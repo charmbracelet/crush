@@ -35,6 +35,9 @@ type Manager struct {
 	manager     *powernapconfig.Manager
 	callback    func(name string, client *Client)
 	now         func() time.Time
+	// unavailableRetry controls how long before a previously-unavailable LSP
+	// server can be retried. 0 means no backoff (retry immediately), and the
+	// default (math.MaxInt64) means effectively infinite backoff.
 	unavailableRetry   time.Duration
 }
 
@@ -67,16 +70,8 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 
 	retryDelay := defaultUnavailableRetryDelay
 	if cfg != nil {
-		if conf := cfg.Config(); conf != nil && conf.Options != nil && conf.Options.LSPUnavailableRetryDelay != nil {
-			val := *conf.Options.LSPUnavailableRetryDelay
-			if val >= 0 {
-				const maxSeconds = int(math.MaxInt64 / int64(time.Second))
-				if val > maxSeconds {
-					val = maxSeconds
-				}
-				retryDelay = time.Duration(val) * time.Second
-			}
-			// val < 0 (including -1) means infinite backoff.
+		if conf := cfg.Config(); conf != nil && conf.Options != nil {
+			retryDelay = parseUnavailableRetryDelay(conf.Options.LSPUnavailableRetryDelay)
 		}
 	}
 
@@ -94,6 +89,22 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 // Clients returns the map of LSP clients.
 func (s *Manager) Clients() *csync.Map[string, *Client] {
 	return s.clients
+}
+
+// parseUnavailableRetryDelay converts a config value (in seconds) to a
+// time.Duration for the LSP unavailable backoff. nil or negative values mean
+// infinite backoff (defaultUnavailableRetryDelay). Non-negative values are
+// clamped to math.MaxInt64 to avoid overflow.
+func parseUnavailableRetryDelay(val *int) time.Duration {
+	if val == nil || *val < 0 {
+		return defaultUnavailableRetryDelay
+	}
+	v := *val
+	const maxSeconds = math.MaxInt64 / int64(time.Second)
+	if int64(v) > maxSeconds {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(v) * time.Second
 }
 
 // SetCallback sets a callback that is invoked when a new LSP

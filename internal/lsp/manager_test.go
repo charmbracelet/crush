@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,13 +19,16 @@ func TestParseUnavailableRetryDelay(t *testing.T) {
 	negOne := -1
 	zero := 0
 	five := 5
-	huge := int(math.MaxInt64)
 
 	require.Equal(t, defaultUnavailableRetryDelay, parseUnavailableRetryDelay(nil))
 	require.Equal(t, defaultUnavailableRetryDelay, parseUnavailableRetryDelay(&negOne))
 	require.Equal(t, time.Duration(0), parseUnavailableRetryDelay(&zero))
 	require.Equal(t, 5*time.Second, parseUnavailableRetryDelay(&five))
-	require.Equal(t, time.Duration(math.MaxInt64), parseUnavailableRetryDelay(&huge))
+
+	if strconv.IntSize == 64 {
+		huge := int(math.MaxInt64)
+		require.Equal(t, defaultUnavailableRetryDelay, parseUnavailableRetryDelay(&huge))
+	}
 }
 
 func TestNewManager_DefaultRetryDelay(t *testing.T) {
@@ -62,8 +66,8 @@ func TestUnavailableBackoff(t *testing.T) {
 	now := base
 
 	manager := &Manager{
-		unavailable: csync.NewMap[string, time.Time](),
-		now:         func() time.Time { return now },
+		unavailable:      csync.NewMap[string, time.Time](),
+		now:              func() time.Time { return now },
 		unavailableRetry: defaultUnavailableRetryDelay,
 	}
 
@@ -80,6 +84,8 @@ func TestUnavailableBackoff(t *testing.T) {
 	// Clearing should make it available immediately.
 	manager.clearUnavailable("gopls")
 	require.False(t, manager.recentlyUnavailable("gopls"))
+	_, exists := manager.unavailable.Get("gopls")
+	require.False(t, exists)
 }
 
 func TestUnavailableBackoffCustomDelay(t *testing.T) {

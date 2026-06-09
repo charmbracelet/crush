@@ -102,7 +102,7 @@ func parseUnavailableRetryDelay(val *int) time.Duration {
 	v := *val
 	const maxSeconds = math.MaxInt64 / int64(time.Second)
 	if int64(v) > maxSeconds {
-		return time.Duration(math.MaxInt64)
+		return defaultUnavailableRetryDelay
 	}
 	return time.Duration(v) * time.Second
 }

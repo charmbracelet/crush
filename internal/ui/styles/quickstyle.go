@@ -336,7 +336,23 @@ func quickStyle(o quickStyleOpts) Styles {
 	// PlanMarkdown keeps the rich markdown colors but paints the plan-card
 	// background under every primitive, so glamour's per-token SGR resets
 	// cannot punch holes in the card that PlanBox draws around the content.
-	s.PlanMarkdown = withMarkdownBackground(s.Markdown, hex(o.bgLeastVisible))
+	//
+	// H2–H5 in s.Markdown only set Prefix; they rely on glamour inheriting
+	// Color/Bold from the base Heading style. Once withMarkdownBackground
+	// adds BackgroundColor to those primitives, glamour stops inheriting and
+	// the heading text renders without color/bold. Copy them explicitly.
+	planMD := s.Markdown
+	headingColor := hex(o.info)
+	headingBold := new(true)
+	for _, h := range []*ansi.StyleBlock{&planMD.H2, &planMD.H3, &planMD.H4, &planMD.H5} {
+		if h.StylePrimitive.Color == nil {
+			h.StylePrimitive.Color = headingColor
+		}
+		if h.StylePrimitive.Bold == nil {
+			h.StylePrimitive.Bold = headingBold
+		}
+	}
+	s.PlanMarkdown = withMarkdownBackground(planMD, hex(o.bgLeastVisible))
 
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
 	plainBg := hex(o.bgLeastVisible)

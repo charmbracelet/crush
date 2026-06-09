@@ -120,6 +120,23 @@ func (f *FilterableList) FilteredItems() []Item {
 
 // Render renders the filterable list.
 func (f *FilterableList) Render() string {
-	f.List.SetItems(f.FilteredItems()...)
+	filtered := f.FilteredItems()
+	if !f.itemsMatch(filtered) {
+		f.List.SetItems(filtered...)
+	}
 	return f.List.Render()
+}
+
+// itemsMatch reports whether the current list items match the given slice
+// by pointer identity and length.
+func (f *FilterableList) itemsMatch(items []Item) bool {
+	if f.List.Len() != len(items) {
+		return false
+	}
+	for i, item := range items {
+		if f.List.ItemAt(i) != item {
+			return false
+		}
+	}
+	return true
 }

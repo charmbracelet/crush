@@ -164,6 +164,20 @@ func (m *Models) ID() string {
 // HandleMsg implements Dialog.
 func (m *Models) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.list.ScrollBy(-mouseScrollLines)
+		case tea.MouseWheelDown:
+			m.list.ScrollBy(mouseScrollLines)
+		}
+		start, end := m.list.VisibleItemIndices()
+		sel := m.list.Selected()
+		if sel < start {
+			m.list.SetSelected(start)
+		} else if sel > end {
+			m.list.SetSelected(end)
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.Close):

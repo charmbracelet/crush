@@ -173,27 +173,32 @@ func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {
 	return u, ws
 }
 
-func TestHandlePlanHandoff_MarkerOpensDialog(t *testing.T) {
+func isPlanHandoffInline(u *UI) bool {
+	_, ok := u.activeInline.(*dialog.PlanHandoffInline)
+	return ok
+}
+
+func TestHandlePlanHandoff_MarkerOpensInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
 	u.handlePlanHandoff(notify.RunComplete{
 		SessionID: "sess-1",
 		Text:      "Here is the plan.\n<!-- CRUSH_PLAN_READY -->",
 	})
-	require.True(t, u.dialog.ContainsDialog(dialog.PlanHandoffID))
+	require.True(t, isPlanHandoffInline(u))
 }
 
-func TestHandlePlanHandoff_NoMarkerNoDialog(t *testing.T) {
+func TestHandlePlanHandoff_NoMarkerNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
 	u.handlePlanHandoff(notify.RunComplete{
 		SessionID: "sess-1",
 		Text:      "Here is the plan without marker.",
 	})
-	require.False(t, u.dialog.ContainsDialog(dialog.PlanHandoffID))
+	require.Nil(t, u.activeInline)
 }
 
-func TestHandlePlanHandoff_ErrorRunNoDialog(t *testing.T) {
+func TestHandlePlanHandoff_ErrorRunNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
 	u.handlePlanHandoff(notify.RunComplete{
@@ -201,10 +206,10 @@ func TestHandlePlanHandoff_ErrorRunNoDialog(t *testing.T) {
 		Text:      "plan\n<!-- CRUSH_PLAN_READY -->",
 		Error:     "something went wrong",
 	})
-	require.False(t, u.dialog.ContainsDialog(dialog.PlanHandoffID))
+	require.Nil(t, u.activeInline)
 }
 
-func TestHandlePlanHandoff_CancelledRunNoDialog(t *testing.T) {
+func TestHandlePlanHandoff_CancelledRunNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
 	u.handlePlanHandoff(notify.RunComplete{
@@ -212,20 +217,20 @@ func TestHandlePlanHandoff_CancelledRunNoDialog(t *testing.T) {
 		Text:      "plan\n<!-- CRUSH_PLAN_READY -->",
 		Cancelled: true,
 	})
-	require.False(t, u.dialog.ContainsDialog(dialog.PlanHandoffID))
+	require.Nil(t, u.activeInline)
 }
 
-func TestHandlePlanHandoff_SessionMismatchNoDialog(t *testing.T) {
+func TestHandlePlanHandoff_SessionMismatchNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
 	u.handlePlanHandoff(notify.RunComplete{
 		SessionID: "sess-OTHER",
 		Text:      "plan\n<!-- CRUSH_PLAN_READY -->",
 	})
-	require.False(t, u.dialog.ContainsDialog(dialog.PlanHandoffID))
+	require.Nil(t, u.activeInline)
 }
 
-func TestHandlePlanHandoff_CodeModeNoDialog(t *testing.T) {
+func TestHandlePlanHandoff_CodeModeNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")
 	u.mode = uiInputModeCode
@@ -233,7 +238,7 @@ func TestHandlePlanHandoff_CodeModeNoDialog(t *testing.T) {
 		SessionID: "sess-1",
 		Text:      "plan\n<!-- CRUSH_PLAN_READY -->",
 	})
-	require.False(t, u.dialog.ContainsDialog(dialog.PlanHandoffID))
+	require.Nil(t, u.activeInline)
 }
 
 func TestHandlePlanHandoff_DuplicateGuard(t *testing.T) {
@@ -244,11 +249,10 @@ func TestHandlePlanHandoff_DuplicateGuard(t *testing.T) {
 		Text:      "plan\n<!-- CRUSH_PLAN_READY -->",
 	}
 	u.handlePlanHandoff(rc)
-	require.True(t, u.dialog.ContainsDialog(dialog.PlanHandoffID))
-	u.handlePlanHandoff(rc)
-	// Close once — a duplicate push would leave it still open.
-	u.dialog.CloseFrontDialog()
-	require.False(t, u.dialog.ContainsDialog(dialog.PlanHandoffID))
+	require.True(t, isPlanHandoffInline(u))
+	first := u.activeInline
+	u.handlePlanHandoff(rc) // guard: must not replace the existing inline
+	require.Same(t, first, u.activeInline)
 }
 
 func TestSetInputMode_SwitchesToCode(t *testing.T) {

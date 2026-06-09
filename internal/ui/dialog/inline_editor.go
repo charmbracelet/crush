@@ -38,6 +38,13 @@ type InlineEditor interface {
 	SetFocused(focused bool)
 }
 
+// CmdOnDone is an optional interface for inline editors that need to
+// run a tea.Cmd when dismissed via mouse. The UI checks for this after
+// HandleMouseClick returns done=true and queues the returned cmd.
+type CmdOnDone interface {
+	PendingCmd() tea.Cmd
+}
+
 // MouseClickableEditor is an optional interface for inline editors
 // that handle mouse clicks and hover highlighting. The UI
 // type-asserts for this before routing click and motion events.

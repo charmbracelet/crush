@@ -51,3 +51,12 @@ type MouseClickableEditor interface {
 	// editor is active.
 	SetHover(x, y int)
 }
+
+// PasteableEditor is an optional interface for inline editors
+// that contain text areas and can receive paste events. The UI
+// type-asserts for this before routing tea.PasteMsg.
+type PasteableEditor interface {
+	// HandlePaste processes a paste message. Returns an optional
+	// tea.Cmd for side effects (e.g., focus commands).
+	HandlePaste(msg tea.PasteMsg) tea.Cmd
+}

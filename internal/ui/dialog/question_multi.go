@@ -155,6 +155,9 @@ func (d *MultiChoice) Height() int         { return d.height(choiceListMaxWidth 
 func (d *MultiChoice) HeightChanged() bool { return d.heightChanged() }
 func (d *MultiChoice) SetFocused(f bool)   { d.setFocused(f) }
 func (d *MultiChoice) SetHover(x, y int)   { d.setHover(x, y) }
+func (d *MultiChoice) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	return d.handlePaste(msg)
+}
 
 // HandleMouseClick checks if the click landed on a choice item and
 // toggles it, or focuses the fill-in. Returns done=false since

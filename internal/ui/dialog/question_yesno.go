@@ -141,11 +141,15 @@ func (d *YesNo) Height() int {
 		h++ // blank
 	}
 	h++ // buttons
-	h++ // trailing blank for bottom padding
-	// Note line if present.
-	if d.activeNoteKey != "" || len(d.notes) > 0 {
-		h++
+	// Note height if present.
+	if d.activeNoteKey != "" && d.noteEditor.Focused() {
+		h++ // blank separator before note editor
+		h += d.noteEditor.Height()
+	} else if len(d.notes) > 0 {
+		h++ // blank separator
+		h++ // saved note text (single line)
 	}
+	h++ // trailing blank for bottom padding
 	return h
 }
 
@@ -205,6 +209,9 @@ func (d *YesNo) SetFocused(focused bool) { d.focused = focused }
 
 // SetHover updates the hover position for button highlighting.
 func (d *YesNo) SetHover(x, y int) { d.hoverX = x; d.hoverY = y }
+
+// HandlePaste forwards paste events to the note editor textarea.
+func (d *YesNo) HandlePaste(msg tea.PasteMsg) tea.Cmd { return d.handlePaste(msg) }
 
 // HandleMouseClick checks if the click landed on a button and
 // triggers the corresponding answer.

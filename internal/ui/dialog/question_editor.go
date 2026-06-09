@@ -113,6 +113,23 @@ func (e *questionEditor) handleNoteKey(msg tea.KeyPressMsg, closeKey key.Binding
 	}
 }
 
+// handlePaste forwards a paste message to the currently focused
+// textarea (note editor or fill-in). Returns nil if no textarea
+// is focused.
+func (e *questionEditor) handlePaste(msg tea.PasteMsg) tea.Cmd {
+	if e.activeNoteKey != "" && e.noteEditor.Focused() {
+		var cmd tea.Cmd
+		e.noteEditor, cmd = e.noteEditor.Update(msg)
+		return cmd
+	}
+	if e.fillIn.Focused() {
+		var cmd tea.Cmd
+		e.fillIn, cmd = e.fillIn.Update(msg)
+		return cmd
+	}
+	return nil
+}
+
 // drawFillIn appends fill-in rows to lines. When focused, renders
 // the live textarea; otherwise shows saved text or placeholder.
 // styleFilled controls whether non-empty fill-in text gets the

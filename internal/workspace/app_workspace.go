@@ -1,10 +1,10 @@
 package workspace
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -108,40 +108,32 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 	return err
 }
 
-func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string) (proto.ShellCommandResponse, error) {
-	var stdout, stderr bytes.Buffer
-	runErr := shell.Run(ctx, shell.RunOptions{
-		Command: command,
-		Cwd:     w.store.WorkingDir(),
-		Stdout:  &stdout,
-		Stderr:  &stderr,
+func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int) (proto.ShellCommandResponse, error) {
+	result, err := shell.RunAndCapturePTY(ctx, shell.RunOptions{
+		Command:   command,
+		Cwd:       w.store.WorkingDir(),
+		TermWidth: termWidth,
 	})
-
-	exitCode := 0
-	if runErr != nil {
-		exitCode = shell.ExitCode(runErr)
+	if err != nil {
+		return proto.ShellCommandResponse{}, err
 	}
 
-	output := stdout.String()
-	if stderr.Len() > 0 {
-		if output != "" {
-			output += "\n"
-		}
-		output += stderr.String()
-	}
-
-	// Persist as a user message so the LLM has context on follow-up.
-	msgContent := fmt.Sprintf("$ %s\n%s", command, output)
 	if sessionID != "" {
-		_, _ = w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
-			Role:  message.User,
-			Parts: []message.ContentPart{message.TextContent{Text: msgContent}},
-		})
+		if _, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
+			Role: message.User,
+			Parts: []message.ContentPart{message.ShellCommand{
+				Command:  command,
+				Output:   result.Output,
+				ExitCode: result.ExitCode,
+			}},
+		}); err != nil {
+			slog.Error("Failed to persist shell command output", "error", err, "session_id", sessionID)
+		}
 	}
 
 	return proto.ShellCommandResponse{
-		Output:   output,
-		ExitCode: exitCode,
+		Output:   result.Output,
+		ExitCode: result.ExitCode,
 	}, nil
 }
 

@@ -129,6 +129,16 @@ type Finish struct {
 
 func (Finish) isPart() {}
 
+// ShellCommand stores a bang-mode shell command and its output as a
+// distinct content part so it can be reconstructed on session restore.
+type ShellCommand struct {
+	Command  string `json:"command"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
+
+func (ShellCommand) isPart() {}
+
 type Message struct {
 	ID               string
 	Role             MessageRole

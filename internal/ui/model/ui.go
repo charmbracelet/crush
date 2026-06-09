@@ -56,6 +56,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/terminal"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
@@ -231,6 +232,9 @@ type UI struct {
 	// shellResultMsg. Checked by isAgentBusy and cancelAgent so that
 	// Escape works for bang commands the same way it does for agent runs.
 	bangCancel context.CancelFunc
+
+	// terminal is the embedded terminal dialog.
+	terminal *terminal.Dialog
 
 	header *header
 
@@ -1253,6 +1257,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		cmds = append(cmds, m.loadPromptHistory())
+	case terminal.OutputMsg:
+		// Terminal refresh tick; keep refreshing even when hidden so the
+		// vterm accumulates output for when the dialog reopens.
+		if m.terminal != nil {
+			cmds = append(cmds, m.terminal.Term().RefreshCmd())
+		}
+	case terminal.ExitMsg:
+		m.closeTerminal()
+		// Only report unexpected errors. SIGKILL/SIGTERM from our own
+		// Close() and normal shell exits are expected.
+		if msg.Err != nil && !terminal.IsExpectedExit(msg.Err) {
+			cmds = append(cmds, util.ReportError(fmt.Errorf("terminal: %w", msg.Err)))
+		}
 	case hyperRefreshDoneMsg:
 		if cmd := m.handleSelectModel(msg.action); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1730,6 +1747,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
+
 	action := m.dialog.Update(msg)
 	if action == nil {
 		return tea.Batch(cmds...)
@@ -1884,6 +1902,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
+		m.closeTerminal()
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -2202,6 +2221,17 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	var cmds []tea.Cmd
 
+	// When the terminal dialog is active, bypass all global key handlers
+	// so keys like Ctrl+C, arrows, etc. pass through to the terminal.
+	// Only intercept the terminal toggle key.
+	if m.dialog.ContainsDialog(terminal.DialogID) {
+		if key.Matches(msg, m.keyMap.OpenTerminal) {
+			cmds = append(cmds, m.toggleTerminal())
+			return tea.Batch(cmds...)
+		}
+		return m.handleDialogMsg(msg)
+	}
+
 	handleGlobalKeys := func(msg tea.KeyPressMsg) bool {
 		switch {
 		case key.Matches(msg, m.keyMap.Help):
@@ -2226,6 +2256,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
 			m.detailsOpen = !m.detailsOpen
 			m.updateLayoutAndSize()
+			return true
+		case key.Matches(msg, m.keyMap.OpenTerminal):
+			cmds = append(cmds, m.toggleTerminal())
 			return true
 		case key.Matches(msg, m.keyMap.Chat.TogglePills):
 			if m.state == uiChat && m.hasSession() {
@@ -2404,6 +2437,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.randomizePlaceholders()
 					m.historyReset()
 					return tea.Batch(m.runShellCommand(value))
+				}
+
+				// Bare ! on enter opens the interactive terminal panel.
+				if m.bangMode && value == "" {
+					m.bangMode = false
+					m.bangWasEmpty = false
+					yolo := m.com.Workspace.PermissionSkipRequests()
+					m.setEditorPrompt(yolo)
+					return m.toggleTerminal()
 				}
 
 				attachments := m.attachments.List()
@@ -2839,6 +2881,11 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			Min: image.Pt(4, 1),
 			Max: image.Pt(8, 3),
 		})
+	}
+
+	// Update terminal dialog styles every frame so it matches current theme.
+	if m.dialog.ContainsDialog(terminal.DialogID) && m.terminal != nil {
+		m.terminal.SetStyles(m.com.Styles)
 	}
 
 	// This needs to come last to overlay on top of everything. We always pass
@@ -4047,6 +4094,74 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		}
 	})
 	return tea.Batch(cmds...)
+}
+
+// closeTerminal tears down the embedded terminal and removes its dialog.
+// Safe to call when no terminal is active.
+func (m *UI) closeTerminal() {
+	m.dialog.CloseDialog(terminal.DialogID)
+	if m.terminal != nil {
+		_ = m.terminal.Term().Close()
+		m.terminal = nil
+	}
+}
+
+// toggleTerminal opens or hides the embedded terminal panel. The child
+// process and PTY stay alive across toggles so the user returns to
+// exactly where they left off. A new shell is only created on the first
+// open.
+func (m *UI) toggleTerminal() tea.Cmd {
+	// If terminal dialog is open, hide it (process keeps running).
+	if m.dialog.ContainsDialog(terminal.DialogID) {
+		m.dialog.CloseDialog(terminal.DialogID)
+		return nil
+	}
+
+	// If we already have a live terminal, just show it again.
+	if m.terminal != nil && m.terminal.Term().Started() && !m.terminal.Term().Closed() {
+		m.dialog.OpenDialog(m.terminal)
+		w, h := terminal.DialogContentSize(m.width, m.height)
+		_ = m.terminal.Term().Resize(w, h)
+		return m.terminal.Term().RefreshCmd()
+	}
+
+	return m.createTerminal()
+}
+
+// createTerminal creates and starts a new embedded terminal running the
+// user's shell. Called on first open or after the previous terminal has
+// been fully closed.
+func (m *UI) createTerminal() tea.Cmd {
+	sh := os.Getenv("SHELL")
+	if sh == "" {
+		sh = "/bin/sh"
+	}
+	cmd := terminal.PrepareCmd(context.Background(), sh, nil, m.com.Workspace.WorkingDir(), nil)
+	term := terminal.New(terminal.Config{
+		Context: context.Background(),
+		Cmd:     cmd,
+	})
+
+	dlg := terminal.NewDialog(terminal.DialogConfig{
+		Title:    "Crush Terminal",
+		QuitHint: "ctrl+b to hide",
+		Term:     term,
+	})
+	dlg.SetStyles(m.com.Styles)
+	m.terminal = dlg
+	m.dialog.OpenDialog(dlg)
+
+	// Size the terminal to match the dialog's content area so the
+	// shell's first output wraps at the final display width.
+	w, h := terminal.DialogContentSize(m.width, m.height)
+	if err := term.Resize(w, h); err != nil {
+		return util.ReportError(fmt.Errorf("terminal resize: %w", err))
+	}
+	if err := term.Start(); err != nil {
+		return util.ReportError(fmt.Errorf("terminal start: %w", err))
+	}
+
+	return tea.Batch(term.WaitCmd(), term.RefreshCmd())
 }
 
 const cancelTimerDuration = 2 * time.Second

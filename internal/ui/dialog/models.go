@@ -89,9 +89,10 @@ type Models struct {
 		Previous key.Binding
 		Close    key.Binding
 	}
-	list  *ModelsList
-	input textinput.Model
-	help  help.Model
+	list       *ModelsList
+	input      textinput.Model
+	help       help.Model
+	listScreenY int
 }
 
 var _ Dialog = (*Models)(nil)
@@ -164,6 +165,11 @@ func (m *Models) ID() string {
 // HandleMsg implements Dialog.
 func (m *Models) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case tea.MouseMotionMsg:
+		idx, _ := m.list.ItemIndexAtPosition(0, msg.Y-m.listScreenY)
+		if idx >= 0 {
+			m.list.SetSelected(idx)
+		}
 	case tea.MouseWheelMsg:
 		switch msg.Button {
 		case tea.MouseWheelUp:
@@ -308,6 +314,28 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(listView)
 
 	rc.Help = m.help.View(m)
+
+	// Compute list screen Y for mouse hover detection.
+	view := rc.Render()
+	viewWidth, viewHeight := lipgloss.Size(view)
+	var dialogMinY int
+	if m.isOnboarding {
+		blRect := common.BottomLeftRect(area, viewWidth, viewHeight)
+		dialogMinY = blRect.Min.Y
+	} else {
+		centerRect := common.CenterRect(area, viewWidth, viewHeight)
+		dialogMinY = centerRect.Min.Y
+	}
+	// heightOffset includes dialogViewFrameSize (top+bottom) and help.
+	// List Y from dialog top = borderTop+paddingTop + title + input.
+	listYFromDialogTop := heightOffset -
+		t.Dialog.View.GetBorderBottomSize() - t.Dialog.View.GetPaddingBottom() -
+		t.Dialog.HelpView.GetVerticalFrameSize()
+	if m.isOnboarding {
+		// Onboarding renders without dialog view wrapping.
+		listYFromDialogTop -= t.Dialog.View.GetBorderTopSize() + t.Dialog.View.GetPaddingTop()
+	}
+	m.listScreenY = dialogMinY + listYFromDialogTop
 
 	cur := m.Cursor()
 

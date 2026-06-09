@@ -432,15 +432,40 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	if a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
 	}
-	out := a.renderMarkdown(a.message.Content().Text, width)
+	text := a.message.Content().Text
 	// In plan mode the agent ends its final plan with a sentinel marker.
-	// Wrap that message in a background "card" so the plan stands out from
-	// regular assistant replies. Mirrors the ThinkingBox treatment.
-	if common.PlanReadyMarkerPresent(a.message.Content().Text) {
-		out = a.sty.Messages.PlanBox.Width(width).Render(strings.TrimSpace(out))
+	// Hide the end plan marker and wrap the message in a background "card" so
+	// the plan stands out from regular assistant replies. Mirrors the
+	// ThinkingBox treatment.
+	var out string
+	if common.PlanReadyMarkerPresent(text) {
+		out = a.renderPlanCard(common.StripPlanReadyMarker(text), width)
+	} else {
+		out = a.renderMarkdown(text, width)
 	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out
+}
+
+// renderPlanCard renders the final plan message as a full-width card. The
+// markdown is rendered at the card's inner width (accounting for PlanBox's
+// horizontal padding) with the PlanMarkdown style, whose per-primitive
+// background keeps the card fill uninterrupted by glamour's SGR resets;
+// PlanBox then paints the padding and pads each line out to full width. The
+// plan is final by the time the marker appears, so this bypasses the
+// streaming-markdown cache and renders directly, like renderThinking.
+func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
+	box := a.sty.Messages.PlanBox
+	innerWidth := max(1, width-box.GetHorizontalPadding())
+	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	rendered, err := renderer.Render(text)
+	mu.Unlock()
+	if err != nil {
+		rendered = text
+	}
+	return box.Width(width).Render(strings.TrimSpace(rendered))
 }
 
 // cachedError returns the rendered error section.

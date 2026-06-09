@@ -355,6 +355,11 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 	}
 
+	// PlanMarkdown keeps the rich markdown colors but paints the plan-card
+	// background under every primitive, so glamour's per-token SGR resets
+	// cannot punch holes in the card that PlanBox draws around the content.
+	s.PlanMarkdown = withMarkdownBackground(s.Markdown, hex(o.bgLeastVisible))
+
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
 	plainBg := hex(o.bgLeastVisible)
 	plainFg := hex(o.fgMoreSubtle)
@@ -1051,4 +1056,60 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Pills.Area = base
 
 	return s
+}
+
+// withMarkdownBackground returns a copy of cfg with bg applied to every style
+// primitive that does not already set its own background, so glamour paints an
+// uninterrupted background under all rendered text. Primitives that carry an
+// intentional background of their own (e.g. H1, inline code) keep it.
+//
+// The CodeBlock Chroma section is nilled out so that code blocks render without
+// per-token syntax highlighting. The xchroma formatter is registered globally
+// with a nil/zero background colour; each token's SGR reset would otherwise
+// punch a hole in the CodeBlock background mid-line. Removing Chroma from this
+// style lets glamour fall back to plain-text rendering for code blocks, which
+// keeps the background uninterrupted.
+func withMarkdownBackground(cfg ansi.StyleConfig, bg *string) ansi.StyleConfig {
+	for _, p := range []*ansi.StylePrimitive{
+		&cfg.Document.StylePrimitive,
+		&cfg.BlockQuote.StylePrimitive,
+		&cfg.Paragraph.StylePrimitive,
+		&cfg.Heading.StylePrimitive,
+		&cfg.H1.StylePrimitive,
+		&cfg.H2.StylePrimitive,
+		&cfg.H3.StylePrimitive,
+		&cfg.H4.StylePrimitive,
+		&cfg.H5.StylePrimitive,
+		&cfg.H6.StylePrimitive,
+		&cfg.Text,
+		&cfg.Strikethrough,
+		&cfg.Emph,
+		&cfg.Strong,
+		&cfg.HorizontalRule,
+		&cfg.Item,
+		&cfg.Enumeration,
+		&cfg.Task.StylePrimitive,
+		&cfg.Link,
+		&cfg.LinkText,
+		&cfg.Image,
+		&cfg.ImageText,
+		&cfg.Code.StylePrimitive,
+		&cfg.CodeBlock.StylePrimitive,
+		&cfg.Table.StylePrimitive,
+		&cfg.DefinitionList.StylePrimitive,
+		&cfg.DefinitionTerm,
+		&cfg.DefinitionDescription,
+		&cfg.HTMLBlock.StylePrimitive,
+		&cfg.HTMLSpan.StylePrimitive,
+	} {
+		if p.BackgroundColor == nil {
+			p.BackgroundColor = bg
+		}
+	}
+	// Chroma syntax-highlighting uses the globally registered xchroma formatter,
+	// which hardcodes a nil background per token. Those per-token SGR resets
+	// break the CodeBlock background. Nil out Chroma so code blocks in the plan
+	// card render as plain text with a consistent background.
+	cfg.CodeBlock.Chroma = nil
+	return cfg
 }

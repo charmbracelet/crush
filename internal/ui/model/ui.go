@@ -214,6 +214,14 @@ type UI struct {
 	state uiState
 	mode  uiInputMode
 
+	// planReadySessionID holds the session whose plan run emitted the
+	// plan-ready marker but has not been confirmed for execution yet. It
+	// lets the user reopen the handoff prompt after dismissing it.
+	planReadySessionID string
+	// modeSwitching is true while the async agent-model update kicked off
+	// by setInputMode is still in flight; sending is blocked meanwhile.
+	modeSwitching bool
+
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
 
@@ -652,6 +660,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
+		// Plan mode is scoped to the session it was enabled in: switching
+		// to another session falls back to code mode and drops any pending
+		// plan handoff. (Loading the session that was just created for the
+		// first plan-mode prompt is not a switch; the IDs match then.)
+		if m.session == nil || m.session.ID != msg.session.ID {
+			if cmd := m.resetPlanModeState(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
@@ -693,6 +710,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			paths = append(paths, f.LatestVersion.Path)
 		}
 		cmds = append(cmds, m.startLSPs(paths))
+
+	case modeSwitchedMsg:
+		m.modeSwitching = false
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("input mode: "+msg.label))
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -2274,6 +2299,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.pasteImageFromClipboard)
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
+				if m.modeSwitching {
+					cmds = append(cmds, util.ReportInfo("Switching input mode, one moment..."))
+					break
+				}
 				prevHeight := m.textarea.Height()
 				value := m.textarea.Value()
 				if before, ok := strings.CutSuffix(value, "\\"); ok {
@@ -2308,6 +2337,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				attachments := m.attachments.List()
 				m.attachments.Reset()
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
+					// Enter on an empty editor while a ready plan is pending
+					// reopens the dismissed handoff prompt.
+					if m.mode == uiInputModePlan && m.hasSession() && m.planReadySessionID == m.session.ID {
+						m.openPlanHandoff()
+					}
 					return nil
 				}
 
@@ -3459,6 +3493,9 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 }
 
 func (m *UI) toggleInputMode() tea.Cmd {
+	if m.isAgentBusy() {
+		return util.ReportWarn("Agent is busy, please wait before switching input mode...")
+	}
 	target := uiInputModePlan
 	if m.mode == uiInputModePlan {
 		target = uiInputModeCode
@@ -3484,12 +3521,20 @@ func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
 		return util.ReportError(err)
 	}
 
+	m.modeSwitching = true
 	return func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
-			return util.ReportError(err)()
+		return modeSwitchedMsg{
+			label: label,
+			err:   m.com.Workspace.UpdateAgentModel(context.Background()),
 		}
-		return util.NewInfoMsg("input mode: " + label)
 	}
+}
+
+// modeSwitchedMsg reports that the async agent-model update started by
+// setInputMode has finished (successfully or not).
+type modeSwitchedMsg struct {
+	label string
+	err   error
 }
 
 // closeCompletions closes the completions popup and resets state.
@@ -3779,6 +3824,9 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 
 	// Start the turn timer.
 	common.StartTurn()
+
+	// Any new prompt supersedes a pending, unconfirmed plan.
+	m.setPlanReadyPending("")
 
 	var cmds []tea.Cmd
 	if !m.hasSession() {
@@ -4238,13 +4286,48 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 		return nil
 	}
 	if !common.PlanReadyMarkerPresent(rc.Text) {
+		slog.Debug("plan run completed without ready marker", "session_id", rc.SessionID)
 		return nil
 	}
+	m.setPlanReadyPending(rc.SessionID)
 	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
 		return nil
 	}
+	m.openPlanHandoff()
+	return nil
+}
+
+// resetPlanModeState drops any pending plan handoff and, when plan mode is
+// active, switches back to code mode. Used when the UI moves to a different
+// session, since plan mode is scoped to the session it was enabled in.
+func (m *UI) resetPlanModeState() tea.Cmd {
+	m.setPlanReadyPending("")
+	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
+		m.activeInline = nil
+		m.textarea.Focus()
+	}
+	if m.mode != uiInputModePlan {
+		return nil
+	}
+	return m.setInputMode(uiInputModeCode)
+}
+
+// setPlanReadyPending records (or clears, with an empty ID) the session that
+// has an unconfirmed ready plan and syncs the status-bar badge.
+func (m *UI) setPlanReadyPending(sessionID string) {
+	m.planReadySessionID = sessionID
+	if m.status != nil {
+		m.status.SetPlanReady(sessionID != "")
+	}
+}
+
+// openPlanHandoff replaces the textarea with the inline "switch to code"
+// prompt. Dismissing it keeps the pending plan, so the prompt can be reopened
+// by pressing enter on an empty editor while still in plan mode.
+func (m *UI) openPlanHandoff() {
 	inline := dialog.NewPlanHandoffInline(m.com)
 	inline.OnConfirm = func() tea.Cmd {
+		m.setPlanReadyPending("")
 		return tea.Sequence(
 			m.setInputMode(uiInputModeCode),
 			m.sendMessage("Implement the plan."),
@@ -4257,7 +4340,6 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 	if m.status != nil {
 		m.updateLayoutAndSize()
 	}
-	return nil
 }
 
 // handleAgentNotification translates domain agent events into desktop
@@ -4306,6 +4388,7 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
+	planCmd := m.resetPlanModeState()
 	m.session = nil
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
@@ -4320,6 +4403,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.historyReset()
 	agenttools.ResetCache()
 	return tea.Batch(
+		planCmd,
 		func() tea.Msg {
 			m.com.Workspace.LSPStopAll(context.Background())
 			return nil

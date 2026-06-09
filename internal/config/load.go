@@ -488,9 +488,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
-	if c.Options.LSPUnavailableRetryDelay <= 0 {
-		c.Options.LSPUnavailableRetryDelay = 999999
-	}
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations

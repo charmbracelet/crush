@@ -63,8 +63,8 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 	}
 
 	retryDelay := defaultUnavailableRetryDelay
-	if cfg != nil && cfg.Config() != nil && cfg.Config().Options != nil && cfg.Config().Options.LSPUnavailableRetryDelay > 0 {
-		retryDelay = time.Duration(cfg.Config().Options.LSPUnavailableRetryDelay) * time.Second
+	if cfg != nil && cfg.Config() != nil && cfg.Config().Options != nil && cfg.Config().Options.LSPUnavailableRetryDelay != nil {
+		retryDelay = time.Duration(*cfg.Config().Options.LSPUnavailableRetryDelay) * time.Second
 	}
 
 	return &Manager{

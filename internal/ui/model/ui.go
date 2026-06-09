@@ -886,9 +886,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
 				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
 					if done {
+						prev := m.activeInline
 						m.activeInline = nil
 						m.textarea.Focus()
 						m.updateLayoutAndSize()
+						if cod, ok := prev.(dialog.CmdOnDone); ok {
+							if c := cod.PendingCmd(); c != nil {
+								cmds = append(cmds, c)
+							}
+						}
 					}
 					return m, tea.Batch(cmds...)
 				}
@@ -1763,12 +1769,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
-	case dialog.ActionSwitchToCodeMode:
-		m.dialog.CloseFrontDialog()
-		cmds = append(cmds, tea.Sequence(
-			m.setInputMode(uiInputModeCode),
-			m.sendMessage("Implement the plan."),
-		))
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.enableDockerMCP)
@@ -2188,9 +2188,17 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// Route keys to active inline editor if one is showing.
 	if m.activeInline != nil && m.focus == uiFocusEditor {
 		if done, cmd := m.activeInline.HandleKey(msg); done {
+			prev := m.activeInline
 			m.activeInline = nil
 			m.textarea.Focus()
 			m.updateLayoutAndSize()
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			} else if cod, ok := prev.(dialog.CmdOnDone); ok {
+				if c := cod.PendingCmd(); c != nil {
+					cmds = append(cmds, c)
+				}
+			}
 		} else {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -4232,10 +4240,23 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 	if !strings.Contains(rc.Text, planReadyMarker) {
 		return nil
 	}
-	if m.dialog.ContainsDialog(dialog.PlanHandoffID) {
+	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
 		return nil
 	}
-	m.dialog.OpenDialogWithGrace(dialog.NewPlanHandoff(m.com))
+	inline := dialog.NewPlanHandoffInline(m.com)
+	inline.OnConfirm = func() tea.Cmd {
+		return tea.Sequence(
+			m.setInputMode(uiInputModeCode),
+			m.sendMessage("Implement the plan."),
+		)
+	}
+	m.activeInline = inline
+	m.textarea.Blur()
+	m.focus = uiFocusEditor
+	m.activeInline.SetFocused(true)
+	if m.status != nil {
+		m.updateLayoutAndSize()
+	}
 	return nil
 }
 

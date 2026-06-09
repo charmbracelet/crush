@@ -142,6 +142,17 @@ func (s *Session) ID() string {
 // HandleMsg implements Dialog.
 func (s *Session) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if s.sessionsMode == sessionsModeNormal {
+			idx, _ := s.list.ItemIndexAtPosition(0, msg.Y-s.listScreenY)
+			if idx >= 0 {
+				s.list.SetSelected(idx)
+				if item := s.list.SelectedItem(); item != nil {
+					sessionItem := item.(*SessionItem)
+					return ActionSelectSession{sessionItem.Session}
+				}
+			}
+		}
 	case tea.MouseMotionMsg:
 		if s.sessionsMode == sessionsModeNormal {
 			idx, _ := s.list.ItemIndexAtPosition(0, msg.Y-s.listScreenY)

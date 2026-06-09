@@ -99,7 +99,7 @@ func (p *PlanHandoffInline) runConfirm() tea.Cmd {
 func (p *PlanHandoffInline) PendingCmd() tea.Cmd { return p.pendingCmd }
 
 // Height returns 3: question line + blank line + button line.
-func (p *PlanHandoffInline) Height() int { return 3 }
+func (p *PlanHandoffInline) Height(width int) int { return 3 }
 
 // Draw renders the inline prompt at the given screen area.
 func (p *PlanHandoffInline) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {

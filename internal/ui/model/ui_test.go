@@ -198,6 +198,29 @@ func TestHandlePlanHandoff_NoMarkerNoInline(t *testing.T) {
 	require.Nil(t, u.activeInline)
 }
 
+func TestHandlePlanHandoff_MarkerInProseNoInline(t *testing.T) {
+	t.Parallel()
+	u, _ := newPlanUI(t, "sess-1")
+	// The marker mentioned mid-sentence must not trigger a handoff; it
+	// only counts when emitted on a line by itself.
+	u.handlePlanHandoff(notify.RunComplete{
+		SessionID: "sess-1",
+		Text:      "I will end with <!-- CRUSH_PLAN_READY --> once the plan is done.",
+	})
+	require.Nil(t, u.activeInline)
+}
+
+func TestHandlePlanHandoff_MarkerOwnLineWithTrailingText(t *testing.T) {
+	t.Parallel()
+	u, _ := newPlanUI(t, "sess-1")
+	// Marker on its own line still triggers even with trailing notes.
+	u.handlePlanHandoff(notify.RunComplete{
+		SessionID: "sess-1",
+		Text:      "Here is the plan.\n<!-- CRUSH_PLAN_READY -->\nLet me know if anything is off.",
+	})
+	require.True(t, isPlanHandoffInline(u))
+}
+
 func TestHandlePlanHandoff_ErrorRunNoInline(t *testing.T) {
 	t.Parallel()
 	u, _ := newPlanUI(t, "sess-1")

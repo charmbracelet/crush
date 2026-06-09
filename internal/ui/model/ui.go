@@ -414,7 +414,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 
 	ui.mode = uiInputModeCode
-	ui.setEditorPrompt(com.Workspace.PermissionSkipRequests(), ui.mode)
+	ui.setEditorPrompt(com.Workspace.PermissionSkipRequests())
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
@@ -1661,7 +1661,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleYoloMode:
 		yolo := !m.com.Workspace.PermissionSkipRequests()
 		m.com.Workspace.PermissionSetSkipRequests(yolo)
-		m.setEditorPrompt(yolo, m.mode)
+		m.setEditorPrompt(yolo)
 		m.status.SetMode(m.mode == uiInputModePlan)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
@@ -2142,7 +2142,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case key.Matches(msg, m.keyMap.ToggleYolo):
 			yolo := !m.com.Workspace.PermissionSkipRequests()
 			m.com.Workspace.PermissionSetSkipRequests(yolo)
-			m.setEditorPrompt(yolo, m.mode)
+			m.setEditorPrompt(yolo)
 			status := "disabled"
 			if yolo {
 				status = "enabled"
@@ -3395,8 +3395,9 @@ func (m *UI) openEditor(value string) tea.Cmd {
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode or bang mode is enabled.
-func (m *UI) setEditorPrompt(yolo bool, mode uiInputMode) {
+// yolo mode or bang mode is enabled. Plan mode is surfaced via the
+// status-bar badge (see Status.renderModeBadge), not the editor prompt.
+func (m *UI) setEditorPrompt(yolo bool) {
 	if m.bangMode {
 		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
 		return
@@ -3474,15 +3475,16 @@ func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
 	}
 
 	m.mode = target
-	m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests(), m.mode)
+	m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests())
 	if m.status != nil {
 		m.status.SetMode(m.mode == uiInputModePlan)
 	}
 
+	if err := m.com.Workspace.AgentSetMain(agentID); err != nil {
+		return util.ReportError(err)
+	}
+
 	return func() tea.Msg {
-		if err := m.com.Workspace.AgentSetMain(agentID); err != nil {
-			return util.ReportError(err)()
-		}
 		if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
 			return util.ReportError(err)()
 		}
@@ -4225,6 +4227,21 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 
 const planReadyMarker = "<!-- CRUSH_PLAN_READY -->"
 
+// planReadyMarkerPresent reports whether text contains the plan-ready
+// sentinel on its own line. The plan prompt instructs the agent to emit
+// the marker on a line by itself at the end of the final response; an
+// own-line check (rather than a substring match) avoids a false handoff
+// when the agent merely mentions the marker inside explanatory prose,
+// while still tolerating trailing whitespace or notes after it.
+func planReadyMarkerPresent(text string) bool {
+	for line := range strings.SplitSeq(text, "\n") {
+		if strings.TrimSpace(line) == planReadyMarker {
+			return true
+		}
+	}
+	return false
+}
+
 // handlePlanHandoff checks whether a completed run in plan mode contained the
 // plan-ready sentinel marker and, if so, opens the plan handoff dialog.
 func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
@@ -4237,7 +4254,7 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 	if m.session == nil || rc.SessionID != m.session.ID {
 		return nil
 	}
-	if !strings.Contains(rc.Text, planReadyMarker) {
+	if !planReadyMarkerPresent(rc.Text) {
 		return nil
 	}
 	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {

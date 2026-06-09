@@ -1941,7 +1941,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case key.Matches(msg, m.keyMap.ToggleYolo):
 			yolo := !m.com.Workspace.PermissionSkipRequests()
 			m.com.Workspace.PermissionSetSkipRequests(yolo)
-			m.setEditorPrompt(yolo, m.mode)
+			m.setEditorPrompt(yolo)
 			status := "disabled"
 			if yolo {
 				status = "enabled"

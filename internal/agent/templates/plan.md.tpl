@@ -33,6 +33,7 @@ These rules override everything else. Follow them strictly:
 6. produce a concrete, actionable implementation plan
 7. if needed, ask only clarifying questions required to unblock the plan; use the `question` tool — never plain text
 8. when the plan is ready and complete, your final response MUST:
+ - include a "Critical Files" section listing the 3-5 files most critical for implementing the plan
  - end with the exact marker on its own line: <!-- CRUSH_PLAN_READY -->
  - do NOT ask for confirmation via the question tool or plain text — the UI will prompt the user
  - keep all intermediate/exploratory responses marker-free
@@ -51,9 +52,3 @@ These rules override everything else. Follow them strictly:
 - When the change touches APIs or data models, evaluate ergonomics for callers and consumers: naming, defaults, error surfaces, and whether the design matches existing project patterns.
 - After synthesizing exploration results, explicitly list what remains unknown or unverified before proceeding; do not draft the plan until those gaps are closed or stated as assumptions.
 </style>
-
-### Critical Files for Implementation
-List 3-5 files most critical for implementing this plan:
-- path/to/file1
-- path/to/file2
-- path/to/file3

@@ -165,6 +165,24 @@ func (m *Models) ID() string {
 // HandleMsg implements Dialog.
 func (m *Models) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		idx, _ := m.list.ItemIndexAtPosition(0, msg.Y-m.listScreenY)
+		if idx >= 0 {
+			m.list.SetSelected(idx)
+			selectedItem := m.list.SelectedItem()
+			if selectedItem == nil {
+				break
+			}
+			modelItem, ok := selectedItem.(*ModelItem)
+			if !ok {
+				break
+			}
+			return ActionSelectModel{
+				Provider:  modelItem.prov,
+				Model:     modelItem.SelectedModel(),
+				ModelType: modelItem.SelectedModelType(),
+			}
+		}
 	case tea.MouseMotionMsg:
 		idx, _ := m.list.ItemIndexAtPosition(0, msg.Y-m.listScreenY)
 		if idx >= 0 {

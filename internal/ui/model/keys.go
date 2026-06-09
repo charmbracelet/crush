@@ -76,15 +76,16 @@ type KeyMap struct {
 	}
 
 	// Global key maps
-	Quit       key.Binding
-	Help       key.Binding
-	Commands   key.Binding
-	Models     key.Binding
-	Suspend    key.Binding
-	Sessions   key.Binding
-	Tab        key.Binding
-	ToggleYolo key.Binding
-	ShiftTab   key.Binding
+	Quit         key.Binding
+	Help         key.Binding
+	Commands     key.Binding
+	Models       key.Binding
+	Suspend      key.Binding
+	Sessions     key.Binding
+	Tab          key.Binding
+	ToggleYolo   key.Binding
+	ShiftTab     key.Binding
+	OpenTerminal key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -124,6 +125,10 @@ func DefaultKeyMap() KeyMap {
 		ShiftTab: key.NewBinding(
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "mode"),
+		),
+		OpenTerminal: key.NewBinding(
+			key.WithKeys("ctrl+b"),
+			key.WithHelp("ctrl+b", "terminal"),
 		),
 	}
 

@@ -22,9 +22,9 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-// defaultUnavailableRetryDelay is used when the config leaves the field unset
-// or explicitly sets it to a negative value. It is math.MaxInt64 nanoseconds
-// (~292 years), which is effectively infinite.
+// defaultUnavailableRetryDelay is the effective retry delay when the configured
+// value is negative (including the -1 default set by setDefaults). It is
+// math.MaxInt64 nanoseconds (~292 years), which is effectively infinite.
 const defaultUnavailableRetryDelay = time.Duration(math.MaxInt64)
 
 // Manager handles lazy initialization of LSP clients based on file types.
@@ -66,12 +66,18 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 	}
 
 	retryDelay := defaultUnavailableRetryDelay
-	if cfg != nil && cfg.Config() != nil && cfg.Config().Options != nil && cfg.Config().Options.LSPUnavailableRetryDelay != nil {
-		val := *cfg.Config().Options.LSPUnavailableRetryDelay
-		if val >= 0 {
-			retryDelay = time.Duration(val) * time.Second
+	if cfg != nil {
+		if conf := cfg.Config(); conf != nil && conf.Options != nil && conf.Options.LSPUnavailableRetryDelay != nil {
+			val := *conf.Options.LSPUnavailableRetryDelay
+			if val >= 0 {
+				const maxSeconds = int(math.MaxInt64 / int64(time.Second))
+				if val > maxSeconds {
+					val = maxSeconds
+				}
+				retryDelay = time.Duration(val) * time.Second
+			}
+			// val < 0 (including -1) means infinite backoff.
 		}
-		// val < 0 (including -1) means infinite backoff.
 	}
 
 	return &Manager{

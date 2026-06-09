@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -217,6 +218,12 @@ type UI struct {
 	// Editor components
 	textarea textarea.Model
 
+	// Active inline editor replaces the textarea when non-nil.
+	activeInline dialog.InlineEditor
+	// inlineCursor stores the cursor from the last inline editor
+	// Draw call, used by the cursor positioning logic below.
+	inlineCursor *tea.Cursor
+
 	// Attachment list
 	attachments *attachments.Attachments
 
@@ -280,6 +287,8 @@ type UI struct {
 
 	// mouse highlighting related state
 	lastClickTime time.Time
+	hoverX        int
+	hoverY        int
 
 	// hyperCredits is the remaining Hyper credits, updated after each prompt.
 	hyperCredits *int
@@ -361,7 +370,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	status := NewStatus(com, ui)
 
 	ui.mode = uiInputModeCode
-	ui.setEditorPrompt(com.Workspace.PermissionSkipRequests(), ui.mode)
+	ui.setEditorPrompt(com.Workspace.PermissionSkipRequests())
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
@@ -537,10 +546,12 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
-		// Append user-invocable skills as commands
-		skillCommands := commands.LoadSkillCommands()
-		skillCommands = append(skillCommands, commands.LoadProjectSkillCommands(m.com.Workspace.WorkingDir())...)
-		customCommands = append(customCommands, skillCommands...)
+		// Append user-invocable skills as commands.
+		skillEntries, err := m.com.Workspace.ListSkills(context.Background())
+		if err != nil {
+			slog.Error("Failed to load skill commands", "error", err)
+		}
+		customCommands = append(customCommands, commands.FromSkillCatalog(skillEntries)...)
 		return userCommandsLoadedMsg{Commands: customCommands}
 	}
 }
@@ -587,6 +598,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyWindowFocused = false
 	case pubsub.Event[notify.Notification]:
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case pubsub.Event[notify.RunComplete]:
+		if cmd := m.handlePlanHandoff(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case loadSessionMsg:
@@ -748,6 +763,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[permission.PermissionNotification]:
 		m.handlePermissionNotification(msg.Payload)
+	case pubsub.Event[question.Request]:
+		m.openBatchFormDialog(msg.Payload)
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if cmd := m.sendNotification(notification.Notification{
+			Title:   "Crush is waiting...",
+			Message: fmt.Sprintf("%d questions need your input", len(msg.Payload.Questions)),
+		}); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -783,6 +809,26 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// Route clicks to inline editors that support mouse interaction.
+		if m.activeInline != nil {
+			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
+				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
+					if done {
+						prev := m.activeInline
+						m.activeInline = nil
+						m.textarea.Focus()
+						m.updateLayoutAndSize()
+						if cod, ok := prev.(dialog.CmdOnDone); ok {
+							if c := cod.PendingCmd(); c != nil {
+								cmds = append(cmds, c)
+							}
+						}
+					}
+					return m, tea.Batch(cmds...)
+				}
+			}
+		}
+
 		if cmd := m.handleClickFocus(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -808,6 +854,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
+		}
+
+		// Track hover position for inline editors.
+		if m.activeInline != nil {
+			if m.hoverX != msg.X || m.hoverY != msg.Y {
+				m.hoverX = msg.X
+				m.hoverY = msg.Y
+				if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
+					clickable.SetHover(msg.X, msg.Y)
+				}
+			}
 		}
 
 		switch m.state {
@@ -1197,7 +1254,11 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
 		m.focus = uiFocusEditor
-		cmd = m.textarea.Focus()
+		if m.activeInline != nil {
+			m.activeInline.SetFocused(true)
+		} else {
+			cmd = m.textarea.Focus()
+		}
 		m.chat.Blur()
 	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
 		m.focus = uiFocusMain
@@ -1423,7 +1484,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleYoloMode:
 		yolo := !m.com.Workspace.PermissionSkipRequests()
 		m.com.Workspace.PermissionSetSkipRequests(yolo)
-		m.setEditorPrompt(yolo, m.mode)
+		m.setEditorPrompt(yolo)
 		m.status.SetMode(m.mode == uiInputModePlan)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
@@ -1817,7 +1878,7 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		return nil
 	}
 
-	m.dialog.OpenDialog(dlg)
+	m.dialog.OpenDialogWithGrace(dlg)
 	return cmd
 }
 
@@ -1903,6 +1964,49 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// Route all messages to dialog if one is open.
 	if m.dialog.HasDialogs() {
 		return m.handleDialogMsg(msg)
+	}
+
+	// Tab always toggles focus between editor and chat, even when
+	// an inline editor is active. This lets users collapse the
+	// question form to view chat.
+	if m.activeInline != nil && key.Matches(msg, m.keyMap.Tab) {
+		if m.focus == uiFocusEditor {
+			m.focus = uiFocusMain
+			m.activeInline.SetFocused(false)
+			m.chat.Focus()
+			m.chat.SetSelected(m.chat.Len() - 1)
+		} else {
+			m.focus = uiFocusEditor
+			m.activeInline.SetFocused(true)
+			m.chat.Blur()
+		}
+		m.updateLayoutAndSize()
+		return tea.Batch(cmds...)
+	}
+
+	// Route keys to active inline editor if one is showing.
+	if m.activeInline != nil && m.focus == uiFocusEditor {
+		if done, cmd := m.activeInline.HandleKey(msg); done {
+			prev := m.activeInline
+			m.activeInline = nil
+			m.textarea.Focus()
+			m.updateLayoutAndSize()
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			} else if cod, ok := prev.(dialog.CmdOnDone); ok {
+				if c := cod.PendingCmd(); c != nil {
+					cmds = append(cmds, c)
+				}
+			}
+		} else {
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			if m.activeInline.HeightChanged() {
+				m.updateLayoutAndSize()
+			}
+		}
+		return tea.Batch(cmds...)
 	}
 
 	// Handle cancel key when agent is busy.
@@ -2252,8 +2356,21 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
-		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
-		editor.Draw(scr, layout.editor)
+		if m.activeInline != nil {
+			m.activeInline.SetFocused(m.focus == uiFocusEditor)
+			if m.focus == uiFocusEditor {
+				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
+			} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
+				qf.DrawCollapsed(scr, layout.editor)
+				m.inlineCursor = nil
+			} else {
+				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
+			}
+		} else {
+			editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
+			editor.Draw(scr, layout.editor)
+			m.inlineCursor = nil
+		}
 
 	case uiChat:
 		if m.isCompact {
@@ -2267,12 +2384,25 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
 		}
 
-		editorWidth := scr.Bounds().Dx()
-		if !m.isCompact {
-			editorWidth -= layout.sidebar.Dx()
+		if m.activeInline != nil {
+			m.activeInline.SetFocused(m.focus == uiFocusEditor)
+			if m.focus == uiFocusEditor {
+				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
+			} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
+				qf.DrawCollapsed(scr, layout.editor)
+				m.inlineCursor = nil
+			} else {
+				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
+			}
+		} else {
+			editorWidth := scr.Bounds().Dx()
+			if !m.isCompact {
+				editorWidth -= layout.sidebar.Dx()
+			}
+			editor := uv.NewStyledString(m.renderEditorView(editorWidth))
+			editor.Draw(scr, layout.editor)
+			m.inlineCursor = nil
 		}
-		editor := uv.NewStyledString(m.renderEditorView(editorWidth))
-		editor.Draw(scr, layout.editor)
 
 		// Draw details overlay in compact mode when open
 		if m.isCompact && m.detailsOpen {
@@ -2334,6 +2464,15 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			return nil
 		}
 
+		if m.activeInline != nil {
+			if cur := m.inlineCursor; cur != nil {
+				cur.X++                        // Adjust for app margins
+				cur.Y += m.layout.editor.Min.Y // Inline editor draws from area top
+				return cur
+			}
+			return nil
+		}
+
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
 			cur.X++                            // Adjust for app margins
@@ -2351,7 +2490,11 @@ func (m *UI) View() tea.View {
 	if !m.isTransparent {
 		v.BackgroundColor = m.com.Styles.Background
 	}
-	v.MouseMode = tea.MouseModeCellMotion
+	if m.activeInline != nil {
+		v.MouseMode = tea.MouseModeAllMotion
+	} else {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = "crush " + home.Short(m.com.Workspace.WorkingDir())
 
@@ -2381,6 +2524,12 @@ func (m *UI) View() tea.View {
 func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
 	k := &m.keyMap
+
+	// When an inline editor is active, show its help.
+	if m.activeInline != nil {
+		return m.activeInline.ShortHelp()
+	}
+
 	tab := k.Tab
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
@@ -2458,6 +2607,11 @@ func (m *UI) ShortHelp() []key.Binding {
 
 // FullHelp implements [help.KeyMap].
 func (m *UI) FullHelp() [][]key.Binding {
+	// When an inline editor is active, show its help.
+	if m.activeInline != nil {
+		return [][]key.Binding{m.activeInline.ShortHelp()}
+	}
+
 	var binds [][]key.Binding
 	k := &m.keyMap
 	help := k.Help
@@ -2717,7 +2871,17 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	// The help height
 	helpHeight := 1
 	// The editor height: textarea height + margin for attachments and bottom spacing.
+	// When an inline editor is active, use its height instead.
 	editorHeight := m.textarea.Height() + editorHeightMargin
+	if m.activeInline != nil {
+		if m.focus == uiFocusEditor {
+			editorHeight = m.activeInline.Height()
+		} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
+			editorHeight = qf.CollapsedHeight() + 1
+		} else {
+			editorHeight = m.activeInline.Height()
+		}
+	}
 	// The sidebar width
 	sidebarWidth := 30
 	// The header height
@@ -2967,9 +3131,10 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	})
 }
 
-// setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode is enabled. Mode indicators are shown in the status bar instead.
-func (m *UI) setEditorPrompt(yolo bool, _ uiInputMode) {
+// setEditorPrompt configures the textarea prompt icon based on
+// whether yolo mode is enabled. Plan mode is surfaced via the status-bar
+// badge (see Status.renderModeBadge), not the editor prompt.
+func (m *UI) setEditorPrompt(yolo bool) {
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
@@ -3011,29 +3176,36 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 }
 
 func (m *UI) toggleInputMode() tea.Cmd {
-	targetMode := uiInputModePlan
-	targetAgentID := config.AgentPlan
-	targetModeLabel := "plan"
+	target := uiInputModePlan
 	if m.mode == uiInputModePlan {
-		targetMode = uiInputModeCode
-		targetAgentID = config.AgentCoder
-		targetModeLabel = "code"
+		target = uiInputModeCode
+	}
+	return m.setInputMode(target)
+}
+
+func (m *UI) setInputMode(target uiInputMode) tea.Cmd {
+	label := "plan"
+	agentID := config.AgentPlan
+	if target == uiInputModeCode {
+		label = "code"
+		agentID = config.AgentCoder
 	}
 
-	m.mode = targetMode
-	m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests(), m.mode)
+	m.mode = target
+	m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests())
 	if m.status != nil {
 		m.status.SetMode(m.mode == uiInputModePlan)
 	}
 
+	if err := m.com.Workspace.AgentSetMain(agentID); err != nil {
+		return util.ReportError(err)
+	}
+
 	return func() tea.Msg {
-		if err := m.com.Workspace.AgentSetMain(targetAgentID); err != nil {
-			return util.ReportError(err)()
-		}
 		if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
 			return util.ReportError(err)()
 		}
-		return util.NewInfoMsg("input mode: " + targetModeLabel)
+		return util.NewInfoMsg("input mode: " + label)
 	}
 }
 
@@ -3332,12 +3504,12 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID
 	cmds = append(cmds, func() tea.Msg {
+		// AgentRun is fire-and-forget: it returns once the prompt has
+		// been accepted (HTTP 202) or synchronously with a validation
+		// or transport error. Run failures and cancellation surface
+		// through SSE-derived events, not this return value.
 		err := m.com.Workspace.AgentRun(context.Background(), sessionID, content, attachments...)
 		if err != nil {
-			isCancelErr := errors.Is(err, context.Canceled)
-			if isCancelErr {
-				return nil
-			}
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("%v", err),
@@ -3566,8 +3738,29 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	}
 
 	permDialog := dialog.NewPermissions(m.com, perm, opts...)
-	m.dialog.OpenDialog(permDialog)
+	m.dialog.OpenDialogWithGrace(permDialog)
 	return nil
+}
+
+// openBatchFormDialog activates a tabbed multi-question form in
+// the editor area. Single questions render without tabs or confirm.
+func (m *UI) openBatchFormDialog(batch question.Request) {
+	form := dialog.NewQuestionForm(m.com.Styles, batch)
+	form.OnAnswer = func(responses []question.Answer) {
+		m.com.Workspace.QuestionAnswer(responses)
+	}
+	m.activeInline = form
+	m.textarea.Blur()
+	m.focus = uiFocusEditor
+	m.activeInline.SetFocused(true)
+	m.updateLayoutAndSize()
+}
+
+// shouldCollapseQuestion reports whether a question form should render
+// in its collapsed one-line view. This is true only when the form is
+// unfocused and would consume more than half the terminal height.
+func (m *UI) shouldCollapseQuestion(qf *dialog.QuestionForm) bool {
+	return m.focus != uiFocusEditor && m.height > 0 && qf.Height() > m.height*2/5
 }
 
 // handlePermissionNotification updates tool items when permission state changes.
@@ -3593,6 +3786,41 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 			m.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
+}
+
+// handlePlanHandoff checks whether a completed run in plan mode contained the
+// plan-ready sentinel marker and, if so, opens the plan handoff dialog.
+func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
+	if m.mode != uiInputModePlan {
+		return nil
+	}
+	if rc.Error != "" || rc.Cancelled {
+		return nil
+	}
+	if m.session == nil || rc.SessionID != m.session.ID {
+		return nil
+	}
+	if !common.PlanReadyMarkerPresent(rc.Text) {
+		return nil
+	}
+	if _, ok := m.activeInline.(*dialog.PlanHandoffInline); ok {
+		return nil
+	}
+	inline := dialog.NewPlanHandoffInline(m.com)
+	inline.OnConfirm = func() tea.Cmd {
+		return tea.Sequence(
+			m.setInputMode(uiInputModeCode),
+			m.sendMessage("Implement the plan."),
+		)
+	}
+	m.activeInline = inline
+	m.textarea.Blur()
+	m.focus = uiFocusEditor
+	m.activeInline.SetFocused(true)
+	if m.status != nil {
+		m.updateLayoutAndSize()
+	}
+	return nil
 }
 
 // handleAgentNotification translates domain agent events into desktop

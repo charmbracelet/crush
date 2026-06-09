@@ -673,6 +673,7 @@ func allToolNames() []string {
 		"glob",
 		"grep",
 		"ls",
+		"question",
 		"sourcegraph",
 		"todos",
 		"view",
@@ -697,7 +698,7 @@ func resolveReadOnlyTools(tools []string) []string {
 }
 
 func resolvePlanTools(tools []string) []string {
-	planTools := []string{"agent", "glob", "grep", "ls", "sourcegraph", "view"}
+	planTools := []string{"agent", "glob", "grep", "ls", "question", "sourcegraph", "view"}
 	return filterSlice(tools, planTools, true)
 }
 

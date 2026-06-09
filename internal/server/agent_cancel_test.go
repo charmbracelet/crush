@@ -60,6 +60,13 @@ func (s *runCoordinator) Run(ctx context.Context, sessionID, prompt string, atta
 	return nil, s.returnFn(ctx)
 }
 
+func (s *runCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	return s.Run(ctx, sessionID, prompt, attachments...)
+}
+
+func (s *runCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
+	return nil
+}
 func (s *runCoordinator) Cancel(string) {}
 func (s *runCoordinator) CancelAll()    {}
 func (s *runCoordinator) IsBusy() bool  { return false }
@@ -116,11 +123,12 @@ func postAgent(t *testing.T, c *controllerV1, ctx context.Context, wsID, session
 }
 
 // TestPostAgent_ReturnsOKOnContextCanceled verifies that when another
-// client cancels the session mid-turn, the prompting client's still
-// open POST receives 200 (not 500). The agent surfaces the
-// FinishReasonCanceled marker to every SSE subscriber via the
-// assistant message; the HTTP response from the prompter should not
-// double as an error signal.
+// client cancels the session mid-turn, the prompting client's POST is
+// unaffected: SendMessage is fire-and-forget, so the handler returns
+// 200 immediately without waiting for the turn. A run that later
+// returns context.Canceled never surfaces as a 500 to the prompter;
+// the FinishReasonCanceled marker reaches SSE subscribers via the
+// assistant message instead.
 func TestPostAgent_ReturnsOKOnContextCanceled(t *testing.T) {
 	t.Parallel()
 
@@ -129,33 +137,56 @@ func TestPostAgent_ReturnsOKOnContextCanceled(t *testing.T) {
 	})
 	c, wsID := buildAgentWorkspace(t, coord)
 
-	done := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		done <- postAgent(t, c, t.Context(), wsID, "S1")
-	}()
+	// The handler returns immediately, before the dispatched run is
+	// released, because the run no longer owns the HTTP response.
+	rec := postAgent(t, c, t.Context(), wsID, "S1")
+	require.Equal(t, http.StatusAccepted, rec.Code, "fire-and-forget SendMessage must return 202 without waiting for the run")
 
-	// Wait until Run is in flight, then release it to return
-	// context.Canceled.
+	// The run is dispatched on a goroutine; let it return
+	// context.Canceled. Nothing from that path reaches the (already
+	// returned) handler.
 	select {
 	case <-coord.entered:
 	case <-time.After(2 * time.Second):
-		t.Fatal("coordinator Run was never entered")
+		t.Fatal("dispatched run was never entered")
 	}
 	close(coord.release)
 
-	select {
-	case rec := <-done:
-		require.Equal(t, http.StatusOK, rec.Code, "context.Canceled from another client's cancel must not surface as 500")
-	case <-time.After(2 * time.Second):
-		t.Fatal("handler did not return after coordinator returned context.Canceled")
-	}
+	// Wait for the dispatched run to fully return. Backend.runAgent
+	// swallows context.Canceled, so it must not publish a
+	// notify.TypeAgentError. Publishing would dereference the synthetic
+	// workspace's nil notification broker and crash this goroutine,
+	// which is the explicit guard that a cancel produces no top-level
+	// error event.
+	require.Eventually(t, func() bool {
+		return coord.ranCount.Load() == 1
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
-// TestPostAgent_DetachesRequestContext verifies that canceling the
-// prompting client's HTTP request context does not cancel the
-// in-flight agent run. The coordinator must observe a context whose
-// Done channel never fires from the request side; only the explicit
-// cancel endpoint may end the run.
+// TestHandleError_ContextCanceledFallsThroughTo500 documents the step 8
+// cleanup: the old context.Canceled special case in handleError was
+// removed because runtime cancellation of an agent run can no longer
+// reach handleError. The agent-prompt handler returns 202 before the run
+// starts (fire-and-forget SendMessage) and Backend.runAgent swallows
+// context.Canceled. Any context.Canceled that still reaches handleError
+// is therefore an unexpected synchronous error and falls through to the
+// default 500 like any other.
+func TestHandleError_ContextCanceledFallsThroughTo500(t *testing.T) {
+	t.Parallel()
+
+	c := &controllerV1{server: &Server{}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+
+	c.handleError(rec, req, context.Canceled)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// TestPostAgent_DetachesRequestContext verifies that the dispatched run
+// is bound to the workspace context, not the prompting client's HTTP
+// request context. Canceling the request context must neither cancel
+// the run nor be observed by the coordinator.
 func TestPostAgent_DetachesRequestContext(t *testing.T) {
 	t.Parallel()
 
@@ -166,46 +197,31 @@ func TestPostAgent_DetachesRequestContext(t *testing.T) {
 
 	reqCtx, cancelReq := context.WithCancel(context.Background())
 
-	done := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		done <- postAgent(t, c, reqCtx, wsID, "S1")
-	}()
+	// The handler returns immediately; the run keeps executing on its
+	// own goroutine bound to the workspace context.
+	rec := postAgent(t, c, reqCtx, wsID, "S1")
+	require.Equal(t, http.StatusAccepted, rec.Code)
 
-	// Wait until Run is in flight, then drop the prompting client.
 	select {
 	case <-coord.entered:
 	case <-time.After(2 * time.Second):
-		t.Fatal("coordinator Run was never entered")
+		t.Fatal("dispatched run was never entered")
 	}
+
+	// Drop the prompting client. This must not reach the run.
 	cancelReq()
 
-	// The captured ctx must be detached: context.WithoutCancel
-	// returns a ctx with Done() == nil so request cancellation cannot
-	// propagate.
 	got := coord.capturedCtx()
 	require.NotNil(t, got)
-	require.Nil(t, got.Done(), "coordinator ctx must be detached from r.Context() via context.WithoutCancel")
-	require.NoError(t, got.Err(), "coordinator ctx must not inherit cancellation from the dropped request")
+	// Compare by identity (pointer), not reflect.DeepEqual: deep
+	// comparison would traverse context internals that the runtime
+	// mutates concurrently.
+	require.False(t, got == reqCtx, "run ctx must not be the request ctx")
+	require.NoError(t, got.Err(), "run ctx must not inherit cancellation from the dropped request")
 
-	// Confirm Run is still running: it should not have completed
-	// just because the request ctx was canceled.
-	select {
-	case <-done:
-		t.Fatal("handler returned before run completed; request ctx cancellation leaked into the run")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	// Release the run; the handler should now complete cleanly.
+	// Release the run so it returns cleanly.
 	close(coord.release)
-	select {
-	case rec := <-done:
-		// Writing to a recorder whose request ctx was canceled
-		// still works; in production the TCP write would silently
-		// fail, which is fine because the run already completed and
-		// SSE subscribers have the result.
-		require.Equal(t, http.StatusOK, rec.Code)
-	case <-time.After(2 * time.Second):
-		t.Fatal("handler did not return after release")
-	}
-	require.Equal(t, int32(1), coord.ranCount.Load())
+	require.Eventually(t, func() bool {
+		return coord.ranCount.Load() == 1
+	}, 2*time.Second, 10*time.Millisecond)
 }

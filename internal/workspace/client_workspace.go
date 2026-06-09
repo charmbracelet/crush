@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -334,6 +335,30 @@ func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
 	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
 }
 
+// -- Questions --
+
+// QuestionAnswer submits answers for a question via the client SDK.
+func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	protoResp := proto.QuestionAnswer{
+		Responses: make([]proto.QuestionResponse, len(responses)),
+	}
+	for i, r := range responses {
+		protoResp.Responses[i] = proto.QuestionResponse{
+			QuestionID:  r.QuestionID,
+			SelectedIDs: r.SelectedIDs,
+			FillInText:  r.FillInText,
+			Yes:         r.Yes,
+			Notes:       r.Notes,
+		}
+	}
+	resolved, err := w.client.AnswerQuestionBatch(context.Background(), w.workspaceID(), protoResp)
+	if err != nil {
+		slog.Error("Failed to answer question", "error", err)
+		return false
+	}
+	return resolved
+}
+
 // -- FileTracker --
 
 func (w *ClientWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
@@ -510,11 +535,12 @@ func (w *ClientWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry
 	result := make([]skills.CatalogEntry, len(entries))
 	for i, entry := range entries {
 		result[i] = skills.CatalogEntry{
-			ID:          entry.ID,
-			Name:        entry.Name,
-			Description: entry.Description,
-			Label:       entry.Label,
-			Source:      skills.SourceType(entry.Source),
+			ID:            entry.ID,
+			Name:          entry.Name,
+			Description:   entry.Description,
+			Label:         entry.Label,
+			Source:        skills.SourceType(entry.Source),
+			UserInvocable: entry.UserInvocable,
 		}
 	}
 	return result, nil
@@ -691,6 +717,18 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 				Denied:     e.Payload.Denied,
 			},
 		}
+	case pubsub.Event[proto.QuestionRequest]:
+		return pubsub.Event[question.Request]{
+			Type: e.Type,
+			Payload: question.Request{
+				ID:                 e.Payload.ID,
+				SessionID:          e.Payload.SessionID,
+				ToolCallID:         e.Payload.ToolCallID,
+				Questions:          protoQuestionsToDomain(e.Payload.Questions),
+				ConfirmTitle:       e.Payload.ConfirmTitle,
+				ConfirmDescription: e.Payload.ConfirmDescription,
+			},
+		}
 	case pubsub.Event[proto.Message]:
 		return pubsub.Event[message.Message]{
 			Type:    e.Type,
@@ -707,13 +745,18 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Payload: protoToFile(e.Payload),
 		}
 	case pubsub.Event[proto.AgentEvent]:
+		n := notify.Notification{
+			SessionID:    e.Payload.SessionID,
+			SessionTitle: e.Payload.SessionTitle,
+			RunID:        e.Payload.RunID,
+			Type:         notify.Type(e.Payload.Type),
+		}
+		if e.Payload.Error != nil {
+			n.Message = e.Payload.Error.Error()
+		}
 		return pubsub.Event[notify.Notification]{
-			Type: e.Type,
-			Payload: notify.Notification{
-				SessionID:    e.Payload.SessionID,
-				SessionTitle: e.Payload.SessionTitle,
-				Type:         notify.Type(e.Payload.Type),
-			},
+			Type:    e.Type,
+			Payload: n,
 		}
 	case pubsub.Event[proto.RunComplete]:
 		// Translate the wire-level proto.RunComplete back into the
@@ -933,6 +976,32 @@ func todosToProto(todos []session.Todo) []proto.Todo {
 			Content:    t.Content,
 			Status:     string(t.Status),
 			ActiveForm: t.ActiveForm,
+		}
+	}
+	return out
+}
+
+func protoQuestionsToDomain(qs []proto.QuestionItem) []question.Question {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]question.Question, len(qs))
+	for i, q := range qs {
+		choices := make([]question.Choice, len(q.Choices))
+		for j, c := range q.Choices {
+			choices[j] = question.Choice{
+				ID:          c.ID,
+				Label:       c.Label,
+				Description: c.Description,
+			}
+		}
+		out[i] = question.Question{
+			ID:          q.ID,
+			Type:        question.Type(q.Type),
+			Label:       q.Label,
+			Text:        q.Question,
+			Description: q.Description,
+			Choices:     choices,
 		}
 	}
 	return out

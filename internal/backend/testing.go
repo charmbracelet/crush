@@ -1,15 +1,29 @@
 package backend
 
+import "context"
+
 // InsertWorkspaceForTest registers ws with b under its current ID and
 // path. It is intended for tests in other packages that need to drive
 // HTTP handlers against a synthetic workspace without booting a real
 // app.App. Production code should go through CreateWorkspace.
+//
+// If the workspace has no run context yet it is derived from the
+// backend context (falling back to context.Background), mirroring the
+// initialization CreateWorkspace performs, so dispatched agent runs
+// have a non-nil ws.ctx.
 func InsertWorkspaceForTest(b *Backend, ws *Workspace) {
 	if ws.resolvedPath == "" {
 		ws.resolvedPath = ws.Path
 	}
 	if ws.clients == nil {
 		ws.clients = make(map[string]*clientState)
+	}
+	if ws.ctx == nil {
+		parent := b.ctx
+		if parent == nil {
+			parent = context.Background()
+		}
+		ws.ctx, ws.cancel = context.WithCancel(parent)
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()

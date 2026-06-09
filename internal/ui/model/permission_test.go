@@ -25,7 +25,7 @@ func TestHandlePermissionNotification_RemoteGrantClosesDialog(t *testing.T) {
 		ToolCallID: "tool-call-X",
 		ToolName:   "bash",
 	}
-	u.dialog.OpenDialog(dialog.NewPermissions(u.com, perm))
+	u.dialog.OpenDialogWithGrace(dialog.NewPermissions(u.com, perm))
 	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
 
 	u.handlePermissionNotification(permission.PermissionNotification{
@@ -45,7 +45,7 @@ func TestHandlePermissionNotification_RemoteDenyClosesDialog(t *testing.T) {
 		ID:         "perm-2",
 		ToolCallID: "tool-call-Y",
 	}
-	u.dialog.OpenDialog(dialog.NewPermissions(u.com, perm))
+	u.dialog.OpenDialogWithGrace(dialog.NewPermissions(u.com, perm))
 
 	u.handlePermissionNotification(permission.PermissionNotification{
 		ToolCallID: "tool-call-Y",
@@ -64,7 +64,7 @@ func TestHandlePermissionNotification_InitialPendingDoesNotClose(t *testing.T) {
 		ID:         "perm-3",
 		ToolCallID: "tool-call-Z",
 	}
-	u.dialog.OpenDialog(dialog.NewPermissions(u.com, perm))
+	u.dialog.OpenDialogWithGrace(dialog.NewPermissions(u.com, perm))
 
 	// The initial notification published by permission.Request is
 	// neither granted nor denied; it must not dismiss the dialog.
@@ -84,7 +84,7 @@ func TestHandlePermissionNotification_DifferentToolCallIDDoesNotClose(t *testing
 		ID:         "perm-4",
 		ToolCallID: "tool-call-A",
 	}
-	u.dialog.OpenDialog(dialog.NewPermissions(u.com, perm))
+	u.dialog.OpenDialogWithGrace(dialog.NewPermissions(u.com, perm))
 
 	u.handlePermissionNotification(permission.PermissionNotification{
 		ToolCallID: "tool-call-B",

@@ -144,6 +144,9 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
+	if m.activeInline != nil {
+		return nil
+	}
 	if m.height < pillsHeightReasonableTerminalHeight {
 		return nil
 	}
@@ -224,6 +227,11 @@ func (m *UI) pillsAreaHeight() int {
 	if !m.hasSession() {
 		return 0
 	}
+	// Suppress pills when an inline editor (e.g. question form) is active
+	// to avoid competing for screen space.
+	if m.activeInline != nil {
+		return 0
+	}
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 	hasPills := hasIncomplete || hasQueue
@@ -246,6 +254,10 @@ func (m *UI) pillsAreaHeight() int {
 func (m *UI) renderPills() {
 	m.pillsView = ""
 	if !m.hasSession() {
+		return
+	}
+	// Suppress pills when an inline editor (e.g. question form) is active.
+	if m.activeInline != nil {
 		return
 	}
 

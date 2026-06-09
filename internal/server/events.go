@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -69,6 +71,19 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Denied:     e.Payload.Denied,
 			},
 		})
+	case pubsub.Event[question.Request]:
+		slog.Info("Wrapping question batch event for SSE", "id", e.Payload.ID, "questions", len(e.Payload.Questions))
+		return envelope(pubsub.PayloadTypeQuestionRequest, pubsub.Event[proto.QuestionRequest]{
+			Type: e.Type,
+			Payload: proto.QuestionRequest{
+				ID:                 e.Payload.ID,
+				SessionID:          e.Payload.SessionID,
+				ToolCallID:         e.Payload.ToolCallID,
+				Questions:          questionsToProto(e.Payload.Questions),
+				ConfirmTitle:       e.Payload.ConfirmTitle,
+				ConfirmDescription: e.Payload.ConfirmDescription,
+			},
+		})
 	case pubsub.Event[message.Message]:
 		return envelope(pubsub.PayloadTypeMessage, pubsub.Event[proto.Message]{
 			Type:    e.Type,
@@ -85,13 +100,19 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Payload: fileToProto(e.Payload),
 		})
 	case pubsub.Event[notify.Notification]:
+		payload := proto.AgentEvent{
+			SessionID:    e.Payload.SessionID,
+			SessionTitle: e.Payload.SessionTitle,
+			RunID:        e.Payload.RunID,
+			Type:         proto.AgentEventType(e.Payload.Type),
+		}
+		if e.Payload.Type == notify.TypeAgentError {
+			payload.Type = proto.AgentEventTypeError
+			payload.Error = errors.New(e.Payload.Message)
+		}
 		return envelope(pubsub.PayloadTypeAgentEvent, pubsub.Event[proto.AgentEvent]{
-			Type: e.Type,
-			Payload: proto.AgentEvent{
-				SessionID:    e.Payload.SessionID,
-				SessionTitle: e.Payload.SessionTitle,
-				Type:         proto.AgentEventType(e.Payload.Type),
-			},
+			Type:    e.Type,
+			Payload: payload,
 		})
 	case pubsub.Event[notify.RunComplete]:
 		return envelope(pubsub.PayloadTypeRunComplete, pubsub.Event[proto.RunComplete]{
@@ -293,6 +314,32 @@ func messagesToProto(msgs []message.Message) []proto.Message {
 	out := make([]proto.Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = messageToProto(m)
+	}
+	return out
+}
+
+func questionsToProto(qs []question.Question) []proto.QuestionItem {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]proto.QuestionItem, len(qs))
+	for i, q := range qs {
+		choices := make([]proto.QuestionChoice, len(q.Choices))
+		for j, c := range q.Choices {
+			choices[j] = proto.QuestionChoice{
+				ID:          c.ID,
+				Label:       c.Label,
+				Description: c.Description,
+			}
+		}
+		out[i] = proto.QuestionItem{
+			ID:          q.ID,
+			Type:        string(q.Type),
+			Label:       q.Label,
+			Question:    q.Text,
+			Description: q.Description,
+			Choices:     choices,
+		}
 	}
 	return out
 }

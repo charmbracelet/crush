@@ -35,6 +35,22 @@ func PlanReadyMarkerPresent(text string) bool {
 	return false
 }
 
+// StripPlanReadyMarker removes lines that consist solely of the plan-ready
+// sentinel (matching the detection rule of [PlanReadyMarkerPresent]) so the
+// marker never shows up in rendered chat output. Mentions of the marker
+// inside prose are left untouched.
+func StripPlanReadyMarker(text string) string {
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if strings.TrimSpace(line) == PlanReadyMarker {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 

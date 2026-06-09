@@ -573,6 +573,20 @@ func (f *QuestionForm) SetHover(x, y int) {
 	}
 }
 
+// HandlePaste implements PasteableEditor. Forwards paste events
+// to the active question component if it supports pasting.
+func (f *QuestionForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	if f.isConfirmTab() {
+		return nil
+	}
+	if f.activeIdx < f.numQuestions {
+		if p, ok := f.questions[f.activeIdx].(PasteableEditor); ok {
+			return p.HandlePaste(msg)
+		}
+	}
+	return nil
+}
+
 // HandleMouseClick implements MouseClickableEditor. It checks if
 // the click landed on a tab and switches to it, or delegates to
 // the active component for content-area clicks.

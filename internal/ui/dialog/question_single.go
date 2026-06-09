@@ -142,6 +142,9 @@ func (d *SingleChoice) Height() int         { return d.height(choiceListMaxWidth
 func (d *SingleChoice) HeightChanged() bool { return d.heightChanged() }
 func (d *SingleChoice) SetFocused(f bool)   { d.setFocused(f) }
 func (d *SingleChoice) SetHover(x, y int)   { d.setHover(x, y) }
+func (d *SingleChoice) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	return d.handlePaste(msg)
+}
 
 // HandleMouseClick checks if the click landed on a choice item and
 // selects it. Does not advance — user can change their selection

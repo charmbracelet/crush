@@ -36,6 +36,7 @@ type Session struct {
 	input              textinput.Model
 	selectedSessionInx int
 	sessions           []session.Session
+	listScreenY        int
 
 	sessionsMode sessionsMode
 
@@ -141,6 +142,13 @@ func (s *Session) ID() string {
 // HandleMsg implements Dialog.
 func (s *Session) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case tea.MouseMotionMsg:
+		if s.sessionsMode == sessionsModeNormal {
+			idx, _ := s.list.ItemIndexAtPosition(0, msg.Y-s.listScreenY)
+			if idx >= 0 {
+				s.list.SetSelected(idx)
+			}
+		}
 	case tea.MouseWheelMsg:
 		if s.sessionsMode == sessionsModeNormal {
 			switch msg.Button {
@@ -329,6 +337,14 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = s.help.View(s)
 
 	view := rc.Render()
+
+	// Compute list screen Y for mouse hover detection.
+	viewWidth, viewHeight := lipgloss.Size(view)
+	centerRect := common.CenterRect(area, viewWidth, viewHeight)
+	listYFromDialogTop := heightOffset -
+		t.Dialog.View.GetBorderBottomSize() - t.Dialog.View.GetPaddingBottom() -
+		t.Dialog.HelpView.GetVerticalFrameSize()
+	s.listScreenY = centerRect.Min.Y + listYFromDialogTop
 
 	DrawCenterCursor(scr, area, view, cur)
 	return cur

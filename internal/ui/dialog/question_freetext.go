@@ -115,6 +115,7 @@ func (d *FreeText) Height() int {
 		h++ // blank
 	}
 	h += d.editor.Height() // textarea
+	h++                    // trailing blank for bottom padding
 	return h
 }
 
@@ -191,3 +192,10 @@ func (d *FreeText) SetHover(x, y int) {}
 
 // HandleMouseClick is a no-op for free text questions.
 func (d *FreeText) HandleMouseClick(x, y int) (bool, bool) { return false, false }
+
+// HandlePaste forwards paste events to the editor textarea.
+func (d *FreeText) HandlePaste(msg tea.PasteMsg) tea.Cmd {
+	var cmd tea.Cmd
+	d.editor, cmd = d.editor.Update(msg)
+	return cmd
+}

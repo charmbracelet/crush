@@ -1037,6 +1037,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case tea.PasteMsg:
+		if m.activeInline != nil && m.focus == uiFocusEditor {
+			if p, ok := m.activeInline.(dialog.PasteableEditor); ok {
+				if cmd := p.HandlePaste(msg); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
+		}
 		if cmd := m.handlePasteMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

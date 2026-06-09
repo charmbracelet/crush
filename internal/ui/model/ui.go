@@ -876,6 +876,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case uiChat:
 			switch msg.Button {
+			case tea.MouseWheelLeft:
+				m.chat.ScrollSelectedShellHorizontal(-5)
+			case tea.MouseWheelRight:
+				m.chat.ScrollSelectedShellHorizontal(5)
 			case tea.MouseWheelUp:
 				if cmd := m.chat.ScrollByAndAnimate(-MouseScrollThreshold); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -1141,15 +1145,8 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	switch msg.Role {
 	case message.User:
 		// Shell commands are rendered live via shellResultMsg; skip
-		// the persisted duplicate.
-		hasShellCmd := false
-		for _, part := range msg.Parts {
-			if _, ok := part.(message.ShellCommand); ok {
-				hasShellCmd = true
-				break
-			}
-		}
-		if hasShellCmd {
+		// the persisted duplicate that arrives through pubsub.
+		if msg.HasShellCommand() {
 			return nil
 		}
 		m.lastUserMessageTime = msg.CreatedAt
@@ -2009,6 +2006,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if command, ok := strings.CutPrefix(value, "!"); ok && command != "" {
 					m.randomizePlaceholders()
 					m.historyReset()
+					if !m.hasSession() {
+						return func() tea.Msg {
+							return util.InfoMsg{Type: util.InfoTypeError, Msg: "shell: requires an active session", TTL: 10 * time.Second}
+						}
+					}
 					return tea.Batch(m.runShellCommand(command), m.loadPromptHistory())
 				}
 
@@ -2018,6 +2020,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.setEditorPrompt(yolo)
 					m.randomizePlaceholders()
 					m.historyReset()
+					if !m.hasSession() {
+						return func() tea.Msg {
+							return util.InfoMsg{Type: util.InfoTypeError, Msg: "shell: requires an active session", TTL: 10 * time.Second}
+						}
+					}
 					return tea.Batch(m.runShellCommand(value), m.loadPromptHistory())
 				}
 
@@ -2123,7 +2130,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				// Bang mode: enter when "!" typed on empty prompt, exit on
 				// backspace clearing the last character.
 				newVal := m.textarea.Value()
-				if !m.bangMode && newVal == "!" {
+				if !m.bangMode && strings.TrimSpace(newVal) == "!" {
 					m.bangMode = true
 					m.bangWasEmpty = true
 					m.textarea.Reset()
@@ -2481,6 +2488,9 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
+			if m.isSelectedShellItem() {
+				binds = append(binds, k.Chat.ScrollLeft, k.Chat.ScrollRight)
+			}
 			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
 			}
@@ -2600,6 +2610,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.ClearHighlight,
 				},
 			)
+			if m.isSelectedShellItem() {
+				binds = append(binds, []key.Binding{k.Chat.ScrollLeft, k.Chat.ScrollRight})
+			}
 			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, []key.Binding{k.Chat.PillLeft})
 			}
@@ -3235,6 +3248,15 @@ func (m *UI) isAgentBusy() bool {
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
+}
+
+// isSelectedShellItem returns true if the currently selected chat item is a
+// ShellItem (bang-mode result).
+func (m *UI) isSelectedShellItem() bool {
+	if !m.hasSession() {
+		return false
+	}
+	return m.chat.IsSelectedShellItem()
 }
 
 // mimeOf detects the MIME type of the given content.

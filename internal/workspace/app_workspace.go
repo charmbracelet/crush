@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -109,26 +108,28 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 }
 
 func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int) (proto.ShellCommandResponse, error) {
-	result, err := shell.RunAndCapturePTY(ctx, shell.RunOptions{
+	var persist shell.PersistFunc
+	if sessionID != "" {
+		persist = func(cmd, output string, exitCode int) error {
+			_, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
+				Role: message.User,
+				Parts: []message.ContentPart{message.ShellCommand{
+					Command:  cmd,
+					Output:   output,
+					ExitCode: exitCode,
+				}},
+			})
+			return err
+		}
+	}
+
+	result, err := shell.RunAndPersist(ctx, shell.RunOptions{
 		Command:   command,
 		Cwd:       w.store.WorkingDir(),
 		TermWidth: termWidth,
-	})
+	}, persist)
 	if err != nil {
 		return proto.ShellCommandResponse{}, err
-	}
-
-	if sessionID != "" {
-		if _, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
-			Role: message.User,
-			Parts: []message.ContentPart{message.ShellCommand{
-				Command:  command,
-				Output:   result.Output,
-				ExitCode: result.ExitCode,
-			}},
-		}); err != nil {
-			slog.Error("Failed to persist shell command output", "error", err, "session_id", sessionID)
-		}
 	}
 
 	return proto.ShellCommandResponse{

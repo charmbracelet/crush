@@ -614,6 +614,21 @@ func (m *Chat) ToggleExpandedSelectedItem() {
 	}
 }
 
+// IsSelectedShellItem returns true if the currently selected item is a
+// ShellItem (bang-mode result).
+func (m *Chat) IsSelectedShellItem() bool {
+	_, ok := m.list.SelectedItem().(*chat.ShellItem)
+	return ok
+}
+
+// ScrollSelectedShellHorizontal scrolls the selected ShellItem horizontally
+// by delta columns. No-op if the selected item is not a ShellItem.
+func (m *Chat) ScrollSelectedShellHorizontal(delta int) {
+	if shell, ok := m.list.SelectedItem().(*chat.ShellItem); ok {
+		shell.ScrollHorizontal(delta)
+	}
+}
+
 // HandleKeyMsg handles key events for the chat component.
 func (m *Chat) HandleKeyMsg(key tea.KeyMsg) (bool, tea.Cmd) {
 	if m.list.Focused() {

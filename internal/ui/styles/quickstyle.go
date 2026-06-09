@@ -699,6 +699,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(charmtone.Turtle).Bold(true).SetString(" ! ")
+	s.Editor.PromptBangIconBlurred = s.Editor.PromptBangIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Turtle).SetString(":::")
+	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsFocused.Foreground(o.fgMoreSubtle)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
@@ -803,6 +807,20 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted
+
+	// Shell (bang mode) item styles.
+	s.Messages.ShellBarFocused = lipgloss.NewStyle().PaddingLeft(1).
+		BorderStyle(messageFocussedBorder).BorderLeft(true).
+		BorderForeground(charmtone.Lichen)
+	s.Messages.ShellBarBlurred = lipgloss.NewStyle().PaddingLeft(1).BorderLeft(true).
+		BorderForeground(charmtone.Turtle).BorderStyle(lipgloss.NormalBorder())
+	s.Messages.ShellPrompt = base.Foreground(charmtone.Lichen).Bold(true)
+	s.Messages.ShellPromptBlurred = base.Foreground(charmtone.Turtle)
+	s.Messages.ShellCommand = base.Foreground(o.fgBase)
+	s.Messages.ShellOutput = subtle
+	s.Messages.ShellExitCode = lipgloss.NewStyle().Foreground(o.destructive)
+	s.Messages.ShellTruncation = muted
+
 	s.Messages.SectionHeader = base.PaddingLeft(2)
 	s.Messages.AssistantInfoIcon = subtle
 	s.Messages.AssistantInfoModel = muted

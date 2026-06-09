@@ -1,12 +1,16 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
 
+	"github.com/creack/pty"
 	"mvdan.cc/sh/moreinterp/coreutils"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -41,6 +45,9 @@ type RunOptions struct {
 	// BlockFuncs is an optional list of deny-list matchers applied before
 	// each command reaches the exec layer. nil disables blocking entirely.
 	BlockFuncs []BlockFunc
+	// TermWidth is the terminal width in columns for PTY execution.
+	// Zero uses a default of 200.
+	TermWidth int
 }
 
 // Run parses and executes a shell command using the same mvdan.cc/sh
@@ -86,6 +93,98 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 	return runner.Run(ctx, line)
 }
 
+// CaptureResult holds the combined output and exit code from a
+// captured shell execution.
+type CaptureResult struct {
+	Output   string
+	ExitCode int
+}
+
+// RunAndCapture executes a shell command and returns its combined
+// stdout/stderr output along with the exit code. It inherits the
+// current process environment when opts.Env is nil.
+func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) {
+	if opts.Env == nil {
+		opts.Env = os.Environ()
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts.Stdout = &stdout
+	opts.Stderr = &stderr
+
+	runErr := Run(ctx, opts)
+
+	exitCode := 0
+	if runErr != nil {
+		exitCode = ExitCode(runErr)
+	}
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	return CaptureResult{
+		Output:   output,
+		ExitCode: exitCode,
+	}, nil
+}
+
+// RunAndCapturePTY executes a shell command through a pseudo-TTY and
+// returns its combined output along with the exit code. Programs that
+// check isatty (eza, ls --color=auto, bat, etc.) will emit ANSI color
+// sequences because they see a real terminal on stdout. The env vars
+// from nonInteractiveEnvVars are still applied. Falls back to
+// RunAndCapture if PTY allocation fails.
+func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, error) {
+	if opts.Env == nil {
+		opts.Env = os.Environ()
+	}
+	env := withNonInteractiveEnv(opts.Env)
+
+	cols := uint16(opts.TermWidth)
+	if cols == 0 {
+		cols = 200
+	}
+
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", opts.Command)
+	cmd.Dir = opts.Cwd
+	cmd.Env = env
+
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 50, Cols: cols})
+	if err != nil {
+		return RunAndCapture(ctx, opts)
+	}
+	defer ptmx.Close()
+
+	var buf bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(&buf, ptmx)
+		done <- copyErr
+	}()
+
+	waitErr := cmd.Wait()
+	<-done
+
+	exitCode := 0
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	return CaptureResult{
+		Output:   buf.String(),
+		ExitCode: exitCode,
+	}, nil
+}
+
 // newRunner constructs an [interp.Runner] configured with the standard
 // Crush handler stack. Shared by the stateless [Run] entrypoint and the
 // stateful [Shell] so the two surfaces cannot drift.
@@ -126,6 +225,9 @@ func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
 // hangs, not useful behavior.
 var nonInteractiveEnvVars = []string{
 	"TERM=xterm-256color",
+	"COLORTERM=truecolor",
+	"CLICOLOR_FORCE=1",
+	"FORCE_COLOR=1",
 	"GIT_EDITOR=false",
 	"EDITOR=false",
 	"VISUAL=false",

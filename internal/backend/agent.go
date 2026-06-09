@@ -1,10 +1,9 @@
 package backend
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/charmbracelet/crush/internal/agent"
@@ -252,39 +251,30 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		return proto.ShellCommandResponse{}, err
 	}
 
-	var stdout, stderr bytes.Buffer
-	runErr := shell.Run(ctx, shell.RunOptions{
+	result, err := shell.RunAndCapturePTY(ctx, shell.RunOptions{
 		Command: req.Command,
 		Cwd:     ws.Path,
 		Env:     append(os.Environ(), ws.Env...),
-		Stdout:  &stdout,
-		Stderr:  &stderr,
 	})
-
-	exitCode := 0
-	if runErr != nil {
-		exitCode = shell.ExitCode(runErr)
+	if err != nil {
+		return proto.ShellCommandResponse{}, err
 	}
 
-	output := stdout.String()
-	if stderr.Len() > 0 {
-		if output != "" {
-			output += "\n"
-		}
-		output += stderr.String()
-	}
-
-	// Persist as a user message so the LLM has context on follow-up.
-	msgContent := fmt.Sprintf("$ %s\n%s", req.Command, output)
 	if req.SessionID != "" {
-		_, _ = ws.Messages.Create(ctx, req.SessionID, message.CreateMessageParams{
-			Role:  message.User,
-			Parts: []message.ContentPart{message.TextContent{Text: msgContent}},
-		})
+		if _, err := ws.Messages.Create(ctx, req.SessionID, message.CreateMessageParams{
+			Role: message.User,
+			Parts: []message.ContentPart{message.ShellCommand{
+				Command:  req.Command,
+				Output:   result.Output,
+				ExitCode: result.ExitCode,
+			}},
+		}); err != nil {
+			slog.Error("Failed to persist shell command output", "error", err, "session_id", req.SessionID)
+		}
 	}
 
 	return proto.ShellCommandResponse{
-		Output:   output,
-		ExitCode: exitCode,
+		Output:   result.Output,
+		ExitCode: result.ExitCode,
 	}, nil
 }

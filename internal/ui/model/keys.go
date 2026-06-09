@@ -47,6 +47,8 @@ type KeyMap struct {
 		Copy           key.Binding
 		ClearHighlight key.Binding
 		Expand         key.Binding
+		ScrollLeft     key.Binding
+		ScrollRight    key.Binding
 	}
 
 	Initialize struct {
@@ -249,6 +251,14 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.Expand = key.NewBinding(
 		key.WithKeys("space"),
 		key.WithHelp("space", "expand/collapse"),
+	)
+	km.Chat.ScrollLeft = key.NewBinding(
+		key.WithKeys("shift+left", "H"),
+		key.WithHelp("shift+←/H", "scroll left"),
+	)
+	km.Chat.ScrollRight = key.NewBinding(
+		key.WithKeys("shift+right", "L"),
+		key.WithHelp("shift+→/L", "scroll right"),
 	)
 	km.Initialize.Yes = key.NewBinding(
 		key.WithKeys("y", "Y"),

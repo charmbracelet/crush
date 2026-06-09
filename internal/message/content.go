@@ -139,6 +139,27 @@ type ShellCommand struct {
 
 func (ShellCommand) isPart() {}
 
+// HasShellCommand reports whether the message contains any ShellCommand parts.
+func (m *Message) HasShellCommand() bool {
+	for _, part := range m.Parts {
+		if _, ok := part.(ShellCommand); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ShellCommands returns all ShellCommand parts from the message.
+func (m *Message) ShellCommands() []ShellCommand {
+	var cmds []ShellCommand
+	for _, part := range m.Parts {
+		if sc, ok := part.(ShellCommand); ok {
+			cmds = append(cmds, sc)
+		}
+	}
+	return cmds
+}
+
 type Message struct {
 	ID               string
 	Role             MessageRole
@@ -492,6 +513,15 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			})
 		}
 		text = PromptWithTextAttachments(text, textAttachments)
+		// Include bang-mode shell commands as context for the agent.
+		for _, sc := range m.ShellCommands() {
+			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, sc.Output, sc.ExitCode)
+			if text != "" {
+				text += "\n\n" + shellText
+			} else {
+				text = shellText
+			}
+		}
 		if text != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}

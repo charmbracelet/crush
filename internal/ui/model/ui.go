@@ -876,6 +876,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
+			if msg.DeltaX != 0 {
+				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
+			}
 			lines := int(msg.DeltaY)
 			if lines == 0 {
 				break
@@ -1998,12 +2001,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				value = strings.TrimSpace(value)
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
-				}
-
-				if command, ok := strings.CutPrefix(value, "!"); ok && command != "" {
-					m.randomizePlaceholders()
-					m.historyReset()
-					return tea.Batch(m.runShellCommand(command), m.loadPromptHistory())
 				}
 
 				if m.bangMode && value != "" {
@@ -3386,12 +3383,25 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 // runShellCommand executes a shell command server-side without triggering
 // the LLM. The result is displayed as a tool-style item in the chat.
 func (m *UI) runShellCommand(command string) tea.Cmd {
-	return func() tea.Msg {
-		sessionID := ""
-		if m.hasSession() {
-			sessionID = m.session.ID
+	var cmds []tea.Cmd
+	if !m.hasSession() {
+		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
+		if err != nil {
+			return util.ReportError(err)
 		}
-		contentWidth := min(m.layout.main.Dx()-2, 120)
+		if m.forceCompactMode {
+			m.isCompact = true
+		}
+		if newSession.ID != "" {
+			m.session = &newSession
+			cmds = append(cmds, m.loadSession(newSession.ID))
+		}
+		m.setState(uiChat, m.focus)
+	}
+
+	sessionID := m.session.ID
+	contentWidth := min(m.layout.main.Dx()-2, 120)
+	cmds = append(cmds, func() tea.Msg {
 		resp, err := m.com.Workspace.AgentRunShellCommand(context.Background(), sessionID, command, contentWidth)
 		if err != nil {
 			return util.InfoMsg{
@@ -3404,7 +3414,8 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 			Output:   resp.Output,
 			ExitCode: resp.ExitCode,
 		}
-	}
+	})
+	return tea.Batch(cmds...)
 }
 
 const cancelTimerDuration = 2 * time.Second

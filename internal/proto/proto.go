@@ -139,6 +139,7 @@ type AgentMessage struct {
 type ShellCommandRequest struct {
 	SessionID string `json:"session_id"`
 	Command   string `json:"command"`
+	TermWidth int    `json:"term_width,omitempty"`
 }
 
 // ShellCommandResponse represents the result of a direct shell command.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"slices"
@@ -100,6 +101,28 @@ type CaptureResult struct {
 	ExitCode int
 }
 
+// PersistFunc is a callback that persists a shell command result.
+// Used by RunAndPersist to decouple execution from storage.
+type PersistFunc func(command, output string, exitCode int) error
+
+// RunAndPersist executes a shell command via PTY and optionally
+// persists the result through the provided callback. This unifies
+// the run-and-save pattern used by both AppWorkspace and Backend.
+func RunAndPersist(ctx context.Context, opts RunOptions, persist PersistFunc) (CaptureResult, error) {
+	result, err := RunAndCapturePTY(ctx, opts)
+	if err != nil {
+		return CaptureResult{}, err
+	}
+
+	if persist != nil {
+		if persistErr := persist(opts.Command, result.Output, result.ExitCode); persistErr != nil {
+			slog.Error("Failed to persist shell command output", "error", persistErr, "command", opts.Command)
+		}
+	}
+
+	return result, nil
+}
+
 // RunAndCapture executes a shell command and returns its combined
 // stdout/stderr output along with the exit code. It inherits the
 // current process environment when opts.Env is nil.
@@ -133,17 +156,26 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 	}, nil
 }
 
+// ptyColorEnvVars force color output for programs running inside a
+// PTY. These are only applied in RunAndCapturePTY, not in the plain
+// Run/RunAndCapture paths where ANSI codes would be noise.
+var ptyColorEnvVars = []string{
+	"COLORTERM=truecolor",
+	"CLICOLOR_FORCE=1",
+	"FORCE_COLOR=1",
+}
+
 // RunAndCapturePTY executes a shell command through a pseudo-TTY and
 // returns its combined output along with the exit code. Programs that
 // check isatty (eza, ls --color=auto, bat, etc.) will emit ANSI color
-// sequences because they see a real terminal on stdout. The env vars
-// from nonInteractiveEnvVars are still applied. Falls back to
-// RunAndCapture if PTY allocation fails.
+// sequences because they see a real terminal on stdout. Falls back to
+// RunAndCapture if PTY allocation fails (logged as a warning).
 func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, error) {
 	if opts.Env == nil {
 		opts.Env = os.Environ()
 	}
 	env := withNonInteractiveEnv(opts.Env)
+	env = append(env, ptyColorEnvVars...)
 
 	cols := uint16(opts.TermWidth)
 	if cols == 0 {
@@ -156,6 +188,7 @@ func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, erro
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 50, Cols: cols})
 	if err != nil {
+		slog.Warn("PTY allocation failed, falling back to pipe capture", "error", err, "command", opts.Command)
 		return RunAndCapture(ctx, opts)
 	}
 	defer ptmx.Close()
@@ -225,9 +258,6 @@ func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
 // hangs, not useful behavior.
 var nonInteractiveEnvVars = []string{
 	"TERM=xterm-256color",
-	"COLORTERM=truecolor",
-	"CLICOLOR_FORCE=1",
-	"FORCE_COLOR=1",
 	"GIT_EDITOR=false",
 	"EDITOR=false",
 	"VISUAL=false",

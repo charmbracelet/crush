@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 
 	"github.com/charmbracelet/crush/internal/agent"
@@ -251,26 +250,29 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		return proto.ShellCommandResponse{}, err
 	}
 
-	result, err := shell.RunAndCapturePTY(ctx, shell.RunOptions{
-		Command: req.Command,
-		Cwd:     ws.Path,
-		Env:     append(os.Environ(), ws.Env...),
-	})
-	if err != nil {
-		return proto.ShellCommandResponse{}, err
+	var persist shell.PersistFunc
+	if req.SessionID != "" {
+		persist = func(cmd, output string, exitCode int) error {
+			_, err := ws.Messages.Create(ctx, req.SessionID, message.CreateMessageParams{
+				Role: message.User,
+				Parts: []message.ContentPart{message.ShellCommand{
+					Command:  cmd,
+					Output:   output,
+					ExitCode: exitCode,
+				}},
+			})
+			return err
+		}
 	}
 
-	if req.SessionID != "" {
-		if _, err := ws.Messages.Create(ctx, req.SessionID, message.CreateMessageParams{
-			Role: message.User,
-			Parts: []message.ContentPart{message.ShellCommand{
-				Command:  req.Command,
-				Output:   result.Output,
-				ExitCode: result.ExitCode,
-			}},
-		}); err != nil {
-			slog.Error("Failed to persist shell command output", "error", err, "session_id", req.SessionID)
-		}
+	result, err := shell.RunAndPersist(ctx, shell.RunOptions{
+		Command:   req.Command,
+		Cwd:       ws.Path,
+		Env:       append(os.Environ(), ws.Env...),
+		TermWidth: req.TermWidth,
+	}, persist)
+	if err != nil {
+		return proto.ShellCommandResponse{}, err
 	}
 
 	return proto.ShellCommandResponse{

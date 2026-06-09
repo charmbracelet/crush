@@ -269,6 +269,12 @@ func messageToProto(m message.Message) proto.Message {
 			msg.Parts = append(msg.Parts, proto.ImageURLContent{URL: v.URL, Detail: v.Detail})
 		case message.BinaryContent:
 			msg.Parts = append(msg.Parts, proto.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
+		case message.ShellCommand:
+			msg.Parts = append(msg.Parts, proto.ShellCommand{
+				Command:  v.Command,
+				Output:   v.Output,
+				ExitCode: v.ExitCode,
+			})
 		}
 	}
 

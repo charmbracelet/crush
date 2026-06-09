@@ -279,10 +279,10 @@ type Options struct {
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	// LSPUnavailableRetryDelay is the number of seconds to wait before
 	// retrying an LSP server that was marked unavailable (e.g. binary not
-	// found). 0 means no backoff — the server is retried immediately on
-	// every file access. When unset (nil), the default is very large
-	// (effectively infinite).
-	LSPUnavailableRetryDelay  *int         `json:"lsp_unavailable_retry_delay,omitempty" jsonschema:"description=Seconds to wait before retrying an unavailable LSP server. 0 disables backoff and retries immediately. When unset, defaults to 999999,default=999999,minimum=0"`
+	// found). -1 or unset means infinite backoff (never retry). 0 means
+	// no backoff — the server is retried immediately on every file access.
+	// Positive values are interpreted as seconds.
+	LSPUnavailableRetryDelay  *int         `json:"lsp_unavailable_retry_delay,omitempty" jsonschema:"description=Seconds to wait before retrying an unavailable LSP server. -1 or unset means infinite backoff (default). 0 disables backoff and retries immediately. Positive values are seconds,default=-1,minimum=-1"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
 	NotificationStyle         string       `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`

@@ -25,12 +25,12 @@ func TestUnavailableBackoff(t *testing.T) {
 	manager.markUnavailable("gopls")
 	require.True(t, manager.recentlyUnavailable("gopls"))
 
-	now = now.Add(defaultUnavailableRetryDelay + time.Second)
-	require.False(t, manager.recentlyUnavailable("gopls"))
-	_, exists := manager.unavailable.Get("gopls")
-	require.False(t, exists)
+	// With the default infinite backoff, it should still be unavailable
+	// even after a very long time.
+	now = now.Add(time.Hour * 24 * 365 * 100)
+	require.True(t, manager.recentlyUnavailable("gopls"))
 
-	manager.markUnavailable("gopls")
+	// Clearing should make it available immediately.
 	manager.clearUnavailable("gopls")
 	require.False(t, manager.recentlyUnavailable("gopls"))
 }

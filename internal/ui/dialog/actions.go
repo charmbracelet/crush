@@ -96,6 +96,9 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionSwitchToCodeMode is sent when the user confirms a plan handoff
+	// to switch the UI from plan mode to code mode.
+	ActionSwitchToCodeMode struct{}
 )
 
 // Messages for API key input dialog.

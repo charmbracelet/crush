@@ -139,6 +139,7 @@ and project-level, with project level hooks taking precedence.
   "hooks": {
     "PreToolUse": [
       {
+        "name": "no-rm-rf", // friendly name shown in the TUI
         "matcher": "bash", // regex tested against the tool name
         "command": "./hooks/my-hot-hook.sh", // the path to the hook
         "timeout": 10, // in seconds; default 30
@@ -600,6 +601,10 @@ Each entry under a `hooks.<EventName>` array:
 
 ```jsonc
 {
+  // string. Optional. Friendly display name shown in the TUI. Falls back to
+  // command when omitted.
+  "name": "no-rm-rf",
+
   // string. Optional. Regex tested against the tool name. Omit to match all.
   "matcher": "^bash$",
 

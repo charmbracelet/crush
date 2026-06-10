@@ -8,16 +8,24 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// configLockDeadline bounds how long lockConfig waits for the
+// cross-process flock before giving up. A few seconds is plenty for
+// honest contention; longer suggests something is wedged.
+const configLockDeadline = 5 * time.Second
 
 // fileSnapshot captures metadata about a config file at a point in time.
 type fileSnapshot struct {
@@ -37,6 +45,15 @@ type RuntimeOverrides struct {
 // ConfigStore is the single entry point for all config access. It owns the
 // pure-data Config, runtime state (working directory, resolver, known
 // providers), and persistence to both global and workspace config files.
+//
+// mu serialises all config file mutations (SetConfigFields,
+// RemoveConfigField, RefreshOAuthToken) to prevent both in-process
+// goroutine races and, together with the shared lock.File, cross-process
+// races on the config file.
+//
+// reloadMu serialises ReloadFromDisk calls to prevent concurrent reloads
+// from racing on store fields. autoReload uses TryLock on reloadMu to
+// skip redundant reloads when one is already in progress.
 type ConfigStore struct {
 	config             *Config
 	workingDir         string
@@ -48,8 +65,9 @@ type ConfigStore struct {
 	overrides          RuntimeOverrides
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
-	autoReloadDisabled bool                    // set during load/reload to prevent re-entrancy
-	reloadInProgress   bool                    // set during reload to avoid disk writes mid-reload
+
+	mu       sync.Mutex // serialises config file writes
+	reloadMu sync.Mutex // serialises ReloadFromDisk calls
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -95,6 +113,71 @@ func (s *ConfigStore) LoadedPaths() []string {
 	return slices.Clone(s.loadedPaths)
 }
 
+// lockConfig acquires both the in-process mutex and a cross-process flock
+// on the config file for the given scope. Callers that need to do I/O
+// between reading and writing (e.g. an HTTP token exchange) must use
+// lockConfig explicitly rather than atomicWrite.
+//
+// The returned release function drops both locks. Callers must call it
+// as soon as the file access is complete — no I/O should be performed
+// while the lock is held.
+func (s *ConfigStore) lockConfig(scope Scope) (func(), error) {
+	s.mu.Lock()
+	path, err := s.configPath(scope)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("create config directory: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), configLockDeadline)
+	defer cancel()
+	release, err := lock.File(ctx, path+".lock")
+	if err != nil {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("acquire config lock: %w", err)
+	}
+	return func() {
+		release()
+		s.mu.Unlock()
+	}, nil
+}
+
+// atomicWrite handles the lock-read-transform-write-unlock cycle for
+// config file mutations. The fn callback receives the current file
+// contents (raw bytes, or {} if the file is missing) and must return the
+// new contents. fn must be pure — no I/O, no network calls.
+func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, error)) error {
+	unlock, err := s.lockConfig(scope)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	path, err := s.configPath(scope)
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			data = []byte("{}")
+		} else {
+			return fmt.Errorf("read config file: %w", err)
+		}
+	}
+
+	newData, err := fn(data)
+	if err != nil {
+		return err
+	}
+
+	return atomicWriteFile(path, newData, 0o600)
+}
+
 // configPath returns the file path for the given scope.
 func (s *ConfigStore) configPath(scope Scope) (string, error) {
 	switch scope {
@@ -134,32 +217,32 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // config to keep in-memory state fresh. This is preferred over multiple
 // SetConfigField calls when writing several fields atomically to avoid
 // intermediate reloads with partial state.
+//
+// The write is protected by an in-process mutex and a cross-process flock
+// to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
-	path, err := s.configPath(scope)
-	if err != nil {
-		return fmt.Errorf("%v: %w", kv, err)
+	// Sort keys for deterministic output regardless of map iteration
+	// order. This also ensures consistent results when callers pass
+	// overlapping JSONPath keys (e.g. "a" and "a.b").
+	keys := make([]string, 0, len(kv))
+	for k := range kv {
+		keys = append(keys, k)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			data = []byte("{}")
-		} else {
-			return fmt.Errorf("failed to read config file: %w", err)
-		}
-	}
+	slices.Sort(keys)
 
-	newValue := string(data)
-	for key, value := range kv {
-		newValue, err = sjson.Set(newValue, key, value)
-		if err != nil {
-			return fmt.Errorf("failed to set config field %s: %w", key, err)
+	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+		v := string(data)
+		for _, key := range keys {
+			var sErr error
+			v, sErr = sjson.Set(v, key, kv[key])
+			if sErr != nil {
+				return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
+			}
 		}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory %q: %w", path, err)
-	}
-	if err := atomicWriteFile(path, []byte(newValue), 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+		return []byte(v), nil
+	})
+	if err != nil {
+		return err
 	}
 
 	// Auto-reload to keep in-memory state fresh after config edits.
@@ -176,28 +259,20 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 // RemoveConfigField removes a key from the config file for the given scope.
 // After a successful write, it automatically reloads config to keep in-memory
 // state fresh.
+//
+// The write is protected by an in-process mutex and a cross-process flock.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
-	path, err := s.configPath(scope)
+	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+		v, sErr := sjson.Delete(string(data), key)
+		if sErr != nil {
+			return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
+		}
+		return []byte(v), nil
+	})
 	if err != nil {
-		return fmt.Errorf("%s: %w", key, err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("failed to read config file: %w", err)
+		return err
 	}
 
-	newValue, err := sjson.Delete(string(data), key)
-	if err != nil {
-		return fmt.Errorf("failed to delete config field %s: %w", key, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory %q: %w", path, err)
-	}
-	if err := atomicWriteFile(path, []byte(newValue), 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	// Auto-reload to keep in-memory state fresh after config edits.
 	if err := s.autoReload(context.Background()); err != nil {
 		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
 	}
@@ -300,12 +375,14 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 }
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
-// Before making an external refresh request, it checks the config file on
-// disk to see if another Crush session has already refreshed the token. If
-// a newer, unexpired token is found, it is used instead of refreshing. If
-// the exchange fails (e.g. because another session already rotated the
-// refresh token), the disk is re-checked to recover the other session's
-// token.
+//
+// It uses two-phase locking: the pre-check (reading the config file to
+// see if another process already refreshed) happens under the config
+// lock, then the HTTP exchange runs without any lock held, and finally
+// the result is persisted via SetConfigFields (which acquires the lock
+// internally). If the exchange fails — e.g. because another process
+// already rotated the refresh token — the disk is re-checked under lock
+// to recover the other process's token.
 func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
 	providerConfig, exists := s.config.Providers.Get(providerID)
 	if !exists {
@@ -316,16 +393,22 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
 
-	// Check if another session refreshed the token recently by reading
-	// the current token from the config file on disk.
-	newToken, err := s.loadTokenFromDisk(scope, providerID)
-	if err != nil {
-		slog.Warn("Failed to read token from config file, proceeding with refresh", "provider", providerID, "error", err)
-	} else if newToken != nil && !newToken.IsExpired() && newToken.AccessToken != providerConfig.OAuthToken.AccessToken {
-		slog.Info("Using token refreshed by another session", "provider", providerID)
-		return s.applyToken(providerConfig, newToken, providerID)
+	// Phase 1: Pre-check under lock — did another process already refresh?
+	release, lockErr := s.lockConfig(scope)
+	if lockErr != nil {
+		slog.Warn("Failed to lock config for pre-check, proceeding anyway", "provider", providerID, "error", lockErr)
+	} else {
+		diskToken, err := s.loadTokenFromDisk(scope, providerID)
+		release()
+		if err != nil {
+			slog.Warn("Failed to read token from config file", "provider", providerID, "error", err)
+		} else if diskToken != nil && !diskToken.IsExpired() && diskToken.AccessToken != providerConfig.OAuthToken.AccessToken {
+			slog.Info("Using token refreshed by another session", "provider", providerID)
+			return s.applyToken(providerConfig, diskToken, providerID)
+		}
 	}
 
+	// Phase 2: HTTP exchange — no lock held.
 	var refreshedToken *oauth.Token
 	var refreshErr error
 	switch providerID {
@@ -337,15 +420,19 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
 	if refreshErr != nil {
-		// The exchange may have failed because another session already
-		// rotated the refresh token. Re-read the config file and use the
-		// other session's token if available.
-		if diskToken, diskErr := s.loadTokenFromDisk(scope, providerID); diskErr == nil &&
-			diskToken != nil &&
-			!diskToken.IsExpired() &&
-			diskToken.AccessToken != providerConfig.OAuthToken.AccessToken {
-			slog.Info("Using token refreshed by another session after exchange failure", "provider", providerID)
-			return s.applyToken(providerConfig, diskToken, providerID)
+		// Phase 3: Fallback — re-check disk under lock. The exchange may
+		// have failed because another process already rotated the refresh
+		// token.
+		if release, lockErr := s.lockConfig(scope); lockErr == nil {
+			diskToken, diskErr := s.loadTokenFromDisk(scope, providerID)
+			release()
+			if diskErr == nil &&
+				diskToken != nil &&
+				!diskToken.IsExpired() &&
+				diskToken.AccessToken != providerConfig.OAuthToken.AccessToken {
+				slog.Info("Using token refreshed by another session after exchange failure", "provider", providerID)
+				return s.applyToken(providerConfig, diskToken, providerID)
+			}
 		}
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
@@ -636,18 +723,20 @@ func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
 // config atomically. It rebuilds the staleness snapshot after successful reload.
 // On failure, the store state is rolled back to its previous state.
+// Concurrent calls are serialised via reloadMu.
 func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 	if s.workingDir == "" {
 		return fmt.Errorf("cannot reload: working directory not set")
 	}
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	return s.reloadFromDiskLocked(ctx)
+}
 
-	// Disable auto-reload during reload to prevent nested/re-entrant calls.
-	s.autoReloadDisabled = true
-	s.reloadInProgress = true
-	defer func() {
-		s.autoReloadDisabled = false
-		s.reloadInProgress = false
-	}()
+// reloadFromDiskLocked performs the actual reload. Caller must hold reloadMu.
+func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
+	// Migrate deprecated disable_notifications before reloading config.
+	migrateDisableNotifications()
 
 	configPaths := lookupConfigs(s.workingDir)
 	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
@@ -748,11 +837,22 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 // disabled during load/reload flows, or when working directory is not set
 // (e.g., during testing). Only actual reload failures return an error.
 func (s *ConfigStore) autoReload(ctx context.Context) error {
-	if s.autoReloadDisabled {
-		return nil // Expected skip: already in load/reload flow
-	}
 	if s.workingDir == "" {
 		return nil // Expected skip: working directory not set
 	}
-	return s.ReloadFromDisk(ctx)
+	// Skip if a reload is already in progress. This handles both
+	// concurrent auto-reloads after parallel writes and re-entrant
+	// calls from configureProviders during a reload.
+	//
+	// Note: if a write completes after the in-progress reload has
+	// already read the config file, that write won't be reflected in
+	// memory until the next reload. This is acceptable because writes
+	// are rare and the next user action or file-watch tick will pick
+	// up the change. Callers that need guaranteed fresh state after a
+	// write should call ReloadFromDisk explicitly.
+	if !s.reloadMu.TryLock() {
+		return nil
+	}
+	defer s.reloadMu.Unlock()
+	return s.reloadFromDiskLocked(ctx)
 }

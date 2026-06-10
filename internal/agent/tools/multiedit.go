@@ -197,7 +197,16 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return NewPermissionDeniedResponse(), nil
+		resp := NewPermissionDeniedResponse()
+		resp = fantasy.WithResponseMetadata(resp, MultiEditResponseMetadata{
+			OldContent:   "",
+			NewContent:   currentContent,
+			Additions:    additions,
+			Removals:     removals,
+			EditsApplied: editsApplied,
+			EditsFailed:  failedEdits,
+		})
+		return resp, nil
 	}
 
 	// Write the file
@@ -343,7 +352,16 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return NewPermissionDeniedResponse(), nil
+		resp := NewPermissionDeniedResponse()
+		resp = fantasy.WithResponseMetadata(resp, MultiEditResponseMetadata{
+			OldContent:   oldContent,
+			NewContent:   currentContent,
+			Additions:    additions,
+			Removals:     removals,
+			EditsApplied: editsApplied,
+			EditsFailed:  failedEdits,
+		})
+		return resp, nil
 	}
 
 	if isCrlf {

@@ -47,6 +47,7 @@ type quickStyleOpts struct {
 	error             color.Color
 	warning           color.Color
 	warningSubtle     color.Color
+	denied            color.Color
 	busy              color.Color
 	info              color.Color
 	infoMoreSubtle    color.Color
@@ -622,6 +623,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ErrorTag = base.Padding(0, 1).Background(o.destructive).Foreground(o.onPrimary)
 	s.Tool.ErrorMessage = base.Foreground(o.fgSubtle)
 
+	s.Tool.WarnTag = base.Padding(0, 1).Background(o.denied).Foreground(o.bgBase).Bold(true)
+	s.Tool.WarnMessage = base.Foreground(o.fgSubtle)
+
 	// Diff and multi-edit styles
 	s.Tool.DiffTruncation = muted.Background(o.bgLeastVisible).PaddingLeft(2)
 	s.Tool.NoteTag = base.Padding(0, 1).Background(o.info).Foreground(o.onPrimary)
@@ -763,6 +767,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.ModelInfo.Reasoning = lipgloss.NewStyle().Foreground(o.fgMostSubtle).PaddingLeft(2)
 	s.ModelInfo.TokenCount = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.ModelInfo.EstimatedUsagePrefix = s.ModelInfo.TokenPercentage
 	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(charmtone.Dolly)
 	s.ModelInfo.HypercreditText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
@@ -922,6 +927,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	attachmentIconStyle := base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1)
 	s.Attachments.Image = attachmentIconStyle.SetString(ImageIcon)
 	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
+	s.Attachments.Skill = attachmentIconStyle.SetString(SkillIcon)
 	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(o.fgMoreSubtle).Foreground(o.fgBase)
 	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
 

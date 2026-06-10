@@ -26,6 +26,8 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.land"
@@ -33,6 +35,9 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	// Migrate deprecated disable_notifications before loading config.
+	migrateDisableNotifications()
+
 	configPaths := lookupConfigs(workingDir)
 
 	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
@@ -103,10 +108,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	valueResolver := NewShellVariableResolver(env)
 	store.resolver = valueResolver
 
-	// Disable auto-reload during initial load to prevent nested calls from
-	// config-modifying operations inside configureProviders.
-	store.autoReloadDisabled = true
-	defer func() { store.autoReloadDisabled = false }()
+	// Hold reloadMu during initial load to prevent configureProviders
+	// from triggering auto-reload via RemoveConfigField.
+	store.reloadMu.Lock()
+	defer store.reloadMu.Unlock()
 
 	if err := cfg.configureProviders(store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
@@ -261,9 +266,11 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		switch {
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
 			// Claude Code subscription is not supported anymore. Remove to show onboarding.
-			if !store.reloadInProgress {
-				store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
-			}
+			// RemoveConfigField persists the deletion to disk. The in-memory
+			// state is kept consistent by the Providers.Del call below; any
+			// concurrent reload that races with this write will also see the
+			// removal because it re-reads from disk.
+			store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
 			c.Providers.Del(string(p.ID))
 			continue
 		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
@@ -297,22 +304,13 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			}
 			prepared.BaseURL = endpoint
 			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
-		case catwalk.InferenceProviderBedrock:
-			if !hasAWSCredentials(env) {
+		case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
+			if p.APIKey == "" && !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
 					c.Providers.Del(string(p.ID))
 				}
 				continue
-			}
-			prepared.ExtraParams["region"] = env.Get("AWS_REGION")
-			if prepared.ExtraParams["region"] == "" {
-				prepared.ExtraParams["region"] = env.Get("AWS_DEFAULT_REGION")
-			}
-			for _, model := range p.Models {
-				if !strings.HasPrefix(model.ID, "anthropic.") {
-					return fmt.Errorf("bedrock provider only supports anthropic models for now, found: %s", model.ID)
-				}
 			}
 		case catwalk.InferenceProvider("hyper"):
 			if apiKey := env.Get("HYPER_API_KEY"); apiKey != "" {
@@ -449,7 +447,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.applyLSPDefaults()
 
 	// Add the default context paths if they are not already present
-	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
+	c.Options.ContextPaths = append(slices.Clone(defaultContextPaths), c.Options.ContextPaths...)
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
@@ -488,6 +486,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
 		}
 	}
+
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
 }
 
@@ -546,8 +545,11 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		}
 		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
 		if defaultLargeModel == nil {
-			err = fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
-			return largeModel, smallModel, err
+			slog.Warn("Default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+			if len(providerConfig.Models) == 0 {
+				return largeModel, smallModel, fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+			}
+			defaultLargeModel = &providerConfig.Models[0]
 		}
 		largeModel = SelectedModel{
 			Provider:        string(p.ID),
@@ -558,8 +560,11 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
 		if defaultSmallModel == nil {
-			err = fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			return largeModel, smallModel, err
+			slog.Warn("Default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
+			if len(providerConfig.Models) == 0 {
+				return largeModel, smallModel, fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
+			}
+			defaultSmallModel = &providerConfig.Models[0]
 		}
 		smallModel = SelectedModel{
 			Provider:        string(p.ID),
@@ -816,8 +821,74 @@ func hasAWSCredentials(env env.Env) bool {
 	if _, err := os.Stat(filepath.Join(home.Dir(), ".aws/credentials")); err == nil && !testing.Testing() {
 		return true
 	}
+	if _, err := os.Stat(filepath.Join(home.Dir(), ".aws/login")); err == nil && !testing.Testing() {
+		return true
+	}
 
 	return false
+}
+
+// migrateDisableNotifications migrates the deprecated disable_notifications
+// field to notification_style. It checks both the user config (~/.config) and
+// data config (~/.local) files. If disable_notifications is true, it sets
+// notification_style to "disabled" in the data file. Regardless of value, it
+// removes disable_notifications from any file that contains it.
+func migrateDisableNotifications() {
+	globalConfig := GlobalConfig()
+	dataConfig := GlobalConfigData()
+
+	var wasDisabled bool
+	filesToClean := []string{}
+
+	for _, path := range []string{globalConfig, dataConfig} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if gjson.Get(string(data), "options.disable_notifications").Exists() {
+			filesToClean = append(filesToClean, path)
+			if gjson.Get(string(data), "options.disable_notifications").Bool() {
+				wasDisabled = true
+			}
+		}
+	}
+
+	if len(filesToClean) == 0 {
+		return
+	}
+
+	// If notifications were disabled, persist the equivalent notification_style.
+	if wasDisabled {
+		data, err := os.ReadFile(dataConfig)
+		if err == nil {
+			if !gjson.Get(string(data), "options.notification_style").Exists() {
+				updated, err := sjson.Set(string(data), "options.notification_style", "disabled")
+				if err == nil {
+					if err := atomicWriteFile(dataConfig, []byte(updated), 0o600); err != nil {
+						slog.Warn("Failed to migrate disable_notifications to notification_style", "error", err)
+					} else {
+						slog.Info("Migrated disable_notifications: true to notification_style: disabled")
+					}
+				}
+			}
+		}
+	}
+
+	// Remove disable_notifications from all files that contain it.
+	for _, path := range filesToClean {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		updated, err := sjson.Delete(string(data), "options.disable_notifications")
+		if err != nil {
+			slog.Warn("Failed to remove deprecated disable_notifications field", "path", path, "error", err)
+			continue
+		}
+		if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
+			slog.Warn("Failed to write migrated config", "path", path, "error", err)
+		}
+	}
 }
 
 // GlobalConfig returns the global configuration file path for the application.
@@ -975,15 +1046,37 @@ func GlobalSkillsDirs() []string {
 	return paths
 }
 
+// projectSkillSubdirs lists the conventional subdirectories where
+// project-level skills are discovered. Shared across working-dir and
+// git-root lookups to prevent drift when a new convention is added.
+var projectSkillSubdirs = []string{
+	".agents/skills",
+	".crush/skills",
+	".claude/skills",
+	".cursor/skills",
+}
+
 // ProjectSkillsDir returns the default project directories for which Crush
-// will look for skills.
+// will look for skills. In addition to the working directory, it also
+// checks the git working tree root so that monorepo-level skills are
+// discovered when the user is inside a subdirectory.
+// Working-directory paths come first so local skills take precedence
+// over monorepo-level ones.
 func ProjectSkillsDir(workingDir string) []string {
-	return []string{
-		filepath.Join(workingDir, ".agents/skills"),
-		filepath.Join(workingDir, ".crush/skills"),
-		filepath.Join(workingDir, ".claude/skills"),
-		filepath.Join(workingDir, ".cursor/skills"),
+	dirs := make([]string, 0, len(projectSkillSubdirs)*2)
+	for _, sub := range projectSkillSubdirs {
+		dirs = append(dirs, filepath.Join(workingDir, sub))
 	}
+
+	// When the working directory is inside a git repository, also look at
+	// the repository root so monorepo-level .agents/skills are found.
+	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
+		for _, sub := range projectSkillSubdirs {
+			dirs = append(dirs, filepath.Join(root, sub))
+		}
+	}
+
+	return dirs
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

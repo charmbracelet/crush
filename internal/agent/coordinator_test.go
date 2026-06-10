@@ -25,6 +25,10 @@ func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fan
 	return m.runFunc(ctx, call)
 }
 
+func (m *mockSessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
+	return &AcceptedRun{sessionID: sessionID}
+}
+
 func (m *mockSessionAgent) Model() Model                        { return m.model }
 func (m *mockSessionAgent) SetModels(large, small Model)        {}
 func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)  {}
@@ -399,7 +403,11 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			model := Model{
-				CatwalkCfg: catwalk.Model{ID: "claude-opus-4-7", CanReason: true},
+				CatwalkCfg: catwalk.Model{
+					ID:              "claude-opus-4-7",
+					CanReason:       true,
+					ReasoningLevels: []string{"max"},
+				},
 				ModelCfg: config.SelectedModel{
 					Provider:        "test",
 					ReasoningEffort: "max",

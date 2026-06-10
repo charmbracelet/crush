@@ -298,7 +298,11 @@ func newVeniceLiveProviderClient(seed catwalk.Provider, cfg *Config, resolver Va
 		apiKey = strings.TrimSpace(resolved)
 	}
 	if apiKey == "" {
-		apiKey = strings.TrimSpace(os.Getenv("VENICE_API_KEY"))
+		resolved, err := resolver.ResolveValue("$VENICE_API_KEY")
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to resolve Venice API key from environment: %w", err)
+		}
+		apiKey = strings.TrimSpace(resolved)
 	}
 
 	return realVeniceModelsClient{baseURL: baseURL, apiKey: apiKey}, apiKey != "", nil

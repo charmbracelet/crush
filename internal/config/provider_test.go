@@ -11,6 +11,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/stretchr/testify/require"
 )
 
@@ -345,6 +346,26 @@ func TestProviders_Integration_LiveOverlaySkipsWithoutCredentials(t *testing.T) 
 	cfg := &Config{Options: &Options{}, Providers: csync.NewMap[string, ProviderConfig]()}
 	result := overlayLiveProviderModels(t.Context(), cfg, []catwalk.Provider{seed}, true)
 	require.Equal(t, []catwalk.Provider{seed}, result)
+}
+
+func TestNewVeniceLiveProviderClient_EnvFallbackUsesResolver(t *testing.T) {
+	t.Parallel()
+
+	seed := catwalk.Provider{
+		ID:          catwalk.InferenceProviderVenice,
+		APIEndpoint: "https://api.venice.ai/api/v1",
+	}
+	cfg := &Config{Options: &Options{}, Providers: csync.NewMap[string, ProviderConfig]()}
+	resolver := NewShellVariableResolver(env.NewFromMap(map[string]string{
+		"VENICE_API_KEY": " env-venice-key ",
+	}))
+
+	client, credentialed, err := newVeniceLiveProviderClient(seed, cfg, resolver, "")
+	require.NoError(t, err)
+	require.True(t, credentialed)
+	veniceClient, ok := client.(realVeniceModelsClient)
+	require.True(t, ok)
+	require.Equal(t, "env-venice-key", veniceClient.apiKey)
 }
 
 func TestUpdateVenice_LiveSourceStoresCache(t *testing.T) {

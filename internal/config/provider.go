@@ -379,7 +379,7 @@ func updateLiveProvider(name, cacheName string, providerID catwalk.InferenceProv
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
-		provider, err = client.Get(ctx, "")
+		provider, err = client.Get(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to fetch provider from %s: %w", name, err)
 		}

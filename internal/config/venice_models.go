@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	xetag "github.com/charmbracelet/x/etag"
 )
 
 var _ liveProviderClient = realVeniceModelsClient{}
@@ -20,14 +19,13 @@ type realVeniceModelsClient struct {
 	apiKey  string
 }
 
-func (r realVeniceModelsClient) Get(ctx context.Context, etag string) (catwalk.Provider, error) {
+func (r realVeniceModelsClient) Get(ctx context.Context) (catwalk.Provider, error) {
 	var result catwalk.Provider
 	baseURL := strings.TrimRight(r.baseURL, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/models", nil)
 	if err != nil {
 		return result, fmt.Errorf("could not create request: %w", err)
 	}
-	xetag.Request(req, etag)
 	if apiKey := strings.TrimSpace(r.apiKey); apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
@@ -39,9 +37,6 @@ func (r realVeniceModelsClient) Get(ctx context.Context, etag string) (catwalk.P
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	if resp.StatusCode == http.StatusNotModified {
-		return result, catwalk.ErrNotModified
-	}
 	if resp.StatusCode != http.StatusOK {
 		return result, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}

@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,7 +19,6 @@ func TestRealCopilotModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/models", r.URL.Path)
 		require.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
-		require.Equal(t, `"cached-etag"`, r.Header.Get("If-None-Match"))
 		require.Equal(t, "application/json", r.Header.Get("Accept"))
 		for key, value := range copilot.Headers() {
 			require.Equal(t, value, r.Header.Get(key))
@@ -51,7 +49,7 @@ func TestRealCopilotModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 	defer server.Close()
 
 	client := &realCopilotModelsClient{baseURL: server.URL + "/", apiKey: " test-token "}
-	provider, err := client.Get(t.Context(), "cached-etag")
+	provider, err := client.Get(t.Context())
 
 	require.NoError(t, err)
 	require.Equal(t, catwalk.InferenceProviderCopilot, provider.ID)
@@ -112,27 +110,11 @@ func TestRealCopilotModelsClientGetRefreshesExpiredOAuthToken(t *testing.T) {
 		},
 	}
 
-	provider, err := client.Get(t.Context(), "")
+	provider, err := client.Get(t.Context())
 
 	require.NoError(t, err)
 	require.Equal(t, []catwalk.Model{{ID: "gpt-5.1", Name: "GPT 5.1", ContextWindow: 128000, DefaultMaxTokens: 16000}}, provider.Models)
 	require.Equal(t, "refreshed-token", client.apiKey)
-}
-
-func TestRealCopilotModelsClientGetNotModified(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, `"cached-etag"`, r.Header.Get("If-None-Match"))
-		w.WriteHeader(http.StatusNotModified)
-	}))
-	defer server.Close()
-
-	client := &realCopilotModelsClient{baseURL: server.URL, apiKey: "test-token"}
-	provider, err := client.Get(t.Context(), "cached-etag")
-
-	require.True(t, errors.Is(err, catwalk.ErrNotModified))
-	require.Empty(t, provider.Models)
 }
 
 func TestCopilotModelsToCatwalkModelsFiltersAndDeduplicates(t *testing.T) {

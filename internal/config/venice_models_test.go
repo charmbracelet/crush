@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +15,6 @@ func TestRealVeniceModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/models", r.URL.Path)
 		require.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
-		require.Equal(t, `"cached-etag"`, r.Header.Get("If-None-Match"))
 
 		w.Header().Set("Content-Type", "application/json")
 		_, err := w.Write([]byte(`{
@@ -69,7 +67,7 @@ func TestRealVeniceModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 	defer server.Close()
 
 	client := realVeniceModelsClient{baseURL: server.URL + "/", apiKey: " test-key "}
-	provider, err := client.Get(t.Context(), "cached-etag")
+	provider, err := client.Get(t.Context())
 
 	require.NoError(t, err)
 	require.Equal(t, catwalk.InferenceProviderVenice, provider.ID)
@@ -96,22 +94,6 @@ func TestRealVeniceModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 			DefaultMaxTokens: 2048,
 		},
 	}, provider.Models)
-}
-
-func TestRealVeniceModelsClientGetNotModified(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, `"cached-etag"`, r.Header.Get("If-None-Match"))
-		w.WriteHeader(http.StatusNotModified)
-	}))
-	defer server.Close()
-
-	client := realVeniceModelsClient{baseURL: server.URL}
-	provider, err := client.Get(t.Context(), "cached-etag")
-
-	require.True(t, errors.Is(err, catwalk.ErrNotModified))
-	require.Empty(t, provider.Models)
 }
 
 func TestVeniceModelsToCatwalkModelsFiltersNonTextAndOfflineModels(t *testing.T) {

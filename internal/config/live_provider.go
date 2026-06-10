@@ -16,7 +16,7 @@ import (
 const liveModelsTTL = time.Minute
 
 type liveProviderClient interface {
-	Get(context.Context, string) (catwalk.Provider, error)
+	Get(context.Context) (catwalk.Provider, error)
 }
 
 var _ syncer[catwalk.Provider] = (*liveProviderSync)(nil)
@@ -60,7 +60,7 @@ func (s *liveProviderSync) Get(ctx context.Context) (catwalk.Provider, error) {
 			return
 		}
 
-		cached, etag, cachedErr := s.cache.Get()
+		cached, _, cachedErr := s.cache.Get()
 		cachedAvailable := cachedErr == nil && len(cached.Models) > 0
 		fallback := s.seed
 		if cachedAvailable {
@@ -76,14 +76,9 @@ func (s *liveProviderSync) Get(ctx context.Context) (catwalk.Provider, error) {
 		}
 
 		slog.Info("Fetching live provider models", "provider", s.seed.ID)
-		result, err := s.client.Get(ctx, etag)
+		result, err := s.client.Get(ctx)
 		if errors.Is(err, context.DeadlineExceeded) {
 			slog.Warn("Live provider models not updated in time", "provider", s.seed.ID)
-			s.result = fallback
-			return
-		}
-		if errors.Is(err, catwalk.ErrNotModified) {
-			slog.Info("Live provider models not modified", "provider", s.seed.ID)
 			s.result = fallback
 			return
 		}

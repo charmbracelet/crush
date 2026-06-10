@@ -12,7 +12,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	xetag "github.com/charmbracelet/x/etag"
 )
 
 var _ liveProviderClient = (*realCopilotModelsClient)(nil)
@@ -26,7 +25,7 @@ type realCopilotModelsClient struct {
 	refreshToken copilotTokenRefresher
 }
 
-func (r *realCopilotModelsClient) Get(ctx context.Context, etag string) (catwalk.Provider, error) {
+func (r *realCopilotModelsClient) Get(ctx context.Context) (catwalk.Provider, error) {
 	var result catwalk.Provider
 	baseURL := strings.TrimRight(r.baseURL, "/")
 	accessToken, err := r.accessToken(ctx)
@@ -38,7 +37,6 @@ func (r *realCopilotModelsClient) Get(ctx context.Context, etag string) (catwalk
 	if err != nil {
 		return result, fmt.Errorf("could not create request: %w", err)
 	}
-	xetag.Request(req, etag)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	for key, value := range copilot.Headers() {
@@ -52,9 +50,6 @@ func (r *realCopilotModelsClient) Get(ctx context.Context, etag string) (catwalk
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	if resp.StatusCode == http.StatusNotModified {
-		return result, catwalk.ErrNotModified
-	}
 	if resp.StatusCode != http.StatusOK {
 		return result, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}

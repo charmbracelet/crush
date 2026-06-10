@@ -16,12 +16,10 @@ type mockLiveProviderClient struct {
 	provider  catwalk.Provider
 	err       error
 	callCount int
-	etags     []string
 }
 
-func (m *mockLiveProviderClient) Get(ctx context.Context, etag string) (catwalk.Provider, error) {
+func (m *mockLiveProviderClient) Get(ctx context.Context) (catwalk.Provider, error) {
 	m.callCount++
-	m.etags = append(m.etags, etag)
 	return m.provider, m.err
 }
 
@@ -112,7 +110,6 @@ func TestLiveProviderSync_GetStaleCacheFetchesMergesAndStores(t *testing.T) {
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, client.callCount)
-	require.NotEmpty(t, client.etags[0])
 	require.Equal(t, seed.ID, provider.ID)
 	require.Equal(t, seed.Name, provider.Name)
 	require.Equal(t, seed.APIEndpoint, provider.APIEndpoint)
@@ -152,7 +149,7 @@ func TestLiveProviderSync_GetStoreFailureStillReturnsMerged(t *testing.T) {
 	require.Equal(t, []catwalk.Model{{ID: "live-model", Name: "Live Model"}}, provider.Models)
 }
 
-func TestLiveProviderSync_GetNotModifiedUsesCached(t *testing.T) {
+func TestLiveProviderSync_GetFetchErrorUsesCached(t *testing.T) {
 	t.Parallel()
 
 	path := t.TempDir() + "/provider.json"
@@ -163,7 +160,7 @@ func TestLiveProviderSync_GetNotModifiedUsesCached(t *testing.T) {
 	staleTime := time.Now().Add(-2 * liveModelsTTL)
 	require.NoError(t, os.Chtimes(path, staleTime, staleTime))
 
-	client := &mockLiveProviderClient{err: catwalk.ErrNotModified}
+	client := &mockLiveProviderClient{err: errors.New("network error")}
 	syncer := &liveProviderSync{}
 	syncer.Init(client, path, true, testLiveSeedProvider(), true)
 

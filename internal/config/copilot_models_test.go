@@ -38,7 +38,10 @@ func TestRealCopilotModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 							"max_context_window_tokens": 264000,
 							"max_output_tokens": 64000
 						},
-						"supports": { "vision": true }
+						"supports": {
+							"vision": true,
+							"reasoning_effort": ["low", "medium", "high"]
+						}
 					}
 				}
 			]
@@ -60,6 +63,8 @@ func TestRealCopilotModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 			Name:             "Claude Sonnet 4.6",
 			ContextWindow:    264000,
 			DefaultMaxTokens: 64000,
+			CanReason:        true,
+			ReasoningLevels:  []string{"low", "medium", "high"},
 			SupportsImages:   true,
 		},
 	}, provider.Models)
@@ -139,8 +144,12 @@ func TestCopilotModelsToCatwalkModelsFiltersAndDeduplicates(t *testing.T) {
 			Name:    "GPT 5.1",
 			Version: "gpt-5.1",
 			Capabilities: copilotModelCapabilities{
-				Limits:   copilotModelLimits{MaxContextWindowTokens: 128000, MaxOutputTokens: 16000},
-				Supports: copilotModelSupports{Vision: true},
+				Limits: copilotModelLimits{MaxContextWindowTokens: 128000, MaxOutputTokens: 16000},
+				Supports: copilotModelSupports{
+					Vision:           true,
+					ReasoningEffort:  []string{"low", "medium", "high"},
+					AdaptiveThinking: true,
+				},
 			},
 		},
 		{
@@ -177,6 +186,8 @@ func TestCopilotModelsToCatwalkModelsFiltersAndDeduplicates(t *testing.T) {
 			Name:             "GPT 5.1",
 			ContextWindow:    128000,
 			DefaultMaxTokens: 16000,
+			CanReason:        true,
+			ReasoningLevels:  []string{"low", "medium", "high"},
 			SupportsImages:   true,
 		},
 	}, models)

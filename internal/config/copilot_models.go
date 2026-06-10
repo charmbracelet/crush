@@ -127,7 +127,9 @@ type copilotModelLimits struct {
 }
 
 type copilotModelSupports struct {
-	Vision bool `json:"vision"`
+	Vision           bool     `json:"vision"`
+	ReasoningEffort  []string `json:"reasoning_effort"`
+	AdaptiveThinking bool     `json:"adaptive_thinking"`
 }
 
 var copilotVersionedModelRegexp = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
@@ -147,11 +149,14 @@ func copilotModelsToCatwalkModels(response copilotModelsResponse) []catwalk.Mode
 			continue
 		}
 		seen[model.ID] = true
+		reasoningLevels := model.Capabilities.Supports.ReasoningEffort
 		models = append(models, catwalk.Model{
 			ID:               model.ID,
 			Name:             model.Name,
 			ContextWindow:    model.Capabilities.Limits.MaxContextWindowTokens,
 			DefaultMaxTokens: model.Capabilities.Limits.MaxOutputTokens,
+			CanReason:        model.Capabilities.Supports.AdaptiveThinking || len(reasoningLevels) > 0,
+			ReasoningLevels:  reasoningLevels,
 			SupportsImages:   model.Capabilities.Supports.Vision,
 		})
 	}

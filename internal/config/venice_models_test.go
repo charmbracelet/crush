@@ -43,6 +43,16 @@ func TestRealVeniceModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 					}
 				},
 				{
+					"id": "venice-fallback",
+					"type": "text",
+					"context_length": 64000,
+					"model_spec": {
+						"name": "Venice Fallback",
+						"maxCompletionTokens": 2048,
+						"offline": false
+					}
+				},
+				{
 					"id": "venice-image",
 					"type": "image",
 					"model_spec": { "name": "Image Model" }
@@ -78,6 +88,12 @@ func TestRealVeniceModelsClientGetMapsModelsAndSendsHeaders(t *testing.T) {
 			ReasoningLevels:        []string{"low", "medium", "high"},
 			DefaultReasoningEffort: "medium",
 			SupportsImages:         true,
+		},
+		{
+			ID:               "venice-fallback",
+			Name:             "Venice Fallback",
+			ContextWindow:    64000,
+			DefaultMaxTokens: 2048,
 		},
 	}, provider.Models)
 }

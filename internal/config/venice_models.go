@@ -65,9 +65,10 @@ type veniceModelsResponse struct {
 }
 
 type veniceModel struct {
-	ID        string          `json:"id"`
-	ModelSpec veniceModelSpec `json:"model_spec"`
-	Type      string          `json:"type"`
+	ID            string          `json:"id"`
+	ContextLength int64           `json:"context_length"`
+	ModelSpec     veniceModelSpec `json:"model_spec"`
+	Type          string          `json:"type"`
 }
 
 type veniceModelSpec struct {
@@ -134,13 +135,18 @@ func veniceModelsToCatwalkModels(response veniceModelsResponse) []catwalk.Model 
 			continue
 		}
 
+		contextWindow := model.ModelSpec.AvailableContextTokens
+		if contextWindow == 0 {
+			contextWindow = model.ContextLength
+		}
+
 		models = append(models, catwalk.Model{
 			ID:                     model.ID,
 			Name:                   model.ModelSpec.Name,
 			CostPer1MIn:            float64(model.ModelSpec.Pricing.Input.USD),
 			CostPer1MOut:           float64(model.ModelSpec.Pricing.Output.USD),
 			CostPer1MInCached:      float64(model.ModelSpec.Pricing.CacheInput.USD),
-			ContextWindow:          model.ModelSpec.AvailableContextTokens,
+			ContextWindow:          contextWindow,
 			DefaultMaxTokens:       model.ModelSpec.MaxCompletionTokens,
 			CanReason:              model.ModelSpec.Capabilities.SupportsReasoning,
 			ReasoningLevels:        model.ModelSpec.Capabilities.ReasoningEffortOptions,

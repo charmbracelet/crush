@@ -19,7 +19,9 @@ import (
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/x/etag"
 )
 
@@ -32,6 +34,14 @@ var (
 	providerList []catwalk.Provider
 	providerErr  error
 )
+
+var errMissingLiveProviderCredentials = errors.New("missing live provider credentials")
+
+// IsMissingLiveProviderCredentials reports whether err means a live provider
+// cannot be updated because no credentials are configured.
+func IsMissingLiveProviderCredentials(err error) bool {
+	return errors.Is(err, errMissingLiveProviderCredentials)
+}
 
 // file to cache provider data
 func cachePathFor(name string) string {
@@ -85,7 +95,7 @@ func UpdateProviders(pathOrURL string) error {
 		return fmt.Errorf("failed to save providers to cache: %w", err)
 	}
 
-	slog.Info("Providers updated successfully", "count", len(providers), "from", pathOrURL, "to", cachePathFor)
+	slog.Info("Providers updated successfully", "count", len(providers), "from", pathOrURL, "to", cachePathFor("providers"))
 	return nil
 }
 
@@ -122,9 +132,23 @@ func UpdateHyper(pathOrURL string) error {
 	return nil
 }
 
+// UpdateVenice updates the cached Venice provider from a live source, embedded
+// seed, or local provider file.
+func UpdateVenice(pathOrURL string, cfg *Config) error {
+	return updateLiveProvider("Venice", "venice", catwalk.InferenceProviderVenice, pathOrURL, cfg, newVeniceLiveProviderClient)
+}
+
+// UpdateCopilot updates the cached Copilot provider from a live source,
+// embedded seed, or local provider file.
+func UpdateCopilot(pathOrURL string, cfg *Config) error {
+	return updateLiveProvider("Copilot", "copilot", catwalk.InferenceProviderCopilot, pathOrURL, cfg, newCopilotLiveProviderClient)
+}
+
 var (
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer   = &hyperSync{}
+	veniceSyncer  = &liveProviderSync{}
+	copilotSyncer = &liveProviderSync{}
 )
 
 // Providers returns the list of providers, taking into account cached results
@@ -141,8 +165,12 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		var wg sync.WaitGroup
 		var errs []error
 		providers := csync.NewSlice[catwalk.Provider]()
-		autoupdate := !cfg.Options.DisableProviderAutoUpdate
-		customProvidersOnly := cfg.Options.DisableDefaultProviders
+		options := &Options{}
+		if cfg != nil && cfg.Options != nil {
+			options = cfg.Options
+		}
+		autoupdate := !options.DisableProviderAutoUpdate
+		customProvidersOnly := options.DisableDefaultProviders
 
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
@@ -186,14 +214,212 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 
 		wg.Wait()
 
+		items := slices.Collect(providers.Seq())
+		if !customProvidersOnly {
+			var liveErrs []error
+			items, liveErrs = overlayLiveProviderModels(ctx, cfg, items, autoupdate)
+			errs = append(errs, liveErrs...)
+		}
+
 		if hyperFound {
-			providerList = append([]catwalk.Provider{hyperProvider}, slices.Collect(providers.Seq())...)
+			providerList = append([]catwalk.Provider{hyperProvider}, items...)
 		} else {
-			providerList = slices.Collect(providers.Seq())
+			providerList = items
 		}
 		providerErr = errors.Join(errs...)
 	})
 	return providerList, providerErr
+}
+
+func overlayLiveProviderModels(ctx context.Context, cfg *Config, providers []catwalk.Provider, autoupdate bool) ([]catwalk.Provider, []error) {
+	if cfg == nil || len(providers) == 0 {
+		return providers, nil
+	}
+
+	environment := env.New()
+	resolver := NewShellVariableResolver(environment)
+	errs := make([]error, 0, 2)
+
+	syncProvider := func(providerID catwalk.InferenceProvider, cacheName string, syncer *liveProviderSync, newClient liveProviderClientFunc) {
+		index := slices.IndexFunc(providers, func(provider catwalk.Provider) bool {
+			return provider.ID == providerID
+		})
+		if index < 0 {
+			return
+		}
+
+		seed := providers[index]
+		client, credentialed, err := newClient(seed, cfg, resolver, "")
+		if err != nil {
+			slog.Warn("Skipping live provider sync", "provider", providerID, "error", err)
+			return
+		}
+
+		syncer.Init(client, cachePathFor(cacheName), autoupdate, seed, credentialed)
+		provider, err := syncer.Get(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("Crush was unable to cache updated models from %s: %w", seed.Name, err))
+			return
+		}
+		providers[index] = provider
+	}
+
+	syncProvider(catwalk.InferenceProviderVenice, "venice", veniceSyncer, newVeniceLiveProviderClient)
+	syncProvider(catwalk.InferenceProviderCopilot, "copilot", copilotSyncer, newCopilotLiveProviderClient)
+
+	return providers, errs
+}
+
+type liveProviderClientFunc func(catwalk.Provider, *Config, VariableResolver, string) (liveProviderClient, bool, error)
+
+func newVeniceLiveProviderClient(seed catwalk.Provider, cfg *Config, resolver VariableResolver, baseURLOverride string) (liveProviderClient, bool, error) {
+	var providerConfig ProviderConfig
+	configExists := cfg != nil && cfg.Providers != nil
+	if configExists {
+		providerConfig, configExists = cfg.Providers.Get(string(catwalk.InferenceProviderVenice))
+	}
+	if configExists && providerConfig.Disable {
+		return realVeniceModelsClient{baseURL: seed.APIEndpoint}, false, nil
+	}
+
+	baseURL := cmp.Or(baseURLOverride, seed.APIEndpoint)
+	if configExists && providerConfig.BaseURL != "" && baseURLOverride == "" {
+		resolved, err := resolver.ResolveValue(providerConfig.BaseURL)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to resolve Venice base URL: %w", err)
+		}
+		baseURL = resolved
+	}
+
+	apiKey := ""
+	if configExists && providerConfig.APIKey != "" {
+		resolved, err := resolver.ResolveValue(providerConfig.APIKey)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to resolve Venice API key: %w", err)
+		}
+		apiKey = strings.TrimSpace(resolved)
+	}
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("VENICE_API_KEY"))
+	}
+
+	return realVeniceModelsClient{baseURL: baseURL, apiKey: apiKey}, apiKey != "", nil
+}
+
+func newCopilotLiveProviderClient(seed catwalk.Provider, cfg *Config, resolver VariableResolver, baseURLOverride string) (liveProviderClient, bool, error) {
+	var providerConfig ProviderConfig
+	configExists := cfg != nil && cfg.Providers != nil
+	if configExists {
+		providerConfig, configExists = cfg.Providers.Get(string(catwalk.InferenceProviderCopilot))
+	}
+	if configExists && providerConfig.Disable {
+		return &realCopilotModelsClient{baseURL: seed.APIEndpoint}, false, nil
+	}
+
+	baseURL := cmp.Or(baseURLOverride, seed.APIEndpoint)
+	if configExists && providerConfig.BaseURL != "" && baseURLOverride == "" {
+		resolved, err := resolver.ResolveValue(providerConfig.BaseURL)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to resolve Copilot base URL: %w", err)
+		}
+		baseURL = resolved
+	}
+
+	apiKey := ""
+	if configExists && providerConfig.APIKey != "" {
+		resolved, err := resolver.ResolveValue(providerConfig.APIKey)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to resolve Copilot API key: %w", err)
+		}
+		apiKey = strings.TrimSpace(resolved)
+	}
+	oauthToken := providerConfig.OAuthToken
+	credentialed := apiKey != "" || usableOAuthToken(oauthToken)
+
+	return &realCopilotModelsClient{baseURL: baseURL, apiKey: apiKey, oauthToken: oauthToken}, credentialed, nil
+}
+
+func usableOAuthToken(token *oauth.Token) bool {
+	if token == nil {
+		return false
+	}
+	return strings.TrimSpace(token.AccessToken) != "" || strings.TrimSpace(token.RefreshToken) != ""
+}
+
+func updateLiveProvider(name, cacheName string, providerID catwalk.InferenceProvider, pathOrURL string, cfg *Config, newClient liveProviderClientFunc) error {
+	seed, err := liveProviderSeed(providerID)
+	if err != nil {
+		return err
+	}
+
+	var provider catwalk.Provider
+	switch {
+	case pathOrURL == "embedded":
+		provider = seed
+	case pathOrURL != "" && !strings.HasPrefix(pathOrURL, "http://") && !strings.HasPrefix(pathOrURL, "https://"):
+		content, err := os.ReadFile(pathOrURL)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+		if err := json.Unmarshal(content, &provider); err != nil {
+			return fmt.Errorf("failed to unmarshal provider data: %w", err)
+		}
+	default:
+		if cfg == nil {
+			return fmt.Errorf("failed to fetch provider from %s: %w", name, errMissingLiveProviderCredentials)
+		}
+		environment := env.New()
+		resolver := NewShellVariableResolver(environment)
+		client, credentialed, err := newClient(seed, cfg, resolver, pathOrURL)
+		if err != nil {
+			return fmt.Errorf("failed to prepare %s provider update: %w", name, err)
+		}
+		if !credentialed {
+			return fmt.Errorf("failed to fetch provider from %s: %w", name, errMissingLiveProviderCredentials)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+
+		provider, err = client.Get(ctx, "")
+		if err != nil {
+			return fmt.Errorf("failed to fetch provider from %s: %w", name, err)
+		}
+		if len(provider.Models) == 0 {
+			return fmt.Errorf("failed to fetch provider from %s: no models returned", name)
+		}
+		provider = mergeLiveProvider(seed, provider)
+	}
+
+	if err := newCache[catwalk.Provider](cachePathFor(cacheName)).Store(provider); err != nil {
+		return fmt.Errorf("failed to save %s provider to cache: %w", name, err)
+	}
+
+	slog.Info(name+" provider updated successfully", "from", cmp.Or(pathOrURL, "live"), "to", cachePathFor(cacheName))
+	return nil
+}
+
+func liveProviderSeed(providerID catwalk.InferenceProvider) (catwalk.Provider, error) {
+	providers, _, err := newCache[[]catwalk.Provider](cachePathFor("providers")).Get()
+	if err != nil || len(providers) == 0 {
+		providers = embedded.GetAll()
+	}
+	if provider, ok := findProvider(providers, providerID); ok {
+		return provider, nil
+	}
+	if provider, ok := findProvider(embedded.GetAll(), providerID); ok {
+		return provider, nil
+	}
+	return catwalk.Provider{}, fmt.Errorf("provider %s not found", providerID)
+}
+
+func findProvider(providers []catwalk.Provider, providerID catwalk.InferenceProvider) (catwalk.Provider, bool) {
+	for _, provider := range providers {
+		if provider.ID == providerID {
+			return provider, true
+		}
+	}
+	return catwalk.Provider{}, false
 }
 
 type cache[T any] struct {

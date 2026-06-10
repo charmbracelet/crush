@@ -2,12 +2,15 @@ package config
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,6 +20,8 @@ func resetProviderState() {
 	providerErr = nil
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer = &hyperSync{}
+	veniceSyncer = &liveProviderSync{}
+	copilotSyncer = &liveProviderSync{}
 }
 
 func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {
@@ -215,6 +220,229 @@ func TestProviders_Integration_BothFail(t *testing.T) {
 	hyperResult, err := testHyperSyncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, "Charm Hyper", hyperResult.Name) // Falls back to embedded when no models.
+}
+
+func TestProviders_Integration_LiveOverlayFetchesWithCredentials(t *testing.T) {
+	resetProviderState()
+	defer resetProviderState()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/models", r.URL.Path)
+
+		switch r.Header.Get("Authorization") {
+		case "Bearer venice-token":
+			_, _ = w.Write([]byte(`{
+				"data": [
+					{
+						"id": "venice-live",
+						"type": "text",
+						"model_spec": {
+							"name": "Venice Live",
+							"availableContextTokens": 4096,
+							"maxCompletionTokens": 1024,
+							"pricing": {"input": {"usd": "0.1"}, "output": {"usd": "0.2"}},
+							"capabilities": {"supportsVision": true}
+						}
+						}
+				]
+			}`))
+		case "Bearer copilot-token":
+			_, _ = w.Write([]byte(`{
+				"data": [
+					{
+						"id": "copilot-live",
+						"name": "Copilot Live",
+						"capabilities": {
+							"limits": {"max_context_window_tokens": 8192, "max_output_tokens": 2048},
+							"supports": {"vision": true}
+						}
+					}
+				]
+			}`))
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	defer server.Close()
+
+	providers := []catwalk.Provider{
+		{
+			Name:                "Venice",
+			ID:                  catwalk.InferenceProviderVenice,
+			APIEndpoint:         server.URL,
+			Type:                catwalk.TypeOpenAICompat,
+			DefaultLargeModelID: "venice-live",
+			DefaultSmallModelID: "venice-live",
+			Models:              []catwalk.Model{{ID: "venice-seed", Name: "Venice Seed"}},
+		},
+		{
+			Name:                "Copilot",
+			ID:                  catwalk.InferenceProviderCopilot,
+			APIEndpoint:         server.URL,
+			Type:                catwalk.TypeOpenAICompat,
+			DefaultLargeModelID: "copilot-live",
+			DefaultSmallModelID: "copilot-live",
+			Models:              []catwalk.Model{{ID: "copilot-seed", Name: "Copilot Seed"}},
+		},
+	}
+	cfg := &Config{
+		Options: &Options{},
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			string(catwalk.InferenceProviderVenice):  {APIKey: "venice-token"},
+			string(catwalk.InferenceProviderCopilot): {APIKey: "copilot-token"},
+		}),
+	}
+
+	result, errs := overlayLiveProviderModels(t.Context(), cfg, providers, true)
+	require.Empty(t, errs)
+
+	venice, ok := findProvider(result, catwalk.InferenceProviderVenice)
+	require.True(t, ok)
+	require.Equal(t, "Venice", venice.Name)
+	require.Equal(t, "venice-live", venice.DefaultLargeModelID)
+	require.Equal(t, []catwalk.Model{{
+		ID:               "venice-live",
+		Name:             "Venice Live",
+		CostPer1MIn:      0.1,
+		CostPer1MOut:     0.2,
+		ContextWindow:    4096,
+		DefaultMaxTokens: 1024,
+		SupportsImages:   true,
+	}}, venice.Models)
+
+	copilot, ok := findProvider(result, catwalk.InferenceProviderCopilot)
+	require.True(t, ok)
+	require.Equal(t, "Copilot", copilot.Name)
+	require.Equal(t, "copilot-live", copilot.DefaultSmallModelID)
+	require.Equal(t, []catwalk.Model{{
+		ID:               "copilot-live",
+		Name:             "Copilot Live",
+		ContextWindow:    8192,
+		DefaultMaxTokens: 2048,
+		SupportsImages:   true,
+	}}, copilot.Models)
+}
+
+func TestProviders_Integration_LiveOverlaySkipsWithoutCredentials(t *testing.T) {
+	resetProviderState()
+	defer resetProviderState()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	seed := catwalk.Provider{
+		Name:        "Venice",
+		ID:          catwalk.InferenceProviderVenice,
+		APIEndpoint: "http://127.0.0.1:1",
+		Models:      []catwalk.Model{{ID: "seed-model", Name: "Seed Model"}},
+	}
+	cached := seed
+	cached.Models = []catwalk.Model{{ID: "cached-model", Name: "Cached Model"}}
+	require.NoError(t, newCache[catwalk.Provider](cachePathFor("venice")).Store(cached))
+
+	cfg := &Config{Options: &Options{}, Providers: csync.NewMap[string, ProviderConfig]()}
+	result, errs := overlayLiveProviderModels(t.Context(), cfg, []catwalk.Provider{seed}, true)
+	require.Empty(t, errs)
+	require.Equal(t, []catwalk.Provider{seed}, result)
+}
+
+func TestUpdateVenice_LiveSourceStoresCache(t *testing.T) {
+	resetProviderState()
+	defer resetProviderState()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/models", r.URL.Path)
+		require.Equal(t, "Bearer venice-token", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{
+			"data": [
+				{
+					"id": "venice-live",
+					"type": "text",
+					"model_spec": {
+						"name": "Venice Live",
+						"availableContextTokens": 4096,
+						"maxCompletionTokens": 1024,
+						"pricing": {"input": {"usd": "0.1"}, "output": {"usd": "0.2"}},
+						"capabilities": {"supportsVision": true}
+					}
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	seed := catwalk.Provider{
+		Name:                "Venice",
+		ID:                  catwalk.InferenceProviderVenice,
+		APIEndpoint:         server.URL,
+		Type:                catwalk.TypeOpenAICompat,
+		DefaultLargeModelID: "venice-live",
+		DefaultSmallModelID: "venice-live",
+	}
+	require.NoError(t, newCache[[]catwalk.Provider](cachePathFor("providers")).Store([]catwalk.Provider{seed}))
+	cfg := &Config{
+		Options: &Options{},
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			string(catwalk.InferenceProviderVenice): {APIKey: "venice-token"},
+		}),
+	}
+
+	require.NoError(t, UpdateVenice(server.URL, cfg))
+
+	cached, _, err := newCache[catwalk.Provider](cachePathFor("venice")).Get()
+	require.NoError(t, err)
+	require.Equal(t, "Venice", cached.Name)
+	require.Equal(t, "venice-live", cached.DefaultLargeModelID)
+	require.Len(t, cached.Models, 1)
+	require.Equal(t, "venice-live", cached.Models[0].ID)
+}
+
+func TestUpdateVenice_LiveSourceRequiresCredentials(t *testing.T) {
+	resetProviderState()
+	defer resetProviderState()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	seed := catwalk.Provider{ID: catwalk.InferenceProviderVenice, Name: "Venice"}
+	require.NoError(t, newCache[[]catwalk.Provider](cachePathFor("providers")).Store([]catwalk.Provider{seed}))
+	cfg := &Config{Options: &Options{}, Providers: csync.NewMap[string, ProviderConfig]()}
+
+	err := UpdateVenice("", cfg)
+	require.Error(t, err)
+	require.True(t, IsMissingLiveProviderCredentials(err))
+}
+
+func TestUpdateCopilot_FileSourceStoresCache(t *testing.T) {
+	resetProviderState()
+	defer resetProviderState()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	provider := catwalk.Provider{
+		Name: "Copilot",
+		ID:   catwalk.InferenceProviderCopilot,
+		Models: []catwalk.Model{
+			{ID: "copilot-file", Name: "Copilot File"},
+		},
+	}
+	data, err := json.Marshal(provider)
+	require.NoError(t, err)
+	path := filepath.Join(tmpDir, "copilot.json")
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+
+	require.NoError(t, UpdateCopilot(path, nil))
+
+	cached, _, err := newCache[catwalk.Provider](cachePathFor("copilot")).Get()
+	require.NoError(t, err)
+	require.Equal(t, provider, cached)
 }
 
 func TestCache_StoreAndGet(t *testing.T) {

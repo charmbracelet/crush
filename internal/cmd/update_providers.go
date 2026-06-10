@@ -17,7 +17,7 @@ var updateProvidersCmd = &cobra.Command{
 	Short: "Update providers",
 	Long:  `Update provider information from a specified local path or remote URL.`,
 	Example: `
-# Update Catwalk providers remotely (default)
+# Update Catwalk providers remotely (default), plus authenticated live providers
 crush update-providers
 
 # Update Catwalk providers from a custom URL
@@ -34,6 +34,12 @@ crush update-providers --source=hyper
 
 # Update Hyper from a custom URL
 crush update-providers --source=hyper https://hyper.example.com
+
+# Update Venice provider models
+crush update-providers --source=venice
+
+# Update Copilot provider models
+crush update-providers --source=copilot
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// NOTE(@andreynering): We want to skip logging output do stdout here.
@@ -48,10 +54,23 @@ crush update-providers --source=hyper https://hyper.example.com
 		switch updateProvidersSource {
 		case "catwalk":
 			err = config.UpdateProviders(pathOrURL)
+			if err == nil && pathOrURL == "" {
+				updateAuthenticatedLiveProviders(cmd)
+			}
 		case "hyper":
 			err = config.UpdateHyper(pathOrURL)
+		case "venice", "copilot":
+			cfg, loadErr := loadUpdateProvidersConfig(cmd)
+			if loadErr != nil {
+				return loadErr
+			}
+			if updateProvidersSource == "venice" {
+				err = config.UpdateVenice(pathOrURL, cfg)
+			} else {
+				err = config.UpdateCopilot(pathOrURL, cfg)
+			}
 		default:
-			return fmt.Errorf("invalid source %q, must be 'catwalk' or 'hyper'", updateProvidersSource)
+			return fmt.Errorf("invalid source %q, must be 'catwalk', 'hyper', 'venice', or 'copilot'", updateProvidersSource)
 		}
 
 		if err != nil {
@@ -77,6 +96,34 @@ crush update-providers --source=hyper https://hyper.example.com
 	},
 }
 
+func updateAuthenticatedLiveProviders(cmd *cobra.Command) {
+	cfg, err := loadUpdateProvidersConfig(cmd)
+	if err != nil {
+		slog.Debug("Skipping live provider updates", "error", err)
+		return
+	}
+	if err := config.UpdateVenice("", cfg); err != nil && !config.IsMissingLiveProviderCredentials(err) {
+		slog.Debug("Skipping Venice provider update", "error", err)
+	}
+	if err := config.UpdateCopilot("", cfg); err != nil && !config.IsMissingLiveProviderCredentials(err) {
+		slog.Debug("Skipping Copilot provider update", "error", err)
+	}
+}
+
+func loadUpdateProvidersConfig(cmd *cobra.Command) (*config.Config, error) {
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, err
+	}
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	debug, _ := cmd.Flags().GetBool("debug")
+	store, err := config.Load(cwd, dataDir, debug)
+	if err != nil {
+		return nil, err
+	}
+	return store.Config(), nil
+}
+
 func init() {
-	updateProvidersCmd.Flags().StringVar(&updateProvidersSource, "source", "catwalk", "Provider source to update (catwalk or hyper)")
+	updateProvidersCmd.Flags().StringVar(&updateProvidersSource, "source", "catwalk", "Provider source to update (catwalk, hyper, venice, or copilot)")
 }

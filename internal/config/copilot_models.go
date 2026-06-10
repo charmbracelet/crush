@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -117,6 +116,7 @@ type copilotModel struct {
 }
 
 type copilotModelCapabilities struct {
+	Type     string               `json:"type"`
 	Limits   copilotModelLimits   `json:"limits"`
 	Supports copilotModelSupports `json:"supports"`
 }
@@ -131,8 +131,6 @@ type copilotModelSupports struct {
 	ReasoningEffort  []string `json:"reasoning_effort"`
 	AdaptiveThinking bool     `json:"adaptive_thinking"`
 }
-
-var copilotVersionedModelRegexp = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 
 func copilotModelsToCatwalkModels(response copilotModelsResponse) []catwalk.Model {
 	aliasedVersions := make(map[string]bool, len(response.Data))
@@ -168,9 +166,11 @@ func copilotModelsToCatwalkModels(response copilotModelsResponse) []catwalk.Mode
 }
 
 func shouldSkipCopilotModel(model copilotModel, aliasedVersions map[string]bool) bool {
+	if capType := model.Capabilities.Type; capType != "" && capType != "chat" {
+		return true
+	}
 	return model.ID == "" ||
 		aliasedVersions[model.ID] ||
-		copilotVersionedModelRegexp.MatchString(model.ID) ||
 		strings.Contains(model.ID, "embedding") ||
 		strings.HasPrefix(model.ID, "accounts/msft/routers") ||
 		strings.HasPrefix(model.ID, "oswe-vscode") ||

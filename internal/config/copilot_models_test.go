@@ -167,6 +167,21 @@ func TestCopilotModelsToCatwalkModelsFiltersAndDeduplicates(t *testing.T) {
 			Name:    "Versioned Model",
 			Version: "versioned-model-2026-01-01",
 		},
+		{
+			ID:      "unaliased-model-2026-01-01",
+			Name:    "Unaliased Dated Model",
+			Version: "unaliased-model-2026-01-01",
+			Capabilities: copilotModelCapabilities{
+				Type: "chat",
+			},
+		},
+		{
+			ID:   "some-embeddings-model",
+			Name: "Embeddings via Type",
+			Capabilities: copilotModelCapabilities{
+				Type: "embeddings",
+			},
+		},
 		{ID: "text-embedding-3", Name: "Embedding"},
 		{ID: "accounts/msft/routers/test", Name: "Router"},
 		{ID: "oswe-vscode-test", Name: "OSWE"},
@@ -189,6 +204,10 @@ func TestCopilotModelsToCatwalkModelsFiltersAndDeduplicates(t *testing.T) {
 			CanReason:        true,
 			ReasoningLevels:  []string{"low", "medium", "high"},
 			SupportsImages:   true,
+		},
+		{
+			ID:   "unaliased-model-2026-01-01",
+			Name: "Unaliased Dated Model",
 		},
 	}, models)
 }

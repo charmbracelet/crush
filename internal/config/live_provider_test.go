@@ -246,27 +246,6 @@ func TestLiveProviderSync_GetCalledMultipleTimesUsesOnce(t *testing.T) {
 	require.Equal(t, 1, client.callCount)
 }
 
-func TestLiveProviderSync_ForceBypassesWarmCache(t *testing.T) {
-	t.Parallel()
-
-	path := t.TempDir() + "/provider.json"
-	cached := testLiveSeedProvider()
-	cached.Models = []catwalk.Model{{ID: "cached-model", Name: "Cached Model"}}
-	writeLiveProviderCache(t, path, cached)
-
-	client := &mockLiveProviderClient{
-		provider: catwalk.Provider{Models: []catwalk.Model{{ID: "live-model", Name: "Live Model"}}},
-	}
-	syncer := &liveProviderSync{}
-	syncer.Init(client, path, true, testLiveSeedProvider(), true)
-	syncer.Force()
-
-	provider, err := syncer.Get(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, 1, client.callCount)
-	require.Equal(t, []catwalk.Model{{ID: "live-model", Name: "Live Model"}}, provider.Models)
-}
-
 func TestCacheAge(t *testing.T) {
 	t.Parallel()
 

@@ -29,7 +29,6 @@ type liveProviderSync struct {
 	seed         catwalk.Provider
 	autoupdate   bool
 	credentialed bool
-	force        bool
 	ttl          time.Duration
 	init         atomic.Bool
 }
@@ -42,10 +41,6 @@ func (s *liveProviderSync) Init(client liveProviderClient, path string, autoupda
 	s.credentialed = credentialed
 	s.ttl = liveModelsTTL
 	s.init.Store(true)
-}
-
-func (s *liveProviderSync) Force() {
-	s.force = true
 }
 
 func (s *liveProviderSync) Get(ctx context.Context) (catwalk.Provider, error) {
@@ -72,7 +67,7 @@ func (s *liveProviderSync) Get(ctx context.Context) (catwalk.Provider, error) {
 			fallback = cached
 		}
 
-		if cachedAvailable && !s.force {
+		if cachedAvailable {
 			if age, ok := cacheAge(s.cache.path); ok && age < s.ttl {
 				slog.Info("Using cached live provider models", "provider", fallback.ID, "age", age)
 				s.result = cached

@@ -859,6 +859,7 @@ command:
 
 ```bash
 # Update providers remotely from Catwalk.
+# This also refreshes Venice and Copilot models when you're authenticated.
 crush update-providers
 
 # Update providers from a custom Catwalk base URL.

@@ -258,7 +258,7 @@ func overlayLiveProviderModels(ctx context.Context, cfg *Config, providers []cat
 		syncer.Init(client, cachePathFor(cacheName), autoupdate, seed, credentialed)
 		provider, err := syncer.Get(ctx)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("Crush was unable to cache updated models from %s: %w", seed.Name, err))
+			errs = append(errs, fmt.Errorf("crush was unable to cache updated models from %s: %w", seed.Name, err))
 			return
 		}
 		providers[index] = provider

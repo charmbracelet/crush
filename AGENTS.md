@@ -64,6 +64,11 @@ internal/
 ### Key Patterns
 
 - **Config is a Service**: accessed via `config.Service`, not global state.
+- **Provider updates**: Catwalk is the default provider seed/cache. Venice and
+  Copilot models are live-overlaid only when authenticated and use the existing
+  provider cache/syncer with a 60s warm-cache TTL; `crush update-providers`
+  refreshes authenticated live providers best-effort, while `--source=venice`
+  and `--source=copilot` refresh them directly.
 - **Tools are self-documenting**: each tool has a `.go` implementation and a
   `.md` description file in `internal/agent/tools/`.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`

@@ -129,6 +129,29 @@ func TestLiveProviderSync_GetStaleCacheFetchesMergesAndStores(t *testing.T) {
 	require.Equal(t, provider, stored)
 }
 
+func TestLiveProviderSync_GetStoreFailureStillReturnsMerged(t *testing.T) {
+	t.Parallel()
+
+	// Point the cache at a path whose parent is a regular file so that
+	// Store fails; the merged provider must still be returned without
+	// error.
+	blocker := t.TempDir() + "/blocker"
+	require.NoError(t, os.WriteFile(blocker, []byte("not a dir"), 0o644))
+	path := blocker + "/provider.json"
+
+	seed := testLiveSeedProvider()
+	client := &mockLiveProviderClient{
+		provider: catwalk.Provider{Models: []catwalk.Model{{ID: "live-model", Name: "Live Model"}}},
+	}
+	syncer := &liveProviderSync{}
+	syncer.Init(client, path, true, seed, true)
+
+	provider, err := syncer.Get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, client.callCount)
+	require.Equal(t, []catwalk.Model{{ID: "live-model", Name: "Live Model"}}, provider.Models)
+}
+
 func TestLiveProviderSync_GetNotModifiedUsesCached(t *testing.T) {
 	t.Parallel()
 

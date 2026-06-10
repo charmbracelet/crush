@@ -296,8 +296,7 @@ func TestProviders_Integration_LiveOverlayFetchesWithCredentials(t *testing.T) {
 		}),
 	}
 
-	result, errs := overlayLiveProviderModels(t.Context(), cfg, providers, true)
-	require.Empty(t, errs)
+	result := overlayLiveProviderModels(t.Context(), cfg, providers, true)
 
 	venice, ok := findProvider(result, catwalk.InferenceProviderVenice)
 	require.True(t, ok)
@@ -344,8 +343,7 @@ func TestProviders_Integration_LiveOverlaySkipsWithoutCredentials(t *testing.T) 
 	require.NoError(t, newCache[catwalk.Provider](cachePathFor("venice")).Store(cached))
 
 	cfg := &Config{Options: &Options{}, Providers: csync.NewMap[string, ProviderConfig]()}
-	result, errs := overlayLiveProviderModels(t.Context(), cfg, []catwalk.Provider{seed}, true)
-	require.Empty(t, errs)
+	result := overlayLiveProviderModels(t.Context(), cfg, []catwalk.Provider{seed}, true)
 	require.Equal(t, []catwalk.Provider{seed}, result)
 }
 

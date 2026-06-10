@@ -216,9 +216,7 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 
 		items := slices.Collect(providers.Seq())
 		if !customProvidersOnly {
-			var liveErrs []error
-			items, liveErrs = overlayLiveProviderModels(ctx, cfg, items, autoupdate)
-			errs = append(errs, liveErrs...)
+			items = overlayLiveProviderModels(ctx, cfg, items, autoupdate)
 		}
 
 		if hyperFound {
@@ -231,14 +229,13 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	return providerList, providerErr
 }
 
-func overlayLiveProviderModels(ctx context.Context, cfg *Config, providers []catwalk.Provider, autoupdate bool) ([]catwalk.Provider, []error) {
+func overlayLiveProviderModels(ctx context.Context, cfg *Config, providers []catwalk.Provider, autoupdate bool) []catwalk.Provider {
 	if cfg == nil || len(providers) == 0 {
-		return providers, nil
+		return providers
 	}
 
 	environment := env.New()
 	resolver := NewShellVariableResolver(environment)
-	errs := make([]error, 0, 2)
 
 	syncProvider := func(providerID catwalk.InferenceProvider, cacheName string, syncer *liveProviderSync, newClient liveProviderClientFunc) {
 		index := slices.IndexFunc(providers, func(provider catwalk.Provider) bool {
@@ -258,16 +255,17 @@ func overlayLiveProviderModels(ctx context.Context, cfg *Config, providers []cat
 		syncer.Init(client, cachePathFor(cacheName), autoupdate, seed, credentialed)
 		provider, err := syncer.Get(ctx)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("crush was unable to cache updated models from %s: %w", seed.Name, err))
-			return
+			slog.Warn("Live provider sync failed", "provider", providerID, "error", err)
 		}
-		providers[index] = provider
+		if len(provider.Models) > 0 {
+			providers[index] = provider
+		}
 	}
 
 	syncProvider(catwalk.InferenceProviderVenice, "venice", veniceSyncer, newVeniceLiveProviderClient)
 	syncProvider(catwalk.InferenceProviderCopilot, "copilot", copilotSyncer, newCopilotLiveProviderClient)
 
-	return providers, errs
+	return providers
 }
 
 type liveProviderClientFunc func(catwalk.Provider, *Config, VariableResolver, string) (liveProviderClient, bool, error)

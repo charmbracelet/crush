@@ -53,7 +53,6 @@ func (s *liveProviderSync) Get(ctx context.Context) (catwalk.Provider, error) {
 		panic("called Get before Init")
 	}
 
-	var throwErr error
 	s.once.Do(func() {
 		if !s.autoupdate {
 			slog.Info("Using provider seed", "provider", s.seed.ID)
@@ -106,9 +105,11 @@ func (s *liveProviderSync) Get(ctx context.Context) (catwalk.Provider, error) {
 
 		merged := mergeLiveProvider(s.seed, result)
 		s.result = merged
-		throwErr = s.cache.Store(merged)
+		if err := s.cache.Store(merged); err != nil {
+			slog.Warn("Failed to store live provider cache", "provider", s.seed.ID, "err", err)
+		}
 	})
-	return s.result, throwErr
+	return s.result, nil
 }
 
 func cacheAge(path string) (time.Duration, bool) {

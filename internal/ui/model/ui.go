@@ -1667,7 +1667,9 @@ func (m *UI) toggleThinking() tea.Msg {
 	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeWorkspace, agentCfg.Model, currentModel); err != nil {
 		return util.ReportError(err)()
 	}
-	m.com.Workspace.UpdateAgentModel(context.TODO())
+	if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+		return util.ReportError(err)()
+	}
 	status := "disabled"
 	if currentModel.Think {
 		status = "enabled"
@@ -1696,7 +1698,9 @@ func (m *UI) selectReasoningEffort(effort string) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		m.com.Workspace.UpdateAgentModel(context.TODO())
+		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+			return util.ReportError(err)()
+		}
 		return util.NewInfoMsg("Reasoning effort set to " + effort)
 	}
 }

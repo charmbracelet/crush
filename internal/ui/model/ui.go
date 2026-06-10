@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -3721,22 +3722,37 @@ func (m *UI) toggleTerminal() tea.Cmd {
 	return m.createTerminal()
 }
 
-// createTerminal creates and starts a new embedded terminal running the
-// user's shell. Called on first open or after the previous terminal has
-// been fully closed.
+// createTerminal creates and starts a new embedded terminal. When
+// connected to a remote server over TCP, it SSHes into the server and
+// cds to the workspace directory. Otherwise it spawns a local shell.
 func (m *UI) createTerminal() tea.Cmd {
-	sh := os.Getenv("SHELL")
-	if sh == "" {
-		sh = "/bin/sh"
+	workDir := m.com.Workspace.WorkingDir()
+	remoteHost := m.com.Workspace.RemoteHost()
+
+	var cmd *exec.Cmd
+	title := "Crush Terminal"
+	if remoteHost != "" {
+		// SSH into the remote host and cd to the workspace directory.
+		// -t forces PTY allocation so interactive programs work.
+		cmd = terminal.PrepareCmd(context.Background(), "ssh",
+			[]string{"-t", remoteHost, "cd " + workDir + " && exec $SHELL"},
+			"", nil)
+		title = "Crush Terminal (" + remoteHost + ")"
+	} else {
+		sh := os.Getenv("SHELL")
+		if sh == "" {
+			sh = "/bin/sh"
+		}
+		cmd = terminal.PrepareCmd(context.Background(), sh, nil, workDir, nil)
 	}
-	cmd := terminal.PrepareCmd(context.Background(), sh, nil, m.com.Workspace.WorkingDir(), nil)
+
 	term := terminal.New(terminal.Config{
 		Context: context.Background(),
 		Cmd:     cmd,
 	})
 
 	dlg := terminal.NewDialog(terminal.DialogConfig{
-		Title:    "Crush Terminal",
+		Title:    title,
 		QuitHint: "ctrl+b to hide",
 		Term:     term,
 	})

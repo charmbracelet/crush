@@ -74,6 +74,17 @@ func (c *Client) ClientID() string {
 	return c.clientID
 }
 
+// Network returns the transport network type ("tcp", "unix", "npipe").
+func (c *Client) Network() string {
+	return c.network
+}
+
+// Addr returns the server address (host:port for tcp, socket path for
+// unix/npipe).
+func (c *Client) Addr() string {
+	return c.addr
+}
+
 // GetGlobalConfig retrieves the server's configuration.
 func (c *Client) GetGlobalConfig(ctx context.Context) (*config.Config, error) {
 	var cfg config.Config

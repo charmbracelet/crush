@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -432,6 +433,22 @@ func (w *ClientWorkspace) WorkingDir() string {
 
 func (w *ClientWorkspace) Resolver() config.VariableResolver {
 	return config.IdentityResolver()
+}
+
+// RemoteHost returns the server's hostname (without port) when
+// connected over TCP. The Crush HTTP port is unrelated to SSH, so we
+// strip it and let SSH use its default port 22. Returns empty string
+// for unix socket or npipe connections where SSH is not applicable.
+func (w *ClientWorkspace) RemoteHost() string {
+	if w.client.Network() != "tcp" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(w.client.Addr())
+	if err != nil {
+		// Addr might not have a port; use as-is.
+		return w.client.Addr()
+	}
+	return host
 }
 
 // -- Config mutations --

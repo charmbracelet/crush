@@ -319,6 +319,9 @@ func (w *AppWorkspace) Resolver() config.VariableResolver {
 	return w.store.Resolver()
 }
 
+// RemoteHost returns empty string for local workspaces.
+func (w *AppWorkspace) RemoteHost() string { return "" }
+
 // -- Config mutations --
 
 func (w *AppWorkspace) UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {

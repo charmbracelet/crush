@@ -131,6 +131,12 @@ type Workspace interface {
 	WorkingDir() string
 	Resolver() config.VariableResolver
 
+	// RemoteHost returns the SSH-compatible hostname of the server
+	// when running in client-server mode over TCP. The Crush HTTP port
+	// is stripped since it is unrelated to SSH. Returns empty string
+	// for local (AppWorkspace) or unix socket connections.
+	RemoteHost() string
+
 	// Config mutations (proxied to server in client mode)
 	UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error
 	SetCompactMode(scope config.Scope, enabled bool) error

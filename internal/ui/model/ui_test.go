@@ -118,6 +118,60 @@ func TestHandleSelectModelPersistsWorkspaceScope(t *testing.T) {
 	require.Equal(t, "small-model", ws.preferredModelUpdates[1].model.Model)
 }
 
+func TestToggleThinkingPersistsWorkspaceScope(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Models: map[config.SelectedModelType]config.SelectedModel{
+			config.SelectedModelTypeLarge: {
+				Provider: "test-provider",
+				Model:    "large-model",
+			},
+		},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Agents: map[string]config.Agent{
+			config.AgentCoder: {Model: config.SelectedModelTypeLarge},
+		},
+	}
+	ws := &testWorkspace{cfg: cfg}
+	ui := newTestUIWithConfig(t, cfg)
+	ui.com.Workspace = ws
+
+	ui.toggleThinking()
+
+	require.Len(t, ws.preferredModelUpdates, 1)
+	require.Equal(t, config.ScopeWorkspace, ws.preferredModelUpdates[0].scope)
+	require.Equal(t, config.SelectedModelTypeLarge, ws.preferredModelUpdates[0].modelType)
+	require.True(t, ws.preferredModelUpdates[0].model.Think)
+}
+
+func TestSelectReasoningEffortPersistsWorkspaceScope(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Models: map[config.SelectedModelType]config.SelectedModel{
+			config.SelectedModelTypeLarge: {
+				Provider: "test-provider",
+				Model:    "large-model",
+			},
+		},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Agents: map[string]config.Agent{
+			config.AgentCoder: {Model: config.SelectedModelTypeLarge},
+		},
+	}
+	ws := &testWorkspace{cfg: cfg}
+	ui := newTestUIWithConfig(t, cfg)
+	ui.com.Workspace = ws
+
+	ui.selectReasoningEffort("high")
+
+	require.Len(t, ws.preferredModelUpdates, 1)
+	require.Equal(t, config.ScopeWorkspace, ws.preferredModelUpdates[0].scope)
+	require.Equal(t, config.SelectedModelTypeLarge, ws.preferredModelUpdates[0].modelType)
+	require.Equal(t, "high", ws.preferredModelUpdates[0].model.ReasoningEffort)
+}
+
 func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 	t.Helper()
 

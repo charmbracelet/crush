@@ -1471,29 +1471,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			agentCfg, ok := cfg.Agents[config.AgentCoder]
-			if !ok {
-				return util.ReportError(errors.New("agent configuration not found"))()
-			}
-
-			currentModel := cfg.Models[agentCfg.Model]
-			currentModel.Think = !currentModel.Think
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-				return util.ReportError(err)()
-			}
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			status := "disabled"
-			if currentModel.Think {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Thinking mode " + status)
-		})
+		cmds = append(cmds, m.toggleThinking)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
 		cmds = append(cmds, func() tea.Msg {
@@ -1542,29 +1520,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
+		if cmd := m.selectReasoningEffort(msg.Effort); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
-
-		agentCfg, ok := cfg.Agents[config.AgentCoder]
-		if !ok {
-			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
-			break
-		}
-
-		currentModel := cfg.Models[agentCfg.Model]
-		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
-
-		cmds = append(cmds, func() tea.Msg {
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
-		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
@@ -1687,6 +1645,59 @@ func (m *UI) fetchHyperCredits() tea.Cmd {
 			return nil
 		}
 		return creditsUpdatedMsg{credits: credits}
+	}
+}
+
+// toggleThinking flips the thinking mode of the coder agent's current
+// model and persists it at workspace scope so it isn't shadowed by
+// workspace-scoped model selections.
+func (m *UI) toggleThinking() tea.Msg {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return util.ReportError(errors.New("configuration not found"))()
+	}
+
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return util.ReportError(errors.New("agent configuration not found"))()
+	}
+
+	currentModel := cfg.Models[agentCfg.Model]
+	currentModel.Think = !currentModel.Think
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeWorkspace, agentCfg.Model, currentModel); err != nil {
+		return util.ReportError(err)()
+	}
+	m.com.Workspace.UpdateAgentModel(context.TODO())
+	status := "disabled"
+	if currentModel.Think {
+		status = "enabled"
+	}
+	return util.NewInfoMsg("Thinking mode " + status)
+}
+
+// selectReasoningEffort sets the reasoning effort of the coder agent's
+// current model and persists it at workspace scope so it isn't shadowed
+// by workspace-scoped model selections.
+func (m *UI) selectReasoningEffort(effort string) tea.Cmd {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return util.ReportError(errors.New("configuration not found"))
+	}
+
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return util.ReportError(errors.New("agent configuration not found"))
+	}
+
+	currentModel := cfg.Models[agentCfg.Model]
+	currentModel.ReasoningEffort = effort
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeWorkspace, agentCfg.Model, currentModel); err != nil {
+		return util.ReportError(err)
+	}
+
+	return func() tea.Msg {
+		m.com.Workspace.UpdateAgentModel(context.TODO())
+		return util.NewInfoMsg("Reasoning effort set to " + effort)
 	}
 }
 

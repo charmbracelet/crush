@@ -41,6 +41,24 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 	}
 }
 
+// setPromptHistory replaces the loaded prompt history and resets navigation
+// back to the live draft.
+func (m *UI) setPromptHistory(messages []string) {
+	m.promptHistory.messages = messages
+	m.promptHistory.index = -1
+	m.promptHistory.draft = ""
+}
+
+// reloadHistoryForMessage reloads prompt history when a user message is
+// created, so a just-sent prompt is immediately navigable even while the
+// agent is still generating its response. Returns nil for non-user messages.
+func (m *UI) reloadHistoryForMessage(msg message.Message) tea.Cmd {
+	if msg.Role != message.User {
+		return nil
+	}
+	return m.loadPromptHistory()
+}
+
 // handleHistoryUp handles up arrow for history navigation.
 func (m *UI) handleHistoryUp(msg tea.Msg) tea.Cmd {
 	prevHeight := m.textarea.Height()

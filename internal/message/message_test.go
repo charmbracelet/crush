@@ -693,3 +693,45 @@ func TestUpdate_StructuralFlushUsesMustDeliver(t *testing.T) {
 		})
 	}
 }
+
+func TestListUserMessages_ReverseSendOrderUnderSpam(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+
+	sent := []string{"first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"}
+	for _, p := range sent {
+		_, err := svc.Create(t.Context(), sessionID, CreateMessageParams{
+			Role:  User,
+			Parts: []ContentPart{TextContent{Text: p}},
+		})
+		require.NoError(t, err)
+	}
+
+	got, err := svc.ListUserMessages(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, got, len(sent))
+
+	bucket := map[int64]int{}
+	for _, m := range got {
+		bucket[m.CreatedAt]++
+	}
+	colliding := 0
+	for _, n := range bucket {
+		if n > 1 {
+			colliding += n
+		}
+	}
+	t.Logf("created_at collisions: %d/%d rows share a value with at least one peer", colliding, len(got))
+
+	want := make([]string, len(sent))
+	for i, p := range sent {
+		want[len(sent)-1-i] = p
+	}
+	actual := make([]string, len(got))
+	for i, m := range got {
+		actual[i] = m.Content().Text
+	}
+	require.Equal(t, want, actual,
+		"history must be reverse-send order even when prompts share a created_at second")
+}

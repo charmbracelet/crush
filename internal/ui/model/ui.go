@@ -651,9 +651,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case promptHistoryLoadedMsg:
-		m.promptHistory.messages = msg.messages
-		m.promptHistory.index = -1
-		m.promptHistory.draft = ""
+		m.setPromptHistory(msg.messages)
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
@@ -691,7 +689,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Type {
 		case pubsub.CreatedEvent:
-			cmds = append(cmds, m.appendSessionMessage(msg.Payload))
+			cmds = append(cmds,
+				m.appendSessionMessage(msg.Payload),
+				m.reloadHistoryForMessage(msg.Payload),
+			)
 		case pubsub.UpdatedEvent:
 			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
 		case pubsub.DeletedEvent:
@@ -1987,7 +1988,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.randomizePlaceholders()
 				m.historyReset()
 
-				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
+				return m.sendMessage(value, attachments...)
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break

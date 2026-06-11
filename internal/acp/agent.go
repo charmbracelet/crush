@@ -19,7 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/coder/acp-go-sdk"
 )
@@ -340,10 +339,11 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 	// Run the agent.
 	result, err := a.app.AgentCoordinator.Run(ctx, string(params.SessionId), prompt, attachments...)
 	if err != nil {
-		// Permission denial is a normal user choice, not an error.
-		if errors.Is(err, permission.ErrorPermissionDenied) {
-			return acp.PromptResponse{StopReason: acp.StopReasonRefusal}, nil
-		}
+		// Permission denials no longer surface as errors here: tools return
+		// a "permission denied" tool response (see
+		// tools.NewPermissionDeniedResponse) that the model handles inline,
+		// so the agent turn ends normally rather than erroring out.
+		//
 		// Context cancellation means the user cancelled the request.
 		if errors.Is(err, context.Canceled) {
 			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/coder/acp-go-sdk"
 	"github.com/stretchr/testify/require"
 )
@@ -457,7 +458,7 @@ func setupAgentTestEnv(t *testing.T) (*Agent, *app.App) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
-	application, err := app.New(t.Context(), conn, cfgStore)
+	application, err := app.New(t.Context(), conn, cfgStore, skills.NewManager(nil, nil, nil))
 	require.NoError(t, err)
 	t.Cleanup(application.Shutdown)
 

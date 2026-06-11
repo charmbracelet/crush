@@ -36,13 +36,14 @@ func hookApproved(ctx context.Context, toolCallID string) bool {
 }
 
 type CreatePermissionRequest struct {
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	SessionID   string   `json:"session_id"`
+	ToolCallID  string   `json:"tool_call_id"`
+	ToolName    string   `json:"tool_name"`
+	Description string   `json:"description"`
+	Action      string   `json:"action"`
+	Params      any      `json:"params"`
+	Path        string   `json:"path"`
+	Contexts    []string `json:"contexts,omitempty"`
 }
 
 type PermissionNotification struct {
@@ -52,14 +53,19 @@ type PermissionNotification struct {
 }
 
 type PermissionRequest struct {
-	ID          string `json:"id"`
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	ID          string   `json:"id"`
+	SessionID   string   `json:"session_id"`
+	ToolCallID  string   `json:"tool_call_id"`
+	ToolName    string   `json:"tool_name"`
+	Description string   `json:"description"`
+	Action      string   `json:"action"`
+	Params      any      `json:"params"`
+	Path        string   `json:"path"`
+	Contexts    []string `json:"contexts,omitempty"`
+	// PendingContexts is the subset of Contexts that are not yet satisfied by
+	// config-level allowances or prior session grants. The dialog uses this to
+	// show only the tokens the user is actually being asked to approve.
+	PendingContexts []string `json:"pending_contexts,omitempty"`
 }
 
 type Service interface {
@@ -90,6 +96,7 @@ type PermissionKey struct {
 	ToolName  string
 	Action    string
 	Path      string
+	Context   string // generic context token; empty for legacy tool grants
 }
 
 type permissionService struct {
@@ -103,6 +110,7 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
+	allowedContexts       []string
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -161,6 +169,24 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
 	// lost to a Deny would still leave an auto-approve entry behind,
 	// silently flipping later denied calls to allowed.
 	return s.resolve(permission, true, false, func() {
+		// If Contexts is non-empty, record one key per context token.
+		// The Path field is intentionally omitted from contextual grant
+		// keys — location semantics are captured by path: tokens, not
+		// the working directory at approval time.
+		if len(permission.Contexts) > 0 {
+			for _, ctx := range permission.Contexts {
+				s.sessionPermissions.Set(PermissionKey{
+					SessionID: permission.SessionID,
+					ToolName:  permission.ToolName,
+					Action:    permission.Action,
+					Context:   ctx,
+				}, true)
+			}
+			return
+		}
+
+		// Otherwise record the legacy key for backward compatibility
+		// with tools that don't use contextual approval (edit, write, view, etc.)
 		s.sessionPermissions.Set(PermissionKey{
 			SessionID: permission.SessionID,
 			ToolName:  permission.ToolName,
@@ -179,20 +205,18 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
+	// 1. Skip mode → allow
 	if s.skip.Load() {
 		return true, nil
 	}
 
-	// Check if the tool/action combination is in the allowlist
+	// 2. Tool / tool:action allowlist → allow
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
 		return true, nil
 	}
 
-	// A PreToolUse hook that returned decision=allow stamps the context
-	// with the tool call ID. Treat that as a pre-approval and skip the
-	// prompt entirely. We still publish a granted notification so the UI
-	// and audit subscribers see the outcome.
+	// 3. Hook approval (context-stamped) → allow
 	if hookApproved(ctx, opts.ToolCallID) {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
@@ -209,6 +233,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		ToolCallID: opts.ToolCallID,
 	})
 
+	// 4. Auto-approve session → allow
 	s.autoApproveSessionsMu.RLock()
 	autoApprove := s.autoApproveSessions[opts.SessionID]
 	s.autoApproveSessionsMu.RUnlock()
@@ -243,19 +268,47 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+		Contexts:    opts.Contexts,
 	}
 
-	if _, ok := s.sessionPermissions.Get(PermissionKey{
-		SessionID: permission.SessionID,
-		ToolName:  permission.ToolName,
-		Action:    permission.Action,
-		Path:      permission.Path,
-	}); ok {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-			ToolCallID: opts.ToolCallID,
-			Granted:    true,
-		})
-		return true, nil
+	// 5. Contextual approval: if len(Contexts) > 0 and every context is
+	// satisfied → allow. Matching uses structured token prefix semantics
+	// (see tokenSatisfies in context.go).
+	//
+	// Also compute PendingContexts — the subset that is NOT yet satisfied —
+	// so the UI can display only what the user is actually being asked to
+	// approve, omitting tokens already covered by prior grants.
+	if len(permission.Contexts) > 0 {
+		allApproved := true
+		for _, ctx := range permission.Contexts {
+			if !s.contextSatisfied(permission.SessionID, permission.ToolName, permission.Action, ctx) {
+				allApproved = false
+				permission.PendingContexts = append(permission.PendingContexts, ctx)
+			}
+		}
+		if allApproved {
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				ToolCallID: opts.ToolCallID,
+				Granted:    true,
+			})
+			return true, nil
+		}
+	}
+
+	// 6. Legacy session approval: if len(Contexts) == 0 → allow
+	if len(permission.Contexts) == 0 {
+		if _, ok := s.sessionPermissions.Get(PermissionKey{
+			SessionID: permission.SessionID,
+			ToolName:  permission.ToolName,
+			Action:    permission.Action,
+			Path:      permission.Path,
+		}); ok {
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				ToolCallID: opts.ToolCallID,
+				Granted:    true,
+			})
+			return true, nil
+		}
 	}
 
 	s.activeRequestMu.Lock()
@@ -295,7 +348,45 @@ func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
 }
 
-func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+// contextSatisfied reports whether the given context token is satisfied by a
+// config-level allowed token or by a previously stored session grant. Config
+// tokens are checked first (fast path), followed by an exact key lookup, and
+// finally a structured prefix scan over all session grants.
+func (s *permissionService) contextSatisfied(sessionID, toolName, action, candidate string) bool {
+	// Config-level allowed contexts (e.g. from allowed_commands): check
+	// whether any configured token is broad enough to satisfy the candidate.
+	for _, allowed := range s.allowedContexts {
+		if tokenSatisfies(allowed, candidate) {
+			return true
+		}
+	}
+
+	// Fast path: exact match on stored contextual grant key.
+	if _, ok := s.sessionPermissions.Get(PermissionKey{
+		SessionID: sessionID,
+		ToolName:  toolName,
+		Action:    action,
+		Context:   candidate,
+	}); ok {
+		return true
+	}
+
+	// Structured prefix match: iterate all contextual grants for this
+	// session/tool/action and check whether any stored token is broad
+	// enough to satisfy the candidate (e.g. command:go satisfies
+	// command:go test; path:/tmp satisfies path:/tmp/subdir).
+	for key := range s.sessionPermissions.Seq2() {
+		if key.SessionID != sessionID || key.ToolName != toolName || key.Action != action || key.Context == "" {
+			continue
+		}
+		if tokenSatisfies(key.Context, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func NewPermissionService(workingDir string, skip bool, allowedTools []string, allowedContexts []string) Service {
 	svc := &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
@@ -303,6 +394,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),
 		allowedTools:        allowedTools,
+		allowedContexts:     allowedContexts,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
 	svc.skip.Store(skip)

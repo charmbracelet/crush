@@ -6,13 +6,14 @@ import (
 
 // CreatePermissionRequest represents a request to create a permission.
 type CreatePermissionRequest struct {
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	SessionID   string   `json:"session_id"`
+	ToolCallID  string   `json:"tool_call_id"`
+	ToolName    string   `json:"tool_name"`
+	Description string   `json:"description"`
+	Action      string   `json:"action"`
+	Params      any      `json:"params"`
+	Path        string   `json:"path"`
+	Contexts    []string `json:"contexts,omitempty"`
 }
 
 // PermissionNotification represents a notification about a permission change.
@@ -24,14 +25,16 @@ type PermissionNotification struct {
 
 // PermissionRequest represents a pending permission request.
 type PermissionRequest struct {
-	ID          string `json:"id"`
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	ID              string   `json:"id"`
+	SessionID       string   `json:"session_id"`
+	ToolCallID      string   `json:"tool_call_id"`
+	ToolName        string   `json:"tool_name"`
+	Description     string   `json:"description"`
+	Action          string   `json:"action"`
+	Params          any      `json:"params"`
+	Path            string   `json:"path"`
+	Contexts        []string `json:"contexts,omitempty"`
+	PendingContexts []string `json:"pending_contexts,omitempty"`
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface. This is needed

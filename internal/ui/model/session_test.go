@@ -1,12 +1,17 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +38,7 @@ func TestFileList(t *testing.T) {
 		}
 		got := fileList(st, "/", files, 10, 10)
 		plain := stripANSI(got)
-		for _, line := range strings.Split(plain, "\n") {
+		for line := range strings.SplitSeq(plain, "\n") {
 			require.LessOrEqual(t, lipgloss.Width(line), 10, "line exceeds sidebar width: %q", line)
 		}
 	})
@@ -49,7 +54,7 @@ func TestFileList(t *testing.T) {
 		plain := stripANSI(got)
 		require.Contains(t, plain, "+5")
 		require.Contains(t, plain, "-3")
-		for _, line := range strings.Split(plain, "\n") {
+		for line := range strings.SplitSeq(plain, "\n") {
 			require.LessOrEqual(t, lipgloss.Width(line), 20, "line exceeds sidebar width: %q", line)
 		}
 	})
@@ -78,7 +83,7 @@ func TestFileList(t *testing.T) {
 		plain := stripANSI(got)
 		require.Contains(t, plain, "+3")
 		require.NotContains(t, plain, "-0")
-		for _, line := range strings.Split(plain, "\n") {
+		for line := range strings.SplitSeq(plain, "\n") {
 			require.LessOrEqual(t, lipgloss.Width(line), 20, "line exceeds sidebar width: %q", line)
 		}
 	})
@@ -94,7 +99,7 @@ func TestFileList(t *testing.T) {
 		plain := stripANSI(got)
 		require.NotContains(t, plain, "+0")
 		require.Contains(t, plain, "-7")
-		for _, line := range strings.Split(plain, "\n") {
+		for line := range strings.SplitSeq(plain, "\n") {
 			require.LessOrEqual(t, lipgloss.Width(line), 20, "line exceeds sidebar width: %q", line)
 		}
 	})
@@ -139,4 +144,57 @@ func stripANSI(s string) string {
 		b.WriteByte(s[i])
 	}
 	return b.String()
+}
+
+func TestFetchParentMeta_ReturnsTitleAndColor(t *testing.T) {
+	t.Parallel()
+
+	ws := &getSessionWorkspace{
+		sessions: map[string]session.Session{
+			"parent-id": {ID: "parent-id", Title: "My Parent Session"},
+		},
+		running: map[string][]workspace.RunningSubagentInfo{
+			"parent-id": {{ChildSessionID: "child-id", Color: "purple"}},
+		},
+	}
+	m := &UI{com: &common.Common{Workspace: ws}}
+
+	cmd := m.fetchParentMeta("parent-id", "child-id")
+	msg := cmd()
+
+	ptm, ok := msg.(parentTitleMsg)
+	require.True(t, ok, "expected parentTitleMsg")
+	require.Equal(t, "My Parent Session", ptm.title)
+	require.Equal(t, "purple", ptm.color)
+}
+
+func TestFetchParentMeta_NotFoundReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	ws := &getSessionWorkspace{sessions: map[string]session.Session{}}
+	m := &UI{com: &common.Common{Workspace: ws}}
+
+	cmd := m.fetchParentMeta("missing", "")
+	msg := cmd()
+
+	require.Nil(t, msg)
+}
+
+// getSessionWorkspace stubs GetSession and RunningSubagents for the
+// fetchParentMeta tests.
+type getSessionWorkspace struct {
+	workspace.Workspace
+	sessions map[string]session.Session
+	running  map[string][]workspace.RunningSubagentInfo
+}
+
+func (w *getSessionWorkspace) RunningSubagents(parentSessionID string) []workspace.RunningSubagentInfo {
+	return w.running[parentSessionID]
+}
+
+func (w *getSessionWorkspace) GetSession(_ context.Context, sessionID string) (session.Session, error) {
+	if sess, ok := w.sessions[sessionID]; ok {
+		return sess, nil
+	}
+	return session.Session{}, errors.New("not found")
 }

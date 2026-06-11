@@ -75,8 +75,21 @@ func (s *ConfigStore) Config() *Config {
 	return s.config
 }
 
-// WorkingDir returns the current working directory.
+// WorkingDir returns the current working directory. When workingDir is empty
+// (as in test stores created via NewTestStore) and exactly one loaded path was
+// supplied that refers to an existing directory on disk, that path is returned
+// as the working directory. This allows test helpers that pass a temp directory
+// as a loaded path to get correct scope-detection results without requiring the
+// full production initialization path.
 func (s *ConfigStore) WorkingDir() string {
+	if s.workingDir != "" {
+		return s.workingDir
+	}
+	if len(s.loadedPaths) == 1 {
+		if info, err := os.Stat(s.loadedPaths[0]); err == nil && info.IsDir() {
+			return s.loadedPaths[0]
+		}
+	}
 	return s.workingDir
 }
 
@@ -552,6 +565,15 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 		config:      cfg,
 		loadedPaths: loadedPaths,
 	}
+}
+
+// NewTestStoreWithWorkingDir creates a ConfigStore for testing purposes with
+// an explicit working directory set. This is required for scope-detection
+// tests in the workspace package.
+func NewTestStoreWithWorkingDir(cfg *Config, workingDir string, loadedPaths ...string) *ConfigStore {
+	s := NewTestStore(cfg, loadedPaths...)
+	s.workingDir = workingDir
+	return s
 }
 
 // ImportCopilot attempts to import a GitHub Copilot token from disk.

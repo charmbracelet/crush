@@ -76,5 +76,7 @@ func NewCoordinator(
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 }

@@ -57,14 +57,16 @@ type KeyMap struct {
 	}
 
 	// Global key maps
-	Quit       key.Binding
-	Help       key.Binding
-	Commands   key.Binding
-	Models     key.Binding
-	Suspend    key.Binding
-	Sessions   key.Binding
-	Tab        key.Binding
-	ToggleYolo key.Binding
+	Quit          key.Binding
+	Help          key.Binding
+	Commands      key.Binding
+	Models        key.Binding
+	Suspend       key.Binding
+	Sessions      key.Binding
+	Tab           key.Binding
+	ToggleYolo    key.Binding
+	ParentSession key.Binding
+	Subagents     key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -100,6 +102,14 @@ func DefaultKeyMap() KeyMap {
 		ToggleYolo: key.NewBinding(
 			key.WithKeys("ctrl+y"),
 			key.WithHelp("ctrl+y", "toggle yolo"),
+		),
+		ParentSession: key.NewBinding(
+			key.WithKeys("ctrl+up"),
+			key.WithHelp("ctrl+up", "go to parent session"),
+		),
+		Subagents: key.NewBinding(
+			key.WithKeys("ctrl+x"),
+			key.WithHelp("ctrl+x", "subagents"),
 		),
 	}
 

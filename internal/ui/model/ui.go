@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -159,6 +160,19 @@ type (
 	creditsUpdatedMsg struct {
 		credits int
 	}
+
+	// parentTitleMsg is sent when the parent session metadata has been
+	// fetched: the title for the breadcrumb and this child's subagent color.
+	parentTitleMsg struct {
+		title string
+		color string
+	}
+
+	// runningSubagentsMsg carries the refreshed running-subagent list,
+	// resolved off the Update path to keep DB IO out of the message loop.
+	runningSubagentsMsg struct {
+		list []workspace.RunningSubagentInfo
+	}
 )
 
 // UI represents the main user interface model.
@@ -239,6 +253,14 @@ type UI struct {
 	// skills
 	skillStates []*skills.SkillState
 
+	// runningSubagents holds the live subagent list for the current session,
+	// refreshed on each RuntimeEvent.
+	runningSubagents []workspace.RunningSubagentInfo
+
+	// Subagents — cached at init, static for session lifetime.
+	activeSubagentItems []completions.SubagentCompletionValue
+	activeSubagentNames map[string]bool
+
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
 
@@ -282,6 +304,12 @@ type UI struct {
 		index    int
 		draft    string
 	}
+
+	// parentTitle holds the resolved parent session title for the breadcrumb.
+	// subagentColor holds this child session's subagent color, looked up from
+	// the runtime when the session loads.
+	parentTitle   string
+	subagentColor string
 }
 
 // New creates a new instance of the [UI] model.
@@ -307,7 +335,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		com.Styles.Completions.Focused,
 		com.Styles.Completions.Match,
 	)
-
 	todoSpinner := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
 		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
@@ -349,6 +376,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
 	}
+
+	// Cache active subagents once — they are static for the session.
+	ui.activeSubagentItems, ui.activeSubagentNames = buildSubagentCaches(com.Workspace.ActiveSubagents())
 
 	status := NewStatus(com, ui)
 
@@ -588,6 +618,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		m.parentTitle = ""
+		m.subagentColor = ""
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {
@@ -611,7 +643,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+		if m.session.ParentSessionID != "" {
+			cmds = append(cmds, m.fetchParentMeta(m.session.ParentSessionID, m.session.ID))
+		}
 		m.updateLayoutAndSize()
+
+	case parentTitleMsg:
+		m.parentTitle = msg.title
+		m.subagentColor = msg.color
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -714,6 +753,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+	case pubsub.Event[subagents.RuntimeEvent]:
+		switch {
+		case m.session == nil:
+			m.runningSubagents = nil
+		case msg.Payload.ParentSessionID == m.session.ID:
+			// Only the current session's children populate the panel; ignore
+			// events for other parents to avoid spurious DB refreshes.
+			cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
+		}
+		if f := msg.Payload.Finished; f != nil && m.session != nil && f.ParentSessionID == m.session.ID {
+			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
+		}
+	case runningSubagentsMsg:
+		m.runningSubagents = msg.list
+	case pubsub.Event[subagents.Event]:
+		// Library discovery changed (e.g. a delete) — rebuild the @-mention
+		// caches so removed subagents stop being offered without a restart.
+		m.rebuildSubagentCaches()
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -964,7 +1021,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status.ClearInfoMsg()
 	case completions.CompletionItemsLoadedMsg:
 		if m.completionsOpen {
-			m.completions.SetItems(msg.Files, msg.Resources)
+			m.completions.SetItems(msg.Files, msg.Resources, msg.Subagents)
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
@@ -1403,6 +1460,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
+
+	// Subagents dialog messages.
+	case dialog.ActionLoadSubagentSession:
+		m.dialog.CloseDialog(dialog.SubagentsID)
+		cmds = append(cmds, m.loadSession(msg.SessionID))
 
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
@@ -1878,6 +1940,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
 			return true
+		case key.Matches(msg, m.keyMap.ParentSession):
+			if m.session != nil && m.session.ParentSessionID != "" {
+				cmds = append(cmds, m.loadSession(m.session.ParentSessionID))
+				return true
+			}
+		case key.Matches(msg, m.keyMap.Subagents):
+			m.openSubagentsDialog()
+			return true
 		}
 		return false
 	}
@@ -1926,6 +1996,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						}
 					case completions.SelectionMsg[completions.ResourceCompletionValue]:
 						cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
+						if !msg.KeepOpen {
+							m.closeCompletions()
+						}
+					case completions.SelectionMsg[completions.SubagentCompletionValue]:
+						cmds = append(cmds, m.insertSubagentCompletion(msg.Value.Name))
 						if !msg.KeepOpen {
 							m.closeCompletions()
 						}
@@ -2055,7 +2130,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.Open(depth, limit))
+						cmds = append(cmds, m.completions.Open(depth, limit, m.activeSubagentItems))
 					}
 				}
 
@@ -2396,6 +2471,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			tab,
 			commands,
 			k.Models,
+			k.Subagents,
 		)
 
 		switch m.focus {
@@ -2425,6 +2501,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds,
 			commands,
 			k.Models,
+			k.Subagents,
 			k.Editor.Newline,
 		)
 	}
@@ -2482,6 +2559,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab,
 			commands,
 			k.Models,
+			k.Subagents,
 			k.Sessions,
 			k.ToggleYolo,
 		)
@@ -2544,6 +2622,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					commands,
 					k.Models,
+					k.Subagents,
 					k.Sessions,
 					k.ToggleYolo,
 				},
@@ -3058,6 +3137,15 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	return tea.Batch(heightCmd, fileCmd)
 }
 
+// insertSubagentCompletion inserts @name into the textarea, replacing the @query.
+func (m *UI) insertSubagentCompletion(name string) tea.Cmd {
+	prevHeight := m.textarea.Height()
+	if !m.insertCompletionText("@" + name) {
+		return nil
+	}
+	return m.handleTextareaHeightChange(prevHeight)
+}
+
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
 // replacing the @query, and adds the resource as an attachment.
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
@@ -3253,6 +3341,8 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
+	content = rewriteSubagentPrompt(content, m.activeSubagentNames)
+
 	if !m.com.Workspace.AgentIsReady() {
 		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
 	}
@@ -3349,6 +3439,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 	switch id {
 	case dialog.SessionsID:
 		if cmd := m.openSessionsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.SubagentsID:
+		if cmd := m.openSubagentsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ModelsID:
@@ -3489,6 +3583,24 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(dialog)
+	return nil
+}
+
+// openSubagentsDialog opens the subagents dialog. If the dialog is already
+// open, it brings it to the front. Subagent surfaces are local-mode only: in
+// client/server mode the ClientWorkspace stubs return empty, so the dialog
+// opens with no running or library entries.
+func (m *UI) openSubagentsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SubagentsID) {
+		m.dialog.BringToFront(dialog.SubagentsID)
+		return nil
+	}
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID
+	}
+	d := dialog.NewSubagents(m.com, sessionID)
+	m.dialog.OpenDialog(d)
 	return nil
 }
 
@@ -3853,14 +3965,24 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
 
 	const maxSectionWidth = 50
-	sectionWidth := max(1, min(maxSectionWidth, width/4-2)) // account for spacing between sections
-	maxItemsPerSection := remainingHeight - 3               // Account for section title and spacing
+	numSections := 4
+	if len(m.runningSubagents) > 0 {
+		numSections = 5
+	}
+	sectionWidth := max(1, min(maxSectionWidth, width/numSections-2)) // account for spacing between sections
+	maxItemsPerSection := remainingHeight - 3                         // Account for section title and spacing
 
 	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
 	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
 	skillsSection := m.skillsInfo(sectionWidth, maxItemsPerSection, false)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
-	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
+	var sections string
+	if len(m.runningSubagents) > 0 {
+		subagentsSection := m.subagentsInfo(sectionWidth, maxItemsPerSection, false)
+		sections = lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection, " ", subagentsSection)
+	} else {
+		sections = lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
+	}
 	uv.NewStyledString(
 		s.CompactDetails.View.
 			Width(area.Dx()).

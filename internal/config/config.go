@@ -281,6 +281,8 @@ type Options struct {
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
 	NotificationStyle         string       `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	SubagentsPaths            []string     `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
+	DisabledSubagents         []string     `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
 }
 
 type MCPs map[string]MCPConfig
@@ -625,6 +627,34 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 		}
 	}
 	return nil
+}
+
+// IsKnownModelID reports whether modelID matches the ID of any model offered
+// by any provider in the config. Walks every provider since model IDs are
+// unique per provider but callers identifying a model by ID alone do not have
+// provider context.
+func (c *Config) IsKnownModelID(modelID string) bool {
+	if modelID == "" {
+		return false
+	}
+	for p := range c.Providers.Seq() {
+		for _, m := range p.Models {
+			if m.ID == modelID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsKnownModel reports whether the given model is offered by the given
+// provider. When provider is empty, it scans all providers (equivalent to
+// IsKnownModelID).
+func (c *Config) IsKnownModel(provider, modelID string) bool {
+	if provider == "" {
+		return c.IsKnownModelID(modelID)
+	}
+	return c.GetModel(provider, modelID) != nil
 }
 
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {

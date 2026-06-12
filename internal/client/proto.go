@@ -488,8 +488,9 @@ func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID
 }
 
 // InitiateAgentProcessing triggers agent initialization on the server.
-func (c *Client) InitiateAgentProcessing(ctx context.Context, id string) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/init", id), nil, nil, nil)
+func (c *Client) InitiateAgentProcessing(ctx context.Context, id string, interactive bool) error {
+	body := jsonBody(proto.AgentInitRequest{Interactive: interactive})
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/init", id), nil, body, http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("failed to initiate session agent processing: %w", err)
 	}

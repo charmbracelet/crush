@@ -786,7 +786,17 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 //	@Router			/workspaces/{id}/agent/init [post]
 func (c *controllerV1) handlePostWorkspaceAgentInit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := c.backend.InitAgent(r.Context(), id); err != nil {
+
+	var req proto.AgentInitRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			c.server.logError(r, "Failed to decode agent init request", "error", err)
+			jsonError(w, http.StatusBadRequest, "failed to decode request")
+			return
+		}
+	}
+
+	if err := c.backend.InitAgent(r.Context(), id, req.Interactive); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

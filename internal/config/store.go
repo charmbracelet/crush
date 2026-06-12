@@ -783,7 +783,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		return fmt.Errorf("failed to load providers during reload: %w", err)
 	}
 
-	if err := cfg.configureProviders(s, env, resolver, providers); err != nil {
+	if err := cfg.configureProviders(ctx, s, env, resolver, providers); err != nil {
 		return fmt.Errorf("failed to configure providers during reload: %w", err)
 	}
 

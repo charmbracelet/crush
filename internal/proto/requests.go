@@ -102,6 +102,11 @@ type ProjectInitPromptResponse struct {
 	Prompt string `json:"prompt"`
 }
 
+// AgentInitRequest represents a request to initialize the agent.
+type AgentInitRequest struct {
+	Interactive bool `json:"interactive"`
+}
+
 // LSPStartRequest represents a request to start an LSP for a path.
 type LSPStartRequest struct {
 	Path string `json:"path"`

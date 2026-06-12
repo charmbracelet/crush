@@ -599,21 +599,20 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
-	app.AgentCoordinator, err = agent.NewCoordinator(
-		ctx,
-		app.config,
-		app.Sessions,
-		app.Messages,
-		app.Permissions,
-		app.Questions,
-		app.History,
-		app.FileTracker,
-		app.LSPManager,
-		app.agentNotifications,
-		app.runCompletions,
-		app.Skills,
-		interactive,
-	)
+	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+		Config:      app.config,
+		Sessions:    app.Sessions,
+		Messages:    app.Messages,
+		Permissions: app.Permissions,
+		Questions:   app.Questions,
+		History:     app.History,
+		FileTracker: app.FileTracker,
+		LSPManager:  app.LSPManager,
+		Notify:      app.agentNotifications,
+		RunComplete: app.runCompletions,
+		Skills:      app.Skills,
+		Interactive: interactive,
+	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err

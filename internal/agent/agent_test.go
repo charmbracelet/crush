@@ -653,7 +653,7 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for range b.N {
-				_ = buildSummaryPrompt(todos)
+				_ = buildSummaryPrompt(todos, false)
 			}
 		})
 	}

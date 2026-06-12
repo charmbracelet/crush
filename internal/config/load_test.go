@@ -552,6 +552,47 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 	require.Equal(t, cfg.Providers.Len(), 0)
 }
 
+// TestConfig_configureProvidersVertexAIWithAPIKey is a regression test for
+// issue #3074: a Vertex AI provider configured with an api_key (and a custom
+// base_url pointing at a proxy) used to be dropped during config load because
+// the vertexai branch only looked at the VERTEXAI_PROJECT / VERTEXAI_LOCATION
+// env vars and ignored the configured api_key entirely. Once dropped, Crush
+// thought the provider was unconfigured and prompted the user for an API key,
+// even though the same api_key style works for openai/anthropic.
+//
+// With the fix, an api_key keeps the provider alive when the GCP env vars are
+// absent, matching the generic-provider behavior.
+func TestConfig_configureProvidersVertexAIWithAPIKey(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderVertexAI,
+			APIKey:      "test-api-key",                     // user configured an api_key
+			APIEndpoint: "https://vertex-proxy.example.com", // custom proxy base_url
+			Models: []catwalk.Model{{
+				ID: "gemini-pro",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	// No VERTEXAI_PROJECT / VERTEXAI_LOCATION on purpose: the user is
+	// authenticating via api_key + proxy, not native GCP credentials.
+	env := env.NewFromMap(map[string]string{})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Providers.Len(),
+		"vertexai provider with an api_key must be kept (issue #3074)")
+
+	vertexProvider, ok := cfg.Providers.Get("vertexai")
+	require.True(t, ok, "VertexAI provider should be present")
+	require.Equal(t, "test-api-key", vertexProvider.APIKey)
+	require.Equal(t, "https://vertex-proxy.example.com", vertexProvider.BaseURL)
+	require.Empty(t, vertexProvider.ExtraParams["project"], "no GCP project expected when authenticating via api_key")
+	require.Empty(t, vertexProvider.ExtraParams["location"])
+}
+
 func TestConfig_configureProvidersSetProviderID(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

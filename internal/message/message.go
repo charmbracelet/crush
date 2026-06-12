@@ -65,6 +65,9 @@ type Service interface {
 	// message known to the service. Intended for shutdown and
 	// session-switch paths.
 	FlushAll(ctx context.Context) error
+
+	DeleteMessagesAfter(ctx context.Context, sessionID, messageID string) error
+	RestoreMessages(ctx context.Context, messages []Message) error
 }
 
 // pendingState holds the in-memory coalescing buffer for a single
@@ -206,6 +209,50 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 			if err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// DeleteMessagesAfter deletes all messages in the session at or after the
+// given message ID.
+func (s *service) DeleteMessagesAfter(ctx context.Context, sessionID, messageID string) error {
+	return s.q.DeleteMessagesAfter(ctx, db.DeleteMessagesAfterParams{
+		SessionID: sessionID,
+		ID:        messageID,
+	})
+}
+
+// RestoreMessages re-inserts previously deleted messages, preserving their
+// original IDs and timestamps so the conversation order is maintained.
+func (s *service) RestoreMessages(ctx context.Context, messages []Message) error {
+	for _, msg := range messages {
+		partsJSON, err := marshalParts(msg.Parts)
+		if err != nil {
+			return err
+		}
+		finishedAt := sql.NullInt64{}
+		if f := msg.FinishPart(); f != nil {
+			finishedAt.Int64 = f.Time
+			finishedAt.Valid = true
+		}
+		isSummary := int64(0)
+		if msg.IsSummaryMessage {
+			isSummary = 1
+		}
+		if err := s.q.RestoreMessage(ctx, db.RestoreMessageParams{
+			ID:               msg.ID,
+			SessionID:        msg.SessionID,
+			Role:             string(msg.Role),
+			Parts:            string(partsJSON),
+			Model:            sql.NullString{String: msg.Model, Valid: msg.Model != ""},
+			Provider:         sql.NullString{String: msg.Provider, Valid: msg.Provider != ""},
+			IsSummaryMessage: isSummary,
+			CreatedAt:        msg.CreatedAt,
+			UpdatedAt:        msg.UpdatedAt,
+			FinishedAt:       finishedAt,
+		}); err != nil {
+			return err
 		}
 	}
 	return nil

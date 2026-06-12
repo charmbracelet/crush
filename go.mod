@@ -8,8 +8,8 @@ require (
 	charm.land/catwalk v0.44.14
 	charm.land/fang/v2 v2.0.1
 	charm.land/fantasy v0.31.0
-	charm.land/glamour/v2 v2.0.0
-	charm.land/lipgloss/v2 v2.0.3
+	charm.land/glamour/v2 v2.0.1
+	charm.land/lipgloss/v2 v2.0.4
 	charm.land/log/v2 v2.0.0
 	charm.land/x/vcr v0.1.1
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0

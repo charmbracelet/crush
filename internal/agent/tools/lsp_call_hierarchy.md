@@ -1,0 +1,1 @@
+Show the call hierarchy for a symbol — either incoming calls (who calls this) or outgoing calls (what does this call). Uses LSP call hierarchy protocol for accurate, language-aware results. Returns a tree showing callers/callees with file paths and line numbers.

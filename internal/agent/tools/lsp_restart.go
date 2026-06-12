@@ -29,10 +29,6 @@ func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		LSPRestartToolName,
 		lspRestartDescription,
 		func(ctx context.Context, params LSPRestartParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if lspManager.Clients().Len() == 0 {
-				return fantasy.NewTextErrorResponse("no LSP clients available to restart"), nil
-			}
-
 			clientsToRestart := make(map[string]*lsp.Client)
 			if params.Name == "" {
 				maps.Insert(clientsToRestart, lspManager.Clients().Seq2())
@@ -42,6 +38,10 @@ func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("LSP client '%s' not found", params.Name)), nil
 				}
 				clientsToRestart[params.Name] = client
+			}
+
+			if len(clientsToRestart) == 0 {
+				return fantasy.NewTextResponse("No LSP clients to restart"), nil
 			}
 
 			var restarted []string

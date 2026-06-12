@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	"github.com/charmbracelet/crush/internal/oauth/xai"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
@@ -25,13 +26,16 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: hyper, copilot.`,
+Available platforms are: hyper, copilot, xai.`,
 	Example: `
 # Authenticate with Charm Hyper
 crush login
 
 # Authenticate with GitHub Copilot
 crush login copilot
+
+# Authenticate with xAI (Grok)
+crush login xai
 
 # Force re-authentication even if already logged in
 crush login -f copilot
@@ -41,6 +45,8 @@ crush login -f copilot
 		"copilot",
 		"github",
 		"github-copilot",
+		"xai",
+		"grok",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,6 +72,8 @@ crush login -f copilot
 			return loginHyper(c, ws.ID, force)
 		case "copilot", "github", "github-copilot":
 			return loginCopilot(c, ws.ID, force)
+		case "xai", "grok":
+			return loginXAI(c, ws.ID, force)
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
@@ -214,6 +222,55 @@ func loginCopilot(c *client.Client, wsID string, force bool) error {
 
 	fmt.Println()
 	fmt.Println("You're now authenticated with GitHub Copilot!")
+	return nil
+}
+
+func loginXAI(c *client.Client, wsID string, force bool) error {
+	ctx := getLoginContext()
+
+	if !force {
+		cfg, err := c.GetConfig(ctx, wsID)
+		if err == nil && cfg != nil {
+			if pc, ok := cfg.Providers.Get("xai"); ok && pc.OAuthToken != nil {
+				fmt.Println("You are already logged in to xAI.")
+				fmt.Println("Use --force to re-authenticate.")
+				return nil
+			}
+		}
+	}
+
+	fmt.Println("Starting xAI OAuth...")
+	auth, err := xai.NewAuthorizer(ctx)
+	if err != nil {
+		return err
+	}
+	defer auth.Close()
+
+	fmt.Println()
+	fmt.Println("Press enter to open this URL in your browser and sign in to xAI:")
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Hyperlink(auth.AuthURL, "id=xai").Render(auth.AuthURL))
+	fmt.Println()
+	waitEnter()
+	if err := browser.OpenURL(auth.AuthURL); err != nil {
+		fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
+	}
+
+	fmt.Println("Waiting for authorization...")
+	token, err := auth.Wait(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := cmp.Or(
+		c.SetConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.api_key", token.AccessToken),
+		c.SetConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.oauth", token),
+	); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("You're now authenticated with xAI!")
 	return nil
 }
 

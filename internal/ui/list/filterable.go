@@ -1,6 +1,8 @@
 package list
 
 import (
+	"strings"
+
 	"github.com/sahilm/fuzzy"
 )
 
@@ -68,7 +70,7 @@ func (f *FilterableList) PrependItems(items ...FilterableItem) {
 
 // SetFilter sets the filter query and updates the list items.
 func (f *FilterableList) SetFilter(q string) {
-	f.query = q
+	f.query = strings.Join(strings.Fields(q), " ")
 	f.List.SetItems(f.FilteredItems()...)
 	f.ScrollToTop()
 }

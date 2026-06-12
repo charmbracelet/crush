@@ -13,7 +13,8 @@ func TestOption_Bool(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option debug true
-option progress false`
+option progress false
+option algorithmic-compaction`
 	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
@@ -25,6 +26,7 @@ option progress false`
 	opts := result["options"].(map[string]any)
 	require.Equal(t, true, opts["debug"])
 	require.Equal(t, false, opts["progress"])
+	require.Equal(t, true, opts["algorithmic_compaction"])
 }
 
 func TestOption_BoolCaseInsensitive(t *testing.T) {

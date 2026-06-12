@@ -33,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
@@ -107,11 +108,13 @@ type coordinator struct {
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
+	questions   question.Service
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
+	interactive bool
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -124,49 +127,57 @@ type coordinator struct {
 	readyWg errgroup.Group
 }
 
-func NewCoordinator(
-	ctx context.Context,
-	cfg *config.ConfigStore,
-	sessions session.Service,
-	messages message.Service,
-	permissions permission.Service,
-	history history.Service,
-	filetracker filetracker.Service,
-	lspManager *lsp.Manager,
-	notify pubsub.Publisher[notify.Notification],
-	runComplete pubsub.Publisher[notify.RunComplete],
-	skillsMgr *skills.Manager,
-) (Coordinator, error) {
+// CoordinatorOptions holds the dependencies for NewCoordinator. Using a
+// struct keeps the constructor self-documenting and avoids a long
+// positional parameter list.
+type CoordinatorOptions struct {
+	Config      *config.ConfigStore
+	Sessions    session.Service
+	Messages    message.Service
+	Permissions permission.Service
+	Questions   question.Service
+	History     history.Service
+	FileTracker filetracker.Service
+	LSPManager  *lsp.Manager
+	Notify      pubsub.Publisher[notify.Notification]
+	RunComplete pubsub.Publisher[notify.RunComplete]
+	Skills      *skills.Manager
+	Interactive bool
+}
+
+func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
 	// manager was provided (legacy callers), fall back to an in-line
 	// discovery so the coordinator still works.
 	var allSkills, activeSkills []*skills.Skill
-	if skillsMgr != nil {
-		allSkills = skillsMgr.AllSkills()
-		activeSkills = skillsMgr.ActiveSkills()
+	if opts.Skills != nil {
+		allSkills = opts.Skills.AllSkills()
+		activeSkills = opts.Skills.ActiveSkills()
 	} else {
-		allSkills, activeSkills = discoverSkills(cfg)
+		allSkills, activeSkills = discoverSkills(opts.Config)
 	}
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          cfg,
-		sessions:     sessions,
-		messages:     messages,
-		permissions:  permissions,
-		history:      history,
-		filetracker:  filetracker,
-		lspManager:   lspManager,
-		notify:       notify,
-		runComplete:  runComplete,
+		cfg:          opts.Config,
+		sessions:     opts.Sessions,
+		messages:     opts.Messages,
+		permissions:  opts.Permissions,
+		questions:    opts.Questions,
+		history:      opts.History,
+		filetracker:  opts.FileTracker,
+		lspManager:   opts.LSPManager,
+		notify:       opts.Notify,
+		runComplete:  opts.RunComplete,
 		agents:       make(map[string]SessionAgent),
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
+		interactive:  opts.Interactive,
 	}
 
-	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
+	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil, errCoderAgentNotConfigured
 	}
@@ -622,6 +633,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
+
+	// Question tool is interactive-only and not available to sub-agents.
+	if !isSubAgent && c.interactive {
+		allTools = append(allTools, tools.NewQuestionTool(c.questions))
+	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {

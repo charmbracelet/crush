@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -68,6 +69,26 @@ func wrapEvent(ev any) *pubsub.Payload {
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
+			},
+		})
+	case pubsub.Event[question.Request]:
+		slog.Info("Wrapping question batch event for SSE", "id", e.Payload.ID, "questions", len(e.Payload.Questions))
+		return envelope(pubsub.PayloadTypeQuestionRequest, pubsub.Event[proto.QuestionRequest]{
+			Type: e.Type,
+			Payload: proto.QuestionRequest{
+				ID:                 e.Payload.ID,
+				SessionID:          e.Payload.SessionID,
+				ToolCallID:         e.Payload.ToolCallID,
+				Questions:          questionsToProto(e.Payload.Questions),
+				ConfirmTitle:       e.Payload.ConfirmTitle,
+				ConfirmDescription: e.Payload.ConfirmDescription,
+			},
+		})
+	case pubsub.Event[question.Notification]:
+		return envelope(pubsub.PayloadTypeQuestionNotification, pubsub.Event[proto.QuestionNotification]{
+			Type: e.Type,
+			Payload: proto.QuestionNotification{
+				BatchID: e.Payload.BatchID,
 			},
 		})
 	case pubsub.Event[message.Message]:
@@ -300,6 +321,32 @@ func messagesToProto(msgs []message.Message) []proto.Message {
 	out := make([]proto.Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = messageToProto(m)
+	}
+	return out
+}
+
+func questionsToProto(qs []question.Question) []proto.QuestionItem {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]proto.QuestionItem, len(qs))
+	for i, q := range qs {
+		choices := make([]proto.QuestionChoice, len(q.Choices))
+		for j, c := range q.Choices {
+			choices[j] = proto.QuestionChoice{
+				ID:          c.ID,
+				Label:       c.Label,
+				Description: c.Description,
+			}
+		}
+		out[i] = proto.QuestionItem{
+			ID:          q.ID,
+			Type:        string(q.Type),
+			Label:       q.Label,
+			Question:    q.Text,
+			Description: q.Description,
+			Choices:     choices,
+		}
 	}
 	return out
 }

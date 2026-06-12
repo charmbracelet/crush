@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -175,6 +176,10 @@ func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
 }
 
+func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
+	return w.app.InitCoderAgentNonInteractive(ctx)
+}
+
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	return w.app.GetDefaultSmallModel(providerID)
 }
@@ -199,6 +204,12 @@ func (w *AppWorkspace) PermissionSkipRequests() bool {
 
 func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.app.Permissions.SetSkipRequests(skip)
+}
+
+// -- Questions --
+
+func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	return w.app.Questions.Answer(responses)
 }
 
 // -- FileTracker --

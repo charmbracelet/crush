@@ -140,13 +140,16 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 }
 
 // InitAgent initializes the coder agent for the workspace.
-func (b *Backend) InitAgent(ctx context.Context, workspaceID string) error {
+func (b *Backend) InitAgent(ctx context.Context, workspaceID string, interactive bool) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
 
-	return ws.InitCoderAgent(ctx)
+	if interactive {
+		return ws.InitCoderAgent(ctx)
+	}
+	return ws.InitCoderAgentNonInteractive(ctx)
 }
 
 // UpdateAgent reloads the agent model configuration.

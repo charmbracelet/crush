@@ -137,6 +137,7 @@ type SessionAgent interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
+	AlgorithmicSummarize(context.Context, string) error
 	Model() Model
 }
 
@@ -1097,7 +1098,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return nil, createErr
 			}
 		}
-		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
@@ -1121,7 +1121,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			} else {
 				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
 			}
-		} else if errors.As(err, &fantasyErr) {
+		} else if fantasyErr, ok := errors.AsType[*fantasy.Error](err); ok {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
 		} else {
 			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
@@ -1137,7 +1137,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
+		var summarizeErr error
+		if os.Getenv("CRUSH_ALGORITHMIC_COMPACT") == "1" {
+			summarizeErr = a.AlgorithmicSummarize(genCtx, call.SessionID)
+		} else {
+			summarizeErr = a.Summarize(genCtx, call.SessionID, call.ProviderOptions)
+		}
+		if summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1321,9 +1327,24 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	thinkingEnabled := largeModel.CatwalkCfg.CanReason && largeModel.ModelCfg.Think
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos, thinkingEnabled)
 
-	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
+	// Route <analysis> blocks to reasoning display, everything else to content.
+	// For non-thinking models, the prompt instructs the model to use <analysis> tags.
+	// For thinking models, this is a defensive safety net for tags that leak into text.
+	router := newAnalysisRouter(
+		func(text string) error {
+			summaryMessage.AppendReasoningContent(text)
+			return a.messages.Update(genCtx, summaryMessage)
+		},
+		func(text string) error {
+			summaryMessage.AppendContent(text)
+			return a.messages.Update(genCtx, summaryMessage)
+		},
+	)
+
+	streamCall := fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
@@ -1349,10 +1370,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnTextDelta: func(id, text string) error {
-			summaryMessage.AppendContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
+			return router.write(text)
 		},
-	})
+	}
+
+	resp, err := agent.Stream(genCtx, streamCall)
+	if flushErr := router.flush(); flushErr != nil && err == nil {
+		err = flushErr
+	}
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		if isCancelErr {
@@ -1626,6 +1651,12 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		if summaryMsgIndex != -1 {
 			msgs = msgs[summaryMsgIndex:]
 			msgs[0].Role = message.User
+			// Strip <analysis> scratch space blocks from the summary text.
+			for i, part := range msgs[0].Parts {
+				if tc, ok := part.(message.TextContent); ok {
+					msgs[0].Parts[i] = message.TextContent{Text: stripAnalysisBlock(tc.Text)}
+				}
+			}
 		}
 	}
 	return msgs, nil
@@ -2089,9 +2120,15 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo) string {
+func buildSummaryPrompt(todos []session.Todo, thinkingEnabled bool) string {
 	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
+	if thinkingEnabled {
+		sb.WriteString("Summarize our conversation above following the instructions in the system prompt.\n")
+		sb.WriteString("Use your reasoning/thinking block to analyze what to preserve before writing the summary.")
+	} else {
+		sb.WriteString("Summarize our conversation above following the instructions in the system prompt.\n")
+		sb.WriteString("Wrap your analysis in <analysis> tags before writing the summary. These will be displayed as thinking.")
+	}
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {

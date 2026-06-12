@@ -129,6 +129,26 @@ type Finish struct {
 
 func (Finish) isPart() {}
 
+// ShellCommand stores a bang-mode shell command and its output as a
+// distinct content part so it can be reconstructed on session restore.
+type ShellCommand struct {
+	Command  string `json:"command"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
+
+func (ShellCommand) isPart() {}
+
+// HasShellCommand reports whether the message contains any ShellCommand parts.
+func (m *Message) HasShellCommand() bool {
+	for _, part := range m.Parts {
+		if _, ok := part.(ShellCommand); ok {
+			return true
+		}
+	}
+	return false
+}
+
 type Message struct {
 	ID               string
 	Role             MessageRole

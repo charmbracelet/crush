@@ -17,7 +17,9 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
@@ -103,6 +105,37 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 	}
 	_, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	return err
+}
+
+func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int) (proto.ShellCommandResponse, error) {
+	var persist shell.PersistFunc
+	if sessionID != "" {
+		persist = func(cmd, output string, exitCode int) error {
+			_, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
+				Role: message.User,
+				Parts: []message.ContentPart{message.ShellCommand{
+					Command:  cmd,
+					Output:   output,
+					ExitCode: exitCode,
+				}},
+			})
+			return err
+		}
+	}
+
+	result, err := shell.RunAndPersist(ctx, shell.RunOptions{
+		Command:   command,
+		Cwd:       w.store.WorkingDir(),
+		TermWidth: termWidth,
+	}, persist)
+	if err != nil {
+		return proto.ShellCommandResponse{}, err
+	}
+
+	return proto.ShellCommandResponse{
+		Output:   result.Output,
+		ExitCode: result.ExitCode,
+	}, nil
 }
 
 func (w *AppWorkspace) AgentCancel(sessionID string) {

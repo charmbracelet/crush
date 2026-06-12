@@ -734,6 +734,22 @@
           ],
           "description": "Diff mode for the TUI interface"
         },
+        "active_theme": {
+          "type": "string",
+          "description": "Name of the currently active theme",
+          "default": "charmtone",
+          "examples": [
+            "charmtone",
+            "gruvbox-dark"
+          ]
+        },
+        "theme": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ThemeConfig"
+          },
+          "type": "object",
+          "description": "Map of theme name to palette overrides. Built-in themes use empty objects; custom themes specify palette colors."
+        },
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
@@ -742,6 +758,15 @@
           "type": "boolean",
           "description": "Enable transparent background for the TUI interface",
           "default": false
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ThemeConfig": {
+      "properties": {
+        "base": {
+          "type": "string"
         }
       },
       "additionalProperties": false,

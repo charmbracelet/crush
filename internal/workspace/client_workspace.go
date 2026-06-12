@@ -457,6 +457,15 @@ func (w *ClientWorkspace) SetConfigField(scope config.Scope, key string, value a
 	return err
 }
 
+func (w *ClientWorkspace) SetConfigFields(scope config.Scope, fields map[string]any) error {
+	for key, value := range fields {
+		if err := w.SetConfigField(scope, key, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) error {
 	err := w.client.RemoveConfigField(context.Background(), w.workspaceID(), scope, key)
 	if err == nil {

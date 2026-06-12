@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
@@ -57,8 +58,24 @@ type (
 		Style string
 	}
 	ActionToggleTransparentBackground struct{}
-	ActionInitializeProject           struct{}
-	ActionSummarize                   struct {
+	ActionSwitchTheme                 struct {
+		Theme string
+	}
+	ActionPreviewTheme struct {
+		Theme string
+	}
+	ActionRevertThemePreview  struct{}
+	ActionPreviewThemePalette struct {
+		Base    string
+		Palette styles.Palette
+	}
+	ActionSaveThemePalette struct {
+		Base    string
+		Palette styles.Palette
+	}
+	ActionRevertThemePalette struct{}
+	ActionInitializeProject  struct{}
+	ActionSummarize          struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

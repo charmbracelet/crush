@@ -3,6 +3,7 @@ package config
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -212,13 +213,99 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
+	CompactMode bool                   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string                 `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	ActiveTheme string                 `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone,example=charmtone,example=gruvbox-dark"`
+	Theme       map[string]ThemeConfig `json:"theme,omitempty" jsonschema:"description=Map of theme name to palette overrides. Built-in themes use empty objects; custom themes specify palette colors."`
+	Completions Completions            `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool                  `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+}
 
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+// ThemeConfig stores palette overrides for a single theme. Empty objects
+// use the built-in theme with no modifications. Objects with fields
+// override specific palette colors on top of the base theme (if specified).
+type ThemeConfig struct {
+	Base      string          `json:"base,omitempty"`
+	RawObject json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON accepts an object containing palette overrides plus an
+// optional base field. For backward compatibility, also accepts a string
+// (theme name) which is converted to {"base": "theme_name"}.
+func (t *ThemeConfig) UnmarshalJSON(data []byte) error {
+	*t = ThemeConfig{}
+	if string(data) == "null" {
+		return nil
+	}
+
+	// Backward compatibility: accept string format
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		// Old format: "theme": "charmtone"
+		// Convert to new format: {"base": "charmtone"}
+		t.Base = str
+		t.RawObject = append(t.RawObject[:0], []byte(`{"base":"`+str+`"}`)...)
+		return nil
+	}
+
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return fmt.Errorf("theme config must be an object: %w", err)
+	}
+	if base, ok := obj["base"].(string); ok {
+		t.Base = base
+	}
+	t.RawObject = append(t.RawObject[:0], data...)
+	return nil
+}
+
+// MarshalJSON preserves the original representation.
+func (t ThemeConfig) MarshalJSON() ([]byte, error) {
+	if len(t.RawObject) > 0 {
+		return t.RawObject, nil
+	}
+	return json.Marshal(struct{}{})
+}
+
+// Name returns the base theme name if specified, otherwise empty string.
+func (t ThemeConfig) Name() string {
+	return t.Base
+}
+
+// IsObject reports whether this theme config has palette overrides.
+// IsObject reports whether this theme config has palette overrides.
+func (t ThemeConfig) IsObject() bool {
+	if len(t.RawObject) == 0 {
+		return false
+	}
+	// Check if RawObject has any fields beyond "base"
+	var obj map[string]any
+	if err := json.Unmarshal(t.RawObject, &obj); err != nil {
+		return false
+	}
+	// Has overrides if there are fields other than "base"
+	for key := range obj {
+		if key != "base" {
+			return true
+		}
+	}
+	return false
+}
+
+// IsZero reports whether the theme config is unset (empty object).
+func (t ThemeConfig) IsZero() bool {
+	if t.Base != "" {
+		return false
+	}
+	if len(t.RawObject) == 0 {
+		return true
+	}
+	// Check if RawObject is an empty object {}
+	var obj map[string]any
+	if err := json.Unmarshal(t.RawObject, &obj); err != nil {
+		return false
+	}
+	return len(obj) == 0
 }
 
 // Completions defines options for the completions UI.

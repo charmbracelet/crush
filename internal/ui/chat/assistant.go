@@ -256,7 +256,7 @@ func (a *AssistantMessageItem) Spinning() bool {
 // restyleAnim implements [animRestyler].
 func (a *AssistantMessageItem) restyleAnim() {
 	a.anim.SetColors(
-		a.sty.WorkingLabelColor,
+		a.sty.ThinkingLabelColor,
 		a.sty.WorkingGradFromColor,
 		a.sty.WorkingGradToColor,
 		a.sty.WorkingTimerColor,
@@ -767,9 +767,9 @@ func (a *AssistantMessageItem) renderMarkdown(content string, width int) string 
 
 func (a *AssistantMessageItem) renderSpinning() string {
 	if a.message.IsThinking() {
-		a.anim.SetLabel("Thinking")
+		a.anim.SetLabel("Thinking…")
 	} else if a.message.IsSummaryMessage {
-		a.anim.SetLabel("Summarizing")
+		a.anim.SetLabel("Summarizing…")
 	}
 	return a.anim.Render()
 }

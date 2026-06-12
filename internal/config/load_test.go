@@ -552,6 +552,46 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 	require.Equal(t, cfg.Providers.Len(), 0)
 }
 
+// TestConfig_configureProvidersVertexAIWithAPIKey reproduces issue #3074:
+// a Vertex AI provider configured with an api_key (and a custom base_url
+// pointing at a proxy) is dropped during config load because the vertexai
+// branch only looks at the VERTEXAI_PROJECT / VERTEXAI_LOCATION env vars and
+// ignores the configured api_key entirely. Once the provider is dropped,
+// Crush thinks it is unconfigured and prompts the user for an API key.
+//
+// The same api_key style works for openai/anthropic because they go through
+// the generic branch that resolves p.APIKey.
+//
+// This test documents the CURRENT (buggy) behavior: the provider is dropped
+// even though a valid api_key is present. After the fix, the provider should
+// be kept (flip the assertion to Len() == 1).
+func TestConfig_configureProvidersVertexAIWithAPIKey(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderVertexAI,
+			APIKey:      "test-api-key",                     // user configured an api_key
+			APIEndpoint: "https://vertex-proxy.example.com", // custom proxy base_url
+			Models: []catwalk.Model{{
+				ID: "gemini-pro",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	// No VERTEXAI_PROJECT / VERTEXAI_LOCATION on purpose: the user is
+	// authenticating via api_key + proxy, not native GCP credentials.
+	env := env.NewFromMap(map[string]string{})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	// BUG #3074: the provider is dropped despite a configured api_key.
+	// This assertion PASSES today, which is exactly the bug.
+	require.Equal(t, 0, cfg.Providers.Len(),
+		"BUG #3074")
+}
+
 func TestConfig_configureProvidersSetProviderID(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

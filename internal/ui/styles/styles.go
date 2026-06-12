@@ -154,6 +154,8 @@ type Styles struct {
 	WorkingGradFromColor color.Color
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
+	ThinkingLabelColor   color.Color // Label text color for thinking/summarizing spinners
+	CanceledLabelColor   color.Color // Label text color for canceled prompts
 
 	// Section Title
 	Section struct {

@@ -165,7 +165,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		Size:        15,
 		GradColorA:  sty.WorkingGradFromColor,
 		GradColorB:  sty.WorkingGradToColor,
-		LabelColor:  sty.WorkingLabelColor,
+		LabelColor:  sty.ThinkingLabelColor,
 		CycleColors: true,
 	})
 	return a
@@ -515,9 +515,9 @@ func (a *AssistantMessageItem) renderMarkdown(content string, width int) string 
 
 func (a *AssistantMessageItem) renderSpinning() string {
 	if a.message.IsThinking() {
-		a.anim.SetLabel("Thinking")
+		a.anim.SetLabel("Thinking…")
 	} else if a.message.IsSummaryMessage {
-		a.anim.SetLabel("Summarizing")
+		a.anim.SetLabel("Summarizing…")
 	}
 	return a.anim.Render()
 }

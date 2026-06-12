@@ -76,6 +76,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.WorkingGradFromColor = o.primary
 	s.WorkingGradToColor = o.secondary
 	s.WorkingLabelColor = o.fgBase
+	s.ThinkingLabelColor = o.fgMoreSubtle
+	s.CanceledLabelColor = o.fgMoreSubtle
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{
@@ -808,7 +810,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
-	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
+	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(s.CanceledLabelColor).Italic(true)
 
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)

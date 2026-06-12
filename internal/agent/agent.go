@@ -1007,7 +1007,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return false
 			},
 			func(steps []fantasy.StepResult) bool {
-				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
+				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) ||
+					hasRepeatedToolErrors(steps, errorLoopDetectionMaxRepeats)
 			},
 		},
 	})

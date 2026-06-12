@@ -306,15 +306,19 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				project  = env.Get("VERTEXAI_PROJECT")
 				location = env.Get("VERTEXAI_LOCATION")
 			)
-			if project == "" || location == "" {
+			if project != "" && location != "" {
+				prepared.ExtraParams["project"] = project
+				prepared.ExtraParams["location"] = location
+			} else if v, err := resolver.ResolveValue(p.APIKey); v == "" || err != nil {
+				// Without native GCP credentials an API key works like any
+				// other provider (e.g. against a Gemini-API-compatible
+				// proxy); only drop the provider when neither is available.
 				if configExists {
-					slog.Warn("Skipping Vertex AI provider due to missing credentials")
+					slog.Warn("Skipping Vertex AI provider: no VERTEXAI_PROJECT/VERTEXAI_LOCATION and no usable api_key", "provider", p.ID, "error", err)
 					c.Providers.Del(string(p.ID))
 				}
 				continue
 			}
-			prepared.ExtraParams["project"] = project
-			prepared.ExtraParams["location"] = location
 		case catwalk.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {

@@ -1,48 +1,40 @@
-You are summarizing a conversation to preserve context for continuing work later.
+You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume this task.
 
-**Critical**: This summary will be the ONLY context available when the conversation resumes. Assume all previous messages will be lost. Be thorough.
+**This summary will be ONLY context available when work resumes.** All previous messages will be replaced by this summary.
 
-**Required sections**:
+## Instructions
 
-## Current State
+Before writing the summary, analyze the conversation. Think through:
+- What is the user's actual goal?
+- What has been accomplished vs what remains?
+- What errors were encountered and how were they resolved?
+- What files are most important for continuing?
+- What would a new assistant need to know to avoid repeating mistakes?
 
-- What task is being worked on (exact user request)
-- Current progress and what's been completed
-- What's being worked on right now (incomplete work)
-- What remains to be done (specific next steps, not vague)
+## Constraints
 
-## Files & Changes
+- **Length budget: ~1500 tokens maximum.** Be concise. Every token in this summary consumes space needed for future work.
+- Include exact file paths and line numbers where applicable.
+- Include commands that worked (exact syntax). Skip commands that failed unless the failure reveals an important constraint.
+- Preserve code snippets only when they represent non-obvious patterns or critical state. Don't reproduce entire files.
+- If there is a todo list, include task statuses using standard markdown checkboxes: `- [x]` for completed, `- [ ]` for pending/in-progress. The resuming assistant will also see the todo list separately via the `todos` tool.
+- Write as if briefing a teammate taking over mid-task. No emojis. No filler.
 
-- Files that were modified (with brief description of changes)
-- Files that were read/analyzed (why they're relevant)
-- Key files not yet touched but will need changes
-- File paths and line numbers for important code locations
+## Output Format
 
-## Technical Context
+Use exactly these section headings. Do not add extra sections.
 
-- Architecture decisions made and why
-- Patterns being followed (with examples)
-- Libraries/frameworks being used
-- Commands that worked (exact commands with context)
-- Commands that failed (what was tried and why it didn't work)
-- Environment details (language versions, dependencies, etc.)
+### Goal
+(One sentence: what the user asked for)
 
-## Strategy & Approach
+### Completed
+(Numbered list of what was done, with file paths)
 
-- Overall approach being taken
-- Why this approach was chosen over alternatives
-- Key insights or gotchas discovered
-- Assumptions made
-- Any blockers or risks identified
+### Errors & Fixes
+(Bullet list. Only include errors that affected the current approach or revealed important constraints. Skip transient failures that were immediately resolved.)
 
-## Exact Next Steps
+### Remaining
+(Specific next steps with file paths and line numbers. Not "implement auth" but "add JWT middleware to src/middleware/auth.js:15")
 
-Be specific. Don't write "implement authentication" - write:
-
-1. Add JWT middleware to src/middleware/auth.js:15
-2. Update login handler in src/routes/user.js:45 to return token
-3. Test with: npm test -- auth.test.js
-
-**Tone**: Write as if briefing a teammate taking over mid-task. Include everything they'd need to continue without asking questions. No emojis ever.
-
-**Length**: No limit. Err on the side of too much detail rather than too little. Critical context is worth the tokens.
+### Key Paths
+(List of files most relevant to continuing work)

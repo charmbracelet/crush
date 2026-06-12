@@ -1439,6 +1439,9 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
+	if os.Getenv("CRUSH_ALGORITHMIC_COMPACT") == "1" {
+		return agent.AlgorithmicSummarize(ctx, sessionID)
+	}
 	return agent.Summarize(ctx, sessionID, getProviderOptions(agent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
 }
 

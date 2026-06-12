@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 )
 
 // NewForTest constructs a minimal [App] suitable for in-process tests
@@ -29,6 +30,7 @@ import (
 func NewForTest(ctx context.Context) *App {
 	app := &App{
 		Permissions:        permission.NewPermissionService("", false, nil),
+		Questions:          question.NewService(),
 		globalCtx:          ctx,
 		events:             pubsub.NewBroker[tea.Msg](),
 		serviceEventsWG:    &sync.WaitGroup{},

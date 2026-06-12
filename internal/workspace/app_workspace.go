@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -160,6 +161,13 @@ func (w *AppWorkspace) AgentClearQueue(sessionID string) {
 	}
 }
 
+func (w *AppWorkspace) AgentSetMain(agentID string) error {
+	if w.app.AgentCoordinator == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	return w.app.AgentCoordinator.SetMainAgent(agentID)
+}
+
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
 	if w.app.AgentCoordinator == nil {
 		return errors.New("agent coordinator not initialized")
@@ -199,6 +207,12 @@ func (w *AppWorkspace) PermissionSkipRequests() bool {
 
 func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.app.Permissions.SetSkipRequests(skip)
+}
+
+// -- Questions --
+
+func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	return w.app.Questions.Answer(responses)
 }
 
 // -- FileTracker --

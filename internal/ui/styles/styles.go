@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 const (
@@ -91,6 +92,7 @@ type Styles struct {
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
 	QuietMarkdown ansi.StyleConfig
+	PlanMarkdown  ansi.StyleConfig
 
 	// Inputs
 	TextInput textinput.Styles
@@ -106,8 +108,10 @@ type Styles struct {
 
 	// Buttons
 	Button struct {
-		Focused lipgloss.Style
-		Blurred lipgloss.Style
+		Focused  lipgloss.Style
+		Blurred  lipgloss.Style
+		Hovered  lipgloss.Style
+		Negative lipgloss.Style // Selected negative/destructive action.
 	}
 
 	// Editor
@@ -123,6 +127,22 @@ type Styles struct {
 		PromptYoloIconBlurred lipgloss.Style
 		PromptYoloDotsFocused lipgloss.Style
 		PromptYoloDotsBlurred lipgloss.Style
+
+		// Question mode prompt (" ? " icon + ":::" dots).
+		PromptQuestionIconFocused lipgloss.Style
+		PromptQuestionIconBlurred lipgloss.Style
+
+		// Question choice styling.
+		QuestionSelected   lipgloss.Style // Active choice text (Dolly).
+		QuestionUnselected lipgloss.Style // Inactive header text (Sash).
+		QuestionBody       lipgloss.Style // Description/body text.
+		QuestionConfirm    lipgloss.Style // Confirm tab title (primary).
+		QuestionNote       lipgloss.Style // Saved note text (dimmer than body).
+		QuestionCursorBar  lipgloss.Style // Active cursor indicator bar.
+		QuestionRadioOn    lipgloss.Style // Selected single-choice radio.
+		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
+		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
+		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
 	}
 
 	// Radio
@@ -130,6 +150,17 @@ type Styles struct {
 		On    lipgloss.Style
 		Off   lipgloss.Style
 		Label lipgloss.Style // Text next to a radio button
+	}
+
+	// Tabs for batch question forms. Uses uv types for direct
+	// screen rendering without lipgloss.
+	Tab struct {
+		ActiveBorder          uv.Border
+		InactiveBorder        uv.Border
+		ActiveBorderBlurred   uv.Border
+		InactiveBorderBlurred uv.Border
+		ActiveStyle           uv.Style
+		InactiveStyle         uv.Style
 	}
 
 	// Background
@@ -242,6 +273,9 @@ type Styles struct {
 		ToolCallCompact  lipgloss.Style
 		ToolCallBlurred  lipgloss.Style
 		SectionHeader    lipgloss.Style
+
+		// Plan section styles
+		PlanBox lipgloss.Style // Background+padding for the final plan message
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
@@ -480,7 +514,8 @@ type Styles struct {
 
 	// Status bar and help
 	Status struct {
-		Help lipgloss.Style
+		Help      lipgloss.Style
+		PlanBadge lipgloss.Style
 
 		ErrorIndicator   lipgloss.Style
 		WarnIndicator    lipgloss.Style

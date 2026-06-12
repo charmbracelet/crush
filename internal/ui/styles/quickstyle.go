@@ -11,6 +11,7 @@ import (
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -331,6 +332,35 @@ func quickStyle(o quickStyleOpts) Styles {
 			BlockPrefix: "\n ",
 		},
 	}
+
+	// PlanMarkdown keeps the rich markdown colors but paints the plan-card
+	// background under every primitive, so glamour's per-token SGR resets
+	// cannot punch holes in the card that PlanBox draws around the content.
+	//
+	// H2–H5 in s.Markdown only set Prefix; they rely on glamour inheriting
+	// Color/Bold from the base Heading style. Once withMarkdownBackground
+	// adds BackgroundColor to those primitives, glamour stops inheriting and
+	// the heading text renders without color/bold. Copy them explicitly.
+	planMD := s.Markdown
+	headingColor := hex(o.info)
+	headingBold := new(true)
+	for _, h := range []*ansi.StyleBlock{&planMD.H2, &planMD.H3, &planMD.H4, &planMD.H5} {
+		if h.StylePrimitive.Color == nil {
+			h.StylePrimitive.Color = headingColor
+		}
+		if h.StylePrimitive.Bold == nil {
+			h.StylePrimitive.Bold = headingBold
+		}
+	}
+	// Replace raw markdown prefixes ("## ", "### ", …) with clean indentation so
+	// the plan card doesn't show literal ## / ### characters. H1 keeps its own
+	// distinct box styling; H2 gets no prefix (top-level sections stand on their
+	// own with bold+color); H3–H5 use increasing indentation for hierarchy.
+	planMD.H2.StylePrimitive.Prefix = ""
+	planMD.H3.StylePrimitive.Prefix = "  "
+	planMD.H4.StylePrimitive.Prefix = "    "
+	planMD.H5.StylePrimitive.Prefix = "      "
+	s.PlanMarkdown = withMarkdownBackground(planMD, hex(o.bgLeastVisible))
 
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
 	plainBg := hex(o.bgLeastVisible)
@@ -691,6 +721,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Buttons
 	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
 	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
+	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.fgMostSubtle)
+	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
@@ -699,10 +731,52 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptQuestionIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgBase).Background(o.primary).Bold(true).SetString(" ? ")
+	s.Editor.PromptQuestionIconBlurred = s.Editor.PromptQuestionIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.QuestionSelected = lipgloss.NewStyle().Foreground(o.secondary).Bold(true)
+	s.Editor.QuestionUnselected = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Editor.QuestionBody = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Editor.QuestionConfirm = lipgloss.NewStyle().Foreground(o.primary).Bold(true)
+	s.Editor.QuestionNote = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Editor.QuestionCursorBar = lipgloss.NewStyle().Foreground(o.secondary)
+	s.Editor.QuestionRadioOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
+	s.Editor.QuestionRadioOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
+	s.Editor.QuestionCheckOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
+	s.Editor.QuestionCheckOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 	s.Radio.Label = lipgloss.NewStyle().Foreground(o.fgSubtle)
+
+	// Tabs for batch question forms. All borders use charple
+	// (primary). Active tab has an open bottom that merges with
+	// the content area; inactive tabs have a closed bottom. First
+	// tab gets a right-angle bottom-left corner at draw time.
+	borderColor := uv.Style{Fg: o.primary}
+	inactiveBorder := uv.RoundedBorder().Style(borderColor)
+	inactiveBorder.BottomLeft = uv.Side{Content: "┴", Style: borderColor}
+	inactiveBorder.BottomRight = uv.Side{Content: "┴", Style: borderColor}
+	activeBorder := uv.RoundedBorder().Style(borderColor)
+	activeBorder.Bottom = uv.Side{Content: " ", Style: borderColor}
+	activeBorder.BottomLeft = uv.Side{Content: "┘", Style: borderColor}
+	activeBorder.BottomRight = uv.Side{Content: "└", Style: borderColor}
+
+	s.Tab.ActiveBorder = activeBorder
+	s.Tab.InactiveBorder = inactiveBorder
+
+	blurredBorderColor := uv.Style{Fg: o.fgMoreSubtle}
+	inactiveBorderBlurred := uv.RoundedBorder().Style(blurredBorderColor)
+	inactiveBorderBlurred.BottomLeft = uv.Side{Content: "┴", Style: blurredBorderColor}
+	inactiveBorderBlurred.BottomRight = uv.Side{Content: "┴", Style: blurredBorderColor}
+	activeBorderBlurred := uv.RoundedBorder().Style(blurredBorderColor)
+	activeBorderBlurred.Bottom = uv.Side{Content: " ", Style: blurredBorderColor}
+	activeBorderBlurred.BottomLeft = uv.Side{Content: "┘", Style: blurredBorderColor}
+	activeBorderBlurred.BottomRight = uv.Side{Content: "└", Style: blurredBorderColor}
+	s.Tab.ActiveBorderBlurred = activeBorderBlurred
+	s.Tab.InactiveBorderBlurred = inactiveBorderBlurred
+
+	s.Tab.ActiveStyle = uv.Style{Fg: o.fgBase}
+	s.Tab.InactiveStyle = uv.Style{Fg: o.fgMoreSubtle}
 
 	// Logo
 	s.Logo.FieldColor = o.primary
@@ -810,6 +884,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoDuration = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
 
+	// Plan section styles
+	s.Messages.PlanBox = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLeastVisible).Padding(1, 2)
+
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted
@@ -907,6 +984,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
+	s.Status.PlanBadge = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.primary).Padding(0, 1).Bold(true)
 	s.Status.SuccessIndicator = base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")
 	s.Status.InfoIndicator = s.Status.SuccessIndicator
 	s.Status.UpdateIndicator = s.Status.SuccessIndicator.SetString("HEY!")
@@ -950,4 +1028,60 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Pills.Area = base
 
 	return s
+}
+
+// withMarkdownBackground returns a copy of cfg with bg applied to every style
+// primitive that does not already set its own background, so glamour paints an
+// uninterrupted background under all rendered text. Primitives that carry an
+// intentional background of their own (e.g. H1, inline code) keep it.
+//
+// The CodeBlock Chroma section is nilled out so that code blocks render without
+// per-token syntax highlighting. The xchroma formatter is registered globally
+// with a nil/zero background colour; each token's SGR reset would otherwise
+// punch a hole in the CodeBlock background mid-line. Removing Chroma from this
+// style lets glamour fall back to plain-text rendering for code blocks, which
+// keeps the background uninterrupted.
+func withMarkdownBackground(cfg ansi.StyleConfig, bg *string) ansi.StyleConfig {
+	for _, p := range []*ansi.StylePrimitive{
+		&cfg.Document.StylePrimitive,
+		&cfg.BlockQuote.StylePrimitive,
+		&cfg.Paragraph.StylePrimitive,
+		&cfg.Heading.StylePrimitive,
+		&cfg.H1.StylePrimitive,
+		&cfg.H2.StylePrimitive,
+		&cfg.H3.StylePrimitive,
+		&cfg.H4.StylePrimitive,
+		&cfg.H5.StylePrimitive,
+		&cfg.H6.StylePrimitive,
+		&cfg.Text,
+		&cfg.Strikethrough,
+		&cfg.Emph,
+		&cfg.Strong,
+		&cfg.HorizontalRule,
+		&cfg.Item,
+		&cfg.Enumeration,
+		&cfg.Task.StylePrimitive,
+		&cfg.Link,
+		&cfg.LinkText,
+		&cfg.Image,
+		&cfg.ImageText,
+		&cfg.Code.StylePrimitive,
+		&cfg.CodeBlock.StylePrimitive,
+		&cfg.Table.StylePrimitive,
+		&cfg.DefinitionList.StylePrimitive,
+		&cfg.DefinitionTerm,
+		&cfg.DefinitionDescription,
+		&cfg.HTMLBlock.StylePrimitive,
+		&cfg.HTMLSpan.StylePrimitive,
+	} {
+		if p.BackgroundColor == nil {
+			p.BackgroundColor = bg
+		}
+	}
+	// Chroma syntax-highlighting uses the globally registered xchroma formatter,
+	// which hardcodes a nil background per token. Those per-token SGR resets
+	// break the CodeBlock background. Nil out Chroma so code blocks in the plan
+	// card render as plain text with a consistent background.
+	cfg.CodeBlock.Chroma = nil
+	return cfg
 }

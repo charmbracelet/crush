@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
@@ -16,6 +17,39 @@ import (
 
 // MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
 const MaxAttachmentSize = int64(5 * 1024 * 1024)
+
+// PlanReadyMarker is the sentinel the plan agent emits on its own line at the
+// end of its final response to signal that the plan is ready for execution.
+const PlanReadyMarker = "<!-- CRUSH_PLAN_READY -->"
+
+// PlanReadyMarkerPresent reports whether text contains the plan-ready sentinel
+// on a line by itself. An own-line check (rather than a substring match) avoids
+// a false positive when the agent merely mentions the marker inside explanatory
+// prose, while still tolerating trailing whitespace or notes after it.
+func PlanReadyMarkerPresent(text string) bool {
+	for line := range strings.SplitSeq(text, "\n") {
+		if strings.TrimSpace(line) == PlanReadyMarker {
+			return true
+		}
+	}
+	return false
+}
+
+// StripPlanReadyMarker removes lines that consist solely of the plan-ready
+// sentinel (matching the detection rule of [PlanReadyMarkerPresent]) so the
+// marker never shows up in rendered chat output. Mentions of the marker
+// inside prose are left untouched.
+func StripPlanReadyMarker(text string) string {
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if strings.TrimSpace(line) == PlanReadyMarker {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
 
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}

@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -90,6 +91,7 @@ type Workspace interface {
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
+	AgentSetMain(agentID string) error
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
@@ -109,6 +111,11 @@ type Workspace interface {
 	PermissionDeny(perm permission.PermissionRequest) bool
 	PermissionSkipRequests() bool
 	PermissionSetSkipRequests(skip bool)
+
+	// Questions
+	//
+	// QuestionAnswer resolves the pending question with responses.
+	QuestionAnswer(responses []question.Answer) bool
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)

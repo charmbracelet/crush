@@ -81,6 +81,7 @@ func (s *runCoordinator) Summarize(context.Context, string) error {
 }
 func (s *runCoordinator) Model() agent.Model                 { return agent.Model{} }
 func (s *runCoordinator) UpdateModels(context.Context) error { return nil }
+func (s *runCoordinator) SetMainAgent(string) error          { return nil }
 
 func (s *runCoordinator) capturedCtx() context.Context {
 	s.mu.Lock()

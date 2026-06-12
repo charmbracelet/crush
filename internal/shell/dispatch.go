@@ -168,9 +168,11 @@ func isBinary(probe []byte) bool {
 }
 
 // dispatchShebang parses probe's shebang line and execs the resolved
-// interpreter via os/exec, inheriting the parent runner's cwd, env, and
-// stdio. Returns interp.ExitStatus on non-zero interpreter exit so the
-// parent interpreter sees it as a normal non-zero status.
+// interpreter via [runExternal], inheriting the parent runner's cwd,
+// env, and stdio. argv is built per kernel shebang convention: the
+// interpreter's own args, then the script path, then the caller's
+// trailing args. Cancellation handling (process group + SIGINT-then-
+// SIGKILL) is shared with the bare-command path through runExternal.
 func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args []string) error {
 	sb, err := parseShebang(probe)
 	if err != nil {
@@ -186,30 +188,17 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 		return interp.ExitStatus(127)
 	}
 
-	cmdArgs := append([]string{}, sb.args...)
-	cmdArgs = append(cmdArgs, scriptPath)
-	cmdArgs = append(cmdArgs, args[1:]...)
+	// argv[0] is the interpreter so the spawned program sees its own
+	// invocation path the same way the kernel would set it for a real
+	// `#!` exec. Trailing user args follow the script path, mirroring
+	// kernel single-arg semantics already encoded by parseShebang.
+	argv := make([]string, 0, len(sb.args)+1+len(args))
+	argv = append(argv, interpreter)
+	argv = append(argv, sb.args...)
+	argv = append(argv, scriptPath)
+	argv = append(argv, args[1:]...)
 
-	cmd := exec.CommandContext(ctx, interpreter, cmdArgs...)
-	hc := interp.HandlerCtx(ctx)
-	cmd.Dir = hc.Dir
-	cmd.Env = execEnvList(hc.Env)
-	cmd.Stdin = hc.Stdin
-	cmd.Stdout = hc.Stdout
-	cmd.Stderr = hc.Stderr
-
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code := exitErr.ExitCode()
-			if code < 0 {
-				code = 1
-			}
-			return interp.ExitStatus(uint8(code))
-		}
-		return err
-	}
-	return nil
+	return runExternal(ctx, interpreter, argv)
 }
 
 // resolveInterpreter tries the literal shebang path first, then falls back

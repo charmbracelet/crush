@@ -116,6 +116,32 @@ func TestBackgroundShellManager_KillNonExistent(t *testing.T) {
 	}
 }
 
+// TestBackgroundShellManager_Kill_Timeout asserts that Kill returns in
+// bounded time. With process-group cancellation in place the normal-case
+// return is well under KillGracePeriod; this test exists as a regression
+// guard against the prior unbounded `<-shell.done` wait, so the upper
+// bound is "KillGracePeriod plus a small wall-clock fudge" rather than
+// the 60s sleep the command would otherwise run for.
+func TestBackgroundShellManager_Kill_Timeout(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	manager := newBackgroundShellManager()
+
+	bgShell, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
+	require.NoError(t, err)
+
+	// Give the trap builtin time to register before we cancel.
+	time.Sleep(100 * time.Millisecond)
+
+	start := time.Now()
+	err = manager.Kill(bgShell.ID)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.Less(t, elapsed, KillGracePeriod+2*time.Second)
+}
+
 func TestBackgroundShell_IsDone(t *testing.T) {
 	t.Parallel()
 

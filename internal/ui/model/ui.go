@@ -903,6 +903,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	case scrollbarHideMsg:
+		if m.state == uiChat {
+			m.chat.HideScrollbar(msg.seq)
+		}
 	case spinner.TickMsg:
 		if m.dialog.HasDialogs() {
 			// route to dialog
@@ -1045,8 +1049,10 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		}
 	}
 
-	m.chat.SetMessages(items...)
-	if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+	if cmd := m.chat.SetMessages(items...); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if cmd := m.chat.RestartPausedVisibleAnimations(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	m.chat.SelectLast()

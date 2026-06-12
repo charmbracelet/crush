@@ -3,6 +3,13 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"time"
+)
+
+const (
+	renameRetryDeadline       = 500 * time.Millisecond
+	renameRetryInitialBackoff = time.Millisecond
+	renameRetryMaxBackoff     = 50 * time.Millisecond
 )
 
 // atomicWriteFile writes data to a file atomically by writing to a unique
@@ -30,9 +37,29 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameFile(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err
 	}
 	return nil
+}
+
+func renameFile(tmp, path string) error {
+	deadline := time.Now().Add(renameRetryDeadline)
+	backoff := renameRetryInitialBackoff
+
+	for {
+		err := os.Rename(tmp, path)
+		if err == nil || !isRetryableRenameError(err) {
+			return err
+		}
+
+		sleep := min(backoff, time.Until(deadline))
+		if sleep <= 0 {
+			return err
+		}
+
+		time.Sleep(sleep)
+		backoff = min(backoff*2, renameRetryMaxBackoff)
+	}
 }

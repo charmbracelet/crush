@@ -182,6 +182,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Cfg:                  c.cfg,
 				Prompts:              c.promptTexts,
 				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+				CompactSummaries:     c.cfg.Config().Options.AlgorithmicCompaction,
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,

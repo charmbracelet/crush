@@ -267,7 +267,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 			Size:        15,
 			GradColorA:  sty.WorkingGradFromColor,
 			GradColorB:  sty.WorkingGradToColor,
-			LabelColor:  sty.WorkingLabelColor,
+			LabelColor:  sty.ThinkingLabelColor,
 			CycleColors: true,
 			Suffix:      func() string { return common.FormatDuration(common.ElapsedSince(startedAt, time.Now())) },
 			SuffixColor: sty.WorkingTimerColor,

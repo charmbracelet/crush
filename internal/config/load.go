@@ -15,11 +15,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -340,18 +343,74 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		c.Providers.Set(string(p.ID), prepared)
 	}
 
-	// validate the custom providers
+	// Discover models concurrently for custom providers that need it.
+	// A provider needs discovery when discover_models is explicitly true,
+	// or when the type is a known custom provider with an empty model list
+	// (auto-trigger, unless opted out).
+	type discoveryResult struct {
+		models []catwalk.Model
+		err    error
+	}
+
+	discoveryResults := make(map[string]discoveryResult)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	discoverCtx, discoverCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	for id, pc := range c.Providers.Seq2() {
+		if knownProviderNames[id] {
+			continue
+		}
+		if pc.Disable || pc.BaseURL == "" {
+			continue
+		}
+		wantsDiscovery := pc.AutoDiscoverModels != nil && *pc.AutoDiscoverModels
+		autoTrigger := len(pc.Models) == 0 &&
+			(pc.AutoDiscoverModels == nil || *pc.AutoDiscoverModels) &&
+			discover.IsKnownCustomProvider(string(cmp.Or(pc.Type, catwalk.TypeOpenAICompat)))
+		if !wantsDiscovery && !autoTrigger {
+			continue
+		}
+		providerID := cmp.Or(pc.ID, id)
+		dlCfg := discover.Config{
+			ID:             providerID,
+			BaseURL:        pc.BaseURL,
+			APIKey:         pc.APIKey,
+			ExtraHeaders:   pc.ExtraHeaders,
+			ExistingModels: pc.Models,
+		}
+		providerType := string(cmp.Or(pc.Type, catwalk.TypeOpenAICompat))
+		wg.Add(1)
+		go func(id string, dlCfg discover.Config, providerType string) {
+			defer wg.Done()
+			models, err := discover.DiscoverModels(discoverCtx, dlCfg)
+			if err == nil && len(models) > 0 {
+				if enricher := discover.GetEnricher(providerType); enricher != nil {
+					models, err = enricher.EnrichModels(discoverCtx, dlCfg, models)
+				}
+			}
+			mu.Lock()
+			discoveryResults[id] = discoveryResult{models: models, err: err}
+			mu.Unlock()
+		}(id, dlCfg, providerType)
+	}
+	wg.Wait()
+	discoverCancel()
+
+	// Validate the custom providers.
 	for id, providerConfig := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
 			continue
 		}
 
-		// Make sure the provider ID is set
+		// Make sure the provider ID is set.
 		providerConfig.ID = id
 		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
-		// default to OpenAI if not set
+		// Default to OpenAI if not set.
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
-		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name {
+		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
+			providerConfig.Type != hyper.Name &&
+			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
 			continue
@@ -370,11 +429,50 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			c.Providers.Del(id)
 			continue
 		}
+
+		// Apply discovery results if available.
+		if result, ok := discoveryResults[id]; ok {
+			if result.err != nil {
+				slog.Warn("Model discovery failed", "provider", id, "error", result.err)
+				if len(providerConfig.Models) == 0 {
+					slog.Warn("Skipping provider with no models after failed discovery", "provider", id)
+					c.Providers.Del(id)
+					continue
+				}
+			} else if len(result.models) > 0 {
+				// Merge discovered models with user-defined ones.
+				// User-defined models take precedence.
+				seen := make(map[string]bool)
+				merged := make([]catwalk.Model, 0, len(providerConfig.Models)+len(result.models))
+				for _, m := range providerConfig.Models {
+					if !seen[m.ID] {
+						seen[m.ID] = true
+						merged = append(merged, m)
+					}
+				}
+				for _, m := range result.models {
+					if !seen[m.ID] {
+						seen[m.ID] = true
+						merged = append(merged, m)
+					}
+				}
+				providerConfig.Models = merged
+				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
+			}
+		}
+
+		// For known custom provider types, switch to openai-compat
+		// for the actual LLM calls.
+		if discover.IsKnownCustomProvider(string(providerConfig.Type)) {
+			providerConfig.Type = catwalk.TypeOpenAICompat
+		}
+
 		if len(providerConfig.Models) == 0 {
 			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
 			c.Providers.Del(id)
 			continue
 		}
+
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)

@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -868,5 +870,129 @@ func TestProviderRetryLogFields(t *testing.T) {
 			"retry_delay", "1s",
 			"status_code", 503,
 		}, fields)
+	})
+}
+
+func TestLastRetryableCause(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty errors", func(t *testing.T) {
+		t.Parallel()
+		retryErr := &fantasy.RetryError{Errors: nil}
+		msg, ok := lastRetryableCause(retryErr)
+		require.False(t, ok)
+		require.Empty(t, msg)
+	})
+
+	t.Run("single error that is net.Error", func(t *testing.T) {
+		t.Parallel()
+		netErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("timeout")}
+		retryErr := &fantasy.RetryError{Errors: []error{netErr}}
+		msg, ok := lastRetryableCause(retryErr)
+		require.True(t, ok)
+		require.Contains(t, msg, "timeout")
+	})
+
+	t.Run("last error is net.Error", func(t *testing.T) {
+		t.Parallel()
+		netErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}
+		retryErr := &fantasy.RetryError{
+			Errors: []error{
+				errors.New("first failure"),
+				netErr,
+			},
+		}
+		msg, ok := lastRetryableCause(retryErr)
+		require.True(t, ok)
+		require.Contains(t, msg, "connection reset by peer")
+	})
+
+	t.Run("last error is not net.Error", func(t *testing.T) {
+		t.Parallel()
+		retryErr := &fantasy.RetryError{
+			Errors: []error{
+				errors.New("some error"),
+				errors.New("another error"),
+			},
+		}
+		msg, ok := lastRetryableCause(retryErr)
+		require.False(t, ok)
+		require.Empty(t, msg)
+	})
+
+	t.Run("net.Error wrapped in provider error", func(t *testing.T) {
+		t.Parallel()
+		netErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection refused")}
+		wrapped := fmt.Errorf("request failed: %w", netErr)
+		retryErr := &fantasy.RetryError{
+			Errors: []error{
+				errors.New("first"),
+				wrapped,
+			},
+		}
+		msg, ok := lastRetryableCause(retryErr)
+		require.True(t, ok)
+		require.Contains(t, msg, "connection refused")
+	})
+}
+
+func TestLastProviderError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no provider error", func(t *testing.T) {
+		t.Parallel()
+		retryErr := &fantasy.RetryError{
+			Errors: []error{
+				errors.New("first"),
+				errors.New("second"),
+			},
+		}
+		pErr, ok := lastProviderError(retryErr)
+		require.False(t, ok)
+		require.Nil(t, pErr)
+	})
+
+	t.Run("last error is provider error", func(t *testing.T) {
+		t.Parallel()
+		providerErr := &fantasy.ProviderError{
+			Title:   "stream transport error",
+			Message: "unexpected EOF",
+		}
+		retryErr := &fantasy.RetryError{
+			Errors: []error{
+				errors.New("first failure"),
+				providerErr,
+			},
+		}
+		pErr, ok := lastProviderError(retryErr)
+		require.True(t, ok)
+		require.Equal(t, "stream transport error", pErr.Title)
+		require.Equal(t, "unexpected EOF", pErr.Message)
+	})
+
+	t.Run("provider error wrapped in other error", func(t *testing.T) {
+		t.Parallel()
+		providerErr := &fantasy.ProviderError{
+			Title:   "stream transport error",
+			Message: "unexpected EOF",
+		}
+		wrapped := fmt.Errorf("step failed: %w", providerErr)
+		retryErr := &fantasy.RetryError{
+			Errors: []error{
+				errors.New("first"),
+				wrapped,
+			},
+		}
+		pErr, ok := lastProviderError(retryErr)
+		require.True(t, ok)
+		require.Equal(t, "stream transport error", pErr.Title)
+	})
+
+	t.Run("empty errors", func(t *testing.T) {
+		t.Parallel()
+		retryErr := &fantasy.RetryError{Errors: nil}
+		pErr, ok := lastProviderError(retryErr)
+		require.False(t, ok)
+		require.Nil(t, pErr)
 	})
 }

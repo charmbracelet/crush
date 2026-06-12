@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/ultraviolet/layout"
 )
@@ -28,6 +29,14 @@ func (m *UI) landingView() string {
 
 	parts := []string{
 		cwd,
+	}
+
+	if m.gitBranch != "" {
+		parts = append(parts,
+			t.Sidebar.GitBranch.Width(width).MaxHeight(1).Render(
+				styles.GitBranchIcon+" "+m.gitBranch,
+			),
+		)
 	}
 
 	parts = append(parts, "", m.modelInfo(width))

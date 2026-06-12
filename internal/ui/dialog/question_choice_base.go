@@ -280,7 +280,7 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 		if active || hovered {
 			bar = barActive
 		}
-		content := itemFn(i, ch, active)
+		content := itemFn(i, ch, active, innerWidth)
 		// Prepend bar to every line so continuation lines also
 		// show the selection indicator.
 		for j, ln := range strings.Split(content, "\n") {
@@ -353,8 +353,10 @@ func (c *choiceList) renderDescription(width int) string {
 
 // choiceItemRenderer renders a choice's label content as a string.
 // The bar prefix is applied by buildLines so that continuation
-// lines also receive it.
-type choiceItemRenderer func(index int, choice question.Choice, active bool) string
+// lines also receive it. innerWidth is the available content
+// width for this particular render pass (may differ between
+// overflow-test and final render).
+type choiceItemRenderer func(index int, choice question.Choice, active bool, innerWidth int) string
 
 // height returns the total visual height at the given width. It is
 // len(buildLines), the single source of truth for layout.
@@ -364,7 +366,7 @@ func (c *choiceList) height(width int) int {
 		w = width
 	}
 	innerWidth := min(w-4, choiceListMaxWidth)
-	return len(c.buildLines(innerWidth, "> ", func(int, question.Choice, bool) string {
+	return len(c.buildLines(innerWidth, "> ", func(int, question.Choice, bool, int) string {
 		return "x" // single-line placeholder; only count matters
 	}))
 }
@@ -409,19 +411,28 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 	c.lastWidth = area.Dx()
 	viewport := area.Dy()
 
-	// Reserve a scrollbar column only when content overflows. The
-	// narrower width can wrap more, so test against it.
+	// Build lines at the narrow width first to test overflow.
+	// If content fits without a scrollbar, rebuild at the wider
+	// width so text uses the full available space.
 	contentWidth := area.Dx()
 	innerNarrow := min(contentWidth-1-4, choiceListMaxWidth)
-	overflow := viewport > 0 && len(c.buildLines(innerNarrow, fillInPrefix, itemFn)) > viewport
+	innerWide := min(contentWidth-4, choiceListMaxWidth)
 
-	innerWidth := min(contentWidth-4, choiceListMaxWidth)
-	if overflow {
-		contentWidth--
-		innerWidth = innerNarrow
+	lines := c.buildLines(innerNarrow, fillInPrefix, itemFn)
+	overflow := viewport > 0 && len(lines) > viewport
+	if !overflow && innerWide != innerNarrow {
+		lines = c.buildLines(innerWide, fillInPrefix, itemFn)
+		overflow = viewport > 0 && len(lines) > viewport
+		if overflow {
+			// Adding the scrollbar column caused wrapping that
+			// created overflow. Stick with the narrow width.
+			lines = c.buildLines(innerNarrow, fillInPrefix, itemFn)
+		}
 	}
 
-	lines := c.buildLines(innerWidth, fillInPrefix, itemFn)
+	if overflow {
+		contentWidth--
+	}
 	c.clampScroll(lines, viewport)
 
 	// Blit the visible window.

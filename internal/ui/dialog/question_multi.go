@@ -204,11 +204,10 @@ func (d *MultiChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		fillPrefix = d.Styles.Editor.QuestionSelected.Render("> ")
 	}
 
-	innerWidth := min(area.Dx()-4, choiceListMaxWidth)
 	unselectedHeader := d.Styles.Editor.QuestionUnselected
 	selectedStyle := d.Styles.Editor.QuestionSelected
 
-	return d.drawContent(scr, area, fillPrefix, func(i int, ch question.Choice, active bool) string {
+	return d.drawContent(scr, area, fillPrefix, func(i int, ch question.Choice, active bool, innerWidth int) string {
 		style := unselectedHeader
 		if active {
 			style = selectedStyle

@@ -10,18 +10,33 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 )
 
+// WorkspacePermissionMode represents the permission enforcement level for a
+// workspace.
+type WorkspacePermissionMode string
+
+const (
+	// WorkspacePermissionModeNormal prompts for all non-safe commands.
+	WorkspacePermissionModeNormal WorkspacePermissionMode = "normal"
+	// WorkspacePermissionModeYolo auto-approves non-dangerous commands and
+	// prompts for dangerous ones.
+	WorkspacePermissionModeYolo WorkspacePermissionMode = "yolo"
+	// WorkspacePermissionModeSuperYolo auto-approves everything, including
+	// dangerous commands.
+	WorkspacePermissionModeSuperYolo WorkspacePermissionMode = "super_yolo"
+)
+
 // Workspace represents a running app.App workspace with its associated
 // resources and state.
 type Workspace struct {
-	ID       string         `json:"id"`
-	Path     string         `json:"path"`
-	YOLO     bool           `json:"yolo,omitempty"`
-	Debug    bool           `json:"debug,omitempty"`
-	DataDir  string         `json:"data_dir,omitempty"`
-	Version  string         `json:"version,omitempty"`
-	ClientID string         `json:"client_id,omitempty"`
-	Config   *config.Config `json:"config,omitempty"`
-	Env      []string       `json:"env,omitempty"`
+	ID             string                  `json:"id"`
+	Path           string                  `json:"path"`
+	PermissionMode WorkspacePermissionMode `json:"permission_mode,omitempty"`
+	Debug          bool                    `json:"debug,omitempty"`
+	DataDir        string                  `json:"data_dir,omitempty"`
+	Version        string                  `json:"version,omitempty"`
+	ClientID       string                  `json:"client_id,omitempty"`
+	Config         *config.Config          `json:"config,omitempty"`
+	Env            []string                `json:"env,omitempty"`
 	// Skills carries the snapshot of skill discovery state at workspace
 	// creation time. Subsequent updates flow through the SSE event
 	// stream.
@@ -181,9 +196,15 @@ type PermissionGrantResponse struct {
 	Resolved bool `json:"resolved"`
 }
 
-// PermissionSkipRequest represents a request to skip permission prompts.
-type PermissionSkipRequest struct {
-	Skip bool `json:"skip"`
+// PermissionSetModeRequest represents a request to set the permission mode.
+type PermissionSetModeRequest struct {
+	Mode WorkspacePermissionMode `json:"mode"`
+}
+
+// PermissionModeEvent is the SSE payload published whenever the server-side
+// permission mode changes.
+type PermissionModeEvent struct {
+	Mode WorkspacePermissionMode `json:"mode"`
 }
 
 // LSPEventType represents the type of LSP event.

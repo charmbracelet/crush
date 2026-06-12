@@ -1165,6 +1165,9 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	}
 
 	summarize := func() error {
+		if os.Getenv("CRUSH_ALGORITHMIC_COMPACT") == "1" {
+			return c.currentAgent.AlgorithmicSummarize(ctx, sessionID)
+		}
 		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
 	}
 

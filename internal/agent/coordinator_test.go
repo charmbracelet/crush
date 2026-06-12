@@ -47,6 +47,9 @@ func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOp
 	return nil
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
+func (m *mockSessionAgent) AlgorithmicSummarize(context.Context, string) error {
+	return nil
+}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {

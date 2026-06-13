@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
+	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -415,7 +416,7 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			}
 			providerCfg := config.ProviderConfig{ID: "test", Type: tc.providerType}
 
-			opts := getProviderOptions(model, providerCfg)
+			opts := getProviderOptions(model, providerCfg, "")
 
 			raw, ok := opts[anthropic.Name]
 			require.True(t, ok, "options should be keyed under anthropic.Name for type %q", tc.providerType)
@@ -425,4 +426,74 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
 		})
 	}
+}
+
+func TestGetProviderOptionsPromptCacheKey(t *testing.T) {
+	t.Run("responses model uses session id", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "gpt-5"},
+		}
+		providerCfg := config.ProviderConfig{Type: catwalk.Type(openai.Name)}
+
+		opts := getProviderOptions(model, providerCfg, "session-123")
+
+		raw, ok := opts[openai.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openai.ResponsesProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, parsed.PromptCacheKey)
+		assert.Equal(t, "session-123", *parsed.PromptCacheKey)
+	})
+
+	t.Run("chat completions model uses session id", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "legacy-chat-model"},
+		}
+		providerCfg := config.ProviderConfig{Type: catwalk.Type(openai.Name)}
+
+		opts := getProviderOptions(model, providerCfg, "session-123")
+
+		raw, ok := opts[openai.Name]
+		require.True(t, ok)
+		parsed, ok := raw.(*openai.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, parsed.PromptCacheKey)
+		assert.Equal(t, "session-123", *parsed.PromptCacheKey)
+	})
+
+	t.Run("preserves explicit prompt cache key", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "gpt-5"},
+			ModelCfg: config.SelectedModel{
+				ProviderOptions: map[string]any{
+					"prompt_cache_key": "configured-cache-key",
+				},
+			},
+		}
+		providerCfg := config.ProviderConfig{Type: catwalk.Type(openai.Name)}
+
+		opts := getProviderOptions(model, providerCfg, "session-123")
+
+		parsed, ok := opts[openai.Name].(*openai.ResponsesProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, parsed.PromptCacheKey)
+		assert.Equal(t, "configured-cache-key", *parsed.PromptCacheKey)
+	})
+
+	t.Run("skips when session id is empty", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{ID: "gpt-5"},
+		}
+		providerCfg := config.ProviderConfig{Type: catwalk.Type(openai.Name)}
+
+		opts := getProviderOptions(model, providerCfg, "")
+
+		raw, ok := opts[openai.Name]
+		if ok {
+			parsed, ok := raw.(*openai.ResponsesProviderOptions)
+			if ok {
+				assert.Nil(t, parsed.PromptCacheKey)
+			}
+		}
+	})
 }

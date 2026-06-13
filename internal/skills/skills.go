@@ -249,6 +249,9 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 				addState("", path, StateError, err)
 				return nil
 			}
+			if d.IsDir() && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
 			if d.IsDir() || d.Name() != SkillFileName {
 				return nil
 			}

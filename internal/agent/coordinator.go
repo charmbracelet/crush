@@ -33,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
@@ -100,6 +101,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	SetNonInteractive(v bool)
 }
 
 type coordinator struct {
@@ -107,6 +109,7 @@ type coordinator struct {
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
+	questions   question.Service
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
@@ -115,6 +118,10 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	// nonInteractive disables tools that require live user input (e.g. question)
+	// when running without a UI.
+	nonInteractive bool
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -130,6 +137,7 @@ func NewCoordinator(
 	sessions session.Service,
 	messages message.Service,
 	permissions permission.Service,
+	questions question.Service,
 	history history.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
@@ -155,6 +163,7 @@ func NewCoordinator(
 		sessions:     sessions,
 		messages:     messages,
 		permissions:  permissions,
+		questions:    questions,
 		history:      history,
 		filetracker:  filetracker,
 		lspManager:   lspManager,
@@ -601,6 +610,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	var hookRunner *hooks.Runner
 	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
 		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	}
+
+	// Some tools (like question) requires live user input, so omit it when running
+	// without a UI (e.g. non-interactive `crush run`).
+	if !c.nonInteractive {
+		allTools = append(allTools, tools.NewQuestionTool(c.questions))
 	}
 
 	allTools = append(
@@ -1076,6 +1091,10 @@ func (c *coordinator) IsSessionBusy(sessionID string) bool {
 
 func (c *coordinator) Model() Model {
 	return c.currentAgent.Model()
+}
+
+func (c *coordinator) SetNonInteractive(v bool) {
+	c.nonInteractive = v
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {

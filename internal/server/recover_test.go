@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -23,7 +24,7 @@ func TestRecoverHandler_PanicReturns500(t *testing.T) {
 	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	h.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
@@ -48,7 +49,7 @@ func TestRecoverHandler_NoPanicPassthrough(t *testing.T) {
 	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	h.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusTeapot, rec.Code)
@@ -71,7 +72,7 @@ func TestRecoverHandler_PanicAfterWriteHeader(t *testing.T) {
 	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	require.NotPanics(t, func() { h.ServeHTTP(rec, req) })
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "partial", rec.Body.String())
@@ -89,6 +90,6 @@ func TestRecoverHandler_AbortHandlerPropagates(t *testing.T) {
 	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	require.PanicsWithValue(t, http.ErrAbortHandler, func() { h.ServeHTTP(rec, req) })
 }

@@ -1289,7 +1289,7 @@ func (c *coordinator) subAgentOutput(ctx context.Context, sessionID string, resu
 
 		var texts []string
 		for _, step := range result.Steps {
-			texts = append(texts, responseContentText(step.Response.Content)...)
+			texts = append(texts, responseContentText(step.Content)...)
 		}
 		if len(texts) > 0 {
 			return strings.Join(texts, "\n\n")

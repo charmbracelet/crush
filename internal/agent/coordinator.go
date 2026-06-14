@@ -1278,7 +1278,54 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		)
 	}
 
-	return fantasy.NewTextResponse(result.Response.Content.Text()), nil
+	return fantasy.NewTextResponse(c.subAgentOutput(ctx, session.ID, result)), nil
+}
+
+func (c *coordinator) subAgentOutput(ctx context.Context, sessionID string, result *fantasy.AgentResult) string {
+	if result != nil {
+		if text := result.Response.Content.Text(); strings.TrimSpace(text) != "" {
+			return text
+		}
+
+		var texts []string
+		for _, step := range result.Steps {
+			texts = append(texts, responseContentText(step.Response.Content)...)
+		}
+		if len(texts) > 0 {
+			return strings.Join(texts, "\n\n")
+		}
+	}
+
+	if c.messages != nil {
+		messages, err := c.messages.List(ctx, sessionID)
+		if err != nil {
+			slog.Warn("Failed to list sub-agent messages", "session", sessionID, "error", err)
+		} else {
+			for i := len(messages) - 1; i >= 0; i-- {
+				msg := messages[i]
+				if msg.Role != message.Assistant {
+					continue
+				}
+				if text := msg.Content().String(); strings.TrimSpace(text) != "" {
+					return text
+				}
+			}
+		}
+	}
+
+	return "Sub-agent completed but produced no text output."
+}
+
+func responseContentText(content fantasy.ResponseContent) []string {
+	texts := make([]string, 0)
+	for _, part := range content {
+		textContent, ok := fantasy.AsContentType[fantasy.TextContent](part)
+		if !ok || strings.TrimSpace(textContent.Text) == "" {
+			continue
+		}
+		texts = append(texts, textContent.Text)
+	}
+	return texts
 }
 
 // updateParentSessionCost accumulates the cost from a child session to its parent session.

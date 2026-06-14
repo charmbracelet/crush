@@ -4286,7 +4286,7 @@ func (m *UI) handlePlanHandoff(rc notify.RunComplete) tea.Cmd {
 		return nil
 	}
 	if !common.PlanReadyMarkerPresent(rc.Text) {
-		slog.Debug("plan run completed without ready marker", "session_id", rc.SessionID)
+		slog.Debug("Plan run completed without ready marker", "session_id", rc.SessionID)
 		return nil
 	}
 	m.setPlanReadyPending(rc.SessionID)

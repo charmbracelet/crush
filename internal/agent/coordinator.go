@@ -199,7 +199,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.agents[config.AgentCoder] = agent
 
-	planCfg, ok := opts.Config.Config().Agents[config.AgentPlan]
+	planCfg, ok := c.cfg.Config().Agents[config.AgentPlan]
 	if !ok {
 		return nil, errPlanAgentNotConfigured
 	}

@@ -367,21 +367,21 @@ func quickStyle(o quickStyleOpts) Styles {
 	headingColor := hex(o.info)
 	headingBold := new(true)
 	for _, h := range []*ansi.StyleBlock{&planMD.H2, &planMD.H3, &planMD.H4, &planMD.H5} {
-		if h.StylePrimitive.Color == nil {
-			h.StylePrimitive.Color = headingColor
+		if h.Color == nil {
+			h.Color = headingColor
 		}
-		if h.StylePrimitive.Bold == nil {
-			h.StylePrimitive.Bold = headingBold
+		if h.Bold == nil {
+			h.Bold = headingBold
 		}
 	}
 	// Replace raw markdown prefixes ("## ", "### ", …) with clean indentation so
 	// the plan card doesn't show literal ## / ### characters. H1 keeps its own
 	// distinct box styling; H2 gets no prefix (top-level sections stand on their
 	// own with bold+color); H3–H5 use increasing indentation for hierarchy.
-	planMD.H2.StylePrimitive.Prefix = ""
-	planMD.H3.StylePrimitive.Prefix = "  "
-	planMD.H4.StylePrimitive.Prefix = "    "
-	planMD.H5.StylePrimitive.Prefix = "      "
+	planMD.H2.Prefix = ""
+	planMD.H3.Prefix = "  "
+	planMD.H4.Prefix = "    "
+	planMD.H5.Prefix = "      "
 	s.PlanMarkdown = withMarkdownBackground(planMD, hex(o.bgLeastVisible))
 
 	// QuietMarkdown style - muted colors on subtle background for thinking content.

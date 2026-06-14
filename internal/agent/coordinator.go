@@ -1283,8 +1283,8 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 func (c *coordinator) subAgentOutput(ctx context.Context, sessionID string, result *fantasy.AgentResult) string {
 	if result != nil {
-		if text := result.Response.Content.Text(); strings.TrimSpace(text) != "" {
-			return text
+		if texts := responseContentText(result.Response.Content); len(texts) > 0 {
+			return strings.Join(texts, "\n\n")
 		}
 
 		var texts []string

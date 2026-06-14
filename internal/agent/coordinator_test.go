@@ -76,11 +76,17 @@ func newMockAgent(providerID string, maxTokens int64, runFunc func(context.Conte
 
 // agentResultWithText creates a minimal AgentResult with the given text response.
 func agentResultWithText(text string) *fantasy.AgentResult {
+	return agentResultWithTextBlocks(text)
+}
+
+func agentResultWithTextBlocks(texts ...string) *fantasy.AgentResult {
+	content := make(fantasy.ResponseContent, 0, len(texts))
+	for _, text := range texts {
+		content = append(content, fantasy.TextContent{Text: text})
+	}
 	return &fantasy.AgentResult{
 		Response: fantasy.Response{
-			Content: fantasy.ResponseContent{
-				fantasy.TextContent{Text: text},
-			},
+			Content: content,
 		},
 	}
 }
@@ -239,6 +245,32 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, resp.IsError)
 		assert.Equal(t, "final response", resp.Content)
+	})
+
+	t.Run("aggregates multi-block final response", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			result := agentResultWithTextBlocks("first final block", "second final block")
+			result.Steps = agentResultWithStepTexts("earlier step").Steps
+			return result, nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError)
+		assert.Equal(t, "first final block\n\nsecond final block", resp.Content)
 	})
 
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {

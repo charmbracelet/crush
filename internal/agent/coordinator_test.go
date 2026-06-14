@@ -273,6 +273,34 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Equal(t, "first final block\n\nsecond final block", resp.Content)
 	})
 
+	t.Run("no recoverable output returns error response", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		// Empty result, no persisted assistant message: no layer can recover
+		// real text, so the diagnostic fallback must surface as a soft tool
+		// error (IsError=true) with a nil Go error.
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return &fantasy.AgentResult{}, nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.NotEmpty(t, resp.Content)
+		assert.Equal(t, "Sub-agent completed but produced no text output.", resp.Content)
+	})
+
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)

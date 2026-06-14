@@ -1278,13 +1278,25 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		)
 	}
 
-	return fantasy.NewTextResponse(c.subAgentOutput(ctx, session.ID, result)), nil
+	// subAgentOutput signals via ok whether it recovered real sub-agent text.
+	// When ok is false it only produced the diagnostic fallback, so report it
+	// as a soft tool error (IsError=true, nil Go error) to let the parent LLM
+	// distinguish "no output" from a real answer without aborting the turn.
+	output, ok := c.subAgentOutput(ctx, session.ID, result)
+	if !ok {
+		return fantasy.NewTextErrorResponse(output), nil
+	}
+	return fantasy.NewTextResponse(output), nil
 }
 
-func (c *coordinator) subAgentOutput(ctx context.Context, sessionID string, result *fantasy.AgentResult) string {
+// subAgentOutput extracts the sub-agent's textual output, returning ok=true
+// when real text was recovered from any layer (final response → aggregated
+// steps → persisted assistant message). It returns ok=false only for the
+// last-resort diagnostic fallback, signalling that no usable output exists.
+func (c *coordinator) subAgentOutput(ctx context.Context, sessionID string, result *fantasy.AgentResult) (string, bool) {
 	if result != nil {
 		if texts := responseContentText(result.Response.Content); len(texts) > 0 {
-			return strings.Join(texts, "\n\n")
+			return strings.Join(texts, "\n\n"), true
 		}
 
 		var texts []string
@@ -1292,7 +1304,7 @@ func (c *coordinator) subAgentOutput(ctx context.Context, sessionID string, resu
 			texts = append(texts, responseContentText(step.Content)...)
 		}
 		if len(texts) > 0 {
-			return strings.Join(texts, "\n\n")
+			return strings.Join(texts, "\n\n"), true
 		}
 	}
 
@@ -1307,13 +1319,13 @@ func (c *coordinator) subAgentOutput(ctx context.Context, sessionID string, resu
 					continue
 				}
 				if text := msg.Content().String(); strings.TrimSpace(text) != "" {
-					return text
+					return text, true
 				}
 			}
 		}
 	}
 
-	return "Sub-agent completed but produced no text output."
+	return "Sub-agent completed but produced no text output.", false
 }
 
 func responseContentText(content fantasy.ResponseContent) []string {

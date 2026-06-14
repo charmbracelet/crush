@@ -712,6 +712,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
 		m.lspStates = app.GetLSPStates()
+	case pubsub.Event[config.ProvidersUpdatedEvent]:
+		if dia := m.dialog.Dialog(dialog.ModelsID); dia != nil {
+			models, ok := dia.(*dialog.Models)
+			if ok {
+				if err := models.RefreshProviders(); err != nil {
+					cmds = append(cmds, util.ReportError(err))
+				}
+			}
+		}
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
 	case pubsub.Event[mcp.Event]:

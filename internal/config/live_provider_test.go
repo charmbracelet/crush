@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,14 +14,38 @@ import (
 )
 
 type mockLiveProviderClient struct {
-	provider  catwalk.Provider
-	err       error
+	provider catwalk.Provider
+	err      error
+	started  chan struct{}
+	release  chan struct{}
+
+	mu        sync.Mutex
 	callCount int
+	startOnce sync.Once
 }
 
 func (m *mockLiveProviderClient) Get(ctx context.Context) (catwalk.Provider, error) {
+	m.mu.Lock()
 	m.callCount++
+	m.mu.Unlock()
+
+	if m.started != nil {
+		m.startOnce.Do(func() { close(m.started) })
+	}
+	if m.release != nil {
+		select {
+		case <-m.release:
+		case <-ctx.Done():
+			return catwalk.Provider{}, ctx.Err()
+		}
+	}
 	return m.provider, m.err
+}
+
+func (m *mockLiveProviderClient) calls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.callCount
 }
 
 func TestLiveProviderSync_GetPanicIfNotInit(t *testing.T) {
@@ -45,7 +70,7 @@ func TestLiveProviderSync_GetAutoUpdateDisabledReturnsSeed(t *testing.T) {
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, seed, provider)
-	require.Equal(t, 0, client.callCount)
+	require.Equal(t, 0, client.calls())
 }
 
 func TestLiveProviderSync_GetWithoutCredentialsReturnsSeed(t *testing.T) {
@@ -61,7 +86,7 @@ func TestLiveProviderSync_GetWithoutCredentialsReturnsSeed(t *testing.T) {
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, seed, provider)
-	require.Equal(t, 0, client.callCount)
+	require.Equal(t, 0, client.calls())
 }
 
 func TestLiveProviderSync_GetWarmCacheReturnsCachedWithoutFetch(t *testing.T) {
@@ -82,10 +107,10 @@ func TestLiveProviderSync_GetWarmCacheReturnsCachedWithoutFetch(t *testing.T) {
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, cached, provider)
-	require.Equal(t, 0, client.callCount)
+	require.Equal(t, 0, client.calls())
 }
 
-func TestLiveProviderSync_GetStaleCacheFetchesMergesAndStores(t *testing.T) {
+func TestLiveProviderSync_GetStaleCacheReturnsCachedAndRefreshesInBackground(t *testing.T) {
 	t.Parallel()
 
 	path := t.TempDir() + "/provider.json"
@@ -96,6 +121,8 @@ func TestLiveProviderSync_GetStaleCacheFetchesMergesAndStores(t *testing.T) {
 	require.NoError(t, os.Chtimes(path, staleTime, staleTime))
 
 	seed := testLiveSeedProvider()
+	started := make(chan struct{})
+	release := make(chan struct{})
 	client := &mockLiveProviderClient{
 		provider: catwalk.Provider{
 			Models: []catwalk.Model{
@@ -103,13 +130,26 @@ func TestLiveProviderSync_GetStaleCacheFetchesMergesAndStores(t *testing.T) {
 				{ID: "other-live-model", Name: "Other Live Model"},
 			},
 		},
+		started: started,
+		release: release,
 	}
 	syncer := &liveProviderSync{}
 	syncer.Init(client, path, true, seed, true)
 
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, 1, client.callCount)
+	require.Equal(t, cached, provider)
+	<-started
+	require.Equal(t, 1, client.calls())
+
+	close(release)
+	require.Eventually(t, func() bool {
+		stored, _, err := newCache[catwalk.Provider](path).Get()
+		return err == nil && len(stored.Models) == 2 && stored.Models[0].ID == "live-model"
+	}, time.Second, 10*time.Millisecond)
+
+	provider, err = syncer.Get(t.Context())
+	require.NoError(t, err)
 	require.Equal(t, seed.ID, provider.ID)
 	require.Equal(t, seed.Name, provider.Name)
 	require.Equal(t, seed.APIEndpoint, provider.APIEndpoint)
@@ -120,33 +160,122 @@ func TestLiveProviderSync_GetStaleCacheFetchesMergesAndStores(t *testing.T) {
 		{ID: "live-model", Name: "Live Model"},
 		{ID: "other-live-model", Name: "Other Live Model"},
 	}, provider.Models)
-
-	stored, _, err := newCache[catwalk.Provider](path).Get()
-	require.NoError(t, err)
-	require.Equal(t, provider, stored)
 }
 
-func TestLiveProviderSync_GetStoreFailureStillReturnsMerged(t *testing.T) {
+func TestLiveProviderSync_GetBackgroundRefreshInvokesCallbackAfterStore(t *testing.T) {
 	t.Parallel()
 
-	// Point the cache at a path whose parent is a regular file so that
-	// Store fails; the merged provider must still be returned without
-	// error.
+	path := t.TempDir() + "/provider.json"
+	seed := testLiveSeedProvider()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	callbackCh := make(chan catwalk.Provider, 1)
+	client := &mockLiveProviderClient{
+		provider: catwalk.Provider{Models: []catwalk.Model{{ID: "live-model", Name: "Live Model"}}},
+		started:  started,
+		release:  release,
+	}
+	syncer := &liveProviderSync{}
+	syncer.Init(client, path, true, seed, true)
+	syncer.onRefresh = func(provider catwalk.Provider) {
+		callbackCh <- provider
+	}
+
+	provider, err := syncer.Get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, seed, provider)
+	<-started
+	close(release)
+
+	var callbackProvider catwalk.Provider
+	require.Eventually(t, func() bool {
+		select {
+		case callbackProvider = <-callbackCh:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, seed.ID, callbackProvider.ID)
+	require.Equal(t, []catwalk.Model{{ID: "live-model", Name: "Live Model"}}, callbackProvider.Models)
+	require.Empty(t, callbackCh)
+}
+
+func TestLiveProviderSync_GetWarmCacheDoesNotInvokeCallback(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir() + "/provider.json"
+	cached := testLiveSeedProvider()
+	cached.Models = []catwalk.Model{{ID: "cached-model", Name: "Cached Model"}}
+	writeLiveProviderCache(t, path, cached)
+	callbackCh := make(chan catwalk.Provider, 1)
+	client := &mockLiveProviderClient{
+		provider: catwalk.Provider{Models: []catwalk.Model{{ID: "live-model"}}},
+	}
+	syncer := &liveProviderSync{}
+	syncer.Init(client, path, true, testLiveSeedProvider(), true)
+	syncer.onRefresh = func(provider catwalk.Provider) {
+		callbackCh <- provider
+	}
+
+	provider, err := syncer.Get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, cached, provider)
+	require.Equal(t, 0, client.calls())
+	require.Empty(t, callbackCh)
+}
+
+func TestLiveProviderSync_GetWithoutCredentialsDoesNotInvokeCallback(t *testing.T) {
+	t.Parallel()
+
+	callbackCh := make(chan catwalk.Provider, 1)
+	seed := testLiveSeedProvider()
+	client := &mockLiveProviderClient{
+		provider: catwalk.Provider{Models: []catwalk.Model{{ID: "live-model"}}},
+	}
+	syncer := &liveProviderSync{}
+	syncer.Init(client, t.TempDir()+"/provider.json", true, seed, false)
+	syncer.onRefresh = func(provider catwalk.Provider) {
+		callbackCh <- provider
+	}
+
+	provider, err := syncer.Get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, seed, provider)
+	require.Equal(t, 0, client.calls())
+	require.Empty(t, callbackCh)
+}
+
+func TestLiveProviderSync_GetStoreFailureStillUsesMergedResult(t *testing.T) {
+	t.Parallel()
+
 	blocker := t.TempDir() + "/blocker"
 	require.NoError(t, os.WriteFile(blocker, []byte("not a dir"), 0o644))
 	path := blocker + "/provider.json"
 
 	seed := testLiveSeedProvider()
+	started := make(chan struct{})
+	callbackCh := make(chan catwalk.Provider, 1)
 	client := &mockLiveProviderClient{
 		provider: catwalk.Provider{Models: []catwalk.Model{{ID: "live-model", Name: "Live Model"}}},
+		started:  started,
 	}
 	syncer := &liveProviderSync{}
 	syncer.Init(client, path, true, seed, true)
+	syncer.onRefresh = func(provider catwalk.Provider) {
+		callbackCh <- provider
+	}
 
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, 1, client.callCount)
-	require.Equal(t, []catwalk.Model{{ID: "live-model", Name: "Live Model"}}, provider.Models)
+	require.Equal(t, seed, provider)
+	<-started
+	require.Eventually(t, func() bool {
+		provider, err := syncer.Get(t.Context())
+		return err == nil && len(provider.Models) == 1 && provider.Models[0].ID == "live-model"
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, 1, client.calls())
+	require.Empty(t, callbackCh)
 }
 
 func TestLiveProviderSync_GetFetchErrorUsesCached(t *testing.T) {
@@ -167,7 +296,7 @@ func TestLiveProviderSync_GetFetchErrorUsesCached(t *testing.T) {
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, cached, provider)
-	require.Equal(t, 1, client.callCount)
+	require.Eventually(t, func() bool { return client.calls() == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestLiveProviderSync_GetDeadlineExceededUsesCached(t *testing.T) {
@@ -188,7 +317,7 @@ func TestLiveProviderSync_GetDeadlineExceededUsesCached(t *testing.T) {
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, cached, provider)
-	require.Equal(t, 1, client.callCount)
+	require.Eventually(t, func() bool { return client.calls() == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestLiveProviderSync_GetFetchErrorUsesSeedWithoutCache(t *testing.T) {
@@ -202,7 +331,7 @@ func TestLiveProviderSync_GetFetchErrorUsesSeedWithoutCache(t *testing.T) {
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, seed, provider)
-	require.Equal(t, 1, client.callCount)
+	require.Eventually(t, func() bool { return client.calls() == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestLiveProviderSync_GetEmptyModelsUsesFallback(t *testing.T) {
@@ -223,14 +352,18 @@ func TestLiveProviderSync_GetEmptyModelsUsesFallback(t *testing.T) {
 	provider, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, cached, provider)
-	require.Equal(t, 1, client.callCount)
+	require.Eventually(t, func() bool { return client.calls() == 1 }, time.Second, 10*time.Millisecond)
 }
 
-func TestLiveProviderSync_GetCalledMultipleTimesUsesOnce(t *testing.T) {
+func TestLiveProviderSync_GetCalledMultipleTimesSchedulesOneRefresh(t *testing.T) {
 	t.Parallel()
 
+	started := make(chan struct{})
+	release := make(chan struct{})
 	client := &mockLiveProviderClient{
 		provider: catwalk.Provider{Models: []catwalk.Model{{ID: "live-model", Name: "Live Model"}}},
+		started:  started,
+		release:  release,
 	}
 	syncer := &liveProviderSync{}
 	syncer.Init(client, t.TempDir()+"/provider.json", true, testLiveSeedProvider(), true)
@@ -240,7 +373,9 @@ func TestLiveProviderSync_GetCalledMultipleTimesUsesOnce(t *testing.T) {
 	provider2, err2 := syncer.Get(t.Context())
 	require.NoError(t, err2)
 	require.Equal(t, provider1, provider2)
-	require.Equal(t, 1, client.callCount)
+	<-started
+	require.Equal(t, 1, client.calls())
+	close(release)
 }
 
 func TestCacheAge(t *testing.T) {

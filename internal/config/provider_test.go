@@ -1,24 +1,31 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 
 func resetProviderState() {
 	providerOnce = sync.Once{}
+	providerMu.Lock()
 	providerList = nil
 	providerErr = nil
+	pendingProvider = nil
+	providerMu.Unlock()
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer = &hyperSync{}
 	veniceSyncer = &liveProviderSync{}
@@ -223,15 +230,21 @@ func TestProviders_Integration_BothFail(t *testing.T) {
 	require.Equal(t, "Charm Hyper", hyperResult.Name) // Falls back to embedded when no models.
 }
 
-func TestProviders_Integration_LiveOverlayFetchesWithCredentials(t *testing.T) {
+func TestProviders_Integration_LiveOverlayRefreshesWithCredentialsInBackground(t *testing.T) {
 	resetProviderState()
 	defer resetProviderState()
 
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
 
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var requestCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/models", r.URL.Path)
+		requestCount.Add(1)
+		started <- struct{}{}
+		<-release
 
 		switch r.Header.Get("Authorization") {
 		case "Bearer venice-token":
@@ -297,12 +310,112 @@ func TestProviders_Integration_LiveOverlayFetchesWithCredentials(t *testing.T) {
 		}),
 	}
 
-	result := overlayLiveProviderModels(t.Context(), cfg, providers, true)
+	resultCh := make(chan []catwalk.Provider, 1)
+	go func() {
+		resultCh <- overlayLiveProviderModels(t.Context(), cfg, providers, true)
+	}()
+
+	var result []catwalk.Provider
+	select {
+	case result = <-resultCh:
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		require.FailNow(t, "Live overlay blocked on background refresh")
+	}
 
 	venice, ok := findProvider(result, catwalk.InferenceProviderVenice)
 	require.True(t, ok)
-	require.Equal(t, "Venice", venice.Name)
-	require.Equal(t, "venice-live", venice.DefaultLargeModelID)
+	require.Equal(t, []catwalk.Model{{ID: "venice-seed", Name: "Venice Seed"}}, venice.Models)
+
+	copilot, ok := findProvider(result, catwalk.InferenceProviderCopilot)
+	require.True(t, ok)
+	require.Equal(t, []catwalk.Model{{ID: "copilot-seed", Name: "Copilot Seed"}}, copilot.Models)
+
+	require.Eventually(t, func() bool { return requestCount.Load() == 2 }, time.Second, 10*time.Millisecond)
+	<-started
+	<-started
+	close(release)
+
+	require.Eventually(t, func() bool {
+		venice, _, err := newCache[catwalk.Provider](cachePathFor("venice")).Get()
+		return err == nil && len(venice.Models) == 1 && venice.Models[0].ID == "venice-live"
+	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		copilot, _, err := newCache[catwalk.Provider](cachePathFor("copilot")).Get()
+		return err == nil && len(copilot.Models) == 1 && copilot.Models[0].ID == "copilot-live"
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestProviders_Integration_LiveOverlayUpdatesProviderListAndPublishesEvent(t *testing.T) {
+	resetProviderState()
+	defer resetProviderState()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/models", r.URL.Path)
+		started <- struct{}{}
+		<-release
+		require.Equal(t, "Bearer venice-token", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{
+			"data": [
+				{
+					"id": "venice-live",
+					"type": "text",
+					"model_spec": {
+						"name": "Venice Live",
+						"availableContextTokens": 4096,
+						"maxCompletionTokens": 1024,
+						"pricing": {"input": {"usd": "0.1"}, "output": {"usd": "0.2"}},
+						"capabilities": {"supportsVision": true}
+					}
+				}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	seed := catwalk.Provider{
+		Name:                "Venice",
+		ID:                  catwalk.InferenceProviderVenice,
+		APIEndpoint:         server.URL,
+		Type:                catwalk.TypeOpenAICompat,
+		DefaultLargeModelID: "venice-seed",
+		DefaultSmallModelID: "venice-seed",
+		Models:              []catwalk.Model{{ID: "venice-seed", Name: "Venice Seed"}},
+	}
+	cfg := &Config{
+		Options: &Options{},
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			string(catwalk.InferenceProviderVenice): {APIKey: "venice-token"},
+		}),
+	}
+	providerOnce.Do(func() {})
+	setProviderList([]catwalk.Provider{seed})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := SubscribeProviderEvents(ctx)
+
+	result := overlayLiveProviderModels(t.Context(), cfg, []catwalk.Provider{seed}, true)
+	require.Equal(t, []catwalk.Model{{ID: "venice-seed", Name: "Venice Seed"}}, result[0].Models)
+	<-started
+	close(release)
+
+	select {
+	case event := <-events:
+		require.Equal(t, pubsub.UpdatedEvent, event.Type)
+		require.Equal(t, string(catwalk.InferenceProviderVenice), event.Payload.ProviderID)
+	case <-time.After(time.Second):
+		require.FailNow(t, "Timed out waiting for providers updated event")
+	}
+
+	providers, err := Providers(cfg)
+	require.NoError(t, err)
+	venice, ok := findProvider(providers, catwalk.InferenceProviderVenice)
+	require.True(t, ok)
 	require.Equal(t, []catwalk.Model{{
 		ID:               "venice-live",
 		Name:             "Venice Live",
@@ -312,18 +425,6 @@ func TestProviders_Integration_LiveOverlayFetchesWithCredentials(t *testing.T) {
 		DefaultMaxTokens: 1024,
 		SupportsImages:   true,
 	}}, venice.Models)
-
-	copilot, ok := findProvider(result, catwalk.InferenceProviderCopilot)
-	require.True(t, ok)
-	require.Equal(t, "Copilot", copilot.Name)
-	require.Equal(t, "copilot-live", copilot.DefaultSmallModelID)
-	require.Equal(t, []catwalk.Model{{
-		ID:               "copilot-live",
-		Name:             "Copilot Live",
-		ContextWindow:    8192,
-		DefaultMaxTokens: 2048,
-		SupportsImages:   true,
-	}}, copilot.Models)
 }
 
 func TestProviders_Integration_LiveOverlaySkipsWithoutCredentials(t *testing.T) {

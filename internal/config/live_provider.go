@@ -13,7 +13,10 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 )
 
-const liveModelsTTL = time.Minute
+const (
+	liveModelsTTL            = time.Minute
+	liveProviderFetchTimeout = 45 * time.Second
+)
 
 type liveProviderClient interface {
 	Get(context.Context) (catwalk.Provider, error)
@@ -23,9 +26,11 @@ var _ syncer[catwalk.Provider] = (*liveProviderSync)(nil)
 
 type liveProviderSync struct {
 	once         sync.Once
+	resultMu     sync.RWMutex
 	result       catwalk.Provider
 	cache        cache[catwalk.Provider]
 	client       liveProviderClient
+	onRefresh    func(catwalk.Provider)
 	seed         catwalk.Provider
 	autoupdate   bool
 	credentialed bool
@@ -51,12 +56,12 @@ func (s *liveProviderSync) Get(ctx context.Context) (catwalk.Provider, error) {
 	s.once.Do(func() {
 		if !s.autoupdate {
 			slog.Info("Using provider seed", "provider", s.seed.ID)
-			s.result = s.seed
+			s.setResult(s.seed)
 			return
 		}
 		if !s.credentialed {
 			slog.Info("Skipping live provider sync without credentials", "provider", s.seed.ID)
-			s.result = s.seed
+			s.setResult(s.seed)
 			return
 		}
 
@@ -70,36 +75,59 @@ func (s *liveProviderSync) Get(ctx context.Context) (catwalk.Provider, error) {
 		if cachedAvailable {
 			if age, ok := cacheAge(s.cache.path); ok && age < s.ttl {
 				slog.Info("Using cached live provider models", "provider", fallback.ID, "age", age)
-				s.result = cached
+				s.setResult(cached)
 				return
 			}
 		}
 
-		slog.Info("Fetching live provider models", "provider", s.seed.ID)
+		s.setResult(fallback)
+		s.refreshInBackground()
+	})
+	return s.getResult(), nil
+}
+
+func (s *liveProviderSync) refreshInBackground() {
+	slog.Info("Refreshing live provider models in background", "provider", s.seed.ID)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), liveProviderFetchTimeout)
+		defer cancel()
+
 		result, err := s.client.Get(ctx)
 		if errors.Is(err, context.DeadlineExceeded) {
 			slog.Warn("Live provider models not updated in time", "provider", s.seed.ID)
-			s.result = fallback
 			return
 		}
 		if err != nil {
 			slog.Warn("Live provider models not updated", "provider", s.seed.ID, "err", err)
-			s.result = fallback
 			return
 		}
 		if len(result.Models) == 0 {
 			slog.Warn("Live provider did not return any models", "provider", s.seed.ID)
-			s.result = fallback
 			return
 		}
 
 		merged := mergeLiveProvider(s.seed, result)
-		s.result = merged
+		s.setResult(merged)
 		if err := s.cache.Store(merged); err != nil {
 			slog.Warn("Failed to store live provider cache", "provider", s.seed.ID, "err", err)
+			return
 		}
-	})
-	return s.result, nil
+		if s.onRefresh != nil {
+			s.onRefresh(merged)
+		}
+	}()
+}
+
+func (s *liveProviderSync) setResult(provider catwalk.Provider) {
+	s.resultMu.Lock()
+	defer s.resultMu.Unlock()
+	s.result = provider
+}
+
+func (s *liveProviderSync) getResult() catwalk.Provider {
+	s.resultMu.RLock()
+	defer s.resultMu.RUnlock()
+	return s.result
 }
 
 func cacheAge(path string) (time.Duration, bool) {

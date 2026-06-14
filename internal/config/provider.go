@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/x/etag"
 )
 
@@ -30,10 +32,24 @@ type syncer[T any] interface {
 }
 
 var (
-	providerOnce sync.Once
-	providerList []catwalk.Provider
-	providerErr  error
+	providerOnce    sync.Once
+	providerMu      sync.RWMutex
+	providerList    []catwalk.Provider
+	providerErr     error
+	pendingProvider map[catwalk.InferenceProvider]catwalk.Provider
+
+	providerEvents = pubsub.NewBroker[ProvidersUpdatedEvent]()
 )
+
+// ProvidersUpdatedEvent reports that a provider's model list changed.
+type ProvidersUpdatedEvent struct {
+	ProviderID string
+}
+
+// SubscribeProviderEvents returns provider update events.
+func SubscribeProviderEvents(ctx context.Context) <-chan pubsub.Event[ProvidersUpdatedEvent] {
+	return providerEvents.Subscribe(ctx)
+}
 
 var errMissingLiveProviderCredentials = errors.New("missing live provider credentials")
 
@@ -220,13 +236,84 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		}
 
 		if hyperFound {
-			providerList = append([]catwalk.Provider{hyperProvider}, items...)
+			setProviderList(append([]catwalk.Provider{hyperProvider}, items...))
 		} else {
-			providerList = items
+			setProviderList(items)
 		}
 		providerErr = errors.Join(errs...)
 	})
-	return providerList, providerErr
+	return providerSnapshot(), providerErr
+}
+
+func setProviderList(providers []catwalk.Provider) {
+	providerMu.Lock()
+	defer providerMu.Unlock()
+
+	providers = cloneProviders(providers)
+	for providerID, provider := range pendingProvider {
+		index := slices.IndexFunc(providers, func(item catwalk.Provider) bool {
+			return item.ID == providerID
+		})
+		if index >= 0 {
+			providers[index] = provider
+		}
+	}
+	pendingProvider = nil
+	providerList = providers
+}
+
+func providerSnapshot() []catwalk.Provider {
+	providerMu.RLock()
+	defer providerMu.RUnlock()
+	return cloneProviders(providerList)
+}
+
+func updateProviderList(provider catwalk.Provider) {
+	providerMu.Lock()
+	defer providerMu.Unlock()
+
+	provider = cloneProvider(provider)
+	index := slices.IndexFunc(providerList, func(item catwalk.Provider) bool {
+		return item.ID == provider.ID
+	})
+	if index < 0 {
+		if pendingProvider == nil {
+			pendingProvider = make(map[catwalk.InferenceProvider]catwalk.Provider)
+		}
+		pendingProvider[provider.ID] = provider
+		return
+	}
+	providerList = slices.Clone(providerList)
+	providerList[index] = provider
+}
+
+func publishProviderUpdated(provider catwalk.Provider) {
+	updateProviderList(provider)
+	providerEvents.Publish(pubsub.UpdatedEvent, ProvidersUpdatedEvent{ProviderID: string(provider.ID)})
+}
+
+func cloneProviders(providers []catwalk.Provider) []catwalk.Provider {
+	if providers == nil {
+		return nil
+	}
+	cloned := make([]catwalk.Provider, len(providers))
+	for i, provider := range providers {
+		cloned[i] = cloneProvider(provider)
+	}
+	return cloned
+}
+
+func cloneProvider(provider catwalk.Provider) catwalk.Provider {
+	provider.Models = slices.Clone(provider.Models)
+	provider.DefaultHeaders = cloneStringMap(provider.DefaultHeaders)
+	return provider
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	return maps.Clone(values)
 }
 
 func overlayLiveProviderModels(ctx context.Context, cfg *Config, providers []catwalk.Provider, autoupdate bool) []catwalk.Provider {
@@ -253,6 +340,7 @@ func overlayLiveProviderModels(ctx context.Context, cfg *Config, providers []cat
 		}
 
 		syncer.Init(client, cachePathFor(cacheName), autoupdate, seed, credentialed)
+		syncer.onRefresh = publishProviderUpdated
 		provider, err := syncer.Get(ctx)
 		if err != nil {
 			slog.Warn("Live provider sync failed", "provider", providerID, "error", err)

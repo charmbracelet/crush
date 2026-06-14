@@ -161,6 +161,19 @@ func (m *Models) ID() string {
 	return ModelsID
 }
 
+// RefreshProviders reloads provider models and repopulates the list.
+func (m *Models) RefreshProviders() error {
+	var err error
+	m.providers, err = config.Providers(m.com.Config())
+	if err != nil {
+		return fmt.Errorf("failed to get providers: %w", err)
+	}
+	if err := m.setProviderItems(); err != nil {
+		return fmt.Errorf("failed to set provider items: %w", err)
+	}
+	return nil
+}
+
 // HandleMsg implements Dialog.
 func (m *Models) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {

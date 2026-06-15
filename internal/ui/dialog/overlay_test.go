@@ -129,3 +129,61 @@ func TestOverlay_NonKeyMessagesPassDuringGrace(t *testing.T) {
 	o.Update(tea.MouseWheelMsg{})
 	require.Len(t, d.received, 1, "non-key messages should pass through during grace")
 }
+
+// TestOverlay_ReopenSameDialogSkipsGrace verifies that when a dialog is
+// closed and immediately reopened with the same ID (e.g. successive
+// permission prompts), the grace period is skipped so the user can
+// continue interacting without lost keystrokes.
+func TestOverlay_ReopenSameDialogSkipsGrace(t *testing.T) {
+	t.Parallel()
+
+	d1 := &stubDialog{id: "permissions"}
+	o := NewOverlay()
+	o.OpenDialogWithGrace(d1)
+
+	// Close and immediately reopen with the same ID.
+	o.CloseDialog("permissions")
+	d2 := &stubDialog{id: "permissions"}
+	o.OpenDialogWithGrace(d2)
+
+	// Keys should reach the new dialog immediately — no grace.
+	o.Update(keyMsg('a'))
+	require.Len(t, d2.received, 1, "reopened dialog with same ID should skip grace")
+}
+
+// TestOverlay_ReopenDifferentDialogKeepsGrace verifies that reopening a
+// different dialog ID still gets the normal grace period.
+func TestOverlay_ReopenDifferentDialogKeepsGrace(t *testing.T) {
+	t.Parallel()
+
+	d1 := &stubDialog{id: "permissions"}
+	o := NewOverlay()
+	o.OpenDialogWithGrace(d1)
+	o.CloseDialog("permissions")
+
+	d2 := &stubDialog{id: "other"}
+	o.OpenDialogWithGrace(d2)
+
+	o.Update(keyMsg('a'))
+	require.Empty(t, d2.received, "different dialog ID should still have grace period")
+}
+
+// TestOverlay_ReopenAfterWindowExpiresKeepsGrace verifies that if enough
+// time passes between close and reopen, the grace period applies normally.
+func TestOverlay_ReopenAfterWindowExpiresKeepsGrace(t *testing.T) {
+	t.Parallel()
+
+	d1 := &stubDialog{id: "permissions"}
+	o := NewOverlay()
+	o.OpenDialogWithGrace(d1)
+	o.CloseDialog("permissions")
+
+	// Backdate the close time so it falls outside the reopen window.
+	o.lastClosedAt = time.Now().Add(-reopenGraceWindow - time.Millisecond)
+
+	d2 := &stubDialog{id: "permissions"}
+	o.OpenDialogWithGrace(d2)
+
+	o.Update(keyMsg('a'))
+	require.Empty(t, d2.received, "reopened dialog after window expires should have grace")
+}

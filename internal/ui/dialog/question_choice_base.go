@@ -97,6 +97,13 @@ func (c *choiceList) isFillIn() bool {
 // moveUp moves the cursor up, wrapping around. Closes any active
 // note editor since the note context changes with the cursor.
 func (c *choiceList) moveUp() {
+	if c.mouseActive {
+		if c.hoveredChoice >= 0 {
+			c.cursorIdx = c.hoveredChoice
+		} else {
+			c.cursorIdx = 0
+		}
+	}
 	c.mouseActive = false
 	c.fillIn.Blur()
 	if c.activeNoteKey != "" {
@@ -111,6 +118,13 @@ func (c *choiceList) moveUp() {
 // moveDown moves the cursor down, wrapping around. Closes any
 // active note editor since the note context changes with the cursor.
 func (c *choiceList) moveDown() {
+	if c.mouseActive {
+		if c.hoveredChoice >= 0 {
+			c.cursorIdx = c.hoveredChoice - 1 // will become hoveredChoice after increment
+		} else {
+			c.cursorIdx = -1 // will become 0 after increment
+		}
+	}
 	c.mouseActive = false
 	c.fillIn.Blur()
 	if c.activeNoteKey != "" {

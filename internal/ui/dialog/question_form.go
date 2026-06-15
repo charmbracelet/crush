@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // questionResponder extends InlineEditor with access to the last
@@ -414,20 +415,88 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		labels := make([]string, len(f.labels))
 		copy(labels, f.labels)
 
-		// Truncate if tabs exceed width.
+		// Truncate if tabs exceed width. Distribute the available
+		// space fairly: short labels keep their natural width and
+		// the deficit is shared proportionally among longer ones,
+		// with remainder cells distributed left-to-right so the
+		// layout resizes smoothly pixel-by-pixel.
+		tabWidths := make([]int, len(labels))
+		naturalWidths := make([]int, len(labels))
 		totalWidth := 0
-		for _, l := range labels {
-			totalWidth += len(l) + tabPadX*2 + 2
+		for i, l := range labels {
+			w := ansi.StringWidth(l) + tabPadX*2 + 2
+			tabWidths[i] = w
+			naturalWidths[i] = w
+			totalWidth += w
 		}
-		if totalWidth > area.Dx() && len(labels) > 0 {
-			availPerTab := max((area.Dx()/len(labels))-tabPadX*2-2, 1)
-			for i, l := range labels {
-				if len(l) > availPerTab {
-					if availPerTab > 1 {
-						labels[i] = l[:availPerTab-1] + "…"
-					} else {
-						labels[i] = l[:availPerTab]
+		avail := area.Dx()
+		if totalWidth > avail && len(labels) > 0 {
+			const minLabelW = 1
+			minTabW := minLabelW + tabPadX*2 + 2
+			n := len(labels)
+
+			// Iteratively compute a fair cap. Tabs at or below
+			// the cap keep their natural width; tabs above share
+			// the remaining budget equally. Repeat until stable
+			// because freeing short tabs changes the per-tab
+			// share for the rest.
+			capped := make([]bool, n)
+			for {
+				freeCount := 0
+				freeTotal := 0
+				for i := range n {
+					if capped[i] {
+						continue
 					}
+					freeCount++
+					freeTotal += naturalWidths[i]
+				}
+				if freeCount == 0 {
+					break
+				}
+				budget := avail
+				for i := range n {
+					if capped[i] {
+						budget -= tabWidths[i]
+					}
+				}
+				share := budget / freeCount
+				changed := false
+				for i := range n {
+					if !capped[i] && naturalWidths[i] <= share {
+						capped[i] = true
+						tabWidths[i] = naturalWidths[i]
+						changed = true
+					}
+				}
+				if !changed {
+					// All remaining tabs are above the share.
+					// Assign equal widths with remainder
+					// distributed left-to-right.
+					for i := range n {
+						if !capped[i] {
+							tabWidths[i] = max(share, minTabW)
+						}
+					}
+					remainder := budget - share*freeCount
+					for i := range n {
+						if remainder <= 0 {
+							break
+						}
+						if !capped[i] && tabWidths[i] < naturalWidths[i] {
+							tabWidths[i]++
+							remainder--
+						}
+					}
+					break
+				}
+			}
+
+			// Apply truncation based on final widths.
+			for i, l := range labels {
+				labelAvail := max(tabWidths[i]-tabPadX*2-2, minLabelW)
+				if ansi.StringWidth(l) > labelAvail {
+					labels[i] = ansi.Truncate(l, labelAvail, "…")
 				}
 			}
 		}
@@ -440,8 +509,8 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		hoveredTab := -1
 		if f.hoverY >= area.Min.Y && f.hoverY < area.Min.Y+tabHeight {
 			tx := area.Min.X
-			for i, label := range labels {
-				tw := len(label) + tabPadX*2 + 2
+			for i := range labels {
+				tw := tabWidths[i]
 				if f.hoverX >= tx && f.hoverX < tx+tw {
 					hoveredTab = i
 					break
@@ -453,8 +522,8 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		for i, label := range labels {
 			isActive := i == f.activeIdx
 			isHovered := i == hoveredTab && !isActive
-			labelWidth := len(label)
-			tabWidth := labelWidth + tabPadX*2 + 2
+			labelWidth := ansi.StringWidth(label)
+			tabWidth := tabWidths[i]
 
 			tabArea := image.Rect(x, area.Min.Y, x+tabWidth, area.Min.Y+tabHeight)
 

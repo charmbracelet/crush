@@ -46,11 +46,11 @@ func Button(t *styles.Styles, opts ButtonOpts) string {
 	return text
 }
 
-// ButtonGroup creates a row of selectable buttons
-// Spacing is the separator between buttons
-// Use "  " or similar for horizontal layout
-// Use "\n"  for vertical layout
-// Defaults to "  " (horizontal)
+// ButtonGroup creates a row of selectable buttons.
+// Spacing is the separator between buttons.
+// Use "  " or similar for horizontal layout.
+// Use "\n"  for vertical layout.
+// Defaults to "  " (horizontal).
 func ButtonGroup(t *styles.Styles, buttons []ButtonOpts, spacing string) string {
 	if len(buttons) == 0 {
 		return ""

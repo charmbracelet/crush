@@ -69,6 +69,13 @@ type Overlay struct {
 	// dialog was opened via OpenDialogWithGrace.
 	graceOpenedAt    time.Time
 	graceLastInputAt time.Time
+
+	// Track recently closed dialog IDs so that reopening the same
+	// dialog type can skip the grace period. This prevents rapid
+	// successive dialogs (e.g. multiple permission prompts) from
+	// each eating a keystroke.
+	lastClosedID string
+	lastClosedAt time.Time
 }
 
 // NewOverlay creates a new [Overlay] instance.
@@ -106,9 +113,21 @@ func (d *Overlay) OpenDialog(dialog Dialog) {
 // comes first. Use this for dialogs that open asynchronously (e.g.
 // permission prompts) where in-flight keystrokes from a previously
 // focused component could act on the dialog before the user sees it.
+//
+// If the same dialog ID was just closed (within reopenGraceWindow),
+// the grace period is skipped — the user is already focused on this
+// dialog type and rapid successive prompts should not eat keystrokes.
 func (d *Overlay) OpenDialogWithGrace(dialog Dialog) {
 	now := time.Now()
 	d.dialogs = append(d.dialogs, dialog)
+
+	// Skip grace when reopening the same dialog type immediately.
+	if dialog.ID() == d.lastClosedID && now.Sub(d.lastClosedAt) < reopenGraceWindow {
+		d.graceOpenedAt = time.Time{}
+		d.graceLastInputAt = time.Time{}
+		return
+	}
+
 	d.graceOpenedAt = now
 	d.graceLastInputAt = now
 }
@@ -146,7 +165,15 @@ func (d *Overlay) CloseFrontDialog() {
 	d.removeDialog(len(d.dialogs) - 1)
 }
 
+// reopenGraceWindow is how long after closing a dialog we consider
+// a reopen of the same dialog ID to be "immediate" and skip grace.
+const reopenGraceWindow = 500 * time.Millisecond
+
 func (d *Overlay) removeDialog(idx int) {
+	if idx == len(d.dialogs)-1 {
+		d.lastClosedID = d.dialogs[idx].ID()
+		d.lastClosedAt = time.Now()
+	}
 	d.dialogs = append(d.dialogs[:idx], d.dialogs[idx+1:]...)
 	// Clear grace state when the front dialog changes.
 	if idx == len(d.dialogs) {

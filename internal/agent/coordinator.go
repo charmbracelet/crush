@@ -1278,66 +1278,18 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		)
 	}
 
-	// subAgentOutput signals via ok whether it recovered real sub-agent text.
-	// When ok is false it only produced the diagnostic fallback, so report it
-	// as a soft tool error (IsError=true, nil Go error) to let the parent LLM
-	// distinguish "no output" from a real answer without aborting the turn.
-	output, ok := c.subAgentOutput(ctx, session.ID, result)
-	if !ok {
-		return fantasy.NewTextErrorResponse(output), nil
+	output := subAgentOutput(result)
+	if output == "" {
+		return fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."), nil
 	}
 	return fantasy.NewTextResponse(output), nil
 }
 
-// subAgentOutput extracts the sub-agent's textual output, returning ok=true
-// when real text was recovered from any layer (final response → aggregated
-// steps → persisted assistant message). It returns ok=false only for the
-// last-resort diagnostic fallback, signalling that no usable output exists.
-func (c *coordinator) subAgentOutput(ctx context.Context, sessionID string, result *fantasy.AgentResult) (string, bool) {
-	if result != nil {
-		if texts := responseContentText(result.Response.Content); len(texts) > 0 {
-			return strings.Join(texts, "\n\n"), true
-		}
-
-		var texts []string
-		for _, step := range result.Steps {
-			texts = append(texts, responseContentText(step.Content)...)
-		}
-		if len(texts) > 0 {
-			return strings.Join(texts, "\n\n"), true
-		}
+func subAgentOutput(result *fantasy.AgentResult) string {
+	if result == nil {
+		return ""
 	}
-
-	if c.messages != nil {
-		messages, err := c.messages.List(ctx, sessionID)
-		if err != nil {
-			slog.Warn("Failed to list sub-agent messages", "session", sessionID, "error", err)
-		} else {
-			for i := len(messages) - 1; i >= 0; i-- {
-				msg := messages[i]
-				if msg.Role != message.Assistant {
-					continue
-				}
-				if text := msg.Content().String(); strings.TrimSpace(text) != "" {
-					return text, true
-				}
-			}
-		}
-	}
-
-	return "Sub-agent completed but produced no text output.", false
-}
-
-func responseContentText(content fantasy.ResponseContent) []string {
-	texts := make([]string, 0)
-	for _, part := range content {
-		textContent, ok := fantasy.AsContentType[fantasy.TextContent](part)
-		if !ok || strings.TrimSpace(textContent.Text) == "" {
-			continue
-		}
-		texts = append(texts, textContent.Text)
-	}
-	return texts
+	return result.Response.Content.Text()
 }
 
 // updateParentSessionCost accumulates the cost from a child session to its parent session.

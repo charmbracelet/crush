@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,13 @@ const (
 	MaxBackgroundJobs = 50
 	// CompletedJobRetentionMinutes is how long to keep completed jobs before auto-cleanup (8 hours)
 	CompletedJobRetentionMinutes = 8 * 60
+	// KillGracePeriod bounds how long Kill waits for a cancelled shell's
+	// goroutine to exit. With the process-group exec handler in place,
+	// the goroutine should unwind almost immediately on cancellation;
+	// this is a safety net for the pathological cases (children in
+	// uninterruptible sleep, a wedge inside the interpreter) so a tool
+	// call can never block indefinitely on job_kill.
+	KillGracePeriod = 5 * time.Second
 )
 
 // syncBuffer is a thread-safe wrapper around bytes.Buffer.
@@ -143,7 +151,17 @@ func (m *BackgroundShellManager) Remove(id string) error {
 	return nil
 }
 
-// Kill terminates a background shell by ID.
+// Kill terminates a background shell by ID. It cancels the shell's
+// context and waits up to [KillGracePeriod] for the goroutine to unwind.
+// In the steady state — where every external command runs in its own
+// process group via the standard exec handler — cancellation reaches the
+// underlying process(es) immediately and the wait returns in
+// milliseconds. The grace-period fallback exists for the long tail:
+// children stuck in uninterruptible kernel sleeps, a wedge somewhere in
+// mvdan's interpreter, or a misbehaving builtin. In those cases we
+// abandon the tracking entry so callers (job_kill, KillAll) never block
+// indefinitely; the orphan goroutine will exit on its own when its
+// blocking syscall finally returns.
 func (m *BackgroundShellManager) Kill(id string) error {
 	shell, ok := m.shells.Take(id)
 	if !ok {
@@ -151,8 +169,17 @@ func (m *BackgroundShellManager) Kill(id string) error {
 	}
 
 	shell.cancel()
-	<-shell.done
-	return nil
+	select {
+	case <-shell.done:
+		return nil
+	case <-time.After(KillGracePeriod):
+		slog.Warn("Background shell did not exit within grace period; abandoning",
+			"id", id,
+			"command", shell.Command,
+			"grace_period", KillGracePeriod,
+		)
+		return nil
+	}
 }
 
 // BackgroundShellInfo contains information about a background shell.

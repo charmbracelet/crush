@@ -147,7 +147,10 @@ func withNonInteractiveEnv(env []string) []string {
 //     that deny rules see the already-resolved argv of anything the
 //     script exec's rather than the outer path-prefixed wrapper;
 //  3. block list;
-//  4. optional Go coreutils (only when useGoCoreUtils is on).
+//  4. optional Go coreutils (only when useGoCoreUtils is on);
+//  5. process-group exec (terminal handler). This replaces mvdan's
+//     DefaultExecHandler so every external command gets its own process
+//     group and is killed as a tree on ctx cancellation.
 func standardHandlers(blockFuncs []BlockFunc) []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	handlers := []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc{
 		builtinHandler(),
@@ -157,6 +160,7 @@ func standardHandlers(blockFuncs []BlockFunc) []func(next interp.ExecHandlerFunc
 	if useGoCoreUtils {
 		handlers = append(handlers, coreutils.ExecHandler)
 	}
+	handlers = append(handlers, processGroupExecHandler())
 	return handlers
 }
 

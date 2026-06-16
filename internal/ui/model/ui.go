@@ -62,10 +62,6 @@ import (
 	xstrings "github.com/charmbracelet/x/exp/strings"
 )
 
-// MouseScrollThreshold defines how many lines to scroll the chat when a mouse
-// wheel event occurs.
-const MouseScrollThreshold = 5
-
 // Compact mode breakpoints.
 const (
 	compactModeWidthBreakpoint  = 120
@@ -855,40 +851,36 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}))
 			}
 		}
-	case tea.MouseWheelMsg:
+	case common.CoalescedWheelMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
 
-		// Otherwise handle mouse wheel for chat.
+		// Otherwise handle mouse wheel for chat. Use the coalesced delta
+		// directly as the line count. Terminals like Ghostty send DeltaY=3
+		// per physical wheel tick (matching their native scrollback), while
+		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
-			switch msg.Button {
-			case tea.MouseWheelUp:
-				if cmd := m.chat.ScrollByAndAnimate(-MouseScrollThreshold); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				if !m.chat.SelectedItemInView() {
+			lines := int(msg.DeltaY)
+			if lines == 0 {
+				break
+			}
+			if cmd := m.chat.ScrollByAndAnimate(lines); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			if !m.chat.SelectedItemInView() {
+				if lines < 0 {
 					m.chat.SelectPrev()
-					if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
-						cmds = append(cmds, cmd)
-					}
+				} else if m.chat.AtBottom() {
+					m.chat.SelectLast()
+				} else {
+					m.chat.SelectNext()
 				}
-			case tea.MouseWheelDown:
-				if cmd := m.chat.ScrollByAndAnimate(MouseScrollThreshold); cmd != nil {
+				if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
 					cmds = append(cmds, cmd)
-				}
-				if !m.chat.SelectedItemInView() {
-					if m.chat.AtBottom() {
-						m.chat.SelectLast()
-					} else {
-						m.chat.SelectNext()
-					}
-					if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
-						cmds = append(cmds, cmd)
-					}
 				}
 			}
 		}

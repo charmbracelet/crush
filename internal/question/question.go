@@ -76,17 +76,9 @@ func (r Request) Validate() error {
 	if len(r.Questions) > MaxQuestions {
 		return fmt.Errorf("questions exceed maximum of %d (got %d)", MaxQuestions, len(r.Questions))
 	}
-	if len(r.Questions) >= 2 {
-		if r.ConfirmTitle == "" {
-			return fmt.Errorf("confirm_title is required for multi-question requests")
-		}
-		if r.ConfirmDescription == "" {
-			return fmt.Errorf("confirm_description is required for multi-question requests")
-		}
-	}
 	for i, q := range r.Questions {
 		if err := q.Validate(); err != nil {
-			return fmt.Errorf("question %d: %w", i, err)
+			return fmt.Errorf("question %d: %w", i+1, err)
 		}
 	}
 	return nil
@@ -95,51 +87,68 @@ func (r Request) Validate() error {
 // Validate checks that a Question has valid fields. Error messages
 // are written for LLM consumption: specific and actionable.
 func (q Question) Validate() error {
+	label := q.identifier()
 	if q.Text == "" {
-		return fmt.Errorf("question text is required")
+		return fmt.Errorf("%s: question text is required", label)
 	}
 	if len(q.Text) > MaxQuestionLength {
-		return fmt.Errorf("text exceeds %d characters (got %d)", MaxQuestionLength, len(q.Text))
+		return fmt.Errorf("%s: text exceeds %d characters (got %d)", label, MaxQuestionLength, len(q.Text))
 	}
 	if q.Description == "" {
-		return fmt.Errorf("description is required")
+		return fmt.Errorf("%s: description is required", label)
 	}
 	if len(q.Description) > MaxDescriptionLength {
-		return fmt.Errorf("description exceeds %d characters (got %d)", MaxDescriptionLength, len(q.Description))
+		return fmt.Errorf("%s: description exceeds %d characters (got %d)", label, MaxDescriptionLength, len(q.Description))
 	}
 	switch q.Type {
 	case TypeYesNo, TypeFreeText:
 		// No choices needed.
 	case TypeSingleChoice, TypeMultiChoice:
 		if len(q.Choices) < 2 {
-			return fmt.Errorf("%s requires at least 2 choices (got %d)", q.Type, len(q.Choices))
+			return fmt.Errorf("%s: %s requires at least 2 choices in the \"choices\" array (got %d). Use \"choices\", not \"options\"", label, q.Type, len(q.Choices))
 		}
 		if len(q.Choices) > MaxChoices {
-			return fmt.Errorf("choices exceed maximum of %d (got %d)", MaxChoices, len(q.Choices))
+			return fmt.Errorf("%s: choices exceed maximum of %d (got %d)", label, MaxChoices, len(q.Choices))
 		}
 		seen := make(map[string]bool, len(q.Choices))
 		for i, c := range q.Choices {
 			if c.ID == "" {
-				return fmt.Errorf("choice %d must have an id", i)
+				return fmt.Errorf("%s: choice %d must have an \"id\" field", label, i+1)
 			}
 			if seen[c.ID] {
-				return fmt.Errorf("choice %d has duplicate id %q", i, c.ID)
+				return fmt.Errorf("%s: choice %d has duplicate id %q", label, i+1, c.ID)
 			}
 			seen[c.ID] = true
 			if c.Label == "" {
-				return fmt.Errorf("choice %d must have a label", i)
+				return fmt.Errorf("%s: choice %d (%s) must have a \"label\" field", label, i+1, c.ID)
 			}
 			if len(c.Label) > MaxChoiceLabelLength {
-				return fmt.Errorf("choice %d label exceeds %d characters (got %d)", i, MaxChoiceLabelLength, len(c.Label))
+				return fmt.Errorf("%s: choice %d label exceeds %d characters (got %d)", label, i+1, MaxChoiceLabelLength, len(c.Label))
 			}
 			if len(c.Description) > MaxChoiceDescriptionLength {
-				return fmt.Errorf("choice %d description exceeds %d characters (got %d)", i, MaxChoiceDescriptionLength, len(c.Description))
+				return fmt.Errorf("%s: choice %d description exceeds %d characters (got %d)", label, i+1, MaxChoiceDescriptionLength, len(c.Description))
 			}
 		}
 	default:
-		return fmt.Errorf("unknown type %q (must be yes_no, single_choice, multi_choice, or free_text)", q.Type)
+		return fmt.Errorf("%s: unknown type %q (must be yes_no, single_choice, multi_choice, or free_text)", label, q.Type)
 	}
 	return nil
+}
+
+// identifier returns a human-readable label for error messages.
+// Uses the question label, text excerpt, or a fallback.
+func (q Question) identifier() string {
+	if q.Label != "" {
+		return fmt.Sprintf("[%s]", q.Label)
+	}
+	if q.Text != "" {
+		t := q.Text
+		if len(t) > 40 {
+			t = t[:40] + "…"
+		}
+		return fmt.Sprintf("[%s]", t)
+	}
+	return "[unnamed question]"
 }
 
 const (
@@ -209,6 +218,16 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 	for i := range req.Questions {
 		if req.Questions[i].ID == "" {
 			req.Questions[i].ID = uuid.New().String()
+		}
+	}
+
+	// Apply defaults for multi-question confirm fields.
+	if len(req.Questions) >= 2 {
+		if req.ConfirmTitle == "" {
+			req.ConfirmTitle = "Ready to go?"
+		}
+		if req.ConfirmDescription == "" {
+			req.ConfirmDescription = "Review your answers above and confirm."
 		}
 	}
 

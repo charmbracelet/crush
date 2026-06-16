@@ -435,68 +435,105 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			minTabW := minLabelW + tabPadX*2 + 2
 			n := len(labels)
 
-			// Iteratively compute a fair cap. Tabs at or below
-			// the cap keep their natural width; tabs above share
-			// the remaining budget equally. Repeat until stable
-			// because freeing short tabs changes the per-tab
-			// share for the rest.
-			capped := make([]bool, n)
-			for {
-				freeCount := 0
-				freeTotal := 0
-				for i := range n {
-					if capped[i] {
-						continue
+			// Check if there's enough room to show all tabs with
+			// at least a useful label. If each tab can't fit at
+			// least 5 cells of label, switch to single-tab mode
+			// with a "N of M" counter.
+			usefulMinTabW := 5 + tabPadX*2 + 2
+			if avail/n < usefulMinTabW {
+				// Single-tab mode: show only the active tab
+				// label plus a counter.
+				counter := fmt.Sprintf("%d/%d", f.activeIdx+1, n)
+				activeLabel := labels[f.activeIdx]
+				combined := activeLabel + " · " + counter
+				maxLabel := avail - tabPadX*2 - 2
+				if maxLabel < 3 {
+					maxLabel = 3
+				}
+				if ansi.StringWidth(combined) > maxLabel {
+					// Truncate the label part to fit.
+					counterPart := " · " + counter
+					labelBudget := maxLabel - ansi.StringWidth(counterPart)
+					if labelBudget < 1 {
+						labelBudget = 1
 					}
-					freeCount++
-					freeTotal += naturalWidths[i]
+					combined = ansi.Truncate(activeLabel, labelBudget, "…") + counterPart
 				}
-				if freeCount == 0 {
-					break
-				}
-				budget := avail
-				for i := range n {
-					if capped[i] {
-						budget -= tabWidths[i]
-					}
-				}
-				share := budget / freeCount
-				changed := false
-				for i := range n {
-					if !capped[i] && naturalWidths[i] <= share {
-						capped[i] = true
-						tabWidths[i] = naturalWidths[i]
-						changed = true
+				for i := range labels {
+					if i == f.activeIdx {
+						labels[i] = combined
+					} else {
+						labels[i] = ""
 					}
 				}
-				if !changed {
-					// All remaining tabs are above the share.
-					// Assign equal widths with remainder
-					// distributed left-to-right.
+				// Recalculate widths for single visible tab.
+				totalWidth = 0
+				for i := range labels {
+					if labels[i] == "" {
+						tabWidths[i] = 0
+					} else {
+						w := ansi.StringWidth(labels[i]) + tabPadX*2 + 2
+						tabWidths[i] = w
+						totalWidth += w
+					}
+				}
+			} else {
+				// Normal truncation: distribute space fairly.
+				capped := make([]bool, n)
+				for {
+					freeCount := 0
+					freeTotal := 0
 					for i := range n {
-						if !capped[i] {
-							tabWidths[i] = max(share, minTabW)
+						if capped[i] {
+							continue
 						}
+						freeCount++
+						freeTotal += naturalWidths[i]
 					}
-					remainder := budget - share*freeCount
+					if freeCount == 0 {
+						break
+					}
+					budget := avail
 					for i := range n {
-						if remainder <= 0 {
-							break
-						}
-						if !capped[i] && tabWidths[i] < naturalWidths[i] {
-							tabWidths[i]++
-							remainder--
+						if capped[i] {
+							budget -= tabWidths[i]
 						}
 					}
-					break
+					share := budget / freeCount
+					changed := false
+					for i := range n {
+						if !capped[i] && naturalWidths[i] <= share {
+							capped[i] = true
+							tabWidths[i] = naturalWidths[i]
+							changed = true
+						}
+					}
+					if !changed {
+						for i := range n {
+							if !capped[i] {
+								tabWidths[i] = max(share, minTabW)
+							}
+						}
+						remainder := budget - share*freeCount
+						for i := range n {
+							if remainder <= 0 {
+								break
+							}
+							if !capped[i] && tabWidths[i] < naturalWidths[i] {
+								tabWidths[i]++
+								remainder--
+							}
+						}
+						break
+					}
 				}
-			}
 
-			// Apply truncation based on final widths.
-			for i, l := range labels {
-				labelAvail := max(tabWidths[i]-tabPadX*2-2, minLabelW)
-				if ansi.StringWidth(l) > labelAvail {
-					labels[i] = ansi.Truncate(l, labelAvail, "…")
+				// Apply truncation based on final widths.
+				for i, l := range labels {
+					labelAvail := max(tabWidths[i]-tabPadX*2-2, minLabelW)
+					if ansi.StringWidth(l) > labelAvail {
+						labels[i] = ansi.Truncate(l, labelAvail, "…")
+					}
 				}
 			}
 		}
@@ -519,7 +556,19 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			}
 		}
 
+		firstVisible := -1
+		for i := range labels {
+			if tabWidths[i] > 0 {
+				firstVisible = i
+				break
+			}
+		}
+
 		for i, label := range labels {
+			// Skip hidden tabs (single-tab mode).
+			if tabWidths[i] == 0 {
+				continue
+			}
 			isActive := i == f.activeIdx
 			isHovered := i == hoveredTab && !isActive
 			labelWidth := ansi.StringWidth(label)
@@ -547,7 +596,7 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 				textStyle = hovered
 			}
 
-			if i == 0 {
+			if i == firstVisible {
 				if isActive {
 					border.BottomLeft = uv.Side{Content: "┘", Style: border.BottomLeft.Style}
 				} else {

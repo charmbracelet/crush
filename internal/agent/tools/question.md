@@ -24,7 +24,8 @@ These are enforced. Violations return an error and waste a round trip.
   single_choice without choices is an error.
 - **Description required** on every question. Keep it under 300 chars.
 - **Choice descriptions** must be under 100 chars each.
-- **Max 5 questions** per batch.
+- **Max 5 questions** per batch. If you need more, split into multiple
+  batches and tell the user there will be follow-up questions.
 
 ## Question types
 
@@ -51,9 +52,6 @@ fill-in option so the user can type a custom answer. Do not add an
 When asking multiple questions, a confirmation tab is **always shown**
 after all questions are answered. The user sees a summary of their answers
 and must confirm before submitting. If they say no, they go back to editing.
-
-**`confirm_title` and `confirm_description` are required for batches.**
-Omitting either causes an error.
 
 - `confirm_title`: a short question like "Ready to go?" or "Sound good?"
 - `confirm_description`: summarize what will happen based on the expected

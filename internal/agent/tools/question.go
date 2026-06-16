@@ -90,14 +90,18 @@ func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("at least one question is required"), nil
 			}
 			if len(params.Questions) > question.MaxQuestions {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("exceeds maximum of %d questions (got %d)", question.MaxQuestions, len(params.Questions))), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("exceeds maximum of %d questions per batch (got %d). Split into multiple batches and tell the user there will be follow-up questions", question.MaxQuestions, len(params.Questions))), nil
 			}
 
 			questions := make([]question.Question, len(params.Questions))
 			for i, item := range params.Questions {
 				qType := question.Type(item.Type)
 				if qType != question.TypeYesNo && qType != question.TypeSingleChoice && qType != question.TypeMultiChoice && qType != question.TypeFreeText {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("invalid type for question %d: %q", i, item.Type)), nil
+					label := item.Label
+					if label == "" {
+						label = item.Question
+					}
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("question %d [%s]: invalid type %q (must be yes_no, single_choice, multi_choice, or free_text)", i+1, label, item.Type)), nil
 				}
 				questions[i] = question.Question{
 					Type:        qType,
@@ -118,7 +122,7 @@ func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 
 			answers, err := svc.Ask(ctx, req)
 			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get user response: %v", err)), nil
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
 			return formatAnswers(answers, questions)

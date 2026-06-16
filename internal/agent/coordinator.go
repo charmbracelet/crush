@@ -212,10 +212,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	}
 
 	model := c.currentAgent.Model()
-	maxTokens := model.CatwalkCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
-	}
+	maxTokens := model.MaxOutputTokens()
 
 	if !model.CatwalkCfg.SupportsImages && attachments != nil {
 		// filter out image attachments
@@ -1226,10 +1223,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	// Get model configuration
 	model := params.Agent.Model()
-	maxTokens := model.CatwalkCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
-	}
+	maxTokens := model.MaxOutputTokens()
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {

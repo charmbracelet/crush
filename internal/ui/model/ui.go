@@ -966,6 +966,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case common.CoalescedWheelMsg:
+		// Route wheel events to active inline editor if it supports scrolling.
+		if m.activeInline != nil {
+			if we, ok := m.activeInline.(common.WheelScrollable); ok {
+				we.HandleWheel(msg.DeltaX, msg.DeltaY)
+				return m, tea.Batch(cmds...)
+			}
+		}
+
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)

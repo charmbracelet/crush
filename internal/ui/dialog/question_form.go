@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -236,6 +237,17 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, cmd
 	}
 	return false, nil
+}
+
+// HandleWheel scrolls the active choice list vertically, or delegates
+// to the active question if it supports wheel scrolling.
+func (f *QuestionForm) HandleWheel(deltaX, deltaY float64) {
+	if f.isConfirmTab() || f.activeIdx >= f.numQuestions {
+		return
+	}
+	if we, ok := f.questions[f.activeIdx].(common.WheelScrollable); ok {
+		we.HandleWheel(deltaX, deltaY)
+	}
 }
 
 // switchTab moves focus to the given tab index, wrapping around.

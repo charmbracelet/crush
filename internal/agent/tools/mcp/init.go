@@ -353,13 +353,22 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
 
-	transport, err := createTransport(mcpCtx, m, resolver)
+	transport, err := createTransport(mcpCtx, name, m, resolver)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		slog.Error("Error creating MCP client", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
 		return nil, err
+	}
+
+	// When OAuth is configured, the initialize request may trigger a
+	// browser-based authorization flow that requires user interaction.
+	// The connection timeout would kill that flow, so we use a new context
+	connectCtx := mcpCtx
+	if m.OAuth != nil {
+		slog.Info("MCP server has OAuth configured, using new context for connect", "name", name)
+		connectCtx = ctx
 	}
 
 	client := mcp.NewClient(
@@ -394,7 +403,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 		},
 	)
 
-	session, err := client.Connect(mcpCtx, transport, nil)
+	session, err := client.Connect(connectCtx, transport, nil)
 	if err != nil {
 		err = maybeStdioErr(err, transport)
 		updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, Counts{})
@@ -437,7 +446,7 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 	return err
 }
 
-func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
+func createTransport(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		command, err := resolver.ResolveValue(m.Command)
@@ -468,6 +477,16 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(url) == "" {
 			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
 		}
+		// When OAuth is configured, normalize the URL by stripping any
+		// trailing slash. The Protected Resource Metadata (PRM) "resource"
+		// field typically does not have a trailing slash, and the SDK
+		// performs a strict string comparison (prm.Resource != serverURL).
+		// A mismatch causes PRM discovery to fail and fall back to root
+		// OAuth endpoints, which issue generic tokens that the per-service
+		// MCP server rejects.
+		if m.OAuth != nil {
+			url = strings.TrimSuffix(url, "/")
+		}
 		headers, err := m.ResolvedHeaders(resolver)
 		if err != nil {
 			return nil, err
@@ -477,10 +496,18 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 				headers: headers,
 			},
 		}
-		return &mcp.StreamableClientTransport{
+		transport := &mcp.StreamableClientTransport{
 			Endpoint:   url,
 			HTTPClient: client,
-		}, nil
+		}
+		if m.OAuth != nil {
+			handler, err := buildOAuthHandler(name, url, m.OAuth)
+			if err != nil {
+				return nil, fmt.Errorf("mcp oauth for %s: %w", name, err)
+			}
+			transport.OAuthHandler = handler
+		}
+		return transport, nil
 	case config.MCPSSE:
 		url, err := m.ResolvedURL(resolver)
 		if err != nil {
@@ -489,14 +516,23 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(url) == "" {
 			return nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
 		}
+		if m.OAuth != nil {
+			url = strings.TrimSuffix(url, "/")
+		}
 		headers, err := m.ResolvedHeaders(resolver)
 		if err != nil {
 			return nil, err
 		}
+		var transport http.RoundTripper = &headerRoundTripper{headers: headers}
+		if m.OAuth != nil {
+			handler, err := buildOAuthHandler(name, url, m.OAuth)
+			if err != nil {
+				return nil, fmt.Errorf("mcp oauth for %s: %w", name, err)
+			}
+			transport = newOAuthRoundTripperWithBase(handler, transport)
+		}
 		client := &http.Client{
-			Transport: &headerRoundTripper{
-				headers: headers,
-			},
+			Transport: transport,
 		}
 		return &mcp.SSEClientTransport{
 			Endpoint:   url,

@@ -138,13 +138,15 @@ Examples of autonomous decisions:
 - `edit` - Single find/replace in a file (exact text matching)
 - `multiedit` - Multiple find/replace operations in one file
 - `write` - Create/overwrite entire file
-- `lsp_replace_symbol` - Replace an entire function/method/class by name (no text matching needed)
+- `lsp_replace_symbol` - Replace, insert before/after, or delete an entire function/method/class by name (no text matching needed)
 - `lsp_rename` - Rename a symbol across all files semantically
 
 Never use `apply_patch` or similar - those tools don't exist.
 
 **Prefer LSP tools when available:**
-- Replacing a whole function, method, or type → `lsp_replace_symbol` instead of `edit`. It finds exact boundaries via document symbols, so there are no whitespace-matching failures.
+- Replacing a whole function, method, or type → `lsp_replace_symbol` with action `replace` instead of `edit`. It finds exact boundaries via document symbols, so there are no whitespace-matching failures.
+- Adding code before or after a symbol → `lsp_replace_symbol` with action `add_before` or `add_after`.
+- Removing a function, method, or type → `lsp_replace_symbol` with action `delete`.
 - Renaming a symbol → `lsp_rename` instead of manual multi-file `edit`. It handles scopes, overloads, and imports automatically.
 - Understanding a file before editing → `lsp_symbols` to get a structured outline of all symbols with kinds and line ranges.
 - Finding where something is defined → `lsp_definition` instead of `grep`. Language-aware, skips comments and strings.

@@ -17,9 +17,10 @@ import (
 )
 
 type ReplaceSymbolParams struct {
-	Symbol      string `json:"symbol" description:"The symbol name to replace (e.g., function name, method name, type name)"`
+	Symbol      string `json:"symbol" description:"The symbol name to target (e.g., function name, method name, type name)"`
 	FilePath    string `json:"file_path" description:"The path to the file containing the symbol"`
-	Replacement string `json:"replacement" description:"The full replacement text for the symbol (including signature/declaration)"`
+	Replacement string `json:"replacement,omitempty" description:"The replacement text. Required for 'replace' action. For 'add_before'/'add_after', the text to insert. Ignored for 'delete'."`
+	Action      string `json:"action,omitempty" description:"Operation to perform: 'replace' (default, replace entire symbol), 'add_before' (insert before symbol), 'add_after' (insert after symbol), 'delete' (remove symbol entirely)"`
 }
 
 const ReplaceSymbolToolName = "lsp_replace_symbol"
@@ -43,8 +44,18 @@ func NewReplaceSymbolTool(
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
-			if params.Replacement == "" {
-				return fantasy.NewTextErrorResponse("replacement is required"), nil
+
+			action := params.Action
+			if action == "" {
+				action = "replace"
+			}
+			switch action {
+			case "replace", "add_before", "add_after", "delete":
+			default:
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("invalid action %q: must be replace, add_before, add_after, or delete", action)), nil
+			}
+			if (action == "replace" || action == "add_before" || action == "add_after") && params.Replacement == "" {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("replacement is required for action %q", action)), nil
 			}
 
 			lspManager.Start(ctx, params.FilePath)
@@ -85,7 +96,7 @@ func NewReplaceSymbolTool(
 				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					ToolName:    ReplaceSymbolToolName,
-					Description: fmt.Sprintf("Replace symbol '%s' in %s", params.Symbol, params.FilePath),
+					Description: fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
 				})
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
@@ -101,10 +112,28 @@ func NewReplaceSymbolTool(
 				}
 			}
 
-			newLines := make([]string, 0, len(lines))
-			newLines = append(newLines, lines[:startLine]...)
-			newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
-			newLines = append(newLines, lines[endLine+1:]...)
+			var newLines []string
+			switch action {
+			case "replace":
+				newLines = make([]string, 0, len(lines))
+				newLines = append(newLines, lines[:startLine]...)
+				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
+				newLines = append(newLines, lines[endLine+1:]...)
+			case "add_before":
+				newLines = make([]string, 0, len(lines)+strings.Count(params.Replacement, "\n")+1)
+				newLines = append(newLines, lines[:startLine]...)
+				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
+				newLines = append(newLines, lines[startLine:]...)
+			case "add_after":
+				newLines = make([]string, 0, len(lines)+strings.Count(params.Replacement, "\n")+1)
+				newLines = append(newLines, lines[:endLine+1]...)
+				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
+				newLines = append(newLines, lines[endLine+1:]...)
+			case "delete":
+				newLines = make([]string, 0, len(lines))
+				newLines = append(newLines, lines[:startLine]...)
+				newLines = append(newLines, lines[endLine+1:]...)
+			}
 
 			newContent := strings.Join(newLines, "\n")
 			if err := os.WriteFile(params.FilePath, []byte(newContent), 0o644); err != nil {
@@ -118,9 +147,21 @@ func NewReplaceSymbolTool(
 			notifyLSPs(ctx, lspManager, params.FilePath)
 
 			var b strings.Builder
-			fmt.Fprintf(&b, "Replaced symbol '%s' in %s (lines %d-%d)\n\n", params.Symbol, params.FilePath, startLine+1, endLine+1)
-			fmt.Fprintf(&b, "Old (%d lines):\n%s\n\n", endLine-startLine+1, truncateText(oldText, 500))
-			fmt.Fprintf(&b, "New (%d lines):\n%s\n", strings.Count(params.Replacement, "\n")+1, truncateText(params.Replacement, 500))
+			switch action {
+			case "replace":
+				fmt.Fprintf(&b, "Replaced symbol '%s' in %s (lines %d-%d)\n\n", params.Symbol, params.FilePath, startLine+1, endLine+1)
+				fmt.Fprintf(&b, "Old (%d lines):\n%s\n\n", endLine-startLine+1, truncateText(oldText, 500))
+				fmt.Fprintf(&b, "New (%d lines):\n%s\n", strings.Count(params.Replacement, "\n")+1, truncateText(params.Replacement, 500))
+			case "add_before":
+				fmt.Fprintf(&b, "Inserted before symbol '%s' in %s (before line %d)\n\n", params.Symbol, params.FilePath, startLine+1)
+				fmt.Fprintf(&b, "Inserted (%d lines):\n%s\n", strings.Count(params.Replacement, "\n")+1, truncateText(params.Replacement, 500))
+			case "add_after":
+				fmt.Fprintf(&b, "Inserted after symbol '%s' in %s (after line %d)\n\n", params.Symbol, params.FilePath, endLine+1)
+				fmt.Fprintf(&b, "Inserted (%d lines):\n%s\n", strings.Count(params.Replacement, "\n")+1, truncateText(params.Replacement, 500))
+			case "delete":
+				fmt.Fprintf(&b, "Deleted symbol '%s' from %s (lines %d-%d)\n\n", params.Symbol, params.FilePath, startLine+1, endLine+1)
+				fmt.Fprintf(&b, "Removed (%d lines):\n%s\n", endLine-startLine+1, truncateText(oldText, 500))
+			}
 
 			text := b.String()
 			text += "\n" + getDiagnostics(params.FilePath, lspManager)

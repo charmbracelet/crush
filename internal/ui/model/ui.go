@@ -3730,6 +3730,12 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 // interpreting clipboard text as a file path.
 func (m *UI) pasteImageFromClipboard() tea.Msg {
 	imageData, err := readClipboard(clipboardFormatImage)
+	if err != nil {
+		// The nativeclipboard library may not support every clipboard image
+		// format on all platforms (e.g., WeChat screenshots on macOS are
+		// copied as TIFF). Try a platform-specific fallback before giving up.
+		imageData, err = readClipboardImageFallback()
+	}
 	if int64(len(imageData)) > common.MaxAttachmentSize {
 		return util.InfoMsg{
 			Type: util.InfoTypeError,

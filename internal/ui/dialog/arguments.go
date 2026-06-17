@@ -230,11 +230,11 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 			a.inputs[a.focused], cmd = a.inputs[a.focused].Update(msg)
 			return ActionCmd{Cmd: cmd}
 		}
-	case tea.MouseWheelMsg:
-		a.viewport, _ = a.viewport.Update(msg)
+	case common.CoalescedWheelMsg:
+		a.viewport, _ = a.viewport.Update(tea.MouseWheelMsg(msg.Mouse))
 		// If focused field scrolled out of view, focus the visible field
 		if !a.isFieldVisible(a.focused) {
-			a.focusInput(a.findVisibleFieldByOffset(msg.Button == tea.MouseWheelDown))
+			a.focusInput(a.findVisibleFieldByOffset(msg.DeltaY > 0))
 		}
 	case tea.PasteMsg:
 		var cmd tea.Cmd

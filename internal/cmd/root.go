@@ -127,12 +127,13 @@ crush --continue
 		com := common.DefaultCommon(ws)
 		model := ui.New(com, sessionID, continueLast)
 
+		inputFilter := ui.NewFilter()
 		var env uv.Environ = os.Environ()
 		program := tea.NewProgram(
 			model,
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
-			tea.WithFilter(ui.MouseEventFilter),
+			tea.WithFilter(inputFilter.Filter),
 		)
 		go ws.Subscribe(program)
 

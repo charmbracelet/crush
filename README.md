@@ -363,6 +363,24 @@ which do expand.
 }
 ```
 
+For `http` and `sse` servers that require OAuth, set the `oauth`
+field instead of a static `Authorization` header. Crush performs the
+authorization-code flow with PKCE in your browser, and persists the
+token to disk for subsequent sessions.
+
+```json
+{
+  "mcp": {
+    "datadog": {
+      "type": "http",
+      "url": "https://example.com/mcp/datadog/",
+      "timeout": 120,
+      "oauth": {}
+    }
+  }
+}
+```
+
 ### Hooks
 
 Crush has preliminary support for hooks. For details, see

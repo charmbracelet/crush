@@ -444,7 +444,11 @@ func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess sessi
 	if cfg != nil {
 		providerID = cfg.Config().Models[config.SelectedModelTypeLarge].Provider
 	}
-	styles := styles.ThemeForProvider(providerID)
+	themePref := "auto"
+	if cfg != nil {
+		themePref = cfg.Config().Options.ThemePreference()
+	}
+	styles := styles.ThemeForProvider(providerID, themePref)
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth

@@ -1,6 +1,7 @@
 package styles
 
 import (
+	"fmt"
 	"image/color"
 
 	"charm.land/bubbles/v2/filepicker"
@@ -55,6 +56,15 @@ type quickStyleOpts struct {
 	success           color.Color
 	successMoreSubtle color.Color
 	successMostSubtle color.Color
+
+	// Diff highlight colors. If left as nil, quickStyle falls back to the
+	// hard-coded dark-mode defaults for backwards compatibility.
+	diffInsertFg       color.Color
+	diffInsertBg       color.Color
+	diffInsertSymbolBg color.Color
+	diffDeleteFg       color.Color
+	diffDeleteBg       color.Color
+	diffDeleteSymbolBg color.Color
 }
 
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
@@ -530,23 +540,23 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		InsertLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#2b322a")),
+				Foreground(lipgloss.Color(diffColor(o.diffInsertFg, "#629657"))).
+				Background(lipgloss.Color(diffColor(o.diffInsertBg, "#2b322a"))),
 			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#323931")),
+				Foreground(lipgloss.Color(diffColor(o.diffInsertFg, "#629657"))).
+				Background(lipgloss.Color(diffColor(o.diffInsertSymbolBg, "#323931"))),
 			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#323931")),
+				Background(lipgloss.Color(diffColor(o.diffInsertBg, "#323931"))),
 		},
 		DeleteLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#312929")),
+				Foreground(lipgloss.Color(diffColor(o.diffDeleteFg, "#a45c59"))).
+				Background(lipgloss.Color(diffColor(o.diffDeleteBg, "#312929"))),
 			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#383030")),
+				Foreground(lipgloss.Color(diffColor(o.diffDeleteFg, "#a45c59"))).
+				Background(lipgloss.Color(diffColor(o.diffDeleteSymbolBg, "#383030"))),
 			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#383030")),
+				Background(lipgloss.Color(diffColor(o.diffDeleteBg, "#383030"))),
 		},
 		Filename: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
@@ -950,4 +960,23 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Pills.Area = base
 
 	return s
+}
+
+// colorHex returns a lowercase "#rrggbb" string for a color.Color value.
+// It returns an empty string when c is nil.
+func colorHex(c color.Color) string {
+	if c == nil {
+		return ""
+	}
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+}
+
+// diffColor returns the hex color for an optional diff color, falling back to
+// a hard-coded dark-mode default when none is provided.
+func diffColor(c color.Color, fallback string) string {
+	if h := colorHex(c); h != "" {
+		return h
+	}
+	return fallback
 }

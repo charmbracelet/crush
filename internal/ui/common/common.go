@@ -35,7 +35,11 @@ func (c *Common) Config() *config.Config {
 // workspace has a large model selected, the theme is chosen based on its
 // provider; otherwise the default theme is used.
 func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.ThemeForProvider(largeModelProviderID(ws))
+	themePref := "auto"
+	if ws != nil && ws.Config() != nil {
+		themePref = ws.Config().Options.ThemePreference()
+	}
+	s := styles.ThemeForProvider(largeModelProviderID(ws), themePref)
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,

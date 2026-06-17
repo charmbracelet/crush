@@ -272,7 +272,7 @@ func newCallbackServer(port int) (auth.AuthorizationCodeFetcher, string, error) 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", cs.handleCallback)
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return nil, "", fmt.Errorf("listen on port %d: %w", port, err)
 	}

@@ -227,7 +227,7 @@ type UI struct {
 	}
 
 	// lsp
-	lspStates map[string]app.LSPClientInfo
+	lspStates map[string]workspace.LSPClientInfo
 
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
@@ -337,7 +337,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		completions:         comp,
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
-		lspStates:           make(map[string]app.LSPClientInfo),
+		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
@@ -707,7 +707,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
-		m.lspStates = app.GetLSPStates()
+		m.lspStates = m.com.Workspace.LSPGetStates()
+	case pubsub.Event[workspace.LSPEvent]:
+		m.lspStates = m.com.Workspace.LSPGetStates()
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
 	case pubsub.Event[mcp.Event]:

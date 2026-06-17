@@ -33,6 +33,10 @@ func questionIconPrompt(sty *styles.Styles, focused bool) string {
 // question components. It embeds questionEditor for fill-in, notes,
 // and editor handling. Concrete types embed it and only implement
 // selection semantics.
+// fillInTop is the first content-line index of the fill-in row,
+// computed during buildLines. -1 when no fill-in rows exist.
+// Used by clampBounds to keep the fill-in visible during wheel
+// scrolling without scanning lines on every event.
 type choiceList struct {
 	questionEditor
 	Request question.Question
@@ -43,9 +47,16 @@ type choiceList struct {
 	lastWidth        int
 	choiceCompositor *lipgloss.Compositor
 	suppressScroll   bool // skip scroll clamping after mouse click
+	wheelActive      bool // wheel-scroll mode: skip cursor snap until next keyboard nav
 	hoverX, hoverY   int  // current mouse position for hover highlight
 	hoveredChoice    int  // choice index under mouse, or -1
 	mouseActive      bool // true when last interaction was mouse (hover mode)
+
+	// Cached layout for wheel-scroll bounds checking.
+	lastLines    []contentLine // last rendered lines from drawContent
+	lastViewport int           // last viewport height from drawContent
+	fillInTop    int           // first fill-in row index, or -1
+	fillInBottom int           // last fill-in row index, or -1
 
 	// styleFillInAsSelected controls whether non-empty fill-in text
 	// gets the selected (pink) style. True for single-choice where
@@ -80,6 +91,8 @@ func newChoiceList(sty *styles.Styles, req question.Question) choiceList {
 		hoveredChoice:  -1,
 		hoverX:         -1,
 		hoverY:         -1,
+		fillInTop:      -1,
+		fillInBottom:   -1,
 		keyUp:          key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑", "up")),
 		keyDown:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓", "down")),
 		keyClose:       CloseKey,
@@ -97,6 +110,7 @@ func (c *choiceList) isFillIn() bool {
 // moveUp moves the cursor up, wrapping around. Closes any active
 // note editor since the note context changes with the cursor.
 func (c *choiceList) moveUp() {
+	c.wheelActive = false
 	if c.mouseActive {
 		if c.hoveredChoice >= 0 {
 			c.cursorIdx = c.hoveredChoice
@@ -118,6 +132,7 @@ func (c *choiceList) moveUp() {
 // moveDown moves the cursor down, wrapping around. Closes any
 // active note editor since the note context changes with the cursor.
 func (c *choiceList) moveDown() {
+	c.wheelActive = false
 	if c.mouseActive {
 		if c.hoveredChoice >= 0 {
 			c.cursorIdx = c.hoveredChoice - 1 // will become hoveredChoice after increment
@@ -159,6 +174,7 @@ func (c *choiceList) handleFillInKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	default:
+		c.wheelActive = false
 		var cmd tea.Cmd
 		c.fillIn, cmd = c.fillIn.Update(msg)
 		return cmd, true
@@ -339,6 +355,16 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 	linesBeforeFillIn := len(lines)
 	c.drawFillIn(&lines, innerWidth, fillBar, barInactive, fillPrefix, c.isFillIn(), false)
 
+	// Record fill-in row range for wheel-scroll bounds checking.
+	c.fillInTop = -1
+	c.fillInBottom = -1
+	for i := linesBeforeFillIn; i < len(lines); i++ {
+		if c.fillInTop < 0 {
+			c.fillInTop = i
+		}
+		c.fillInBottom = i
+	}
+
 	// Tag fill-in rows with the fill-in item index so clicks can
 	// navigate to it.
 	fillInIdx := len(c.Request.Choices)
@@ -447,6 +473,8 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 	if overflow {
 		contentWidth--
 	}
+	c.lastLines = lines
+	c.lastViewport = viewport
 	c.clampScroll(lines, viewport)
 
 	// Blit the visible window.
@@ -472,6 +500,20 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 			if tc := c.noteCursor(screenRow, area.Min.X, lipgloss.Width(notePrefix)); tc != nil {
 				cur = tc
 			}
+		}
+	}
+
+	// Clamp cursor to visible area to prevent overflow.
+	if cur != nil {
+		if cur.Y < 0 {
+			cur.Y = 0
+		} else if cur.Y >= viewport {
+			cur.Y = viewport - 1
+		}
+		if cur.X < 0 {
+			cur.X = 0
+		} else if cur.X >= area.Dx() {
+			cur.X = area.Dx() - 1
 		}
 	}
 
@@ -538,10 +580,57 @@ func (c *choiceList) buildChoiceCompositor(lines []contentLine, area uv.Rectangl
 // window: the cursor moves freely within the visible region and
 // only pushes the window when it reaches an edge. Going down pushes
 // the bottom; going up pushes the top until the start (header and
+// HandleWheel scrolls the choice list vertically. Satisfies
+// WheelScrollableEditor so the form can delegate wheel events.
+func (c *choiceList) HandleWheel(deltaX, deltaY float64) {
+	if deltaY == 0 {
+		return
+	}
+	c.scrollOffset += int(deltaY)
+	c.wheelActive = true
+	c.clampToBounds(c.lastLines, c.lastViewport)
+}
+
+// clampToBounds enforces scroll bounds [0, max] and keeps the
+// fill-in at least partially visible when active. It does NOT
+// snap to the cursor, making it safe for wheel-driven scrolling.
+func (c *choiceList) clampToBounds(lines []contentLine, viewport int) {
+	limit := max(0, len(lines)-viewport)
+	c.scrollOffset = min(max(0, c.scrollOffset), limit)
+	// When fill-in is active, ensure at least one fill-in line
+	// remains visible in the viewport.
+	if c.isFillIn() && c.fillInTop >= 0 {
+		fillInBottom := c.fillInBottom
+		if fillInBottom < 0 {
+			fillInBottom = c.fillInTop
+		}
+		// If scrolled past the fill-in entirely, pull back so
+		// the last fill-in line is at the bottom of the viewport.
+		if c.scrollOffset > fillInBottom {
+			c.scrollOffset = max(0, fillInBottom-viewport+1)
+		}
+		// If scrolled above the fill-in start while fill-in is
+		// taller than the viewport, pin to fill-in start.
+		if c.scrollOffset+viewport <= c.fillInTop && fillInBottom-c.fillInTop+1 >= viewport {
+			c.scrollOffset = c.fillInTop
+		}
+	}
+}
+
+// clampScroll keeps the cursor item visible using a sliding
+// window: the cursor moves freely within the visible region and
+// only pushes the window when it reaches an edge. Going down pushes
+// the bottom; going up pushes the top until the start (header and
 // description) comes back into view.
 func (c *choiceList) clampScroll(lines []contentLine, viewport int) {
 	if c.suppressScroll {
 		c.suppressScroll = false
+		return
+	}
+	// After wheel scroll, only enforce bounds instead of snapping
+	// to cursor. Wheel mode persists until the next keyboard nav.
+	if c.wheelActive {
+		c.clampToBounds(lines, viewport)
 		return
 	}
 	limit := max(0, len(lines)-viewport)
@@ -558,6 +647,17 @@ func (c *choiceList) clampScroll(lines []contentLine, viewport int) {
 				cursorTop = i
 			}
 			cursorBottom = i
+		}
+	}
+	// When fill-in is focused, narrow the cursor target to the
+	// specific textarea cursor line so typing auto-scrolls.
+	if c.isFillIn() && c.fillIn.Focused() && cursorTop >= 0 {
+		if tc := c.fillIn.Cursor(); tc != nil {
+			targetLine := cursorTop + tc.Y
+			if targetLine >= cursorTop && targetLine <= cursorBottom {
+				cursorTop = targetLine
+				cursorBottom = targetLine
+			}
 		}
 	}
 	if cursorTop < 0 {

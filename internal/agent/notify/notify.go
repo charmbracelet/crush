@@ -3,6 +3,8 @@
 // events without importing UI packages.
 package notify
 
+import "time"
+
 // Type identifies the kind of agent notification.
 type Type string
 
@@ -12,6 +14,9 @@ const (
 	// TypeReAuthenticate indicates the agent encountered an
 	// authentication error and the user needs to re-authenticate.
 	TypeReAuthenticate Type = "re_authenticate"
+	// TypeRetry indicates the provider request failed and is being
+	// retried after a delay.
+	TypeRetry Type = "retry"
 	// TypeAgentError indicates the agent's turn terminated with an
 	// error. The error text is carried in Notification.Message.
 	TypeAgentError Type = "error"
@@ -32,6 +37,9 @@ type Notification struct {
 	// Message carries the error text for TypeAgentError. Other
 	// notification types ignore it.
 	Message string
+	// RetryDelay is the delay before the next retry attempt. Only set for
+	// TypeRetry notifications.
+	RetryDelay time.Duration
 }
 
 // RunComplete is the authoritative end-of-run signal for a session.

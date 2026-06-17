@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -159,6 +160,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	maxRetries           int
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
 
@@ -211,6 +213,7 @@ type SessionAgentOptions struct {
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
+	MaxRetries           int
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
@@ -232,6 +235,7 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
+		maxRetries:           opts.MaxRetries,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
@@ -794,6 +798,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
+		MaxRetries:       a.maxRetriesPtr(),
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
@@ -919,6 +924,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+			if a.notify != nil && !call.NonInteractive {
+				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					SessionID:    call.SessionID,
+					SessionTitle: currentSession.Title,
+					Type:         notify.TypeRetry,
+					ProviderID:   largeModel.ModelCfg.Provider,
+					RetryDelay:   delay,
+				})
+			}
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -1101,30 +1115,55 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
+		sentSpecificNotification := false
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
+			if a.notify != nil {
+				sentSpecificNotification = true
+				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					SessionID:    call.SessionID,
+					SessionTitle: currentSession.Title,
+					Type:         notify.TypeReAuthenticate,
+					ProviderID:   largeModel.ModelCfg.Provider,
+				})
+			}
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusPaymentRequired {
 			url := hyper.BaseURL()
 			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
 			currentAssistant.AddFinish(message.FinishReasonError, "No credits", "You're out of credits. Add more at "+link)
-		} else if errors.As(err, &providerErr) {
-			if providerErr.Message == "The requested model is not supported." {
-				url := "https://github.com/settings/copilot/features"
-				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
-				currentAssistant.AddFinish(
-					message.FinishReasonError,
-					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
-				)
-			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
-			}
-		} else if errors.As(err, &fantasyErr) {
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
 		} else {
-			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
+			title := defaultTitle
+			msg := err.Error()
+			var retryErr *fantasy.RetryError
+			if errors.As(err, &retryErr) {
+				title = "Network Error"
+				if cause, ok := lastRetryableCause(retryErr); ok {
+					msg = cause
+				} else if lastProviderErr, ok := lastProviderError(retryErr); ok {
+					title = cmp.Or(stringext.Capitalize(lastProviderErr.Title), defaultTitle)
+					msg = lastProviderErr.Message
+				}
+				msg = fmt.Sprintf("%s (retried %d time(s))", msg, len(retryErr.Errors)-1)
+				currentAssistant.AddFinish(message.FinishReasonError, title, msg)
+			} else if errors.As(err, &providerErr) {
+				if providerErr.Message == "The requested model is not supported." {
+					url := "https://github.com/settings/copilot/features"
+					link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
+					currentAssistant.AddFinish(
+						message.FinishReasonError,
+						"Copilot model not enabled",
+						fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
+					)
+				} else {
+					currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+				}
+			} else if errors.As(err, &fantasyErr) {
+				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+			} else {
+				currentAssistant.AddFinish(message.FinishReasonError, title, msg)
+			}
 		}
 		// Note: we use the cleanup context here because the genCtx has been
 		// cancelled.
@@ -1132,6 +1171,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if updateErr != nil {
 			return nil, updateErr
 		}
+
+		if !call.NonInteractive && a.notify != nil && !isCancelErr && !sentSpecificNotification {
+			a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				SessionID:    call.SessionID,
+				SessionTitle: currentSession.Title,
+				Type:         notify.TypeAgentError,
+			})
+		}
+
 		return nil, err
 	}
 
@@ -1902,6 +1950,15 @@ func (a *sessionAgent) CancelAll() {
 	}
 }
 
+// maxRetriesPtr returns a pointer to the configured max retries, or nil
+// to use fantasy's built-in default when unset (0).
+func (a *sessionAgent) maxRetriesPtr() *int {
+	if a.maxRetries <= 0 {
+		return nil
+	}
+	return &a.maxRetries
+}
+
 func (a *sessionAgent) IsBusy() bool {
 	var busy bool
 	for cancelFunc := range a.activeRequests.Seq() {
@@ -2118,4 +2175,27 @@ func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []a
 		fields = append(fields, "message", err.Message)
 	}
 	return fields
+}
+
+// lastRetryableCause extracts a human-readable message from the last error
+// in a RetryError that is a net.Error (network-level failure). Returns empty
+// string and false if the last error is not a network error.
+func lastRetryableCause(retryErr *fantasy.RetryError) (string, bool) {
+	var netErr net.Error
+	if !errors.As(retryErr, &netErr) {
+		return "", false
+	}
+	return netErr.Error(), true
+}
+
+// lastProviderError extracts the last ProviderError from a RetryError's error
+// chain. Returns false if no ProviderError is found.
+func lastProviderError(retryErr *fantasy.RetryError) (*fantasy.ProviderError, bool) {
+	for i := len(retryErr.Errors) - 1; i >= 0; i-- {
+		var pErr *fantasy.ProviderError
+		if errors.As(retryErr.Errors[i], &pErr) {
+			return pErr, true
+		}
+	}
+	return nil, false
 }

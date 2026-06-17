@@ -602,6 +602,24 @@ To disable desktop notifications, set `disable_notifications` to `true` in your
 configuration. On macOS, notifications currently lack icons due to platform
 limitations.
 
+### Max retries
+
+By default, Crush uses the provider's built-in retry behavior when requests
+fail. You can control the maximum number of retries with the `max_retries`
+option:
+
+```jsonc
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "max_retries": 3, // 0 = provider default
+  }
+}
+```
+
+Set to `0` (or omit) to use the provider's default retry count. Higher values
+can help with transient network errors or rate limiting.
+
 ### Initialization
 
 When you initialize a project, Crush analyzes your codebase and creates

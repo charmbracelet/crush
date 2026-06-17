@@ -1637,6 +1637,14 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 
+	// fallback when LLM title generation fails.
+	var fallbackTitle string
+	if len([]rune(userPrompt)) > 50 {
+		fallbackTitle = string([]rune(userPrompt)[:50]) + "…"
+	} else {
+		fallbackTitle = userPrompt
+	}
+
 	smallModel := a.smallModel.Get()
 	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
@@ -1656,7 +1664,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	streamCall := fantasy.AgentStreamCall{
-		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
+		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s", userPrompt),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages
 			if systemPromptPrefix != "" {
@@ -1687,7 +1695,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 			// Welp, the large model didn't work either. Use the default
 			// session name and return.
 			slog.Error("Error generating title with large model", "err", err)
-			saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
+			saveErr := a.sessions.Rename(ctx, sessionID, fallbackTitle)
 			if saveErr != nil {
 				slog.Error("Failed to save session title", "error", saveErr)
 			}
@@ -1699,7 +1707,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		// Actually, we didn't get a response so we can't. Use the default
 		// session name and return.
 		slog.Error("Response is nil; can't generate title")
-		saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
+		saveErr := a.sessions.Rename(ctx, sessionID, fallbackTitle)
 		if saveErr != nil {
 			slog.Error("Failed to save session title", "error", saveErr)
 		}
@@ -1715,7 +1723,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	title = orphanThinkTagRegex.ReplaceAllString(title, "")
 
 	title = strings.TrimSpace(title)
-	title = cmp.Or(title, DefaultSessionName)
+	title = cmp.Or(title, fallbackTitle)
 
 	// Calculate usage and cost.
 	var openrouterCost *float64

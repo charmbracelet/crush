@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net"
@@ -320,9 +321,9 @@ func (cs *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request)
 
 	if errParam := query.Get("error"); errParam != "" {
 		errorDesc := query.Get("error_description")
-		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "<h1>Authorization failed</h1><p>%s: %s</p>", errParam, errorDesc)
+		fmt.Fprintf(w, "<h1>Authorization failed</h1><p>%s: %s</p>", html.EscapeString(errParam), html.EscapeString(errorDesc))
 		cs.resultCh <- callbackResult{err: fmt.Errorf("%s: %s", errParam, errorDesc)}
 		return
 	}

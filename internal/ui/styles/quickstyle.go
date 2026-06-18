@@ -695,13 +695,13 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Editor
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
 	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
-	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" ! ")
+	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" Y ")
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
-	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(charmtone.Turtle).Bold(true).SetString(" ! ")
+	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Salt).Background(charmtone.Hazy).Bold(true).SetString(" ! ")
 	s.Editor.PromptBangIconBlurred = s.Editor.PromptBangIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
-	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Turtle).SetString(":::")
+	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Hazy).SetString(":::")
 	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsFocused.Foreground(o.fgMoreSubtle)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
@@ -811,11 +811,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Shell (bang mode) item styles.
 	s.Messages.ShellBarFocused = lipgloss.NewStyle().PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).BorderLeft(true).
-		BorderForeground(charmtone.Lichen)
+		BorderForeground(charmtone.Char)
 	s.Messages.ShellBarBlurred = lipgloss.NewStyle().PaddingLeft(1).BorderLeft(true).
-		BorderForeground(charmtone.Turtle).BorderStyle(lipgloss.NormalBorder())
-	s.Messages.ShellPrompt = base.Foreground(charmtone.Lichen).Bold(true)
-	s.Messages.ShellPromptBlurred = base.Foreground(charmtone.Turtle)
+		BorderForeground(charmtone.Char).BorderStyle(lipgloss.NormalBorder())
+	s.Messages.ShellPrompt = base.Foreground(charmtone.Hazy).Bold(true)
+	s.Messages.ShellPromptBlurred = base.Foreground(charmtone.Char)
 	s.Messages.ShellCommand = base.Foreground(o.fgBase)
 	s.Messages.ShellOutput = subtle
 	s.Messages.ShellExitCode = lipgloss.NewStyle().Foreground(o.destructive)

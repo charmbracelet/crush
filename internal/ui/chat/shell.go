@@ -194,5 +194,5 @@ func (s *ShellItem) RawRender(width int) string {
 		return header + "\n" + strings.TrimRight(result, "\n")
 	}
 
-	return header + "\n" + body.String()
+	return header + "\n" + strings.TrimRight(body.String(), "\n")
 }

@@ -998,12 +998,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
-		if m.isAgentBusy() {
+		if m.bangMode {
+			m.textarea.Placeholder = "Run a shell command..."
+		} else if m.isAgentBusy() {
 			m.textarea.Placeholder = m.workingPlaceholder
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if m.com.Workspace.PermissionSkipRequests() {
+		if !m.bangMode && m.com.Workspace.PermissionSkipRequests() {
 			m.textarea.Placeholder = "Yolo mode!"
 		}
 	}

@@ -25,10 +25,11 @@ const (
 // Revert is a confirm dialog that lets the user choose which parts of
 // the session to revert (code, conversation, or both).
 type Revert struct {
-	com        *common.Common
-	messageID  string
-	selected   revertChoice
-	keyMap     struct {
+	com            *common.Common
+	messageID      string
+	messageContent string
+	selected       revertChoice
+	keyMap         struct {
 		LeftRight key.Binding
 		Enter     key.Binding
 		Close     key.Binding
@@ -38,11 +39,12 @@ type Revert struct {
 var _ Dialog = (*Revert)(nil)
 
 // NewRevert creates a new revert confirm dialog.
-func NewRevert(com *common.Common, messageID string) *Revert {
+func NewRevert(com *common.Common, messageID, messageContent string) *Revert {
 	r := &Revert{
-		com:       com,
-		messageID: messageID,
-		selected:  revertBoth,
+		com:            com,
+		messageID:      messageID,
+		messageContent: messageContent,
+		selected:       revertBoth,
 	}
 	r.keyMap.LeftRight = key.NewBinding(
 		key.WithKeys("left", "right"),
@@ -74,18 +76,21 @@ func (r *Revert) HandleMsg(msg tea.Msg) Action {
 			case revertBoth:
 				return ActionRevertToMessage{
 					MessageID:           r.messageID,
+					MessageContent:      r.messageContent,
 					RestoreCode:         true,
 					RestoreConversation: true,
 				}
 			case revertCodeOnly:
 				return ActionRevertToMessage{
 					MessageID:           r.messageID,
+					MessageContent:      r.messageContent,
 					RestoreCode:         true,
 					RestoreConversation: false,
 				}
 			case revertConversationOnly:
 				return ActionRevertToMessage{
 					MessageID:           r.messageID,
+					MessageContent:      r.messageContent,
 					RestoreCode:         false,
 					RestoreConversation: true,
 				}

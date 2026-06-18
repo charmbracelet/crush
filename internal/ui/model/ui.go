@@ -233,6 +233,10 @@ type UI struct {
 	// lsp
 	lspStates map[string]workspace.LSPClientInfo
 
+	// pendingRevertText holds the message content to insert into the
+	// textarea after a revert completes.
+	pendingRevertText string
+
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
 
@@ -947,6 +951,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.setSessionMessages(msgs); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+		}
+		// If a revert was triggered from the dialog, put the original
+		// message text back into the input so the user can edit and
+		// re-send it.
+		if m.pendingRevertText != "" {
+			prevHeight := m.textarea.Height()
+			m.textarea.SetValue(m.pendingRevertText)
+			m.textarea.MoveToEnd()
+			m.pendingRevertText = ""
+			m.focus = uiFocusEditor
+			cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+			cmds = append(cmds, m.textarea.Focus())
+			m.chat.Blur()
 		}
 		// Build a summary.
 		parts := []string{}
@@ -1665,6 +1682,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		m.dialog.CloseDialog(dialog.RevertID)
+		m.pendingRevertText = msg.MessageContent
 		cmds = append(cmds, m.executeRevert(msg.MessageID, msg.RestoreCode, msg.RestoreConversation))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
@@ -2164,7 +2182,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, util.ReportWarn("Select a user message to revert to"))
 					break
 				}
-				m.dialog.OpenDialog(dialog.NewRevert(m.com, msgItem.ID()))
+				m.dialog.OpenDialog(dialog.NewRevert(m.com, msgItem.ID(), msgItem.Content()))
 			case key.Matches(msg, m.keyMap.Chat.Up):
 				if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
 					cmds = append(cmds, cmd)

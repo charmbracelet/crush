@@ -101,6 +101,7 @@ type (
 	// of the session are rewound.
 	ActionRevertToMessage struct {
 		MessageID           string
+		MessageContent      string
 		RestoreCode         bool
 		RestoreConversation bool
 	}

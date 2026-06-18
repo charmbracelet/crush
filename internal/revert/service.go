@@ -126,10 +126,12 @@ type fileAction struct {
 // the reverted turn when its producing message id is in cutIDs (or, for legacy
 // rows with no message id, when its timestamp is at or after the checkpoint).
 //
-// For each path that has at least one reverted version, the file is restored
-// to the newest version that is NOT in the cut set, or deleted if no such
-// version exists (the agent created it during the reverted turn). The function
-// is pure so the correlation logic can be tested without a database or disk.
+// For each path that has at least one reverted version, the file is restored to
+// the newest version that survives the cut; if none survives, it is restored to
+// the reverted-turn baseline (its pre-turn content) unless that baseline is
+// marked is_new — meaning the agent created the file this turn — in which case
+// it is deleted. The function is pure so the correlation logic can be tested
+// without a database or disk.
 func planFileRevert(versions []history.File, cutIDs map[string]struct{}, checkpointCreatedAt int64) []fileAction {
 	reverted := func(v history.File) bool {
 		if v.MessageID.Valid {
@@ -153,11 +155,16 @@ func planFileRevert(versions []history.File, cutIDs map[string]struct{}, checkpo
 	var actions []fileAction
 	for _, path := range paths {
 		var revertedIDs []string
-		var best *history.File
+		var best *history.File     // newest version that survives the cut
+		var baseline *history.File // oldest reverted version (pre-turn snapshot)
 		for i := range byPath[path] {
 			v := byPath[path][i]
 			if reverted(v) {
 				revertedIDs = append(revertedIDs, v.ID)
+				if baseline == nil || v.Version < baseline.Version {
+					vv := v
+					baseline = &vv
+				}
 				continue
 			}
 			// Track the newest pre-checkpoint version as the restore source.
@@ -170,14 +177,29 @@ func planFileRevert(versions []history.File, cutIDs map[string]struct{}, checkpo
 		if len(revertedIDs) == 0 {
 			continue // path untouched by the reverted turn
 		}
-		if best != nil {
+		switch {
+		case best != nil:
+			// A version survives the cut (the file was last written in an
+			// earlier, kept turn): restore to it.
 			actions = append(actions, fileAction{
 				path:       path,
 				restore:    true,
 				content:    best.Content,
 				versionIDs: revertedIDs,
 			})
-		} else {
+		case baseline != nil && !baseline.IsNew:
+			// No surviving version, but the file pre-existed this turn: restore
+			// it to the baseline (its content from before the turn) instead of
+			// deleting it. This is the fix for the data-loss bug where a
+			// first-touched existing file was deleted on revert.
+			actions = append(actions, fileAction{
+				path:       path,
+				restore:    true,
+				content:    baseline.Content,
+				versionIDs: revertedIDs,
+			})
+		default:
+			// The agent created this file in the reverted turn: delete it.
 			actions = append(actions, fileAction{
 				path:       path,
 				restore:    false,

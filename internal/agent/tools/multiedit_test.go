@@ -48,6 +48,10 @@ func (m *mockHistoryService) Create(ctx context.Context, sessionID, path, conten
 	return history.File{Path: path, Content: content}, nil
 }
 
+func (m *mockHistoryService) CreateNew(ctx context.Context, sessionID, path, content string, messageID ...string) (history.File, error) {
+	return history.File{Path: path, Content: content, IsNew: true}, nil
+}
+
 func (m *mockHistoryService) CreateVersion(ctx context.Context, sessionID, path, content string, messageID ...string) (history.File, error) {
 	return history.File{}, nil
 }

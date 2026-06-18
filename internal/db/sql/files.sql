@@ -30,10 +30,11 @@ INSERT INTO files (
     content,
     version,
     message_id,
+    is_new,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
 RETURNING *;
 

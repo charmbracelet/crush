@@ -24,6 +24,14 @@ func ver(id, path, content, msgID string, version, createdAt int64) history.File
 	}
 }
 
+// verNew builds a history.File version marked is_new (the agent created the
+// file this turn; it did not exist before).
+func verNew(id, path, content, msgID string, version, createdAt int64) history.File {
+	f := ver(id, path, content, msgID, version, createdAt)
+	f.IsNew = true
+	return f
+}
+
 func findAction(actions []fileAction, path string) (fileAction, bool) {
 	for _, a := range actions {
 		if a.path == path {
@@ -61,7 +69,7 @@ func TestPlanFileRevert(t *testing.T) {
 
 	t.Run("agent-created file is deleted", func(t *testing.T) {
 		versions := []history.File{
-			ver("v0", "/new.go", "created", "assistant-cut", 0, 110),
+			verNew("v0", "/new.go", "created", "assistant-cut", 0, 110),
 		}
 		actions := planFileRevert(versions, cut, checkpoint)
 		a, ok := findAction(actions, "/new.go")
@@ -73,6 +81,31 @@ func TestPlanFileRevert(t *testing.T) {
 		}
 		if len(a.versionIDs) != 1 || a.versionIDs[0] != "v0" {
 			t.Errorf("versionIDs = %v, want [v0]", a.versionIDs)
+		}
+	})
+
+	// Regression guard for the data-loss bug: a PRE-EXISTING file first touched
+	// in the reverted turn has all of its versions in the cut, but its baseline
+	// is NOT is_new. It must be restored to that baseline content, not deleted.
+	// (This is exactly the case that deleted write.go.)
+	t.Run("pre-existing file first touched is restored, not deleted", func(t *testing.T) {
+		versions := []history.File{
+			ver("v0", "/exist.go", "OLD", "assistant-cut", 0, 110), // baseline, not is_new
+			ver("v1", "/exist.go", "NEW", "assistant-cut", 1, 111), // edit
+		}
+		actions := planFileRevert(versions, cut, checkpoint)
+		a, ok := findAction(actions, "/exist.go")
+		if !ok {
+			t.Fatalf("expected an action for /exist.go, got %+v", actions)
+		}
+		if !a.restore {
+			t.Fatalf("expected restore (not delete) for a pre-existing file")
+		}
+		if a.content != "OLD" {
+			t.Errorf("restore content = %q, want %q", a.content, "OLD")
+		}
+		if len(a.versionIDs) != 2 {
+			t.Errorf("versionIDs = %v, want both versions dropped", a.versionIDs)
 		}
 	})
 

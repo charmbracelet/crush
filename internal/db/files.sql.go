@@ -19,12 +19,13 @@ INSERT INTO files (
     content,
     version,
     message_id,
+    is_new,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
-RETURNING id, session_id, path, content, version, created_at, updated_at, message_id
+RETURNING id, session_id, path, content, version, created_at, updated_at, message_id, is_new
 `
 
 type CreateFileParams struct {
@@ -34,6 +35,7 @@ type CreateFileParams struct {
 	Content   string         `json:"content"`
 	Version   int64          `json:"version"`
 	MessageID sql.NullString `json:"message_id"`
+	IsNew     int64          `json:"is_new"`
 }
 
 func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, error) {
@@ -44,6 +46,7 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 		arg.Content,
 		arg.Version,
 		arg.MessageID,
+		arg.IsNew,
 	)
 	var i File
 	err := row.Scan(
@@ -55,6 +58,7 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MessageID,
+		&i.IsNew,
 	)
 	return i, err
 }
@@ -100,7 +104,7 @@ func (q *Queries) DeleteSessionFiles(ctx context.Context, sessionID string) erro
 }
 
 const getFile = `-- name: GetFile :one
-SELECT id, session_id, path, content, version, created_at, updated_at, message_id
+SELECT id, session_id, path, content, version, created_at, updated_at, message_id, is_new
 FROM files
 WHERE id = ? LIMIT 1
 `
@@ -117,12 +121,13 @@ func (q *Queries) GetFile(ctx context.Context, id string) (File, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MessageID,
+		&i.IsNew,
 	)
 	return i, err
 }
 
 const getFileByPathAndSession = `-- name: GetFileByPathAndSession :one
-SELECT id, session_id, path, content, version, created_at, updated_at, message_id
+SELECT id, session_id, path, content, version, created_at, updated_at, message_id, is_new
 FROM files
 WHERE path = ? AND session_id = ?
 ORDER BY version DESC, created_at DESC
@@ -146,12 +151,13 @@ func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPath
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MessageID,
+		&i.IsNew,
 	)
 	return i, err
 }
 
 const listFilesByPath = `-- name: ListFilesByPath :many
-SELECT id, session_id, path, content, version, created_at, updated_at, message_id
+SELECT id, session_id, path, content, version, created_at, updated_at, message_id, is_new
 FROM files
 WHERE path = ?
 ORDER BY version DESC, created_at DESC
@@ -175,6 +181,7 @@ func (q *Queries) ListFilesByPath(ctx context.Context, path string) ([]File, err
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MessageID,
+			&i.IsNew,
 		); err != nil {
 			return nil, err
 		}
@@ -190,7 +197,7 @@ func (q *Queries) ListFilesByPath(ctx context.Context, path string) ([]File, err
 }
 
 const listFilesBySession = `-- name: ListFilesBySession :many
-SELECT id, session_id, path, content, version, created_at, updated_at, message_id
+SELECT id, session_id, path, content, version, created_at, updated_at, message_id, is_new
 FROM files
 WHERE session_id = ?
 ORDER BY version ASC, created_at ASC
@@ -214,6 +221,7 @@ func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]F
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MessageID,
+			&i.IsNew,
 		); err != nil {
 			return nil, err
 		}
@@ -229,7 +237,7 @@ func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]F
 }
 
 const listLatestSessionFiles = `-- name: ListLatestSessionFiles :many
-SELECT f.id, f.session_id, f.path, f.content, f.version, f.created_at, f.updated_at, f.message_id
+SELECT f.id, f.session_id, f.path, f.content, f.version, f.created_at, f.updated_at, f.message_id, f.is_new
 FROM files f
 INNER JOIN (
     SELECT path, MAX(version) as max_version, MAX(created_at) as max_created_at
@@ -258,6 +266,7 @@ func (q *Queries) ListLatestSessionFiles(ctx context.Context, sessionID string) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MessageID,
+			&i.IsNew,
 		); err != nil {
 			return nil, err
 		}

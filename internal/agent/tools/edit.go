@@ -169,8 +169,9 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	// File can't be in the history so we create a new file history
-	_, err = edit.files.Create(edit.ctx, sessionID, filePath, "", GetMessageFromContext(edit.ctx))
+	// File can't be in the history so we create a new file history. Mark it
+	// is_new (CreateNew) so a revert deletes the agent-created file.
+	_, err = edit.files.CreateNew(edit.ctx, sessionID, filePath, "", GetMessageFromContext(edit.ctx))
 	if err != nil {
 		// Log error but don't fail the operation
 		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)

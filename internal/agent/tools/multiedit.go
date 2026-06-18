@@ -214,8 +214,9 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	// Update file history
-	_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, "", GetMessageFromContext(edit.ctx))
+	// Update file history. The file is being created, so mark it is_new
+	// (CreateNew) so a revert deletes it rather than restoring empty content.
+	_, err = edit.files.CreateNew(edit.ctx, sessionID, params.FilePath, "", GetMessageFromContext(edit.ctx))
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 	}

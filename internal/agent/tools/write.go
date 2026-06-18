@@ -145,7 +145,14 @@ func NewWriteTool(
 				// Keep the created baseline so the divergence check below
 				// compares against real content, not a zero-value struct
 				// (which would write a duplicate intermediate version).
-				file, err = files.Create(ctx, sessionID, filePath, oldContent, GetMessageFromContext(ctx))
+				if fileInfo == nil {
+					// The file did not exist on disk: the agent is creating it,
+					// so mark the baseline is_new — a revert deletes it rather
+					// than restoring empty content.
+					file, err = files.CreateNew(ctx, sessionID, filePath, oldContent, GetMessageFromContext(ctx))
+				} else {
+					file, err = files.Create(ctx, sessionID, filePath, oldContent, GetMessageFromContext(ctx))
+				}
 				if err != nil {
 					// Log error but don't fail the operation
 					return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)

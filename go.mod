@@ -5,9 +5,9 @@ go 1.26.4
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
-	charm.land/catwalk v0.44.14
+	charm.land/catwalk v0.45.0
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.31.1
+	charm.land/fantasy v0.32.0
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.4
 	charm.land/log/v2 v2.0.0
@@ -23,7 +23,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/colorprofile v0.4.3
-	github.com/charmbracelet/openai-go v0.0.0-20260319145158-d0740cc34266
+	github.com/charmbracelet/openai-go v0.0.0-20260617131321-5e4b9c18c4be
 	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/editor v0.2.0

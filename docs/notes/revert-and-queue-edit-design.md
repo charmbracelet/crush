@@ -147,6 +147,31 @@ func (s *Service) RevertToMessage(ctx context.Context, sessionID, messageID stri
 - **DB bloat** from full-content versions is pre-existing, not introduced here.
 - **Legacy rows** (no `message_id`) fall back to timestamp correlation — less precise; acceptable.
 
+### A.5.1 TODO — clamp revert at the summary boundary (do **not** restore to before a summary)
+**Decision:** treat an active summary as a **floor** for revert. A user must not be able to
+revert to a checkpoint *before* `session.SummaryMessageID`.
+
+**Why:** reverting past the summary deletes the summary message (it sits after everything it
+summarized), which (a) de-compresses the surviving context — the next turn falls back to the
+full surviving history instead of `summary + tail`, and (b) orphans the session's
+`SummaryMessageID` **and** leaves stale token counters. Today this *self-heals by accident*
+via the `summaryMsgIndex == -1` fallback in `getSessionMessages` (`internal/agent/agent.go:1626`),
+but it's "works by luck," and the token gauge reads wrong for a turn. Cleaner to forbid the
+crossing than to clean up after it.
+
+**Where to implement (gate the revert *target*, newest summary wins):**
+- `ctrl+b` path — `internal/ui/model/ui.go` (`Chat.Revert` case): if the selected user message's
+  `created_at < summaryMsg.created_at`, refuse with a `ReportWarn` ("can't revert past the last
+  summary").
+- Picker — `openRevertPickerDialog` user-message filter + `internal/ui/dialog/revert_picker.go`:
+  drop (or visibly disable) user messages older than the summary so they can't be picked.
+- Belt-and-suspenders — `revert.Service.RevertToMessage`: reject with a sentinel error if the
+  checkpoint precedes the active summary, so the rule holds regardless of UI.
+
+**Alternative we are deliberately NOT doing now:** allow cross-summary revert by giving the
+service a `sessions` dependency and resetting `SummaryMessageID = ""` + recomputing the session
+token counters in the same op. Revisit only if cross-summary revert is explicitly wanted.
+
 ---
 
 # Feature B — Edit queued message

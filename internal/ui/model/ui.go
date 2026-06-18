@@ -1940,10 +1940,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		// Revert works from both editor and chat focus.
 		if key.Matches(msg, m.keyMap.Chat.Revert) {
 			if m.hasSession() && !m.isAgentBusy() {
-				sel := m.chat.SelectedItem()
-				switch sel.(type) {
+				switch sel := m.chat.SelectedItem().(type) {
 				case *chat.UserMessageItem:
-					m.dialog.OpenDialog(dialog.NewRevert(m.com, sel.(*chat.UserMessageItem).ID(), sel.(*chat.UserMessageItem).Content()))
+					m.dialog.OpenDialog(dialog.NewRevert(m.com, sel.ID(), sel.Content()))
 				case *chat.AssistantMessageItem:
 					cmds = append(cmds, util.ReportWarn("Revert to a user message, not an LLM response"))
 				default:
@@ -3482,17 +3481,20 @@ func (m *UI) openRevertPickerDialog() tea.Cmd {
 	if !m.hasSession() {
 		return util.ReportWarn("No active session")
 	}
+	if m.isAgentBusy() {
+		return util.ReportWarn("Agent is busy, please wait before reverting")
+	}
 
 	msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 	if err != nil {
 		return util.ReportError(err)
 	}
 
-	// Filter to user messages only.
+	// Filter to user messages, newest-first (ListMessages is oldest-first).
 	var userMessages []message.Message
-	for _, msg := range msgs {
-		if msg.Role == message.User {
-			userMessages = append(userMessages, msg)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == message.User {
+			userMessages = append(userMessages, msgs[i])
 		}
 	}
 

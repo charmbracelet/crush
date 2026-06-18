@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/sahilm/fuzzy"
 )
@@ -45,7 +46,9 @@ type revertPickerItem struct {
 	messageID      string
 	messageContent string
 	preview        string
+	t              *styles.Styles
 	m              fuzzy.Match
+	cache          map[int]string
 	focused        bool
 }
 
@@ -54,25 +57,29 @@ func (r *revertPickerItem) Finished() bool { return true }
 func (r *revertPickerItem) Filter() string { return r.preview }
 
 func (r *revertPickerItem) Render(width int) string {
-	text := r.preview
-	if len(text) > width-4 {
-		text = text[:width-4] + "..."
+	itemStyles := ListItemStyles{
+		ItemBlurred:     r.t.Dialog.NormalItem,
+		ItemFocused:     r.t.Dialog.SelectedItem,
+		InfoTextBlurred: r.t.Dialog.ListItem.InfoBlurred,
+		InfoTextFocused: r.t.Dialog.ListItem.InfoFocused,
 	}
-	if r.focused {
-		return "▸ " + text
-	}
-	return "  " + text
+	// Shared list renderer: themed selection highlight (matches the sessions
+	// and commands dialogs — no raw cursor glyph), fuzzy-match underline, and
+	// width-aware, rune-safe truncation.
+	return renderItem(itemStyles, r.preview, "", r.focused, width, r.cache, &r.m)
 }
 
 func (r *revertPickerItem) SetFocused(focused bool) {
 	if r.focused != focused {
 		r.focused = focused
+		r.cache = nil
 		r.Bump()
 	}
 }
 
 func (r *revertPickerItem) SetMatch(m fuzzy.Match) {
 	if !sameFuzzyMatch(r.m, m) {
+		r.cache = nil
 		r.m = m
 		r.Bump()
 	}
@@ -114,12 +121,12 @@ func NewRevertPicker(com *common.Common, userMessages []message.Message) *Revert
 	)
 	r.keyMap.Close = CloseKey
 
-	// Build list items. Messages arrive newest-first; reverse so
-	// oldest is at the top and newest at the bottom (scroll up for
-	// older messages, like a chat view).
+	// Items arrive newest-first (see openRevertPickerDialog). Show them in that
+	// order — newest at the top — and default the cursor there: "undo my last
+	// turn" is the common case, and it avoids pre-selecting the very first
+	// message, which would revert almost the entire session.
 	items := make([]list.FilterableItem, 0, len(userMessages))
-	for i := len(userMessages) - 1; i >= 0; i-- {
-		msg := userMessages[i]
+	for _, msg := range userMessages {
 		text := strings.TrimSpace(msg.Content().Text)
 		if text == "" {
 			continue
@@ -127,6 +134,7 @@ func NewRevertPicker(com *common.Common, userMessages []message.Message) *Revert
 		preview := strings.ReplaceAll(text, "\n", " ")
 		items = append(items, &revertPickerItem{
 			Versioned:      list.NewVersioned(),
+			t:              com.Styles,
 			messageID:      msg.ID,
 			messageContent: text,
 			preview:        preview,
@@ -134,8 +142,8 @@ func NewRevertPicker(com *common.Common, userMessages []message.Message) *Revert
 	}
 	r.list.SetItems(items...)
 	if len(items) > 0 {
-		r.list.SelectLast()
-		r.list.ScrollToBottom()
+		r.list.SelectFirst()
+		r.list.ScrollToTop()
 	}
 
 	return r
@@ -227,7 +235,10 @@ func (r *RevertPicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.View.GetVerticalFrameSize()
 
 	r.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
-	listHeight := max(3, min(len(r.list.FilteredItems()), area.Dy()-heightOffset))
+	// r.list.Len() is the already-filtered count; len(FilteredItems()) would
+	// re-run the fuzzy search (and re-Bump every item) on every frame.
+	visibleCount := r.list.Len()
+	listHeight := max(3, min(visibleCount, area.Dy()-heightOffset))
 	r.list.SetSize(innerWidth, listHeight)
 	r.help.SetWidth(innerWidth)
 
@@ -236,7 +247,6 @@ func (r *RevertPicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	inputView := t.Dialog.InputPrompt.Render(r.input.View())
 	rc.AddPart(inputView)
 
-	visibleCount := len(r.list.FilteredItems())
 	if r.list.Height() >= visibleCount {
 		r.list.ScrollToTop()
 	} else {

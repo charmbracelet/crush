@@ -105,6 +105,12 @@ type (
 		RestoreCode         bool
 		RestoreConversation bool
 	}
+	// ActionSelectRevertMessage is returned by the revert picker when the
+	// user selects a message. The UI should open the Revert dialog next.
+	ActionSelectRevertMessage struct {
+		MessageID      string
+		MessageContent string
+	}
 )
 
 // Messages for API key input dialog.

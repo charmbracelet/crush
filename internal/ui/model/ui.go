@@ -1684,6 +1684,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.RevertID)
 		m.pendingRevertText = msg.MessageContent
 		cmds = append(cmds, m.executeRevert(msg.MessageID, msg.RestoreCode, msg.RestoreConversation))
+	case dialog.ActionSelectRevertMessage:
+		// User picked a message from the revert picker — open the
+		// revert scope dialog next.
+		m.dialog.CloseDialog(dialog.RevertPickerID)
+		m.dialog.OpenDialog(dialog.NewRevert(m.com, msg.MessageID, msg.MessageContent))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}
@@ -1932,6 +1937,21 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
 			return true
 		}
+		// Revert works from both editor and chat focus.
+		if key.Matches(msg, m.keyMap.Chat.Revert) {
+			if m.hasSession() && !m.isAgentBusy() {
+				sel := m.chat.SelectedItem()
+				switch sel.(type) {
+				case *chat.UserMessageItem:
+					m.dialog.OpenDialog(dialog.NewRevert(m.com, sel.(*chat.UserMessageItem).ID(), sel.(*chat.UserMessageItem).Content()))
+				case *chat.AssistantMessageItem:
+					cmds = append(cmds, util.ReportWarn("Revert to a user message, not an LLM response"))
+				default:
+					cmds = append(cmds, m.openRevertPickerDialog())
+				}
+				return true
+			}
+		}
 		return false
 	}
 
@@ -2168,21 +2188,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
-			case key.Matches(msg, m.keyMap.Chat.Revert):
-				if !m.hasSession() || m.isAgentBusy() {
-					break
-				}
-				sel := m.chat.SelectedItem()
-				if sel == nil {
-					break
-				}
-				// Only allow reverting from user messages.
-				msgItem, ok := sel.(*chat.UserMessageItem)
-				if !ok {
-					cmds = append(cmds, util.ReportWarn("Select a user message to revert to"))
-					break
-				}
-				m.dialog.OpenDialog(dialog.NewRevert(m.com, msgItem.ID(), msgItem.Content()))
 			case key.Matches(msg, m.keyMap.Chat.Up):
 				if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -3443,6 +3448,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.RevertPickerID:
+		if cmd := m.openRevertPickerDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
@@ -3460,6 +3469,39 @@ func (m *UI) openQuitDialog() tea.Cmd {
 
 	quitDialog := dialog.NewQuit(m.com)
 	m.dialog.OpenDialog(quitDialog)
+	return nil
+}
+
+// openRevertPickerDialog opens the revert message picker dialog.
+func (m *UI) openRevertPickerDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.RevertPickerID) {
+		m.dialog.BringToFront(dialog.RevertPickerID)
+		return nil
+	}
+
+	if !m.hasSession() {
+		return util.ReportWarn("No active session")
+	}
+
+	msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	// Filter to user messages only.
+	var userMessages []message.Message
+	for _, msg := range msgs {
+		if msg.Role == message.User {
+			userMessages = append(userMessages, msg)
+		}
+	}
+
+	if len(userMessages) == 0 {
+		return util.ReportWarn("No user messages to revert to")
+	}
+
+	picker := dialog.NewRevertPicker(m.com, userMessages)
+	m.dialog.OpenDialog(picker)
 	return nil
 }
 

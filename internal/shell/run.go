@@ -7,11 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 
-	"github.com/creack/pty"
 	"mvdan.cc/sh/moreinterp/coreutils"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -165,57 +163,21 @@ var ptyColorEnvVars = []string{
 	"FORCE_COLOR=1",
 }
 
-// RunAndCapturePTY executes a shell command through a pseudo-TTY and
-// returns its combined output along with the exit code. Programs that
-// check isatty (eza, ls --color=auto, bat, etc.) will emit ANSI color
-// sequences because they see a real terminal on stdout. Falls back to
-// RunAndCapture if PTY allocation fails (logged as a warning).
+// RunAndCapturePTY executes a shell command through the mvdan.cc/sh
+// interpreter with color-forcing environment variables set. Programs
+// that respect FORCE_COLOR or CLICOLOR_FORCE (git, cargo, npm, eza,
+// bat, ripgrep, etc.) will emit ANSI color sequences even without a
+// real PTY. This approach is fully cross-platform — no /bin/sh or
+// unix PTY required.
+//
+// The name is preserved for API compatibility; the PTY path has been
+// replaced by the portable interpreter + env-var approach.
 func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, error) {
 	if opts.Env == nil {
 		opts.Env = os.Environ()
 	}
-	env := withNonInteractiveEnv(opts.Env)
-	env = append(env, ptyColorEnvVars...)
-
-	cols := uint16(opts.TermWidth)
-	if cols == 0 {
-		cols = 200
-	}
-
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", opts.Command)
-	cmd.Dir = opts.Cwd
-	cmd.Env = env
-
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 50, Cols: cols})
-	if err != nil {
-		slog.Warn("PTY allocation failed, falling back to pipe capture", "error", err, "command", opts.Command)
-		return RunAndCapture(ctx, opts)
-	}
-	defer ptmx.Close()
-
-	var buf bytes.Buffer
-	done := make(chan error, 1)
-	go func() {
-		_, copyErr := io.Copy(&buf, ptmx)
-		done <- copyErr
-	}()
-
-	waitErr := cmd.Wait()
-	<-done
-
-	exitCode := 0
-	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-	}
-
-	return CaptureResult{
-		Output:   buf.String(),
-		ExitCode: exitCode,
-	}, nil
+	opts.Env = append(opts.Env, ptyColorEnvVars...)
+	return RunAndCapture(ctx, opts)
 }
 
 // newRunner constructs an [interp.Runner] configured with the standard

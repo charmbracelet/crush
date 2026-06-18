@@ -63,3 +63,21 @@ SELECT *
 FROM messages
 WHERE session_id = ? AND created_at >= ?
 ORDER BY created_at ASC;
+
+-- name: ListMessagesFromCheckpoint :many
+-- Messages at or after the checkpoint, ordered by insertion (rowid) so the cut
+-- is exact even when created_at timestamps collide at second precision.
+SELECT m.*
+FROM messages m
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.rowid >= (SELECT cp.rowid FROM messages cp WHERE cp.id = sqlc.arg(checkpoint_id))
+ORDER BY m.rowid ASC;
+
+-- name: DeleteMessagesFromCheckpoint :exec
+DELETE FROM messages
+WHERE id IN (
+    SELECT m.id
+    FROM messages m
+    WHERE m.session_id = sqlc.arg(session_id)
+      AND m.rowid >= (SELECT cp.rowid FROM messages cp WHERE cp.id = sqlc.arg(checkpoint_id))
+);

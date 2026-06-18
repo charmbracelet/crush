@@ -73,6 +73,15 @@ type Service interface {
 	// ListMessagesAfter returns all messages in a session with
 	// created_at >= the given timestamp.
 	ListMessagesAfter(ctx context.Context, sessionID string, createdAt int64) ([]Message, error)
+
+	// ListMessagesFromCheckpoint returns the checkpoint message and every
+	// message inserted after it, ordered by insertion (rowid) so the cut is
+	// exact even when created_at timestamps collide at second precision.
+	ListMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) ([]Message, error)
+
+	// DeleteMessagesFromCheckpoint deletes the checkpoint message and every
+	// message inserted after it (by rowid), publishing DeletedEvent for each.
+	DeleteMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) error
 }
 
 // pendingState holds the in-memory coalescing buffer for a single
@@ -520,6 +529,37 @@ func (s *service) DeleteMessagesAfter(ctx context.Context, sessionID string, cre
 			continue
 		}
 		if delErr := s.Delete(ctx, msg.ID); delErr != nil {
+			return delErr
+		}
+	}
+	return nil
+}
+
+func (s *service) ListMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) ([]Message, error) {
+	dbMessages, err := s.q.ListMessagesFromCheckpoint(ctx, db.ListMessagesFromCheckpointParams{
+		SessionID:    sessionID,
+		CheckpointID: checkpointID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
+func (s *service) DeleteMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) error {
+	msgs, err := s.ListMessagesFromCheckpoint(ctx, sessionID, checkpointID)
+	if err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		if delErr := s.Delete(ctx, m.ID); delErr != nil {
 			return delErr
 		}
 	}

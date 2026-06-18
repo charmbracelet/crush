@@ -13,7 +13,10 @@ type Querier interface {
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	DeleteFile(ctx context.Context, id string) error
+	DeleteFileVersionsByID(ctx context.Context, ids []string) error
 	DeleteMessage(ctx context.Context, id string) error
+	DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error
+	DeleteMessagesFromCheckpoint(ctx context.Context, arg DeleteMessagesFromCheckpointParams) error
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
@@ -36,8 +39,11 @@ type Querier interface {
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
+	ListMessagesAfter(ctx context.Context, arg ListMessagesAfterParams) ([]Message, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
-	ListNewFiles(ctx context.Context) ([]File, error)
+	// Messages at or after the checkpoint, ordered by insertion (rowid) so the cut
+	// is exact even when created_at timestamps collide at second precision.
+	ListMessagesFromCheckpoint(ctx context.Context, arg ListMessagesFromCheckpointParams) ([]Message, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
@@ -46,12 +52,6 @@ type Querier interface {
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
-	GetFileVersionBeforeCheckpoint(ctx context.Context, arg GetFileVersionBeforeCheckpointParams) (File, error)
-	ListFileVersionsAfterCheckpoint(ctx context.Context, arg ListFileVersionsAfterCheckpointParams) ([]File, error)
-	ListDistinctPathsVersionsAfterCheckpoint(ctx context.Context, arg ListDistinctPathsVersionsAfterCheckpointParams) ([]string, error)
-	DeleteFileVersionsAfterCheckpoint(ctx context.Context, arg DeleteFileVersionsAfterCheckpointParams) error
-	DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error
-	ListMessagesAfter(ctx context.Context, arg ListMessagesAfterParams) ([]Message, error)
 }
 
 var _ Querier = (*Queries)(nil)

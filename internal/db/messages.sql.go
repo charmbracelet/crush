@@ -73,6 +73,41 @@ func (q *Queries) DeleteMessage(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteMessagesAfter = `-- name: DeleteMessagesAfter :exec
+DELETE FROM messages
+WHERE session_id = ? AND created_at >= ?
+`
+
+type DeleteMessagesAfterParams struct {
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error {
+	_, err := q.exec(ctx, q.deleteMessagesAfterStmt, deleteMessagesAfter, arg.SessionID, arg.CreatedAt)
+	return err
+}
+
+const deleteMessagesFromCheckpoint = `-- name: DeleteMessagesFromCheckpoint :exec
+DELETE FROM messages
+WHERE id IN (
+    SELECT m.id
+    FROM messages m
+    WHERE m.session_id = ?1
+      AND m.rowid >= (SELECT cp.rowid FROM messages cp WHERE cp.id = ?2)
+)
+`
+
+type DeleteMessagesFromCheckpointParams struct {
+	SessionID    string `json:"session_id"`
+	CheckpointID string `json:"checkpoint_id"`
+}
+
+func (q *Queries) DeleteMessagesFromCheckpoint(ctx context.Context, arg DeleteMessagesFromCheckpointParams) error {
+	_, err := q.exec(ctx, q.deleteMessagesFromCheckpointStmt, deleteMessagesFromCheckpoint, arg.SessionID, arg.CheckpointID)
+	return err
+}
+
 const deleteSessionMessages = `-- name: DeleteSessionMessages :exec
 DELETE FROM messages
 WHERE session_id = ?
@@ -148,6 +183,52 @@ func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	return items, nil
 }
 
+const listMessagesAfter = `-- name: ListMessagesAfter :many
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
+FROM messages
+WHERE session_id = ? AND created_at >= ?
+ORDER BY created_at ASC
+`
+
+type ListMessagesAfterParams struct {
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) ListMessagesAfter(ctx context.Context, arg ListMessagesAfterParams) ([]Message, error) {
+	rows, err := q.query(ctx, q.listMessagesAfterStmt, listMessagesAfter, arg.SessionID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessagesBySession = `-- name: ListMessagesBySession :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
 FROM messages
@@ -157,6 +238,55 @@ ORDER BY created_at ASC
 
 func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := q.query(ctx, q.listMessagesBySessionStmt, listMessagesBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesFromCheckpoint = `-- name: ListMessagesFromCheckpoint :many
+SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at, m.finished_at, m.provider, m.is_summary_message
+FROM messages m
+WHERE m.session_id = ?1
+  AND m.rowid >= (SELECT cp.rowid FROM messages cp WHERE cp.id = ?2)
+ORDER BY m.rowid ASC
+`
+
+type ListMessagesFromCheckpointParams struct {
+	SessionID    string `json:"session_id"`
+	CheckpointID string `json:"checkpoint_id"`
+}
+
+// Messages at or after the checkpoint, ordered by insertion (rowid) so the cut
+// is exact even when created_at timestamps collide at second precision.
+func (q *Queries) ListMessagesFromCheckpoint(ctx context.Context, arg ListMessagesFromCheckpointParams) ([]Message, error) {
+	rows, err := q.query(ctx, q.listMessagesFromCheckpointStmt, listMessagesFromCheckpoint, arg.SessionID, arg.CheckpointID)
 	if err != nil {
 		return nil, err
 	}
@@ -248,65 +378,4 @@ type UpdateMessageParams struct {
 func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) error {
 	_, err := q.exec(ctx, q.updateMessageStmt, updateMessage, arg.Parts, arg.FinishedAt, arg.ID)
 	return err
-}
-
-const deleteMessagesAfter = `-- name: DeleteMessagesAfter :exec
-DELETE FROM messages
-WHERE session_id = ? AND created_at >= ?
-`
-
-type DeleteMessagesAfterParams struct {
-	SessionID string `json:"session_id"`
-	CreatedAt int64  `json:"created_at"`
-}
-
-func (q *Queries) DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error {
-	_, err := q.exec(ctx, q.deleteMessagesAfterStmt, deleteMessagesAfter, arg.SessionID, arg.CreatedAt)
-	return err
-}
-
-const listMessagesAfter = `-- name: ListMessagesAfter :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
-FROM messages
-WHERE session_id = ? AND created_at >= ?
-ORDER BY created_at ASC
-`
-
-type ListMessagesAfterParams struct {
-	SessionID string `json:"session_id"`
-	CreatedAt int64  `json:"created_at"`
-}
-
-func (q *Queries) ListMessagesAfter(ctx context.Context, arg ListMessagesAfterParams) ([]Message, error) {
-	rows, err := q.query(ctx, q.listMessagesAfterStmt, listMessagesAfter, arg.SessionID, arg.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Message{}
-	for rows.Next() {
-		var i Message
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Role,
-			&i.Parts,
-			&i.Model,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.FinishedAt,
-			&i.Provider,
-			&i.IsSummaryMessage,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }

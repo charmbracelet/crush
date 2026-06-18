@@ -72,14 +72,14 @@ func (s *Service) RevertToMessage(
 		return Result{}, fmt.Errorf("%w: message belongs to session %s", ErrMessageNotFound, cp.SessionID)
 	}
 
-	// 2. Determine the cut set: every message at or after the checkpoint.
-	// We correlate file versions to this set by message id (the column added
-	// by the schema migration), which is exact even when two edits share the
-	// same second-precision timestamp. cp.CreatedAt is retained only as a
-	// fallback for legacy rows written before message ids were recorded.
-	cutMsgs, err := s.messages.ListMessagesAfter(ctx, sessionID, cp.CreatedAt)
+	// 2. Determine the cut set: the checkpoint message and everything inserted
+	// after it, ordered by rowid (insertion order). Using rowid instead of
+	// created_at makes the cut exact even when two messages share the same
+	// second-precision timestamp. File versions are correlated to this set by
+	// message id.
+	cutMsgs, err := s.messages.ListMessagesFromCheckpoint(ctx, sessionID, messageID)
 	if err != nil {
-		return Result{}, fmt.Errorf("listing messages after checkpoint: %w", err)
+		return Result{}, fmt.Errorf("listing messages from checkpoint: %w", err)
 	}
 	cutIDs := make(map[string]struct{}, len(cutMsgs))
 	for _, m := range cutMsgs {
@@ -101,7 +101,7 @@ func (s *Service) RevertToMessage(
 	// 4. Truncate conversation if requested.
 	if opts.RestoreConversation {
 		result.MessagesDeleted = len(cutMsgs)
-		if err := s.messages.DeleteMessagesAfter(ctx, sessionID, cp.CreatedAt); err != nil {
+		if err := s.messages.DeleteMessagesFromCheckpoint(ctx, sessionID, messageID); err != nil {
 			return Result{}, fmt.Errorf("deleting messages: %w", err)
 		}
 	}

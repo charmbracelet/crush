@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
 )
 
 var (
@@ -18,6 +19,10 @@ var (
 	ErrSessionBusy = errors.New("session is busy")
 	// ErrMessageNotFound is returned when the checkpoint message doesn't exist.
 	ErrMessageNotFound = errors.New("message not found")
+	// ErrRevertPastSummary is returned when the checkpoint is at or before the
+	// session's last summary. Reverting there would delete the summary message
+	// and de-compress the context, so it is disallowed.
+	ErrRevertPastSummary = errors.New("cannot revert past the last summary")
 )
 
 // Options controls what parts of the session to revert.
@@ -39,13 +44,15 @@ type Result struct {
 type Service struct {
 	history  history.Service
 	messages message.Service
+	sessions session.Service
 }
 
 // NewService creates a new revert Service.
-func NewService(history history.Service, messages message.Service) *Service {
+func NewService(history history.Service, messages message.Service, sessions session.Service) *Service {
 	return &Service{
 		history:  history,
 		messages: messages,
+		sessions: sessions,
 	}
 }
 
@@ -86,6 +93,20 @@ func (s *Service) RevertToMessage(
 		cutIDs[m.ID] = struct{}{}
 	}
 
+	// Load the session for the summary-boundary check and the todo reset.
+	sess, err := s.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return Result{}, fmt.Errorf("getting session: %w", err)
+	}
+	// Refuse reverting to a point at or before the last summary: the summary
+	// message would land in the cut, which would delete it and de-compress the
+	// context window.
+	if sess.SummaryMessageID != "" {
+		if _, inCut := cutIDs[sess.SummaryMessageID]; inCut {
+			return Result{}, ErrRevertPastSummary
+		}
+	}
+
 	var result Result
 
 	// 3. Restore code if requested.
@@ -103,6 +124,14 @@ func (s *Service) RevertToMessage(
 		result.MessagesDeleted = len(cutMsgs)
 		if err := s.messages.DeleteMessagesFromCheckpoint(ctx, sessionID, messageID); err != nil {
 			return Result{}, fmt.Errorf("deleting messages: %w", err)
+		}
+		// The conversation that produced the todo list was just truncated;
+		// clear it so the sidebar doesn't linger with stale, orphaned work.
+		if len(sess.Todos) > 0 {
+			sess.Todos = nil
+			if _, err := s.sessions.Save(ctx, sess); err != nil {
+				return Result{}, fmt.Errorf("clearing todos: %w", err)
+			}
 		}
 	}
 

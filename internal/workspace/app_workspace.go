@@ -227,7 +227,7 @@ func (w *AppWorkspace) AgentRevertToMessage(ctx context.Context, sessionID, mess
 	if w.app.AgentCoordinator != nil {
 		isBusy = w.app.AgentCoordinator.IsSessionBusy(sessionID)
 	}
-	svc := revert.NewService(w.app.History, w.app.Messages)
+	svc := revert.NewService(w.app.History, w.app.Messages, w.app.Sessions)
 	result, err := svc.RevertToMessage(ctx, sessionID, messageID, isBusy, revert.Options{
 		RestoreCode:         restoreCode,
 		RestoreConversation: restoreConversation,

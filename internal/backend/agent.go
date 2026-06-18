@@ -191,7 +191,7 @@ func (b *Backend) RevertToMessage(ctx context.Context, workspaceID, sessionID, m
 	if ws.AgentCoordinator != nil {
 		isBusy = ws.AgentCoordinator.IsSessionBusy(sessionID)
 	}
-	svc := revert.NewService(ws.History, ws.Messages)
+	svc := revert.NewService(ws.History, ws.Messages, ws.Sessions)
 	result, err := svc.RevertToMessage(ctx, sessionID, messageID, isBusy, revert.Options{
 		RestoreCode:         restoreCode,
 		RestoreConversation: restoreConversation,

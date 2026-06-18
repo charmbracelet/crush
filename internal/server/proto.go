@@ -886,7 +886,7 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionRevert(w http.ResponseWrit
 	result, err := c.backend.RevertToMessage(r.Context(), id, sid, mid, body.RestoreCode, body.RestoreConversation)
 	if err != nil {
 		switch {
-		case errors.Is(err, revert.ErrSessionBusy):
+		case errors.Is(err, revert.ErrSessionBusy), errors.Is(err, revert.ErrRevertPastSummary):
 			jsonError(w, http.StatusConflict, err.Error())
 		case errors.Is(err, revert.ErrMessageNotFound):
 			jsonError(w, http.StatusNotFound, err.Error())

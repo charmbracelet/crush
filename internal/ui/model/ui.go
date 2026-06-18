@@ -997,9 +997,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.hasSession() || msg.sessionID != m.session.ID {
 			break
 		}
+		// Only messages after the last summary are revertable — you can't
+		// revert past a summary. Find its position so we can skip it and
+		// everything before it.
+		summaryIdx := -1
+		if m.session.SummaryMessageID != "" {
+			for i, mm := range msg.messages {
+				if mm.ID == m.session.SummaryMessageID {
+					summaryIdx = i
+					break
+				}
+			}
+		}
 		// Filter to user messages, newest-first (ListMessages is oldest-first).
 		var userMessages []message.Message
-		for i := len(msg.messages) - 1; i >= 0; i-- {
+		for i := len(msg.messages) - 1; i > summaryIdx; i-- {
 			if msg.messages[i].Role == message.User {
 				userMessages = append(userMessages, msg.messages[i])
 			}

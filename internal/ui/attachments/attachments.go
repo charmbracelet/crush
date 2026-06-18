@@ -39,6 +39,11 @@ type Attachments struct {
 func (m *Attachments) List() []message.Attachment { return m.list }
 func (m *Attachments) Reset()                     { m.list = nil }
 
+// SetRendererStyles updates the styling for the attachment chips.
+func (m *Attachments) SetRendererStyles(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle lipgloss.Style) {
+	m.renderer.SetStyles(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle)
+}
+
 func (m *Attachments) Update(msg tea.Msg) bool {
 	switch msg := msg.(type) {
 	case message.Attachment:

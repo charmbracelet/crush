@@ -529,6 +529,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
 
+	commands = append(commands, NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", "", ActionOpenDialog{ThemeID}))
+	commands = append(commands, NewCommandItem(c.com.Styles, "edit_theme", "Edit Theme", "", ActionOpenDialog{ThemeEditorID}))
+
 	commands = append(
 		commands,
 		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}).WithAliases("exit"),

@@ -744,6 +744,12 @@ func (c *Client) RevertToMessage(ctx context.Context, id, sessionID, messageID s
 	}
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
+		// Surface the server's error message (session busy, message not found,
+		// disk restore error) instead of just the status code.
+		var e proto.Error
+		if json.NewDecoder(rsp.Body).Decode(&e) == nil && e.Message != "" {
+			return nil, fmt.Errorf("failed to revert session: %s", e.Message)
+		}
 		return nil, fmt.Errorf("failed to revert session: status code %d", rsp.StatusCode)
 	}
 	var result RevertToMessageResult

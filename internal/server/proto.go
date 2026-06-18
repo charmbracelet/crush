@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/revert"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 )
@@ -878,13 +879,20 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionRevert(w http.ResponseWrit
 		RestoreConversation bool `json:"restore_conversation"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		c.handleError(w, r, fmt.Errorf("invalid request body: %w", err))
+		jsonError(w, http.StatusBadRequest, "failed to decode request body")
 		return
 	}
 
 	result, err := c.backend.RevertToMessage(r.Context(), id, sid, mid, body.RestoreCode, body.RestoreConversation)
 	if err != nil {
-		c.handleError(w, r, err)
+		switch {
+		case errors.Is(err, revert.ErrSessionBusy):
+			jsonError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, revert.ErrMessageNotFound):
+			jsonError(w, http.StatusNotFound, err.Error())
+		default:
+			c.handleError(w, r, err)
+		}
 		return
 	}
 

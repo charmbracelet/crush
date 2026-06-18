@@ -104,6 +104,11 @@ type ToolCall struct {
 	Input            string `json:"input"`
 	ProviderExecuted bool   `json:"provider_executed"`
 	Finished         bool   `json:"finished"`
+	// ThoughtSignature is the per-tool-call thought signature returned by
+	// Google Gemini thinking models. It must be replayed verbatim, attached
+	// to this specific tool call, or Gemini rejects the request with
+	// "Corrupted thought signature".
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 func (ToolCall) isPart() {}
@@ -251,10 +256,13 @@ func (m *Message) AppendReasoningContent(delta string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			m.Parts[i] = ReasoningContent{
-				Thinking:   c.Thinking + delta,
-				Signature:  c.Signature,
-				StartedAt:  c.StartedAt,
-				FinishedAt: c.FinishedAt,
+				Thinking:         c.Thinking + delta,
+				Signature:        c.Signature,
+				ThoughtSignature: c.ThoughtSignature,
+				ToolID:           c.ToolID,
+				ResponsesData:    c.ResponsesData,
+				StartedAt:        c.StartedAt,
+				FinishedAt:       c.FinishedAt,
 			}
 			found = true
 		}
@@ -303,10 +311,13 @@ func (m *Message) SetReasoningResponsesData(data *openai.ResponsesReasoningMetad
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			m.Parts[i] = ReasoningContent{
-				Thinking:      c.Thinking,
-				ResponsesData: data,
-				StartedAt:     c.StartedAt,
-				FinishedAt:    c.FinishedAt,
+				Thinking:         c.Thinking,
+				Signature:        c.Signature,
+				ThoughtSignature: c.ThoughtSignature,
+				ToolID:           c.ToolID,
+				ResponsesData:    data,
+				StartedAt:        c.StartedAt,
+				FinishedAt:       c.FinishedAt,
 			}
 			return
 		}
@@ -318,10 +329,13 @@ func (m *Message) FinishThinking() {
 		if c, ok := part.(ReasoningContent); ok {
 			if c.FinishedAt == 0 {
 				m.Parts[i] = ReasoningContent{
-					Thinking:   c.Thinking,
-					Signature:  c.Signature,
-					StartedAt:  c.StartedAt,
-					FinishedAt: time.Now().Unix(),
+					Thinking:         c.Thinking,
+					Signature:        c.Signature,
+					ThoughtSignature: c.ThoughtSignature,
+					ToolID:           c.ToolID,
+					ResponsesData:    c.ResponsesData,
+					StartedAt:        c.StartedAt,
+					FinishedAt:       time.Now().Unix(),
 				}
 			}
 			return
@@ -348,10 +362,12 @@ func (m *Message) FinishToolCall(toolCallID string) {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input,
-					Finished: true,
+					ID:               c.ID,
+					Name:             c.Name,
+					Input:            c.Input,
+					ProviderExecuted: c.ProviderExecuted,
+					Finished:         true,
+					ThoughtSignature: c.ThoughtSignature,
 				}
 				return
 			}
@@ -364,10 +380,12 @@ func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
 				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Finished: c.Finished,
+					ID:               c.ID,
+					Name:             c.Name,
+					Input:            c.Input + inputDelta,
+					ProviderExecuted: c.ProviderExecuted,
+					Finished:         c.Finished,
+					ThoughtSignature: c.ThoughtSignature,
 				}
 				return
 			}
@@ -385,6 +403,21 @@ func (m *Message) AddToolCall(tc ToolCall) {
 		}
 	}
 	m.Parts = append(m.Parts, tc)
+}
+
+// SetToolCallThoughtSignature attaches a Google thought signature to the tool
+// call with the given ID, preserving its other fields. No-op if not found.
+func (m *Message) SetToolCallThoughtSignature(toolCallID, signature string) {
+	if signature == "" {
+		return
+	}
+	for i, part := range m.Parts {
+		if c, ok := part.(ToolCall); ok && c.ID == toolCallID {
+			c.ThoughtSignature = signature
+			m.Parts[i] = c
+			return
+		}
+	}
 }
 
 func (m *Message) SetToolCalls(tc []ToolCall) {
@@ -503,11 +536,17 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	case Assistant:
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)
-		if text != "" {
-			parts = append(parts, fantasy.TextPart{Text: text})
-		}
 		reasoning := m.ReasoningContent()
-		if reasoning.Thinking != "" {
+
+		// Emit the reasoning block (if any) BEFORE the text part. The Google
+		// provider replays a thought signature by attaching it to the part
+		// immediately following its ReasoningPart, so the order matters. We
+		// only carry the Google signature here when it is NOT bound to a
+		// specific tool call (ToolID == ""), i.e. the signature of the final
+		// text answer; per-tool-call signatures are emitted next to their
+		// tool call below.
+		hasGoogleTextSig := reasoning.ThoughtSignature != "" && reasoning.ToolID == ""
+		if reasoning.Thinking != "" || hasGoogleTextSig {
 			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
 			if reasoning.Signature != "" {
 				reasoningPart.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{
@@ -517,7 +556,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			if reasoning.ResponsesData != nil {
 				reasoningPart.ProviderOptions[openai.Name] = reasoning.ResponsesData
 			}
-			if reasoning.ThoughtSignature != "" {
+			if hasGoogleTextSig {
 				reasoningPart.ProviderOptions[google.Name] = &google.ReasoningMetadata{
 					Signature: reasoning.ThoughtSignature,
 					ToolID:    reasoning.ToolID,
@@ -525,7 +564,23 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			}
 			parts = append(parts, reasoningPart)
 		}
+		if text != "" {
+			parts = append(parts, fantasy.TextPart{Text: text})
+		}
 		for _, call := range m.ToolCalls() {
+			// Replay the per-tool-call thought signature in its own
+			// ReasoningPart placed immediately before the tool call, so the
+			// Google provider attaches it to exactly this function call.
+			if call.ThoughtSignature != "" {
+				parts = append(parts, fantasy.ReasoningPart{
+					ProviderOptions: fantasy.ProviderOptions{
+						google.Name: &google.ReasoningMetadata{
+							Signature: call.ThoughtSignature,
+							ToolID:    call.ID,
+						},
+					},
+				})
+			}
 			parts = append(parts, fantasy.ToolCallPart{
 				ToolCallID:       call.ID,
 				ToolName:         call.Name,

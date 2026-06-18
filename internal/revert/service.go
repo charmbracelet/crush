@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"sort"
 
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
@@ -70,11 +72,25 @@ func (s *Service) RevertToMessage(
 		return Result{}, fmt.Errorf("%w: message belongs to session %s", ErrMessageNotFound, cp.SessionID)
 	}
 
+	// 2. Determine the cut set: every message at or after the checkpoint.
+	// We correlate file versions to this set by message id (the column added
+	// by the schema migration), which is exact even when two edits share the
+	// same second-precision timestamp. cp.CreatedAt is retained only as a
+	// fallback for legacy rows written before message ids were recorded.
+	cutMsgs, err := s.messages.ListMessagesAfter(ctx, sessionID, cp.CreatedAt)
+	if err != nil {
+		return Result{}, fmt.Errorf("listing messages after checkpoint: %w", err)
+	}
+	cutIDs := make(map[string]struct{}, len(cutMsgs))
+	for _, m := range cutMsgs {
+		cutIDs[m.ID] = struct{}{}
+	}
+
 	var result Result
 
-	// 2. Restore code if requested.
+	// 3. Restore code if requested.
 	if opts.RestoreCode {
-		codeResult, err := s.restoreCode(ctx, sessionID, cp.CreatedAt)
+		codeResult, err := s.restoreCode(ctx, sessionID, cutIDs, cp.CreatedAt)
 		if err != nil {
 			return Result{}, fmt.Errorf("restoring code: %w", err)
 		}
@@ -82,14 +98,9 @@ func (s *Service) RevertToMessage(
 		result.FilesDeleted = codeResult.FilesDeleted
 	}
 
-	// 3. Truncate conversation if requested.
+	// 4. Truncate conversation if requested.
 	if opts.RestoreConversation {
-		msgs, err := s.messages.ListMessagesAfter(ctx, sessionID, cp.CreatedAt)
-		if err != nil {
-			return Result{}, fmt.Errorf("listing messages to delete: %w", err)
-		}
-		result.MessagesDeleted = len(msgs)
-
+		result.MessagesDeleted = len(cutMsgs)
 		if err := s.messages.DeleteMessagesAfter(ctx, sessionID, cp.CreatedAt); err != nil {
 			return Result{}, fmt.Errorf("deleting messages: %w", err)
 		}
@@ -98,42 +109,133 @@ func (s *Service) RevertToMessage(
 	return result, nil
 }
 
-// restoreCode restores all files touched at or after the checkpoint to their
+// fileAction is a single planned file operation produced by planFileRevert.
+type fileAction struct {
+	path string
+	// restore is true when the file should be rewritten to content; false
+	// means the file was created in the reverted turn and should be removed.
+	restore bool
+	content string
+	// versionIDs are the history rows produced in the reverted turn for this
+	// path. They are dropped only after the on-disk operation succeeds.
+	versionIDs []string
+}
+
+// planFileRevert partitions a session's file versions against the cut set and
+// returns the on-disk operations needed to rewind code. A version belongs to
+// the reverted turn when its producing message id is in cutIDs (or, for legacy
+// rows with no message id, when its timestamp is at or after the checkpoint).
+//
+// For each path that has at least one reverted version, the file is restored
+// to the newest version that is NOT in the cut set, or deleted if no such
+// version exists (the agent created it during the reverted turn). The function
+// is pure so the correlation logic can be tested without a database or disk.
+func planFileRevert(versions []history.File, cutIDs map[string]struct{}, checkpointCreatedAt int64) []fileAction {
+	reverted := func(v history.File) bool {
+		if v.MessageID.Valid {
+			_, ok := cutIDs[v.MessageID.String]
+			return ok
+		}
+		// Legacy row with no message id: fall back to the timestamp.
+		return v.CreatedAt >= checkpointCreatedAt
+	}
+
+	byPath := make(map[string][]history.File)
+	paths := make([]string, 0)
+	for _, v := range versions {
+		if _, seen := byPath[v.Path]; !seen {
+			paths = append(paths, v.Path)
+		}
+		byPath[v.Path] = append(byPath[v.Path], v)
+	}
+	sort.Strings(paths)
+
+	var actions []fileAction
+	for _, path := range paths {
+		var revertedIDs []string
+		var best *history.File
+		for i := range byPath[path] {
+			v := byPath[path][i]
+			if reverted(v) {
+				revertedIDs = append(revertedIDs, v.ID)
+				continue
+			}
+			// Track the newest pre-checkpoint version as the restore source.
+			if best == nil || v.Version > best.Version ||
+				(v.Version == best.Version && v.CreatedAt > best.CreatedAt) {
+				vv := v
+				best = &vv
+			}
+		}
+		if len(revertedIDs) == 0 {
+			continue // path untouched by the reverted turn
+		}
+		if best != nil {
+			actions = append(actions, fileAction{
+				path:       path,
+				restore:    true,
+				content:    best.Content,
+				versionIDs: revertedIDs,
+			})
+		} else {
+			actions = append(actions, fileAction{
+				path:       path,
+				restore:    false,
+				versionIDs: revertedIDs,
+			})
+		}
+	}
+	return actions
+}
+
+// restoreCode restores all files touched by the reverted turn to their
 // pre-checkpoint state. Files that didn't exist before the checkpoint are
-// deleted (agent-created files).
-func (s *Service) restoreCode(ctx context.Context, sessionID string, checkpointCreatedAt int64) (Result, error) {
+// deleted (agent-created files). History rows for a path are dropped only
+// after its on-disk operation succeeds, so a failed write never strands the
+// file at post-checkpoint content with no recoverable version.
+func (s *Service) restoreCode(ctx context.Context, sessionID string, cutIDs map[string]struct{}, checkpointCreatedAt int64) (Result, error) {
 	var result Result
 
-	// Find all distinct paths that have versions at or after the checkpoint.
-	paths, err := s.history.ListDistinctPathsAfterCheckpoint(ctx, sessionID, checkpointCreatedAt)
+	versions, err := s.history.ListBySession(ctx, sessionID)
 	if err != nil {
-		return result, fmt.Errorf("listing paths after checkpoint: %w", err)
+		return result, fmt.Errorf("listing file versions: %w", err)
 	}
 
-	for _, path := range paths {
-		// Try to get the latest version of this file before the checkpoint.
-		prev, err := s.history.GetFileVersionBeforeCheckpoint(ctx, path, sessionID, checkpointCreatedAt)
-		if err != nil {
-			// No version before checkpoint — this file was agent-created in the
-			// reverted turn. Delete it from disk.
-			if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
-				slog.Warn("Failed to delete agent-created file during revert", "path", path, "error", removeErr)
+	actions := planFileRevert(versions, cutIDs, checkpointCreatedAt)
+
+	var orphanedVersionIDs []string
+	for _, a := range actions {
+		if a.restore {
+			// Preserve the existing file's permissions where possible; the
+			// history table stores content only, not mode.
+			mode := os.FileMode(0o644)
+			if fi, statErr := os.Stat(a.path); statErr == nil {
+				mode = fi.Mode().Perm()
 			}
-			result.FilesDeleted = append(result.FilesDeleted, path)
-			continue
+			if mkErr := os.MkdirAll(filepath.Dir(a.path), 0o755); mkErr != nil {
+				slog.Warn("Failed to create directory during revert", "path", a.path, "error", mkErr)
+				continue
+			}
+			if writeErr := os.WriteFile(a.path, []byte(a.content), mode); writeErr != nil {
+				slog.Warn("Failed to restore file during revert", "path", a.path, "error", writeErr)
+				continue
+			}
+			result.FilesRestored = append(result.FilesRestored, a.path)
+		} else {
+			if removeErr := os.Remove(a.path); removeErr != nil && !os.IsNotExist(removeErr) {
+				slog.Warn("Failed to delete agent-created file during revert", "path", a.path, "error", removeErr)
+				continue
+			}
+			result.FilesDeleted = append(result.FilesDeleted, a.path)
 		}
-
-		// Restore the file to its pre-checkpoint content.
-		if writeErr := os.WriteFile(path, []byte(prev.Content), 0o644); writeErr != nil {
-			slog.Warn("Failed to restore file during revert", "path", path, "error", writeErr)
-			continue
-		}
-		result.FilesRestored = append(result.FilesRestored, path)
+		orphanedVersionIDs = append(orphanedVersionIDs, a.versionIDs...)
 	}
 
-	// Clean up orphaned file versions at or after the checkpoint.
-	if err := s.history.DeleteFileVersionsAfterCheckpoint(ctx, sessionID, checkpointCreatedAt); err != nil {
-		return result, fmt.Errorf("cleaning up file versions: %w", err)
+	// Drop the now-orphaned versions produced by the reverted turn.
+	for _, id := range orphanedVersionIDs {
+		if delErr := s.history.Delete(ctx, id); delErr != nil {
+			slog.Warn("Failed to delete orphaned file version during revert", "id", id, "error", delErr)
+		}
 	}
 
 	return result, nil

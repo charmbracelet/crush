@@ -40,11 +40,6 @@ type Service interface {
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
-
-	// Revert-specific queries.
-	GetFileVersionBeforeCheckpoint(ctx context.Context, path, sessionID string, checkpointCreatedAt int64) (File, error)
-	ListDistinctPathsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) ([]string, error)
-	DeleteFileVersionsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) error
 }
 
 type service struct {
@@ -231,30 +226,4 @@ func (s *service) fromDBItem(item db.File) File {
 		CreatedAt: item.CreatedAt,
 		UpdatedAt: item.UpdatedAt,
 	}
-}
-
-func (s *service) GetFileVersionBeforeCheckpoint(ctx context.Context, path, sessionID string, checkpointCreatedAt int64) (File, error) {
-	dbFile, err := s.q.GetFileVersionBeforeCheckpoint(ctx, db.GetFileVersionBeforeCheckpointParams{
-		Path:      path,
-		SessionID: sessionID,
-		CreatedAt: checkpointCreatedAt,
-	})
-	if err != nil {
-		return File{}, err
-	}
-	return s.fromDBItem(dbFile), nil
-}
-
-func (s *service) ListDistinctPathsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) ([]string, error) {
-	return s.q.ListDistinctPathsVersionsAfterCheckpoint(ctx, db.ListDistinctPathsVersionsAfterCheckpointParams{
-		SessionID: sessionID,
-		CreatedAt: checkpointCreatedAt,
-	})
-}
-
-func (s *service) DeleteFileVersionsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) error {
-	return s.q.DeleteFileVersionsAfterCheckpoint(ctx, db.DeleteFileVersionsAfterCheckpointParams{
-		SessionID: sessionID,
-		CreatedAt: checkpointCreatedAt,
-	})
 }

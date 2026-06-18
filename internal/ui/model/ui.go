@@ -155,9 +155,12 @@ type (
 	creditsUpdatedMsg struct {
 		credits int
 	}
-	// revertDoneMsg is sent after a revert operation completes.
+	// revertDoneMsg is sent after a revert operation completes. msgs is the
+	// reloaded message list, fetched off the Update loop in executeRevert so
+	// the handler performs no IO.
 	revertDoneMsg struct {
 		result workspace.AgentRevertResult
+		msgs   []message.Message
 	}
 )
 
@@ -941,14 +944,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case creditsUpdatedMsg:
 		m.hyperCredits = &msg.credits
 	case revertDoneMsg:
-		// Reload messages after revert.
+		// Messages were reloaded off the Update loop in executeRevert, so no
+		// IO happens here (internal/ui/AGENTS.md: never do IO in Update).
 		if m.hasSession() {
-			msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
-			if err != nil {
-				cmds = append(cmds, util.ReportError(err))
-				break
-			}
-			if cmd := m.setSessionMessages(msgs); cmd != nil {
+			if cmd := m.setSessionMessages(msg.msgs); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -3738,9 +3737,15 @@ func (m *UI) executeRevert(messageID string, restoreCode, restoreConversation bo
 			restoreCode, restoreConversation,
 		)
 		if err != nil {
-			return util.ReportError(err)
+			return util.ReportError(err)()
 		}
-		return revertDoneMsg{result: result}
+		// Reload messages here (still off the Update loop) so the
+		// revertDoneMsg handler does no IO.
+		msgs, err := m.com.Workspace.ListMessages(ctx, m.session.ID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return revertDoneMsg{result: result, msgs: msgs}
 	}
 }
 

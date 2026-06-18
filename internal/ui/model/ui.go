@@ -157,10 +157,19 @@ type (
 	}
 	// revertDoneMsg is sent after a revert operation completes. msgs is the
 	// reloaded message list, fetched off the Update loop in executeRevert so
-	// the handler performs no IO.
+	// the handler performs no IO. sessionID binds the result to the session the
+	// revert started on, so switching sessions mid-revert can't apply it to the
+	// wrong session.
 	revertDoneMsg struct {
-		result workspace.AgentRevertResult
-		msgs   []message.Message
+		sessionID string
+		result    workspace.AgentRevertResult
+		msgs      []message.Message
+	}
+	// revertPickerLoadedMsg carries the user messages loaded off the Update
+	// loop for the revert picker, bound to the session they came from.
+	revertPickerLoadedMsg struct {
+		sessionID string
+		messages  []message.Message
 	}
 )
 
@@ -946,10 +955,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case revertDoneMsg:
 		// Messages were reloaded off the Update loop in executeRevert, so no
 		// IO happens here (internal/ui/AGENTS.md: never do IO in Update).
-		if m.hasSession() {
-			if cmd := m.setSessionMessages(msg.msgs); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+		// Ignore the result if the user switched sessions mid-revert — it
+		// belongs to the session the revert started on, not the active one.
+		if !m.hasSession() || msg.sessionID != m.session.ID {
+			break
+		}
+		if cmd := m.setSessionMessages(msg.msgs); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 		// If a revert was triggered from the dialog, put the original
 		// message text back into the input so the user can edit and
@@ -979,6 +991,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status.SetInfoMsg(util.NewInfoMsg("Reverted: " + strings.Join(parts, ", ")))
 			cmds = append(cmds, clearInfoMsgCmd(DefaultStatusTTL))
 		}
+	case revertPickerLoadedMsg:
+		// Messages were loaded off the Update loop; build and open the picker
+		// here (no IO). Ignore if the user switched sessions while loading.
+		if !m.hasSession() || msg.sessionID != m.session.ID {
+			break
+		}
+		// Filter to user messages, newest-first (ListMessages is oldest-first).
+		var userMessages []message.Message
+		for i := len(msg.messages) - 1; i >= 0; i-- {
+			if msg.messages[i].Role == message.User {
+				userMessages = append(userMessages, msg.messages[i])
+			}
+		}
+		if len(userMessages) == 0 {
+			cmds = append(cmds, util.ReportWarn("No user messages to revert to"))
+			break
+		}
+		m.dialog.OpenDialog(dialog.NewRevertPicker(m.com, userMessages))
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -3484,26 +3514,16 @@ func (m *UI) openRevertPickerDialog() tea.Cmd {
 		return util.ReportWarn("Agent is busy, please wait before reverting")
 	}
 
-	msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
-	if err != nil {
-		return util.ReportError(err)
-	}
-
-	// Filter to user messages, newest-first (ListMessages is oldest-first).
-	var userMessages []message.Message
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == message.User {
-			userMessages = append(userMessages, msgs[i])
+	// Load messages off the Update loop (an HTTP roundtrip in client mode);
+	// the picker is built when revertPickerLoadedMsg comes back.
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
 		}
+		return revertPickerLoadedMsg{sessionID: sessionID, messages: msgs}
 	}
-
-	if len(userMessages) == 0 {
-		return util.ReportWarn("No user messages to revert to")
-	}
-
-	picker := dialog.NewRevertPicker(m.com, userMessages)
-	m.dialog.OpenDialog(picker)
-	return nil
 }
 
 // openModelsDialog opens the models dialog.
@@ -3730,10 +3750,13 @@ func (m *UI) newSession() tea.Cmd {
 // executeRevert runs the revert operation via the workspace and returns
 // a revertDoneMsg so the Update loop can reload messages.
 func (m *UI) executeRevert(messageID string, restoreCode, restoreConversation bool) tea.Cmd {
+	// Bind the session at command-creation time so a session switch while the
+	// revert is in flight can't retarget it or apply the result elsewhere.
+	sessionID := m.session.ID
 	return func() tea.Msg {
 		ctx := context.Background()
 		result, err := m.com.Workspace.AgentRevertToMessage(
-			ctx, m.session.ID, messageID,
+			ctx, sessionID, messageID,
 			restoreCode, restoreConversation,
 		)
 		if err != nil {
@@ -3741,11 +3764,11 @@ func (m *UI) executeRevert(messageID string, restoreCode, restoreConversation bo
 		}
 		// Reload messages here (still off the Update loop) so the
 		// revertDoneMsg handler does no IO.
-		msgs, err := m.com.Workspace.ListMessages(ctx, m.session.ID)
+		msgs, err := m.com.Workspace.ListMessages(ctx, sessionID)
 		if err != nil {
 			return util.ReportError(err)()
 		}
-		return revertDoneMsg{result: result, msgs: msgs}
+		return revertDoneMsg{sessionID: sessionID, result: result, msgs: msgs}
 	}
 }
 

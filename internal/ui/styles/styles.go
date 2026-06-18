@@ -435,6 +435,11 @@ type Styles struct {
 			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 
+		Revert struct {
+			Content lipgloss.Style // Wrapper for the revert dialog's inner content
+			Frame   lipgloss.Style // Outer rounded border framing the revert dialog
+		}
+
 		APIKey struct {
 			Spinner lipgloss.Style // Loading spinner while validating the key
 		}

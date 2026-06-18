@@ -21,6 +21,7 @@ type File struct {
 	Path      string
 	Content   string
 	Version   int64
+	MessageID sql.NullString
 	CreatedAt int64
 	UpdatedAt int64
 }
@@ -28,10 +29,10 @@ type File struct {
 // Service manages file versions and history for sessions.
 type Service interface {
 	pubsub.Subscriber[File]
-	Create(ctx context.Context, sessionID, path, content string) (File, error)
+	Create(ctx context.Context, sessionID, path, content string, messageID ...string) (File, error)
 
 	// CreateVersion creates a new version of a file.
-	CreateVersion(ctx context.Context, sessionID, path, content string) (File, error)
+	CreateVersion(ctx context.Context, sessionID, path, content string, messageID ...string) (File, error)
 
 	Get(ctx context.Context, id string) (File, error)
 	GetByPathAndSession(ctx context.Context, path, sessionID string) (File, error)
@@ -39,6 +40,11 @@ type Service interface {
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
+
+	// Revert-specific queries.
+	GetFileVersionBeforeCheckpoint(ctx context.Context, path, sessionID string, checkpointCreatedAt int64) (File, error)
+	ListDistinctPathsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) ([]string, error)
+	DeleteFileVersionsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) error
 }
 
 type service struct {
@@ -55,14 +61,23 @@ func NewService(q *db.Queries, db *sql.DB) Service {
 	}
 }
 
-func (s *service) Create(ctx context.Context, sessionID, path, content string) (File, error) {
-	return s.createWithVersion(ctx, sessionID, path, content, InitialVersion)
+func (s *service) Create(ctx context.Context, sessionID, path, content string, messageID ...string) (File, error) {
+	var mid sql.NullString
+	if len(messageID) > 0 && messageID[0] != "" {
+		mid = sql.NullString{String: messageID[0], Valid: true}
+	}
+	return s.createWithVersion(ctx, sessionID, path, content, InitialVersion, mid)
 }
 
 // CreateVersion creates a new version of a file with auto-incremented version
 // number. If no previous versions exist for the path, it creates the initial
 // version. The provided content is stored as the new version.
-func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
+func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string, messageID ...string) (File, error) {
+	var mid sql.NullString
+	if len(messageID) > 0 && messageID[0] != "" {
+		mid = sql.NullString{String: messageID[0], Valid: true}
+	}
+
 	// Get the latest version for this path
 	files, err := s.q.ListFilesByPath(ctx, path)
 	if err != nil {
@@ -71,17 +86,17 @@ func (s *service) CreateVersion(ctx context.Context, sessionID, path, content st
 
 	if len(files) == 0 {
 		// No previous versions, create initial
-		return s.Create(ctx, sessionID, path, content)
+		return s.Create(ctx, sessionID, path, content, messageID...)
 	}
 
 	// Get the latest version
 	latestFile := files[0] // Files are ordered by version DESC, created_at DESC
 	nextVersion := latestFile.Version + 1
 
-	return s.createWithVersion(ctx, sessionID, path, content, nextVersion)
+	return s.createWithVersion(ctx, sessionID, path, content, nextVersion, mid)
 }
 
-func (s *service) createWithVersion(ctx context.Context, sessionID, path, content string, version int64) (File, error) {
+func (s *service) createWithVersion(ctx context.Context, sessionID, path, content string, version int64, messageID sql.NullString) (File, error) {
 	// Maximum number of retries for transaction conflicts
 	const maxRetries = 3
 	var file File
@@ -105,6 +120,7 @@ func (s *service) createWithVersion(ctx context.Context, sessionID, path, conten
 			Path:      path,
 			Content:   content,
 			Version:   version,
+			MessageID: messageID,
 		})
 		if txErr != nil {
 			// Rollback the transaction
@@ -211,7 +227,34 @@ func (s *service) fromDBItem(item db.File) File {
 		Path:      item.Path,
 		Content:   item.Content,
 		Version:   item.Version,
+		MessageID: item.MessageID,
 		CreatedAt: item.CreatedAt,
 		UpdatedAt: item.UpdatedAt,
 	}
+}
+
+func (s *service) GetFileVersionBeforeCheckpoint(ctx context.Context, path, sessionID string, checkpointCreatedAt int64) (File, error) {
+	dbFile, err := s.q.GetFileVersionBeforeCheckpoint(ctx, db.GetFileVersionBeforeCheckpointParams{
+		Path:      path,
+		SessionID: sessionID,
+		CreatedAt: checkpointCreatedAt,
+	})
+	if err != nil {
+		return File{}, err
+	}
+	return s.fromDBItem(dbFile), nil
+}
+
+func (s *service) ListDistinctPathsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) ([]string, error) {
+	return s.q.ListDistinctPathsVersionsAfterCheckpoint(ctx, db.ListDistinctPathsVersionsAfterCheckpointParams{
+		SessionID: sessionID,
+		CreatedAt: checkpointCreatedAt,
+	})
+}
+
+func (s *service) DeleteFileVersionsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) error {
+	return s.q.DeleteFileVersionsAfterCheckpoint(ctx, db.DeleteFileVersionsAfterCheckpointParams{
+		SessionID: sessionID,
+		CreatedAt: checkpointCreatedAt,
+	})
 }

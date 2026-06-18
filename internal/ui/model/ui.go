@@ -155,6 +155,10 @@ type (
 	creditsUpdatedMsg struct {
 		credits int
 	}
+	// revertDoneMsg is sent after a revert operation completes.
+	revertDoneMsg struct {
+		result workspace.AgentRevertResult
+	}
 )
 
 // UI represents the main user interface model.
@@ -932,6 +936,33 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case creditsUpdatedMsg:
 		m.hyperCredits = &msg.credits
+	case revertDoneMsg:
+		// Reload messages after revert.
+		if m.hasSession() {
+			msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+			if cmd := m.setSessionMessages(msgs); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		// Build a summary.
+		parts := []string{}
+		if msg.result.MessagesDeleted > 0 {
+			parts = append(parts, fmt.Sprintf("removed %d messages", msg.result.MessagesDeleted))
+		}
+		if len(msg.result.FilesRestored) > 0 {
+			parts = append(parts, fmt.Sprintf("restored %d files", len(msg.result.FilesRestored)))
+		}
+		if len(msg.result.FilesDeleted) > 0 {
+			parts = append(parts, fmt.Sprintf("deleted %d files", len(msg.result.FilesDeleted)))
+		}
+		if len(parts) > 0 {
+			m.status.SetInfoMsg(util.NewInfoMsg("Reverted: " + strings.Join(parts, ", ")))
+			cmds = append(cmds, clearInfoMsgCmd(DefaultStatusTTL))
+		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -1625,6 +1656,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
+	case dialog.ActionRevertToMessage:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+		if !m.hasSession() {
+			break
+		}
+		m.dialog.CloseDialog(dialog.RevertID)
+		cmds = append(cmds, m.executeRevert(msg.MessageID, msg.RestoreCode, msg.RestoreConversation))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}
@@ -2109,6 +2150,21 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
+			case key.Matches(msg, m.keyMap.Chat.Revert):
+				if !m.hasSession() || m.isAgentBusy() {
+					break
+				}
+				sel := m.chat.SelectedItem()
+				if sel == nil {
+					break
+				}
+				// Only allow reverting from user messages.
+				msgItem, ok := sel.(*chat.UserMessageItem)
+				if !ok {
+					cmds = append(cmds, util.ReportWarn("Select a user message to revert to"))
+					break
+				}
+				m.dialog.OpenDialog(dialog.NewRevert(m.com, msgItem.ID()))
 			case key.Matches(msg, m.keyMap.Chat.Up):
 				if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -3608,6 +3664,22 @@ func (m *UI) newSession() tea.Cmd {
 		m.loadPromptHistory(),
 		m.reportCurrentSession(""),
 	)
+}
+
+// executeRevert runs the revert operation via the workspace and returns
+// a revertDoneMsg so the Update loop can reload messages.
+func (m *UI) executeRevert(messageID string, restoreCode, restoreConversation bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		result, err := m.com.Workspace.AgentRevertToMessage(
+			ctx, m.session.ID, messageID,
+			restoreCode, restoreConversation,
+		)
+		if err != nil {
+			return util.ReportError(err)
+		}
+		return revertDoneMsg{result: result}
+	}
 }
 
 // handlePasteMsg handles a paste message.

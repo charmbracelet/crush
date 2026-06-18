@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const createFile = `-- name: CreateFile :one
@@ -16,20 +17,22 @@ INSERT INTO files (
     path,
     content,
     version,
+    message_id,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
-RETURNING id, session_id, path, content, version, created_at, updated_at
+RETURNING id, session_id, path, content, version, message_id, created_at, updated_at
 `
 
 type CreateFileParams struct {
-	ID        string `json:"id"`
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-	Content   string `json:"content"`
-	Version   int64  `json:"version"`
+	ID        string         `json:"id"`
+	SessionID string         `json:"session_id"`
+	Path      string         `json:"path"`
+	Content   string         `json:"content"`
+	Version   int64          `json:"version"`
+	MessageID sql.NullString `json:"message_id"`
 }
 
 func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, error) {
@@ -39,6 +42,7 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 		arg.Path,
 		arg.Content,
 		arg.Version,
+		arg.MessageID,
 	)
 	var i File
 	err := row.Scan(
@@ -47,6 +51,7 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 		&i.Path,
 		&i.Content,
 		&i.Version,
+		&i.MessageID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -74,7 +79,7 @@ func (q *Queries) DeleteSessionFiles(ctx context.Context, sessionID string) erro
 }
 
 const getFile = `-- name: GetFile :one
-SELECT id, session_id, path, content, version, created_at, updated_at
+SELECT id, session_id, path, content, version, message_id, created_at, updated_at
 FROM files
 WHERE id = ? LIMIT 1
 `
@@ -88,6 +93,7 @@ func (q *Queries) GetFile(ctx context.Context, id string) (File, error) {
 		&i.Path,
 		&i.Content,
 		&i.Version,
+		&i.MessageID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -95,7 +101,7 @@ func (q *Queries) GetFile(ctx context.Context, id string) (File, error) {
 }
 
 const getFileByPathAndSession = `-- name: GetFileByPathAndSession :one
-SELECT id, session_id, path, content, version, created_at, updated_at
+SELECT id, session_id, path, content, version, message_id, created_at, updated_at
 FROM files
 WHERE path = ? AND session_id = ?
 ORDER BY version DESC, created_at DESC
@@ -116,6 +122,7 @@ func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPath
 		&i.Path,
 		&i.Content,
 		&i.Version,
+		&i.MessageID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -123,7 +130,7 @@ func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPath
 }
 
 const listFilesByPath = `-- name: ListFilesByPath :many
-SELECT id, session_id, path, content, version, created_at, updated_at
+SELECT id, session_id, path, content, version, message_id, created_at, updated_at
 FROM files
 WHERE path = ?
 ORDER BY version DESC, created_at DESC
@@ -144,6 +151,7 @@ func (q *Queries) ListFilesByPath(ctx context.Context, path string) ([]File, err
 			&i.Path,
 			&i.Content,
 			&i.Version,
+			&i.MessageID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -161,7 +169,7 @@ func (q *Queries) ListFilesByPath(ctx context.Context, path string) ([]File, err
 }
 
 const listFilesBySession = `-- name: ListFilesBySession :many
-SELECT id, session_id, path, content, version, created_at, updated_at
+SELECT id, session_id, path, content, version, message_id, created_at, updated_at
 FROM files
 WHERE session_id = ?
 ORDER BY version ASC, created_at ASC
@@ -182,6 +190,7 @@ func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]F
 			&i.Path,
 			&i.Content,
 			&i.Version,
+			&i.MessageID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -199,7 +208,7 @@ func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]F
 }
 
 const listLatestSessionFiles = `-- name: ListLatestSessionFiles :many
-SELECT f.id, f.session_id, f.path, f.content, f.version, f.created_at, f.updated_at
+SELECT f.id, f.session_id, f.path, f.content, f.version, f.message_id, f.created_at, f.updated_at
 FROM files f
 INNER JOIN (
     SELECT path, MAX(version) as max_version, MAX(created_at) as max_created_at
@@ -225,6 +234,7 @@ func (q *Queries) ListLatestSessionFiles(ctx context.Context, sessionID string) 
 			&i.Path,
 			&i.Content,
 			&i.Version,
+			&i.MessageID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -242,7 +252,7 @@ func (q *Queries) ListLatestSessionFiles(ctx context.Context, sessionID string) 
 }
 
 const listNewFiles = `-- name: ListNewFiles :many
-SELECT id, session_id, path, content, version, created_at, updated_at
+SELECT id, session_id, path, content, version, message_id, created_at, updated_at
 FROM files
 WHERE is_new = 1
 ORDER BY version DESC, created_at DESC
@@ -263,6 +273,7 @@ func (q *Queries) ListNewFiles(ctx context.Context) ([]File, error) {
 			&i.Path,
 			&i.Content,
 			&i.Version,
+			&i.MessageID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -277,4 +288,127 @@ func (q *Queries) ListNewFiles(ctx context.Context) ([]File, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const getFileVersionBeforeCheckpoint = `-- name: GetFileVersionBeforeCheckpoint :one
+SELECT id, session_id, path, content, version, message_id, created_at, updated_at
+FROM files
+WHERE path = ? AND session_id = ? AND created_at < ?
+ORDER BY version DESC, created_at DESC
+LIMIT 1
+`
+
+type GetFileVersionBeforeCheckpointParams struct {
+	Path      string `json:"path"`
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) GetFileVersionBeforeCheckpoint(ctx context.Context, arg GetFileVersionBeforeCheckpointParams) (File, error) {
+	row := q.queryRow(ctx, q.getFileVersionBeforeCheckpointStmt, getFileVersionBeforeCheckpoint, arg.Path, arg.SessionID, arg.CreatedAt)
+	var i File
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Path,
+		&i.Content,
+		&i.Version,
+		&i.MessageID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listFileVersionsAfterCheckpoint = `-- name: ListFileVersionsAfterCheckpoint :many
+SELECT id, session_id, path, content, version, message_id, created_at, updated_at
+FROM files
+WHERE session_id = ? AND created_at >= ?
+ORDER BY created_at ASC, version ASC
+`
+
+type ListFileVersionsAfterCheckpointParams struct {
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) ListFileVersionsAfterCheckpoint(ctx context.Context, arg ListFileVersionsAfterCheckpointParams) ([]File, error) {
+	rows, err := q.query(ctx, q.listFileVersionsAfterCheckpointStmt, listFileVersionsAfterCheckpoint, arg.SessionID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []File{}
+	for rows.Next() {
+		var i File
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Path,
+			&i.Content,
+			&i.Version,
+			&i.MessageID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDistinctPathsVersionsAfterCheckpoint = `-- name: ListDistinctPathsVersionsAfterCheckpoint :many
+SELECT DISTINCT path
+FROM files
+WHERE session_id = ? AND created_at >= ?
+`
+
+type ListDistinctPathsVersionsAfterCheckpointParams struct {
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) ListDistinctPathsVersionsAfterCheckpoint(ctx context.Context, arg ListDistinctPathsVersionsAfterCheckpointParams) ([]string, error) {
+	rows, err := q.query(ctx, q.listDistinctPathsVersionsAfterCheckpointStmt, listDistinctPathsVersionsAfterCheckpoint, arg.SessionID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		items = append(items, path)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const deleteFileVersionsAfterCheckpoint = `-- name: DeleteFileVersionsAfterCheckpoint :exec
+DELETE FROM files
+WHERE session_id = ? AND created_at >= ?
+`
+
+type DeleteFileVersionsAfterCheckpointParams struct {
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) DeleteFileVersionsAfterCheckpoint(ctx context.Context, arg DeleteFileVersionsAfterCheckpointParams) error {
+	_, err := q.exec(ctx, q.deleteFileVersionsAfterCheckpointStmt, deleteFileVersionsAfterCheckpoint, arg.SessionID, arg.CreatedAt)
+	return err
 }

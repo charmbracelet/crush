@@ -215,12 +215,12 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	}
 
 	// Update file history
-	_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, "")
+	_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, "", GetMessageFromContext(edit.ctx))
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 	}
 
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent, GetMessageFromContext(edit.ctx))
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}
@@ -374,21 +374,21 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	// Update file history
 	file, err := edit.files.GetByPathAndSession(edit.ctx, params.FilePath, sessionID)
 	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, oldContent)
+		_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, oldContent, GetMessageFromContext(edit.ctx))
 		if err != nil {
 			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 		}
 	}
 	if file.Content != oldContent {
 		// User manually changed the content, store an intermediate version
-		_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, oldContent)
+		_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, oldContent, GetMessageFromContext(edit.ctx))
 		if err != nil {
 			slog.Error("Error creating file history version", "error", err)
 		}
 	}
 
 	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent, GetMessageFromContext(edit.ctx))
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}

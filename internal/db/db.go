@@ -135,6 +135,24 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateSessionTitleAndUsageStmt, err = db.PrepareContext(ctx, updateSessionTitleAndUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSessionTitleAndUsage: %w", err)
 	}
+	if q.getFileVersionBeforeCheckpointStmt, err = db.PrepareContext(ctx, getFileVersionBeforeCheckpoint); err != nil {
+		return nil, fmt.Errorf("error preparing query GetFileVersionBeforeCheckpoint: %w", err)
+	}
+	if q.listFileVersionsAfterCheckpointStmt, err = db.PrepareContext(ctx, listFileVersionsAfterCheckpoint); err != nil {
+		return nil, fmt.Errorf("error preparing query ListFileVersionsAfterCheckpoint: %w", err)
+	}
+	if q.listDistinctPathsVersionsAfterCheckpointStmt, err = db.PrepareContext(ctx, listDistinctPathsVersionsAfterCheckpoint); err != nil {
+		return nil, fmt.Errorf("error preparing query ListDistinctPathsVersionsAfterCheckpoint: %w", err)
+	}
+	if q.deleteFileVersionsAfterCheckpointStmt, err = db.PrepareContext(ctx, deleteFileVersionsAfterCheckpoint); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteFileVersionsAfterCheckpoint: %w", err)
+	}
+	if q.deleteMessagesAfterStmt, err = db.PrepareContext(ctx, deleteMessagesAfter); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteMessagesAfter: %w", err)
+	}
+	if q.listMessagesAfterStmt, err = db.PrepareContext(ctx, listMessagesAfter); err != nil {
+		return nil, fmt.Errorf("error preparing query ListMessagesAfter: %w", err)
+	}
 	return &q, nil
 }
 
@@ -325,6 +343,36 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateSessionTitleAndUsageStmt: %w", cerr)
 		}
 	}
+	if q.getFileVersionBeforeCheckpointStmt != nil {
+		if cerr := q.getFileVersionBeforeCheckpointStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getFileVersionBeforeCheckpointStmt: %w", cerr)
+		}
+	}
+	if q.listFileVersionsAfterCheckpointStmt != nil {
+		if cerr := q.listFileVersionsAfterCheckpointStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listFileVersionsAfterCheckpointStmt: %w", cerr)
+		}
+	}
+	if q.listDistinctPathsVersionsAfterCheckpointStmt != nil {
+		if cerr := q.listDistinctPathsVersionsAfterCheckpointStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listDistinctPathsVersionsAfterCheckpointStmt: %w", cerr)
+		}
+	}
+	if q.deleteFileVersionsAfterCheckpointStmt != nil {
+		if cerr := q.deleteFileVersionsAfterCheckpointStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteFileVersionsAfterCheckpointStmt: %w", cerr)
+		}
+	}
+	if q.deleteMessagesAfterStmt != nil {
+		if cerr := q.deleteMessagesAfterStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteMessagesAfterStmt: %w", cerr)
+		}
+	}
+	if q.listMessagesAfterStmt != nil {
+		if cerr := q.listMessagesAfterStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listMessagesAfterStmt: %w", cerr)
+		}
+	}
 	return err
 }
 
@@ -401,6 +449,12 @@ type Queries struct {
 	updateMessageStmt              *sql.Stmt
 	updateSessionStmt              *sql.Stmt
 	updateSessionTitleAndUsageStmt *sql.Stmt
+	getFileVersionBeforeCheckpointStmt          *sql.Stmt
+	listFileVersionsAfterCheckpointStmt         *sql.Stmt
+	listDistinctPathsVersionsAfterCheckpointStmt *sql.Stmt
+	deleteFileVersionsAfterCheckpointStmt       *sql.Stmt
+	deleteMessagesAfterStmt                     *sql.Stmt
+	listMessagesAfterStmt                       *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {

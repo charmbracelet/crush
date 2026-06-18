@@ -725,6 +725,34 @@ func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID st
 	return nil
 }
 
+// RevertToMessageResult describes the outcome of a revert operation.
+type RevertToMessageResult struct {
+	MessagesDeleted int      `json:"messages_deleted"`
+	FilesRestored   []string `json:"files_restored"`
+	FilesDeleted    []string `json:"files_deleted"`
+}
+
+// RevertToMessage reverts a session to the state before the given message.
+func (c *Client) RevertToMessage(ctx context.Context, id, sessionID, messageID string, restoreCode, restoreConversation bool) (*RevertToMessageResult, error) {
+	body := map[string]any{
+		"restore_code":         restoreCode,
+		"restore_conversation": restoreConversation,
+	}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/revert/%s", id, sessionID, messageID), nil, jsonBody(body), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to revert session: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to revert session: status code %d", rsp.StatusCode)
+	}
+	var result RevertToMessageResult
+	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode revert result: %w", err)
+	}
+	return &result, nil
+}
+
 // GetAgentSessionQueuedPromptsList retrieves the list of queued prompt
 // strings for a session.
 func (c *Client) GetAgentSessionQueuedPromptsList(ctx context.Context, id string, sessionID string) ([]string, error) {

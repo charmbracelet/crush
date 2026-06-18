@@ -65,6 +65,14 @@ type Service interface {
 	// message known to the service. Intended for shutdown and
 	// session-switch paths.
 	FlushAll(ctx context.Context) error
+
+	// DeleteMessagesAfter deletes all messages in a session with
+	// created_at >= the given timestamp and publishes DeletedEvent for each.
+	DeleteMessagesAfter(ctx context.Context, sessionID string, createdAt int64) error
+
+	// ListMessagesAfter returns all messages in a session with
+	// created_at >= the given timestamp.
+	ListMessagesAfter(ctx context.Context, sessionID string, createdAt int64) ([]Message, error)
 }
 
 // pendingState holds the in-memory coalescing buffer for a single
@@ -485,6 +493,44 @@ func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Mes
 
 func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	dbMessages, err := s.q.ListAllUserMessages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
+func (s *service) DeleteMessagesAfter(ctx context.Context, sessionID string, createdAt int64) error {
+	msgs, err := s.q.ListMessagesAfter(ctx, db.ListMessagesAfterParams{
+		SessionID: sessionID,
+		CreatedAt: createdAt,
+	})
+	if err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		msg, convErr := s.fromDBItem(m)
+		if convErr != nil {
+			continue
+		}
+		if delErr := s.Delete(ctx, msg.ID); delErr != nil {
+			return delErr
+		}
+	}
+	return nil
+}
+
+func (s *service) ListMessagesAfter(ctx context.Context, sessionID string, createdAt int64) ([]Message, error) {
+	dbMessages, err := s.q.ListMessagesAfter(ctx, db.ListMessagesAfterParams{
+		SessionID: sessionID,
+		CreatedAt: createdAt,
+	})
 	if err != nil {
 		return nil, err
 	}

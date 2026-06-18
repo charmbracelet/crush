@@ -46,6 +46,12 @@ type Querier interface {
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
+	GetFileVersionBeforeCheckpoint(ctx context.Context, arg GetFileVersionBeforeCheckpointParams) (File, error)
+	ListFileVersionsAfterCheckpoint(ctx context.Context, arg ListFileVersionsAfterCheckpointParams) ([]File, error)
+	ListDistinctPathsVersionsAfterCheckpoint(ctx context.Context, arg ListDistinctPathsVersionsAfterCheckpointParams) ([]string, error)
+	DeleteFileVersionsAfterCheckpoint(ctx context.Context, arg DeleteFileVersionsAfterCheckpointParams) error
+	DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error
+	ListMessagesAfter(ctx context.Context, arg ListMessagesAfterParams) ([]Message, error)
 }
 
 var _ Querier = (*Queries)(nil)

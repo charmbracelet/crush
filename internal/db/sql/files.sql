@@ -29,10 +29,11 @@ INSERT INTO files (
     path,
     content,
     version,
+    message_id,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
 RETURNING *;
 
@@ -60,3 +61,29 @@ SELECT *
 FROM files
 WHERE is_new = 1
 ORDER BY version DESC, created_at DESC;
+
+-- name: GetFileVersionBeforeCheckpoint :one
+SELECT *
+FROM files
+WHERE path = ? AND session_id = ? AND created_at < ?
+ORDER BY version DESC, created_at DESC
+LIMIT 1;
+
+-- name: ListFileVersionsAfterCheckpoint :many
+SELECT *
+FROM files
+WHERE session_id = ? AND created_at >= ?
+ORDER BY created_at ASC, version ASC;
+
+-- name: ListDistinctPathsVersionsAfterCheckpoint :many
+SELECT DISTINCT path
+FROM files
+WHERE session_id = ? AND created_at >= ?;
+
+-- name: DeleteFileVersionsAfterCheckpoint :exec
+DELETE FROM files
+WHERE session_id = ? AND created_at >= ?;
+
+-- name: DeleteFileVersionsByID :exec
+DELETE FROM files
+WHERE id IN (sqlc.slice('ids'));

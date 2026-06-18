@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/revert"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -219,6 +220,26 @@ func (w *AppWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID s
 
 func (w *AppWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
 	return w.app.History.ListBySession(ctx, sessionID)
+}
+
+func (w *AppWorkspace) AgentRevertToMessage(ctx context.Context, sessionID, messageID string, restoreCode, restoreConversation bool) (AgentRevertResult, error) {
+	isBusy := false
+	if w.app.AgentCoordinator != nil {
+		isBusy = w.app.AgentCoordinator.IsSessionBusy(sessionID)
+	}
+	svc := revert.NewService(w.app.History, w.app.Messages)
+	result, err := svc.RevertToMessage(ctx, sessionID, messageID, isBusy, revert.Options{
+		RestoreCode:         restoreCode,
+		RestoreConversation: restoreConversation,
+	})
+	if err != nil {
+		return AgentRevertResult{}, err
+	}
+	return AgentRevertResult{
+		MessagesDeleted: result.MessagesDeleted,
+		FilesRestored:   result.FilesRestored,
+		FilesDeleted:    result.FilesDeleted,
+	}, nil
 }
 
 // -- LSP --

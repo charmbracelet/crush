@@ -249,3 +249,64 @@ func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) er
 	_, err := q.exec(ctx, q.updateMessageStmt, updateMessage, arg.Parts, arg.FinishedAt, arg.ID)
 	return err
 }
+
+const deleteMessagesAfter = `-- name: DeleteMessagesAfter :exec
+DELETE FROM messages
+WHERE session_id = ? AND created_at >= ?
+`
+
+type DeleteMessagesAfterParams struct {
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error {
+	_, err := q.exec(ctx, q.deleteMessagesAfterStmt, deleteMessagesAfter, arg.SessionID, arg.CreatedAt)
+	return err
+}
+
+const listMessagesAfter = `-- name: ListMessagesAfter :many
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
+FROM messages
+WHERE session_id = ? AND created_at >= ?
+ORDER BY created_at ASC
+`
+
+type ListMessagesAfterParams struct {
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) ListMessagesAfter(ctx context.Context, arg ListMessagesAfterParams) ([]Message, error) {
+	rows, err := q.query(ctx, q.listMessagesAfterStmt, listMessagesAfter, arg.SessionID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

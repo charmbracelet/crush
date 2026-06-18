@@ -1,15 +1,23 @@
-//go:build (linux || darwin || windows) && !arm && !386 && !ios && !android
+//go:build (darwin || linux || windows || freebsd || openbsd || netbsd) && !ios && !android
 
 package model
 
-import "github.com/aymanbagabas/go-nativeclipboard"
+import "golang.design/x/clipboard"
 
 func readClipboard(f clipboardFormat) ([]byte, error) {
 	switch f {
 	case clipboardFormatText:
-		return nativeclipboard.Text.Read()
+		data := clipboard.Read(clipboard.FmtText)
+		if data == nil {
+			return nil, errClipboardUnknownFormat
+		}
+		return data, nil
 	case clipboardFormatImage:
-		return nativeclipboard.Image.Read()
+		data := clipboard.Read(clipboard.FmtImage)
+		if data == nil {
+			return nil, errClipboardUnknownFormat
+		}
+		return data, nil
 	}
 	return nil, errClipboardUnknownFormat
 }

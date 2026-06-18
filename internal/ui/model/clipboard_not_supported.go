@@ -1,4 +1,4 @@
-//go:build !(darwin || linux || windows) || arm || 386 || ios || android
+//go:build !((darwin || linux || windows || freebsd || openbsd || netbsd) && !ios && !android)
 
 package model
 

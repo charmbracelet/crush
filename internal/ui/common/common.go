@@ -6,12 +6,12 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
+	"golang.design/x/clipboard"
 )
 
 // MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
@@ -112,7 +112,7 @@ func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) 
 	return tea.Sequence(
 		tea.SetClipboard(text),
 		func() tea.Msg {
-			_ = clipboard.WriteAll(text)
+			clipboard.Write(clipboard.FmtText, []byte(text))
 			return nil
 		},
 		callback,

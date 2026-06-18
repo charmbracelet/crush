@@ -127,16 +127,19 @@ func NewRevertPicker(com *common.Common, userMessages []message.Message) *Revert
 	// message, which would revert almost the entire session.
 	items := make([]list.FilterableItem, 0, len(userMessages))
 	for _, msg := range userMessages {
-		text := strings.TrimSpace(msg.Content().Text)
-		if text == "" {
+		rawText := msg.Content().Text
+		previewText := strings.TrimSpace(rawText)
+		if previewText == "" {
 			continue
 		}
-		preview := strings.ReplaceAll(text, "\n", " ")
+		preview := strings.ReplaceAll(previewText, "\n", " ")
 		items = append(items, &revertPickerItem{
-			Versioned:      list.NewVersioned(),
-			t:              com.Styles,
-			messageID:      msg.ID,
-			messageContent: text,
+			Versioned: list.NewVersioned(),
+			t:         com.Styles,
+			messageID: msg.ID,
+			// Store the raw text so editor restoration after a revert keeps
+			// the exact original prompt (preview uses the trimmed form).
+			messageContent: rawText,
 			preview:        preview,
 		})
 	}

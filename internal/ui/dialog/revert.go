@@ -69,7 +69,12 @@ func (r *Revert) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, r.keyMap.Close):
 			return ActionClose{}
 		case key.Matches(msg, r.keyMap.LeftRight):
-			r.selected = (r.selected + 1) % 3
+			// left moves back, right moves forward (3-option chooser).
+			if msg.String() == "left" {
+				r.selected = (r.selected + 2) % 3
+			} else {
+				r.selected = (r.selected + 1) % 3
+			}
 			return nil
 		case key.Matches(msg, r.keyMap.Enter):
 			switch r.selected {

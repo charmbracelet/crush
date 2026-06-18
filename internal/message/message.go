@@ -66,14 +66,6 @@ type Service interface {
 	// session-switch paths.
 	FlushAll(ctx context.Context) error
 
-	// DeleteMessagesAfter deletes all messages in a session with
-	// created_at >= the given timestamp and publishes DeletedEvent for each.
-	DeleteMessagesAfter(ctx context.Context, sessionID string, createdAt int64) error
-
-	// ListMessagesAfter returns all messages in a session with
-	// created_at >= the given timestamp.
-	ListMessagesAfter(ctx context.Context, sessionID string, createdAt int64) ([]Message, error)
-
 	// ListMessagesFromCheckpoint returns the checkpoint message and every
 	// message inserted after it, ordered by insertion (rowid) so the cut is
 	// exact even when created_at timestamps collide at second precision.
@@ -515,26 +507,6 @@ func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	return messages, nil
 }
 
-func (s *service) DeleteMessagesAfter(ctx context.Context, sessionID string, createdAt int64) error {
-	msgs, err := s.q.ListMessagesAfter(ctx, db.ListMessagesAfterParams{
-		SessionID: sessionID,
-		CreatedAt: createdAt,
-	})
-	if err != nil {
-		return err
-	}
-	for _, m := range msgs {
-		msg, convErr := s.fromDBItem(m)
-		if convErr != nil {
-			continue
-		}
-		if delErr := s.Delete(ctx, msg.ID); delErr != nil {
-			return delErr
-		}
-	}
-	return nil
-}
-
 func (s *service) ListMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) ([]Message, error) {
 	dbMessages, err := s.q.ListMessagesFromCheckpoint(ctx, db.ListMessagesFromCheckpointParams{
 		SessionID:    sessionID,
@@ -554,34 +526,14 @@ func (s *service) ListMessagesFromCheckpoint(ctx context.Context, sessionID, che
 }
 
 func (s *service) DeleteMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) error {
-	msgs, err := s.ListMessagesFromCheckpoint(ctx, sessionID, checkpointID)
-	if err != nil {
-		return err
-	}
-	for _, m := range msgs {
-		if delErr := s.Delete(ctx, m.ID); delErr != nil {
-			return delErr
-		}
-	}
-	return nil
-}
-
-func (s *service) ListMessagesAfter(ctx context.Context, sessionID string, createdAt int64) ([]Message, error) {
-	dbMessages, err := s.q.ListMessagesAfter(ctx, db.ListMessagesAfterParams{
-		SessionID: sessionID,
-		CreatedAt: createdAt,
+	// Atomic, all-or-nothing delete (a single statement) so a mid-truncation
+	// failure can't leave the conversation partially cut. The revert flow
+	// reloads the full message list afterward, so per-row DeletedEvents aren't
+	// needed here.
+	return s.q.DeleteMessagesFromCheckpoint(ctx, db.DeleteMessagesFromCheckpointParams{
+		SessionID:    sessionID,
+		CheckpointID: checkpointID,
 	})
-	if err != nil {
-		return nil, err
-	}
-	messages := make([]Message, len(dbMessages))
-	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {

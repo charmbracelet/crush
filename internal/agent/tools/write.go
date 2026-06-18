@@ -142,7 +142,10 @@ func NewWriteTool(
 			// Check if file exists in history
 			file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
 			if err != nil {
-				_, err = files.Create(ctx, sessionID, filePath, oldContent, GetMessageFromContext(ctx))
+				// Keep the created baseline so the divergence check below
+				// compares against real content, not a zero-value struct
+				// (which would write a duplicate intermediate version).
+				file, err = files.Create(ctx, sessionID, filePath, oldContent, GetMessageFromContext(ctx))
 				if err != nil {
 					// Log error but don't fail the operation
 					return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)

@@ -42,9 +42,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteMessageStmt, err = db.PrepareContext(ctx, deleteMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteMessage: %w", err)
 	}
-	if q.deleteMessagesAfterStmt, err = db.PrepareContext(ctx, deleteMessagesAfter); err != nil {
-		return nil, fmt.Errorf("error preparing query DeleteMessagesAfter: %w", err)
-	}
 	if q.deleteMessagesFromCheckpointStmt, err = db.PrepareContext(ctx, deleteMessagesFromCheckpoint); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteMessagesFromCheckpoint: %w", err)
 	}
@@ -114,9 +111,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listLatestSessionFilesStmt, err = db.PrepareContext(ctx, listLatestSessionFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListLatestSessionFiles: %w", err)
 	}
-	if q.listMessagesAfterStmt, err = db.PrepareContext(ctx, listMessagesAfter); err != nil {
-		return nil, fmt.Errorf("error preparing query ListMessagesAfter: %w", err)
-	}
 	if q.listMessagesBySessionStmt, err = db.PrepareContext(ctx, listMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListMessagesBySession: %w", err)
 	}
@@ -180,11 +174,6 @@ func (q *Queries) Close() error {
 	if q.deleteMessageStmt != nil {
 		if cerr := q.deleteMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteMessageStmt: %w", cerr)
-		}
-	}
-	if q.deleteMessagesAfterStmt != nil {
-		if cerr := q.deleteMessagesAfterStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing deleteMessagesAfterStmt: %w", cerr)
 		}
 	}
 	if q.deleteMessagesFromCheckpointStmt != nil {
@@ -302,11 +291,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listLatestSessionFilesStmt: %w", cerr)
 		}
 	}
-	if q.listMessagesAfterStmt != nil {
-		if cerr := q.listMessagesAfterStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listMessagesAfterStmt: %w", cerr)
-		}
-	}
 	if q.listMessagesBySessionStmt != nil {
 		if cerr := q.listMessagesBySessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listMessagesBySessionStmt: %w", cerr)
@@ -402,7 +386,6 @@ type Queries struct {
 	deleteFileStmt                   *sql.Stmt
 	deleteFileVersionsByIDStmt       *sql.Stmt
 	deleteMessageStmt                *sql.Stmt
-	deleteMessagesAfterStmt          *sql.Stmt
 	deleteMessagesFromCheckpointStmt *sql.Stmt
 	deleteSessionStmt                *sql.Stmt
 	deleteSessionFilesStmt           *sql.Stmt
@@ -426,7 +409,6 @@ type Queries struct {
 	listFilesByPathStmt              *sql.Stmt
 	listFilesBySessionStmt           *sql.Stmt
 	listLatestSessionFilesStmt       *sql.Stmt
-	listMessagesAfterStmt            *sql.Stmt
 	listMessagesBySessionStmt        *sql.Stmt
 	listMessagesFromCheckpointStmt   *sql.Stmt
 	listSessionReadFilesStmt         *sql.Stmt
@@ -449,7 +431,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteFileStmt:                   q.deleteFileStmt,
 		deleteFileVersionsByIDStmt:       q.deleteFileVersionsByIDStmt,
 		deleteMessageStmt:                q.deleteMessageStmt,
-		deleteMessagesAfterStmt:          q.deleteMessagesAfterStmt,
 		deleteMessagesFromCheckpointStmt: q.deleteMessagesFromCheckpointStmt,
 		deleteSessionStmt:                q.deleteSessionStmt,
 		deleteSessionFilesStmt:           q.deleteSessionFilesStmt,
@@ -473,7 +454,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listFilesByPathStmt:              q.listFilesByPathStmt,
 		listFilesBySessionStmt:           q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:       q.listLatestSessionFilesStmt,
-		listMessagesAfterStmt:            q.listMessagesAfterStmt,
 		listMessagesBySessionStmt:        q.listMessagesBySessionStmt,
 		listMessagesFromCheckpointStmt:   q.listMessagesFromCheckpointStmt,
 		listSessionReadFilesStmt:         q.listSessionReadFilesStmt,

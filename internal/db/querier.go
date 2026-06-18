@@ -15,7 +15,6 @@ type Querier interface {
 	DeleteFile(ctx context.Context, id string) error
 	DeleteFileVersionsByID(ctx context.Context, ids []string) error
 	DeleteMessage(ctx context.Context, id string) error
-	DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error
 	DeleteMessagesFromCheckpoint(ctx context.Context, arg DeleteMessagesFromCheckpointParams) error
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
@@ -39,7 +38,6 @@ type Querier interface {
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
-	ListMessagesAfter(ctx context.Context, arg ListMessagesAfterParams) ([]Message, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	// Messages at or after the checkpoint, ordered by insertion (rowid) so the cut
 	// is exact even when created_at timestamps collide at second precision.

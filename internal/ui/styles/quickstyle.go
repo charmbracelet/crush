@@ -55,6 +55,28 @@ type quickStyleOpts struct {
 	success           color.Color
 	successMoreSubtle color.Color
 	successMostSubtle color.Color
+
+	// ANSI 16-color palette. These remap the basic terminal colors that
+	// programs emit (e.g. bang-mode shell output) onto legible, on-brand
+	// colors instead of leaving them to the user's terminal defaults.
+	// Normal intensity.
+	ansiBlack   color.Color
+	ansiRed     color.Color
+	ansiGreen   color.Color
+	ansiYellow  color.Color
+	ansiBlue    color.Color
+	ansiMagenta color.Color
+	ansiCyan    color.Color
+	ansiWhite   color.Color
+	// Bright intensity.
+	ansiBrightBlack   color.Color
+	ansiBrightRed     color.Color
+	ansiBrightGreen   color.Color
+	ansiBrightYellow  color.Color
+	ansiBrightBlue    color.Color
+	ansiBrightMagenta color.Color
+	ansiBrightCyan    color.Color
+	ansiBrightWhite   color.Color
 }
 
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
@@ -807,6 +829,16 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted
+
+	// ANSI 16-color palette (indices 0-7 normal, 8-15 bright). Used to
+	// remap raw terminal color codes in command output onto legible
+	// colors. See [Styles.ANSI].
+	s.ANSI = [16]color.Color{
+		o.ansiBlack, o.ansiRed, o.ansiGreen, o.ansiYellow,
+		o.ansiBlue, o.ansiMagenta, o.ansiCyan, o.ansiWhite,
+		o.ansiBrightBlack, o.ansiBrightRed, o.ansiBrightGreen, o.ansiBrightYellow,
+		o.ansiBrightBlue, o.ansiBrightMagenta, o.ansiBrightCyan, o.ansiBrightWhite,
+	}
 
 	// Shell (bang mode) item styles.
 	s.Messages.ShellBarFocused = lipgloss.NewStyle().PaddingLeft(1).

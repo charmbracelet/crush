@@ -217,7 +217,10 @@ func (s *ShellItem) RawRender(width int) string {
 		return header
 	}
 
-	output := strings.TrimRight(s.output, "\n")
+	// Remap raw ANSI 16-color codes onto legible Charmtone colors so
+	// dark terminal defaults don't render illegibly on Crush's
+	// background.
+	output := remapANSI16(strings.TrimRight(s.output, "\n"), s.sty.ANSI)
 	lines := strings.Split(output, "\n")
 
 	// While streaming, show the tail of the output so the most recent

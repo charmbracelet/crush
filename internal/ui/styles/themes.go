@@ -51,6 +51,26 @@ func CharmtonePantera() Styles {
 		success:           charmtone.Julep,
 		successMoreSubtle: charmtone.Bok,
 		successMostSubtle: charmtone.Guac,
+
+		// ANSI 16-color palette for remapping raw terminal output
+		// (e.g. bang-mode shell commands) onto legible Charmtone colors.
+		ansiBlack:   charmtone.Pepper,
+		ansiRed:     charmtone.Coral,
+		ansiGreen:   charmtone.Guac,
+		ansiYellow:  charmtone.Mustard,
+		ansiBlue:    charmtone.Malibu,
+		ansiMagenta: charmtone.Charple,
+		ansiCyan:    charmtone.Turtle,
+		ansiWhite:   charmtone.Smoke,
+
+		ansiBrightBlack:   charmtone.Iron,
+		ansiBrightRed:     charmtone.Cherry,
+		ansiBrightGreen:   charmtone.Julep,
+		ansiBrightYellow:  charmtone.Citron,
+		ansiBrightBlue:    charmtone.Guppy,
+		ansiBrightMagenta: charmtone.Violet,
+		ansiBrightCyan:    charmtone.Bok,
+		ansiBrightWhite:   charmtone.Salt,
 	})
 
 	// Bang ! prompt overrides - use Salt/Hazy/Larple colors.

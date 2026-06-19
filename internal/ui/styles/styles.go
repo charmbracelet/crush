@@ -60,6 +60,16 @@ const (
 )
 
 type Styles struct {
+	// ANSI holds the 16 standard ANSI colors (0-7 normal, 8-15 bright)
+	// used to remap legible colors onto raw terminal output, such as the
+	// output of bang-mode shell commands. Terminal programs emit the
+	// basic 16-color SGR codes (red, green, blue, …) and leave the actual
+	// colors up to the terminal; without this palette they fall through
+	// to the user's terminal defaults, which are often illegible on
+	// Crush's background. Defining them here keeps output readable and
+	// on-brand regardless of terminal configuration.
+	ANSI [16]color.Color
+
 	// Header
 	Header struct {
 		Charm             lipgloss.Style // Style for "Charm™" label

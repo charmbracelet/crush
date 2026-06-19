@@ -618,6 +618,11 @@
           "type": "boolean",
           "description": "Flat-rate mode for this provider"
         },
+        "discover_models": {
+          "type": "boolean",
+          "description": "Auto-discover models from /v1/models endpoint. When true with existing models they are merged (yours win)",
+          "default": true
+        },
         "models": {
           "items": {
             "$ref": "#/$defs/Model"

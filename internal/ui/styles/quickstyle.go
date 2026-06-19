@@ -578,7 +578,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.Charm = base.Foreground(o.secondary)
 	s.Header.Diagonals = base.Foreground(o.primary)
 	s.Header.Percentage = muted
-	s.Header.Hypercredit = base.Foreground(charmtone.Dolly)
+	s.Header.HypercreditIcon = base.Foreground(o.secondary)
 	s.Header.Keystroke = muted
 	s.Header.KeystrokeTip = subtle
 	s.Header.WorkingDir = muted
@@ -699,9 +699,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
-	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Salt).Background(charmtone.Hazy).Bold(true).SetString(" ! ")
+	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" ! ")
 	s.Editor.PromptBangIconBlurred = s.Editor.PromptBangIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
-	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Hazy).SetString(":::")
+	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
 	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsFocused.Foreground(o.fgMoreSubtle)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
@@ -773,7 +773,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.ModelInfo.EstimatedUsagePrefix = s.ModelInfo.TokenPercentage
 	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
-	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(charmtone.Dolly)
+	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(o.secondary)
 	s.ModelInfo.HypercreditText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 
 	// ResourceGroup
@@ -811,11 +811,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Shell (bang mode) item styles.
 	s.Messages.ShellBarFocused = lipgloss.NewStyle().PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).BorderLeft(true).
-		BorderForeground(charmtone.Char)
+		BorderForeground(o.primary)
 	s.Messages.ShellBarBlurred = lipgloss.NewStyle().PaddingLeft(1).BorderLeft(true).
-		BorderForeground(charmtone.Char).BorderStyle(lipgloss.NormalBorder())
-	s.Messages.ShellPrompt = base.Foreground(charmtone.Hazy).Bold(true)
-	s.Messages.ShellPromptBlurred = base.Foreground(charmtone.Char)
+		BorderForeground(o.bgMostVisible).BorderStyle(lipgloss.NormalBorder())
+	s.Messages.ShellPrompt = base.Foreground(o.primary).Bold(true)
+	s.Messages.ShellPromptBlurred = base.Foreground(o.fgMoreSubtle)
 	s.Messages.ShellCommand = base.Foreground(o.fgBase)
 	s.Messages.ShellOutput = subtle
 	s.Messages.ShellExitCode = lipgloss.NewStyle().Foreground(o.destructive)

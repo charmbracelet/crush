@@ -849,7 +849,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ShellPrompt = base.Foreground(o.primary).Bold(true)
 	s.Messages.ShellPromptBlurred = base.Foreground(o.fgMoreSubtle)
 	s.Messages.ShellCommand = base.Foreground(o.fgBase)
-	s.Messages.ShellOutput = subtle
+	s.Messages.ShellOutput = lipgloss.NewStyle().Foreground(o.fgSubtle)
 	s.Messages.ShellExitCode = lipgloss.NewStyle().Foreground(o.destructive)
 	s.Messages.ShellTruncation = muted
 

@@ -201,10 +201,7 @@ func (s *ShellItem) RawRender(width int) string {
 		prompt = s.sty.Messages.ShellPromptBlurred.Render("$")
 	}
 
-	highlighted, err := common.SyntaxHighlight(s.sty, cmd, "cmd.sh", s.sty.Background)
-	if err != nil || highlighted == "" {
-		highlighted = s.sty.Messages.ShellCommand.Render(cmd)
-	}
+	highlighted := s.sty.Messages.ShellCommand.Render(cmd)
 	header := prompt + " " + highlighted
 
 	if s.pending {

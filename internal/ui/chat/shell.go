@@ -152,9 +152,12 @@ func (s *ShellItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 	return btn == ansi.MouseLeft
 }
 
-// HandleKeyEvent implements KeyEventHandler for horizontal scrolling.
+// HandleKeyEvent implements KeyEventHandler for copy and horizontal scrolling.
 func (s *ShellItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	switch key.String() {
+	switch k := key.String(); k {
+	case "c", "y":
+		text := "$ " + s.command + "\n" + s.output
+		return true, common.CopyToClipboard(text, "Shell output copied to clipboard")
 	case "shift+left", "H":
 		if s.xOffset > 0 {
 			s.xOffset = max(0, s.xOffset-shellHScrollStep)

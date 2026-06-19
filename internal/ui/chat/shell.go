@@ -156,7 +156,7 @@ func (s *ShellItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 func (s *ShellItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 	switch k := key.String(); k {
 	case "c", "y":
-		text := "$ " + s.command + "\n" + s.output
+		text := "$ " + s.command + "\n" + ansi.Strip(s.output)
 		return true, common.CopyToClipboard(text, "Shell output copied to clipboard")
 	case "shift+left", "H":
 		if s.xOffset > 0 {
@@ -223,7 +223,20 @@ func (s *ShellItem) RawRender(width int) string {
 	// Remap raw ANSI 16-color codes onto legible Charmtone colors so
 	// dark terminal defaults don't render illegibly on Crush's
 	// background.
-	output := remapANSI16(strings.TrimRight(s.output, "\n"), s.sty.ANSI)
+	// Strip trailing whitespace and bare ANSI resets before remapping.
+	// Programs like `task` emit "\x1b[0m\n" after their last line of
+	// output; trimming only "\n" misses these because the reset bytes
+	// sit between the content and the newline.
+	raw := s.output
+	for {
+		trimmed := strings.TrimRight(raw, " \t\r\n")
+		trimmed = strings.TrimSuffix(trimmed, "\x1b[0m")
+		if trimmed == raw {
+			break
+		}
+		raw = trimmed
+	}
+	output := remapANSI16(raw, s.sty.ANSI)
 	lines := strings.Split(output, "\n")
 
 	// While streaming, show the tail of the output so the most recent

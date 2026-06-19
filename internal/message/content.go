@@ -14,6 +14,7 @@ import (
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type MessageRole string
@@ -515,7 +516,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		text = PromptWithTextAttachments(text, textAttachments)
 		// Include bang-mode shell commands as context for the agent.
 		for _, sc := range m.ShellCommands() {
-			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, sc.Output, sc.ExitCode)
+			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, ansi.Strip(sc.Output), sc.ExitCode)
 			if text != "" {
 				text += "\n\n" + shellText
 			} else {

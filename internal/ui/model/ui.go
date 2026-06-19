@@ -2116,7 +2116,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				// Bang mode: enter when "!" typed on empty prompt, exit on
 				// backspace clearing the last character.
 				newVal := m.textarea.Value()
-				if !m.bangMode && newVal == "!" {
+				if !m.bangMode && strings.TrimSpace(newVal) == "!" {
 					m.bangMode = true
 					m.bangWasEmpty = true
 					m.textarea.Reset()

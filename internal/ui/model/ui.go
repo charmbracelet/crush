@@ -113,9 +113,10 @@ type openEditorMsg struct {
 }
 
 type shellResultMsg struct {
-	Command  string
-	Output   string
-	ExitCode int
+	PendingID string // ID of the pending ShellItem to update.
+	Command   string
+	Output    string
+	ExitCode  int
 }
 
 type (
@@ -200,8 +201,9 @@ type UI struct {
 	isCanceling bool
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
-	bangMode     bool
-	bangWasEmpty bool // true when bang prompt became empty on last keystroke
+	bangMode         bool
+	bangWasEmpty     bool // true when bang prompt became empty on last keystroke
+	pendingShellItem *chat.ShellItem
 
 	header *header
 
@@ -607,6 +609,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.autoExpandPillsIfReasonable(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		// Re-append pending shell item if session load wiped it.
+		if m.pendingShellItem != nil {
+			m.chat.AppendMessages(m.pendingShellItem)
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			if cmd := m.pendingShellItem.StartAnimation(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.pendingShellItem = nil
+		}
 		if hasInProgressTodo(m.session.Todos) {
 			// only start spinner if there is an in-progress todo
 			if m.isAgentBusy() {
@@ -941,6 +954,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.MoveToEnd()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 	case shellResultMsg:
+		// Complete the pending shell item if it exists, otherwise create a new one.
+		if msg.PendingID != "" {
+			if item := m.chat.MessageItem(msg.PendingID); item != nil {
+				if shellItem, ok := item.(*chat.ShellItem); ok {
+					shellItem.Complete(msg.Output, msg.ExitCode)
+					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					break
+				}
+			}
+		}
 		item := chat.NewShellItem(m.com.Styles, msg.Command, msg.Output, msg.ExitCode)
 		m.chat.AppendMessages(item)
 		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -3387,7 +3412,8 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 // the LLM. The result is displayed as a tool-style item in the chat.
 func (m *UI) runShellCommand(command string) tea.Cmd {
 	var cmds []tea.Cmd
-	if !m.hasSession() {
+	creatingSession := !m.hasSession()
+	if creatingSession {
 		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
@@ -3404,6 +3430,23 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 
 	sessionID := m.session.ID
 	contentWidth := min(m.layout.main.Dx()-2, 120)
+
+	// Append a pending shell item immediately so the user sees feedback.
+	pendingItem := chat.NewPendingShellItem(m.com.Styles, command)
+	if creatingSession {
+		// loadSession will wipe the chat list via SetMessages.
+		// Stash the item and re-append after messages load.
+		m.pendingShellItem = pendingItem
+	} else {
+		m.chat.AppendMessages(pendingItem)
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if cmd := pendingItem.StartAnimation(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+
 	cmds = append(cmds, func() tea.Msg {
 		resp, err := m.com.Workspace.AgentRunShellCommand(context.Background(), sessionID, command, contentWidth)
 		if err != nil {
@@ -3413,9 +3456,10 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 			}
 		}
 		return shellResultMsg{
-			Command:  command,
-			Output:   resp.Output,
-			ExitCode: resp.ExitCode,
+			PendingID: pendingItem.ID(),
+			Command:   command,
+			Output:    resp.Output,
+			ExitCode:  resp.ExitCode,
 		}
 	})
 	return tea.Batch(cmds...)

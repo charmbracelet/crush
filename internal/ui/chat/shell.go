@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -39,12 +40,15 @@ type ShellItem struct {
 	xOffset         int
 	maxLineWidth    int // computed during render, used to clamp xOffset
 	sty             *styles.Styles
+	pending         bool
+	anim            *anim.Anim
 }
 
 var (
 	_ Expandable         = (*ShellItem)(nil)
 	_ list.Highlightable = (*ShellItem)(nil)
 	_ KeyEventHandler    = (*ShellItem)(nil)
+	_ Animatable         = (*ShellItem)(nil)
 )
 
 // NewShellItem creates a new ShellItem for displaying bang-mode results.
@@ -63,9 +67,60 @@ func NewShellItem(sty *styles.Styles, command, output string, exitCode int) Mess
 	}
 }
 
+// NewPendingShellItem creates a ShellItem in a pending/running state that
+// displays a spinner until Complete is called with the results.
+func NewPendingShellItem(sty *styles.Styles, command string) *ShellItem {
+	v := list.NewVersioned()
+	id := fmt.Sprintf("shell-%d-%s", shellSeq.Add(1), command)
+	s := &ShellItem{
+		Versioned:                v,
+		highlightableMessageItem: defaultHighlighter(sty, v),
+		cachedMessageItem:        &cachedMessageItem{},
+		focusableMessageItem:     newFocusableMessageItem(v),
+		id:                       id,
+		command:                  command,
+		sty:                      sty,
+		pending:                  true,
+	}
+	s.anim = anim.New(anim.Settings{
+		ID:         id,
+		Label:      "Running",
+		LabelColor: sty.WorkingLabelColor,
+		GradColorA: sty.WorkingGradFromColor,
+		GradColorB: sty.WorkingGradToColor,
+		NoScramble: true,
+	})
+	return s
+}
+
+// Complete transitions a pending ShellItem to a finished state with output.
+func (s *ShellItem) Complete(output string, exitCode int) {
+	s.output = output
+	s.exitCode = exitCode
+	s.pending = false
+	s.Bump()
+}
+
 func (s *ShellItem) ID() string          { return s.id }
 func (s *ShellItem) FilterValue() string { return s.command }
-func (s *ShellItem) Finished() bool      { return true }
+func (s *ShellItem) Finished() bool      { return !s.pending }
+
+// StartAnimation starts the spinner animation for pending shell items.
+func (s *ShellItem) StartAnimation() tea.Cmd {
+	if !s.pending {
+		return nil
+	}
+	return s.anim.Start()
+}
+
+// Animate advances the spinner animation for pending shell items.
+func (s *ShellItem) Animate(msg anim.StepMsg) tea.Cmd {
+	if !s.pending {
+		return nil
+	}
+	s.Bump()
+	return s.anim.Animate(msg)
+}
 
 func (s *ShellItem) Render(width int) string {
 	innerWidth := max(0, width-MessageLeftPaddingTotal)
@@ -142,6 +197,10 @@ func (s *ShellItem) RawRender(width int) string {
 		highlighted = s.sty.Messages.ShellCommand.Render(cmd)
 	}
 	header := prompt + " " + highlighted
+
+	if s.pending {
+		return header + "\n" + s.anim.Render()
+	}
 
 	if s.exitCode != 0 {
 		header += " " + s.sty.Messages.ShellExitCode.Render(fmt.Sprintf("(exit %d)", s.exitCode))

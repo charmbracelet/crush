@@ -571,10 +571,18 @@
           "enum": [
             "openai",
             "openai-compat",
+            "openrouter",
+            "vercel",
             "anthropic",
-            "gemini",
+            "google",
             "azure",
-            "vertexai"
+            "bedrock",
+            "google-vertex",
+            "hyper",
+            "litellm",
+            "lmstudio",
+            "ollama",
+            "omlx"
           ],
           "description": "Provider type that determines the API format",
           "default": "openai"

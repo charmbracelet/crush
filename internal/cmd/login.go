@@ -9,6 +9,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/client"
+	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
@@ -16,7 +17,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
-	"golang.design/x/clipboard"
 )
 
 var loginCmd = &cobra.Command{
@@ -95,7 +95,7 @@ func loginHyper(c *client.Client, wsID string, force bool) error {
 		return err
 	}
 
-	clipboard.Write(clipboard.FmtText, []byte(resp.UserCode))
+	clipboard.WriteText(resp.UserCode)
 	fmt.Println("The following code should be on clipboard already:")
 
 	fmt.Println()

@@ -994,6 +994,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.bangCancel = nil
 		}
 		// Complete the pending shell item if it exists, otherwise create a new one.
+		// During session creation the pending item lives in m.pendingShellItem
+		// rather than the chat list, so check both locations.
+		completed := false
 		if msg.PendingID != "" {
 			if item := m.chat.MessageItem(msg.PendingID); item != nil {
 				if shellItem, ok := item.(*chat.ShellItem); ok {
@@ -1001,14 +1004,29 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
-					break
+					completed = true
 				}
 			}
+			if !completed && m.pendingShellItem != nil && m.pendingShellItem.ID() == msg.PendingID {
+				m.pendingShellItem.Complete(msg.Output, msg.ExitCode)
+				// The item is still stashed; it will be appended when the
+				// session load handler fires. Append it now so the result
+				// is visible immediately and clear the stash to prevent
+				// a duplicate append later.
+				m.chat.AppendMessages(m.pendingShellItem)
+				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				m.pendingShellItem = nil
+				completed = true
+			}
 		}
-		item := chat.NewShellItem(m.com.Styles, msg.Command, msg.Output, msg.ExitCode)
-		m.chat.AppendMessages(item)
-		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-			cmds = append(cmds, cmd)
+		if !completed {
+			item := chat.NewShellItem(m.com.Styles, msg.Command, msg.Output, msg.ExitCode)
+			m.chat.AppendMessages(item)
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	case hyperRefreshDoneMsg:
 		if cmd := m.handleSelectModel(msg.action); cmd != nil {

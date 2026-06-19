@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"sort"
 
 	"charm.land/catwalk/pkg/catwalk"
 )
@@ -41,4 +42,19 @@ func GetEnricher(providerType string) Enricher {
 // enricher itself to callers that only need the compatibility check.
 func IsKnownCustomProvider(providerType string) bool {
 	return enrichers[providerType] != nil
+}
+
+// RegisteredProviderTypes returns the provider type strings that have a
+// registered enricher, sorted for stable output. These are the custom,
+// locally-discovered providers (e.g. ollama, omlx) that Crush accepts as
+// a `type` value even though they are not catwalk provider types. The
+// schema generator uses this so the published enum stays in sync with the
+// registry instead of drifting from a hand-maintained list.
+func RegisteredProviderTypes() []string {
+	types := make([]string, 0, len(enrichers))
+	for providerType := range enrichers {
+		types = append(types, providerType)
+	}
+	sort.Strings(types)
+	return types
 }

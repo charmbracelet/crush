@@ -119,6 +119,13 @@ type shellResultMsg struct {
 	ExitCode  int
 }
 
+// shellStreamMsg carries incremental output from a streaming shell command.
+type shellStreamMsg struct {
+	PendingID string
+	Chunk     string
+	streamCh  <-chan string // unexported; used to continue draining
+}
+
 type (
 	// cancelTimerExpiredMsg is sent when the cancel timer expires.
 	cancelTimerExpiredMsg struct{}
@@ -953,6 +960,27 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+	case shellStreamMsg:
+		if item := m.chat.MessageItem(msg.PendingID); item != nil {
+			if shellItem, ok := item.(*chat.ShellItem); ok {
+				shellItem.AppendOutput(msg.Chunk)
+				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		// Continue draining the stream channel.
+		if msg.streamCh != nil {
+			ch := msg.streamCh
+			pid := msg.PendingID
+			cmds = append(cmds, func() tea.Msg {
+				chunk, ok := <-ch
+				if !ok {
+					return nil
+				}
+				return shellStreamMsg{PendingID: pid, Chunk: chunk, streamCh: ch}
+			})
+		}
 	case shellResultMsg:
 		// Complete the pending shell item if it exists, otherwise create a new one.
 		if msg.PendingID != "" {
@@ -3447,8 +3475,31 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 		}
 	}
 
+	// Stream output via channel. The progress callback writes chunks
+	// to streamCh; a reader cmd converts them to shellStreamMsg values.
+	streamCh := make(chan string, 64)
+	pendingID := pendingItem.ID()
+
+	onProgress := func(chunk string) {
+		select {
+		case streamCh <- chunk:
+		default:
+			// Drop if UI can't keep up.
+		}
+	}
+
+	// Reader cmd: drains streamCh into shellStreamMsg until closed.
 	cmds = append(cmds, func() tea.Msg {
-		resp, err := m.com.Workspace.AgentRunShellCommand(context.Background(), sessionID, command, contentWidth)
+		chunk, ok := <-streamCh
+		if !ok {
+			return nil
+		}
+		return shellStreamMsg{PendingID: pendingID, Chunk: chunk, streamCh: streamCh}
+	})
+
+	cmds = append(cmds, func() tea.Msg {
+		resp, err := m.com.Workspace.AgentRunShellCommand(context.Background(), sessionID, command, contentWidth, onProgress)
+		close(streamCh)
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -3456,7 +3507,7 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 			}
 		}
 		return shellResultMsg{
-			PendingID: pendingItem.ID(),
+			PendingID: pendingID,
 			Command:   command,
 			Output:    resp.Output,
 			ExitCode:  resp.ExitCode,

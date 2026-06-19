@@ -101,6 +101,12 @@ func (s *ShellItem) Complete(output string, exitCode int) {
 	s.Bump()
 }
 
+// AppendOutput appends incremental output to a pending ShellItem.
+func (s *ShellItem) AppendOutput(chunk string) {
+	s.output += chunk
+	s.Bump()
+}
+
 func (s *ShellItem) ID() string          { return s.id }
 func (s *ShellItem) FilterValue() string { return s.command }
 func (s *ShellItem) Finished() bool      { return !s.pending }
@@ -199,10 +205,11 @@ func (s *ShellItem) RawRender(width int) string {
 	header := prompt + " " + highlighted
 
 	if s.pending {
-		return header + "\n" + s.anim.Render()
-	}
-
-	if s.exitCode != 0 {
+		if s.output == "" {
+			// Nothing streamed yet: show the spinner under the header.
+			return header + "\n" + s.anim.Render()
+		}
+	} else if s.exitCode != 0 {
 		header += " " + s.sty.Messages.ShellExitCode.Render(fmt.Sprintf("(exit %d)", s.exitCode))
 	}
 
@@ -213,14 +220,23 @@ func (s *ShellItem) RawRender(width int) string {
 	output := strings.TrimRight(s.output, "\n")
 	lines := strings.Split(output, "\n")
 
+	// While streaming, show the tail of the output so the most recent
+	// lines stay visible without forcing the user to expand.
 	maxLines := shellMaxCollapsedLines
 	if s.expandedContent {
 		maxLines = len(lines)
 	}
 
 	displayLines := lines
+	truncatedCount := 0
 	if len(lines) > maxLines {
-		displayLines = lines[:maxLines]
+		if s.pending {
+			// Show the most recent lines while still running.
+			displayLines = lines[len(lines)-maxLines:]
+		} else {
+			displayLines = lines[:maxLines]
+		}
+		truncatedCount = len(lines) - maxLines
 	}
 
 	// Compute max line width for scroll clamping.
@@ -234,6 +250,16 @@ func (s *ShellItem) RawRender(width int) string {
 	s.maxLineWidth = max(0, maxW-cappedWidth)
 
 	var body strings.Builder
+
+	// When streaming, hidden lines are above the visible tail, so show
+	// the "more lines" notice before the output.
+	if truncatedCount > 0 && s.pending {
+		body.WriteString(s.sty.Messages.ShellTruncation.Render(
+			fmt.Sprintf("… %d earlier lines", truncatedCount),
+		))
+		body.WriteString("\n")
+	}
+
 	for _, ln := range displayLines {
 		scrolled := ansi.GraphemeWidth.Cut(ln, s.xOffset, len(ln))
 		truncated := ansi.Truncate(scrolled, cappedWidth, "…")
@@ -244,14 +270,20 @@ func (s *ShellItem) RawRender(width int) string {
 		body.WriteString("\n")
 	}
 
-	if len(lines) > maxLines && !s.expandedContent {
+	// When finished, hidden lines are below, so show the notice after.
+	if truncatedCount > 0 && !s.pending && !s.expandedContent {
 		body.WriteString(s.sty.Messages.ShellTruncation.Render(
-			fmt.Sprintf("… %d more lines", len(lines)-maxLines),
+			fmt.Sprintf("… %d more lines", truncatedCount),
 		))
-	} else {
-		result := body.String()
-		return header + "\n" + strings.TrimRight(result, "\n")
+		return header + "\n" + body.String()
 	}
 
-	return header + "\n" + strings.TrimRight(body.String(), "\n")
+	result := header + "\n" + strings.TrimRight(body.String(), "\n")
+
+	// While streaming, keep the spinner pinned below the latest output.
+	if s.pending {
+		result += "\n" + s.anim.Render()
+	}
+
+	return result
 }

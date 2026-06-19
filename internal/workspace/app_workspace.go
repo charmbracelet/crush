@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -107,7 +108,7 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 	return err
 }
 
-func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int) (proto.ShellCommandResponse, error) {
+func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string)) (proto.ShellCommandResponse, error) {
 	var isFirstMessage bool
 	var persist shell.PersistFunc
 	if sessionID != "" {
@@ -135,13 +136,31 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 		}
 	}
 
-	result, err := shell.RunAndPersist(ctx, shell.RunOptions{
+	opts := shell.RunOptions{
 		Command:   command,
 		Cwd:       w.store.WorkingDir(),
 		TermWidth: termWidth,
-	}, persist)
-	if err != nil {
+	}
+
+	var result shell.CaptureResult
+	var err error
+
+	if onProgress != nil {
+		// Use streaming execution with progress callback.
+		result, err = shell.RunAndCaptureStream(ctx, opts, onProgress)
+	} else {
+		result, err = shell.RunAndPersist(ctx, opts, persist)
+	}
+
+	if err != nil && onProgress == nil {
 		return proto.ShellCommandResponse{}, err
+	}
+
+	// Persist if we used streaming path (persist wasn't called by RunAndPersist).
+	if onProgress != nil && persist != nil {
+		if persistErr := persist(command, result.Output, result.ExitCode); persistErr != nil {
+			slog.Error("Failed to persist shell command output", "error", persistErr, "command", command)
+		}
 	}
 
 	// Generate a title from the shell command if it was the first message.

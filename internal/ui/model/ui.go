@@ -2181,13 +2181,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
-				// Bang mode: enter when "!" typed on empty prompt, exit on
-				// backspace clearing the last character.
+				// Bang mode: enter when "!" is typed at the start of the
+				// prompt (either on an empty prompt or prepended to existing
+				// text). Exit on backspace clearing the last character.
 				newVal := m.textarea.Value()
-				if !m.bangMode && strings.TrimSpace(newVal) == "!" {
+				if !m.bangMode && strings.HasPrefix(newVal, "!") && !strings.HasPrefix(curValue, "!") {
 					m.bangMode = true
-					m.bangWasEmpty = true
-					m.textarea.Reset()
+					m.bangWasEmpty = len(strings.TrimSpace(curValue)) == 0
+					// Strip the leading "!" from the textarea while preserving
+					// the cursor position relative to the command text.
+					col := m.textarea.Column()
+					line := m.textarea.Line()
+					m.textarea.SetValue(newVal[1:])
+					m.textarea.SetCursorColumn(max(0, col-1))
+					_ = line // cursor line doesn't change; first char removed
 					yolo := m.com.Workspace.PermissionSkipRequests()
 					m.setEditorPrompt(yolo)
 				} else if m.bangMode && newVal == "" && curValue != "" {

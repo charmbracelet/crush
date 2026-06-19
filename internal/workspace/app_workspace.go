@@ -108,10 +108,22 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 }
 
 func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int) (proto.ShellCommandResponse, error) {
+	var isFirstMessage bool
 	var persist shell.PersistFunc
 	if sessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			_, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
+			// Check if this is the first user message before persisting.
+			msgs, err := w.app.Messages.List(ctx, sessionID)
+			if err == nil {
+				isFirstMessage = true
+				for _, msg := range msgs {
+					if msg.Role == message.User {
+						isFirstMessage = false
+						break
+					}
+				}
+			}
+			_, err = w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
 				Role: message.User,
 				Parts: []message.ContentPart{message.ShellCommand{
 					Command:  cmd,
@@ -130,6 +142,20 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	}, persist)
 	if err != nil {
 		return proto.ShellCommandResponse{}, err
+	}
+
+	// Generate a title from the shell command if it was the first message.
+	if isFirstMessage {
+		go func() {
+			titleCtx := context.WithoutCancel(ctx)
+			// Wait for the agent to be ready before generating.
+			for i := 0; i < 50 && w.app.AgentCoordinator == nil; i++ {
+				time.Sleep(100 * time.Millisecond)
+			}
+			if w.app.AgentCoordinator != nil {
+				w.app.AgentCoordinator.GenerateTitle(titleCtx, sessionID, "$ "+command)
+			}
+		}()
 	}
 
 	return proto.ShellCommandResponse{

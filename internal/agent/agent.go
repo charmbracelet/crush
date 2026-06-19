@@ -1742,7 +1742,17 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	title = orphanThinkTagRegex.ReplaceAllString(title, "")
 
 	title = strings.TrimSpace(title)
-	title = cmp.Or(title, DefaultSessionName)
+	if title == "" {
+		// LLM returned empty content. Use the prompt itself as a
+		// fallback title, truncated to 50 chars, before resorting to
+		// the generic default.
+		fallback := strings.ReplaceAll(userPrompt, "\n", " ")
+		fallback = strings.TrimSpace(fallback)
+		if len(fallback) > 50 {
+			fallback = fallback[:50]
+		}
+		title = cmp.Or(fallback, DefaultSessionName)
+	}
 
 	// Calculate usage and cost.
 	var openrouterCost *float64

@@ -3,20 +3,24 @@ package shell
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"os"
+	"sync"
 )
 
 // progressWriter wraps an io.Writer and calls onProgress with each write.
+// It is safe for concurrent use from multiple goroutines (e.g. stdout and
+// stderr writing simultaneously).
 type progressWriter struct {
+	mu         sync.Mutex
 	buf        bytes.Buffer
 	onProgress func(string)
 }
 
 func (w *progressWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	n, err := w.buf.Write(p)
 	if n > 0 && w.onProgress != nil {
-		slog.Debug("Shell stream progress", "bytes", n)
 		w.onProgress(string(p[:n]))
 	}
 	return n, err
@@ -30,10 +34,9 @@ func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(s
 	}
 	opts.Env = append(opts.Env, ptyColorEnvVars...)
 
-	stdout := &progressWriter{onProgress: onProgress}
-	stderr := &progressWriter{onProgress: onProgress}
-	opts.Stdout = stdout
-	opts.Stderr = stderr
+	buf := &progressWriter{onProgress: onProgress}
+	opts.Stdout = buf
+	opts.Stderr = buf
 
 	runErr := Run(ctx, opts)
 
@@ -42,16 +45,8 @@ func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(s
 		exitCode = ExitCode(runErr)
 	}
 
-	output := stdout.buf.String()
-	if stderr.buf.Len() > 0 {
-		if output != "" {
-			output += "\n"
-		}
-		output += stderr.buf.String()
-	}
-
 	return CaptureResult{
-		Output:   output,
+		Output:   buf.buf.String(),
 		ExitCode: exitCode,
 	}, nil
 }

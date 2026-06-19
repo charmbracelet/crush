@@ -159,6 +159,7 @@ func parseClaudeCodeOutput(data json.RawMessage) HookResult {
 		PermissionDecision       string          `json:"permissionDecision"`
 		PermissionDecisionReason string          `json:"permissionDecisionReason"`
 		UpdatedInput             json.RawMessage `json:"updatedInput"`
+		AdditionalContext        string          `json:"additionalContext"`
 	}
 	if err := json.Unmarshal(data, &hso); err != nil {
 		return HookResult{Decision: DecisionNone}
@@ -167,6 +168,7 @@ func parseClaudeCodeOutput(data json.RawMessage) HookResult {
 	result := HookResult{
 		Decision: parseDecision(hso.PermissionDecision),
 		Reason:   hso.PermissionDecisionReason,
+		Context:  hso.AdditionalContext,
 	}
 
 	// Marshal updatedInput back to a string for our opaque format.

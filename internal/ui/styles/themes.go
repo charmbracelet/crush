@@ -54,22 +54,22 @@ func CharmtonePantera() Styles {
 
 		// ANSI 16-color palette for remapping raw terminal output
 		// (e.g. bang-mode shell commands) onto legible Charmtone colors.
-		ansiBlack:   charmtone.Pepper,
+		ansiBlack:   charmtone.BBQ,
 		ansiRed:     charmtone.Coral,
 		ansiGreen:   charmtone.Guac,
 		ansiYellow:  charmtone.Mustard,
-		ansiBlue:    charmtone.Malibu,
-		ansiMagenta: charmtone.Charple,
-		ansiCyan:    charmtone.Turtle,
+		ansiBlue:    charmtone.Charple,
+		ansiMagenta: charmtone.Dolly,
+		ansiCyan:    charmtone.Malibu,
 		ansiWhite:   charmtone.Smoke,
 
 		ansiBrightBlack:   charmtone.Iron,
-		ansiBrightRed:     charmtone.Cherry,
+		ansiBrightRed:     charmtone.Tuna,
 		ansiBrightGreen:   charmtone.Julep,
-		ansiBrightYellow:  charmtone.Citron,
+		ansiBrightYellow:  charmtone.Zest,
 		ansiBrightBlue:    charmtone.Guppy,
-		ansiBrightMagenta: charmtone.Violet,
-		ansiBrightCyan:    charmtone.Bok,
+		ansiBrightMagenta: charmtone.Blush,
+		ansiBrightCyan:    charmtone.Sardine,
 		ansiBrightWhite:   charmtone.Salt,
 	})
 

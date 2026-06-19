@@ -208,9 +208,14 @@ type UI struct {
 	isCanceling bool
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
-	bangMode         bool
-	bangWasEmpty     bool // true when bang prompt became empty on last keystroke
-	pendingShellItem *chat.ShellItem
+	bangMode     bool
+	bangWasEmpty bool // true when bang prompt became empty on last keystroke
+
+	// pendingBangCommand holds a shell command that was issued before
+	// the session finished loading. The loadSessionMsg handler creates
+	// the pending UI item and starts execution once the chat list is
+	// stable, eliminating races between session load and shell output.
+	pendingBangCommand string
 
 	// bangCancel cancels a running bang-mode shell command. Nil when no
 	// bang command is in progress. Set by runShellCommand, cleared by
@@ -622,16 +627,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.autoExpandPillsIfReasonable(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		// Re-append pending shell item if session load wiped it.
-		if m.pendingShellItem != nil {
-			m.chat.AppendMessages(m.pendingShellItem)
-			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			if cmd := m.pendingShellItem.StartAnimation(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m.pendingShellItem = nil
+		// If a bang command was issued before the session finished
+		// loading, start it now that the chat list is stable.
+		if m.pendingBangCommand != "" {
+			cmds = append(cmds, m.runShellCommandInternal(m.pendingBangCommand, true))
+			m.pendingBangCommand = ""
 		}
 		if hasInProgressTodo(m.session.Todos) {
 			// only start spinner if there is an in-progress todo
@@ -994,8 +994,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.bangCancel = nil
 		}
 		// Complete the pending shell item if it exists, otherwise create a new one.
-		// During session creation the pending item lives in m.pendingShellItem
-		// rather than the chat list, so check both locations.
 		completed := false
 		if msg.PendingID != "" {
 			if item := m.chat.MessageItem(msg.PendingID); item != nil {
@@ -1006,19 +1004,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					completed = true
 				}
-			}
-			if !completed && m.pendingShellItem != nil && m.pendingShellItem.ID() == msg.PendingID {
-				m.pendingShellItem.Complete(msg.Output, msg.ExitCode)
-				// The item is still stashed; it will be appended when the
-				// session load handler fires. Append it now so the result
-				// is visible immediately and clear the stash to prevent
-				// a duplicate append later.
-				m.chat.AppendMessages(m.pendingShellItem)
-				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				m.pendingShellItem = nil
-				completed = true
 			}
 		}
 		if !completed {
@@ -3471,9 +3456,15 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 // runShellCommand executes a shell command server-side without triggering
 // the LLM. The result is displayed as a tool-style item in the chat.
 func (m *UI) runShellCommand(command string) tea.Cmd {
+	return m.runShellCommandInternal(command, false)
+}
+
+// runShellCommandInternal is the shared implementation for bang-mode shell
+// execution. isFirstMessage indicates the command is the first user message
+// in a newly created session, which triggers title generation.
+func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cmd {
 	var cmds []tea.Cmd
-	creatingSession := !m.hasSession()
-	if creatingSession {
+	if !m.hasSession() {
 		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
@@ -3486,6 +3477,10 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 			cmds = append(cmds, m.loadSession(newSession.ID))
 		}
 		m.setState(uiChat, m.focus)
+		// Defer shell execution until loadSessionMsg fires so the chat
+		// list is stable before we add items or start streaming.
+		m.pendingBangCommand = command
+		return tea.Batch(cmds...)
 	}
 
 	sessionID := m.session.ID
@@ -3493,18 +3488,12 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 
 	// Append a pending shell item immediately so the user sees feedback.
 	pendingItem := chat.NewPendingShellItem(m.com.Styles, command)
-	if creatingSession {
-		// loadSession will wipe the chat list via SetMessages.
-		// Stash the item and re-append after messages load.
-		m.pendingShellItem = pendingItem
-	} else {
-		m.chat.AppendMessages(pendingItem)
-		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if cmd := pendingItem.StartAnimation(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+	m.chat.AppendMessages(pendingItem)
+	if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if cmd := pendingItem.StartAnimation(); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 
 	// Stream output via channel. The progress callback writes chunks
@@ -3533,7 +3522,7 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 	m.bangCancel = cancel
 
 	cmds = append(cmds, func() tea.Msg {
-		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress)
+		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
 		close(streamCh)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return util.InfoMsg{

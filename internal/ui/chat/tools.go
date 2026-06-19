@@ -621,7 +621,7 @@ func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, n
 
 // toolOutputPlainContent renders plain text with optional expansion support.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
-	content = remapANSI16(stringext.NormalizeSpace(content), sty.ANSI)
+	content = common.RemapANSI16(stringext.NormalizeSpace(content), sty.ANSI)
 	lines := strings.Split(content, "\n")
 
 	maxLines := responseContextHeight

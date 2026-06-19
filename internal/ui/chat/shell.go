@@ -233,7 +233,7 @@ func (s *ShellItem) RawRender(width int) string {
 		}
 		raw = trimmed
 	}
-	output := remapANSI16(raw, s.sty.ANSI)
+	output := common.RemapANSI16(raw, s.sty.ANSI)
 	lines := strings.Split(output, "\n")
 
 	// While streaming, show the tail of the output so the most recent

@@ -1,4 +1,4 @@
-package chat
+package common
 
 import (
 	"image/color"
@@ -91,7 +91,7 @@ func TestRemapANSI16(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tt.want, remapANSI16(tt.in, pal))
+			require.Equal(t, tt.want, RemapANSI16(tt.in, pal))
 		})
 	}
 }
@@ -102,5 +102,5 @@ func TestRemapANSI16NilColorFallsBack(t *testing.T) {
 	var pal [16]color.Color // all nil
 	// With a nil palette entry, the introducer is emitted bare so the
 	// terminal default applies rather than crashing.
-	require.Equal(t, "\x1b[38mx\x1b[0m", remapANSI16("\x1b[31mx\x1b[0m", pal))
+	require.Equal(t, "\x1b[38mx\x1b[0m", RemapANSI16("\x1b[31mx\x1b[0m", pal))
 }

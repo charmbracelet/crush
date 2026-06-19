@@ -1,4 +1,4 @@
-package chat
+package common
 
 import (
 	"image/color"
@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// remapANSI16 replaces basic ANSI 16-color SGR codes with 24-bit
+// RemapANSI16 replaces basic ANSI 16-color SGR codes with 24-bit
 // truecolor from palette. Programs emit \x1b[31m etc. and trust the
 // terminal to pick the color; inside Crush's TUI those defaults are
 // often illegible on our dark background. Rewriting them to explicit
@@ -16,7 +16,7 @@ import (
 //
 // Uses [ansi.DecodeSequence] for parsing (same approach as
 // [colorprofile.Writer]) since there is no upstream palette-remap API.
-func remapANSI16(s string, palette [16]color.Color) string {
+func RemapANSI16(s string, palette [16]color.Color) string {
 	if !strings.ContainsRune(s, 0x1b) {
 		return s
 	}

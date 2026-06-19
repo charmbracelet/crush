@@ -162,27 +162,27 @@ func TestArgumentsBlocker_PathPrefixed(t *testing.T) {
 func TestCommandBlocking_LegitWrappedCommandsAllowed(t *testing.T) {
 	allowed := []string{
 		"echo hello",
-		"nohup ./myserver",           // wrapping a non-banned local binary
-		"timeout 30 echo go-test",    // stands in for `timeout 30 go test`
+		"nohup ./myserver",        // wrapping a non-banned local binary
+		"timeout 30 echo go-test", // stands in for `timeout 30 go test`
 		"timeout 0.5 true",
 		"timeout --preserve-status 5 echo build",
 		"timeout -k 5 30 echo build",
 		"nice echo build",
-		"nice -n 10 echo train",      // stands in for `nice -n 10 python train.py`
-		"env FOO=bar echo make",      // stands in for `env FOO=bar make`
+		"nice -n 10 echo train", // stands in for `nice -n 10 python train.py`
+		"env FOO=bar echo make", // stands in for `env FOO=bar make`
 		"env GOFLAGS=-mod=mod echo go",
 		"env -i PATH=/usr/bin echo make",
 		"env -S 'A=b echo split-ok'", // env -S of a NON-banned command
 		"setsid echo detached",
 		"stdbuf -oL echo streamed",
 		"nohup echo bg",
-		"echo x | xargs echo",        // stands in for `xargs ls`
+		"echo x | xargs echo", // stands in for `xargs ls`
 		"echo a b | xargs -n1 echo",
-		"npm install lodash",         // local install, not -g
-		"timeout 10 echo npm-test",   // wrapped non-install npm
+		"npm install lodash",       // local install, not -g
+		"timeout 10 echo npm-test", // wrapped non-install npm
 		"flock /tmp/lock echo locked",
-		"env -u curl make",          // curl is the value of -u (an env var name), not a command
-		"flock /var/lock/at make",   // 'at' is part of the lockfile path, not the at command
+		"env -u curl make",        // curl is the value of -u (an env var name), not a command
+		"flock /var/lock/at make", // 'at' is part of the lockfile path, not the at command
 		"timeout -s SIGTERM 30 echo",
 		"nice -n 19 echo build",
 	}

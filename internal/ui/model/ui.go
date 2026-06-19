@@ -212,6 +212,12 @@ type UI struct {
 	bangWasEmpty     bool // true when bang prompt became empty on last keystroke
 	pendingShellItem *chat.ShellItem
 
+	// bangCancel cancels a running bang-mode shell command. Nil when no
+	// bang command is in progress. Set by runShellCommand, cleared by
+	// shellResultMsg. Checked by isAgentBusy and cancelAgent so that
+	// Escape works for bang commands the same way it does for agent runs.
+	bangCancel context.CancelFunc
+
 	header *header
 
 	// sendProgressBar instructs the TUI to send progress bar updates to the
@@ -982,6 +988,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 	case shellResultMsg:
+		// Clear the bang cancel func — command is done.
+		if m.bangCancel != nil {
+			m.bangCancel()
+			m.bangCancel = nil
+		}
 		// Complete the pending shell item if it exists, otherwise create a new one.
 		if msg.PendingID != "" {
 			if item := m.chat.MessageItem(msg.PendingID); item != nil {
@@ -3275,6 +3286,9 @@ func isWhitespace(b byte) bool {
 // isAgentBusy returns true if the agent coordinator exists and is currently
 // busy processing a request.
 func (m *UI) isAgentBusy() bool {
+	if m.bangCancel != nil {
+		return true
+	}
 	return m.com.Workspace.AgentIsReady() &&
 		m.com.Workspace.AgentIsBusy()
 }
@@ -3497,20 +3511,27 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 		return shellStreamMsg{PendingID: pendingID, Chunk: chunk, streamCh: streamCh}
 	})
 
+	ctx, cancel := context.WithCancel(context.Background())
+	m.bangCancel = cancel
+
 	cmds = append(cmds, func() tea.Msg {
-		resp, err := m.com.Workspace.AgentRunShellCommand(context.Background(), sessionID, command, contentWidth, onProgress)
+		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress)
 		close(streamCh)
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("shell: %v", err),
 			}
 		}
+		exitCode := resp.ExitCode
+		if errors.Is(err, context.Canceled) {
+			exitCode = 130 // conventional SIGINT exit code
+		}
 		return shellResultMsg{
 			PendingID: pendingID,
 			Command:   command,
 			Output:    resp.Output,
-			ExitCode:  resp.ExitCode,
+			ExitCode:  exitCode,
 		}
 	})
 	return tea.Batch(cmds...)
@@ -3538,8 +3559,15 @@ func (m *UI) cancelAgent() tea.Cmd {
 	}
 
 	if m.isCanceling {
-		// Second escape press - actually cancel the agent.
+		// Second escape press — actually cancel.
 		m.isCanceling = false
+
+		// Cancel a running bang command if one is in progress.
+		if m.bangCancel != nil {
+			m.bangCancel()
+			m.bangCancel = nil
+		}
+
 		m.com.Workspace.AgentCancel(m.session.ID)
 		// Stop the spinning todo indicator.
 		m.todoIsSpinning = false

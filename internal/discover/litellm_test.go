@@ -42,8 +42,10 @@ func TestLitellmEnricher(t *testing.T) {
 		defer srv.Close()
 
 		cfg := Config{
-			ID:      "test-litellm",
-			BaseURL: srv.URL,
+			ID: "test-litellm",
+			// Base URL includes /v1 (as Crush configures it); the
+			// enricher strips it so /model/info resolves at the root.
+			BaseURL: srv.URL + "/v1",
 			APIKey:  "test-key",
 		}
 		models := []catwalk.Model{

@@ -17,6 +17,16 @@ import (
 // even if the caller forgets to set a context deadline.
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
+// stripV1Suffix removes a trailing /v1 from a base URL. Enricher
+// endpoints (e.g. Ollama's /api/show, LM Studio's /api/v1/models) are
+// served at the server root, not under the OpenAI-compatible /v1
+// prefix. Since provider configs typically include /v1 in the base URL
+// for chat completions, enrichers must strip it before constructing
+// their own request paths.
+func stripV1Suffix(baseURL string) string {
+	return strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+}
+
 // doRequest builds and executes an authenticated HTTP request using the
 // shared client. It resolves variable references in the base URL, API
 // key, and extra headers via the provided Resolver. The path is joined

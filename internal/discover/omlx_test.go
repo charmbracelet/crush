@@ -17,6 +17,8 @@ func TestOmlxEnricher(t *testing.T) {
 	t.Run("populates context window and max tokens from /v1/models/status", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// oMLX serves the status endpoint under /v1 (base URL
+			// includes /v1), so the resolved path keeps the prefix.
 			require.Equal(t, "/v1/models/status", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(omlxModelsStatusResponse{
@@ -28,7 +30,7 @@ func TestOmlxEnricher(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		cfg := Config{ID: "test-omlx", BaseURL: srv.URL}
+		cfg := Config{ID: "test-omlx", BaseURL: srv.URL + "/v1"}
 		models := []catwalk.Model{
 			{ID: "qwen3:latest", Name: "qwen3:latest"},
 			{ID: "llama3:latest", Name: "llama3:latest"},

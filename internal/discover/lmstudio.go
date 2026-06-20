@@ -13,10 +13,11 @@ func init() {
 }
 
 // lmstudioModelsResponse mirrors the response from LM Studio's native
-// GET /api/v1/models endpoint. Only the fields we care about are
-// decoded.
+// GET /api/v1/models endpoint. The model array is returned under the
+// "models" key (not "data" like the OpenAI-compatible endpoint). Only
+// the fields we care about are decoded.
 type lmstudioModelsResponse struct {
-	Data []lmstudioModelEntry `json:"data"`
+	Models []lmstudioModelEntry `json:"models"`
 }
 
 // lmstudioModelEntry is a single entry from /api/v1/models.
@@ -44,7 +45,7 @@ type lmstudioInstanceConfig struct {
 type lmstudioEnricher struct{}
 
 func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
-	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/api/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
+	resp, err := doRequest(ctx, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/api/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
 	if err != nil {
 		return models, nil
 	}
@@ -60,8 +61,8 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 	}
 
 	// Index by key for O(1) lookup.
-	metaByKey := make(map[string]lmstudioModelEntry, len(modelsResp.Data))
-	for _, m := range modelsResp.Data {
+	metaByKey := make(map[string]lmstudioModelEntry, len(modelsResp.Models))
+	for _, m := range modelsResp.Models {
 		metaByKey[m.Key] = m
 	}
 

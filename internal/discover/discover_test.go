@@ -200,3 +200,22 @@ func TestDiscoverModels_NoAuthWhenNoAPIKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, models, 1)
 }
+
+func TestStripV1Suffix(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"http://localhost:8000/v1", "http://localhost:8000"},
+		{"http://localhost:8000/v1/", "http://localhost:8000"},
+		{"http://localhost:8000", "http://localhost:8000"},
+		{"http://localhost:8000/", "http://localhost:8000"},
+		{"http://localhost:8000/api/v1", "http://localhost:8000/api"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := stripV1Suffix(tt.input)
+		require.Equal(t, tt.want, got, "stripV1Suffix(%q)", tt.input)
+	}
+}

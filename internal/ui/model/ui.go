@@ -1014,6 +1014,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+		cmds = append(cmds, m.loadPromptHistory())
 	case hyperRefreshDoneMsg:
 		if cmd := m.handleSelectModel(msg.action); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2080,7 +2081,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.setEditorPrompt(yolo)
 					m.randomizePlaceholders()
 					m.historyReset()
-					return tea.Batch(m.runShellCommand(value), m.loadPromptHistory())
+					return tea.Batch(m.runShellCommand(value))
 				}
 
 				attachments := m.attachments.List()

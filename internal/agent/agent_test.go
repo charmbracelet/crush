@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
@@ -838,6 +841,146 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, syntheticCount, "expected exactly one synthetic result for the orphaned call")
+}
+
+func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	pngBase64 := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
+
+	messages := []fantasy.Message{
+		{
+			Role: fantasy.MessageRoleTool,
+			Content: []fantasy.MessagePart{
+				fantasy.ToolResultPart{
+					ToolCallID: "call_1",
+					Output: fantasy.ToolResultOutputContentMedia{
+						Data:      pngBase64,
+						MediaType: "image/png",
+					},
+				},
+			},
+		},
+	}
+
+	// Non-Anthropic provider, no image support — should replace media with
+	// a text placeholder and not create a synthetic user message.
+	largeModel := Model{
+		ModelCfg: config.SelectedModel{Provider: "openai"},
+		CatwalkCfg: catwalk.Model{
+			SupportsImages: false,
+		},
+	}
+
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel)
+
+	// Should produce exactly one message: the tool message with a text
+	// placeholder. No synthetic user message with FilePart.
+	require.Len(t, result, 1)
+	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
+
+	tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](result[0].Content[0])
+	require.True(t, ok)
+	_, ok = fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](tr.Output)
+	require.True(t, ok)
+}
+
+func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	pngBase64 := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
+
+	messages := []fantasy.Message{
+		{
+			Role: fantasy.MessageRoleTool,
+			Content: []fantasy.MessagePart{
+				fantasy.ToolResultPart{
+					ToolCallID: "call_1",
+					Output: fantasy.ToolResultOutputContentMedia{
+						Data:      pngBase64,
+						MediaType: "image/png",
+					},
+				},
+			},
+		},
+	}
+
+	// Non-Anthropic provider, image support — should create a synthetic
+	// user message with FilePart.
+	largeModel := Model{
+		ModelCfg: config.SelectedModel{Provider: "openai"},
+		CatwalkCfg: catwalk.Model{
+			SupportsImages: true,
+		},
+	}
+
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel)
+
+	// Should produce two messages: tool message with placeholder text,
+	// and synthetic user message with FilePart.
+	require.Len(t, result, 2)
+	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
+	require.Equal(t, fantasy.MessageRoleUser, result[1].Role)
+
+	// The tool message should have text placeholder.
+	tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](result[0].Content[0])
+	require.True(t, ok)
+	textOutput, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](tr.Output)
+	require.True(t, ok)
+	require.Contains(t, textOutput.Text, "see attached file")
+
+	// The synthetic user message should contain a TextPart and a FilePart.
+	require.Len(t, result[1].Content, 2)
+	file, ok := fantasy.AsMessagePart[fantasy.FilePart](result[1].Content[1])
+	require.True(t, ok)
+	require.Equal(t, "image/png", file.MediaType)
+}
+
+func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	pngBase64 := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
+
+	messages := []fantasy.Message{
+		{
+			Role: fantasy.MessageRoleTool,
+			Content: []fantasy.MessagePart{
+				fantasy.ToolResultPart{
+					ToolCallID: "call_1",
+					Output: fantasy.ToolResultOutputContentMedia{
+						Data:      pngBase64,
+						MediaType: "image/png",
+					},
+				},
+			},
+		},
+	}
+
+	// Anthropic provider — should return messages unchanged regardless of
+	// SupportsImages, since Anthropic handles media in tool results natively.
+	largeModel := Model{
+		ModelCfg: config.SelectedModel{Provider: string(catwalk.InferenceProviderAnthropic)},
+		CatwalkCfg: catwalk.Model{
+			SupportsImages: true,
+		},
+	}
+
+	result := agent.workaroundProviderMediaLimitations(messages, largeModel)
+	require.Len(t, result, 1)
+	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
+
+	// The media should still be in the tool result, untouched.
+	tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](result[0].Content[0])
+	require.True(t, ok)
+	media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](tr.Output)
+	require.True(t, ok)
+	require.Equal(t, "image/png", media.MediaType)
 }
 
 func TestProviderRetryLogFields(t *testing.T) {

@@ -1392,6 +1392,8 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 		return messages
 	}
 
+	supportsImages := largeModel.CatwalkCfg.SupportsImages
+
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
 
 	for _, msg := range messages {
@@ -1411,6 +1413,21 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 			}
 
 			if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
+				if !supportsImages {
+					// Model cannot process images. Replace with a text
+					// placeholder and skip creating a synthetic user
+					// message with FilePart, which would brick the
+					// session on text-only models.
+					textParts = append(textParts, fantasy.ToolResultPart{
+						ToolCallID: toolResult.ToolCallID,
+						Output: fantasy.ToolResultOutputContentText{
+							Text: "[Image/media content not supported by this model]",
+						},
+						ProviderOptions: toolResult.ProviderOptions,
+					})
+					continue
+				}
+
 				decoded, err := base64.StdEncoding.DecodeString(media.Data)
 				if err != nil {
 					slog.Warn("Failed to decode media data", "error", err)

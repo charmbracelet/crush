@@ -160,8 +160,25 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 	return out.String()
 }
 
+// npmInstallAliases are the aliases npm accepts for its install subcommand
+// (npm's lib/utils/cmd-list.js). The canonical "install" is registered in
+// blockFuncs with the global-flag requirement; these are the alternate
+// spellings that resolve to the same subcommand and would otherwise let a
+// global install slip past that rule (npm i -g pkg, npm add -g pkg).
+var npmInstallAliases = []string{
+	"i", "in", "ins", "inst", "insta", "instal",
+	"isnt", "isnta", "isntal", "isntall", "add",
+}
+
+// gemInstallAliases are the spellings RubyGems resolves to its install command.
+// gem accepts `i` (an explicit alias) and any unambiguous prefix of `install`;
+// `ins`/`inst`/`insta`/`instal` each resolve uniquely to install, so they reach
+// `gem install` just like the canonical spelling. `in` is omitted: it is an
+// ambiguous prefix (install vs info) that RubyGems rejects rather than runs.
+var gemInstallAliases = []string{"i", "ins", "inst", "insta", "instal"}
+
 func blockFuncs() []shell.BlockFunc {
-	return []shell.BlockFunc{
+	funcs := []shell.BlockFunc{
 		shell.CommandsBlocker(bannedCommands),
 
 		// System package managers
@@ -190,6 +207,25 @@ func blockFuncs() []shell.BlockFunc {
 		// `go test -exec` can run arbitrary commands
 		shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
 	}
+
+	// npm and gem accept documented aliases / prefix abbreviations for their
+	// install subcommand, so the canonical-spelling rules above were
+	// bypassable by an alias (npm i -g pkg, npm add -g pkg, gem ins pkg).
+	// Register each alias against the same requirement as its canonical rule:
+	// the npm aliases keep the -g/--global flag requirement so a local install
+	// (npm i pkg) stays allowed, and the gem aliases mirror the unconditional
+	// `gem install` ban.
+	for _, alias := range npmInstallAliases {
+		funcs = append(funcs,
+			shell.ArgumentsBlocker("npm", []string{alias}, []string{"--global"}),
+			shell.ArgumentsBlocker("npm", []string{alias}, []string{"-g"}),
+		)
+	}
+	for _, alias := range gemInstallAliases {
+		funcs = append(funcs, shell.ArgumentsBlocker("gem", []string{alias}, nil))
+	}
+
+	return funcs
 }
 
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {

@@ -771,8 +771,9 @@ To add specific models to the configuration, configure as such:
 ### Local Models
 
 Crush can auto-discovers models from local providers. Add a custom provider
-with `type` set to `omlx`, `lmstudio`, `litellm`, or `ollama` and leave out
-the models list. Crush will populate the model list automatically.
+with `type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama`
+and leave out the models list. Crush will populate the model list
+automatically.
 
 ```json
 {
@@ -781,6 +782,20 @@ the models list. Crush will populate the model list automatically.
       "name": "Ollama",
       "base_url": "http://localhost:11434/v1/",
       "type": "ollama"
+    }
+  }
+}
+```
+
+For llama.cpp (`llama-server`), point at the server's base URL:
+
+```json
+{
+  "providers": {
+    "llamacpp": {
+      "name": "llama.cpp",
+      "base_url": "http://localhost:2222",
+      "type": "llamacpp"
     }
   }
 }

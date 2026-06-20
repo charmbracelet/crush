@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -2182,19 +2183,24 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
 				// Bang mode: enter when "!" is typed at the start of the
-				// prompt (either on an empty prompt or prepended to existing
-				// text). Exit on backspace clearing the last character.
+				// prompt, optionally preceded by whitespace (either on an
+				// empty/whitespace-only prompt or prepended to existing text).
+				// Exit on backspace clearing the last character.
 				newVal := m.textarea.Value()
-				if !m.bangMode && strings.HasPrefix(newVal, "!") && !strings.HasPrefix(curValue, "!") {
+				trimmedNew := strings.TrimLeftFunc(newVal, unicode.IsSpace)
+				trimmedCur := strings.TrimLeftFunc(curValue, unicode.IsSpace)
+				if !m.bangMode && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
 					m.bangMode = true
 					m.bangWasEmpty = len(strings.TrimSpace(curValue)) == 0
-					// Strip the leading "!" from the textarea while preserving
-					// the cursor position relative to the command text.
+					// Strip leading whitespace and the "!" from the textarea
+					// while preserving the cursor position relative to the
+					// command text.
 					col := m.textarea.Column()
 					line := m.textarea.Line()
-					m.textarea.SetValue(newVal[1:])
-					m.textarea.SetCursorColumn(max(0, col-1))
-					_ = line // cursor line doesn't change; first char removed
+					stripped := trimmedNew[1:]
+					m.textarea.SetValue(stripped)
+					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
+					_ = line // cursor line doesn't change; prefix removed
 					yolo := m.com.Workspace.PermissionSkipRequests()
 					m.setEditorPrompt(yolo)
 				} else if m.bangMode && newVal == "" && curValue != "" {

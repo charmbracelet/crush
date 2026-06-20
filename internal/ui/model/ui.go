@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -3587,6 +3588,28 @@ func (m *UI) newSession() tea.Cmd {
 	)
 }
 
+// checkBangModeAfterPaste engages bang mode when pasted text starts with
+// optional whitespace followed by "!". It strips the prefix and adjusts
+// the cursor, mirroring the keypress bang-mode entry logic.
+func (m *UI) checkBangModeAfterPaste() {
+	if m.bangMode {
+		return
+	}
+	val := m.textarea.Value()
+	trimmed := strings.TrimLeftFunc(val, unicode.IsSpace)
+	if !strings.HasPrefix(trimmed, "!") {
+		return
+	}
+	m.bangMode = true
+	m.bangWasEmpty = true
+	stripped := trimmed[1:]
+	m.textarea.SetValue(stripped)
+	col := m.textarea.Column()
+	m.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
+	yolo := m.com.Workspace.PermissionSkipRequests()
+	m.setEditorPrompt(yolo)
+}
+
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Normalize \r\n before the textarea sanitizer sees it.
@@ -3647,7 +3670,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	}
 	if !allExistsAndValid() {
 		prevHeight := m.textarea.Height()
-		return m.updateTextareaWithPrevHeight(msg, prevHeight)
+		cmd := m.updateTextareaWithPrevHeight(msg, prevHeight)
+		m.checkBangModeAfterPaste()
+		return cmd
 	}
 
 	var cmds []tea.Cmd

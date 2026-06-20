@@ -167,6 +167,7 @@ func TestIsKnownCustomProvider(t *testing.T) {
 	require.True(t, IsKnownCustomProvider("ollama"))
 	require.True(t, IsKnownCustomProvider("omlx"))
 	require.True(t, IsKnownCustomProvider("lmstudio"))
+	require.True(t, IsKnownCustomProvider("llamaswap"))
 	require.False(t, IsKnownCustomProvider("openai-compat"))
 	require.False(t, IsKnownCustomProvider("anthropic"))
 	require.False(t, IsKnownCustomProvider(""))

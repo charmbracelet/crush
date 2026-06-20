@@ -771,8 +771,8 @@ To add specific models to the configuration, configure as such:
 ### Local Models
 
 Crush can auto-discovers models from local providers. Add a custom provider
-with `type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama`
-and leave out the models list. Crush will populate the model list
+with `type` set to `llamacpp`, `llamaswap`, `omlx`, `lmstudio`, `litellm`,
+or `ollama` and leave out the models list. Crush will populate the model list
 automatically.
 
 ```json
@@ -800,6 +800,15 @@ For llama.cpp (`llama-server`), point at the server's base URL:
   }
 }
 ```
+
+#### llama-swap auto-discovery
+
+Unlike many other local providers, llama-swap does not provide the additional
+properties needed for auto-discovery in its API, such as the display name or
+context length. However it does provide a `metadata` dictionary that you may
+use to define additional metadata for a model in your llama-swap configuration
+that will be included in the `/v1/models` response. Any field that you may
+configure for a model in `crush.json` is supported.
 
 #### Manual Model Configuration
 

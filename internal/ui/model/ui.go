@@ -927,6 +927,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prevHeight := m.textarea.Height()
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
+		m.syncBangModeFromTextarea()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 	case hyperRefreshDoneMsg:
 		if cmd := m.handleSelectModel(msg.action); cmd != nil {
@@ -1456,7 +1457,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 			break
 		}
-		cmds = append(cmds, m.openEditor(m.textarea.Value()))
+		editorValue := m.textarea.Value()
+		if m.bangMode {
+			editorValue = "!" + editorValue
+		}
+		cmds = append(cmds, m.openEditor(editorValue))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
@@ -1997,7 +2002,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 					break
 				}
-				cmds = append(cmds, m.openEditor(m.textarea.Value()))
+				editorValue := m.textarea.Value()
+				if m.bangMode {
+					editorValue = "!" + editorValue
+				}
+				cmds = append(cmds, m.openEditor(editorValue))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				prevHeight := m.textarea.Height()
 				m.textarea.InsertRune('\n')

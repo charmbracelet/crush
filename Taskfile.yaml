@@ -1,0 +1,215 @@
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  VERSION:
+    sh: git describe --long 2>/dev/null || echo ""
+  RACE:
+    sh: test -f race.log && echo "1" || echo ""
+
+env:
+  CGO_ENABLED: 0
+  GOEXPERIMENT: greenteagc
+
+tasks:
+  lint:install:
+    desc: Install golangci-lint
+    cmds:
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+    env:
+      GOTOOLCHAIN: go1.25.0
+
+  lint:
+    desc: Run base linters
+    cmds:
+      - task: lint:log
+      - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m
+    env:
+      GOEXPERIMENT: null
+
+  lint:log:
+    desc: Check that log messages start with capital letters
+    cmds:
+      - ./scripts/check_log_capitalization.sh
+
+  lint:fix:
+    desc: Run base linters and fix issues
+    cmds:
+      - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m --fix
+    env:
+      GOEXPERIMENT: null
+
+  build:
+    desc: Run build
+    vars:
+      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
+    cmds:
+      - "go build -v {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
+    sources:
+      - ./**/*.go
+      - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
+      - internal/agent/hyper/provider.json
+    generates:
+      - crush{{exeExt}}
+
+  run:
+    desc: Run build
+    cmds:
+      - task: build
+      - "./crush{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
+
+  run:catwalk:
+    desc: Run build with local Catwalk
+    env:
+      CATWALK_URL: http://localhost:8080
+    cmds:
+      - task: build
+      - ./crush{{exeExt}} {{.CLI_ARGS}}
+
+  run:onboarding:
+    desc: Run build with custom config to test onboarding
+    env:
+      CRUSH_GLOBAL_DATA: tmp/onboarding/data
+      CRUSH_GLOBAL_CONFIG: tmp/onboarding/config
+    cmds:
+      - task: build
+      - rm -rf tmp/onboarding
+      - ./crush{{exeExt}} {{.CLI_ARGS}}
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test -race -failfast ./... {{.CLI_ARGS}}
+
+  test:record:
+    desc: Run tests and record all VCR cassettes again
+    aliases: [record]
+    cmds:
+      - rm -r internal/agent/testdata
+      - go test -v -count=1 -timeout=1h ./internal/agent
+
+  fmt:
+    desc: Run gofumpt
+    cmds:
+      - gofumpt -w .
+
+  fmt:html:
+    desc: Run prettier on HTML/CSS/JS files
+    cmds:
+      - prettier --write internal/cmd/stats/index.html internal/cmd/stats/index.css internal/cmd/stats/index.js
+
+  modernize:
+    desc: Run modernize
+    cmds:
+      - go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -fix -test ./...
+
+  dev:
+    desc: Run with profiling enabled
+    env:
+      CRUSH_PROFILE: true
+    cmds:
+      - go run .
+
+  install:
+    desc: Install the application
+    vars:
+      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
+    cmds:
+      - task: fetch-tags
+      - go install {{.LDFLAGS}} -v .
+    sources:
+      - ./**/*.go
+      - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
+      - internal/agent/hyper/provider.json
+
+  profile:cpu:
+    desc: 10s CPU profile
+    cmds:
+      - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/profile?seconds=10'
+
+  profile:heap:
+    desc: Heap profile
+    cmds:
+      - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/heap'
+
+  profile:allocs:
+    desc: Allocations profile
+    cmds:
+      - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/allocs'
+
+  schema:
+    desc: Generate JSON schema for configuration
+    cmds:
+      - go run main.go schema > schema.json
+      - echo "Generated schema.json"
+    generates:
+      - schema.json
+
+  hyper:
+    desc: Update Hyper embedded provider.json
+    cmds:
+      - go generate ./internal/agent/hyper/...
+    generates:
+      - ./internal/agent/hyper/provider.json
+
+  release:
+    desc: Create and push a new tag following semver
+    vars:
+      NEXT:
+        sh: svu next --always || go run github.com/caarlos0/svu/v3@latest next --always
+    prompt: "This will release {{.NEXT}}. Continue?"
+    preconditions:
+      - sh: '[ $(git symbolic-ref --short HEAD) = "main" ]'
+        msg: Not on main branch
+      - sh: "[ $(git status --porcelain=2 | wc -l) = 0 ]"
+        msg: "Git is dirty"
+      - sh: 'gh run list --workflow build.yml --commit $(git rev-parse HEAD) --status success --json conclusion -q ".[0].conclusion" | grep -q success'
+        msg: "Test build for this commit failed or not present"
+      - sh: 'gh run list --workflow snapshot.yml --commit $(git rev-parse HEAD) --status success --json conclusion -q ".[0].conclusion" | grep -q success'
+        msg: "Snapshot build for this commit failed or not present"
+    cmds:
+      - task: fetch-tags
+      - git commit --allow-empty -m "{{.NEXT}}"
+      - git tag --annotate --sign -m "{{.NEXT}}" {{.NEXT}} {{.CLI_ARGS}}
+      - echo "Pushing {{.NEXT}}..."
+      - git push origin main --follow-tags
+
+  fetch-tags:
+    cmds:
+      - git tag -d nightly || true
+      - git fetch --tags
+
+  deps:
+    desc: Update Fantasy and Catwalk
+    env:
+      # The Go proxy takes a bit of time to see the latest release. Setting
+      # these bypass it to ensure we can update to a release from a minute ago.
+      GOPROXY: direct
+      GONOSUMDB: charm.land/*
+    cmds:
+      - go get charm.land/fantasy@latest
+      - go get charm.land/catwalk@latest
+      - go mod tidy
+
+  swag:
+    desc: Generate OpenAPI spec from swag annotations
+    cmds:
+      - go run github.com/swaggo/swag/cmd/swag@v1.16.6 init --generalInfo main.go --dir . --output internal/swagger --packageName swagger --parseDependency --parseInternal --parseDepth 5
+    sources:
+      - internal/server/*.go
+      - internal/proto/*.go
+      - main.go
+    generates:
+      - internal/swagger/docs.go
+      - internal/swagger/swagger.json
+      - internal/swagger/swagger.yaml
+
+  sqlc:
+    desc: Generate code using SQLC
+    cmds:
+      - sqlc generate

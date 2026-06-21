@@ -1,0 +1,31 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # every day at midnight
+  workflow_dispatch: # allows manual triggering
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 1
+      - id: check
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          if gh run list --workflow nightly.yml -c $(git rev-parse HEAD) -s success | grep 'completed'; then
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+  nightly:
+    needs: check
+    if: needs.check.outputs.should_run == 'true'
+    uses: charmbracelet/meta/.github/workflows/nightly.yml@main
+    secrets:
+      goreleaser_key: ${{ secrets.GORELEASER_KEY }}

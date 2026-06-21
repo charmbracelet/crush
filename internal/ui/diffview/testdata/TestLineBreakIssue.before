@@ -1,0 +1,6 @@
+// this is
+// a regular
+// comment
+$(function() {
+    console.log("Hello, world!");
+});

@@ -1,0 +1,705 @@
+// Package app wires together services, coordinates agents, and manages
+// application lifecycle.
+package app
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/fantasy"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/format"
+	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/ui/anim"
+	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/update"
+	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/x/term"
+)
+
+// UpdateAvailableMsg is sent when a new version is available.
+type UpdateAvailableMsg struct {
+	CurrentVersion string
+	LatestVersion  string
+	IsDevelopment  bool
+}
+
+type App struct {
+	Sessions    session.Service
+	Messages    message.Service
+	History     history.Service
+	Permissions permission.Service
+	FileTracker filetracker.Service
+
+	AgentCoordinator agent.Coordinator
+
+	LSPManager *lsp.Manager
+
+	Skills *skills.Manager
+
+	config *config.ConfigStore
+
+	serviceEventsWG *sync.WaitGroup
+	eventsCtx       context.Context
+	events          *pubsub.Broker[tea.Msg]
+	tuiWG           *sync.WaitGroup
+
+	// global context and cleanup functions
+	globalCtx          context.Context
+	cleanupFuncs       []func(context.Context) error
+	agentNotifications *pubsub.Broker[notify.Notification]
+	// runCompletions is the authoritative per-run completion signal,
+	// emitted once per top-level agent turn after all message
+	// updates have been flushed. Bridged into app.events so SSE
+	// subscribers (notably `crush run` in client/server mode) can
+	// drive their exit on a deterministic, payload-bearing event
+	// instead of guessing from message finish parts.
+	runCompletions *pubsub.Broker[notify.RunComplete]
+}
+
+// New initializes a new application instance. skillsMgr carries the
+// per-workspace skill discovery results computed by the caller; the
+// caller is responsible for constructing it (typically via
+// skills.NewManager + skills.DiscoverFromConfig).
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	messages := message.NewService(q)
+	files := history.NewService(q, conn)
+	cfg := store.Config()
+	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
+	var allowedTools []string
+	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
+		allowedTools = cfg.Permissions.AllowedTools
+	}
+
+	app := &App{
+		Sessions:    sessions,
+		Messages:    messages,
+		History:     files,
+		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		FileTracker: filetracker.NewService(q),
+		LSPManager:  lsp.NewManager(store),
+		Skills:      skillsMgr,
+
+		globalCtx: ctx,
+
+		config: store,
+
+		events:             pubsub.NewBroker[tea.Msg](),
+		serviceEventsWG:    &sync.WaitGroup{},
+		tuiWG:              &sync.WaitGroup{},
+		agentNotifications: pubsub.NewBroker[notify.Notification](),
+		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+	}
+
+	app.setupEvents()
+
+	// Check for updates in the background.
+	go app.checkForUpdates(ctx)
+
+	go mcp.Initialize(ctx, app.Permissions, store)
+
+	// Release the shared database connection on shutdown. The pool
+	// closes the underlying *sql.DB when the last reference is released.
+	dataDir := cfg.Options.DataDirectory
+	app.cleanupFuncs = append(
+		app.cleanupFuncs,
+		func(context.Context) error { return db.Release(dataDir) },
+		func(ctx context.Context) error { return mcp.Close(ctx) },
+	)
+
+	// TODO: remove the concept of agent config, most likely.
+	if !cfg.IsConfigured() {
+		slog.Warn("No agent configuration found")
+		return app, nil
+	}
+	if err := app.InitCoderAgent(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
+	}
+
+	// Set up callback for LSP state updates.
+	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
+		if client == nil {
+			updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
+			return
+		}
+		client.SetDiagnosticsCallback(updateLSPDiagnostics)
+		updateLSPState(name, client.GetServerState(), nil, client, 0)
+	})
+	go app.LSPManager.TrackConfigured()
+
+	return app, nil
+}
+
+// Config returns the pure-data configuration.
+func (app *App) Config() *config.Config {
+	return app.config.Config()
+}
+
+// Store returns the config store.
+func (app *App) Store() *config.ConfigStore {
+	return app.config
+}
+
+// Events returns a per-caller subscription channel for application events.
+// Each caller receives its own channel; all callers receive every event.
+func (app *App) Events(ctx context.Context) <-chan pubsub.Event[tea.Msg] {
+	return app.events.Subscribe(ctx)
+}
+
+// SendEvent publishes a message to all event subscribers.
+func (app *App) SendEvent(msg tea.Msg) {
+	app.events.Publish(pubsub.UpdatedEvent, msg)
+}
+
+// AgentNotifications returns the broker for agent notification events.
+func (app *App) AgentNotifications() *pubsub.Broker[notify.Notification] {
+	return app.agentNotifications
+}
+
+// RunCompletions returns the broker for the authoritative per-run
+// terminal RunComplete events. The dispatcher (backend.runAgent) uses
+// it to emit a reliable terminal event when a run fails before the
+// coordinator could publish one of its own.
+func (app *App) RunCompletions() *pubsub.Broker[notify.RunComplete] {
+	return app.runCompletions
+}
+
+// resolveSession resolves which session to use for a non-interactive run
+// If continueSessionID is set, it looks up that session by ID
+// If useLast is set, it returns the most recently updated top-level session
+// Otherwise, it creates a new session
+func (app *App) resolveSession(ctx context.Context, continueSessionID string, useLast bool) (session.Session, error) {
+	switch {
+	case continueSessionID != "":
+		if app.Sessions.IsAgentToolSession(continueSessionID) {
+			return session.Session{}, fmt.Errorf("cannot continue an agent tool session: %s", continueSessionID)
+		}
+		sess, err := app.Sessions.Get(ctx, continueSessionID)
+		if err != nil {
+			return session.Session{}, fmt.Errorf("session not found: %s", continueSessionID)
+		}
+		if sess.ParentSessionID != "" {
+			return session.Session{}, fmt.Errorf("cannot continue a child session: %s", continueSessionID)
+		}
+		return sess, nil
+
+	case useLast:
+		sess, err := app.Sessions.GetLast(ctx)
+		if err != nil {
+			return session.Session{}, fmt.Errorf("no sessions found to continue")
+		}
+		return sess, nil
+
+	default:
+		return app.Sessions.Create(ctx, agent.DefaultSessionName)
+	}
+}
+
+// RunNonInteractive runs the application in non-interactive mode with the
+// given prompt, printing to stdout.
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
+	slog.Info("Running in non-interactive mode")
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	if largeModel != "" || smallModel != "" {
+		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
+			return fmt.Errorf("failed to override models: %w", err)
+		}
+	}
+
+	var (
+		spinner   *format.Spinner
+		stdoutTTY bool
+		stderrTTY bool
+		stdinTTY  bool
+		progress  bool
+	)
+
+	if f, ok := output.(*os.File); ok {
+		stdoutTTY = term.IsTerminal(f.Fd())
+	}
+	stderrTTY = term.IsTerminal(os.Stderr.Fd())
+	stdinTTY = term.IsTerminal(os.Stdin.Fd())
+	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
+
+	if !hideSpinner && stderrTTY {
+		t := styles.ThemeForProvider(app.config.Config().Models[config.SelectedModelTypeLarge].Provider)
+
+		// Detect background color to set the appropriate color for the
+		// spinner's 'Generating...' text. Without this, that text would be
+		// unreadable in light terminals.
+		hasDarkBG := true
+		if f, ok := output.(*os.File); ok && stdinTTY && stdoutTTY {
+			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
+		}
+		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.WorkingLabelColor)
+
+		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
+			Size:        10,
+			Label:       "Generating",
+			LabelColor:  defaultFG,
+			GradColorA:  t.WorkingGradFromColor,
+			GradColorB:  t.WorkingGradToColor,
+			CycleColors: true,
+		})
+		spinner.Start()
+	}
+
+	// Helper function to stop spinner once.
+	stopSpinner := func() {
+		if !hideSpinner && spinner != nil {
+			spinner.Stop()
+			spinner = nil
+		}
+	}
+
+	// Wait for MCP initialization to complete before reading MCP tools.
+	if err := mcp.WaitForInit(ctx); err != nil {
+		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	// force update of agent models before running so mcp tools are loaded
+	app.AgentCoordinator.UpdateModels(ctx)
+
+	defer stopSpinner()
+
+	sess, err := app.resolveSession(ctx, continueSessionID, useLast)
+	if err != nil {
+		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
+	}
+
+	if continueSessionID != "" || useLast {
+		slog.Info("Continuing session for non-interactive run", "session_id", sess.ID)
+	} else {
+		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
+	}
+
+	// Automatically approve all permission requests for this non-interactive
+	// session.
+	app.Permissions.AutoApproveSession(sess.ID)
+
+	type response struct {
+		result *fantasy.AgentResult
+		err    error
+	}
+	done := make(chan response, 1)
+
+	go func(ctx context.Context, sessionID, prompt string) {
+		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
+		if err != nil {
+			done <- response{
+				err: fmt.Errorf("failed to start agent processing stream: %w", err),
+			}
+			return
+		}
+		done <- response{
+			result: result,
+		}
+	}(ctx, sess.ID, prompt)
+
+	messageEvents := app.Messages.Subscribe(ctx)
+	messageReadBytes := make(map[string]int)
+	var printed bool
+
+	defer func() {
+		if progress && stderrTTY {
+			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
+		}
+
+		// Always print a newline at the end. If output is a TTY this will
+		// prevent the prompt from overwriting the last line of output.
+		_, _ = fmt.Fprintln(output)
+	}()
+
+	for {
+		if progress && stderrTTY {
+			// HACK: Reinitialize the terminal progress bar on every iteration
+			// so it doesn't get hidden by the terminal due to inactivity.
+			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
+		}
+
+		select {
+		case result := <-done:
+			stopSpinner()
+			if result.err != nil {
+				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
+					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
+					return nil
+				}
+				return fmt.Errorf("agent processing failed: %w", result.err)
+			}
+			return nil
+
+		case event := <-messageEvents:
+			msg := event.Payload
+			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
+				stopSpinner()
+
+				content := msg.Content().String()
+				readBytes := messageReadBytes[msg.ID]
+
+				if len(content) < readBytes {
+					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
+					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+				}
+
+				part := content[readBytes:]
+				// Trim leading whitespace. Sometimes the LLM includes leading
+				// formatting and intentation, which we don't want here.
+				if readBytes == 0 {
+					part = strings.TrimLeft(part, " \t")
+				}
+				// Ignore initial whitespace-only messages.
+				if printed || strings.TrimSpace(part) != "" {
+					printed = true
+					fmt.Fprint(output, part)
+				}
+				messageReadBytes[msg.ID] = len(content)
+			}
+
+		case <-ctx.Done():
+			stopSpinner()
+			return ctx.Err()
+		}
+	}
+}
+
+func (app *App) UpdateAgentModel(ctx context.Context) error {
+	if app.AgentCoordinator == nil {
+		return fmt.Errorf("agent configuration is missing")
+	}
+	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// overrideModelsForNonInteractive parses the model strings and temporarily
+// overrides the model configurations, then rebuilds the agent.
+// Format: "model-name" (searches all providers) or "provider/model-name".
+// Model matching is case-insensitive.
+// If largeModel is provided but smallModel is not, the small model defaults to
+// the provider's default small model.
+func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
+	providers := app.config.Config().Providers.Copy()
+
+	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
+	if err != nil {
+		return err
+	}
+
+	var largeProviderID string
+
+	// Override large model.
+	if largeModel != "" {
+		found, err := validateMatches(largeMatches, largeModel, "large")
+		if err != nil {
+			return err
+		}
+		largeProviderID = found.provider
+		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		app.config.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+			Provider: found.provider,
+			Model:    found.modelID,
+		}
+	}
+
+	// Override small model.
+	switch {
+	case smallModel != "":
+		found, err := validateMatches(smallMatches, smallModel, "small")
+		if err != nil {
+			return err
+		}
+		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		app.config.Config().Models[config.SelectedModelTypeSmall] = config.SelectedModel{
+			Provider: found.provider,
+			Model:    found.modelID,
+		}
+
+	case largeModel != "":
+		// No small model specified, but large model was - use provider's default.
+		smallCfg := app.GetDefaultSmallModel(largeProviderID)
+		app.config.Config().Models[config.SelectedModelTypeSmall] = smallCfg
+	}
+
+	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// GetDefaultSmallModel returns the default small model for the given
+// provider. Falls back to the large model if no default is found.
+func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
+	cfg := app.config.Config()
+	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
+
+	// Find the provider in the known providers list to get its default small model.
+	knownProviders, _ := config.Providers(cfg)
+	var knownProvider *catwalk.Provider
+	for _, p := range knownProviders {
+		if string(p.ID) == providerID {
+			knownProvider = &p
+			break
+		}
+	}
+
+	// For unknown/local providers, use the large model as small.
+	if knownProvider == nil {
+		slog.Warn("Using large model as small model for unknown provider", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
+	}
+
+	defaultSmallModelID := knownProvider.DefaultSmallModelID
+	model := cfg.GetModel(providerID, defaultSmallModelID)
+	if model == nil {
+		slog.Warn("Default small model not found, using large model", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
+	}
+
+	slog.Info("Using provider default small model", "provider", providerID, "model", defaultSmallModelID)
+	return config.SelectedModel{
+		Provider:        providerID,
+		Model:           defaultSmallModelID,
+		MaxTokens:       model.DefaultMaxTokens,
+		ReasoningEffort: model.DefaultReasoningEffort,
+	}
+}
+
+func (app *App) setupEvents() {
+	ctx, cancel := context.WithCancel(app.globalCtx)
+	app.eventsCtx = ctx
+	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
+	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+	if app.Skills != nil {
+		setupSubscriber(ctx, app.serviceEventsWG, "skills", app.Skills.SubscribeEvents, app.events)
+	}
+	cleanupFunc := func(context.Context) error {
+		cancel()
+		app.serviceEventsWG.Wait()
+		app.events.Shutdown()
+		return nil
+	}
+	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
+}
+
+func setupSubscriber[T any](
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	name string,
+	subscriber func(context.Context) <-chan pubsub.Event[T],
+	broker *pubsub.Broker[tea.Msg],
+) {
+	wg.Go(func() {
+		subCh := subscriber(ctx)
+		for {
+			select {
+			case event, ok := <-subCh:
+				if !ok {
+					slog.Debug("Subscription channel closed", "name", name)
+					return
+				}
+				broker.Publish(pubsub.UpdatedEvent, tea.Msg(event))
+			case <-ctx.Done():
+				slog.Debug("Subscription cancelled", "name", name)
+				return
+			}
+		}
+	})
+}
+
+// setupSubscriberMustDeliver is the bounded-blocking fan-in variant of
+// setupSubscriber: it re-publishes upstream events onto the shared
+// app.events broker using PublishMustDeliver instead of Publish. Use
+// this for terminal events that subscribers cannot tolerate losing —
+// notably RunComplete, which is the authoritative end-of-run signal
+// for `crush run`. A lossy fan-in here can drop the only terminal
+// event and hang non-interactive clients waiting on it.
+func setupSubscriberMustDeliver[T any](
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	name string,
+	subscriber func(context.Context) <-chan pubsub.Event[T],
+	broker *pubsub.Broker[tea.Msg],
+) {
+	wg.Go(func() {
+		subCh := subscriber(ctx)
+		for {
+			select {
+			case event, ok := <-subCh:
+				if !ok {
+					slog.Debug("Subscription channel closed", "name", name)
+					return
+				}
+				broker.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
+			case <-ctx.Done():
+				slog.Debug("Subscription cancelled", "name", name)
+				return
+			}
+		}
+	})
+}
+
+func (app *App) InitCoderAgent(ctx context.Context) error {
+	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
+	if coderAgentCfg.ID == "" {
+		return fmt.Errorf("coder agent configuration is missing")
+	}
+	var err error
+	app.AgentCoordinator, err = agent.NewCoordinator(
+		ctx,
+		app.config,
+		app.Sessions,
+		app.Messages,
+		app.Permissions,
+		app.History,
+		app.FileTracker,
+		app.LSPManager,
+		app.agentNotifications,
+		app.runCompletions,
+		app.Skills,
+	)
+	if err != nil {
+		slog.Error("Failed to create coder agent", "err", err)
+		return err
+	}
+	return nil
+}
+
+// Subscribe sends events to the TUI as tea.Msgs.
+func (app *App) Subscribe(program *tea.Program) {
+	defer log.RecoverPanic("app.Subscribe", func() {
+		slog.Info("TUI subscription panic: attempting graceful shutdown")
+		program.Quit()
+	})
+
+	app.tuiWG.Add(1)
+	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
+	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
+		slog.Debug("Cancelling TUI message handler")
+		tuiCancel()
+		app.tuiWG.Wait()
+		return nil
+	})
+	defer app.tuiWG.Done()
+
+	events := app.events.Subscribe(tuiCtx)
+	for {
+		select {
+		case <-tuiCtx.Done():
+			slog.Debug("TUI message handler shutting down")
+			return
+		case ev, ok := <-events:
+			if !ok {
+				slog.Debug("TUI message channel closed")
+				return
+			}
+			program.Send(ev.Payload)
+		}
+	}
+}
+
+// Shutdown performs a graceful shutdown of the application.
+func (app *App) Shutdown() {
+	start := time.Now()
+	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
+
+	// First, cancel all agents and wait for them to finish. This must complete
+	// before closing the DB so agents can finish writing their state.
+	if app.AgentCoordinator != nil {
+		app.AgentCoordinator.CancelAll()
+	}
+
+	// Shared shutdown context for all timeout-bounded cleanup.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Drain any debounced message updates before the DB-close cleanup
+	// runs in the parallel block below. message.Service buffers
+	// streaming deltas (see internal/message/message.go) and we must
+	// land them while the connection is still open.
+	if app.Messages != nil {
+		if err := app.Messages.FlushAll(shutdownCtx); err != nil {
+			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
+		}
+	}
+
+	// Now run remaining cleanup tasks in parallel.
+	var wg sync.WaitGroup
+
+	// Send exit event
+	wg.Go(func() {
+		event.AppExited()
+	})
+
+	// Kill all background shells.
+	wg.Go(func() {
+		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
+	})
+
+	// Shutdown all LSP clients.
+	wg.Go(func() {
+		app.LSPManager.KillAll(shutdownCtx)
+	})
+
+	// Call all cleanup functions.
+	for _, cleanup := range app.cleanupFuncs {
+		if cleanup != nil {
+			wg.Go(func() {
+				if err := cleanup(shutdownCtx); err != nil {
+					slog.Error("Failed to cleanup app properly on shutdown", "error", err)
+				}
+			})
+		}
+	}
+	wg.Wait()
+}
+
+// checkForUpdates checks for available updates.
+func (app *App) checkForUpdates(ctx context.Context) {
+	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	info, err := update.Check(checkCtx, version.Version, update.Default)
+	if err != nil || !info.Available() {
+		return
+	}
+	app.events.Publish(pubsub.UpdatedEvent, UpdateAvailableMsg{
+		CurrentVersion: info.Current,
+		LatestVersion:  info.Latest,
+		IsDevelopment:  info.IsDevelopment(),
+	})
+}

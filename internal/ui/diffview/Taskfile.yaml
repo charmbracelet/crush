@@ -1,0 +1,122 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./... {{.CLI_ARGS}}
+
+  test:update:
+    desc: Run tests and update golden files
+    cmds:
+      - go test ./... -update {{.CLI_ARGS}}
+
+  test:print:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffView/**/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:width:unified:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewWidth/Unified/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:width:split:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewWidth/Split/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:height:unified:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewHeight/Unified/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:height:split:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewHeight/Split/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:xoffset:unified:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewXOffset/Unified/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:xoffset:split:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewXOffset/Split/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:yoffset:unified:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewYOffset/Unified/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:yoffset:split:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewYOffset/Split/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:yoffset:unified:infinite:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewYOffsetInfinite/Unified/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true
+
+  test:print:yoffset:split:infinite:
+    desc: Print golden files for debugging
+    method: none
+    sources:
+      - ./testdata/TestDiffViewYOffsetInfinite/Split/*.golden
+    cmds:
+      - for: sources
+        cmd: echo && echo "------- {{.ITEM}} -------" && echo && cat {{.ITEM}}
+    silent: true

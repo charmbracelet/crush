@@ -1,0 +1,13 @@
+package main
+
+import (
+    "fmt"
+)
+
+func main() {
+    fmt.Println(getContent())
+}
+
+func getContent() string {
+    return "Hello, world!"
+}

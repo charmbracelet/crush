@@ -1,0 +1,1 @@
+Get LSP errors, warnings, and hints for a file or the whole project.

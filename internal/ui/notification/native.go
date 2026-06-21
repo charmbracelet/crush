@@ -1,0 +1,52 @@
+package notification
+
+import (
+	"log/slog"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/gen2brain/beeep"
+)
+
+// NativeBackend sends desktop notifications using the native OS notification
+// system via beeep.
+type NativeBackend struct {
+	// icon is the notification icon data (PNG bytes).
+	icon []byte
+	// notifyFunc is the function used to send notifications (swappable for testing).
+	notifyFunc func(title, message string, icon any) error
+}
+
+// NewNativeBackend creates a new native notification backend.
+func NewNativeBackend(icon []byte) *NativeBackend {
+	beeep.AppName = "Crush"
+	return &NativeBackend{
+		icon:       icon,
+		notifyFunc: beeep.Notify,
+	}
+}
+
+// Send returns a command that sends a desktop notification using the native
+// OS notification system.
+func (b *NativeBackend) Send(n Notification) tea.Cmd {
+	return func() tea.Msg {
+		slog.Debug("Sending native notification", "title", n.Title, "message", n.Message)
+
+		if err := b.notifyFunc(n.Title, n.Message, b.icon); err != nil {
+			slog.Error("Failed to send notification", "error", err)
+		} else {
+			slog.Debug("Notification sent successfully")
+		}
+
+		return nil
+	}
+}
+
+// SetNotifyFunc allows replacing the notification function for testing.
+func (b *NativeBackend) SetNotifyFunc(fn func(title, message string, icon any) error) {
+	b.notifyFunc = fn
+}
+
+// ResetNotifyFunc resets the notification function to the default.
+func (b *NativeBackend) ResetNotifyFunc() {
+	b.notifyFunc = beeep.Notify
+}

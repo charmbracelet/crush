@@ -51,9 +51,14 @@ type RuntimeOverrides struct {
 // goroutine races and, together with the shared lock.File, cross-process
 // races on the config file.
 //
-// reloadMu serialises ReloadFromDisk calls to prevent concurrent reloads
-// from racing on store fields. autoReload uses TryLock on reloadMu to
-// skip redundant reloads when one is already in progress.
+// writeMu serialises every operation that produces a new in-memory Config:
+// the typed copy-on-write mutators (SetCompactMode, UpdatePreferredModel,
+// ...) and ReloadFromDisk. Typed mutators take Lock; autoReload takes
+// TryLock so a write triggered re-entrantly during a reload (e.g.
+// configureProviders calling RemoveConfigField) skips the nested reload
+// instead of deadlocking. This is what lets published Configs be treated
+// as immutable: a mutator clones, mutates the clone, and swaps it in under
+// writeMu rather than mutating the live Config in place.
 type ConfigStore struct {
 	config             *Config
 	workingDir         string
@@ -66,13 +71,37 @@ type ConfigStore struct {
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
 
-	mu       sync.Mutex // serialises config file writes
-	reloadMu sync.Mutex // serialises ReloadFromDisk calls
+	// configMu guards the config pointer field against concurrent
+	// readers (Config) and the writeMu-serialised swap (setConfig). It
+	// protects the pointer word only; the pointed-to Config is treated
+	// as immutable once published, since both reloads and typed mutators
+	// build a fresh Config rather than mutating the live one.
+	configMu sync.RWMutex
+
+	mu      sync.Mutex // serialises config file writes
+	writeMu sync.Mutex // serialises in-memory config production (mutators + reload)
 }
 
 // Config returns the pure-data config struct (read-only after load).
+//
+// The pointer read is guarded by configMu so it can never tear against
+// the reload swap in reloadFromDiskLocked. Reloads build a brand-new
+// Config and swap it in rather than mutating the live one, so holding the
+// returned pointer stays safe even across a concurrent reload — the reader
+// keeps reading its (now immutable) snapshot.
 func (s *ConfigStore) Config() *Config {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
 	return s.config
+}
+
+// setConfig atomically swaps the active config pointer under configMu.
+// Used by the reload path; in-place field mutators leave the pointer
+// untouched and run under mu instead.
+func (s *ConfigStore) setConfig(cfg *Config) {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	s.config = cfg
 }
 
 // WorkingDir returns the current working directory.
@@ -100,7 +129,7 @@ func (s *ConfigStore) KnownProviders() []catwalk.Provider {
 
 // SetupAgents configures the coder and task agents on the config.
 func (s *ConfigStore) SetupAgents() {
-	s.config.SetupAgents()
+	s.Config().SetupAgents()
 }
 
 // Overrides returns the runtime overrides for this store.
@@ -212,25 +241,36 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 	return s.SetConfigFields(scope, map[string]any{key: value})
 }
 
-// SetConfigFields sets multiple key/value pairs in the config file for the given
-// scope in a single write. After a successful write, it automatically reloads
-// config to keep in-memory state fresh. This is preferred over multiple
-// SetConfigField calls when writing several fields atomically to avoid
-// intermediate reloads with partial state.
+// SetConfigFields sets multiple key/value pairs in the config file for the
+// given scope in a single write, then reloads in-memory state from disk.
+//
+// Use this for arbitrary external edits where the in-memory effect of the
+// change is not known ahead of time. The typed mutators (which know exactly
+// what changed) go through update instead and skip the reload.
 //
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
-	return s.setConfigFields(scope, kv, true)
+	if err := s.writeConfigFields(scope, kv); err != nil {
+		return err
+	}
+	// Auto-reload to keep in-memory state fresh after config edits.
+	// We use context.Background() since this is an internal operation that
+	// shouldn't be cancelled by user context.
+	if err := s.autoReload(context.Background()); err != nil {
+		// Log warning but don't fail the write - disk is already updated.
+		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+	}
+	return nil
 }
 
-// setConfigFields performs the write and, when reload is true, refreshes
-// in-memory state from disk. Callers that have already updated the relevant
-// in-memory state themselves can pass reload=false to skip the expensive
-// full reparse (which rebuilds the provider catalog and agents). The disk
-// is the source of truth for other processes either way; skipping reload
-// only avoids re-deriving state this process already holds.
-func (s *ConfigStore) setConfigFields(scope Scope, kv map[string]any, reload bool) error {
+// writeConfigFields persists key/value pairs to the config file. It does not
+// touch in-memory config state or the staleness snapshot: callers either
+// reload (SetConfigFields, whose reload recaptures the snapshot) or have
+// already published an updated clone and capture the snapshot themselves
+// (update). Both of those run under writeMu, which is what keeps the
+// snapshot map free of concurrent writers.
+func (s *ConfigStore) writeConfigFields(scope Scope, kv map[string]any) error {
 	// Sort keys for deterministic output regardless of map iteration
 	// order. This also ensures consistent results when callers pass
 	// overlapping JSONPath keys (e.g. "a" and "a.b").
@@ -240,40 +280,69 @@ func (s *ConfigStore) setConfigFields(scope Scope, kv map[string]any, reload boo
 	}
 	slices.Sort(keys)
 
-	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+	return s.atomicWrite(scope, func(data []byte) ([]byte, error) {
 		v := string(data)
 		for _, key := range keys {
 			var sErr error
-			v, sErr = sjson.Set(v, key, kv[key])
-			if sErr != nil {
+			if v, sErr = sjson.Set(v, key, kv[key]); sErr != nil {
 				return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
 			}
 		}
 		return []byte(v), nil
 	})
-	if err != nil {
-		return err
-	}
+}
 
-	if !reload {
-		// The caller has already updated in-memory state; just refresh
-		// the staleness snapshot so the file watcher does not treat our
-		// own write as an external change.
-		if path, perr := s.configPath(scope); perr == nil {
-			s.captureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
-		}
+// mutateInMemory applies a copy-on-write change to the config without
+// persisting. Under writeMu it clones the live config, lets mutate edit the
+// clone, and publishes it. This is the single primitive every in-memory
+// config change goes through, so a published Config is never mutated in
+// place and readers always see a consistent snapshot.
+func (s *ConfigStore) mutateInMemory(mutate func(*Config)) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	nc := s.Config().cloneForWrite()
+	mutate(nc)
+	s.setConfig(nc)
+}
+
+// update applies a copy-on-write change and persists the reported fields.
+// mutate edits the clone and returns the JSON-path fields to write to disk;
+// because the clone already reflects the change, no reload is needed.
+// Returning an empty map publishes the clone without a disk write.
+func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	nc := s.Config().cloneForWrite()
+	fields := mutate(nc)
+	s.setConfig(nc)
+	if len(fields) == 0 {
 		return nil
 	}
-
-	// Auto-reload to keep in-memory state fresh after config edits.
-	// We use context.Background() since this is an internal operation that
-	// shouldn't be cancelled by user context.
-	if err := s.autoReload(context.Background()); err != nil {
-		// Log warning but don't fail the write - disk is already updated.
-		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+	if err := s.writeConfigFields(scope, fields); err != nil {
+		return err
 	}
-
+	// Refresh the staleness snapshot so the file watcher does not treat
+	// our own write as an external change. Safe to touch the snapshot map
+	// here because we hold writeMu.
+	if path, err := s.configPath(scope); err == nil {
+		s.captureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
+	}
 	return nil
+}
+
+// OverridePreferredModel sets the preferred model for the given type in
+// memory only, without persisting. It is for per-run overrides (such as the
+// non-interactive --model flags) that must not be written to the user's
+// config file.
+func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model SelectedModel) {
+	s.mutateInMemory(func(c *Config) {
+		if c.Models == nil {
+			c.Models = make(map[SelectedModelType]SelectedModel)
+		}
+		c.Models[modelType] = model
+	})
 }
 
 // RemoveConfigField removes a key from the config file for the given scope.
@@ -304,47 +373,45 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 // persists it to the config file at the given scope. The selected model and
 // the recent-models list are written together in a single config write.
 //
-// The in-memory config is updated directly here, so the write skips the
-// full disk reparse/reload. The reload would otherwise rebuild the entire
-// provider catalog and agents on every model switch, which dominates the
-// latency of selecting a model. Agents are refreshed separately by the
-// caller (see UpdateAgentModel).
+// The write skips the full disk reparse/reload (which would rebuild the
+// provider catalog and agents on every model switch and dominate selection
+// latency); agents are refreshed separately by the caller (see
+// UpdateAgentModel).
 func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
-	s.config.Models[modelType] = model
+	return s.update(scope, func(c *Config) map[string]any {
+		if c.Models == nil {
+			c.Models = make(map[SelectedModelType]SelectedModel)
+		}
+		c.Models[modelType] = model
 
-	fields := map[string]any{
-		fmt.Sprintf("models.%s", modelType): model,
-	}
-
-	// Compute the updated recent-models list in memory. When it changes,
-	// fold the write into the same batch so we avoid a second write.
-	if updated, changed := s.nextRecentModels(modelType, model); changed {
-		s.config.RecentModels[modelType] = updated
-		fields[fmt.Sprintf("recent_models.%s", modelType)] = updated
-	}
-
-	if err := s.setConfigFields(scope, fields, false); err != nil {
-		return fmt.Errorf("failed to update preferred model: %w", err)
-	}
-	return nil
+		fields := map[string]any{
+			fmt.Sprintf("models.%s", modelType): model,
+		}
+		if updated, changed := nextRecentModels(c, modelType, model); changed {
+			if c.RecentModels == nil {
+				c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+			}
+			c.RecentModels[modelType] = updated
+			fields[fmt.Sprintf("recent_models.%s", modelType)] = updated
+		}
+		return fields
+	})
 }
 
 // SetCompactMode sets the compact mode setting and persists it.
 func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
-	if s.config.Options == nil {
-		s.config.Options = &Options{}
-	}
-	s.config.Options.TUI.CompactMode = enabled
-	return s.SetConfigField(scope, "options.tui.compact_mode", enabled)
+	return s.update(scope, func(c *Config) map[string]any {
+		c.ensureTUI().CompactMode = enabled
+		return map[string]any{"options.tui.compact_mode": enabled}
+	})
 }
 
 // SetTransparentBackground sets the transparent background setting and persists it.
 func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error {
-	if s.config.Options == nil {
-		s.config.Options = &Options{}
-	}
-	s.config.Options.TUI.Transparent = &enabled
-	return s.SetConfigField(scope, "options.tui.transparent", enabled)
+	return s.update(scope, func(c *Config) map[string]any {
+		c.ensureTUI().Transparent = &enabled
+		return map[string]any{"options.tui.transparent": enabled}
+	})
 }
 
 // SetProviderAPIKey sets the API key for a provider and persists it.
@@ -376,10 +443,11 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		}
 	}
 
-	providerConfig, exists = s.config.Providers.Get(providerID)
+	cfg := s.Config()
+	providerConfig, exists = cfg.Providers.Get(providerID)
 	if exists {
 		setKeyOrToken()
-		s.config.Providers.Set(providerID, providerConfig)
+		cfg.Providers.Set(providerID, providerConfig)
 		return nil
 	}
 
@@ -406,7 +474,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	} else {
 		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
 	}
-	s.config.Providers.Set(providerID, providerConfig)
+	cfg.Providers.Set(providerID, providerConfig)
 	return nil
 }
 
@@ -420,7 +488,8 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 // already rotated the refresh token — the disk is re-checked under lock
 // to recover the other process's token.
 func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
-	providerConfig, exists := s.config.Providers.Get(providerID)
+	cfg := s.Config()
+	providerConfig, exists := cfg.Providers.Get(providerID)
 	if !exists {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
@@ -482,7 +551,7 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 		providerConfig.SetupGitHubCopilot()
 	}
 
-	s.config.Providers.Set(providerID, providerConfig)
+	cfg.Providers.Set(providerID, providerConfig)
 
 	if err := s.SetConfigFields(scope, map[string]any{
 		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
@@ -501,7 +570,7 @@ func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Tok
 	if providerID == string(catwalk.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}
-	s.config.Providers.Set(providerID, providerConfig)
+	s.Config().Providers.Set(providerID, providerConfig)
 	return nil
 }
 
@@ -541,18 +610,13 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 }
 
 // nextRecentModels computes the recent-models list for the given type
-// after recording the supplied model at the front, without persisting
-// anything. It returns the new slice and whether it differs from the
-// current list. It also lazily initializes the RecentModels map. Callers
-// that want to persist the change can fold the result into a batched
-// config write; recordRecentModel wraps it for the standalone case.
-func (s *ConfigStore) nextRecentModels(modelType SelectedModelType, model SelectedModel) ([]SelectedModel, bool) {
+// after recording the supplied model at the front, operating on the
+// provided config without persisting anything. It returns the new slice
+// and whether it differs from cfg's current list. Callers fold the result
+// into a clone they are about to publish.
+func nextRecentModels(cfg *Config, modelType SelectedModelType, model SelectedModel) ([]SelectedModel, bool) {
 	if model.Provider == "" || model.Model == "" {
 		return nil, false
-	}
-
-	if s.config.RecentModels == nil {
-		s.config.RecentModels = make(map[SelectedModelType][]SelectedModel)
 	}
 
 	eq := func(a, b SelectedModel) bool {
@@ -564,7 +628,7 @@ func (s *ConfigStore) nextRecentModels(modelType SelectedModelType, model Select
 		Model:    model.Model,
 	}
 
-	current := s.config.RecentModels[modelType]
+	current := cfg.RecentModels[modelType]
 	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
 		return eq(existing, entry)
 	})
@@ -579,25 +643,6 @@ func (s *ConfigStore) nextRecentModels(modelType SelectedModelType, model Select
 	}
 
 	return updated, true
-}
-
-// recordRecentModel records a model in the recent models list and persists
-// the change. It is retained for callers that update recent models in
-// isolation; UpdatePreferredModel batches the same change into a single
-// config write instead.
-func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
-	updated, changed := s.nextRecentModels(modelType, model)
-	if !changed {
-		return nil
-	}
-
-	s.config.RecentModels[modelType] = updated
-
-	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
-		return fmt.Errorf("failed to persist recent models: %w", err)
-	}
-
-	return nil
 }
 
 // NewTestStore creates a ConfigStore for testing purposes.
@@ -777,17 +822,17 @@ func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
 // config atomically. It rebuilds the staleness snapshot after successful reload.
 // On failure, the store state is rolled back to its previous state.
-// Concurrent calls are serialised via reloadMu.
+// Concurrent calls are serialised via writeMu.
 func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 	if s.workingDir == "" {
 		return fmt.Errorf("cannot reload: working directory not set")
 	}
-	s.reloadMu.Lock()
-	defer s.reloadMu.Unlock()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	return s.reloadFromDiskLocked(ctx)
 }
 
-// reloadFromDiskLocked performs the actual reload. Caller must hold reloadMu.
+// reloadFromDiskLocked performs the actual reload. Caller must hold writeMu.
 func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// Migrate deprecated disable_notifications before reloading config.
 	migrateDisableNotifications()
@@ -800,8 +845,8 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 
 	// Apply defaults (using existing data directory if set)
 	var dataDir string
-	if s.config != nil && s.config.Options != nil {
-		dataDir = s.config.Options.DataDirectory
+	if cur := s.Config(); cur != nil && cur.Options != nil {
+		dataDir = cur.Options.DataDirectory
 	}
 	cfg.setDefaults(s.workingDir, dataDir)
 
@@ -842,7 +887,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	}
 
 	// Save current state for potential rollback
-	oldConfig := s.config
+	oldConfig := s.Config()
 	oldLoadedPaths := s.loadedPaths
 	oldResolver := s.resolver
 	oldKnownProviders := s.knownProviders
@@ -850,7 +895,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	oldWorkspacePath := s.workspacePath
 
 	// Update store state BEFORE running model/agent setup (so they see new config)
-	s.config = cfg
+	s.setConfig(cfg)
 	s.loadedPaths = loadedPaths
 	s.resolver = resolver
 	s.knownProviders = providers
@@ -871,7 +916,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 
 	// Rollback on setup failure
 	if setupErr != nil {
-		s.config = oldConfig
+		s.setConfig(oldConfig)
 		s.loadedPaths = oldLoadedPaths
 		s.resolver = oldResolver
 		s.knownProviders = oldKnownProviders
@@ -904,9 +949,9 @@ func (s *ConfigStore) autoReload(ctx context.Context) error {
 	// are rare and the next user action or file-watch tick will pick
 	// up the change. Callers that need guaranteed fresh state after a
 	// write should call ReloadFromDisk explicitly.
-	if !s.reloadMu.TryLock() {
+	if !s.writeMu.TryLock() {
 		return nil
 	}
-	defer s.reloadMu.Unlock()
+	defer s.writeMu.Unlock()
 	return s.reloadFromDiskLocked(ctx)
 }

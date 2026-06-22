@@ -111,10 +111,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	valueResolver := NewShellVariableResolver(env)
 	store.resolver = valueResolver
 
-	// Hold reloadMu during initial load to prevent configureProviders
+	// Hold writeMu during initial load to prevent configureProviders
 	// from triggering auto-reload via RemoveConfigField.
-	store.reloadMu.Lock()
-	defer store.reloadMu.Unlock()
+	store.writeMu.Lock()
+	defer store.writeMu.Unlock()
 
 	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)

@@ -34,6 +34,12 @@ type List struct {
 	// renderCallbacks is a list of callbacks to apply when rendering items.
 	renderCallbacks []func(idx, selectedIdx int, item Item) Item
 
+	// totalHeightCache is a cached value of the total rendered height of
+	// all items. It is invalidated whenever the item set changes or the
+	// viewport width changes (which can alter per-item line counts).
+	totalHeightCache int
+	totalHeightValid bool
+
 	// cache is the F6 list-level render memo, keyed by item pointer.
 	// Each entry stores the rendered content, a pre-split slice of
 	// lines (so AtBottom / Render / VisibleItemIndices /
@@ -158,15 +164,25 @@ func (l *List) Len() int {
 }
 
 // TotalHeight returns the total height of all items in the list.
+// The result is cached and only recomputed when the item set or
+// viewport width changes.
 func (l *List) TotalHeight() int {
+	if l.totalHeightValid {
+		return l.totalHeightCache
+	}
 	total := 0
 	for idx := range l.items {
-		item := l.getItem(idx)
-		total += item.height
+		entry := l.renderItemEntry(idx)
+		if entry == nil {
+			continue
+		}
+		total += entry.height
 		if l.gap > 0 && idx < len(l.items)-1 {
 			total += l.gap
 		}
 	}
+	l.totalHeightCache = total
+	l.totalHeightValid = true
 	return total
 }
 
@@ -289,6 +305,11 @@ func (l *List) renderItemEntry(idx int) *listCacheEntry {
 		entry = &listCacheEntry{}
 		l.cache[rawItem] = entry
 	}
+	// If the item's rendered height changed, the cached total height is
+	// no longer valid and must be recomputed on the next TotalHeight call.
+	if entry.height != height {
+		l.totalHeightValid = false
+	}
 	entry.width = l.width
 	entry.version = finalVersion
 	entry.frozen = frozen
@@ -303,6 +324,7 @@ func (l *List) invalidateAll() {
 	for k := range l.cache {
 		delete(l.cache, k)
 	}
+	l.totalHeightValid = false
 }
 
 // Invalidate drops the cache entry for the given item, forcing a
@@ -575,6 +597,7 @@ func (l *List) PrependItems(items ...Item) {
 	if l.selectedIdx != -1 {
 		l.selectedIdx += len(items)
 	}
+	l.totalHeightValid = false
 }
 
 // SetItems sets the items in the list. Cache entries for items that
@@ -586,11 +609,13 @@ func (l *List) SetItems(items ...Item) {
 	l.offsetIdx = min(l.offsetIdx, len(l.items)-1)
 	l.offsetLine = 0
 	l.retainCacheFor(items)
+	l.totalHeightValid = false
 }
 
 // AppendItems appends items to the list.
 func (l *List) AppendItems(items ...Item) {
 	l.items = append(l.items, items...)
+	l.totalHeightValid = false
 }
 
 // RemoveItem removes the item at the given index from the list.
@@ -623,6 +648,7 @@ func (l *List) RemoveItem(idx int) {
 		l.offsetIdx = max(0, len(l.items)-1)
 		l.offsetLine = 0
 	}
+	l.totalHeightValid = false
 }
 
 // Focused returns whether the list is focused.

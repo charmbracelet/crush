@@ -269,10 +269,9 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.help.SetWidth(innerWidth)
 
 	listHeight := height - heightOffset
-	m.list.SetSize(innerWidth, listHeight)
-	listTotalHeight := m.list.TotalHeight()
 	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
 	m.list.SetSize(listWidth, listHeight)
+	listTotalHeight := m.list.TotalHeight()
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"

@@ -703,11 +703,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
+			prevPillsHeight := m.pillsAreaHeight()
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
+			}
+			// The pills panel reserves vertical space that the chat area
+			// must yield. Recompute the layout whenever that footprint
+			// changes (todos appearing, the list growing, etc.) so the
+			// box renders on first paint rather than waiting for a toggle.
+			// When the footprint is unchanged we still re-render the pill
+			// content so status changes (e.g. the in-progress spinner)
+			// show up.
+			if m.pillsAreaHeight() != prevPillsHeight {
 				m.updateLayoutAndSize()
+			} else {
+				m.renderPills()
 			}
 			m.autoExpandPillsIfReasonable()
 		}
@@ -2364,6 +2376,13 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if m.layout != layout {
 		m.layout = layout
 		m.updateSize()
+	} else if m.state == uiChat && m.hasSession() {
+		// Re-render pills on every draw so the box appears even when
+		// the layout footprint hasn't changed (e.g. todos arrived
+		// while the panel was collapsed). updateSize already calls
+		// renderPills, but only when the layout actually differs;
+		// this catches the steady-state case.
+		m.renderPills()
 	}
 
 	// Clear the screen first

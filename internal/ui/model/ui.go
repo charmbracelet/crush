@@ -196,6 +196,11 @@ type UI struct {
 
 	isTransparent bool
 
+	// themeKey identifies the currently applied theme so applyTheme can
+	// skip the expensive style rebuild when switching to a provider that
+	// resolves to the same theme.
+	themeKey string
+
 	focus uiFocusState
 	state uiState
 
@@ -379,6 +384,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 
 	status := NewStatus(com, ui)
+
+	// Seed the active theme key from the large model provider so the
+	// first model selection can correctly skip a redundant theme swap.
+	if cfg := com.Config(); cfg != nil {
+		ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
+	}
 
 	ui.setEditorPrompt(com.Workspace.PermissionSkipRequests())
 	ui.randomizePlaceholders()
@@ -1842,8 +1853,10 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	} else {
 		if msg.ModelType == config.SelectedModelTypeLarge {
 			// Swap the theme live based on the newly selected large
-			// model's provider.
-			m.applyTheme(styles.ThemeForProvider(providerID))
+			// model's provider. Skipped when the provider resolves to
+			// the already-active theme, which avoids a full markdown
+			// re-render of the transcript on every selection.
+			m.applyThemeForProvider(providerID)
 		}
 		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
@@ -3369,6 +3382,21 @@ func (m *UI) renderEditorView(width int) string {
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+}
+
+// applyThemeForProvider swaps the active theme to the one associated with
+// the given provider, but only when that theme differs from the one
+// already applied. Most providers share a single theme, so re-selecting a
+// model from the same theme family would otherwise pay the full cost of
+// invalidating the markdown renderer cache and re-rendering the entire
+// transcript for no visible change.
+func (m *UI) applyThemeForProvider(providerID string) {
+	key := styles.ThemeKeyForProvider(providerID)
+	if key == m.themeKey {
+		return
+	}
+	m.themeKey = key
+	m.applyTheme(styles.ThemeForProvider(providerID))
 }
 
 // applyTheme replaces the active styles with the given theme, drops the

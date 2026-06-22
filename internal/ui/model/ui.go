@@ -966,8 +966,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case common.CoalescedWheelMsg:
-		// Route wheel events to active inline editor if it supports scrolling.
-		if m.activeInline != nil {
+		// Route wheel events to active inline editor only when the
+		// mouse is over the editor area, so scrolling over the chat
+		// still scrolls the chat.
+		if m.activeInline != nil && image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.layout.editor) {
 			if we, ok := m.activeInline.(common.WheelScrollable); ok {
 				we.HandleWheel(msg.DeltaX, msg.DeltaY)
 				return m, tea.Batch(cmds...)

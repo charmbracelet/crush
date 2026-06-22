@@ -948,6 +948,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return createMsgErr
 		},
 		OnStepFinish: func(stepResult fantasy.StepResult) error {
+			for _, w := range stepResult.Warnings {
+				slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
+			}
 			finishReason := message.FinishReasonUnknown
 			switch stepResult.FinishReason {
 			case fantasy.FinishReasonLength:

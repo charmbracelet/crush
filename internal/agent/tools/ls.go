@@ -122,7 +122,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 				}
 			}
 
-			output, metadata, err := ListDirectoryTree(searchPath, params, lsConfig)
+			output, metadata, err := ListDirectoryTree(ctx, searchPath, params, lsConfig)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
@@ -135,7 +135,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 	)
 }
 
-func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolLs) (string, LSResponseMetadata, error) {
+func ListDirectoryTree(ctx context.Context, searchPath string, params LSParams, lsConfig config.ToolLs) (string, LSResponseMetadata, error) {
 	if _, err := os.Stat(searchPath); os.IsNotExist(err) {
 		return "", LSResponseMetadata{}, fmt.Errorf("path does not exist: %s", searchPath)
 	}
@@ -143,6 +143,7 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 	depth, limit := lsConfig.Limits()
 	maxFiles := cmp.Or(limit, maxLSFiles)
 	files, truncated, err := fsext.ListDirectory(
+		ctx,
 		searchPath,
 		params.Ignore,
 		cmp.Or(params.Depth, depth),

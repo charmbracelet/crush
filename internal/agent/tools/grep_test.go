@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -84,10 +85,10 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte(crushignoreContent), 0o644))
 
 	// Test both implementations
-	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
+	for name, fn := range map[string]func(context.Context, string, string, string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
-		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+		"rg": func(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
+			return searchWithRipgrep(ctx, pattern, path, include)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -97,7 +98,7 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 				t.Skip("rg is not in $PATH")
 			}
 
-			matches, err := fn("hello world", tempDir, "")
+			matches, err := fn(t.Context(), "hello world", tempDir, "")
 			require.NoError(t, err)
 
 			// Convert matches to a set of file paths for easier testing
@@ -144,10 +145,10 @@ func TestSearchImplementations(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".gitignore"), []byte("file4.txt\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte("file5.txt\n"), 0o644))
 
-	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
+	for name, fn := range map[string]func(context.Context, string, string, string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
-		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+		"rg": func(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
+			return searchWithRipgrep(ctx, pattern, path, include)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -157,7 +158,7 @@ func TestSearchImplementations(t *testing.T) {
 				t.Skip("rg is not in $PATH")
 			}
 
-			matches, err := fn("hello world", tempDir, "")
+			matches, err := fn(t.Context(), "hello world", tempDir, "")
 			require.NoError(t, err)
 
 			require.Equal(t, len(matches), 4)
@@ -395,10 +396,10 @@ func TestColumnMatch(t *testing.T) {
 	t.Parallel()
 
 	// Test both implementations
-	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
+	for name, fn := range map[string]func(context.Context, string, string, string) ([]grepMatch, error){
 		"regex": searchFilesWithRegex,
-		"rg": func(pattern, path, include string) ([]grepMatch, error) {
-			return searchWithRipgrep(t.Context(), pattern, path, include)
+		"rg": func(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
+			return searchWithRipgrep(ctx, pattern, path, include)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -408,7 +409,7 @@ func TestColumnMatch(t *testing.T) {
 				t.Skip("rg is not in $PATH")
 			}
 
-			matches, err := fn("THIS", "./testdata/", "")
+			matches, err := fn(t.Context(), "THIS", "./testdata/", "")
 			require.NoError(t, err)
 			require.Len(t, matches, 1)
 			match := matches[0]

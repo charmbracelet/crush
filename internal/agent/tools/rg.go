@@ -27,6 +27,9 @@ var getRg = sync.OnceValue(func() string {
 })
 
 func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
+	if ctx.Err() != nil {
+		return nil
+	}
 	name := getRg()
 	if name == "" {
 		return nil
@@ -42,6 +45,9 @@ func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 }
 
 func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
+	if ctx.Err() != nil {
+		return nil
+	}
 	name := getRg()
 	if name == "" {
 		return nil

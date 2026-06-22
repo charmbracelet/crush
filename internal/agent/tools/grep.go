@@ -193,7 +193,7 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
 	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
 	if err != nil {
-		matches, err = searchFilesWithRegex(pattern, rootPath, include)
+		matches, err = searchFilesWithRegex(ctx, pattern, rootPath, include)
 		if err != nil {
 			return nil, false, err
 		}
@@ -280,7 +280,7 @@ type ripgrepMatch struct {
 	} `json:"data"`
 }
 
-func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
+func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
 	matches := []grepMatch{}
 
 	// Use cached regex compilation
@@ -302,6 +302,9 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	walker := fsext.NewFastGlobWalker(rootPath)
 
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			return nil // Skip errors
 		}
@@ -329,7 +332,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil
 		}
 
-		match, lineNum, charNum, lineText, err := fileContainsPattern(path, regex)
+		match, lineNum, charNum, lineText, err := fileContainsPattern(ctx, path, regex)
 		if err != nil {
 			return nil // Skip files we can't read
 		}
@@ -357,7 +360,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	return matches, nil
 }
 
-func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
+func fileContainsPattern(ctx context.Context, filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
 	if pattern == nil {
 		return false, 0, 0, "", nil
 	}
@@ -375,6 +378,9 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, in
 	reader := bufio.NewReader(file)
 	lineNum := 0
 	for {
+		if ctx.Err() != nil {
+			return false, 0, 0, "", ctx.Err()
+		}
 		line, err := reader.ReadString('\n')
 		lineNum++
 		line = strings.TrimSuffix(line, "\n")

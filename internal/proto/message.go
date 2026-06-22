@@ -172,6 +172,15 @@ type Finish struct {
 
 func (Finish) isPart() {}
 
+// ShellCommand stores a bang-mode shell command and its output.
+type ShellCommand struct {
+	Command  string `json:"command"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
+
+func (ShellCommand) isPart() {}
+
 // MarshalJSON implements the [json.Marshaler] interface.
 func (m Message) MarshalJSON() ([]byte, error) {
 	parts, err := MarshalParts(m.Parts)
@@ -495,13 +504,14 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 type partType string
 
 const (
-	reasoningType  partType = "reasoning"
-	textType       partType = "text"
-	imageURLType   partType = "image_url"
-	binaryType     partType = "binary"
-	toolCallType   partType = "tool_call"
-	toolResultType partType = "tool_result"
-	finishType     partType = "finish"
+	reasoningType    partType = "reasoning"
+	textType         partType = "text"
+	imageURLType     partType = "image_url"
+	binaryType       partType = "binary"
+	toolCallType     partType = "tool_call"
+	toolResultType   partType = "tool_result"
+	finishType       partType = "finish"
+	shellCommandType partType = "shell_command"
 )
 
 type partWrapper struct {
@@ -531,6 +541,8 @@ func MarshalParts(parts []ContentPart) ([]byte, error) {
 			typ = toolResultType
 		case Finish:
 			typ = finishType
+		case ShellCommand:
+			typ = shellCommandType
 		default:
 			return nil, fmt.Errorf("unknown part type: %T", part)
 		}
@@ -602,6 +614,12 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 			parts = append(parts, part)
 		case finishType:
 			part := Finish{}
+			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
+		case shellCommandType:
+			part := ShellCommand{}
 			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}

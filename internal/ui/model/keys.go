@@ -47,6 +47,8 @@ type KeyMap struct {
 		Copy           key.Binding
 		ClearHighlight key.Binding
 		Expand         key.Binding
+		ScrollLeft     key.Binding
+		ScrollRight    key.Binding
 	}
 
 	Initialize struct {
@@ -127,7 +129,7 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+f", "add image"),
 	)
 	km.Editor.PasteImage = key.NewBinding(
-		key.WithKeys("ctrl+v"),
+		key.WithKeys("ctrl+v", "super+v"),
 		key.WithHelp("ctrl+v", "paste image from clipboard"),
 	)
 	km.Editor.MentionFile = key.NewBinding(
@@ -249,6 +251,14 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.Expand = key.NewBinding(
 		key.WithKeys("space"),
 		key.WithHelp("space", "expand/collapse"),
+	)
+	km.Chat.ScrollLeft = key.NewBinding(
+		key.WithKeys("shift+left", "H"),
+		key.WithHelp("shift+←/H", "scroll left"),
+	)
+	km.Chat.ScrollRight = key.NewBinding(
+		key.WithKeys("shift+right", "L"),
+		key.WithHelp("shift+→/L", "scroll right"),
 	)
 	km.Initialize.Yes = key.NewBinding(
 		key.WithKeys("y", "Y"),

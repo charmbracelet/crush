@@ -135,6 +135,19 @@ type AgentMessage struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
+// ShellCommandRequest represents a request to run a shell command directly.
+type ShellCommandRequest struct {
+	SessionID string `json:"session_id"`
+	Command   string `json:"command"`
+	TermWidth int    `json:"term_width,omitempty"`
+}
+
+// ShellCommandResponse represents the result of a direct shell command.
+type ShellCommandResponse struct {
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
+
 // AgentSession represents a session with its busy status.
 type AgentSession struct {
 	Session

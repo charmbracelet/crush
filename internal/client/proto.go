@@ -445,6 +445,26 @@ func decodeErrorMessage(body io.Reader) string {
 	return e.Message
 }
 
+// RunShellCommand runs a shell command in the workspace without triggering the agent.
+func (c *Client) RunShellCommand(ctx context.Context, id, sessionID, command string, termWidth int) (proto.ShellCommandResponse, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/shell", id, sessionID), nil, jsonBody(proto.ShellCommandRequest{
+		Command:   command,
+		TermWidth: termWidth,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return proto.ShellCommandResponse{}, fmt.Errorf("failed to run shell command: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return proto.ShellCommandResponse{}, fmt.Errorf("failed to run shell command: status code %d", rsp.StatusCode)
+	}
+	var resp proto.ShellCommandResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return proto.ShellCommandResponse{}, fmt.Errorf("failed to decode shell command response: %w", err)
+	}
+	return resp, nil
+}
+
 // GetAgentSessionInfo retrieves the agent session info for a workspace.
 func (c *Client) GetAgentSessionInfo(ctx context.Context, id string, sessionID string) (*proto.AgentSession, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s", id, sessionID), nil, nil)

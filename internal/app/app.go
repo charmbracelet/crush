@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
@@ -121,6 +122,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	app.setupEvents()
+
+	// Initialize clipboard support. This is best-effort; if it fails
+	// (e.g., headless environment), clipboard operations will return nil.
+	if err := clipboard.Init(); err != nil {
+		slog.Warn("Clipboard initialization failed", "error", err)
+	}
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)

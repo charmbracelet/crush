@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -31,6 +32,7 @@ import (
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -109,6 +111,20 @@ const (
 
 type openEditorMsg struct {
 	Text string
+}
+
+type shellResultMsg struct {
+	PendingID string // ID of the pending ShellItem to update.
+	Command   string
+	Output    string
+	ExitCode  int
+}
+
+// shellStreamMsg carries incremental output from a streaming shell command.
+type shellStreamMsg struct {
+	PendingID string
+	Chunk     string
+	streamCh  <-chan string // unexported; used to continue draining
 }
 
 type (
@@ -192,6 +208,22 @@ type UI struct {
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
+	// bangMode tracks whether the editor is in bang (!) shell mode.
+	bangMode     bool
+	bangWasEmpty bool // true when bang prompt became empty on last keystroke
+
+	// pendingBangCommand holds a shell command that was issued before
+	// the session finished loading. The loadSessionMsg handler creates
+	// the pending UI item and starts execution once the chat list is
+	// stable, eliminating races between session load and shell output.
+	pendingBangCommand string
+
+	// bangCancel cancels a running bang-mode shell command. Nil when no
+	// bang command is in progress. Set by runShellCommand, cleared by
+	// shellResultMsg. Checked by isAgentBusy and cancelAgent so that
+	// Escape works for bang commands the same way it does for agent runs.
+	bangCancel context.CancelFunc
+
 	header *header
 
 	// sendProgressBar instructs the TUI to send progress bar updates to the
@@ -227,7 +259,7 @@ type UI struct {
 	}
 
 	// lsp
-	lspStates map[string]app.LSPClientInfo
+	lspStates map[string]workspace.LSPClientInfo
 
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
@@ -337,7 +369,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		completions:         comp,
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
-		lspStates:           make(map[string]app.LSPClientInfo),
+		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
@@ -596,6 +628,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.autoExpandPillsIfReasonable(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		// If a bang command was issued before the session finished
+		// loading, start it now that the chat list is stable.
+		if m.pendingBangCommand != "" {
+			cmds = append(cmds, m.runShellCommandInternal(m.pendingBangCommand, true))
+			m.pendingBangCommand = ""
+		}
 		if hasInProgressTodo(m.session.Todos) {
 			// only start spinner if there is an in-progress todo
 			if m.isAgentBusy() {
@@ -707,7 +745,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
-		m.lspStates = app.GetLSPStates()
+		m.lspStates = m.com.Workspace.LSPGetStates()
+	case pubsub.Event[workspace.LSPEvent]:
+		m.lspStates = m.com.Workspace.LSPGetStates()
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
 	case pubsub.Event[mcp.Event]:
@@ -864,6 +904,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
+			if msg.DeltaX != 0 {
+				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
+			}
 			lines := int(msg.DeltaY)
 			if lines == 0 {
 				break
@@ -923,7 +966,56 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prevHeight := m.textarea.Height()
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
+		m.syncBangModeFromTextarea()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+	case shellStreamMsg:
+		if item := m.chat.MessageItem(msg.PendingID); item != nil {
+			if shellItem, ok := item.(*chat.ShellItem); ok {
+				shellItem.AppendOutput(msg.Chunk)
+				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		// Continue draining the stream channel.
+		if msg.streamCh != nil {
+			ch := msg.streamCh
+			pid := msg.PendingID
+			cmds = append(cmds, func() tea.Msg {
+				chunk, ok := <-ch
+				if !ok {
+					return nil
+				}
+				return shellStreamMsg{PendingID: pid, Chunk: chunk, streamCh: ch}
+			})
+		}
+	case shellResultMsg:
+		// Clear the bang cancel func — command is done.
+		if m.bangCancel != nil {
+			m.bangCancel()
+			m.bangCancel = nil
+		}
+		// Complete the pending shell item if it exists, otherwise create a new one.
+		completed := false
+		if msg.PendingID != "" {
+			if item := m.chat.MessageItem(msg.PendingID); item != nil {
+				if shellItem, ok := item.(*chat.ShellItem); ok {
+					shellItem.Complete(msg.Output, msg.ExitCode)
+					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					completed = true
+				}
+			}
+		}
+		if !completed {
+			item := chat.NewShellItem(m.com.Styles, msg.Command, msg.Output, msg.ExitCode)
+			m.chat.AppendMessages(item)
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		cmds = append(cmds, m.loadPromptHistory())
 	case hyperRefreshDoneMsg:
 		if cmd := m.handleSelectModel(msg.action); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -977,12 +1069,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
-		if m.isAgentBusy() {
+		if m.bangMode {
+			m.textarea.Placeholder = "Run a shell command"
+		} else if m.isAgentBusy() {
 			m.textarea.Placeholder = m.workingPlaceholder
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if m.com.Workspace.PermissionSkipRequests() {
+		if !m.bangMode && m.com.Workspace.PermissionSkipRequests() {
 			m.textarea.Placeholder = "Yolo mode!"
 		}
 	}
@@ -1116,6 +1210,18 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 
 	switch msg.Role {
 	case message.User:
+		// Shell commands are rendered live via shellResultMsg; skip
+		// the persisted duplicate.
+		hasShellCmd := false
+		for _, part := range msg.Parts {
+			if _, ok := part.(message.ShellCommand); ok {
+				hasShellCmd = true
+				break
+			}
+		}
+		if hasShellCmd {
+			return nil
+		}
 		m.lastUserMessageTime = msg.CreatedAt
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
 		for _, item := range items {
@@ -1452,7 +1558,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 			break
 		}
-		cmds = append(cmds, m.openEditor(m.textarea.Value()))
+		editorValue := m.textarea.Value()
+		if m.bangMode {
+			editorValue = "!" + editorValue
+		}
+		cmds = append(cmds, m.openEditor(editorValue))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
@@ -1970,6 +2080,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return m.openQuitDialog()
 				}
 
+				if m.bangMode && value != "" {
+					m.bangMode = false
+					yolo := m.com.Workspace.PermissionSkipRequests()
+					m.setEditorPrompt(yolo)
+					m.randomizePlaceholders()
+					m.historyReset()
+					return tea.Batch(m.runShellCommand(value))
+				}
+
 				attachments := m.attachments.List()
 				m.attachments.Reset()
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
@@ -2003,7 +2122,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 					break
 				}
-				cmds = append(cmds, m.openEditor(m.textarea.Value()))
+				editorValue := m.textarea.Value()
+				if m.bangMode {
+					editorValue = "!" + editorValue
+				}
+				cmds = append(cmds, m.openEditor(editorValue))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				prevHeight := m.textarea.Height()
 				m.textarea.InsertRune('\n')
@@ -2034,6 +2157,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
+				// Bang mode: backspace on already-empty prompt exits.
+				if m.bangMode && m.bangWasEmpty && msg.Code == tea.KeyBackspace {
+					m.bangMode = false
+					m.bangWasEmpty = false
+					yolo := m.com.Workspace.PermissionSkipRequests()
+					m.setEditorPrompt(yolo)
+					break
+				}
+
 				// Check for @ trigger before passing to textarea.
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
@@ -2059,6 +2191,34 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+
+				// Bang mode: enter when "!" is typed at the start of the
+				// prompt, optionally preceded by whitespace (either on an
+				// empty/whitespace-only prompt or prepended to existing text).
+				// Exit on backspace clearing the last character.
+				newVal := m.textarea.Value()
+				trimmedNew := strings.TrimLeftFunc(newVal, unicode.IsSpace)
+				trimmedCur := strings.TrimLeftFunc(curValue, unicode.IsSpace)
+				if !m.bangMode && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
+					m.bangMode = true
+					m.bangWasEmpty = len(strings.TrimSpace(curValue)) == 0
+					// Strip leading whitespace and the "!" from the textarea
+					// while preserving the cursor position relative to the
+					// command text.
+					col := m.textarea.Column()
+					line := m.textarea.Line()
+					stripped := trimmedNew[1:]
+					m.textarea.SetValue(stripped)
+					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
+					_ = line // cursor line doesn't change; prefix removed
+					yolo := m.com.Workspace.PermissionSkipRequests()
+					m.setEditorPrompt(yolo)
+				} else if m.bangMode && newVal == "" && curValue != "" {
+					// Just cleared last character; mark empty, stay in bang mode.
+					m.bangWasEmpty = true
+				} else if m.bangMode && newVal != "" {
+					m.bangWasEmpty = false
+				}
 
 				// Any text modification becomes the current draft.
 				m.updateHistoryDraft(curValue)
@@ -2940,8 +3100,12 @@ func (m *UI) openEditor(value string) tea.Cmd {
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode is enabled.
+// yolo mode or bang mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
+	if m.bangMode {
+		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
+		return
+	}
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
@@ -2980,6 +3144,22 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.Editor.PromptYoloDotsFocused.Render()
 	}
 	return t.Editor.PromptYoloDotsBlurred.Render()
+}
+
+// bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
+// icon and dots.
+func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptBangIconFocused.Render()
+		}
+		return t.Editor.PromptBangIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.Editor.PromptBangDotsFocused.Render()
+	}
+	return t.Editor.PromptBangDotsBlurred.Render()
 }
 
 // closeCompletions closes the completions popup and resets state.
@@ -3132,6 +3312,9 @@ func isWhitespace(b byte) bool {
 // isAgentBusy returns true if the agent coordinator exists and is currently
 // busy processing a request.
 func (m *UI) isAgentBusy() bool {
+	if m.bangCancel != nil {
+		return true
+	}
 	return m.com.Workspace.AgentIsReady() &&
 		m.com.Workspace.AgentIsBusy()
 }
@@ -3293,6 +3476,97 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	return tea.Batch(cmds...)
 }
 
+// runShellCommand executes a shell command server-side without triggering
+// the LLM. The result is displayed as a tool-style item in the chat.
+func (m *UI) runShellCommand(command string) tea.Cmd {
+	return m.runShellCommandInternal(command, false)
+}
+
+// runShellCommandInternal is the shared implementation for bang-mode shell
+// execution. isFirstMessage indicates the command is the first user message
+// in a newly created session, which triggers title generation.
+func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cmd {
+	var cmds []tea.Cmd
+	if !m.hasSession() {
+		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
+		if err != nil {
+			return util.ReportError(err)
+		}
+		if m.forceCompactMode {
+			m.isCompact = true
+		}
+		if newSession.ID != "" {
+			m.session = &newSession
+			cmds = append(cmds, m.loadSession(newSession.ID))
+		}
+		m.setState(uiChat, m.focus)
+		// Defer shell execution until loadSessionMsg fires so the chat
+		// list is stable before we add items or start streaming.
+		m.pendingBangCommand = command
+		return tea.Batch(cmds...)
+	}
+
+	sessionID := m.session.ID
+	contentWidth := min(m.layout.main.Dx()-2, 120)
+
+	// Append a pending shell item immediately so the user sees feedback.
+	pendingItem := chat.NewPendingShellItem(m.com.Styles, command)
+	m.chat.AppendMessages(pendingItem)
+	if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if cmd := pendingItem.StartAnimation(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
+	// Stream output via channel. The progress callback writes chunks
+	// to streamCh; a reader cmd converts them to shellStreamMsg values.
+	streamCh := make(chan string, 64)
+	pendingID := pendingItem.ID()
+
+	onProgress := func(chunk string) {
+		select {
+		case streamCh <- chunk:
+		default:
+			// Drop if UI can't keep up.
+		}
+	}
+
+	// Reader cmd: drains streamCh into shellStreamMsg until closed.
+	cmds = append(cmds, func() tea.Msg {
+		chunk, ok := <-streamCh
+		if !ok {
+			return nil
+		}
+		return shellStreamMsg{PendingID: pendingID, Chunk: chunk, streamCh: streamCh}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.bangCancel = cancel
+
+	cmds = append(cmds, func() tea.Msg {
+		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
+		close(streamCh)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  fmt.Sprintf("shell: %v", err),
+			}
+		}
+		exitCode := resp.ExitCode
+		if errors.Is(err, context.Canceled) {
+			exitCode = 130 // conventional SIGINT exit code
+		}
+		return shellResultMsg{
+			PendingID: pendingID,
+			Command:   command,
+			Output:    resp.Output,
+			ExitCode:  exitCode,
+		}
+	})
+	return tea.Batch(cmds...)
+}
+
 const cancelTimerDuration = 2 * time.Second
 
 // cancelTimerCmd creates a command that expires the cancel timer.
@@ -3315,8 +3589,15 @@ func (m *UI) cancelAgent() tea.Cmd {
 	}
 
 	if m.isCanceling {
-		// Second escape press - actually cancel the agent.
+		// Second escape press — actually cancel.
 		m.isCanceling = false
+
+		// Cancel a running bang command if one is in progress.
+		if m.bangCancel != nil {
+			m.bangCancel()
+			m.bangCancel = nil
+		}
+
 		m.com.Workspace.AgentCancel(m.session.ID)
 		// Stop the spinning todo indicator.
 		m.todoIsSpinning = false
@@ -3608,6 +3889,28 @@ func (m *UI) newSession() tea.Cmd {
 	)
 }
 
+// checkBangModeAfterPaste engages bang mode when pasted text starts with
+// optional whitespace followed by "!". It strips the prefix and adjusts
+// the cursor, mirroring the keypress bang-mode entry logic.
+func (m *UI) checkBangModeAfterPaste() {
+	if m.bangMode {
+		return
+	}
+	val := m.textarea.Value()
+	trimmed := strings.TrimLeftFunc(val, unicode.IsSpace)
+	if !strings.HasPrefix(trimmed, "!") {
+		return
+	}
+	m.bangMode = true
+	m.bangWasEmpty = true
+	stripped := trimmed[1:]
+	m.textarea.SetValue(stripped)
+	col := m.textarea.Column()
+	m.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
+	yolo := m.com.Workspace.PermissionSkipRequests()
+	m.setEditorPrompt(yolo)
+}
+
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Normalize \r\n before the textarea sanitizer sees it.
@@ -3668,7 +3971,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	}
 	if !allExistsAndValid() {
 		prevHeight := m.textarea.Height()
-		return m.updateTextareaWithPrevHeight(msg, prevHeight)
+		cmd := m.updateTextareaWithPrevHeight(msg, prevHeight)
+		m.checkBangModeAfterPaste()
+		return cmd
 	}
 
 	var cmds []tea.Cmd
@@ -3729,7 +4034,7 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 // creates an attachment. If no image data is found, it falls back to
 // interpreting clipboard text as a file path.
 func (m *UI) pasteImageFromClipboard() tea.Msg {
-	imageData, err := readClipboard(clipboardFormatImage)
+	imageData, err := clipboard.Read(clipboard.FormatImage)
 	if int64(len(imageData)) > common.MaxAttachmentSize {
 		return util.InfoMsg{
 			Type: util.InfoTypeError,
@@ -3746,7 +4051,7 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		}
 	}
 
-	textData, textErr := readClipboard(clipboardFormatText)
+	textData, textErr := clipboard.Read(clipboard.FormatText)
 	if textErr != nil || len(textData) == 0 {
 		return nil // Clipboard is empty or does not contain an image
 	}

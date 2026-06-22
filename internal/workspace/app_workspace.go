@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,7 +18,9 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
@@ -103,6 +106,60 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 	}
 	_, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	return err
+}
+
+func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error) {
+	var persist shell.PersistFunc
+	if sessionID != "" {
+		persist = func(cmd, output string, exitCode int) error {
+			_, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
+				Role: message.User,
+				Parts: []message.ContentPart{message.ShellCommand{
+					Command:  cmd,
+					Output:   output,
+					ExitCode: exitCode,
+				}},
+			})
+			return err
+		}
+	}
+
+	opts := shell.RunOptions{
+		Command:   command,
+		Cwd:       w.store.WorkingDir(),
+		TermWidth: termWidth,
+	}
+
+	var result shell.CaptureResult
+	var err error
+
+	if onProgress != nil {
+		result, err = shell.RunAndCaptureStream(ctx, opts, onProgress)
+	} else {
+		result, err = shell.RunAndPersist(ctx, opts, persist)
+	}
+
+	if err != nil && onProgress == nil {
+		return proto.ShellCommandResponse{}, err
+	}
+
+	// Persist if we used the streaming path (persist wasn't called by RunAndPersist).
+	if onProgress != nil && persist != nil {
+		if persistErr := persist(command, result.Output, result.ExitCode); persistErr != nil {
+			slog.Error("Failed to persist shell command output", "error", persistErr, "command", command)
+		}
+	}
+
+	// Generate a title from the shell command if it was the first message.
+	if isFirstMessage && w.app.AgentCoordinator != nil {
+		titleCtx := context.WithoutCancel(ctx)
+		w.app.AgentCoordinator.GenerateTitle(titleCtx, sessionID, "$ "+command)
+	}
+
+	return proto.ShellCommandResponse{
+		Output:   result.Output,
+		ExitCode: result.ExitCode,
+	}, nil
 }
 
 func (w *AppWorkspace) AgentCancel(sessionID string) {

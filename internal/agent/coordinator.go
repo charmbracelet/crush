@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
@@ -100,6 +101,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
 
 type coordinator struct {
@@ -499,6 +501,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					"type": "disabled",
 				}
 			}
+		case string(catwalk.InferenceProviderFireworks):
+			// NOTE: Fireworks break if we set both `reasoning_effort` and `thinking`.
+			if model.ModelCfg.ReasoningEffort == "" {
+				if model.ModelCfg.Think {
+					extraBody["thinking"] = map[string]any{"type": "enabled"}
+				} else {
+					extraBody["thinking"] = map[string]any{"type": "disabled"}
+				}
+			}
 		case string(catwalk.InferenceProviderAlibabaSingapore):
 			if model.CatwalkCfg.CanReason {
 				extraBody["enable_thinking"] = model.ModelCfg.Think
@@ -510,6 +521,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openaicompat.Name] = parsed
+		}
+	default:
+		// Known custom providers (litellm, ollama, omlx) are
+		// openai-compat under the hood.
+		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
+			parsed, err := openaicompat.ParseOptions(mergedOptions)
+			if err == nil {
+				options[openaicompat.Name] = parsed
+			}
 		}
 	}
 
@@ -1030,6 +1050,11 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
 	default:
+		// Known custom providers (litellm, ollama, omlx) are
+		// openai-compat under the hood.
+		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
+		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
 }
@@ -1122,6 +1147,14 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	}
 
 	return c.runWithUnauthorizedRetry(ctx, providerCfg, summarize)
+}
+
+// GenerateTitle generates a session title using the current agent.
+func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt string) {
+	if c.currentAgent == nil {
+		return
+	}
+	c.currentAgent.GenerateTitle(ctx, sessionID, prompt)
 }
 
 // refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.

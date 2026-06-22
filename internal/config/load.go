@@ -118,13 +118,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 	// Apply top-level env vars before configuring providers so variables
 	// like AWS_PROFILE are visible to the AWS SDK credential chain.
-	for k, v := range cfg.Env {
-		resolved, err := valueResolver.ResolveValue(v)
-		if err != nil {
-			slog.Warn("Failed to resolve env var value. Variable will be set to empty string.", "key", k, "value", v, "error", err)
-		}
-		os.Setenv(k, resolved)
-	}
+	cfg.applyEnv(valueResolver)
 
 	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
@@ -279,21 +273,20 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			headers[k] = resolved
 		}
-		prepared := ProviderConfig{
-			ID:                 string(p.ID),
-			Name:               p.Name,
-			BaseURL:            p.APIEndpoint,
-			APIKey:             p.APIKey,
-			APIKeyTemplate:     p.APIKey, // Store original template for re-resolution
-			OAuthToken:         config.OAuthToken,
-			Type:               p.Type,
-			Disable:            config.Disable,
-			SystemPromptPrefix: config.SystemPromptPrefix,
-			ExtraHeaders:       headers,
-			ExtraBody:          config.ExtraBody,
-			ExtraParams:        make(map[string]string),
-			Models:             p.Models,
-			AWSAuthRefresh:     config.AWSAuthRefresh,
+		// Start from user config so all user fields survive without
+		// explicit copying. Overlay catwalk identity/endpoint fields
+		// (already merged with user overrides above).
+		prepared := config
+		prepared.ID = string(p.ID)
+		prepared.Name = p.Name
+		prepared.BaseURL = p.APIEndpoint
+		prepared.APIKey = p.APIKey
+		prepared.APIKeyTemplate = p.APIKey // Store original template for re-resolution
+		prepared.Type = p.Type
+		prepared.Models = p.Models
+		prepared.ExtraHeaders = headers
+		if prepared.ExtraParams == nil {
+			prepared.ExtraParams = make(map[string]string)
 		}
 
 		switch {
@@ -509,6 +502,24 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	}
 
 	return nil
+}
+
+// applyEnv sets top-level env vars from the config. Keys are sorted for
+// deterministic ordering so that vars referencing other vars via the
+// value resolver produce consistent results.
+func (c *Config) applyEnv(resolver VariableResolver) {
+	keys := make([]string, 0, len(c.Env))
+	for k := range c.Env {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		resolved, err := resolver.ResolveValue(c.Env[k])
+		if err != nil {
+			slog.Warn("Failed to resolve env var value. Variable will be set to empty string.", "key", k, "value", c.Env[k], "error", err)
+		}
+		os.Setenv(k, resolved)
+	}
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

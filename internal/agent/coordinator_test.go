@@ -526,47 +526,66 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 }
 
 func TestIsUnauthorized(t *testing.T) {
-	env := testEnv(t)
-	coord := newTestCoordinator(t, env, "bedrock", config.ProviderConfig{ID: "bedrock"})
-
 	t.Run("nil error", func(t *testing.T) {
-		assert.False(t, coord.isUnauthorized(nil, config.ProviderConfig{}))
+		assert.False(t, isUnauthorized(nil))
 	})
 
 	t.Run("non-provider error", func(t *testing.T) {
-		assert.False(t, coord.isUnauthorized(errors.New("something broke"), config.ProviderConfig{}))
+		assert.False(t, isUnauthorized(errors.New("something broke")))
 	})
 
 	t.Run("provider error with 401", func(t *testing.T) {
 		err := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
-		assert.True(t, coord.isUnauthorized(err, config.ProviderConfig{}))
+		assert.True(t, isUnauthorized(err))
 	})
 
 	t.Run("provider error with non-401", func(t *testing.T) {
 		err := &fantasy.ProviderError{StatusCode: http.StatusForbidden, Message: "forbidden"}
-		assert.False(t, coord.isUnauthorized(err, config.ProviderConfig{}))
+		assert.False(t, isUnauthorized(err))
 	})
 
 	t.Run("wrapped provider error with 401", func(t *testing.T) {
 		inner := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "expired"}
 		err := fmt.Errorf("request failed: %w", inner)
-		assert.True(t, coord.isUnauthorized(err, config.ProviderConfig{}))
+		assert.True(t, isUnauthorized(err))
+	})
+}
+
+func TestIsAWSCredentialError(t *testing.T) {
+	t.Run("nil error", func(t *testing.T) {
+		assert.False(t, isAWSCredentialError(nil))
+	})
+
+	t.Run("matching error", func(t *testing.T) {
+		err := errors.New("operation error: failed to refresh cached credentials")
+		assert.True(t, isAWSCredentialError(err))
+	})
+
+	t.Run("unrelated error", func(t *testing.T) {
+		assert.False(t, isAWSCredentialError(errors.New("network timeout")))
+	})
+}
+
+func TestNeedsAuthRetry(t *testing.T) {
+	t.Run("401 always needs retry", func(t *testing.T) {
+		err := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
+		assert.True(t, needsAuthRetry(err, config.ProviderConfig{}))
 	})
 
 	t.Run("AWS credential error with aws_auth_refresh", func(t *testing.T) {
 		cfg := config.ProviderConfig{AWSAuthRefresh: "aws sso login"}
 		err := errors.New("operation error: failed to refresh cached credentials")
-		assert.True(t, coord.isUnauthorized(err, cfg))
+		assert.True(t, needsAuthRetry(err, cfg))
 	})
 
 	t.Run("AWS credential error without aws_auth_refresh", func(t *testing.T) {
 		err := errors.New("operation error: failed to refresh cached credentials")
-		assert.False(t, coord.isUnauthorized(err, config.ProviderConfig{}))
+		assert.False(t, needsAuthRetry(err, config.ProviderConfig{}))
 	})
 
 	t.Run("unrelated error with aws_auth_refresh", func(t *testing.T) {
 		cfg := config.ProviderConfig{AWSAuthRefresh: "aws sso login"}
-		assert.False(t, coord.isUnauthorized(errors.New("network timeout"), cfg))
+		assert.False(t, needsAuthRetry(errors.New("network timeout"), cfg))
 	})
 }
 

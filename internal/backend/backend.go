@@ -92,6 +92,7 @@ type clientState struct {
 	streams          int
 	holdTimer        *time.Timer
 	currentSessionID string
+	pid              int
 }
 
 // Workspace represents a running [app.App] workspace with its
@@ -405,7 +406,7 @@ func skillStatesToProto(states []*skills.SkillState) []proto.SkillState {
 // ws.clientsMu (under b.mu), no concurrent teardown can succeed without
 // re-checking the (now non-empty) clients map. Lock order is the
 // canonical b.mu -> ws.clientsMu.
-func (b *Backend) AttachClient(workspaceID, clientID string) error {
+func (b *Backend) AttachClient(workspaceID, clientID string, pid int) error {
 	if _, err := validateClientID(clientID); err != nil {
 		return err
 	}
@@ -424,12 +425,15 @@ func (b *Backend) AttachClient(workspaceID, clientID string) error {
 		// Defensive: SSE attach without a prior CreateWorkspace by
 		// this client still installs a stream claim so the stream
 		// stays alive for its duration.
-		ws.clients[clientID] = &clientState{streams: 1}
+		ws.clients[clientID] = &clientState{streams: 1, pid: pid}
 		return nil
 	}
 	if cs.holdTimer != nil {
 		cs.holdTimer.Stop()
 		cs.holdTimer = nil
+	}
+	if pid != 0 {
+		cs.pid = pid
 	}
 	cs.streams++
 	return nil
@@ -630,6 +634,29 @@ func (b *Backend) AttachedClients(workspaceID, sessionID string) (int, error) {
 		return 0, ErrWorkspaceNotFound
 	}
 	return ws.AttachedClientsForSession(sessionID), nil
+}
+
+// ListClients returns information about all attached clients for the
+// given workspace. Only clients with at least one live SSE stream are
+// included. Returns [ErrWorkspaceNotFound] if the workspace is unknown.
+func (b *Backend) ListClients(workspaceID string) ([]proto.ClientInfo, error) {
+	ws, ok := b.workspaces.Get(workspaceID)
+	if !ok {
+		return nil, ErrWorkspaceNotFound
+	}
+	ws.clientsMu.Lock()
+	defer ws.clientsMu.Unlock()
+	out := make([]proto.ClientInfo, 0, len(ws.clients))
+	for id, cs := range ws.clients {
+		if cs.streams > 0 {
+			out = append(out, proto.ClientInfo{
+				ClientID:         id,
+				CurrentSessionID: cs.currentSessionID,
+				PID:              cs.pid,
+			})
+		}
+	}
+	return out, nil
 }
 
 // AttachedClientsForSession returns the number of clients in this

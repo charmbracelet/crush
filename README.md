@@ -791,7 +791,7 @@ the models list. Crush will populate the model list automatically.
 You can still list models explicitly. User-defined models always take
 precedence over discovered ones, and any fields you set won't be overwritten
 by auto-discovery. Auto discovery will run if the model list is empty for any
-`openai-compat` provider or if you pass `"auto_discovery": true` it will merge
+`openai-compat` provider or if you pass `"discover_models": true` it will merge
  the found models with your hand configured ones.
 
 ```json
@@ -809,7 +809,7 @@ by auto-discovery. Auto discovery will run if the model list is empty for any
           "default_max_tokens": 20000
         }
       ],
-      "auto_discovery": true
+      "discover_models": true
     }
   }
 }

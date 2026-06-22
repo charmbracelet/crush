@@ -221,6 +221,16 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
+	return s.setConfigFields(scope, kv, true)
+}
+
+// setConfigFields performs the write and, when reload is true, refreshes
+// in-memory state from disk. Callers that have already updated the relevant
+// in-memory state themselves can pass reload=false to skip the expensive
+// full reparse (which rebuilds the provider catalog and agents). The disk
+// is the source of truth for other processes either way; skipping reload
+// only avoids re-deriving state this process already holds.
+func (s *ConfigStore) setConfigFields(scope Scope, kv map[string]any, reload bool) error {
 	// Sort keys for deterministic output regardless of map iteration
 	// order. This also ensures consistent results when callers pass
 	// overlapping JSONPath keys (e.g. "a" and "a.b").
@@ -243,6 +253,16 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if !reload {
+		// The caller has already updated in-memory state; just refresh
+		// the staleness snapshot so the file watcher does not treat our
+		// own write as an external change.
+		if path, perr := s.configPath(scope); perr == nil {
+			s.captureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
+		}
+		return nil
 	}
 
 	// Auto-reload to keep in-memory state fresh after config edits.
@@ -281,14 +301,30 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 }
 
 // UpdatePreferredModel updates the preferred model for the given type and
-// persists it to the config file at the given scope.
+// persists it to the config file at the given scope. The selected model and
+// the recent-models list are written together in a single config write.
+//
+// The in-memory config is updated directly here, so the write skips the
+// full disk reparse/reload. The reload would otherwise rebuild the entire
+// provider catalog and agents on every model switch, which dominates the
+// latency of selecting a model. Agents are refreshed separately by the
+// caller (see UpdateAgentModel).
 func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
 	s.config.Models[modelType] = model
-	if err := s.SetConfigField(scope, fmt.Sprintf("models.%s", modelType), model); err != nil {
-		return fmt.Errorf("failed to update preferred model: %w", err)
+
+	fields := map[string]any{
+		fmt.Sprintf("models.%s", modelType): model,
 	}
-	if err := s.recordRecentModel(scope, modelType, model); err != nil {
-		return err
+
+	// Compute the updated recent-models list in memory. When it changes,
+	// fold the write into the same batch so we avoid a second write.
+	if updated, changed := s.nextRecentModels(modelType, model); changed {
+		s.config.RecentModels[modelType] = updated
+		fields[fmt.Sprintf("recent_models.%s", modelType)] = updated
+	}
+
+	if err := s.setConfigFields(scope, fields, false); err != nil {
+		return fmt.Errorf("failed to update preferred model: %w", err)
 	}
 	return nil
 }
@@ -504,10 +540,15 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 	return &token, nil
 }
 
-// recordRecentModel records a model in the recent models list.
-func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
+// nextRecentModels computes the recent-models list for the given type
+// after recording the supplied model at the front, without persisting
+// anything. It returns the new slice and whether it differs from the
+// current list. It also lazily initializes the RecentModels map. Callers
+// that want to persist the change can fold the result into a batched
+// config write; recordRecentModel wraps it for the standalone case.
+func (s *ConfigStore) nextRecentModels(modelType SelectedModelType, model SelectedModel) ([]SelectedModel, bool) {
 	if model.Provider == "" || model.Model == "" {
-		return nil
+		return nil, false
 	}
 
 	if s.config.RecentModels == nil {
@@ -534,6 +575,19 @@ func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType
 	}
 
 	if slices.EqualFunc(current, updated, eq) {
+		return current, false
+	}
+
+	return updated, true
+}
+
+// recordRecentModel records a model in the recent models list and persists
+// the change. It is retained for callers that update recent models in
+// isolation; UpdatePreferredModel batches the same change into a single
+// config write instead.
+func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
+	updated, changed := s.nextRecentModels(modelType, model)
+	if !changed {
 		return nil
 	}
 

@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -33,6 +34,27 @@ func hookApproved(ctx context.Context, toolCallID string) bool {
 	}
 	v, _ := ctx.Value(hookApprovalKey{}).(string)
 	return v == toolCallID
+}
+
+// Lifecycle hook event names. Mirrors hooks.EventPermissionRequest and
+// hooks.EventPermissionResult without importing the hooks package.
+const (
+	EventPermissionRequest = "PermissionRequest"
+	EventPermissionResult  = "PermissionResult"
+)
+
+// LifecycleHookRunner is the narrow interface for running lifecycle
+// hooks. Defined here so callers can provide any compatible
+// implementation without coupling to *hooks.Runner directly.
+type LifecycleHookRunner interface {
+	RunLifecycle(ctx context.Context, eventName, sessionID string) error
+}
+
+// LifecycleHookRunnerFunc is a function adapter for LifecycleHookRunner.
+type LifecycleHookRunnerFunc func(ctx context.Context, eventName, sessionID string) error
+
+func (f LifecycleHookRunnerFunc) RunLifecycle(ctx context.Context, eventName, sessionID string) error {
+	return f(ctx, eventName, sessionID)
 }
 
 type CreatePermissionRequest struct {
@@ -82,6 +104,9 @@ type Service interface {
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	// SetLifecycleHooks sets the hook runner for PermissionRequest and
+	// PermissionResult lifecycle events.
+	SetLifecycleHooks(runner LifecycleHookRunner)
 }
 
 // PermissionKey is a composite key for session permission lookups.
@@ -108,6 +133,10 @@ type permissionService struct {
 	requestMu       sync.Mutex
 	activeRequest   *PermissionRequest
 	activeRequestMu sync.Mutex
+
+	// lifecycleHooks fires PermissionRequest/PermissionResult hooks.
+	// Set via SetLifecycleHooks after construction; nil means no hooks.
+	lifecycleHooks LifecycleHookRunner
 }
 
 // resolve atomically removes the pending request entry for the given
@@ -269,6 +298,27 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
 
+	// Fire PermissionRequest lifecycle hook.
+	if s.lifecycleHooks != nil {
+		if err := s.lifecycleHooks.RunLifecycle(ctx, EventPermissionRequest, permission.SessionID); err != nil {
+			slog.Warn("PermissionRequest hook failed", "error", err)
+		}
+	}
+
+	// Fire PermissionResult on every exit path (grant, deny, or cancel)
+	// so external state machines always see the paired transition.
+	defer func() {
+		if s.lifecycleHooks == nil {
+			return
+		}
+		// Use a fresh context so the hook can run even if the
+		// original context was cancelled.
+		hookCtx := context.WithoutCancel(ctx)
+		if err := s.lifecycleHooks.RunLifecycle(hookCtx, EventPermissionResult, permission.SessionID); err != nil {
+			slog.Warn("PermissionResult hook failed", "error", err)
+		}
+	}()
+
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -293,6 +343,10 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
+}
+
+func (s *permissionService) SetLifecycleHooks(runner LifecycleHookRunner) {
+	s.lifecycleHooks = runner
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {

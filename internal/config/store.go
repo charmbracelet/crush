@@ -102,6 +102,13 @@ type ConfigStore struct {
 	// real network calls. Production code leaves it nil, and exchange falls
 	// back to the real provider clients.
 	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
+
+	// authSignalMu guards authSignals, which maps provider IDs to
+	// channels that WaitForTokenChange blocks on. SignalAuthComplete
+	// closes the channel to unblock waiters; a new channel is created
+	// on the next wait.
+	authSignalMu sync.Mutex
+	authSignals  map[string]chan struct{}
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -608,6 +615,54 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 	return nil
+}
+
+// WaitForTokenChange blocks until SignalAuthComplete is called for the
+// given provider or the context is cancelled. It is used by OnAuthRefresh
+// callbacks to wait for interactive re-authentication to complete before
+// retrying a failed request. The channel is created atomically with the
+// wait registration so a concurrent SignalAuthComplete cannot miss it.
+func (s *ConfigStore) WaitForTokenChange(ctx context.Context, providerID string) error {
+	s.authSignalMu.Lock()
+	ch, ok := s.authSignals[providerID]
+	if !ok {
+		ch = make(chan struct{})
+		if s.authSignals == nil {
+			s.authSignals = make(map[string]chan struct{})
+		}
+		s.authSignals[providerID] = ch
+	}
+	s.authSignalMu.Unlock()
+
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// SignalAuthComplete unblocks any goroutine waiting in WaitForTokenChange
+// for the given provider. If no waiter exists yet, it pre-creates and
+// immediately closes the channel so a subsequent WaitForTokenChange
+// returns without blocking. This eliminates the race where the signal
+// fires before the waiter registers.
+func (s *ConfigStore) SignalAuthComplete(providerID string) {
+	s.authSignalMu.Lock()
+	defer s.authSignalMu.Unlock()
+	if ch, ok := s.authSignals[providerID]; ok {
+		close(ch)
+		delete(s.authSignals, providerID)
+	} else {
+		// No waiter yet. Pre-create a closed channel so the next
+		// WaitForTokenChange returns immediately.
+		if s.authSignals == nil {
+			s.authSignals = make(map[string]chan struct{})
+		}
+		ch := make(chan struct{})
+		close(ch)
+		s.authSignals[providerID] = ch
+	}
 }
 
 // adoptableDiskToken returns the on-disk token for the provider when it is

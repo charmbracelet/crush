@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -293,15 +294,11 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			PresencePenalty:  presPenalty,
 			OnComplete:       onComplete,
 			Accepted:         accept,
+			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
-	var result *fantasy.AgentResult
-	originalErr := c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
-		var err error
-		result, err = run()
-		return err
-	})
+	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
 	// Notify only if still unauthorized after retry — a successful
@@ -1229,12 +1226,52 @@ func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg 
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after receiving a 401
-// and returns nil if retry should be attempted.
+// and returns nil if retry should be attempted. When the refresh token is
+// revoked, it triggers interactive re-authentication and blocks until the user
+// completes it (or the context is cancelled).
 func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig) error {
 	switch {
 	case providerCfg.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
-		return c.refreshOAuth2Token(ctx, providerCfg)
+		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
+			// If the refresh token was revoked, trigger interactive
+			// re-auth and wait for the user to complete it.
+			var exchangeErr *oauth.TokenExchangeError
+			if c.notify != nil && errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() {
+				slog.Info("Refresh token revoked, waiting for re-authentication", "provider", providerCfg.ID)
+				c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					Type:       notify.TypeReAuthenticate,
+					ProviderID: providerCfg.ID,
+				})
+				// Use a detached context with a generous timeout so the
+				// wait survives agent run cancellation. The user needs
+				// time to complete browser-based authentication.
+				waitCtx, waitCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+				defer waitCancel()
+				slog.Info("Blocking on WaitForTokenChange", "provider", providerCfg.ID)
+				if waitErr := c.cfg.WaitForTokenChange(waitCtx, providerCfg.ID); waitErr != nil {
+					slog.Info("WaitForTokenChange returned error", "provider", providerCfg.ID, "error", waitErr)
+					return waitErr
+				}
+				slog.Info("WaitForTokenChange unblocked, updating models", "provider", providerCfg.ID)
+				// Check if the original context is still alive. If it was
+				// cancelled during the wait, fantasy's retry will fail immediately.
+				if ctx.Err() != nil {
+					slog.Warn("Original context cancelled during auth wait, cannot retry",
+						"provider", providerCfg.ID, "ctx_err", ctx.Err())
+					return ctx.Err()
+				}
+				// Rebuild models so ModelProvider picks up the fresh credentials.
+				if updateErr := c.UpdateModels(waitCtx); updateErr != nil {
+					slog.Error("Failed to update models after re-authentication", "error", updateErr)
+					return updateErr
+				}
+				slog.Info("Models updated, returning nil to retry", "provider", providerCfg.ID)
+				return nil
+			}
+			return err
+		}
+		return nil
 	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return c.refreshApiKeyTemplate(ctx, providerCfg)
@@ -1246,6 +1283,18 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 func (c *coordinator) isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
 	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+}
+
+// makeAuthRefreshCallback returns an OnAuthRefresh callback for fantasy that
+// delegates to the coordinator's existing credential refresh logic. Returns
+// nil if no refresh mechanism is configured for the provider.
+func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
+	if providerCfg.OAuthToken == nil && !strings.Contains(providerCfg.APIKeyTemplate, "$") {
+		return nil
+	}
+	return func(ctx context.Context, _ *fantasy.ProviderError) error {
+		return c.retryAfterUnauthorized(ctx, providerCfg)
+	}
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
@@ -1329,14 +1378,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
 			NonInteractive:   true,
+			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
-	var result *fantasy.AgentResult
-	err = c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
-		var runErr error
-		result, runErr = run()
-		return runErr
-	})
+	result, err := run()
 	// Notify only if still unauthorized after retry.
 	if err != nil && c.isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{

@@ -717,12 +717,17 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// without hook interception to avoid firing the user's hook N times
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	// Build PostToolUse runner if configured.
+	var postToolRunner *hooks.Runner
+	if postHooks := c.cfg.Config().Hooks[hooks.EventPostToolUse]; len(postHooks) > 0 {
+		postToolRunner = hooks.NewRunner(map[string][]config.HookConfig{hooks.EventPostToolUse: postHooks}, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	}
+
+	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, postToolRunner, isSubAgent)
 
 	return filteredTools, nil
 }
 
-// TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
 	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
 	if !ok {

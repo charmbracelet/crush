@@ -45,7 +45,7 @@ func NewAppWorkspace(a *app.App, store *config.ConfigStore) *AppWorkspace {
 // -- Sessions --
 
 func (w *AppWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
-	return w.app.Sessions.Create(ctx, title)
+	return w.app.CreateSession(ctx, title)
 }
 
 func (w *AppWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {

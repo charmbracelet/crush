@@ -270,17 +270,21 @@ $HOME/.local/share/crush/crush.json
 
 The top-level `env` field sets environment variables at startup, before
 providers are configured. This is useful for variables that affect provider
-authentication (e.g. AWS SDK credential chain) without needing shell wrappers:
+authentication (e.g. the AWS SDK credential chain) without wrapping the
+`crush` command in a shell script or exporting them in your shell profile:
 
 ```json
 {
   "$schema": "https://charm.land/crush.json",
   "env": {
-    "AWS_PROFILE": "my-sso-profile",
-    "AWS_REGION": "us-west-2"
+    "AWS_PROFILE": "my-sso-profile"
   }
 }
 ```
+
+Values support the same `$VAR` and `$(command)` expansion as other config
+fields, so you can reference existing environment variables or shell out for
+a value.
 
 ### LSPs
 
@@ -745,18 +749,30 @@ Custom Anthropic-compatible providers follow this format:
 
 Crush currently supports running Anthropic models through Bedrock, with caching disabled.
 
-- A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-- Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set (or configured via [`env`](#environment-variables))
-- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`, or use the top-level [`env`](#environment-variables) config
-- Alternatively to `aws configure`, you can also just set `AWS_BEARER_TOKEN_BEDROCK`
+A Bedrock provider appears once Crush can find AWS credentials. You can
+authenticate in one of two ways:
 
-If you authenticate via AWS SSO, set `aws_auth_refresh` to a command that
-refreshes credentials. Crush runs it automatically when Bedrock returns a
-credential error and retries the request:
+**API key.** Set `AWS_BEARER_TOKEN_BEDROCK` to a Bedrock API key. This is the
+simplest option and never expires mid-session.
+
+**AWS credential chain (SSO, profiles, access keys).** Configure AWS the usual
+way with `aws configure` or `aws configure sso`. Crush picks up whatever the
+AWS SDK credential chain resolves, including `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`
+/ `AWS_SECRET_ACCESS_KEY`, or an SSO session. To select a specific profile,
+set `AWS_PROFILE` in your shell (`AWS_PROFILE=myprofile crush`) or in the
+top-level [`env`](#environment-variables) config.
+
+If you authenticate via AWS SSO, your session expires periodically. Set
+`aws_auth_refresh` to a command that refreshes it. When Bedrock returns a
+credential error, Crush runs the command, then retries the request in place
+(no duplicate messages, no manual restart):
 
 ```json
 {
   "$schema": "https://charm.land/crush.json",
+  "env": {
+    "AWS_PROFILE": "my-sso-profile"
+  },
   "providers": {
     "bedrock": {
       "aws_auth_refresh": "aws sso login --profile my-sso-profile"
@@ -765,7 +781,7 @@ credential error and retries the request:
 }
 ```
 
-- `aws_auth_refresh` — shell command run when credentials expire (e.g. `aws sso login`)
+- `aws_auth_refresh` — shell command run when AWS credentials expire (e.g. `aws sso login`)
 
 ### Vertex AI Platform
 

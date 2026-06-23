@@ -90,6 +90,20 @@ func (d *Overlay) HasDialogs() bool {
 	return len(d.dialogs) > 0
 }
 
+// HasVisibleDialogs checks if there are any visible (non-minimized) dialogs.
+func (d *Overlay) HasVisibleDialogs() bool {
+	for _, dialog := range d.dialogs {
+		// Check if this is a minimized permission dialog
+		if perm, ok := dialog.(*Permissions); ok {
+			if perm.HasDiffView() && perm.IsMinimized() {
+				continue // Skip minimized permission dialogs
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // ContainsDialog checks if a dialog with the specified ID exists.
 func (d *Overlay) ContainsDialog(dialogID string) bool {
 	for _, dialog := range d.dialogs {

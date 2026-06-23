@@ -244,7 +244,7 @@ Skills with `disable-model-invocation` won't appear in the model's available ski
 
 ## Hooks
 
-Hooks are user-defined shell commands that fire on agent events. Currently only `PreToolUse` is supported, which runs before a tool is executed.
+Hooks are user-defined shell commands that fire on agent events. Crush supports 12 events: `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, `TurnStart`, `TurnEnd`, `StopFailure`, `Interrupt`, `PermissionRequest`, `PermissionResult`, `PreCompact`, `PostCompact`.
 
 ```json
 {

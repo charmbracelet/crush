@@ -152,16 +152,18 @@ unaffected.
 
 ## `UserPromptSubmit` event
 
-**Status:** not implemented.
+**Status:** partially implemented as `TurnStart`. The current `TurnStart` event
+fires when the agent begins processing a prompt but does not yet support
+`decision` (blocking prompts) or `updated_prompt` (rewriting prompts). Those
+control features are still planned.
 
 ### Motivation
 
-Today Crush supports exactly one hook event, `PreToolUse`. That's enough to gate
-and rewrite tool calls but nothing else. The next-most-useful event is
-`UserPromptSubmit`: fires after the user hits Enter but before the turn hits the
-LLM. Lets hooks inject context, rewrite prompts, or gate on content without the
-mutation complexity of `PostToolUse` (output scrubbing, error coercion, size
-limits — all rabbit holes).
+Crush now supports 12 hook events including `TurnStart`, which covers the basic
+observability use case. The remaining gap is **control**: letting hooks block
+prompts matching a policy or rewrite them before they reach the LLM. This would
+enable secret redaction from prompts, policy enforcement ("don't mention
+production credentials"), and shorthand expansion.
 
 ### Use cases
 

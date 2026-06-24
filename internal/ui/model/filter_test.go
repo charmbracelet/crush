@@ -81,7 +81,7 @@ func TestFilter_DirectionChangeResetsAccumulator(t *testing.T) {
 	require.Equal(t, float64(-2), msg.DeltaY, "should have 2 accumulated up events")
 }
 
-func TestFilter_DirectionChangeDropsStaleAccumulator(t *testing.T) {
+func TestFilter_DirectionChangeWithinWindowAccumulatesNewDirection(t *testing.T) {
 	t.Parallel()
 	f, now := newTestFilter(t)
 

@@ -104,5 +104,5 @@ func wheelDeltas(mouse tea.Mouse) (float64, float64) {
 }
 
 func oppositeSign(a, b float64) bool {
-	return a < 0 && b > 0 || a > 0 && b < 0
+	return (a < 0 && b > 0) || (a > 0 && b < 0)
 }

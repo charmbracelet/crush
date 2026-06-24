@@ -708,6 +708,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
 				m.updateLayoutAndSize()
+			} else if prevHasInProgress && !hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
+				m.todoIsSpinning = false
+				m.renderPills()
+				m.updateLayoutAndSize()
 			}
 			m.autoExpandPillsIfReasonable()
 		}
@@ -945,12 +949,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		if m.state == uiChat && m.hasSession() && hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
-			var cmd tea.Cmd
-			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
-			if cmd != nil {
+		if m.state == uiChat && m.hasSession() && m.todoIsSpinning {
+			if hasInProgressTodo(m.session.Todos) {
+				var cmd tea.Cmd
+				m.todoSpinner, cmd = m.todoSpinner.Update(msg)
+				if cmd != nil {
+					m.renderPills()
+					cmds = append(cmds, cmd)
+				}
+			} else {
+				m.todoIsSpinning = false
 				m.renderPills()
-				cmds = append(cmds, cmd)
 			}
 		}
 

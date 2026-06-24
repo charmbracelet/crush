@@ -61,7 +61,7 @@ func TestFilter_CoalescesSameDirection(t *testing.T) {
 	require.Equal(t, float64(3), msg.DeltaY, "should accumulate 3 down events")
 }
 
-func TestFilter_DirectionChangeResetsAccumulator(t *testing.T) {
+func TestFilter_DirectionChangeWithinWindowAccumulatesNewDirection(t *testing.T) {
 	t.Parallel()
 	f, now := newTestFilter(t)
 
@@ -81,7 +81,7 @@ func TestFilter_DirectionChangeResetsAccumulator(t *testing.T) {
 	require.Equal(t, float64(-2), msg.DeltaY, "should have 2 accumulated up events")
 }
 
-func TestFilter_DirectionChangeWithinWindowAccumulatesNewDirection(t *testing.T) {
+func TestFilter_DirectionChangeDropsStaleAccumulator(t *testing.T) {
 	t.Parallel()
 	f, now := newTestFilter(t)
 

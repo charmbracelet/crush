@@ -9,12 +9,16 @@ package question
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
+
+// ErrCancelled is returned by Ask when the user cancels the question.
+var ErrCancelled = errors.New("question cancelled by user")
 
 // Type identifies the kind of question to present.
 type Type string
@@ -181,6 +185,10 @@ type Service interface {
 
 	// Answer resolves the pending question with the given answers.
 	Answer(answers []Answer) bool
+
+	// Cancel cancels the pending question. Returns false if no
+	// question is pending.
+	Cancel() bool
 }
 
 type questionService struct {
@@ -188,6 +196,7 @@ type questionService struct {
 	notificationBroker *pubsub.Broker[Notification]
 	mu                 sync.Mutex
 	pending            chan []Answer
+	cancelled          chan struct{}
 	pendingID          string
 }
 
@@ -237,12 +246,14 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 
 	s.mu.Lock()
 	s.pending = make(chan []Answer, 1)
+	s.cancelled = make(chan struct{})
 	s.pendingID = req.ID
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
 		s.pending = nil
+		s.cancelled = nil
 		s.pendingID = ""
 		s.mu.Unlock()
 	}()
@@ -252,6 +263,8 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-s.cancelled:
+		return nil, ErrCancelled
 	case answers := <-s.pending:
 		return answers, nil
 	}
@@ -269,6 +282,29 @@ func (s *questionService) Answer(answers []Answer) bool {
 		return false
 	}
 	ch <- answers
+
+	// Publish a notification so non-answering clients can dismiss
+	// their open question forms.
+	if batchID != "" {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
+			BatchID: batchID,
+		})
+	}
+	return true
+}
+
+// Cancel cancels the pending question. Returns false if no
+// question is pending.
+func (s *questionService) Cancel() bool {
+	s.mu.Lock()
+	batchID := s.pendingID
+	cancelCh := s.cancelled
+	s.mu.Unlock()
+
+	if cancelCh == nil {
+		return false
+	}
+	close(cancelCh)
 
 	// Publish a notification so non-answering clients can dismiss
 	// their open question forms.

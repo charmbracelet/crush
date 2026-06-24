@@ -370,6 +370,16 @@ func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
 	return resolved
 }
 
+// QuestionCancel cancels the pending question via the client SDK.
+func (w *ClientWorkspace) QuestionCancel() bool {
+	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
+	if err != nil {
+		slog.Error("Failed to cancel question", "error", err)
+		return false
+	}
+	return cancelled
+}
+
 // -- FileTracker --
 
 func (w *ClientWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {

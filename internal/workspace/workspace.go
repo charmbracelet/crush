@@ -119,6 +119,9 @@ type Workspace interface {
 	// QuestionAnswer resolves the pending question with responses.
 	QuestionAnswer(responses []question.Answer) bool
 
+	// QuestionCancel cancels the pending question.
+	QuestionCancel() bool
+
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
 	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time

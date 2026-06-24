@@ -646,6 +646,25 @@ func (c *Client) AnswerQuestionBatch(ctx context.Context, id string, req proto.Q
 	return resp.Resolved, nil
 }
 
+// CancelQuestionBatch cancels the pending question batch on a
+// workspace. Returns true if a question was cancelled, false if
+// none was pending.
+func (c *Client) CancelQuestionBatch(ctx context.Context, id string) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/questions/cancel", id), nil, nil, http.Header{})
+	if err != nil {
+		return false, fmt.Errorf("failed to cancel question batch: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to cancel question batch: status code %d", rsp.StatusCode)
+	}
+	var resp proto.QuestionAnswerResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode cancel question batch response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
 // SetPermissionsSkipRequests sets the skip-requests flag for a workspace.
 func (c *Client) SetPermissionsSkipRequests(ctx context.Context, id string, skip bool) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/skip", id), nil, jsonBody(proto.PermissionSkipRequest{Skip: skip}), http.Header{"Content-Type": []string{"application/json"}})

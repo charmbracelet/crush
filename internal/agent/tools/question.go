@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -122,6 +123,11 @@ func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 
 			answers, err := svc.Ask(ctx, req)
 			if err != nil {
+				if errors.Is(err, question.ErrCancelled) {
+					resp := fantasy.NewTextErrorResponse("User cancelled this question")
+					resp.StopTurn = true
+					return resp, nil
+				}
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 

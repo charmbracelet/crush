@@ -118,8 +118,11 @@ func (d *YesNo) respond(yes bool) question.Answer {
 
 // Height returns the visual height at the default max width.
 // Pure function — no render-time state.
-func (d *YesNo) Height() int {
-	w := d.lastWidth
+func (d *YesNo) Height(width int) int {
+	w := width
+	if w <= 0 {
+		w = d.lastWidth
+	}
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}

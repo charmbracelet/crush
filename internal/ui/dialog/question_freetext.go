@@ -95,8 +95,11 @@ func (d *FreeText) ShortHelp() []key.Binding {
 }
 
 // Height returns the visual height at the default max width.
-func (d *FreeText) Height() int {
-	w := d.lastWidth
+func (d *FreeText) Height(width int) int {
+	w := width
+	if w <= 0 {
+		w = d.lastWidth
+	}
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}

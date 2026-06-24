@@ -164,18 +164,26 @@ func formatAnswers(answers []question.Answer, questions []question.Question) (fa
 func formatAnswer(answer *question.Answer, _ question.Type) (fantasy.ToolResponse, error) {
 	var b strings.Builder
 
-	if answer.Yes != nil {
+	switch {
+	case answer.Yes != nil:
 		if *answer.Yes {
 			b.WriteString("User answered: yes")
 		} else {
 			b.WriteString("User answered: no")
 		}
-	} else if answer.FillInText != "" {
-		fmt.Fprintf(&b, "User provided: %s", answer.FillInText)
-	} else if len(answer.SelectedIDs) > 0 {
-		data, _ := json.Marshal(answer.SelectedIDs)
-		fmt.Fprintf(&b, "User selected: %s", string(data))
-	} else {
+	case len(answer.SelectedIDs) > 0 || answer.FillInText != "":
+		// Selections and free-text can coexist for multi-choice;
+		// report both so the model sees the complete answer.
+		var parts []string
+		if len(answer.SelectedIDs) > 0 {
+			data, _ := json.Marshal(answer.SelectedIDs)
+			parts = append(parts, fmt.Sprintf("User selected: %s", string(data)))
+		}
+		if answer.FillInText != "" {
+			parts = append(parts, fmt.Sprintf("User provided: %s", answer.FillInText))
+		}
+		b.WriteString(strings.Join(parts, "\n"))
+	default:
 		b.WriteString("User skipped this question")
 	}
 

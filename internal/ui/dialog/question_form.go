@@ -129,12 +129,12 @@ func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 		numQuestions: numQuestions,
 		confirmComp:  confirmComp,
 		keyPrevTab: key.NewBinding(
-			key.WithKeys("ctrl+left"),
-			key.WithHelp("ctrl+←", "prev tab"),
+			key.WithKeys("[", "ctrl+left"),
+			key.WithHelp("[", "prev tab"),
 		),
 		keyNextTab: key.NewBinding(
-			key.WithKeys("ctrl+right"),
-			key.WithHelp("ctrl+→", "next tab"),
+			key.WithKeys("]", "ctrl+right"),
+			key.WithHelp("]", "next tab"),
 		),
 		keyClose: CloseKey,
 	}
@@ -247,7 +247,15 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 // HandleWheel scrolls the active choice list vertically, or delegates
 // to the active question if it supports wheel scrolling.
 func (f *QuestionForm) HandleWheel(deltaX, deltaY float64) {
-	if f.isConfirmTab() || f.activeIdx >= f.numQuestions {
+	if f.isConfirmTab() {
+		if deltaY < 0 && f.confirmComp.scrollOffset > 0 {
+			f.confirmComp.scrollOffset--
+		} else if deltaY > 0 {
+			f.confirmComp.scrollOffset++
+		}
+		return
+	}
+	if f.activeIdx >= f.numQuestions {
 		return
 	}
 	if we, ok := f.questions[f.activeIdx].(common.WheelScrollable); ok {
@@ -333,19 +341,19 @@ func (f *QuestionForm) ShortHelp() []key.Binding {
 
 // Height returns the total height using the max tab height so
 // switching tabs doesn't cause layout jumps.
-func (f *QuestionForm) Height() int {
+func (f *QuestionForm) Height(width int) int {
 	h := 0
 	if f.showTabs {
 		h = 4 // bordered tab row (top + label + bottom) + blank line
 	}
 	maxQ := 0
 	for _, q := range f.questions {
-		if qh := q.Height(); qh > maxQ {
+		if qh := q.Height(width); qh > maxQ {
 			maxQ = qh
 		}
 	}
 	if f.confirmComp != nil {
-		if ch := f.confirmComp.Height(); ch > maxQ {
+		if ch := f.confirmComp.Height(width); ch > maxQ {
 			maxQ = ch
 		}
 	}

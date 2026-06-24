@@ -192,6 +192,7 @@ reviewed.
     "tui": {
       "compact_mode": false,
       "diff_mode": "unified",
+      "logo": "wordmark",
       "transparent": false
     },
     "auto_lsp": true,

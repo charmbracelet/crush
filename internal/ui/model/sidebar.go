@@ -6,6 +6,7 @@ import (
 	"image"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -141,20 +142,25 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
+	style := m.logoStyle()
 	sidebarLogo := m.sidebarLogo
-	if height < logoHeightBreakpoint {
+	if height < logoHeightBreakpoint && style != config.LogoStyleHidden {
 		sidebarLogo = logo.SmallRender(m.com.Styles, width, logo.Opts{
-			Hyper: m.com.IsHyper(),
+			Hyper:    m.com.IsHyper(),
+			TextFree: style == config.LogoStyleGradient,
 		})
 	}
 	blocks := []string{
-		sidebarLogo,
 		title,
 		"",
 		cwd,
 		"",
 		m.modelInfo(width),
 		"",
+	}
+	if sidebarLogo != "" {
+		// The logo block carries its own trailing spacing.
+		blocks = append([]string{sidebarLogo}, blocks...)
 	}
 
 	sidebarHeader := lipgloss.JoinVertical(

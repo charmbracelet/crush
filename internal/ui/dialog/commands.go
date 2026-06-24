@@ -515,6 +515,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	notificationLabel := "Notification Style"
 	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
 
+	// Add a command for selecting the session logo style via picker dialog.
+	commands = append(commands, NewCommandItem(c.com.Styles, "select_logo", "Session Logo", "", ActionOpenDialog{DialogID: LogoID}))
+
 	commands = append(
 		commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),

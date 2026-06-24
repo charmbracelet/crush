@@ -747,6 +747,16 @@
           ],
           "description": "Diff mode for the TUI interface"
         },
+        "logo": {
+          "type": "string",
+          "enum": [
+            "wordmark",
+            "gradient",
+            "hidden"
+          ],
+          "description": "Session logo style for the TUI. Applies to the sidebar logo in normal mode and the header logo in compact mode",
+          "default": "wordmark"
+        },
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"

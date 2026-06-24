@@ -17,8 +17,6 @@ Every question MUST include:
 
 These are enforced. Violations return an error and waste a round trip.
 
-- **`questions` must be a JSON array**, not a string. Pass `[{...}]`, not
-  `"[{...}]"`. Double-serializing the array as a string is a common mistake.
 - **Max 5 choices** per question. If you have more, group or prioritize.
 - **Choices required** for `single_choice` and `multi_choice`. A
   single_choice without choices is an error.

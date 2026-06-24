@@ -20,12 +20,22 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"golang.org/x/sync/singleflight"
 )
 
 // configLockDeadline bounds how long lockConfig waits for the
 // cross-process flock before giving up. A few seconds is plenty for
 // honest contention; longer suggests something is wedged.
 const configLockDeadline = 5 * time.Second
+
+// refreshLockDeadline bounds how long RefreshOAuthToken waits for the
+// per-provider cross-process refresh lock. It must exceed the token
+// exchange HTTP timeout (30s) so that a peer mid-exchange is given time
+// to finish and publish its result, which we then adopt instead of
+// running our own exchange. Running our own would reuse an
+// already-rotated refresh token and trip the provider's reuse detection,
+// revoking the whole token family.
+const refreshLockDeadline = 45 * time.Second
 
 // fileSnapshot captures metadata about a config file at a point in time.
 type fileSnapshot struct {
@@ -68,6 +78,18 @@ type ConfigStore struct {
 
 	mu       sync.Mutex // serialises config file writes
 	reloadMu sync.Mutex // serialises ReloadFromDisk calls
+
+	// refreshSF collapses concurrent in-process OAuth refreshes for the
+	// same provider into a single attempt. Combined with the per-provider
+	// cross-process refresh lock, it ensures only one token exchange runs
+	// at a time. See RefreshOAuthToken.
+	refreshSF singleflight.Group
+
+	// exchangeToken performs the provider-specific OAuth token exchange.
+	// It is a field so tests can substitute a fake exchange without making
+	// real network calls. Production code leaves it nil, and exchange falls
+	// back to the real provider clients.
+	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -376,63 +398,81 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 //
-// It uses two-phase locking: the pre-check (reading the config file to
-// see if another process already refreshed) happens under the config
-// lock, then the HTTP exchange runs without any lock held, and finally
-// the result is persisted via SetConfigFields (which acquires the lock
-// internally). If the exchange fails — e.g. because another process
-// already rotated the refresh token — the disk is re-checked under lock
-// to recover the other process's token.
+// Providers like Hyper rotate refresh tokens: each exchange consumes the
+// caller's refresh token, issues a new pair, and revokes the old one. If
+// two crush instances (or two goroutines) refresh concurrently with the
+// same stored refresh token, the second exchange reuses an already-revoked
+// token, trips the provider's reuse detection, and revokes the entire
+// token family — leaving both with dead tokens even though each refresh
+// "succeeded".
+//
+// To prevent that, refreshes are single-flighted at two levels:
+//
+//   - In-process: refreshSF collapses concurrent goroutines for the same
+//     provider into one attempt.
+//   - Cross-process: a per-provider advisory lock is held across the whole
+//     read-decide-exchange-write cycle, so only one process exchanges at a
+//     time. A process that acquires the lock after a peer rotated finds the
+//     peer's fresh token on disk and adopts it instead of exchanging.
 func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
+	key := fmt.Sprintf("%d\x00%s", scope, providerID)
+	_, err, _ := s.refreshSF.Do(key, func() (any, error) {
+		return nil, s.refreshOAuthTokenLocked(ctx, scope, providerID)
+	})
+	return err
+}
+
+// refreshOAuthTokenLocked performs the cross-process single-flighted
+// refresh. It is invoked through refreshSF, so at most one goroutine per
+// provider runs it at a time within this process.
+func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, providerID string) error {
 	providerConfig, exists := s.config.Providers.Get(providerID)
 	if !exists {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
-
 	if providerConfig.OAuthToken == nil {
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
+	entryToken := providerConfig.OAuthToken
 
-	// Phase 1: Pre-check under lock — did another process already refresh?
-	release, lockErr := s.lockConfig(scope)
+	// Acquire the per-provider cross-process refresh lock. This is a
+	// dedicated lock file, not the config-write lock, and it does not take
+	// s.mu — so the network exchange below cannot stall unrelated config
+	// operations. The deadline exceeds the exchange timeout so that a peer
+	// mid-exchange has time to publish a token we can adopt. Lock ordering:
+	// the refresh lock is always taken before the config-write lock (via
+	// SetConfigFields), never the reverse, so no deadlock is possible.
+	lockCtx, cancel := context.WithTimeout(ctx, refreshLockDeadline)
+	defer cancel()
+	release, lockErr := lock.File(lockCtx, s.refreshLockPath(providerID))
 	if lockErr != nil {
-		slog.Warn("Failed to lock config for pre-check, proceeding anyway", "provider", providerID, "error", lockErr)
-	} else {
-		diskToken, err := s.loadTokenFromDisk(scope, providerID)
-		release()
-		if err != nil {
-			slog.Warn("Failed to read token from config file", "provider", providerID, "error", err)
-		} else if diskToken != nil && !diskToken.IsExpired() && diskToken.AccessToken != providerConfig.OAuthToken.AccessToken {
-			slog.Info("Using token refreshed by another session", "provider", providerID)
+		// Could not acquire the lock (peer wedged or deadline hit). Prefer a
+		// usable token already on disk over forcing our own exchange, which
+		// would risk reusing a rotated refresh token.
+		if diskToken := s.adoptableDiskToken(scope, providerID, entryToken); diskToken != nil {
+			slog.Warn("Refresh lock unavailable; adopting token from disk", "provider", providerID, "error", lockErr)
 			return s.applyToken(providerConfig, diskToken, providerID)
 		}
+		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, lockErr)
+	}
+	defer release()
+
+	// Did a peer rotate the token while we waited for the lock? If disk now
+	// holds a different, unexpired token, adopt it instead of exchanging.
+	if diskToken := s.adoptableDiskToken(scope, providerID, entryToken); diskToken != nil {
+		slog.Info("Adopting token refreshed by another session", "provider", providerID)
+		return s.applyToken(providerConfig, diskToken, providerID)
 	}
 
-	// Phase 2: HTTP exchange — no lock held.
-	var refreshedToken *oauth.Token
-	var refreshErr error
-	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
-		refreshedToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	case hyperp.Name:
-		refreshedToken, refreshErr = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	default:
-		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
-	}
+	// Disk still holds our token (or no usable peer token exists) and we hold
+	// the lock, so we are the sole exchanger. Perform the exchange.
+	refreshedToken, refreshErr := s.exchange(ctx, providerID, entryToken.RefreshToken)
 	if refreshErr != nil {
-		// Phase 3: Fallback — re-check disk under lock. The exchange may
-		// have failed because another process already rotated the refresh
-		// token.
-		if release, lockErr := s.lockConfig(scope); lockErr == nil {
-			diskToken, diskErr := s.loadTokenFromDisk(scope, providerID)
-			release()
-			if diskErr == nil &&
-				diskToken != nil &&
-				!diskToken.IsExpired() &&
-				diskToken.AccessToken != providerConfig.OAuthToken.AccessToken {
-				slog.Info("Using token refreshed by another session after exchange failure", "provider", providerID)
-				return s.applyToken(providerConfig, diskToken, providerID)
-			}
+		// The exchange may have failed because a peer rotated the refresh
+		// token in a window we did not cover. Re-check disk and adopt.
+		if diskToken := s.adoptableDiskToken(scope, providerID, entryToken); diskToken != nil {
+			slog.Info("Adopting token refreshed by another session after exchange failure", "provider", providerID)
+			return s.applyToken(providerConfig, diskToken, providerID)
 		}
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
@@ -440,12 +480,9 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	providerConfig.OAuthToken = refreshedToken
 	providerConfig.APIKey = refreshedToken.AccessToken
-
-	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
+	if providerID == string(catwalk.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}
-
 	s.config.Providers.Set(providerID, providerConfig)
 
 	if err := s.SetConfigFields(scope, map[string]any{
@@ -454,8 +491,55 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 	}); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
-
 	return nil
+}
+
+// adoptableDiskToken returns the on-disk token for the provider when it is
+// usable and differs from entryToken — i.e. when another session has
+// already refreshed it and we should adopt that result rather than running
+// our own exchange. It returns nil when there is nothing newer to adopt.
+func (s *ConfigStore) adoptableDiskToken(scope Scope, providerID string, entryToken *oauth.Token) *oauth.Token {
+	diskToken, err := s.loadTokenFromDisk(scope, providerID)
+	if err != nil {
+		slog.Warn("Failed to read token from config file", "provider", providerID, "error", err)
+		return nil
+	}
+	if diskToken == nil || diskToken.IsExpired() {
+		return nil
+	}
+	if diskToken.AccessToken == entryToken.AccessToken {
+		// Same token we started with; nobody refreshed since.
+		return nil
+	}
+	return diskToken
+}
+
+// exchange performs the provider-specific OAuth token exchange. Tests may
+// override it via the exchangeToken field; production uses the real
+// provider clients.
+func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	if s.exchangeToken != nil {
+		return s.exchangeToken(ctx, providerID, refreshToken)
+	}
+	switch providerID {
+	case string(catwalk.InferenceProviderCopilot):
+		return copilot.RefreshToken(ctx, refreshToken)
+	case hyperp.Name:
+		return hyper.ExchangeToken(ctx, refreshToken)
+	default:
+		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
+	}
+}
+
+// refreshLockPath returns the path to the per-provider cross-process refresh
+// lock file. Lock files live under a dedicated locks/ subdirectory of the
+// data dir so they do not clutter the config directory. The file is created
+// on demand by lock.File and is never removed (flock keys on inode, not
+// path).
+func (s *ConfigStore) refreshLockPath(providerID string) string {
+	dir := filepath.Join(filepath.Dir(s.globalDataPath), "locks")
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, fmt.Sprintf("%s.refresh.lock", providerID))
 }
 
 // applyToken updates the in-memory provider config with the given token.

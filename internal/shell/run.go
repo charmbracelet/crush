@@ -210,7 +210,9 @@ func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
 	for _, mw := range slices.Backward(standardHandlers(blockFuncs)) {
 		handler = mw(handler)
 	}
-	return interp.ExecHandler(handler) //nolint:staticcheck // ExecHandlers always appends DefaultExecHandler which lacks process isolation.
+	// ExecHandlers always appends DefaultExecHandler which lacks process
+	// group isolation, so we use the deprecated ExecHandler instead.
+	return interp.ExecHandler(handler)
 }
 
 // nonInteractiveEnvVars are forced on every shell execution to prevent

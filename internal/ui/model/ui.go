@@ -4047,6 +4047,9 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	form.OnAnswer = func(responses []question.Answer) {
 		m.com.Workspace.QuestionAnswer(responses)
 	}
+	form.OnCancel = func() {
+		m.com.Workspace.QuestionCancel()
+	}
 	m.activeInline = form
 	m.textarea.Blur()
 	m.focus = uiFocusEditor

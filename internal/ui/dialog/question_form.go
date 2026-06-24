@@ -57,6 +57,11 @@ type QuestionForm struct {
 	// OnAnswer is called when the form is submitted. The UI sets
 	// this to wire up workspace submission.
 	OnAnswer func(responses []question.Answer)
+
+	// OnCancel is called when the user presses escape to cancel
+	// the entire question batch. The UI sets this to wire up
+	// workspace cancellation.
+	OnCancel func()
 }
 
 // NewQuestionForm creates a tabbed multi-question form from a
@@ -215,7 +220,7 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 	// Global keys for question tabs.
 	if key.Matches(msg, f.keyClose) {
-		f.submit()
+		f.cancel()
 		return true, nil
 	}
 
@@ -303,6 +308,14 @@ func (f *QuestionForm) submit() {
 	}
 	if f.OnAnswer != nil {
 		f.OnAnswer(responses)
+	}
+}
+
+// cancel calls OnCancel to signal that the user dismissed the
+// question batch without answering.
+func (f *QuestionForm) cancel() {
+	if f.OnCancel != nil {
+		f.OnCancel()
 	}
 }
 

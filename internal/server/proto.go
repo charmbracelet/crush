@@ -1063,6 +1063,28 @@ func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter,
 	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: resolved})
 }
 
+// handlePostWorkspaceQuestionsCancel cancels the pending question
+// batch for a workspace.
+//
+//	@Summary		Cancel question batch
+//	@Tags			questions
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200	{object}	proto.QuestionAnswerResponse
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/questions/cancel [post]
+func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	cancelled, err := c.backend.CancelQuestion(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: cancelled})
+}
+
 // handlePostWorkspacePermissionsSkip sets whether to skip permission prompts.
 //
 //	@Summary		Set skip permissions

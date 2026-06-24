@@ -263,6 +263,10 @@ func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
 	return w.app.Questions.Answer(responses)
 }
 
+func (w *AppWorkspace) QuestionCancel() bool {
+	return w.app.Questions.Cancel()
+}
+
 // -- FileTracker --
 
 func (w *AppWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {

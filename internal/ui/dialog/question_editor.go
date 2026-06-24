@@ -18,7 +18,7 @@ import (
 func newQuestionTextarea(sty *styles.Styles, placeholder string, charLimit int) textarea.Model {
 	ta := textarea.New()
 	taStyles := sty.Editor.Textarea
-	taStyles.Cursor.Color = sty.Editor.PromptYoloDotsFocused.GetForeground()
+	taStyles.Cursor.Color = sty.Editor.QuestionCursorBar.GetForeground()
 	ta.SetStyles(taStyles)
 	ta.Placeholder = placeholder
 	ta.ShowLineNumbers = false

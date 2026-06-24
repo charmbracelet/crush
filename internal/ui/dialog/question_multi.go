@@ -151,10 +151,10 @@ func (d *MultiChoice) ShortHelp() []key.Binding {
 	return []key.Binding{d.keyUp, d.keyDown, d.keyToggle, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyDone, d.keyClose}
 }
 
-func (d *MultiChoice) Height() int         { return d.height(choiceListMaxWidth + 4) }
-func (d *MultiChoice) HeightChanged() bool { return d.heightChanged() }
-func (d *MultiChoice) SetFocused(f bool)   { d.setFocused(f) }
-func (d *MultiChoice) SetHover(x, y int)   { d.setHover(x, y) }
+func (d *MultiChoice) Height(width int) int { return d.height(width) }
+func (d *MultiChoice) HeightChanged() bool  { return d.heightChanged() }
+func (d *MultiChoice) SetFocused(f bool)    { d.setFocused(f) }
+func (d *MultiChoice) SetHover(x, y int)    { d.setHover(x, y) }
 func (d *MultiChoice) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	return d.handlePaste(msg)
 }

@@ -914,6 +914,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch m.state {
 		case uiChat:
+			// Skip chat edge-scrolling when an inline editor is
+			// active to prevent accidental scrolling while hovering
+			// over question forms or other inline components.
+			if m.activeInline != nil && m.focus == uiFocusEditor {
+				break
+			}
 			if msg.Y <= 0 {
 				if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -3066,12 +3072,17 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	// When an inline editor is active, use its height instead.
 	editorHeight := m.textarea.Height() + editorHeightMargin
 	if m.activeInline != nil {
+		// The editor content width depends only on terminal width
+		// and layout (not on editor height), so passing the current
+		// frame's width to Height() keeps layout in sync with the
+		// width Draw will use, preventing flicker during fast resize.
+		editorWidth := m.editorContentWidth()
 		if m.focus == uiFocusEditor {
-			editorHeight = m.activeInline.Height()
+			editorHeight = m.activeInline.Height(editorWidth)
 		} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
 			editorHeight = qf.CollapsedHeight() + 1
 		} else {
-			editorHeight = m.activeInline.Height()
+			editorHeight = m.activeInline.Height(editorWidth)
 		}
 	}
 	// The sidebar width
@@ -4069,11 +4080,25 @@ func (m *UI) handleQuestionNotification(_ question.Notification) {
 	}
 }
 
+// editorContentWidth returns the content width available to the
+// editor area for the current state. It depends only on terminal
+// width and layout (not on editor height), so it can be computed
+// before the editor's height is known. This is the single source
+// of truth for the inline editor width used by both layout sizing
+// and Height() queries.
+func (m *UI) editorContentWidth() int {
+	width := m.width - 2 // appRect horizontal margins
+	if m.state == uiChat && !m.isCompact {
+		width -= 30 // sidebar column
+	}
+	return width
+}
+
 // shouldCollapseQuestion reports whether a question form should render
 // in its collapsed one-line view. This is true only when the form is
 // unfocused and would consume more than half the terminal height.
 func (m *UI) shouldCollapseQuestion(qf *dialog.QuestionForm) bool {
-	return m.focus != uiFocusEditor && m.height > 0 && qf.Height() > m.height*2/5
+	return m.focus != uiFocusEditor && m.height > 0 && qf.Height(m.editorContentWidth()) > m.height*2/5
 }
 
 // handlePermissionNotification updates tool items when permission state changes.

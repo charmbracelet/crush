@@ -19,8 +19,10 @@ type InlineEditor interface {
 	// ShortHelp returns key bindings for the status bar.
 	ShortHelp() []key.Binding
 
-	// Height returns the number of content lines for layout.
-	Height() int
+	// Height returns the number of content lines for layout at the
+	// given content width. It must be a pure function of width so
+	// layout stays in sync with Draw during resize.
+	Height(width int) int
 
 	// Draw renders the component onto the screen within the given
 	// area. Returns the cursor position relative to the area's

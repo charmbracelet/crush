@@ -32,12 +32,15 @@ type ConfirmComponent struct {
 	keyRight key.Binding
 	keyEnter key.Binding
 	keyClose key.Binding
+	keyUp    key.Binding
+	keyDown  key.Binding
 
-	focused    bool
-	lastWidth  int
-	compositor *lipgloss.Compositor
-	hoverX     int
-	hoverY     int
+	focused      bool
+	lastWidth    int
+	scrollOffset int
+	compositor   *lipgloss.Compositor
+	hoverX       int
+	hoverY       int
 
 	// OnConfirm is called when the user confirms.
 	OnConfirm func()
@@ -62,6 +65,8 @@ func NewConfirmComponent(sty *styles.Styles, title, description string, labels [
 		keyRight:         key.NewBinding(key.WithKeys("right"), key.WithHelp("←/→", "switch")),
 		keyEnter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
 		keyClose:         CloseKey,
+		keyUp:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑", "scroll")),
+		keyDown:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓", "scroll")),
 	}
 }
 
@@ -70,6 +75,14 @@ func NewConfirmComponent(sty *styles.Styles, title, description string, labels [
 // here; QuestionForm intercepts them for tab navigation.
 func (c *ConfirmComponent) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch {
+	case key.Matches(msg, c.keyUp):
+		if c.scrollOffset > 0 {
+			c.scrollOffset--
+		}
+		return false, nil
+	case key.Matches(msg, c.keyDown):
+		c.scrollOffset++
+		return false, nil
 	case key.Matches(msg, c.keyLeft), key.Matches(msg, c.keyRight):
 		c.confirmYes = !c.confirmYes
 		return false, nil
@@ -101,7 +114,7 @@ func (c *ConfirmComponent) Response() question.Answer {
 
 // ShortHelp returns key bindings for the status bar.
 func (c *ConfirmComponent) ShortHelp() []key.Binding {
-	return []key.Binding{c.keyLeft, c.keyEnter, c.keyClose}
+	return []key.Binding{c.keyUp, c.keyLeft, c.keyEnter, c.keyClose}
 }
 
 // unansweredCount returns how many questions have no meaningful answer.
@@ -116,8 +129,11 @@ func (c *ConfirmComponent) unansweredCount() int {
 }
 
 // Height returns the visual height of the confirm content.
-func (c *ConfirmComponent) Height() int {
-	w := c.lastWidth
+func (c *ConfirmComponent) Height(width int) int {
+	w := width
+	if w <= 0 {
+		w = c.lastWidth
+	}
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}
@@ -149,18 +165,27 @@ func (c *ConfirmComponent) Height() int {
 	return h
 }
 
-// Draw renders the confirmation content.
+// Draw renders the confirmation content with scroll support.
 func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	c.lastWidth = area.Dx()
-	y := area.Min.Y
+	viewport := area.Dy()
 
-	// Title with ? icon prompt, using confirm style.
+	// Build all content lines into a virtual buffer.
+	type line struct {
+		text    string
+		buttons bool // true for the button row
+	}
+	var lines []line
+
 	iconPrompt := questionIconPrompt(c.Styles, c.focused)
-	qText := iconPrompt + c.Styles.Editor.QuestionConfirm.Render(
-		ansi.Wrap(c.Title, area.Dx()-lipgloss.Width(iconPrompt), ""),
-	)
-	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), qText)
-	y++ // blank
+	iconWidth := lipgloss.Width(iconPrompt)
+
+	// Title.
+	titleWrapped := ansi.Wrap(c.Title, area.Dx()-iconWidth, "")
+	for _, l := range strings.Split(titleWrapped, "\n") {
+		lines = append(lines, line{text: iconPrompt + c.Styles.Editor.QuestionConfirm.Render(l)})
+	}
+	lines = append(lines, line{}) // blank
 
 	// Description.
 	if c.Description != "" {
@@ -171,21 +196,25 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		mu.Unlock()
 		if err == nil {
 			desc = strings.TrimSuffix(desc, "\n")
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), desc)
+			for _, l := range strings.Split(desc, "\n") {
+				lines = append(lines, line{text: l})
+			}
 		} else {
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), c.Description)
+			for _, l := range strings.Split(c.Description, "\n") {
+				lines = append(lines, line{text: l})
+			}
 		}
-		y++ // blank
+		lines = append(lines, line{}) // blank
 	}
 
-	// Answer summary bullets in description/body style.
+	// Answer summary bullets.
 	bulletStyle := c.Styles.Editor.QuestionBody
 	for i, label := range c.QuestionLabels {
 		summary := c.answerSummary(i)
 		bullet := bulletStyle.Render("• " + label + ": " + summary)
-		y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), bullet)
+		lines = append(lines, line{text: bullet})
 	}
-	y++ // blank
+	lines = append(lines, line{}) // blank
 
 	// Warning if some questions are unanswered.
 	if missed := c.unansweredCount(); missed > 0 {
@@ -196,21 +225,67 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			word = "questions"
 		}
 		warn := warnStyle.Render("WARN") + " " + msgStyle.Render(fmt.Sprintf("%d %s unanswered", missed, word))
-		y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), warn)
-		y++ // blank
+		lines = append(lines, line{text: warn})
+		lines = append(lines, line{}) // blank
 	}
 
-	// Buttons. Build compositor first so hover uses current geometry.
+	// Buttons.
+	lines = append(lines, line{buttons: true})
+
+	totalLines := len(lines)
 	confirmButtonOpts := []common.ButtonOpts{
 		{Text: "Yup!", Selected: c.confirmYes, Padding: 3, UnderlineIndex: -1},
 		{Text: "Not yet", Selected: !c.confirmYes, Padding: 3, UnderlineIndex: -1},
 	}
-	c.compositor = common.ButtonHitCompositor(c.Styles, confirmButtonOpts, " ", area.Min.X, y)
-	hoveredBtn := common.HitButtonIndex(c.compositor, c.hoverX, c.hoverY)
-	confirmButtonOpts[0].Hovered = hoveredBtn == 0
-	confirmButtonOpts[1].Hovered = hoveredBtn == 1
-	buttons := common.ButtonGroup(c.Styles, confirmButtonOpts, " ")
-	drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), buttons)
+	overflow := viewport > 0 && totalLines > viewport
+
+	// Clamp scroll offset.
+	maxScroll := totalLines - viewport
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if c.scrollOffset > maxScroll {
+		c.scrollOffset = maxScroll
+	}
+	if c.scrollOffset < 0 {
+		c.scrollOffset = 0
+	}
+
+	// Determine content width (shrink by 1 for scrollbar if overflowing).
+	contentWidth := area.Dx()
+	if overflow {
+		contentWidth--
+	}
+
+	// Blit visible window.
+	for screenRow := range viewport {
+		idx := c.scrollOffset + screenRow
+		if idx >= totalLines {
+			break
+		}
+		ln := lines[idx]
+		y := area.Min.Y + screenRow
+		if ln.buttons {
+			// Build compositor for button hit detection.
+			c.compositor = common.ButtonHitCompositor(c.Styles, confirmButtonOpts, " ", area.Min.X, y)
+			hoveredBtn := common.HitButtonIndex(c.compositor, c.hoverX, c.hoverY)
+			confirmButtonOpts[0].Hovered = hoveredBtn == 0
+			confirmButtonOpts[1].Hovered = hoveredBtn == 1
+			buttons := common.ButtonGroup(c.Styles, confirmButtonOpts, " ")
+			drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), buttons)
+		} else if ln.text != "" {
+			drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), ln.text)
+		}
+	}
+
+	// Scrollbar.
+	if overflow {
+		sb := common.Scrollbar(c.Styles, viewport, totalLines, viewport, c.scrollOffset)
+		if sb != "" {
+			x := area.Max.X - 1
+			uv.NewStyledString(sb).Draw(scr, image.Rect(x, area.Min.Y, x+1, area.Min.Y+viewport))
+		}
+	}
 
 	return nil
 }
@@ -258,21 +333,25 @@ func (c *ConfirmComponent) answerSummary(idx int) string {
 		return "(not answered)"
 	}
 	resp := c.Answers[idx]
+	var parts []string
+	if len(resp.SelectedIDs) > 0 {
+		labels := make([]string, 0, len(resp.SelectedIDs))
+		for _, id := range resp.SelectedIDs {
+			labels = append(labels, c.choiceLabel(idx, id))
+		}
+		parts = append(parts, strings.Join(labels, ", "))
+	}
 	if resp.FillInText != "" {
-		return resp.FillInText
+		parts = append(parts, resp.FillInText)
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "; ")
 	}
 	if resp.Yes != nil {
 		if *resp.Yes {
 			return "Yes"
 		}
 		return "No"
-	}
-	if len(resp.SelectedIDs) > 0 {
-		labels := make([]string, 0, len(resp.SelectedIDs))
-		for _, id := range resp.SelectedIDs {
-			labels = append(labels, c.choiceLabel(idx, id))
-		}
-		return strings.Join(labels, ", ")
 	}
 	return "(not answered)"
 }

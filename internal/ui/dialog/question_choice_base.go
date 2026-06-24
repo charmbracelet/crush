@@ -399,13 +399,14 @@ func (c *choiceList) renderDescription(width int) string {
 type choiceItemRenderer func(index int, choice question.Choice, active bool, innerWidth int) string
 
 // height returns the total visual height at the given width. It is
-// len(buildLines), the single source of truth for layout.
+// len(buildLines), the single source of truth for layout, and a
+// pure function of the width passed in so it always agrees with
+// the width drawContent will use this frame.
 func (c *choiceList) height(width int) int {
-	w := c.lastWidth
-	if w <= 0 {
-		w = width
+	if width <= 0 {
+		width = c.lastWidth
 	}
-	innerWidth := min(w-4, choiceListMaxWidth)
+	innerWidth := min(width-4, choiceListMaxWidth)
 	return len(c.buildLines(innerWidth, "> ", func(int, question.Choice, bool, int) string {
 		return "x" // single-line placeholder; only count matters
 	}))
@@ -451,23 +452,20 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 	c.lastWidth = area.Dx()
 	viewport := area.Dy()
 
-	// Build lines at the narrow width first to test overflow.
-	// If content fits without a scrollbar, rebuild at the wider
-	// width so text uses the full available space.
+	// Build lines at the wide width first (matching height(),
+	// which the form uses to size our viewport). Only reserve a
+	// scrollbar column and rebuild narrow if the wide layout
+	// actually overflows. Testing narrow first would over-report
+	// overflow by one line at boundary widths, causing the
+	// scrollbar to flicker during horizontal resize.
 	contentWidth := area.Dx()
 	innerNarrow := min(contentWidth-1-4, choiceListMaxWidth)
 	innerWide := min(contentWidth-4, choiceListMaxWidth)
 
-	lines := c.buildLines(innerNarrow, fillInPrefix, itemFn)
+	lines := c.buildLines(innerWide, fillInPrefix, itemFn)
 	overflow := viewport > 0 && len(lines) > viewport
-	if !overflow && innerWide != innerNarrow {
-		lines = c.buildLines(innerWide, fillInPrefix, itemFn)
-		overflow = viewport > 0 && len(lines) > viewport
-		if overflow {
-			// Adding the scrollbar column caused wrapping that
-			// created overflow. Stick with the narrow width.
-			lines = c.buildLines(innerNarrow, fillInPrefix, itemFn)
-		}
+	if overflow && innerNarrow != innerWide {
+		lines = c.buildLines(innerNarrow, fillInPrefix, itemFn)
 	}
 
 	if overflow {

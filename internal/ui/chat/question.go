@@ -196,9 +196,25 @@ func formatQuestionAnswers(sty *styles.Styles, content string, width int) string
 }
 
 // styleAnswer extracts the meaningful part of an answer string and styles it.
+// styleAnswer extracts the meaningful part of an answer string and styles it.
+// An answer may span multiple lines (e.g. multi-choice selections plus a
+// custom fill-in), so each line is styled independently and rejoined.
 func styleAnswer(sty *styles.Styles, answer string) string {
 	answer = strings.TrimSpace(answer)
+	lines := strings.Split(answer, "\n")
+	styled := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		styled = append(styled, styleAnswerLine(sty, line))
+	}
+	return strings.Join(styled, sty.Tool.TodoStatusNote.Render(", "))
+}
 
+// styleAnswerLine styles a single answer line.
+func styleAnswerLine(sty *styles.Styles, answer string) string {
 	switch {
 	case answer == "User answered: yes":
 		return sty.Tool.TodoCompletedIcon.Render("Yes")

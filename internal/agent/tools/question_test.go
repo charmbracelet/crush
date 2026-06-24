@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,4 +47,30 @@ func TestQuestionParamsUnmarshalJSON_InvalidString(t *testing.T) {
 	input := `{"questions": ` + string(encoded) + `}`
 	var p QuestionParams
 	require.Error(t, json.Unmarshal([]byte(input), &p))
+}
+
+func TestFormatAnswer_MultiChoiceWithFillIn(t *testing.T) {
+	answer := question.Answer{
+		SelectedIDs: []string{"speed", "readability"},
+		FillInText:  "maintainability",
+	}
+	resp, err := formatAnswer(&answer, question.TypeMultiChoice)
+	require.NoError(t, err)
+	require.Contains(t, resp.Content, `User selected: ["speed","readability"]`)
+	require.Contains(t, resp.Content, "User provided: maintainability")
+}
+
+func TestFormatAnswer_SelectionsOnly(t *testing.T) {
+	answer := question.Answer{SelectedIDs: []string{"gardening"}}
+	resp, err := formatAnswer(&answer, question.TypeSingleChoice)
+	require.NoError(t, err)
+	require.Contains(t, resp.Content, `User selected: ["gardening"]`)
+	require.NotContains(t, resp.Content, "User provided")
+}
+
+func TestFormatAnswer_Skipped(t *testing.T) {
+	answer := question.Answer{}
+	resp, err := formatAnswer(&answer, question.TypeFreeText)
+	require.NoError(t, err)
+	require.Equal(t, "User skipped this question", resp.Content)
 }

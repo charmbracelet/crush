@@ -61,7 +61,7 @@ func TestFilter_CoalescesSameDirection(t *testing.T) {
 	require.Equal(t, float64(3), msg.DeltaY, "should accumulate 3 down events")
 }
 
-func TestFilter_DirectionChangeResetsAccumulator(t *testing.T) {
+func TestFilter_DirectionChangeWithinWindowAccumulatesNewDirection(t *testing.T) {
 	t.Parallel()
 	f, now := newTestFilter(t)
 
@@ -79,6 +79,31 @@ func TestFilter_DirectionChangeResetsAccumulator(t *testing.T) {
 	msg, ok := result.(common.CoalescedWheelMsg)
 	require.True(t, ok)
 	require.Equal(t, float64(-2), msg.DeltaY, "should have 2 accumulated up events")
+}
+
+func TestFilter_DirectionChangeDropsStaleAccumulator(t *testing.T) {
+	t.Parallel()
+	f, now := newTestFilter(t)
+
+	// Scroll up
+	f.Filter(nil, wheelUp())
+
+	// Scroll up again
+	*now = now.Add(5 * time.Millisecond)
+	result := f.Filter(nil, wheelUp())
+	require.Nil(t, result)
+
+	// Scroll down (accumulation should reset)
+	*now = now.Add(5 * time.Millisecond)
+	result = f.Filter(nil, wheelDown())
+	require.Nil(t, result)
+
+	// And scroll down again
+	*now = now.Add(20 * time.Millisecond)
+	result = f.Filter(nil, wheelDown())
+	msg, ok := result.(common.CoalescedWheelMsg)
+	require.True(t, ok)
+	require.Equal(t, float64(2), msg.DeltaY, "should drop stale opposite-direction events")
 }
 
 func TestFilter_WindowExpiryEmitsAccumulated(t *testing.T) {

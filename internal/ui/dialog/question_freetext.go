@@ -127,126 +127,126 @@ func (d *FreeText) Height(width int) int {
 
 // Draw renders the free-text question directly to screen.
 // Returns the cursor position, or nil.
+//
+// The question header, description, and textarea share a single
+// scroll buffer so the title scrolls away as the answer grows,
+// matching the choice and confirm components. This keeps the
+// textarea from being permanently squeezed by fixed header rows.
 func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	d.lastWidth = area.Dx()
-	y := area.Min.Y
+	viewport := area.Dy()
 
-	// Draw question header.
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	qText := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
-		ansi.Wrap(d.Request.Text, area.Dx()-lipgloss.Width(iconPrompt), ""),
-	)
-	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), qText)
-	y++ // blank
-
-	// Draw optional description.
-	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, area.Dx())
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		desc, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			desc = strings.TrimSuffix(desc, "\n")
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), desc)
-		} else {
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), d.Request.Description)
-		}
-		y++ // blank
-	}
-
-	// Draw textarea with > prompt prefix, viewport clipping, and scrollbar.
 	promptPrefix := d.Styles.Editor.QuestionBody.Render("> ")
 	prefixWidth := lipgloss.Width(promptPrefix)
+	iconPrompt := questionIconPrompt(d.Styles, d.focused)
+	iconWidth := lipgloss.Width(iconPrompt)
 
-	// Available height for the textarea viewport (subtract trailing padding).
-	viewport := area.Max.Y - y - 1
-	if viewport < 1 {
-		viewport = 1
+	// ftLine is a single buffer row. cursorX >= 0 marks the row
+	// carrying the textarea cursor and its column (incl. prefix).
+	type ftLine struct {
+		text    string
+		cursorX int
 	}
 
-	// Pre-compute whether we need a scrollbar column by estimating
-	// line count at full width first. This avoids the double-render
-	// that caused width oscillation.
-	fullWidth := min(area.Dx()-2-prefixWidth, choiceListMaxWidth)
-	d.editor.SetWidth(fullWidth)
-	view := d.editor.View()
-	viewLines := strings.Split(view, "\n")
-	totalLines := len(viewLines)
+	// build renders the full content (header, description, textarea)
+	// into a flat line buffer at the given content width. Returns
+	// the buffer and the row index of the cursor (-1 if none).
+	build := func(contentWidth int) ([]ftLine, int) {
+		var lines []ftLine
+		cursorRow := -1
 
-	overflow := totalLines > viewport
-	textWidth := area.Dx()
-	sbX := 0
-	if overflow {
-		textWidth-- // reserve 1 column for scrollbar
-		sbX = area.Min.X + textWidth
-		// Re-render at narrower width only if it changed.
-		narrowWidth := min(textWidth-2-prefixWidth, choiceListMaxWidth)
-		if narrowWidth != fullWidth {
-			d.editor.SetWidth(narrowWidth)
-			view = d.editor.View()
-			viewLines = strings.Split(view, "\n")
-			totalLines = len(viewLines)
+		header := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
+			ansi.Wrap(d.Request.Text, contentWidth-iconWidth, ""),
+		)
+		for _, l := range strings.Split(header, "\n") {
+			lines = append(lines, ftLine{text: l, cursorX: -1})
 		}
-	}
+		lines = append(lines, ftLine{cursorX: -1}) // blank
 
-	// Clamp scroll offset to valid bounds.
-	maxScroll := max(0, totalLines-viewport)
-	d.scrollOffset = min(max(0, d.scrollOffset), maxScroll)
-
-	// Auto-scroll to keep cursor visible, unless in wheel-scroll mode.
-	if !d.wheelActive {
-		if tc := d.editor.Cursor(); tc != nil {
-			cursorLine := tc.Y
-			if cursorLine < d.scrollOffset {
-				d.scrollOffset = cursorLine
-			} else if cursorLine >= d.scrollOffset+viewport {
-				d.scrollOffset = cursorLine - viewport + 1
+		if d.Request.Description != "" {
+			r := common.MarkdownRenderer(d.Styles, contentWidth)
+			mu := common.LockMarkdownRenderer(r)
+			mu.Lock()
+			desc, err := r.Render(d.Request.Description)
+			mu.Unlock()
+			if err != nil {
+				desc = d.Request.Description
 			}
+			desc = strings.TrimSuffix(desc, "\n")
+			for _, l := range strings.Split(desc, "\n") {
+				lines = append(lines, ftLine{text: l, cursorX: -1})
+			}
+			lines = append(lines, ftLine{cursorX: -1}) // blank
 		}
-		// Re-clamp after cursor adjustment.
+
+		d.editor.SetWidth(contentWidth - 2 - prefixWidth)
+		tc := d.editor.Cursor()
+		for j, ln := range strings.Split(d.editor.View(), "\n") {
+			text := promptPrefix + ln
+			if j > 0 {
+				text = strings.Repeat(" ", prefixWidth) + ln
+			}
+			cursorX := -1
+			if tc != nil && tc.Y == j {
+				cursorRow = len(lines)
+				cursorX = tc.X + prefixWidth
+			}
+			lines = append(lines, ftLine{text: text, cursorX: cursorX})
+		}
+		lines = append(lines, ftLine{cursorX: -1}) // trailing bottom padding, matches Height()
+		return lines, cursorRow
+	}
+
+	// Build at full width; reserve a scrollbar column and rebuild
+	// only if the content overflows the viewport.
+	contentWidth := area.Dx()
+	lines, cursorRow := build(contentWidth)
+	overflow := viewport > 0 && len(lines) > viewport
+	if overflow {
+		contentWidth--
+		lines, cursorRow = build(contentWidth)
+	}
+
+	// Clamp scroll, then keep the cursor row visible unless the
+	// user is wheel-scrolling.
+	maxScroll := max(0, len(lines)-viewport)
+	d.scrollOffset = min(max(0, d.scrollOffset), maxScroll)
+	if !d.wheelActive && cursorRow >= 0 {
+		if cursorRow < d.scrollOffset {
+			d.scrollOffset = cursorRow
+		} else if cursorRow >= d.scrollOffset+viewport {
+			d.scrollOffset = cursorRow - viewport + 1
+		}
 		d.scrollOffset = min(max(0, d.scrollOffset), maxScroll)
 	}
-	// Don't clear wheelActive here; it persists until the next key press.
 
+	// Blit the visible window and place the cursor. The cursor is
+	// returned relative to the area's top-left, matching the
+	// InlineEditor contract.
 	var cur *tea.Cursor
+	baseCursor := d.editor.Cursor()
 	for screenRow := range viewport {
-		lineIdx := d.scrollOffset + screenRow
-		if lineIdx >= totalLines {
+		idx := d.scrollOffset + screenRow
+		if idx >= len(lines) {
 			break
 		}
-		ln := viewLines[lineIdx]
-		text := promptPrefix + ln
-		if lineIdx > 0 {
-			text = strings.Repeat(" ", prefixWidth) + ln
+		ln := lines[idx]
+		y := area.Min.Y + screenRow
+		drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), ln.text)
+		if ln.cursorX >= 0 && ln.cursorX < contentWidth && baseCursor != nil {
+			c := *baseCursor
+			c.X = ln.cursorX
+			c.Y = screenRow
+			cur = &c
 		}
-		drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+textWidth, y+1), text)
-
-		// Cursor: only on the line matching the editor's cursor row.
-		if tc := d.editor.Cursor(); tc != nil && tc.Y == lineIdx {
-			tc.X += prefixWidth
-			tc.Y = y - area.Min.Y
-			if tc.X < textWidth {
-				cur = tc
-			}
-		}
-		y++
 	}
 
 	// Scrollbar.
 	if overflow {
-		sb := common.Scrollbar(d.Styles, viewport, totalLines, viewport, d.scrollOffset)
+		sb := common.Scrollbar(d.Styles, viewport, len(lines), viewport, d.scrollOffset)
 		if sb != "" {
-			uv.NewStyledString(sb).Draw(scr, image.Rect(sbX, area.Max.Y-viewport-1, sbX+1, area.Max.Y-1))
-		}
-	}
-
-	// Clamp cursor X to visible text width.
-	if cur != nil {
-		if cur.X < 0 {
-			cur.X = 0
-		} else if cur.X >= textWidth {
-			cur.X = textWidth - 1
+			x := area.Max.X - 1
+			uv.NewStyledString(sb).Draw(scr, image.Rect(x, area.Min.Y, x+1, area.Min.Y+viewport))
 		}
 	}
 

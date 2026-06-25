@@ -231,6 +231,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Buttons.
 	lines = append(lines, line{buttons: true})
+	lines = append(lines, line{}) // bottom margin, matches Height()
 
 	totalLines := len(lines)
 	confirmButtonOpts := []common.ButtonOpts{

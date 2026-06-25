@@ -100,7 +100,7 @@ func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]st
 	return fsext.GlobGitignoreAware(pattern, searchPath, limit)
 }
 
-func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
+func runRipgrep(cmd *rgCmd, searchRoot string, limit int) ([]string, error) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {

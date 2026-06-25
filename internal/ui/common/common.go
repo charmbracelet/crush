@@ -6,6 +6,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -33,9 +34,11 @@ func (c *Common) Config() *config.Config {
 
 // DefaultCommon returns the default common UI configurations. When the
 // workspace has a large model selected, the theme is chosen based on its
-// provider; otherwise the default theme is used.
+// provider; otherwise the default theme is used. The terminal background
+// is auto-detected so light terminals get the appropriate theme variant.
 func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.ThemeForProvider(largeModelProviderID(ws))
+	hasDarkBG := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+	s := styles.ThemeForProvider(largeModelProviderID(ws), hasDarkBG)
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,

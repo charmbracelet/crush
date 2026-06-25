@@ -444,7 +444,8 @@ func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess sessi
 	if cfg != nil {
 		providerID = cfg.Config().Models[config.SelectedModelTypeLarge].Provider
 	}
-	styles := styles.ThemeForProvider(providerID)
+	hasDarkBG := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+	st := styles.ThemeForProvider(providerID, hasDarkBG)
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth
@@ -485,7 +486,7 @@ func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess sessi
 
 	first := true
 	for _, msg := range msgs {
-		items := chat.ExtractMessageItems(&styles, msg, toolResults)
+		items := chat.ExtractMessageItems(&st, msg, toolResults)
 		for _, item := range items {
 			if !first {
 				fmt.Fprintln(&buf)

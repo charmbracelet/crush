@@ -580,6 +580,7 @@
             "google-vertex",
             "hyper",
             "litellm",
+            "llamacpp",
             "lmstudio",
             "ollama",
             "omlx"
@@ -773,6 +774,16 @@
         "expires_at"
       ]
     },
+    "ToolGlob": {
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout for the glob tool call"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "ToolGrep": {
       "properties": {
         "timeout": {
@@ -812,6 +823,9 @@
         },
         "grep": {
           "$ref": "#/$defs/ToolGrep"
+        },
+        "glob": {
+          "$ref": "#/$defs/ToolGlob"
         }
       },
       "additionalProperties": false,

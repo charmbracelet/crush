@@ -144,6 +144,13 @@ type AssistantMessageItem struct {
 	// docs/notes/2026-05-12-chat-rendering-perf.md. See
 	// streaming_markdown.go for the full algorithm.
 	streamingContent streamingMarkdown
+
+	// streamingThinking applies the same stable-prefix caching to
+	// the thinking/reasoning section. Without this, every streaming
+	// delta forces a full glamour re-render of the entire accumulated
+	// thinking text, which burns CPU and starves the terminal emulator
+	// during long reasoning traces.
+	streamingThinking streamingMarkdown
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -447,13 +454,7 @@ func (a *AssistantMessageItem) cachedError(width int) string {
 // lines so the visual box matches what the user sees today.
 func (a *AssistantMessageItem) renderThinking(thinking string, width int) string {
 	renderer := common.QuietMarkdownRenderer(a.sty, width)
-	mu := common.LockMarkdownRenderer(renderer)
-	mu.Lock()
-	rendered, err := renderer.Render(thinking)
-	mu.Unlock()
-	if err != nil {
-		rendered = thinking
-	}
+	rendered := a.streamingThinking.Render(thinking, width, renderer)
 	rendered = strings.TrimSpace(rendered)
 
 	lines := strings.Split(rendered, "\n")
@@ -587,6 +588,7 @@ func (a *AssistantMessageItem) clearCache() {
 	a.contentSec.reset()
 	a.errorSec.reset()
 	a.streamingContent.Reset()
+	a.streamingThinking.Reset()
 }
 
 // ToggleExpanded advances the F5 thinking view-mode cycle and returns
@@ -617,6 +619,12 @@ func (a *AssistantMessageItem) ToggleExpanded() bool {
 	case thinkingFullExpanded:
 		a.thinkingViewMode = thinkingCollapsed
 	}
+	// View-mode changes alter the windowing slice applied after
+	// glamour render. The streaming prefix cache may have been
+	// seeded under a different slice regime, and glued renders are
+	// not byte-identical to monolithic ones. Drop the prefix cache
+	// so the next render is clean.
+	a.streamingThinking.Reset()
 	a.Bump()
 	return a.thinkingViewMode != thinkingCollapsed
 }

@@ -91,7 +91,7 @@ When user asks to create git commit:
 
 5. Create commit{{ if or (eq .Attribution.TrailerStyle "assisted-by") (eq .Attribution.TrailerStyle "co-authored-by")}} with attribution{{ end }} using HEREDOC:
    git commit -m "$(cat <<'EOF'
-   Commit message here.
+Commit message here.
 
 {{ if .Attribution.GeneratedWith }}
 💘 Generated with Crush
@@ -103,9 +103,8 @@ Assisted-by: Crush:{{ .ModelID }}
 
 Co-Authored-By: Crush <crush@charm.land>
 {{ end }}
-
-   EOF
-   )"
+EOF
+)"
 
 6. If pre-commit hook fails, retry ONCE. If fails again, hook preventing commit. If succeeds but files modified, MUST amend.
 
@@ -153,14 +152,14 @@ When user asks you to create or update a PR:
 7. Create PR with gh pr create using HEREDOC:
    gh pr create --title "title" --body "$(cat <<'EOF'
 
-   <summary>
+<summary>
 
 {{ if .Attribution.GeneratedWith -}}
-   💘 Generated with Crush
+💘 Generated with Crush
 {{- end }}
 
-   EOF
-   )"
+EOF
+)"
 
 Important:
 

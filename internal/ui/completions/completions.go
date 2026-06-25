@@ -2,6 +2,7 @@ package completions
 
 import (
 	"cmp"
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -141,12 +142,12 @@ func (c *Completions) KeyMap() KeyMap {
 }
 
 // Open opens the completions with file items from the filesystem.
-func (c *Completions) Open(depth, limit int) tea.Cmd {
+func (c *Completions) Open(ctx context.Context, depth, limit int) tea.Cmd {
 	return func() tea.Msg {
 		var msg CompletionItemsLoadedMsg
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			msg.Files = loadFiles(depth, limit)
+			msg.Files = loadFiles(ctx, depth, limit)
 		})
 		wg.Go(func() {
 			msg.Resources = loadMCPResources()
@@ -404,8 +405,8 @@ func (c *Completions) Render() string {
 	return c.list.List.Render()
 }
 
-func loadFiles(depth, limit int) []FileCompletionValue {
-	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
+func loadFiles(ctx context.Context, depth, limit int) []FileCompletionValue {
+	files, _, _ := fsext.ListDirectory(ctx, ".", nil, depth, limit)
 	slices.Sort(files)
 	result := make([]FileCompletionValue, 0, len(files))
 	for _, file := range files {

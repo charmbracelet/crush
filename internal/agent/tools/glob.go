@@ -97,7 +97,7 @@ func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]st
 		slog.Warn("Ripgrep execution failed, falling back to doublestar", "error", err)
 	}
 
-	return fsext.GlobGitignoreAware(pattern, searchPath, limit)
+	return fsext.GlobGitignoreAware(ctx, pattern, searchPath, limit)
 }
 
 func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {

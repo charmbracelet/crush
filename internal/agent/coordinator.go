@@ -35,7 +35,6 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
 
@@ -296,11 +295,19 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 
 	// Notify only if still unauthorized after retry — a successful
 	// retry means the user doesn't need to re-authenticate.
-	if originalErr != nil && needsAuthRetry(originalErr, providerCfg) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
-		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-			Type:       notify.TypeReAuthenticate,
-			ProviderID: model.ModelCfg.Provider,
-		})
+	if originalErr != nil && needsAuthRetry(originalErr, providerCfg) && c.notify != nil {
+		if isAWSCredentialError(originalErr) && providerCfg.AWSAuthRefresh != "" {
+			c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				Type:         notify.TypeAWSSSOAuth,
+				ProviderID:   model.ModelCfg.Provider,
+				AWSSOCommand: providerCfg.AWSAuthRefresh,
+			})
+		} else if model.ModelCfg.Provider == hyper.Name {
+			c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				Type:       notify.TypeReAuthenticate,
+				ProviderID: model.ModelCfg.Provider,
+			})
+		}
 	}
 
 	if hasLatest && c.runComplete != nil {
@@ -1219,9 +1226,6 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return c.refreshApiKeyTemplate(ctx, providerCfg)
-	case providerCfg.AWSAuthRefresh != "":
-		slog.Debug("Received 401. Running AWS auth refresh and retrying", "provider", providerCfg.ID)
-		return c.runAWSAuthRefresh(ctx, providerCfg)
 	default:
 		return nil
 	}
@@ -1276,22 +1280,6 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 	return nil
-}
-
-// runAWSAuthRefresh runs aws_auth_refresh to obtain fresh AWS credentials.
-func (c *coordinator) runAWSAuthRefresh(ctx context.Context, providerCfg config.ProviderConfig) error {
-	var stderr bytes.Buffer
-	err := shell.Run(ctx, shell.RunOptions{
-		Command: providerCfg.AWSAuthRefresh,
-		Cwd:     c.cfg.WorkingDir(),
-		Env:     os.Environ(),
-		Stderr:  &stderr,
-	})
-	if err != nil {
-		slog.Error("AWS auth refresh command failed.", "provider", providerCfg.ID, "error", err, "stderr", stderr.String())
-		return err
-	}
-	return c.UpdateModels(ctx)
 }
 
 // subAgentParams holds the parameters for running a sub-agent.
@@ -1357,11 +1345,19 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return runErr
 	})
 	// Notify only if still unauthorized after retry.
-	if err != nil && needsAuthRetry(err, providerCfg) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
-		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-			Type:       notify.TypeReAuthenticate,
-			ProviderID: model.ModelCfg.Provider,
-		})
+	if err != nil && needsAuthRetry(err, providerCfg) && c.notify != nil {
+		if isAWSCredentialError(err) && providerCfg.AWSAuthRefresh != "" {
+			c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				Type:         notify.TypeAWSSSOAuth,
+				ProviderID:   model.ModelCfg.Provider,
+				AWSSOCommand: providerCfg.AWSAuthRefresh,
+			})
+		} else if model.ModelCfg.Provider == hyper.Name {
+			c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				Type:       notify.TypeReAuthenticate,
+				ProviderID: model.ModelCfg.Provider,
+			})
+		}
 	}
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil

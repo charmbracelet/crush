@@ -15,6 +15,10 @@ const (
 	// TypeAgentError indicates the agent's turn terminated with an
 	// error. The error text is carried in Notification.Message.
 	TypeAgentError Type = "error"
+	// TypeAWSSSOAuth indicates AWS SSO credentials have expired and
+	// the user needs to re-authenticate via the configured refresh
+	// command. AWSSOCommand carries the shell command to run.
+	TypeAWSSSOAuth Type = "aws_sso_auth"
 )
 
 // Notification represents a domain event published by the agent.
@@ -32,6 +36,8 @@ type Notification struct {
 	// Message carries the error text for TypeAgentError. Other
 	// notification types ignore it.
 	Message string
+	// AWSSOCommand carries the shell command for TypeAWSSSOAuth.
+	AWSSOCommand string
 }
 
 // RunComplete is the authoritative end-of-run signal for a session.

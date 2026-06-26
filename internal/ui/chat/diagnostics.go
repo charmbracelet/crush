@@ -49,7 +49,7 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		mainParam = fsext.PrettyPath(params.FilePath)
 	}
 
-	header := toolHeader(sty, opts.Status, "Diagnostics", cappedWidth, opts.Compact, mainParam)
+	header := toolHeader(sty, opts.Status, "Diagnostics", cappedWidth, opts, mainParam)
 	if opts.Compact {
 		return header
 	}

@@ -54,10 +54,40 @@ type Broker[T any] struct {
 	mustDeliverTimeout   time.Duration
 	dropCount            atomic.Uint64
 	mustDeliverDropCount atomic.Uint64
+
+	// Name identifies this broker in log messages. Set via
+	// NewBrokerWithName; empty for brokers created with NewBroker.
+	Name string
+
+	// lastDropLog gates drop warnings to at most one per interval to
+	// avoid flooding logs during burst drops.
+	lastDropLog atomic.Int64
+
+	// lastDropCount snapshots the drop count at the time of the last
+	// log message so we can report the delta (drops since last log)
+	// rather than just the cumulative total.
+	lastDropCount atomic.Uint64
+
+	// lastMustDeliverLog gates must-deliver timeout errors similarly.
+	lastMustDeliverLog atomic.Int64
+
+	// lastMustDeliverDropCount snapshots the must-deliver drop count
+	// at the time of the last log message.
+	lastMustDeliverDropCount atomic.Uint64
 }
 
 func NewBroker[T any]() *Broker[T] {
 	return NewBrokerWithOptions[T](bufferSize)
+}
+
+// NewBrokerWithName creates a broker with a human-readable name used in
+// log messages and debug endpoints. Prefer this over NewBroker for any
+// broker that will be registered in app.setupEvents so drop warnings
+// identify the source.
+func NewBrokerWithName[T any](name string) *Broker[T] {
+	b := NewBrokerWithOptions[T](bufferSize)
+	b.Name = name
+	return b
 }
 
 func NewBrokerWithOptions[T any](channelBufferSize int) *Broker[T] {
@@ -143,6 +173,36 @@ func (b *Broker[T]) GetSubscriberCount() int {
 	return b.subCount
 }
 
+// BrokerStats holds a point-in-time snapshot of broker health.
+type BrokerStats struct {
+	Name             string `json:"name"`
+	Subscribers      int    `json:"subscribers"`
+	BufferCap        int    `json:"buffer_cap"`
+	BufferLengths    []int  `json:"buffer_lengths"`
+	DropCount        uint64 `json:"drop_count"`
+	MustDeliverDrops uint64 `json:"must_deliver_drops"`
+}
+
+// Stats returns a point-in-time snapshot of broker health including
+// per-subscriber buffer occupancy and cumulative drop counts.
+func (b *Broker[T]) Stats() BrokerStats {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	lengths := make([]int, 0, len(b.subs))
+	for sub := range b.subs {
+		lengths = append(lengths, len(sub))
+	}
+	return BrokerStats{
+		Name:             b.Name,
+		Subscribers:      len(b.subs),
+		BufferCap:        b.channelBufferSize,
+		BufferLengths:    lengths,
+		DropCount:        b.dropCount.Load(),
+		MustDeliverDrops: b.mustDeliverDropCount.Load(),
+	}
+}
+
 // DropCount returns the cumulative number of events dropped by
 // [Broker.Publish] because a subscriber's channel was full.
 func (b *Broker[T]) DropCount() uint64 {
@@ -154,6 +214,64 @@ func (b *Broker[T]) DropCount() uint64 {
 // expired.
 func (b *Broker[T]) MustDeliverDropCount() uint64 {
 	return b.mustDeliverDropCount.Load()
+}
+
+// logDrop emits a rate-limited warning when events are dropped. At most
+// one warning per second to prevent log flooding during burst drops
+// (e.g., when fan-in goroutines drain full source buffers faster than
+// the downstream consumer can process). Reports the number of drops
+// since the last log message so you can see the rate, not just the
+// cumulative total.
+func (b *Broker[T]) logDrop(t EventType) {
+	now := time.Now().UnixNano()
+	last := b.lastDropLog.Load()
+	if now-last < int64(time.Second) {
+		return
+	}
+	if !b.lastDropLog.CompareAndSwap(last, now) {
+		return // Another goroutine won the race; skip.
+	}
+	total := b.dropCount.Load()
+	delta := total - b.lastDropCount.Load()
+	b.lastDropCount.Store(total)
+	name := b.Name
+	if name == "" {
+		name = "unknown"
+	}
+	slog.Warn("Pubsub buffer full; dropping events",
+		"broker", name,
+		"type", t,
+		"dropsLastSecond", delta,
+		"totalDrops", total,
+	)
+}
+
+// logMustDeliverDrop emits a rate-limited error when must-deliver events
+// time out. Same cadence as logDrop to prevent log flooding during
+// sustained backpressure. Reports drops since last log.
+func (b *Broker[T]) logMustDeliverDrop(t EventType, timeout time.Duration) {
+	now := time.Now().UnixNano()
+	last := b.lastMustDeliverLog.Load()
+	if now-last < int64(time.Second) {
+		return
+	}
+	if !b.lastMustDeliverLog.CompareAndSwap(last, now) {
+		return
+	}
+	total := b.mustDeliverDropCount.Load()
+	delta := total - b.lastMustDeliverDropCount.Load()
+	b.lastMustDeliverDropCount.Store(total)
+	name := b.Name
+	if name == "" {
+		name = "unknown"
+	}
+	slog.Error("PublishMustDeliver timed out delivering events",
+		"broker", name,
+		"type", t,
+		"timeout", timeout,
+		"dropsLastSecond", delta,
+		"totalDrops", total,
+	)
 }
 
 // Publish delivers an event to every active subscriber.
@@ -182,7 +300,7 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 			// Lossy by design; counted and logged so saturation is
 			// observable.
 			b.dropCount.Add(1)
-			slog.Warn("Pubsub buffer full; dropping event", "type", t)
+			b.logDrop(t)
 		}
 	}
 }
@@ -226,8 +344,7 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 			timer.Stop()
 		case <-timer.C:
 			b.mustDeliverDropCount.Add(1)
-			slog.Error("PublishMustDeliver timed out delivering event",
-				"type", t, "timeout", timeout)
+			b.logMustDeliverDrop(t, timeout)
 		case <-ctx.Done():
 			timer.Stop()
 			return

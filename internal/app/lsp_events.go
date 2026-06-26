@@ -38,7 +38,7 @@ type LSPClientInfo struct {
 
 var (
 	lspStates = csync.NewMap[string, LSPClientInfo]()
-	lspBroker = pubsub.NewBroker[LSPEvent]()
+	lspBroker = pubsub.NewBrokerWithName[LSPEvent]("lsp")
 )
 
 // SubscribeLSPEvents returns a channel for LSP events

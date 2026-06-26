@@ -72,7 +72,7 @@ type Event struct {
 	States []*SkillState
 }
 
-var broker = pubsub.NewBroker[Event]()
+var broker = pubsub.NewBrokerWithName[Event]("skills")
 
 // SubscribeEvents returns a channel that receives events when skill discovery state changes.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {

@@ -14,6 +14,7 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type FileInfo struct {
@@ -204,7 +205,11 @@ func DirTrim(pwd string, lim int) string {
 		if i == len(dirs)-1 {
 			out = dirs[i]
 		} else if i >= len(dirs)-lim {
-			out = string(dirs[i][0]) + out
+			// Keep the first grapheme cluster, not the first byte: CJK,
+			// combining marks, and emoji can span multiple bytes and runes,
+			// so a byte or single rune would render the wrong character.
+			first, _ := ansi.FirstGraphemeCluster(dirs[i], ansi.GraphemeWidth)
+			out = first + out
 		} else {
 			out = "..." + out
 			break

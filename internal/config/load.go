@@ -729,7 +729,7 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		if model == nil {
 			large = defaultLarge
 			if persist {
-				if err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, large); err != nil {
+				if err := store.updatePreferredModelLocked(ScopeGlobal, SelectedModelTypeLarge, large); err != nil {
 					return fmt.Errorf("failed to update preferred large model: %w", err)
 				}
 			}
@@ -775,7 +775,7 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		if model == nil {
 			small = defaultSmall
 			if persist {
-				if err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeSmall, small); err != nil {
+				if err := store.updatePreferredModelLocked(ScopeGlobal, SelectedModelTypeSmall, small); err != nil {
 					return fmt.Errorf("failed to update preferred small model: %w", err)
 				}
 			}

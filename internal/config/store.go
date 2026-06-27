@@ -328,14 +328,8 @@ func (s *ConfigStore) mutateInMemory(mutate func(*Config)) {
 	s.setConfig(nc)
 }
 
-// update applies a copy-on-write change and persists the reported fields.
-// mutate edits the clone and returns the JSON-path fields to write to disk;
-// because the clone already reflects the change, no reload is needed.
-// Returning an empty map publishes the clone without a disk write.
-func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
+// updateLocked is the lock-free version of update. Caller must hold writeMu.
+func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]any) error {
 	nc := s.Config().cloneForWrite()
 	fields := mutate(nc)
 	s.setConfig(nc)
@@ -346,12 +340,22 @@ func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) e
 		return err
 	}
 	// Refresh the staleness snapshot so the file watcher does not treat
-	// our own write as an external change. Safe to touch the snapshot map
-	// here because we hold writeMu.
+	// our own write as an external change.
 	if path, err := s.configPath(scope); err == nil {
 		s.captureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
 	}
 	return nil
+}
+
+// update applies a copy-on-write change and persists the reported fields.
+// mutate edits the clone and returns the JSON-path fields to write to disk;
+// because the clone already reflects the change, no reload is needed.
+// Returning an empty map publishes the clone without a disk write.
+func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	return s.updateLocked(scope, mutate)
 }
 
 // OverridePreferredModel sets the preferred model for the given type in
@@ -389,6 +393,30 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	}
 
 	return nil
+}
+
+// updatePreferredModelLocked updates the preferred model for the given type and
+// persists it to the config file at the given scope, without locking writeMu.
+// Used internally during startup when the loader already holds writeMu.
+func (s *ConfigStore) updatePreferredModelLocked(scope Scope, modelType SelectedModelType, model SelectedModel) error {
+	return s.updateLocked(scope, func(c *Config) map[string]any {
+		if c.Models == nil {
+			c.Models = make(map[SelectedModelType]SelectedModel)
+		}
+		c.Models[modelType] = model
+
+		fields := map[string]any{
+			fmt.Sprintf("models.%s", modelType): model,
+		}
+		if updated, changed := nextRecentModels(c, modelType, model); changed {
+			if c.RecentModels == nil {
+				c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+			}
+			c.RecentModels[modelType] = updated
+			fields[fmt.Sprintf("recent_models.%s", modelType)] = updated
+		}
+		return fields
+	})
 }
 
 // UpdatePreferredModel updates the preferred model for the given type and

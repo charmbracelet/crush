@@ -27,11 +27,6 @@ const statusTickInterval = 100 * time.Millisecond
 // readable.
 const tokenSpeedInterval = 800 * time.Millisecond
 
-// tokensPerChar is the rough heuristic used to estimate token counts from
-// raw text length during streaming (before the provider reports actual
-// usage).
-const tokensPerChar = 1.0 / 4.0
-
 // Status is the status bar and help model.
 type Status struct {
 	com      *common.Common
@@ -45,11 +40,13 @@ type Status struct {
 	startTime   time.Time
 
 	// Token-speed fields — estimated tokens/sec during streaming.
-	estimatedTokens int       // running estimate of tokens generated so far
-	lastTickTokens  int       // token count at the previous speed sample
-	lastTickTime    time.Time // when the last speed sample was taken
-	tokensPerSec    float64   // displayed tokens/sec value
-	nextSpeedTime   time.Time // earliest time to recompute tokensPerSec
+	estimatedTokens       int       // running estimate of tokens generated so far
+	lastTickTokens        int       // token count at the previous speed sample
+	lastTickTime          time.Time // when the last speed sample was taken
+	tokensPerSec          float64   // displayed tokens/sec value
+	nextSpeedTime         time.Time // earliest time to recompute tokensPerSec
+	baselineOutputTokens  int64     // session.CompletionTokens at request start
+	confirmedOutputTokens int64     // real output tokens from completed steps
 }
 
 // NewStatus creates a new status bar and help model.
@@ -72,10 +69,12 @@ func (s *Status) ClearInfoMsg() {
 	s.msg = util.InfoMsg{}
 }
 
-// StartTimer begins tracking elapsed time for the current request. It is
-// safe to call when the timer is already running — the start time is only
-// set once per run.
-func (s *Status) StartTimer() {
+// StartTimer begins tracking elapsed time for the current request. The
+// baselineOutputTokens is the session's CompletionTokens at the start of
+// the request — used to compute real token deltas when steps complete. It
+// is safe to call when the timer is already running — the start time is
+// only set once per run.
+func (s *Status) StartTimer(baselineOutputTokens int64) {
 	if s.timerActive {
 		return
 	}
@@ -86,6 +85,8 @@ func (s *Status) StartTimer() {
 	s.estimatedTokens = 0
 	s.tokensPerSec = 0
 	s.nextSpeedTime = s.startTime.Add(tokenSpeedInterval)
+	s.baselineOutputTokens = baselineOutputTokens
+	s.confirmedOutputTokens = 0
 }
 
 // StopTimer stops the timer and resets token-speed tracking.
@@ -94,6 +95,8 @@ func (s *Status) StopTimer() {
 	s.estimatedTokens = 0
 	s.lastTickTokens = 0
 	s.tokensPerSec = 0
+	s.baselineOutputTokens = 0
+	s.confirmedOutputTokens = 0
 }
 
 // IsTimerActive returns whether the request timer is currently running.
@@ -101,11 +104,28 @@ func (s *Status) IsTimerActive() bool {
 	return s.timerActive
 }
 
-// UpdateEstimatedTokens sets the estimated total tokens generated so far for
-// the current response. This is called from the UI as streaming text
-// arrives. The tokens-per-second rate is recomputed on each tick.
+// UpdateConfirmedTokens updates the real output token count from the
+// session's CompletionTokens. The delta above baseline replaces the
+// heuristic estimate for completed steps, so the tokens-per-second value
+// converges on the real count as steps finish.
+func (s *Status) UpdateConfirmedTokens(completionTokens int64) {
+	if !s.timerActive {
+		return
+	}
+	delta := completionTokens - s.baselineOutputTokens
+	if delta < 0 {
+		delta = 0
+	}
+	s.confirmedOutputTokens = delta
+}
+
+// UpdateEstimatedTokens sets the estimated total tokens generated so far
+// for the current in-flight step (from a text-length heuristic). This is
+// called from the UI as streaming text arrives. The total displayed token
+// count is the sum of confirmed tokens from completed steps plus this
+// estimate for the current step.
 func (s *Status) UpdateEstimatedTokens(tokens int) {
-	s.estimatedTokens = tokens
+	s.estimatedTokens = int(s.confirmedOutputTokens) + tokens
 }
 
 // Tick advances the timer by one interval. The elapsed timer always

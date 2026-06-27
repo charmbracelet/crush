@@ -720,6 +720,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
 			prevPillsHeight := m.pillsAreaHeight()
 			m.session = &msg.Payload
+			// Feed real output token counts to the status timer so the
+			// tokens-per-second display converges on actual usage as
+			// steps complete.
+			if m.status.IsTimerActive() {
+				m.status.UpdateConfirmedTokens(m.session.CompletionTokens)
+			}
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
@@ -771,7 +777,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// working, keep it ticking, and stop it when the agent goes idle.
 		if m.isAgentBusy() {
 			if !m.status.IsTimerActive() {
-				m.status.StartTimer()
+				m.status.StartTimer(m.session.CompletionTokens)
 				m.updateLayoutAndSize()
 				cmds = append(cmds, statusTickCmd())
 			}
@@ -3395,8 +3401,8 @@ func estimateMessageTokens(msg *message.Message) int {
 	if msg.Role != message.Assistant {
 		return 0
 	}
-	charCount := len(msg.Content().Text) + len(msg.ReasoningContent().Thinking)
-	return int(float64(charCount) * tokensPerChar)
+	return estimateTextTokens(msg.Content().Text) +
+		estimateTextTokens(msg.ReasoningContent().Thinking)
 }
 
 // hasSession returns true if there is an active session with a valid ID.
@@ -3556,7 +3562,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	})
 
 	// Start the status bar timer for this request.
-	m.status.StartTimer()
+	m.status.StartTimer(m.session.CompletionTokens)
 	m.updateLayoutAndSize()
 	cmds = append(cmds, statusTickCmd())
 

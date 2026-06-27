@@ -112,15 +112,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	var persist shell.PersistFunc
 	if sessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			_, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
-				Role: message.User,
-				Parts: []message.ContentPart{message.ShellCommand{
-					Command:  cmd,
-					Output:   output,
-					ExitCode: exitCode,
-				}},
-			})
-			return err
+			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode)
 		}
 	}
 

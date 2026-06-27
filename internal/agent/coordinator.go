@@ -313,6 +313,20 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	return result, originalErr
 }
 
+// effectiveReasoningEffort returns the reasoning effort to apply for provider calls.
+// It prefers the user-selected effort when valid, otherwise the model default when
+// valid, and finally falls back to the first configured reasoning level.
+func effectiveReasoningEffort(model Model) string {
+	effort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+	if effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+		return effort
+	}
+	if model.CatwalkCfg.CanReason && len(model.CatwalkCfg.ReasoningLevels) > 0 {
+		return model.CatwalkCfg.ReasoningLevels[0]
+	}
+	return effort
+}
+
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
@@ -361,14 +375,16 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		return options
 	}
 
+	reasoningEffort := effectiveReasoningEffort(model)
 	shouldSetEffort := model.CatwalkCfg.CanReason &&
-		slices.Contains(model.CatwalkCfg.ReasoningLevels, model.ModelCfg.ReasoningEffort)
+		reasoningEffort != "" &&
+		slices.Contains(model.CatwalkCfg.ReasoningLevels, reasoningEffort)
 
 	switch providerCfg.Type {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
@@ -396,7 +412,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case string(catwalk.InferenceProviderAlibabaSingapore):
 			switch {
 			case !hasEffort && shouldSetEffort:
-				extraBody["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+				extraBody["reasoning_effort"] = reasoningEffort
 			case !hasThink && model.CatwalkCfg.CanReason:
 				if model.ModelCfg.Think {
 					extraBody["thinking"] = map[string]any{"type": "enabled"}
@@ -409,7 +425,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		default:
 			switch {
 			case !hasEffort && shouldSetEffort:
-				mergedOptions["effort"] = model.ModelCfg.ReasoningEffort
+				mergedOptions["effort"] = reasoningEffort
 			case !hasThink && model.ModelCfg.Think:
 				mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
 			}
@@ -425,7 +441,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoning && shouldSetEffort {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
-				"effort":  model.ModelCfg.ReasoningEffort,
+				"effort":  reasoningEffort,
 			}
 		}
 		parsed, err := openrouter.ParseOptions(mergedOptions)
@@ -437,7 +453,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoning && shouldSetEffort {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
-				"effort":  model.ModelCfg.ReasoningEffort,
+				"effort":  reasoningEffort,
 			}
 		}
 		parsed, err := vercel.ParseOptions(mergedOptions)
@@ -454,7 +470,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			} else {
 				mergedOptions["thinking_config"] = map[string]any{
-					"thinking_level":   model.ModelCfg.ReasoningEffort,
+					"thinking_level":   reasoningEffort,
 					"include_thoughts": true,
 				}
 			}
@@ -470,9 +486,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoningEffort && shouldSetEffort {
 			switch providerCfg.ID {
 			case string(catwalk.InferenceProviderIoNet):
-				extraBody["reasoning"] = map[string]string{"effort": model.ModelCfg.ReasoningEffort}
+				extraBody["reasoning"] = map[string]string{"effort": reasoningEffort}
 			default:
-				mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+				mergedOptions["reasoning_effort"] = reasoningEffort
 			}
 		}
 
@@ -492,7 +508,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			}
 		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
-			if model.ModelCfg.Think || model.ModelCfg.ReasoningEffort != "" {
+			if model.ModelCfg.Think || reasoningEffort != "" {
 				extraBody["thinking"] = map[string]any{
 					"type": "enabled",
 				}
@@ -503,7 +519,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 		case string(catwalk.InferenceProviderFireworks):
 			// NOTE: Fireworks break if we set both `reasoning_effort` and `thinking`.
-			if model.ModelCfg.ReasoningEffort == "" {
+			if reasoningEffort == "" {
 				if model.ModelCfg.Think {
 					extraBody["thinking"] = map[string]any{"type": "enabled"}
 				} else {

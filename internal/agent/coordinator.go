@@ -317,14 +317,20 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 // It prefers the user-selected effort when valid, otherwise the model default when
 // valid, and finally falls back to the first configured reasoning level.
 func effectiveReasoningEffort(model Model) string {
-	effort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
-	if effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+	if !model.CatwalkCfg.CanReason {
+		return ""
+	}
+
+	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
 		return effort
 	}
-	if model.CatwalkCfg.CanReason && len(model.CatwalkCfg.ReasoningLevels) > 0 {
+	if effort := model.CatwalkCfg.DefaultReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+		return effort
+	}
+	if len(model.CatwalkCfg.ReasoningLevels) > 0 {
 		return model.CatwalkCfg.ReasoningLevels[0]
 	}
-	return effort
+	return ""
 }
 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {

@@ -90,6 +90,14 @@ type LifecyclePayload struct {
 	CWD       string `json:"cwd"`
 }
 
+// TurnEndPayload extends LifecyclePayload with the assistant's
+// rendered text content for the completed turn. Observe-only;
+// hooks cannot modify or block based on this data.
+type TurnEndPayload struct {
+	LifecyclePayload
+	Text string `json:"text"`
+}
+
 // BuildLifecyclePayload constructs the JSON stdin payload for a
 // lifecycle hook command (non-tool events).
 func BuildLifecyclePayload(eventName, sessionID, cwd string) []byte {
@@ -97,6 +105,24 @@ func BuildLifecyclePayload(eventName, sessionID, cwd string) []byte {
 		Event:     eventName,
 		SessionID: sessionID,
 		CWD:       cwd,
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
+}
+
+// BuildTurnEndPayload constructs the JSON stdin payload for a
+// TurnEnd hook, including the assistant's rendered text content.
+func BuildTurnEndPayload(sessionID, cwd, text string) []byte {
+	p := TurnEndPayload{
+		LifecyclePayload: LifecyclePayload{
+			Event:     EventTurnEnd,
+			SessionID: sessionID,
+			CWD:       cwd,
+		},
+		Text: text,
 	}
 	data, err := json.Marshal(p)
 	if err != nil {

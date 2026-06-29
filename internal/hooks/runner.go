@@ -142,6 +142,22 @@ func (r *Runner) RunPostToolUse(ctx context.Context, sessionID, toolName, toolIn
 	return agg, nil
 }
 
+// RunTurnEnd executes TurnEnd hooks with the assistant's rendered
+// text content included in the payload. Observe-only; results are
+// logged but not acted upon.
+func (r *Runner) RunTurnEnd(ctx context.Context, sessionID, text string) {
+	hooks := r.matchingHooks(EventTurnEnd, "")
+	if len(hooks) == 0 {
+		return
+	}
+
+	envVars := BuildLifecycleEnv(EventTurnEnd, sessionID, r.cwd, r.projectDir)
+	payload := BuildTurnEndPayload(sessionID, r.cwd, text)
+
+	agg := r.executeHooks(ctx, hooks, envVars, payload, "", false)
+	slog.Info("Hook completed", "event", EventTurnEnd, "hooks", agg.HookCount)
+}
+
 // executeHooks is the shared orchestration. It deduplicates hooks by
 // command, runs them in parallel, waits for completion, and aggregates
 // results in config order.

@@ -226,7 +226,7 @@ func (a *sessionAgent) fireLifecycleHook(ctx context.Context, eventName, session
 }
 
 // fireObservabilityHook runs a lifecycle hook event for observation
-// only (e.g. TurnStart, TurnEnd). Errors are logged and discarded.
+// only (e.g. TurnStart). Errors are logged and discarded.
 func (a *sessionAgent) fireObservabilityHook(ctx context.Context, eventName, sessionID string) {
 	if a.hookRunner == nil {
 		return
@@ -234,6 +234,20 @@ func (a *sessionAgent) fireObservabilityHook(ctx context.Context, eventName, ses
 	if _, err := a.hookRunner.Run(ctx, eventName, sessionID, "", ""); err != nil {
 		slog.Warn("Lifecycle hook failed", "event", eventName, "error", err)
 	}
+}
+
+// fireTurnEndHook runs the TurnEnd lifecycle hook with the
+// assistant's rendered text content. Observe-only; errors are
+// logged and discarded.
+func (a *sessionAgent) fireTurnEndHook(ctx context.Context, sessionID string, msg *message.Message) {
+	if a.hookRunner == nil {
+		return
+	}
+	var text string
+	if msg != nil {
+		text = msg.Content().String()
+	}
+	a.hookRunner.RunTurnEnd(ctx, sessionID, text)
 }
 
 type SessionAgentOptions struct {
@@ -1220,7 +1234,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// subscribers see stale busy state at the moment of receipt.
 	a.activeRequests.Del(call.SessionID)
 	cancel()
-	a.fireObservabilityHook(ctx, hooks.EventTurnEnd, call.SessionID)
+	a.fireTurnEndHook(ctx, call.SessionID, currentAssistant)
 
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions).

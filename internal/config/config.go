@@ -226,6 +226,7 @@ type TUIOptions struct {
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
 }
 
 // Completions defines options for the completions UI.
@@ -237,6 +238,13 @@ type Completions struct {
 func (c Completions) Limits() (depth, items int) {
 	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
 }
+
+// Scrollbar visibility options.
+const (
+	ScrollbarDefault = "default" // Auto-hide after 2 seconds
+	ScrollbarAlways  = "always"  // Always show when content exceeds viewport
+	ScrollbarNever   = "never"   // Never show scrollbar
+)
 
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`

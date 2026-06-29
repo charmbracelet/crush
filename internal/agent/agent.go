@@ -2198,7 +2198,8 @@ func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []a
 // The second return value indicates whether sanitization occurred.
 func sanitizeToolInput(toolName, toolCallID, input string) (string, bool) {
 	if !json.Valid([]byte(input)) {
-		slog.Warn("Malformed tool call JSON from provider, replacing with empty object",
+		slog.Warn(
+			"Malformed tool call JSON from provider, replacing with empty object",
 			"tool", toolName,
 			"id", toolCallID,
 			"input_len", len(input),

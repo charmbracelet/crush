@@ -330,7 +330,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.MaxHeight = TextareaMaxHeight
 	ta.Focus()
 
-	ch := NewChat(com)
+	scrollbarMode := config.ScrollbarDefault
+	if cfg := com.Config(); cfg.Options.TUI != nil && cfg.Options.TUI.Scrollbar != "" {
+		scrollbarMode = cfg.Options.TUI.Scrollbar
+	}
+	ch := NewChat(com, scrollbarMode)
 
 	keyMap := DefaultKeyMap()
 

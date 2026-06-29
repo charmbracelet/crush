@@ -1326,7 +1326,8 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	// Update parent session cost on a best-effort basis. A failure here must
 	// not discard the sub-agent output that was already produced.
 	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
-		slog.Warn("Failed to update parent session cost",
+		slog.Warn(
+			"Failed to update parent session cost",
 			"child_session", session.ID,
 			"parent_session", params.SessionID,
 			"error", err,

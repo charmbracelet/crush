@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -85,8 +86,9 @@ type Chat struct {
 	drawCache *chatDrawCache
 
 	// Scrollbar visibility state
-	scrollbarVisible   bool
-	scrollbarHideSeq   int // current sequence number for hide timer
+	scrollbarVisible bool
+	scrollbarHideSeq int    // current sequence number for hide timer
+	scrollbarMode    string // "default", "always", or "never"
 }
 
 // scrollbarHideDuration is how long the scrollbar remains visible after scroll activity.
@@ -113,11 +115,12 @@ type chatDrawCache struct {
 
 // NewChat creates a new instance of [Chat] that handles chat interactions and
 // messages.
-func NewChat(com *common.Common) *Chat {
+func NewChat(com *common.Common, scrollbarMode string) *Chat {
 	c := &Chat{
 		com:              com,
 		idInxMap:         make(map[string]int),
 		pausedAnimations: make(map[string]struct{}),
+		scrollbarMode:    scrollbarMode,
 	}
 	l := list.NewList()
 	l.SetGap(1)
@@ -147,9 +150,20 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	listTotalHeight := m.list.TotalHeight() - 1
 	needsScrollbar := listTotalHeight > listHeight
 
+	// Determine visibility based on scrollbar mode.
+	showScrollbar := false
+	switch m.scrollbarMode {
+	case config.ScrollbarAlways:
+		showScrollbar = needsScrollbar
+	case config.ScrollbarDefault:
+		showScrollbar = needsScrollbar && m.scrollbarVisible
+	case config.ScrollbarNever:
+		showScrollbar = false
+	}
+
 	// Reserve space for scrollbar only when visible.
 	scrollbarWidth := 0
-	if needsScrollbar && m.scrollbarVisible {
+	if showScrollbar {
 		scrollbarWidth = 1
 	}
 
@@ -468,6 +482,10 @@ func (m *Chat) ScrollToIndex(index int) tea.Cmd {
 
 // showScrollbar makes the scrollbar visible and returns a command to hide it after timeout.
 func (m *Chat) showScrollbar() tea.Cmd {
+	// Only start timer for "default" mode
+	if m.scrollbarMode != config.ScrollbarDefault {
+		return nil
+	}
 	m.scrollbarVisible = true
 	m.scrollbarHideSeq++
 	return scrollbarHideCmd(m.scrollbarHideSeq)
@@ -475,6 +493,10 @@ func (m *Chat) showScrollbar() tea.Cmd {
 
 // HideScrollbar hides the scrollbar if the sequence matches.
 func (m *Chat) HideScrollbar(seq int) {
+	// Only hide scrollbar for "default" mode
+	if m.scrollbarMode != config.ScrollbarDefault {
+		return
+	}
 	if seq == m.scrollbarHideSeq {
 		m.scrollbarVisible = false
 	}

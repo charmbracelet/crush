@@ -85,18 +85,18 @@
     {
       "id": "glm-5.2",
       "name": "GLM-5.2",
-      "cost_per_1m_in": 1.4,
-      "cost_per_1m_out": 4.4,
-      "cost_per_1m_in_cached": 0.26,
+      "cost_per_1m_in": 1.5,
+      "cost_per_1m_out": 4.5,
+      "cost_per_1m_in_cached": 0.3,
       "cost_per_1m_out_cached": 0,
-      "context_window": 1048576,
-      "default_max_tokens": 131072,
+      "context_window": 1000000,
+      "default_max_tokens": 128000,
       "can_reason": true,
       "reasoning_levels": [
         "high",
-        "max"
+        "xhigh"
       ],
-      "default_reasoning_effort": "max",
+      "default_reasoning_effort": "high",
       "supports_attachments": false
     },
     {

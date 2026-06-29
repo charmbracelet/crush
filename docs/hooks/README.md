@@ -199,6 +199,10 @@ regex tested against the tool name (e.g. `^bash$`, `^(edit|write)$`,
 `^mcp_`). Omit to match all tools. Lifecycle events run all configured hooks
 unconditionally.
 
+> **Note:** `TurnEnd` carries the assistant's rendered text content in its
+> stdin payload (`text` field). See [Stdin payload — TurnEnd](#stdin-payload--turnend)
+> below. All other lifecycle events use only the common fields.
+
 **Scope**: tool events only fire on the **top-level agent's** tool calls.
 Sub-agents run without hook interception. The outer sub-agent tool call itself
 _is_ hooked.
@@ -747,10 +751,25 @@ Extends the common payload with tool-specific fields:
 
 ### Stdin payload — Lifecycle Events
 
-All other events (SessionStart, SessionEnd, TurnStart, TurnEnd, StopFailure,
+All other events (SessionStart, SessionEnd, TurnStart, StopFailure,
 Interrupt, PermissionRequest, PermissionResult, PreCompact, PostCompact) use
 only the common payload fields (`event`, `session_id`, `cwd`). No tool-specific
 fields are included.
+
+### Stdin payload — TurnEnd
+
+`TurnEnd` extends the common payload with the assistant's rendered text
+content for the completed turn. The hook remains observe-only; output is
+ignored.
+
+```jsonc
+{
+  // ...common fields...
+
+  // string. The assistant's rendered text output for this turn.
+  "text": "Here's what I found..."
+}
+```
 
 ### Output envelope (common)
 

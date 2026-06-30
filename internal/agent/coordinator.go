@@ -990,7 +990,7 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 	return google.New(opts...)
 }
 
-func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildGoogleVertexProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) (fantasy.Provider, error) {
 	opts := []google.Option{}
 	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -1003,7 +1003,16 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	project := options["project"]
 	location := options["location"]
 
-	opts = append(opts, google.WithVertex(project, location))
+	if project != "" && location != "" {
+		opts = append(opts, google.WithVertex(project, location))
+	} else {
+		// Without native GCP credentials, authenticate with the configured
+		// API key (e.g. against a Gemini-API-compatible proxy).
+		opts = append(opts, google.WithGeminiAPIKey(apiKey))
+	}
+	if baseURL != "" {
+		opts = append(opts, google.WithBaseURL(baseURL))
+	}
 
 	return google.New(opts...)
 }
@@ -1058,7 +1067,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
-		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
+		return c.buildGoogleVertexProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case openaicompat.Name, hyper.Name:
 		switch providerCfg.ID {
 		case hyper.Name:

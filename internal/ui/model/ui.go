@@ -1538,6 +1538,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
+		if msg.DialogID == dialog.MCPToggleID {
+			m.dialog.OpenDialog(dialog.NewMCPToggle(m.com))
+			return nil
+		}
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1701,6 +1705,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
+
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
@@ -1766,6 +1771,65 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
+	case dialog.ActionToggleMCPServer:
+		return func() tea.Msg {
+			ctx := context.Background()
+
+			// Update persistent config
+			key := fmt.Sprintf("mcp.%s.disabled", msg.Name)
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, key, !msg.Enabled); err != nil {
+				return util.ReportError(err)()
+			}
+
+			// Update runtime process state
+			if msg.Enabled {
+				_ = m.com.Workspace.MCPInitializeSingle(ctx, msg.Name)
+			} else {
+				_ = m.com.Workspace.MCPDisableSingle(msg.Name)
+			}
+
+			// Re-init agent to pick up/remove tools
+			_ = m.com.Workspace.UpdateAgentModel(ctx)
+
+			// Refresh the dialog list
+			if d, ok := m.dialog.Dialog(dialog.MCPToggleID).(*dialog.MCPToggle); ok {
+				d.RefreshItems()
+			}
+
+			// Manually trigger the state refresh for the sidebar/landing view
+			// handleStateChanged returns mcpStateChangedMsg which UI.Update uses to update m.mcpStates
+			return m.handleStateChanged()()
+		}
+
+	case dialog.ActionToggleAllMCPServers:
+		return func() tea.Msg {
+			ctx := context.Background()
+			cfg := m.com.Config()
+			kv := make(map[string]any)
+
+			for name := range cfg.MCP {
+				kv[fmt.Sprintf("mcp.%s.disabled", name)] = !msg.Enable
+				if msg.Enable {
+					_ = m.com.Workspace.MCPInitializeSingle(ctx, name)
+				} else {
+					_ = m.com.Workspace.MCPDisableSingle(name)
+				}
+			}
+
+			if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, kv); err != nil {
+				return util.ReportError(err)()
+			}
+
+			_ = m.com.Workspace.UpdateAgentModel(ctx)
+
+			if d, ok := m.dialog.Dialog(dialog.MCPToggleID).(*dialog.MCPToggle); ok {
+				d.RefreshItems()
+			}
+
+			// Manually trigger the state refresh for the sidebar
+			return m.handleStateChanged()()
+		}
+
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}

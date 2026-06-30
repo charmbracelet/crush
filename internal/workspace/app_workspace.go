@@ -337,6 +337,10 @@ func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any)
 	return w.store.SetConfigField(scope, key, value)
 }
 
+func (w *AppWorkspace) SetConfigFields(scope config.Scope, kv map[string]any) error {
+	return w.store.SetConfigFields(scope, kv)
+}
+
 func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {
 	return w.store.RemoveConfigField(scope, key)
 }
@@ -438,6 +442,14 @@ func (w *AppWorkspace) DisableDockerMCP() error {
 		return fmt.Errorf("failed to disable docker MCP: %w", err)
 	}
 	return w.store.DisableDockerMCP()
+}
+
+func (w *AppWorkspace) MCPInitializeSingle(ctx context.Context, name string) error {
+	return mcptools.InitializeSingle(ctx, name, w.store)
+}
+
+func (w *AppWorkspace) MCPDisableSingle(name string) error {
+	return mcptools.DisableSingle(w.store, name)
 }
 
 // -- Lifecycle --

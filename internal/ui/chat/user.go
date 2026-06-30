@@ -75,11 +75,9 @@ func (m *UserMessageItem) RawRender(width int) string {
 
 	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
 	mu := common.LockMarkdownRenderer(renderer)
-
 	mu.Lock()
 	result, err := renderer.Render(msgContent)
 	mu.Unlock()
-
 	if err != nil {
 		content = msgContent
 	} else {
@@ -107,11 +105,9 @@ func (m *UserMessageItem) renderSkillInvocation(content string, width int) strin
 		// If parsing fails, just render as markdown
 		renderer := common.MarkdownRenderer(m.sty, width)
 		mu := common.LockMarkdownRenderer(renderer)
-
 		mu.Lock()
 		result, err := renderer.Render(content)
 		mu.Unlock()
-
 		if err != nil {
 			return content
 		}

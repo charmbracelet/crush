@@ -20,6 +20,10 @@ type trackedItem struct {
 	renderHits int
 }
 
+type trackedFilterableItem struct {
+	*trackedItem
+}
+
 func newTrackedItem(id, body string, finished bool) *trackedItem {
 	return &trackedItem{
 		Versioned: NewVersioned(),
@@ -36,6 +40,10 @@ func (t *trackedItem) Render(width int) string {
 
 func (t *trackedItem) Finished() bool {
 	return t.finished
+}
+
+func (t *trackedFilterableItem) Filter() string {
+	return t.body
 }
 
 // TestList_RenderMemo_PointerKey covers the F6 invariant that the
@@ -384,6 +392,21 @@ func TestList_SetItems_AllNewDropsEveryEntry(t *testing.T) {
 	require.Equal(t, 2, a.renderHits, "previously-dropped item must re-render")
 	require.Equal(t, 2, b.renderHits, "previously-dropped item must re-render")
 	require.Equal(t, 2, c.renderHits, "previously-dropped item must re-render")
+}
+
+func TestFilterableList_SetFilterCollapsesWhitespace(t *testing.T) {
+	t.Parallel()
+
+	list := NewFilterableList(&trackedFilterableItem{newTrackedItem("quit", "quit exit", true)})
+
+	list.SetFilter("quit")
+	require.Len(t, list.FilteredItems(), 1)
+
+	list.SetFilter("quit   ")
+	require.Len(t, list.FilteredItems(), 1)
+
+	list.SetFilter("quit   exit")
+	require.Len(t, list.FilteredItems(), 1)
 }
 
 // TestVersioned_BumpMonotonic covers the basic Versioned contract:

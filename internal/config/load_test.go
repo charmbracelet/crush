@@ -2291,3 +2291,131 @@ func TestConfig_configureProviders_UnsetAzureEndpointSkipsProvider(t *testing.T)
 	_, exists := cfg.Providers.Get("azure")
 	require.False(t, exists)
 }
+
+// TestShouldReduceAnimations tests the ShouldReduceAnimations logic.
+func TestShouldReduceAnimations(t *testing.T) {
+	// Test explicit reduce_animations: true
+	cfg := &Config{
+		Options: &Options{
+			TUI: &TUIOptions{
+				ReduceAnimations: ptr(true),
+			},
+		},
+	}
+	assert.True(t, cfg.ShouldReduceAnimations())
+
+	// Test explicit reduce_animations: false
+	cfg.Options.TUI.ReduceAnimations = ptr(false)
+	assert.False(t, cfg.ShouldReduceAnimations())
+
+	// Test SSH with reduce mode
+	cfg.Options.TUI.ReduceAnimations = nil
+	cfg.Options.TUI.SSHAnimationMode = "reduce"
+	os.Setenv("SSH_TTY", "some_value")
+	assert.True(t, cfg.ShouldReduceAnimations())
+	os.Unsetenv("SSH_TTY")
+
+	// Test SSH with never mode (should not reduce)
+	cfg.Options.TUI.SSHAnimationMode = "never"
+	os.Setenv("SSH_TTY", "some_value")
+	assert.False(t, cfg.ShouldReduceAnimations())
+	os.Unsetenv("SSH_TTY")
+
+	// Test SSH with ask mode (should not reduce unless explicitly set)
+	cfg.Options.TUI.SSHAnimationMode = "ask"
+	os.Setenv("SSH_TTY", "some_value")
+	assert.False(t, cfg.ShouldReduceAnimations())
+	os.Unsetenv("SSH_TTY")
+
+	// Test no SSH, no explicit setting
+	cfg.Options.TUI.SSHAnimationMode = ""
+	assert.False(t, cfg.ShouldReduceAnimations())
+}
+
+// TestShouldPromptForSSHAnimations tests when we should prompt for SSH animations.
+func TestShouldPromptForSSHAnimations(t *testing.T) {
+	// Test SSH + ask mode + no explicit setting = prompt
+	cfg := &Config{
+		Options: &Options{
+			TUI: &TUIOptions{
+				SSHAnimationMode: "ask",
+			},
+		},
+	}
+	os.Setenv("SSH_TTY", "some_value")
+	assert.True(t, cfg.ShouldPromptForSSHAnimations())
+	os.Unsetenv("SSH_TTY")
+
+	// Test default (empty) ssh_animation_mode = prompt (same as "ask")
+	cfg.Options.TUI.SSHAnimationMode = ""
+	os.Setenv("SSH_TTY", "some_value")
+	assert.True(t, cfg.ShouldPromptForSSHAnimations())
+	os.Unsetenv("SSH_TTY")
+
+	// Test SSH + ask mode + explicit setting = no prompt
+	cfg.Options.TUI.ReduceAnimations = ptr(true)
+	assert.False(t, cfg.ShouldPromptForSSHAnimations())
+
+	// Test SSH + reduce mode = no prompt (auto-enabled)
+	cfg.Options.TUI.ReduceAnimations = nil
+	cfg.Options.TUI.SSHAnimationMode = "reduce"
+	os.Setenv("SSH_TTY", "some_value")
+	assert.False(t, cfg.ShouldPromptForSSHAnimations())
+	os.Unsetenv("SSH_TTY")
+
+	// Test SSH + never mode = no prompt (never enable)
+	cfg.Options.TUI.SSHAnimationMode = "never"
+	os.Setenv("SSH_TTY", "some_value")
+	assert.False(t, cfg.ShouldPromptForSSHAnimations())
+	os.Unsetenv("SSH_TTY")
+
+	// Test non-SSH = no prompt
+	os.Unsetenv("SSH_TTY")
+	assert.False(t, cfg.ShouldPromptForSSHAnimations())
+}
+
+// TestSetSSHAnimationMode tests persisting SSH animation mode.
+func TestSetSSHAnimationMode(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			TUI: &TUIOptions{},
+		},
+	}
+
+	// Test setting to reduce
+	assert.NoError(t, cfg.SetSSHAnimationMode("reduce"))
+	assert.Equal(t, "reduce", cfg.Options.TUI.SSHAnimationMode)
+
+	// Test setting to never
+	assert.NoError(t, cfg.SetSSHAnimationMode("never"))
+	assert.Equal(t, "never", cfg.Options.TUI.SSHAnimationMode)
+
+	// Test setting to ask (empty string)
+	assert.NoError(t, cfg.SetSSHAnimationMode(""))
+	assert.Equal(t, "", cfg.Options.TUI.SSHAnimationMode)
+}
+
+// TestConfig_load applies environment variable and SSH detection.
+func TestConfig_load(t *testing.T) {
+	// Test CRUSH_REDUCE_ANIMATIONS env var
+	t.Setenv("CRUSH_REDUCE_ANIMATIONS", "true")
+
+	cfg, err := Load("", "", false)
+	require.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.NotNil(t, cfg.config.Options)
+	assert.NotNil(t, cfg.config.Options.TUI)
+	assert.True(t, *cfg.config.Options.TUI.ReduceAnimations)
+
+	// Test SSH auto-enable is removed (should not auto-enable)
+	// When SSH_TTY is set but CRUSH_REDUCE_ANIMATIONS is NOT set,
+	// ReduceAnimations should remain nil.
+	os.Unsetenv("CRUSH_REDUCE_ANIMATIONS")
+	t.Setenv("SSH_TTY", "some_value")
+	cfg2, err := Load("", "", false)
+	require.NoError(t, err)
+	assert.NotNil(t, cfg2)
+	assert.NotNil(t, cfg2.config.Options)
+	assert.NotNil(t, cfg2.config.Options.TUI)
+	assert.Nil(t, cfg2.config.Options.TUI.ReduceAnimations) // Should be nil, not auto-set to true
+}

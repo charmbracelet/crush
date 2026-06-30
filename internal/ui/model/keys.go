@@ -21,6 +21,10 @@ type KeyMap struct {
 		// History navigation
 		HistoryPrev key.Binding
 		HistoryNext key.Binding
+
+		// Clear current input
+		ClearInput   key.Binding
+		RestoreInput key.Binding
 	}
 
 	Chat struct {
@@ -72,8 +76,8 @@ type KeyMap struct {
 func DefaultKeyMap() KeyMap {
 	km := KeyMap{
 		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit"),
+			key.WithKeys("ctrl+q"),
+			key.WithHelp("ctrl+q", "quit"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("ctrl+g"),
@@ -157,6 +161,14 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.HistoryNext = key.NewBinding(
 		key.WithKeys("down"),
+	)
+	km.Editor.ClearInput = key.NewBinding(
+		key.WithKeys("ctrl+c"),
+		key.WithHelp("ctrl+c", "clear input"),
+	)
+	km.Editor.RestoreInput = key.NewBinding(
+		key.WithKeys("ctrl+u"),
+		key.WithHelp("ctrl+u", "restore cleared input"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(

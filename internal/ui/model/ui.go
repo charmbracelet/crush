@@ -242,6 +242,10 @@ type UI struct {
 	// Editor components
 	textarea textarea.Model
 
+	// lastClearedInput stores the most recently cleared input value so it
+	// can be restored with Editor.RestoreInput (ctrl+shift+c).
+	lastClearedInput string
+
 	// Attachment list
 	attachments *attachments.Attachments
 
@@ -2204,6 +2208,26 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd := m.openCommandsDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.ClearInput):
+				if m.textarea.Value() != "" {
+					m.lastClearedInput = m.textarea.Value()
+					prevHeight := m.textarea.Height()
+					m.textarea.Reset()
+					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+				m.closeCompletions()
+			case key.Matches(msg, m.keyMap.Editor.RestoreInput):
+				if m.lastClearedInput != "" {
+					prevHeight := m.textarea.Height()
+					m.textarea.SetValue(m.lastClearedInput)
+					m.textarea.MoveToEnd()
+					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					m.lastClearedInput = ""
+				}
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -2707,6 +2731,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 		case uiFocusEditor:
 			editorBinds := []key.Binding{
 				k.Editor.Newline,
+				k.Editor.ClearInput,
+				k.Editor.RestoreInput,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
 			}
@@ -2762,6 +2788,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			)
 			editorBinds := []key.Binding{
 				k.Editor.Newline,
+				k.Editor.ClearInput,
+				k.Editor.RestoreInput,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
 			}

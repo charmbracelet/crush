@@ -254,6 +254,68 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 	}
 }
 
+// nonInteractiveStream holds the state for a local-mode
+// non-interactive run's event loop. Extracted from RunNonInteractive
+// so the core streaming logic is independently testable without
+// wiring up the full App dependency graph.
+type nonInteractiveStream struct {
+	sessionID string
+	out       io.Writer
+	read      map[string]int
+	printed   bool
+}
+
+// handleMessage processes one message event. It writes new content
+// to s.out and updates s.read/s.printed. Returns the number of
+// bytes written (0 if the event was not applicable) and an error
+// if the message content is shorter than previously read bytes.
+func (s *nonInteractiveStream) handleMessage(msg message.Message) (int, error) {
+	if msg.SessionID != s.sessionID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
+		return 0, nil
+	}
+
+	content := msg.Content().String()
+	readBytes := s.read[msg.ID]
+
+	if len(content) < readBytes {
+		return 0, fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+	}
+
+	part := content[readBytes:]
+	// Trim leading whitespace on the first chunk. Sometimes the LLM
+	// includes leading formatting and indentation, which we don't want.
+	if readBytes == 0 {
+		part = strings.TrimLeft(part, " \t")
+	}
+	// Ignore initial whitespace-only messages.
+	if s.printed || strings.TrimSpace(part) != "" {
+		s.printed = true
+		n, _ := fmt.Fprint(s.out, part)
+		s.read[msg.ID] = len(content)
+		return n, nil
+	}
+	s.read[msg.ID] = len(content)
+	return 0, nil
+}
+
+// drainMessages consumes all buffered message events from the
+// channel after the agent run has completed. This prevents the
+// race condition where the done channel fires in the select
+// before the final messageEvents (which carry the actual text
+// content), which would cause truncated stdout output.
+func (s *nonInteractiveStream) drainMessages(events <-chan pubsub.Event[message.Message]) error {
+	for {
+		select {
+		case event := <-events:
+			if _, err := s.handleMessage(event.Payload); err != nil {
+				return err
+			}
+		default:
+			return nil
+		}
+	}
+}
+
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
@@ -362,8 +424,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}(ctx, sess.ID, prompt)
 
 	messageEvents := app.Messages.Subscribe(ctx)
-	messageReadBytes := make(map[string]int)
-	var printed bool
+	stream := &nonInteractiveStream{
+		sessionID: sess.ID,
+		out:       output,
+		read:      make(map[string]int),
+	}
 
 	defer func() {
 		if progress && stderrTTY {
@@ -392,33 +457,20 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				}
 				return fmt.Errorf("agent processing failed: %w", result.err)
 			}
-			return nil
+			// Drain any remaining message events that were published
+			// before agent.Run returned but haven't been consumed yet.
+			// Without this drain, the select above can pick the done
+			// channel before the final messageEvents (which carry the
+			// actual text content), causing truncated stdout output.
+			return stream.drainMessages(messageEvents)
 
 		case event := <-messageEvents:
-			msg := event.Payload
-			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
+			if _, err := stream.handleMessage(event.Payload); err != nil {
+				slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(event.Payload.Content().String()), "read_bytes", stream.read[event.Payload.ID])
+				return err
+			}
+			if stream.printed {
 				stopSpinner()
-
-				content := msg.Content().String()
-				readBytes := messageReadBytes[msg.ID]
-
-				if len(content) < readBytes {
-					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-				}
-
-				part := content[readBytes:]
-				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and intentation, which we don't want here.
-				if readBytes == 0 {
-					part = strings.TrimLeft(part, " \t")
-				}
-				// Ignore initial whitespace-only messages.
-				if printed || strings.TrimSpace(part) != "" {
-					printed = true
-					fmt.Fprint(output, part)
-				}
-				messageReadBytes[msg.ID] = len(content)
 			}
 
 		case <-ctx.Done():

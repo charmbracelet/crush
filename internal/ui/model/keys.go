@@ -35,6 +35,9 @@ type KeyMap struct {
 		// PasteText pastes clipboard text into the textarea, as an
 		// alternative to bracketed paste.
 		PasteText key.Binding
+
+		// PasteSnippet opens the snippet paste dialog.
+		PasteSnippet key.Binding
 	}
 
 	Chat struct {
@@ -186,6 +189,10 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.SelectAll = key.NewBinding(
 		key.WithKeys("ctrl+shift+a"),
 		key.WithHelp("ctrl+shift+a", "select all"),
+	)
+	km.Editor.PasteSnippet = key.NewBinding(
+		key.WithKeys("alt+v"),
+		key.WithHelp("alt+v", "paste snippet"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(

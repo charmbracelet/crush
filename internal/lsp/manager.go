@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,10 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-const unavailableRetryDelay = 30 * time.Second
+// defaultUnavailableRetryDelay is the effective retry delay when the configured
+// value is negative (including the -1 default set by setDefaults). It is
+// math.MaxInt64 nanoseconds (~292 years), which is effectively infinite.
+const defaultUnavailableRetryDelay = time.Duration(math.MaxInt64)
 
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
@@ -31,6 +35,10 @@ type Manager struct {
 	manager     *powernapconfig.Manager
 	callback    func(name string, client *Client)
 	now         func() time.Time
+	// unavailableRetry controls how long before a previously-unavailable LSP
+	// server can be retried. 0 means no backoff (retry immediately), and the
+	// default (math.MaxInt64) means effectively infinite backoff.
+	unavailableRetry   time.Duration
 }
 
 // NewManager creates a new LSP manager service.
@@ -60,6 +68,13 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		})
 	}
 
+	retryDelay := defaultUnavailableRetryDelay
+	if cfg != nil {
+		if conf := cfg.Config(); conf != nil && conf.Options != nil {
+			retryDelay = parseUnavailableRetryDelay(conf.Options.LSPUnavailableRetryDelay)
+		}
+	}
+
 	return &Manager{
 		clients:     csync.NewMap[string, *Client](),
 		unavailable: csync.NewMap[string, time.Time](),
@@ -67,12 +82,29 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		manager:     manager,
 		callback:    func(string, *Client) {}, // default no-op callback
 		now:         time.Now,
+		unavailableRetry: retryDelay,
 	}
 }
 
 // Clients returns the map of LSP clients.
 func (s *Manager) Clients() *csync.Map[string, *Client] {
 	return s.clients
+}
+
+// parseUnavailableRetryDelay converts a config value (in seconds) to a
+// time.Duration for the LSP unavailable backoff. nil or negative values mean
+// infinite backoff (defaultUnavailableRetryDelay). Non-negative values are
+// clamped to math.MaxInt64 to avoid overflow.
+func parseUnavailableRetryDelay(val *int) time.Duration {
+	if val == nil || *val < 0 {
+		return defaultUnavailableRetryDelay
+	}
+	v := *val
+	const maxSeconds = math.MaxInt64 / int64(time.Second)
+	if int64(v) > maxSeconds {
+		return defaultUnavailableRetryDelay
+	}
+	return time.Duration(v) * time.Second
 }
 
 // SetCallback sets a callback that is invoked when a new LSP
@@ -264,7 +296,7 @@ func (s *Manager) recentlyUnavailable(name string) bool {
 	if !exists {
 		return false
 	}
-	if s.now().Sub(lastUnavailableAt) < unavailableRetryDelay {
+	if s.now().Sub(lastUnavailableAt) < s.unavailableRetry {
 		return true
 	}
 	s.unavailable.Del(name)

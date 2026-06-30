@@ -79,8 +79,7 @@ var opencodeMessagesModels = map[string]bool{
 }
 
 type Coordinator interface {
-	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
-	// SetMainAgent(string)
+	SetMainAgent(id string)
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
@@ -168,24 +167,45 @@ func NewCoordinator(
 		skillTracker: skillTracker,
 	}
 
-	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
-	if !ok {
+	// Build all configured agents.
+	for agentID, agentCfg := range cfg.Config().Agents {
+		if agentCfg.ID == "" {
+			continue
+		}
+		prompt, err := agentPrompt(agentID, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+		if err != nil {
+			return nil, fmt.Errorf("failed to build prompt for agent %q: %w", agentID, err)
+		}
+		agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build agent %q: %w", agentID, err)
+		}
+		c.agents[agentID] = agent
+	}
+
+	// Default to the coder agent if available.
+	if defaultAgent, ok := c.agents[config.AgentCoder]; ok {
+		c.currentAgent = defaultAgent
+	} else if len(c.agents) > 0 {
+		// Pick the first agent as default if coder is not configured.
+		for _, a := range c.agents {
+			c.currentAgent = a
+			break
+		}
+	}
+
+	if c.currentAgent == nil {
 		return nil, errCoderAgentNotConfigured
 	}
 
-	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
-	if err != nil {
-		return nil, err
-	}
-
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
-	if err != nil {
-		return nil, err
-	}
-	c.currentAgent = agent
-	c.agents[config.AgentCoder] = agent
 	return c, nil
+}
+
+// SetMainAgent switches the active agent to the one identified by id.
+func (c *coordinator) SetMainAgent(id string) {
+	if agent, ok := c.agents[id]; ok {
+		c.currentAgent = agent
+	}
 }
 
 // Run implements Coordinator.

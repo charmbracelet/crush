@@ -142,7 +142,7 @@ crush run --continue "Follow up on your last response"
 		}
 
 		appWs := ws.(*workspace.AppWorkspace)
-		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
+		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast, "")
 	},
 }
 

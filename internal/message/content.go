@@ -266,20 +266,25 @@ func (m *Message) IsThinking() bool {
 }
 
 func (m *Message) AppendContent(delta string) {
-	found := false
+	// Append to the first existing TextContent part only. The sibling
+	// helpers (AddToolCall, AppendThoughtSignature, FinishThinking) all
+	// `return` after finding the first match; without that here, a
+	// message that ever ends up with multiple TextContent parts would
+	// see `delta` appended to every one of them — multiplying the
+	// visible response. There is no current code path that creates two
+	// TextContent parts on the same message, but the defensive
+	// single-match behavior matches the rest of this file.
 	for i, part := range m.Parts {
 		if c, ok := part.(TextContent); ok {
 			m.Parts[i] = TextContent{Text: c.Text + delta}
-			found = true
+			return
 		}
 	}
-	if !found {
-		m.Parts = append(m.Parts, TextContent{Text: delta})
-	}
+	m.Parts = append(m.Parts, TextContent{Text: delta})
 }
 
 func (m *Message) AppendReasoningContent(delta string) {
-	found := false
+	// See AppendContent above — append to the first match only.
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			m.Parts[i] = ReasoningContent{
@@ -288,15 +293,13 @@ func (m *Message) AppendReasoningContent(delta string) {
 				StartedAt:  c.StartedAt,
 				FinishedAt: c.FinishedAt,
 			}
-			found = true
+			return
 		}
 	}
-	if !found {
-		m.Parts = append(m.Parts, ReasoningContent{
-			Thinking:  delta,
-			StartedAt: time.Now().Unix(),
-		})
-	}
+	m.Parts = append(m.Parts, ReasoningContent{
+		Thinking:  delta,
+		StartedAt: time.Now().Unix(),
+	})
 }
 
 func (m *Message) AppendThoughtSignature(signature string, toolCallID string) {

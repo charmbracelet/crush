@@ -224,6 +224,12 @@ func (*Permissions) ID() string {
 	return PermissionsID
 }
 
+// ToolCallID returns the tool call ID associated with this dialog's
+// permission request.
+func (p *Permissions) ToolCallID() string {
+	return p.permission.ToolCallID
+}
+
 // HandleMsg implements [Dialog].
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -272,18 +278,17 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 				p.viewport, _ = p.viewport.Update(msg)
 			}
 		}
-	case tea.MouseWheelMsg:
+	case common.CoalescedWheelMsg:
 		if p.hasDiffView() {
-			switch msg.Button {
-			case tea.MouseWheelLeft:
+			if msg.DeltaX < 0 {
 				p.scrollLeft()
-			case tea.MouseWheelRight:
+			} else if msg.DeltaX > 0 {
 				p.scrollRight()
-			default:
-				p.viewport, _ = p.viewport.Update(msg)
+			} else {
+				p.viewport, _ = p.viewport.Update(tea.MouseWheelMsg(msg.Mouse))
 			}
 		} else {
-			p.viewport, _ = p.viewport.Update(msg)
+			p.viewport, _ = p.viewport.Update(tea.MouseWheelMsg(msg.Mouse))
 		}
 	default:
 		// Pass unhandled keys to viewport for non-diff content scrolling.

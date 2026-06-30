@@ -6,11 +6,13 @@ import (
 )
 
 // GrantPermission grants, denies, or persistently grants a permission
-// request.
-func (b *Backend) GrantPermission(workspaceID string, req proto.PermissionGrant) error {
+// request. The returned bool reports whether this call resolved the
+// pending request (true) or found it already resolved by a previous
+// caller (false). A false return is not an error.
+func (b *Backend) GrantPermission(workspaceID string, req proto.PermissionGrant) (bool, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	perm := permission.PermissionRequest{
@@ -26,15 +28,14 @@ func (b *Backend) GrantPermission(workspaceID string, req proto.PermissionGrant)
 
 	switch req.Action {
 	case proto.PermissionAllow:
-		ws.Permissions.Grant(perm)
+		return ws.Permissions.Grant(perm), nil
 	case proto.PermissionAllowForSession:
-		ws.Permissions.GrantPersistent(perm)
+		return ws.Permissions.GrantPersistent(perm), nil
 	case proto.PermissionDeny:
-		ws.Permissions.Deny(perm)
+		return ws.Permissions.Deny(perm), nil
 	default:
-		return ErrInvalidPermissionAction
+		return false, ErrInvalidPermissionAction
 	}
-	return nil
 }
 
 // SetPermissionsSkip sets whether permission prompts are skipped.

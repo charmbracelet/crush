@@ -64,9 +64,19 @@ type PermissionRequest struct {
 
 type Service interface {
 	pubsub.Subscriber[PermissionRequest]
-	GrantPersistent(permission PermissionRequest)
-	Grant(permission PermissionRequest)
-	Deny(permission PermissionRequest)
+	// GrantPersistent grants a permission request and remembers the grant
+	// for the session. It returns true if this call actually resolved the
+	// pending request; false if the request had already been resolved
+	// (e.g., by another concurrent caller) or is unknown.
+	GrantPersistent(permission PermissionRequest) bool
+	// Grant grants a permission request. It returns true if this call
+	// actually resolved the pending request; false if the request had
+	// already been resolved or is unknown.
+	Grant(permission PermissionRequest) bool
+	// Deny denies a permission request. It returns true if this call
+	// actually resolved the pending request; false if the request had
+	// already been resolved or is unknown.
+	Deny(permission PermissionRequest) bool
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
@@ -100,63 +110,72 @@ type permissionService struct {
 	activeRequestMu sync.Mutex
 }
 
-func (s *permissionService) GrantPersistent(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: permission.ToolCallID,
-		Granted:    true,
-	})
-	respCh, ok := s.pendingRequests.Get(permission.ID)
-	if ok {
-		respCh <- true
+// resolve atomically removes the pending request entry for the given
+// permission and, if it was still pending, publishes exactly one
+// PermissionNotification and forwards the outcome to the waiter on
+// respCh. It returns true if this call resolved the request, false if
+// it had already been resolved (e.g., by another concurrent caller) or
+// the request ID is unknown.
+//
+// If onResolve is non-nil it runs after the pending entry has been
+// taken but before the notification is published or the waiter is
+// unblocked. This lets GrantPersistent record the session permission
+// only when it actually wins the race, so a losing GrantPersistent
+// that lost to a Deny does not leak an auto-approve entry.
+//
+// All three public resolution methods (Grant, GrantPersistent, Deny)
+// route through this helper so multi-subscriber UIs can race safely:
+// the first caller wins, the rest become no-ops.
+func (s *permissionService) resolve(permission PermissionRequest, granted, denied bool, onResolve func()) bool {
+	respCh, ok := s.pendingRequests.Take(permission.ID)
+	if !ok {
+		return false
 	}
 
-	s.sessionPermissions.Set(PermissionKey{
-		SessionID: permission.SessionID,
-		ToolName:  permission.ToolName,
-		Action:    permission.Action,
-		Path:      permission.Path,
-	}, true)
+	if onResolve != nil {
+		onResolve()
+	}
+
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: permission.ToolCallID,
+		Granted:    granted,
+		Denied:     denied,
+	})
+
+	// respCh is buffered (cap 1) and only ever has at most one sender
+	// per request because Take removes the entry under the map lock,
+	// so this send never blocks.
+	respCh <- granted
 
 	s.activeRequestMu.Lock()
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
 		s.activeRequest = nil
 	}
 	s.activeRequestMu.Unlock()
+	return true
 }
 
-func (s *permissionService) Grant(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: permission.ToolCallID,
-		Granted:    true,
+func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
+	// Record the persistent grant only if this call wins the
+	// pending-request race. Otherwise a losing GrantPersistent that
+	// lost to a Deny would still leave an auto-approve entry behind,
+	// silently flipping later denied calls to allowed.
+	return s.resolve(permission, true, false, func() {
+		s.sessionPermissions.Set(PermissionKey{
+			SessionID: permission.SessionID,
+			ToolName:  permission.ToolName,
+			Action:    permission.Action,
+			Path:      permission.Path,
+		}, true)
 	})
-	respCh, ok := s.pendingRequests.Get(permission.ID)
-	if ok {
-		respCh <- true
-	}
-
-	s.activeRequestMu.Lock()
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
-	s.activeRequestMu.Unlock()
 }
 
-func (s *permissionService) Deny(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: permission.ToolCallID,
-		Granted:    false,
-		Denied:     true,
-	})
-	respCh, ok := s.pendingRequests.Get(permission.ID)
-	if ok {
-		respCh <- false
-	}
+func (s *permissionService) Grant(permission PermissionRequest) bool {
+	return s.resolve(permission, true, false, nil)
+}
 
-	s.activeRequestMu.Lock()
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
-	s.activeRequestMu.Unlock()
+func (s *permissionService) Deny(permission PermissionRequest) bool {
+	return s.resolve(permission, false, true, nil)
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {

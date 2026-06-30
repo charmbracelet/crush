@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestConfigStore_ConfigPath_GlobalAlwaysWorks(t *testing.T) {
@@ -495,27 +497,21 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 	}`
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
-	// Load will trigger configureProviders which removes anthropic OAuth config
-	// This should NOT cause infinite recursion thanks to autoReloadDisabled guard
+	// Load will trigger configureProviders which removes anthropic OAuth config.
+	// This should NOT cause infinite recursion — writeMu prevents re-entrant reloads.
 	store, err := Load(dir, dir, false)
 	require.NoError(t, err)
-
-	// Verify the store loaded successfully and autoReloadDisabled was unset
-	require.False(t, store.autoReloadDisabled)
 
 	// Capture snapshot and verify reload also works without recursion
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
 
-	// Modify file and reload - this should work without re-entrancy issues
+	// Modify file and reload — this should work without re-entrancy issues
 	time.Sleep(10 * time.Millisecond)
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"options": {"debug": true}}`), 0o600))
 
 	err = store.ReloadFromDisk(context.Background())
 	require.NoError(t, err)
-
-	// Verify reload completed successfully
-	require.False(t, store.autoReloadDisabled, "autoReloadDisabled should be false after ReloadFromDisk")
 }
 
 // TestSetConfigFields_AutoReloadsAtomically verifies that SetConfigFields writes
@@ -728,4 +724,61 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 	require.Equal(t, "newer-access-token", updatedConfig.APIKey)
 	require.Equal(t, "newer-access-token", updatedConfig.OAuthToken.AccessToken)
 	require.Equal(t, "refresh-abc", updatedConfig.OAuthToken.RefreshToken)
+}
+
+// TestConfigStore_SetConfigFields_concurrentInProcess verifies that
+// concurrent in-process writes do not lose data when serialized by the
+// s.mu mutex. This does not exercise the cross-process flock; testing
+// that would require spawning a separate OS process.
+func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
+
+	store := &ConfigStore{
+		config: &Config{
+			Providers: csync.NewMap[string, ProviderConfig](),
+			Models:    make(map[SelectedModelType]SelectedModel),
+		},
+		globalDataPath: configPath,
+		workingDir:     dir,
+	}
+
+	const (
+		numGoroutines    = 20
+		fieldsPerRoutine = 5
+	)
+
+	errs := make(chan error, numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			kv := make(map[string]any, fieldsPerRoutine)
+			for j := 0; j < fieldsPerRoutine; j++ {
+				key := fmt.Sprintf("goroutine_%d_field_%d", id, j)
+				kv[key] = fmt.Sprintf("value_%d_%d", id, j)
+			}
+			errs <- store.SetConfigFields(ScopeGlobal, kv)
+		}(i)
+	}
+
+	for i := 0; i < numGoroutines; i++ {
+		require.NoError(t, <-errs)
+	}
+
+	// Verify all fields are present in the config file.
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+
+	for i := 0; i < numGoroutines; i++ {
+		for j := 0; j < fieldsPerRoutine; j++ {
+			key := fmt.Sprintf("goroutine_%d_field_%d", i, j)
+			expectedValue := fmt.Sprintf("value_%d_%d", i, j)
+			result := gjson.Get(string(data), key)
+			require.True(t, result.Exists(), "key %s should exist", key)
+			require.Equal(t, expectedValue, result.String(), "key %s should have the correct value", key)
+		}
+	}
 }

@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -35,6 +36,9 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 		for _, msg := range messages {
 			if text := msg.Content().Text; text != "" {
 				texts = append(texts, text)
+			}
+			for _, sc := range msg.ShellCommands() {
+				texts = append(texts, "!"+sc.Command)
 			}
 		}
 		return promptHistoryLoadedMsg{messages: texts}
@@ -93,6 +97,7 @@ func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 		m.promptHistory.index = -1
 		m.textarea.Reset()
 		m.textarea.InsertString(m.promptHistory.draft)
+		m.syncBangModeFromTextarea()
 		return m.updateTextareaWithPrevHeight(nil, prevHeight)
 	}
 
@@ -106,6 +111,26 @@ func (m *UI) updateHistoryDraft(oldValue string) {
 		m.promptHistory.draft = m.textarea.Value()
 		m.promptHistory.index = -1
 	}
+}
+
+// syncBangModeFromTextarea engages or disengages bang mode based on
+// whether the current textarea value starts with "!". The "!" prefix
+// is stripped when entering bang mode and re-added when leaving it so
+// the visible text always reflects the correct state.
+func (m *UI) syncBangModeFromTextarea() {
+	val := m.textarea.Value()
+	hasBang := strings.HasPrefix(val, "!")
+	if hasBang && !m.bangMode {
+		m.bangMode = true
+		m.bangWasEmpty = false
+		m.textarea.SetValue(val[1:])
+		m.textarea.MoveToBegin()
+	} else if !hasBang && m.bangMode {
+		m.bangMode = false
+		m.bangWasEmpty = false
+	}
+	yolo := m.com.Workspace.PermissionSkipRequests()
+	m.setEditorPrompt(yolo)
 }
 
 // historyPrev changes the text area content to the previous message in the history
@@ -125,6 +150,7 @@ func (m *UI) historyPrev() bool {
 	m.textarea.Reset()
 	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
 	m.textarea.MoveToBegin()
+	m.syncBangModeFromTextarea()
 	return true
 }
 
@@ -139,11 +165,13 @@ func (m *UI) historyNext() bool {
 		m.promptHistory.index = -1
 		m.textarea.Reset()
 		m.textarea.InsertString(m.promptHistory.draft)
+		m.syncBangModeFromTextarea()
 		return true
 	}
 	m.promptHistory.index = nextIndex
 	m.textarea.Reset()
 	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
+	m.syncBangModeFromTextarea()
 	return true
 }
 

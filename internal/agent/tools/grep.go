@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -161,8 +162,8 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 					}
 					if match.lineNum > 0 {
 						lineText := match.lineText
-						if len(lineText) > maxGrepContentWidth {
-							lineText = lineText[:maxGrepContentWidth] + "..."
+						if ansi.StringWidth(lineText) > maxGrepContentWidth {
+							lineText = ansi.Truncate(lineText, maxGrepContentWidth, "...")
 						}
 						if match.charNum > 0 {
 							fmt.Fprintf(&output, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)

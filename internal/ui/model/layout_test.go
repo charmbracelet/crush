@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -72,6 +73,9 @@ func newTestUI() *UI {
 			},
 		),
 		keyMap:   keyMap,
+		com:      com,
+		status:   NewStatus(com, nil),
+		chat:     NewChat(com, config.ScrollbarDefault),
 		textarea: ta,
 		state:    uiChat,
 		focus:    uiFocusEditor,

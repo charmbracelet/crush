@@ -2,12 +2,14 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -84,14 +86,34 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Payload: fileToProto(e.Payload),
 		})
 	case pubsub.Event[notify.Notification]:
+		payload := proto.AgentEvent{
+			SessionID:    e.Payload.SessionID,
+			SessionTitle: e.Payload.SessionTitle,
+			RunID:        e.Payload.RunID,
+			Type:         proto.AgentEventType(e.Payload.Type),
+		}
+		if e.Payload.Type == notify.TypeAgentError {
+			payload.Type = proto.AgentEventTypeError
+			payload.Error = errors.New(e.Payload.Message)
+		}
 		return envelope(pubsub.PayloadTypeAgentEvent, pubsub.Event[proto.AgentEvent]{
+			Type:    e.Type,
+			Payload: payload,
+		})
+	case pubsub.Event[notify.RunComplete]:
+		return envelope(pubsub.PayloadTypeRunComplete, pubsub.Event[proto.RunComplete]{
 			Type: e.Type,
-			Payload: proto.AgentEvent{
-				SessionID:    e.Payload.SessionID,
-				SessionTitle: e.Payload.SessionTitle,
-				Type:         proto.AgentEventType(e.Payload.Type),
+			Payload: proto.RunComplete{
+				SessionID: e.Payload.SessionID,
+				RunID:     e.Payload.RunID,
+				MessageID: e.Payload.MessageID,
+				Text:      e.Payload.Text,
+				Error:     e.Payload.Error,
+				Cancelled: e.Payload.Cancelled,
 			},
 		})
+	case pubsub.Event[proto.ConfigChanged]:
+		return envelope(pubsub.PayloadTypeConfigChanged, e)
 	case pubsub.Event[skills.Event]:
 		return envelope(pubsub.PayloadTypeSkillsEvent, pubsub.Event[proto.SkillsEvent]{
 			Type:    e.Type,
@@ -145,6 +167,29 @@ func sessionToProto(s session.Session) proto.Session {
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+// isSessionBusy reports whether the given workspace has an in-flight
+// agent run for sessionID. It tolerates a nil workspace (treating it as
+// "not busy") so REST handlers can pass GetWorkspace's result through
+// unconditionally — the workspace lookup error is already surfaced by
+// the prior ListSessions/GetSession call when relevant.
+func isSessionBusy(ws *backend.Workspace, sessionID string) bool {
+	if ws == nil || ws.App == nil || ws.AgentCoordinator == nil {
+		return false
+	}
+	return ws.AgentCoordinator.IsSessionBusy(sessionID)
+}
+
+// attachedClients returns the number of clients currently viewing
+// sessionID in ws. Hold-only clients (streams == 0) do not contribute.
+// A nil workspace is treated as zero so handlers can pass GetWorkspace's
+// result through without an extra guard.
+func attachedClients(ws *backend.Workspace, sessionID string) int {
+	if ws == nil {
+		return 0
+	}
+	return ws.AttachedClientsForSession(sessionID)
 }
 
 func todosToProto(todos []session.Todo) []proto.Todo {
@@ -224,6 +269,12 @@ func messageToProto(m message.Message) proto.Message {
 			msg.Parts = append(msg.Parts, proto.ImageURLContent{URL: v.URL, Detail: v.Detail})
 		case message.BinaryContent:
 			msg.Parts = append(msg.Parts, proto.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
+		case message.ShellCommand:
+			msg.Parts = append(msg.Parts, proto.ShellCommand{
+				Command:  v.Command,
+				Output:   v.Output,
+				ExitCode: v.ExitCode,
+			})
 		}
 	}
 

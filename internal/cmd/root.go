@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/lock"
 	crushlog "github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -126,12 +127,13 @@ crush --continue
 		com := common.DefaultCommon(ws)
 		model := ui.New(com, sessionID, continueLast)
 
+		inputFilter := ui.NewFilter()
 		var env uv.Environ = os.Environ()
 		program := tea.NewProgram(
 			model,
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
-			tea.WithFilter(ui.MouseEventFilter),
+			tea.WithFilter(inputFilter.Filter),
 		)
 		go ws.Subscribe(program)
 
@@ -293,7 +295,8 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	// with the manager.
 	discoveryCfg := localSkillsDiscoveryConfig(store)
 	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
-	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates,
+	skillsMgr := skills.NewManager(
+		allSkills, activeSkills, skillStates,
 		skills.WithGlobalMirror(),
 		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
@@ -414,12 +417,42 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 // version matches the client; on mismatch it shuts down the old server
 // and starts a fresh one.
 func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
+	// Initialize the persistent log here so stale-socket diagnostics
+	// emitted before connectToServer runs are captured in the per-host
+	// server log file. crushlog.Setup uses sync.Once internally, so the
+	// later call from connectToServer becomes a no-op.
+	debug, _ := cmd.Flags().GetBool("debug")
+	logFile := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "crush.log")
+	crushlog.Setup(logFile, debug)
+
 	switch hostURL.Scheme {
 	case "unix", "npipe":
 		needsStart := false
 		_, statErr := os.Stat(hostURL.Host)
 		switch {
 		case statErr == nil:
+			// Probe the socket explicitly before the version-check
+			// path. A stale unix socket file (the previous server
+			// exited without cleaning up) would otherwise make
+			// restartIfStale spin on a non-responsive endpoint; here
+			// we detect it with a short DialTimeout and remove the
+			// orphaned file so the normal spawn path can run.
+			if hostURL.Scheme == "unix" {
+				conn, dialErr := net.DialTimeout( //nolint:noctx
+					hostURL.Scheme, hostURL.Host, 200*time.Millisecond,
+				)
+				if dialErr == nil {
+					conn.Close()
+				} else if server.IsStaleSocketErr(dialErr) {
+					slog.Warn("Stale socket detected, removing",
+						"path", hostURL.Host, "error", dialErr)
+					if err := os.Remove(hostURL.Host); err != nil && !errors.Is(err, fs.ErrNotExist) {
+						return fmt.Errorf("failed to remove stale server socket %q: %v", hostURL.Host, err)
+					}
+					needsStart = true
+					break
+				}
+			}
 			restarted, err := restartIfStale(cmd, hostURL)
 			if err != nil {
 				slog.Warn("Failed to check server version", "error", err)
@@ -465,7 +498,7 @@ func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 	if err != nil {
 		return err
 	}
-	release, err := acquireSpawnLock(filepath.Join(chDir, "start.lock"))
+	release, err := lock.File(cmd.Context(), filepath.Join(chDir, "start.lock"))
 	if err != nil {
 		// If the lock itself is unavailable, fall back to the
 		// unsynchronized path rather than blocking the user.

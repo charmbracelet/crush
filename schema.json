@@ -106,6 +106,10 @@
     },
     "HookConfig": {
       "properties": {
+        "name": {
+          "type": "string",
+          "description": "Friendly display name shown in the TUI for this hook"
+        },
         "matcher": {
           "type": "string",
           "description": "Regex pattern tested against the tool name. Empty means match all tools."
@@ -401,6 +405,17 @@
           "type": "array",
           "description": "Paths to files containing context information for the AI"
         },
+        "global_context_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Paths to files containing global context information for the AI",
+          "default": [
+            "~/.config/crush/CRUSH.md",
+            "~/.config/AGENTS.md"
+          ]
+        },
         "skills_paths": {
           "items": {
             "type": "string",
@@ -492,8 +507,20 @@
         },
         "disable_notifications": {
           "type": "boolean",
-          "description": "Disable desktop notifications",
+          "description": "Deprecated: Use notification_style instead. Disable desktop notifications",
           "default": false
+        },
+        "notification_style": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "native",
+            "osc",
+            "bell",
+            "disabled"
+          ],
+          "description": "Notification style to use. Options: auto (default)",
+          "default": "auto"
         },
         "disabled_skills": {
           "items": {
@@ -555,10 +582,19 @@
           "enum": [
             "openai",
             "openai-compat",
+            "openrouter",
+            "vercel",
             "anthropic",
-            "gemini",
+            "google",
             "azure",
-            "vertexai"
+            "bedrock",
+            "google-vertex",
+            "hyper",
+            "litellm",
+            "llamacpp",
+            "lmstudio",
+            "ollama",
+            "omlx"
           ],
           "description": "Provider type that determines the API format",
           "default": "openai"
@@ -601,6 +637,11 @@
         "flat_rate": {
           "type": "boolean",
           "description": "Flat-rate mode for this provider"
+        },
+        "discover_models": {
+          "type": "boolean",
+          "description": "Auto-discover models from /v1/models endpoint. When true with existing models they are merged (yours win)",
+          "default": true
         },
         "models": {
           "items": {
@@ -715,6 +756,16 @@
           "type": "boolean",
           "description": "Enable transparent background for the TUI interface",
           "default": false
+        },
+        "scrollbar": {
+          "type": "string",
+          "enum": [
+            "default",
+            "always",
+            "never"
+          ],
+          "description": "Chat scrollbar visibility",
+          "default": "default"
         }
       },
       "additionalProperties": false,
@@ -743,6 +794,16 @@
         "expires_in",
         "expires_at"
       ]
+    },
+    "ToolGlob": {
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout for the glob tool call"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     },
     "ToolGrep": {
       "properties": {
@@ -783,6 +844,9 @@
         },
         "grep": {
           "$ref": "#/$defs/ToolGrep"
+        },
+        "glob": {
+          "$ref": "#/$defs/ToolGlob"
         }
       },
       "additionalProperties": false,

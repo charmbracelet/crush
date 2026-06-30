@@ -43,7 +43,7 @@ func (r *LSPRestartToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		toolParams = append(toolParams, params.Name)
 	}
 
-	header := toolHeader(sty, opts.Status, "Restart LSP", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Restart LSP", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

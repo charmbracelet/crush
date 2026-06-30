@@ -21,11 +21,13 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/format"
+	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -75,6 +77,17 @@ type App struct {
 	globalCtx          context.Context
 	cleanupFuncs       []func(context.Context) error
 	agentNotifications *pubsub.Broker[notify.Notification]
+	// runCompletions is the authoritative per-run completion signal,
+	// emitted once per top-level agent turn after all message
+	// updates have been flushed. Bridged into app.events so SSE
+	// subscribers (notably `crush run` in client/server mode) can
+	// drive their exit on a deterministic, payload-bearing event
+	// instead of guessing from message finish parts.
+	runCompletions *pubsub.Broker[notify.RunComplete]
+
+	// herdrClient reports agent state to herdr when running inside
+	// a herdr-managed pane. Nil when not in a herdr environment.
+	herdrClient *herdr.Client
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -110,14 +123,30 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
+		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 	}
 
 	app.setupEvents()
+
+	// Initialize clipboard support. This is best-effort; if it fails
+	// (e.g., headless environment), clipboard operations will return nil.
+	if err := clipboard.Init(); err != nil {
+		slog.Warn("Clipboard initialization failed", "error", err)
+	}
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
 	go mcp.Initialize(ctx, app.Permissions, store)
+
+	// Start herdr integration when running inside a herdr pane.
+	app.herdrClient = herdr.Init()
+	herdr.BridgeLocal(ctx, app.herdrClient, herdr.BridgeSources{
+		PermRequests:      app.Permissions,
+		PermNotifications: app.Permissions,
+		RunCompletions:    app.runCompletions,
+		Messages:          app.Messages,
+	})
 
 	// Release the shared database connection on shutdown. The pool
 	// closes the underlying *sql.DB when the last reference is released.
@@ -175,6 +204,23 @@ func (app *App) SendEvent(msg tea.Msg) {
 // AgentNotifications returns the broker for agent notification events.
 func (app *App) AgentNotifications() *pubsub.Broker[notify.Notification] {
 	return app.agentNotifications
+}
+
+// RunCompletions returns the broker for the authoritative per-run
+// terminal RunComplete events. The dispatcher (backend.runAgent) uses
+// it to emit a reliable terminal event when a run fails before the
+// coordinator could publish one of its own.
+func (app *App) RunCompletions() *pubsub.Broker[notify.RunComplete] {
+	return app.runCompletions
+}
+
+// ReportCurrentSession tells herdr which session the user is now
+// viewing so it can persist a resumable reference for the pane. Safe
+// to call when not running inside a herdr pane; the underlying client
+// is nil-safe. Call this whenever the active session changes (load,
+// new, or select).
+func (app *App) ReportCurrentSession(sessionID string) {
+	app.herdrClient.SetSessionID(sessionID)
 }
 
 // resolveSession resolves which session to use for a non-interactive run
@@ -293,6 +339,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// session.
 	app.Permissions.AutoApproveSession(sess.ID)
 
+	// Report session identity to herdr.
+	app.ReportCurrentSession(sess.ID)
+
 	type response struct {
 		result *fantasy.AgentResult
 		err    error
@@ -410,10 +459,10 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 		}
 		largeProviderID = found.provider
 		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		app.config.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+		app.config.OverridePreferredModel(config.SelectedModelTypeLarge, config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
-		}
+		})
 	}
 
 	// Override small model.
@@ -424,15 +473,15 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 			return err
 		}
 		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		app.config.Config().Models[config.SelectedModelTypeSmall] = config.SelectedModel{
+		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
-		}
+		})
 
 	case largeModel != "":
 		// No small model specified, but large model was - use provider's default.
 		smallCfg := app.GetDefaultSmallModel(largeProviderID)
-		app.config.Config().Models[config.SelectedModelTypeSmall] = smallCfg
+		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallCfg)
 	}
 
 	return app.AgentCoordinator.UpdateModels(ctx)
@@ -485,6 +534,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
+	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	if app.Skills != nil {
@@ -524,6 +574,38 @@ func setupSubscriber[T any](
 	})
 }
 
+// setupSubscriberMustDeliver is the bounded-blocking fan-in variant of
+// setupSubscriber: it re-publishes upstream events onto the shared
+// app.events broker using PublishMustDeliver instead of Publish. Use
+// this for terminal events that subscribers cannot tolerate losing —
+// notably RunComplete, which is the authoritative end-of-run signal
+// for `crush run`. A lossy fan-in here can drop the only terminal
+// event and hang non-interactive clients waiting on it.
+func setupSubscriberMustDeliver[T any](
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	name string,
+	subscriber func(context.Context) <-chan pubsub.Event[T],
+	broker *pubsub.Broker[tea.Msg],
+) {
+	wg.Go(func() {
+		subCh := subscriber(ctx)
+		for {
+			select {
+			case event, ok := <-subCh:
+				if !ok {
+					slog.Debug("Subscription channel closed", "name", name)
+					return
+				}
+				broker.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
+			case <-ctx.Done():
+				slog.Debug("Subscription cancelled", "name", name)
+				return
+			}
+		}
+	})
+}
+
 func (app *App) InitCoderAgent(ctx context.Context) error {
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
@@ -540,6 +622,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.FileTracker,
 		app.LSPManager,
 		app.agentNotifications,
+		app.runCompletions,
 		app.Skills,
 	)
 	if err != nil {
@@ -619,6 +702,9 @@ func (app *App) Shutdown() {
 	wg.Go(func() {
 		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
 	})
+
+	// Close herdr client to stop its background writer.
+	app.herdrClient.Close()
 
 	// Shutdown all LSP clients.
 	wg.Go(func() {

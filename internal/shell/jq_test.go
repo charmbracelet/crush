@@ -155,27 +155,39 @@ func TestJQ_CtxCancel_MidReadAll(t *testing.T) {
 	}
 }
 
+// failOnReadReader fails the test if Read is ever called. It proves that a
+// code path short-circuited before touching the input, without relying on
+// wall-clock timing.
+type failOnReadReader struct {
+	t *testing.T
+}
+
+func (r failOnReadReader) Read(p []byte) (int, error) {
+	r.t.Error("Read called; outer guard did not short-circuit before io.ReadAll")
+	return 0, io.EOF
+}
+
 // TestJQ_CtxCancel_PreCancel verifies the fast-fail path: a ctx already
 // cancelled before handleJQ is called returns context.Canceled
 // immediately via the outer-loop guard, never entering io.ReadAll.
 // Complements TestJQ_CtxCancel_MidReadAll.
+//
+// The invariant — not wall-clock timing — is what proves the guard fired:
+// the input reader fails the test if it is ever read from. A previous
+// version asserted a 100ms ceiling, which measured scheduler latency rather
+// than the guard and flaked on contended Windows CI runners under -race.
 func TestJQ_CtxCancel_PreCancel(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	start := time.Now()
 	err := handleJQ(ctx, []string{"jq", "-R", "."},
-		bytes.NewReader(bytes.Repeat([]byte("a"), 1024)),
+		failOnReadReader{t: t},
 		io.Discard, io.Discard)
-	elapsed := time.Since(start)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
-	}
-	if elapsed > 100*time.Millisecond {
-		t.Fatalf("pre-cancel fast-fail took %v; outer guard is not firing", elapsed)
 	}
 }
 

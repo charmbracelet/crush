@@ -60,12 +60,22 @@ const (
 )
 
 type Styles struct {
+	// ANSI holds the 16 standard ANSI colors (0-7 normal, 8-15 bright)
+	// used to remap legible colors onto raw terminal output, such as the
+	// output of bang-mode shell commands. Terminal programs emit the
+	// basic 16-color SGR codes (red, green, blue, …) and leave the actual
+	// colors up to the terminal; without this palette they fall through
+	// to the user's terminal defaults, which are often illegible on
+	// Crush's background. Defining them here keeps output readable and
+	// on-brand regardless of terminal configuration.
+	ANSI [16]color.Color
+
 	// Header
 	Header struct {
 		Charm             lipgloss.Style // Style for "Charm™" label
 		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
 		Percentage        lipgloss.Style // Style for context percentage
-		Hypercredit       lipgloss.Style // Style for Hypercredit count (◆ N)
+		HypercreditIcon   lipgloss.Style // Style for Hypercredit count (◆ N)
 		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
 		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
 		WorkingDir        lipgloss.Style // Style for current working directory
@@ -123,6 +133,12 @@ type Styles struct {
 		PromptYoloIconBlurred lipgloss.Style
 		PromptYoloDotsFocused lipgloss.Style
 		PromptYoloDotsBlurred lipgloss.Style
+
+		// Bang mode prompt (" ! " icon + ":::" dots, Turtle color).
+		PromptBangIconFocused lipgloss.Style
+		PromptBangIconBlurred lipgloss.Style
+		PromptBangDotsFocused lipgloss.Style
+		PromptBangDotsBlurred lipgloss.Style
 	}
 
 	// Radio
@@ -241,7 +257,17 @@ type Styles struct {
 		ToolCallFocused  lipgloss.Style
 		ToolCallCompact  lipgloss.Style
 		ToolCallBlurred  lipgloss.Style
-		SectionHeader    lipgloss.Style
+
+		// Shell (bang mode) item styles.
+		ShellBarFocused    lipgloss.Style // Left vertical bar when focused.
+		ShellBarBlurred    lipgloss.Style // Left vertical bar when blurred.
+		ShellPrompt        lipgloss.Style // "$" prompt symbol (focused).
+		ShellPromptBlurred lipgloss.Style // "$" prompt symbol (blurred).
+		ShellCommand       lipgloss.Style // Command text (syntax-highlighted).
+		ShellOutput        lipgloss.Style // Plain output text.
+		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
+		ShellTruncation    lipgloss.Style // "N more lines" hint.
+		SectionHeader      lipgloss.Style
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
@@ -291,6 +317,10 @@ type Styles struct {
 		// Error styles
 		ErrorTag     lipgloss.Style // ERROR tag
 		ErrorMessage lipgloss.Style // Error message text
+
+		// Warning styles (used for permission denied)
+		WarnTag     lipgloss.Style // WARN tag
+		WarnMessage lipgloss.Style // Warning message text
 
 		// Diff styles
 		DiffTruncation lipgloss.Style // Diff truncation message with padding

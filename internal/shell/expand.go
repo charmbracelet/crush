@@ -59,6 +59,15 @@ var NoUnset atomic.Bool
 //     prefix of its stderr. Callers that surface the error to users
 //     should additionally scrub it for the original template text.
 func ExpandValue(ctx context.Context, value string, env []string) (string, error) {
+	// Fast path: a value with no shell metacharacters expands to itself.
+	// Parsing and running it through the interpreter would produce the
+	// same string at significant cost. Most config values (literal API
+	// keys, fixed URLs) hit this path, which matters because ExpandValue
+	// runs over every provider/MCP/LSP value on each config reload.
+	if !strings.ContainsAny(value, "$`\\'\"") {
+		return value, nil
+	}
+
 	// Parse the value as a here-doc style word: no word splitting, no
 	// globbing, but full support for $VAR, ${VAR...}, $(...), and
 	// quoted/escaped strings.
@@ -73,12 +82,16 @@ func ExpandValue(ctx context.Context, value string, env []string) (string, error
 	// verbatim, with no CRUSH/AGENT/AI_AGENT injection: callers of
 	// ExpandValue control the env, and nounset must treat any name
 	// not in env as unset.
-	cwd, _ := os.Getwd()
+	//
+	// The working directory is only needed for $(...) command
+	// substitution, so we resolve it lazily on first use. Values that
+	// only reference variables or use quoting (the common case) avoid
+	// the os.Getwd() syscall entirely.
 	s := &Shell{
-		cwd:    cwd,
 		env:    env,
 		logger: noopLogger{},
 	}
+	cwdResolved := false
 
 	strict := NoUnset.Load()
 
@@ -87,13 +100,17 @@ func ExpandValue(ctx context.Context, value string, env []string) (string, error
 		Env:     expand.ListEnviron(env...),
 		NoUnset: strict,
 		CmdSubst: func(w io.Writer, cs *syntax.CmdSubst) error {
+			if !cwdResolved {
+				s.cwd, _ = os.Getwd()
+				cwdResolved = true
+			}
 			stderrBuf.Reset()
 			runnerOpts := []interp.RunnerOption{
 				interp.StdIO(nil, w, &stderrBuf),
 				interp.Interactive(false),
 				interp.Env(expand.ListEnviron(env...)),
 				interp.Dir(s.cwd),
-				interp.ExecHandlers(standardHandlers(s.blockFuncs)...),
+				execHandlerOption(s.blockFuncs),
 			}
 			if strict {
 				// Match the outer NoUnset: an unset $VAR inside

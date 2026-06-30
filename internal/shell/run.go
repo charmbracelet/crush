@@ -1,9 +1,13 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
+	"slices"
 	"strings"
 
 	"mvdan.cc/sh/moreinterp/coreutils"
@@ -40,6 +44,9 @@ type RunOptions struct {
 	// BlockFuncs is an optional list of deny-list matchers applied before
 	// each command reaches the exec layer. nil disables blocking entirely.
 	BlockFuncs []BlockFunc
+	// TermWidth is the terminal width in columns for PTY execution.
+	// Zero uses a default of 200.
+	TermWidth int
 }
 
 // Run parses and executes a shell command using the same mvdan.cc/sh
@@ -85,17 +92,197 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 	return runner.Run(ctx, line)
 }
 
+// CaptureResult holds the combined output and exit code from a
+// captured shell execution.
+type CaptureResult struct {
+	Output   string
+	ExitCode int
+}
+
+// PersistFunc is a callback that persists a shell command result.
+// Used by RunAndPersist to decouple execution from storage.
+type PersistFunc func(command, output string, exitCode int) error
+
+// RunAndPersist executes a shell command via PTY and optionally
+// persists the result through the provided callback. This unifies
+// the run-and-save pattern used by both AppWorkspace and Backend.
+func RunAndPersist(ctx context.Context, opts RunOptions, persist PersistFunc) (CaptureResult, error) {
+	result, err := RunAndCapturePTY(ctx, opts)
+	if err != nil {
+		return CaptureResult{}, err
+	}
+
+	if persist != nil {
+		if persistErr := persist(opts.Command, result.Output, result.ExitCode); persistErr != nil {
+			slog.Error("Failed to persist shell command output", "error", persistErr, "command", opts.Command)
+		}
+	}
+
+	return result, nil
+}
+
+// RunAndCapture executes a shell command and returns its combined
+// stdout/stderr output along with the exit code. It inherits the
+// current process environment when opts.Env is nil.
+func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) {
+	if opts.Env == nil {
+		opts.Env = os.Environ()
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts.Stdout = &stdout
+	opts.Stderr = &stderr
+
+	runErr := Run(ctx, opts)
+
+	exitCode := 0
+	if runErr != nil {
+		exitCode = ExitCode(runErr)
+	}
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	return CaptureResult{
+		Output:   output,
+		ExitCode: exitCode,
+	}, nil
+}
+
+// ptyColorEnvVars force color output for programs running inside a
+// PTY. These are only applied in RunAndCapturePTY, not in the plain
+// Run/RunAndCapture paths where ANSI codes would be noise.
+var ptyColorEnvVars = []string{
+	"COLORTERM=truecolor",
+	"CLICOLOR_FORCE=1",
+	"FORCE_COLOR=1",
+}
+
+// RunAndCapturePTY executes a shell command through the mvdan.cc/sh
+// interpreter with color-forcing environment variables set. Programs
+// that respect FORCE_COLOR or CLICOLOR_FORCE (git, cargo, npm, eza,
+// bat, ripgrep, etc.) will emit ANSI color sequences even without a
+// real PTY. This approach is fully cross-platform — no /bin/sh or
+// unix PTY required.
+//
+// The name is preserved for API compatibility; the PTY path has been
+// replaced by the portable interpreter + env-var approach.
+func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, error) {
+	if opts.Env == nil {
+		opts.Env = os.Environ()
+	}
+	opts.Env = append(opts.Env, ptyColorEnvVars...)
+	return RunAndCapture(ctx, opts)
+}
+
 // newRunner constructs an [interp.Runner] configured with the standard
 // Crush handler stack. Shared by the stateless [Run] entrypoint and the
 // stateful [Shell] so the two surfaces cannot drift.
 func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writer, blockFuncs []BlockFunc) (*interp.Runner, error) {
+	env = withNonInteractiveEnv(env)
 	return interp.New(
 		interp.StdIO(stdin, stdout, stderr),
 		interp.Interactive(false),
 		interp.Env(expand.ListEnviron(env...)),
 		interp.Dir(cwd),
-		interp.ExecHandlers(standardHandlers(blockFuncs)...),
+		execHandlerOption(blockFuncs),
 	)
+}
+
+// execHandlerOption returns an interp.RunnerOption that installs the
+// standard Crush middleware chain (builtins, script dispatch, block list)
+// on top of a process-group-isolated base exec handler.
+//
+// We use interp.ExecHandler (singular) with a manually-built chain rather
+// than interp.ExecHandlers because the latter always appends
+// interp.DefaultExecHandler as the final handler, which lacks process group
+// isolation. Without isolation, shells like zsh that set up job control
+// when sourcing framework files can send SIGINT/SIGTERM to Crush's process
+// group and crash the parent.
+func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
+	base := processGroupExecHandler(defaultKillTimeout)
+	handler := base
+	for _, mw := range slices.Backward(standardHandlers(blockFuncs)) {
+		handler = mw(handler)
+	}
+	// ExecHandlers always appends DefaultExecHandler which lacks process
+	// group isolation, so we use the deprecated ExecHandler instead.
+	return interp.ExecHandler(handler)
+}
+
+// nonInteractiveEnvVars are forced on every shell execution to prevent
+// commands from hanging on a nonexistent TTY. These are always applied
+// regardless of the caller's environment because Crush shells are never
+// interactive — preserving user preferences like EDITOR=nvim only causes
+// hangs, not useful behavior.
+var nonInteractiveEnvVars = []string{
+	"TERM=xterm-256color",
+	"GIT_EDITOR=false",
+	"EDITOR=false",
+	"VISUAL=false",
+	"JJ_EDITOR=false",
+	"JJ_PAGER=cat",
+	"GIT_PAGER=cat",
+	"PAGER=cat",
+}
+
+// withNonInteractiveEnv returns env with nonInteractiveEnvVars forced in,
+// replacing any existing values for those keys. The returned slice is a
+// new allocation safe to use concurrently with the input.
+func withNonInteractiveEnv(env []string) []string {
+	// Build a set of override keys for fast lookup.
+	overrideKeys := make(map[string]bool, len(nonInteractiveEnvVars))
+	for _, kv := range nonInteractiveEnvVars {
+		if key, _, ok := strings.Cut(kv, "="); ok {
+			overrideKeys[key] = true
+		}
+	}
+
+	// Copy env, filtering out any keys we will override.
+	result := make([]string, 0, len(env)+len(nonInteractiveEnvVars))
+	for _, e := range env {
+		if key, _, ok := strings.Cut(e, "="); ok && overrideKeys[key] {
+			continue
+		}
+		result = append(result, e)
+	}
+
+	return append(result, nonInteractiveEnvVars...)
+}
+
+// herdrEnvVars are the environment variables herdr injects into panes
+// so agents can report state over its Unix socket API. Subprocesses
+// must not inherit these: a child process that calls herdr.Init()
+// would attach to the parent's pane and, on exit, release its agent
+// authority — making the status vanish. Stripping them here closes
+// that gap for every command the bash tool runs.
+var herdrEnvVars = []string{
+	"HERDR_ENV",
+	"HERDR_SOCKET_PATH",
+	"HERDR_PANE_ID",
+}
+
+// withoutHerdrEnv returns env with all HERDR_* variables removed.
+// The returned slice is a new allocation safe to use concurrently
+// with the input.
+func withoutHerdrEnv(env []string) []string {
+	strip := make(map[string]bool, len(herdrEnvVars))
+	for _, k := range herdrEnvVars {
+		strip[k] = true
+	}
+	result := make([]string, 0, len(env))
+	for _, e := range env {
+		if key, _, ok := strings.Cut(e, "="); ok && strip[key] {
+			continue
+		}
+		result = append(result, e)
+	}
+	return result
 }
 
 // standardHandlers returns the exec-handler middleware chain used by both

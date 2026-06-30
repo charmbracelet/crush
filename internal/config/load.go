@@ -857,18 +857,34 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 	return result, nil
 }
 
+// SystemConfig returns the system-wide configuration file path.
+// On Unix systems this is typically /etc/crush/crush.json.
+func SystemConfig() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	return filepath.Join("/etc", appName, fmt.Sprintf("%s.json", appName))
+}
+
 // lookupConfigs searches config files starting at cwd and walking up
 // through the current project. The upward walk stops at the git
 // working tree root when one can be detected, otherwise at cwd itself,
 // so an unrelated crush.json placed above the project is never picked
 // up. Global user-level config locations are always included
-// regardless of the boundary.
+// regardless of the boundary. System-wide config at /etc/crush/crush.json
+// is included first (lowest priority) on Unix systems.
 func lookupConfigs(cwd string) []string {
+	// start with system-wide config (lowest priority)
+	configPaths := []string{}
+	if system := SystemConfig(); system != "" {
+		configPaths = append(configPaths, system)
+	}
+
 	// prepend default config paths
-	configPaths := []string{
+	configPaths = append(configPaths,
 		GlobalConfig(),
 		GlobalConfigData(),
-	}
+	)
 
 	configNames := []string{appName + ".json", "." + appName + ".json"}
 

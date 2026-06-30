@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -130,6 +131,25 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		// even when no project file exists.
 		require.Contains(t, got, GlobalConfig())
 		require.Contains(t, got, GlobalConfigData())
+	})
+
+	t.Run("system config is loaded first", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("system config not supported on Windows")
+		}
+
+		systemConfig := SystemConfig()
+
+		// Ensure the system config path is not empty.
+		require.NotEmpty(t, systemConfig)
+
+		got := lookupConfigs(t.TempDir())
+
+		// Ensure configs were returned before accessing index 0.
+		require.NotEmpty(t, got)
+
+		// Ensure the system config is loaded first with lowest priority.
+		require.Equal(t, systemConfig, got[0])
 	})
 }
 

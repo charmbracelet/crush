@@ -1637,6 +1637,21 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
+	case dialog.ActionSelectScrollbarStyle:
+		cfg := m.com.Config()
+		if cfg != nil && cfg.Options != nil {
+			if cfg.Options.TUI == nil {
+				cfg.Options.TUI = &config.TUIOptions{}
+			}
+			cfg.Options.TUI.Scrollbar = msg.Style
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.scrollbar", msg.Style); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			} else {
+				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Scrollbar set to: "+msg.Style)))
+			}
+			m.chat.SetScrollbarMode(msg.Style)
+		}
+		m.dialog.CloseDialog(dialog.ScrollbarID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
@@ -1707,6 +1722,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
+		// Capture preferences dialog reference before the async command so
+		// we can refresh the label after the config write completes.
+		var prefsDialog *dialog.Preferences
+		if m.dialog.ContainsDialog(dialog.PreferencesID) {
+			if dlg := m.dialog.Dialog(dialog.PreferencesID); dlg != nil {
+				prefsDialog, _ = dlg.(*dialog.Preferences)
+			}
+		}
 		cmds = append(cmds, func() tea.Msg {
 			cfg := m.com.Config()
 			if cfg == nil {
@@ -1719,6 +1742,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				return util.ReportError(err)()
 			}
 			m.isTransparent = newValue
+
+			// Refresh the label now that the config has been written.
+			if prefsDialog != nil {
+				prefsDialog.RefreshItems()
+			}
 
 			status := "disabled"
 			if newValue {
@@ -3891,6 +3919,14 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ScrollbarID:
+		if cmd := m.openScrollbarDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.PreferencesID:
+		if cmd := m.openPreferencesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3989,6 +4025,30 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
+	return nil
+}
+
+// openScrollbarDialog opens the scrollbar style picker dialog.
+func (m *UI) openScrollbarDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ScrollbarID) {
+		m.dialog.BringToFront(dialog.ScrollbarID)
+		return nil
+	}
+
+	scrollbarDialog := dialog.NewScrollbar(m.com)
+	m.dialog.OpenDialog(scrollbarDialog)
+	return nil
+}
+
+// openPreferencesDialog opens the customization submenu dialog.
+func (m *UI) openPreferencesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.PreferencesID) {
+		m.dialog.BringToFront(dialog.PreferencesID)
+		return nil
+	}
+
+	customizationDialog := dialog.NewPreferences(m.com)
+	m.dialog.OpenDialog(customizationDialog)
 	return nil
 }
 

@@ -557,7 +557,12 @@ func (p *Permissions) renderBashContent(width int) string {
 		return ""
 	}
 
-	return p.renderContentPanel(params.Command, width)
+	var parts []string
+	parts = append(parts, p.renderContentPanel(params.Command, width))
+	if ctxBlock := p.renderPendingContexts(width); ctxBlock != "" {
+		parts = append(parts, ctxBlock)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (p *Permissions) renderEditContent(contentWidth int) string {
@@ -721,11 +726,61 @@ func (p *Permissions) renderDefaultContent(width int) string {
 		}
 	}
 
+	// Display contexts if available
+	if pendingCtx := p.renderPendingContexts(width); pendingCtx != "" {
+		if content != "" {
+			content += "\n\n"
+		}
+		content += pendingCtx
+	}
+
 	if content == "" {
 		return ""
 	}
 
 	return p.renderContentPanel(strings.TrimSpace(content), width)
+}
+
+// renderPendingContexts renders only the context tokens that have not yet been
+// approved, using styled key-value rows. If some tokens are already covered by
+// prior grants, a faint note shows the count. Returns "" when there are no
+// contexts at all.
+func (p *Permissions) renderPendingContexts(width int) string {
+	pending := p.permission.PendingContexts
+	if len(pending) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, tok := range pending {
+		label, value := parseContextToken(tok)
+		lines = append(lines, p.renderKeyValue(label, value, width))
+	}
+
+	alreadyApproved := len(p.permission.Contexts) - len(pending)
+	if alreadyApproved > 0 {
+		note := lipgloss.NewStyle().Faint(true).Render(
+			fmt.Sprintf("  (%d already approved this session)", alreadyApproved),
+		)
+		lines = append(lines, note)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// parseContextToken splits a context token (e.g. "command:go test",
+// "path:/tmp", "command!:bash -c ...") into a display label and its value.
+func parseContextToken(tok string) (label, value string) {
+	switch {
+	case strings.HasPrefix(tok, "command!:"):
+		return "unsafe", strings.TrimPrefix(tok, "command!:")
+	case strings.HasPrefix(tok, "command:"):
+		return "command", strings.TrimPrefix(tok, "command:")
+	case strings.HasPrefix(tok, "path:"):
+		return "path", strings.TrimPrefix(tok, "path:")
+	default:
+		return "context", tok
+	}
 }
 
 // renderContentPanel renders content in a panel with the full width.

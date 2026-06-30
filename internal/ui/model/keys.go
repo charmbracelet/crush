@@ -21,6 +21,9 @@ type KeyMap struct {
 		// History navigation
 		HistoryPrev key.Binding
 		HistoryNext key.Binding
+
+		// Snippet paste
+		PasteSnippet key.Binding
 	}
 
 	Chat struct {
@@ -155,6 +158,10 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.HistoryNext = key.NewBinding(
 		key.WithKeys("down"),
+	)
+	km.Editor.PasteSnippet = key.NewBinding(
+		key.WithKeys("alt+v"),
+		key.WithHelp("alt+v", "paste snippet"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(

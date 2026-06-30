@@ -248,7 +248,7 @@ func TestSessionListIncludesAttachedClients(t *testing.T) {
 
 	// Attach A, set to S1: S1=1.
 	cidA := uuid.New().String()
-	require.NoError(t, c.backend.AttachClient(ws.ID, cidA))
+	require.NoError(t, c.backend.AttachClient(ws.ID, cidA, 0))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cidA) })
 	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cidA, "S1"))
 	counts = countsBySessionID(listSessions(t, c, ws.ID))
@@ -257,7 +257,7 @@ func TestSessionListIncludesAttachedClients(t *testing.T) {
 
 	// Attach B, set to S1: S1=2.
 	cidB := uuid.New().String()
-	require.NoError(t, c.backend.AttachClient(ws.ID, cidB))
+	require.NoError(t, c.backend.AttachClient(ws.ID, cidB, 0))
 	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cidB, "S1"))
 	counts = countsBySessionID(listSessions(t, c, ws.ID))
 	require.Equal(t, 2, counts["S1"])
@@ -300,7 +300,7 @@ func TestSessionListExcludesUnselectedAttachedClient(t *testing.T) {
 	c, ws := buildMultiSessionWorkspace(t, "S1")
 
 	cid := uuid.New().String()
-	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
+	require.NoError(t, c.backend.AttachClient(ws.ID, cid, 0))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
 	// Intentionally do NOT call SetCurrentSession.
 
@@ -316,7 +316,7 @@ func TestSessionGetIncludesAttachedClients(t *testing.T) {
 	c, ws := buildMultiSessionWorkspace(t, "S1")
 
 	cid := uuid.New().String()
-	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
+	require.NoError(t, c.backend.AttachClient(ws.ID, cid, 0))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
 	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cid, "S1"))
 

@@ -123,7 +123,7 @@ func TestAttachClient_ConsumesHold(t *testing.T) {
 
 	cid := newClientID(t)
 	b.registerClient(ws, cid)
-	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
 
 	ws.clientsMu.Lock()
 	require.Len(t, ws.clients, 1)
@@ -143,7 +143,7 @@ func TestAttachClient_WithoutPriorCreate(t *testing.T) {
 	ws, _ := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
 
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
@@ -159,8 +159,8 @@ func TestAttachClient_DuplicateStreams(t *testing.T) {
 	ws, shutdowns := insertTestWorkspace(t, b, "/tmp/a")
 
 	cid := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, cid))
-	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
 
 	ws.clientsMu.Lock()
 	require.Equal(t, 2, ws.clients[cid].streams)
@@ -184,7 +184,7 @@ func TestDetachClient_LastStreamTearsDown(t *testing.T) {
 
 	cid := newClientID(t)
 	b.registerClient(ws, cid)
-	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
 	b.DetachClient(ws.ID, cid)
 
 	require.Equal(t, int32(1), wsShutdowns.Load())
@@ -231,7 +231,7 @@ func TestReleaseHold_WithActiveStream(t *testing.T) {
 
 	cid := newClientID(t)
 	b.registerClient(ws, cid)
-	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
 	require.NoError(t, b.releaseHold(ws.ID, cid))
 
 	ws.clientsMu.Lock()
@@ -252,7 +252,7 @@ func TestReleaseHoldThenAttach(t *testing.T) {
 
 	cid := newClientID(t)
 	require.NoError(t, b.releaseHold(ws.ID, cid)) // no entry yet — no-op.
-	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
 	ws.clientsMu.Lock()
 	require.Equal(t, 1, ws.clients[cid].streams)
 	ws.clientsMu.Unlock()
@@ -271,9 +271,9 @@ func TestRefcountWithSecondClient(t *testing.T) {
 	cidA := newClientID(t)
 	cidB := newClientID(t)
 	b.registerClient(ws, cidA)
-	require.NoError(t, b.AttachClient(ws.ID, cidA))
+	require.NoError(t, b.AttachClient(ws.ID, cidA, 0))
 	b.registerClient(ws, cidB)
-	require.NoError(t, b.AttachClient(ws.ID, cidB))
+	require.NoError(t, b.AttachClient(ws.ID, cidB, 0))
 
 	b.DetachClient(ws.ID, cidA)
 	ws.clientsMu.Lock()
@@ -292,8 +292,8 @@ func TestAttachClient_InvalidID(t *testing.T) {
 	b, _ := newTestBackend(t)
 	ws, _ := insertTestWorkspace(t, b, "/tmp/a")
 
-	require.ErrorIs(t, b.AttachClient(ws.ID, ""), ErrInvalidClientID)
-	require.ErrorIs(t, b.AttachClient(ws.ID, "not-a-uuid"), ErrInvalidClientID)
+	require.ErrorIs(t, b.AttachClient(ws.ID, "", 0), ErrInvalidClientID)
+	require.ErrorIs(t, b.AttachClient(ws.ID, "not-a-uuid", 0), ErrInvalidClientID)
 }
 
 func TestDeleteWorkspace_RejectsBadClientID(t *testing.T) {
@@ -322,7 +322,7 @@ func TestHoldExpiry_RaceWithAttach(t *testing.T) {
 		b.registerClient(ws, cid)
 		// Attach concurrently with the very short grace timer.
 		errCh := make(chan error, 1)
-		go func() { errCh <- b.AttachClient(ws.ID, cid) }()
+		go func() { errCh <- b.AttachClient(ws.ID, cid, 0) }()
 		<-errCh
 
 		// Wait for any pending timer to settle.
@@ -364,7 +364,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 
 	cid := newClientID(t)
 	b.registerClient(ws, cid)
-	require.NoError(t, b.AttachClient(ws.ID, cid)) // ensure refcount stays > 0.
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0)) // ensure refcount stays > 0.
 
 	const n = 50
 	var wg sync.WaitGroup
@@ -373,7 +373,7 @@ func TestConcurrentAttachDetach(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			cid2 := newClientID(t)
-			_ = b.AttachClient(ws.ID, cid2)
+			_ = b.AttachClient(ws.ID, cid2, 0)
 			b.DetachClient(ws.ID, cid2)
 		}()
 	}
@@ -793,11 +793,11 @@ func TestRaceTwoClientsAttachOneDetaches(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		require.NoError(t, b.AttachClient(ws.ID, cidA))
+		require.NoError(t, b.AttachClient(ws.ID, cidA, 0))
 	}()
 	go func() {
 		defer wg.Done()
-		require.NoError(t, b.AttachClient(ws.ID, cidB))
+		require.NoError(t, b.AttachClient(ws.ID, cidB, 0))
 	}()
 	wg.Wait()
 
@@ -837,7 +837,7 @@ func TestExplicitDeleteThenAttach(t *testing.T) {
 	// Anchor client keeps the workspace registered in
 	// b.workspaces across the cid's releaseHold below.
 	anchor := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, anchor))
+	require.NoError(t, b.AttachClient(ws.ID, anchor, 0))
 
 	cid := newClientID(t)
 	// Real hold via registerClient (mirrors CreateWorkspace).
@@ -859,7 +859,7 @@ func TestExplicitDeleteThenAttach(t *testing.T) {
 
 	// AttachClient creates a fresh entry with streams==1 and no
 	// hold timer.
-	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
 	ws.clientsMu.Lock()
 	require.Contains(t, ws.clients, cid, "fresh entry must be created")
 	require.Equal(t, 1, ws.clients[cid].streams, "fresh attach must start at streams=1")
@@ -905,7 +905,7 @@ func TestAttachClient_RacesWithTeardown(t *testing.T) {
 		// imminent DetachClient(cidA) will be the *only* claim
 		// drop, so teardown will run.
 		cidA := newClientID(t)
-		require.NoError(t, b.AttachClient(ws.ID, cidA))
+		require.NoError(t, b.AttachClient(ws.ID, cidA, 0))
 
 		// cidB attempts to attach concurrently with the detach
 		// that will tear the workspace down.
@@ -915,7 +915,7 @@ func TestAttachClient_RacesWithTeardown(t *testing.T) {
 		detachDone := make(chan struct{})
 		go func() {
 			<-start
-			errCh <- b.AttachClient(ws.ID, cidB)
+			errCh <- b.AttachClient(ws.ID, cidB, 0)
 		}()
 		go func() {
 			<-start
@@ -983,8 +983,8 @@ func TestSetCurrentSession_BasicAttachAndSwitch(t *testing.T) {
 
 	cidA := newClientID(t)
 	cidB := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, cidA))
-	require.NoError(t, b.AttachClient(ws.ID, cidB))
+	require.NoError(t, b.AttachClient(ws.ID, cidA, 0))
+	require.NoError(t, b.AttachClient(ws.ID, cidB, 0))
 
 	require.NoError(t, b.SetCurrentSession(ws.ID, cidA, "S1"))
 	ws.clientsMu.Lock()
@@ -1028,10 +1028,10 @@ func TestSetCurrentSession_DetachClearsEntry(t *testing.T) {
 	// Anchor client so the workspace is not torn down when cid
 	// detaches.
 	anchor := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, anchor))
+	require.NoError(t, b.AttachClient(ws.ID, anchor, 0))
 
 	cid := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.AttachClient(ws.ID, cid, 0))
 	require.NoError(t, b.SetCurrentSession(ws.ID, cid, "S2"))
 
 	b.DetachClient(ws.ID, cid)
@@ -1115,8 +1115,8 @@ func TestSetCurrentSession_RaceWithDetach(t *testing.T) {
 
 	cidA := newClientID(t)
 	cidB := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, cidA))
-	require.NoError(t, b.AttachClient(ws.ID, cidB))
+	require.NoError(t, b.AttachClient(ws.ID, cidA, 0))
+	require.NoError(t, b.AttachClient(ws.ID, cidB, 0))
 
 	var wg sync.WaitGroup
 	const updates = 200
@@ -1170,7 +1170,7 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 
 	// Attach A, set to S1. Count for S1 is 1; count for S2 is 0.
 	cidA := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, cidA))
+	require.NoError(t, b.AttachClient(ws.ID, cidA, 0))
 	require.NoError(t, b.SetCurrentSession(ws.ID, cidA, "S1"))
 
 	n, err = b.AttachedClients(ws.ID, "S1")
@@ -1182,7 +1182,7 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 
 	// Attach B, set to S1. Count for S1 is 2.
 	cidB := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, cidB))
+	require.NoError(t, b.AttachClient(ws.ID, cidB, 0))
 	require.NoError(t, b.SetCurrentSession(ws.ID, cidB, "S1"))
 
 	n, _ = b.AttachedClients(ws.ID, "S1")
@@ -1213,7 +1213,7 @@ func TestAttachedClients_BasicLifecycle(t *testing.T) {
 	// against the empty session id (which represents the landing
 	// screen).
 	cidC := newClientID(t)
-	require.NoError(t, b.AttachClient(ws.ID, cidC))
+	require.NoError(t, b.AttachClient(ws.ID, cidC, 0))
 	n, _ = b.AttachedClients(ws.ID, "S1")
 	require.Equal(t, 1, n, "stream-only client with empty currentSessionID must not be counted toward S1")
 	n, _ = b.AttachedClients(ws.ID, "")

@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -113,7 +115,10 @@ func (c *Client) SetCurrentSession(ctx context.Context, workspaceID, sessionID s
 // SubscribeEvents subscribes to server-sent events for a workspace.
 func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, error) {
 	events := make(chan any, 100)
-	q := url.Values{"client_id": []string{c.clientID}}
+	q := url.Values{
+		"client_id": []string{c.clientID},
+		"pid":       []string{strconv.Itoa(os.Getpid())},
+	}
 	//nolint:bodyclose
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/events", id), q, http.Header{
 		"Accept":        []string{"text/event-stream"},

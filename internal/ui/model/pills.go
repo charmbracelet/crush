@@ -192,6 +192,8 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	m.updateLayoutAndSize()
 
 	// Make sure to follow scroll if follow is enabled when toggling pills.
+	// Note: uses ScrollToBottom (no scrollbar) since this is layout adjustment,
+	// not user-initiated scrolling.
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
 	}

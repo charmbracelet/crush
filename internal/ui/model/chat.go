@@ -302,6 +302,7 @@ func (m *Chat) InvalidateRenderCaches() {
 func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	m.idInxMap = make(map[string]int)
 	m.pausedAnimations = make(map[string]struct{})
+	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
 
 	items := make([]list.Item, len(msgs))
 	for i, msg := range msgs {
@@ -315,7 +316,8 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 		items[i] = msg
 	}
 	m.list.SetItems(items...)
-	return m.ScrollToBottom()
+	m.ScrollToBottom()
+	return nil
 }
 
 // AppendMessages appends a new message item to the chat list.
@@ -446,10 +448,11 @@ func (m *Chat) Follow() bool {
 }
 
 // ScrollToBottom scrolls the chat view to the bottom.
+// Does not trigger scrollbar visibility (auto-scroll to show new content).
 func (m *Chat) ScrollToBottom() tea.Cmd {
 	m.list.ScrollToBottom()
-	m.follow = true // Enable follow mode when user scrolls to bottom
-	return m.showScrollbar()
+	m.follow = true
+	return nil
 }
 
 // ScrollToTop scrolls the chat view to the top.
@@ -652,6 +655,7 @@ func (m *Chat) SelectLastInView() {
 func (m *Chat) ClearMessages() {
 	m.idInxMap = make(map[string]int)
 	m.pausedAnimations = make(map[string]struct{})
+	m.scrollbarVisible = false
 	m.list.SetItems()
 	m.ClearMouse()
 }

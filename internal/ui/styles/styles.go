@@ -22,6 +22,7 @@ const (
 	LoadingIcon     string = "⟳"
 	ModelIcon       string = "◇"
 	HypercreditIcon string = "◆"
+	GitBranchIcon   string = ""
 
 	ArrowRightIcon string = "→"
 
@@ -196,6 +197,7 @@ type Styles struct {
 	Sidebar struct {
 		SessionTitle lipgloss.Style // Current session title at top of sidebar
 		WorkingDir   lipgloss.Style // Working directory path (PrettyPath)
+		GitBranch    lipgloss.Style // Git branch name
 	}
 
 	// ModelInfo (model name, provider, reasoning, token/cost summary)

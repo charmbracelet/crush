@@ -213,6 +213,7 @@ That said, you can also set environment variables for preferred providers.
 If you prefer subscription-based usage, here are some plans that work well in
 Crush:
 
+- [Charm Hyper](https://hyper.charm.land)
 - [Synthetic](https://synthetic.new/pricing)
 - [GLM Coding Plan](https://z.ai/subscribe)
 - [Kimi Code](https://www.kimi.com/membership/pricing)

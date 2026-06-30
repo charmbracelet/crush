@@ -56,6 +56,9 @@ type (
 	ActionSelectNotificationStyle struct {
 		Style string
 	}
+	ActionSelectScrollbarStyle struct {
+		Style string
+	}
 	ActionToggleTransparentBackground struct{}
 	ActionInitializeProject           struct{}
 	ActionSummarize                   struct {

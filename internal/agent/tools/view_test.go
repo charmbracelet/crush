@@ -133,6 +133,25 @@ func TestViewToolAllowsSmallSectionsOfLargeFiles(t *testing.T) {
 	require.Equal(t, "target line", meta.Content)
 }
 
+func TestViewToolRespectsCrushignore(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	product := filepath.Join(workingDir, "product")
+	require.NoError(t, os.MkdirAll(product, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(product, "_brain-dump.md"), []byte("secret"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, ".crushignore"), []byte("**/_*.md\n"), 0o644))
+
+	tool := newViewToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	resp := runViewTool(t, tool, ctx, ViewParams{
+		FilePath: filepath.Join("product", "_brain-dump.md"),
+	})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, ".crushignore")
+}
+
 func TestViewToolBlocksOversizedReturnedSections(t *testing.T) {
 	t.Parallel()
 

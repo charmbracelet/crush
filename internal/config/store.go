@@ -972,6 +972,11 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// Reconfigure providers
 	env := env.New()
 	resolver := NewShellVariableResolver(env)
+
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
+	cfg.applyEnv(resolver)
+
 	providers, err := Providers(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to load providers during reload: %w", err)

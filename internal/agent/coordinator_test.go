@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -521,6 +523,70 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
 		})
 	}
+}
+
+func TestIsUnauthorized(t *testing.T) {
+	t.Run("nil error", func(t *testing.T) {
+		assert.False(t, isUnauthorized(nil))
+	})
+
+	t.Run("non-provider error", func(t *testing.T) {
+		assert.False(t, isUnauthorized(errors.New("something broke")))
+	})
+
+	t.Run("provider error with 401", func(t *testing.T) {
+		err := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
+		assert.True(t, isUnauthorized(err))
+	})
+
+	t.Run("provider error with non-401", func(t *testing.T) {
+		err := &fantasy.ProviderError{StatusCode: http.StatusForbidden, Message: "forbidden"}
+		assert.False(t, isUnauthorized(err))
+	})
+
+	t.Run("wrapped provider error with 401", func(t *testing.T) {
+		inner := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "expired"}
+		err := fmt.Errorf("request failed: %w", inner)
+		assert.True(t, isUnauthorized(err))
+	})
+}
+
+func TestIsAWSCredentialError(t *testing.T) {
+	t.Run("nil error", func(t *testing.T) {
+		assert.False(t, isAWSCredentialError(nil))
+	})
+
+	t.Run("matching error", func(t *testing.T) {
+		err := errors.New("operation error: failed to refresh cached credentials")
+		assert.True(t, isAWSCredentialError(err))
+	})
+
+	t.Run("unrelated error", func(t *testing.T) {
+		assert.False(t, isAWSCredentialError(errors.New("network timeout")))
+	})
+}
+
+func TestNeedsAuthRetry(t *testing.T) {
+	t.Run("401 always needs retry", func(t *testing.T) {
+		err := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
+		assert.True(t, needsAuthRetry(err, config.ProviderConfig{}))
+	})
+
+	t.Run("AWS credential error with aws_auth_refresh", func(t *testing.T) {
+		cfg := config.ProviderConfig{AWSAuthRefresh: "aws sso login"}
+		err := errors.New("operation error: failed to refresh cached credentials")
+		assert.True(t, needsAuthRetry(err, cfg))
+	})
+
+	t.Run("AWS credential error without aws_auth_refresh", func(t *testing.T) {
+		err := errors.New("operation error: failed to refresh cached credentials")
+		assert.False(t, needsAuthRetry(err, config.ProviderConfig{}))
+	})
+
+	t.Run("unrelated error with aws_auth_refresh", func(t *testing.T) {
+		cfg := config.ProviderConfig{AWSAuthRefresh: "aws sso login"}
+		assert.False(t, needsAuthRetry(errors.New("network timeout"), cfg))
+	})
 }
 
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {

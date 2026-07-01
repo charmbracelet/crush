@@ -3912,6 +3912,8 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		return tea.Batch(cmds...)
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
+	case notify.TypeAWSSSOAuth:
+		return m.handleAWSSSOAuth(n.AWSSOCommand)
 	default:
 		return nil
 	}
@@ -3931,6 +3933,24 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 		return nil
 	}
 	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[agentCfg.Model], agentCfg.Model)
+}
+
+// handleAWSSSOAuth opens the AWS SSO authentication dialog with the
+// configured refresh command.
+func (m *UI) handleAWSSSOAuth(command string) tea.Cmd {
+	if command == "" {
+		return nil
+	}
+	dlg, cmd := dialog.NewAWSSSO(m.com, command, m.com.Workspace.WorkingDir(), func() {
+		// On successful auth, nothing extra needed; the user can
+		// retry their message and credentials will be fresh.
+	})
+	if m.dialog.ContainsDialog(dlg.ID()) {
+		m.dialog.BringToFront(dlg.ID())
+		return nil
+	}
+	m.dialog.OpenDialogWithGrace(dlg)
+	return cmd
 }
 
 // newSession clears the current session state and prepares for a new session.

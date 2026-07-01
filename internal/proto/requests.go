@@ -135,3 +135,8 @@ type MCPGetPromptRequest struct {
 type MCPGetPromptResponse struct {
 	Prompt string `json:"prompt"`
 }
+
+// RestoreMessagesRequest represents a request to restore previously deleted messages.
+type RestoreMessagesRequest struct {
+	Messages []Message `json:"messages"`
+}

@@ -58,6 +58,7 @@ const (
 
 const (
 	AgentCoder string = "coder"
+	AgentPlan  string = "plan"
 	AgentTask  string = "task"
 )
 
@@ -748,6 +749,7 @@ func allToolNames() []string {
 		"glob",
 		"grep",
 		"ls",
+		"question",
 		"sourcegraph",
 		"todos",
 		"view",
@@ -769,6 +771,11 @@ func resolveReadOnlyTools(tools []string) []string {
 	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
+}
+
+func resolvePlanTools(tools []string) []string {
+	planTools := []string{"agent", "glob", "grep", "ls", "question", "sourcegraph", "view"}
+	return filterSlice(tools, planTools, true)
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
@@ -803,6 +810,17 @@ func (c *Config) SetupAgents() {
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: resolveReadOnlyTools(allowedTools),
+			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+		},
+
+		AgentPlan: {
+			ID:           AgentPlan,
+			Name:         "Plan",
+			Description:  "An agent that performs deep analysis and prepares implementation plans without modifying files.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: resolvePlanTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},

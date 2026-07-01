@@ -255,6 +255,8 @@ func NewToolMessageItem(
 		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.TodosToolName:
 		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
+	case tools.QuestionToolName:
+		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ReferencesToolName:
 		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
 	case tools.LSPRestartToolName:
@@ -542,7 +544,8 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 		return ""
 	}
 	errContent := strings.ReplaceAll(result.Content, "\n", " ")
-	if strings.Contains(errContent, "User denied permission") {
+	if strings.Contains(errContent, "User denied permission") ||
+		strings.Contains(errContent, "User cancelled") {
 		deniedTag := sty.Tool.WarnTag.Render("WARN")
 		deniedTagWidth := lipgloss.Width(deniedTag)
 		errContent = ansi.Truncate(errContent, width-deniedTagWidth-3, "…")

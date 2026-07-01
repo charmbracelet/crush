@@ -36,6 +36,7 @@ type Session struct {
 	input              textinput.Model
 	selectedSessionInx int
 	sessions           []session.Session
+	listScreenY        int
 
 	sessionsMode sessionsMode
 
@@ -141,6 +142,41 @@ func (s *Session) ID() string {
 // HandleMsg implements Dialog.
 func (s *Session) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if s.sessionsMode == sessionsModeNormal {
+			idx, _ := s.list.ItemIndexAtPosition(0, msg.Y-s.listScreenY)
+			if idx >= 0 {
+				s.list.SetSelected(idx)
+				if item := s.list.SelectedItem(); item != nil {
+					sessionItem := item.(*SessionItem)
+					return ActionSelectSession{sessionItem.Session}
+				}
+			}
+		}
+	case tea.MouseMotionMsg:
+		if s.sessionsMode == sessionsModeNormal {
+			idx, _ := s.list.ItemIndexAtPosition(0, msg.Y-s.listScreenY)
+			if idx >= 0 {
+				s.list.SetSelected(idx)
+			}
+		}
+	case tea.MouseWheelMsg:
+		if s.sessionsMode == sessionsModeNormal {
+			switch msg.Button {
+			case tea.MouseWheelUp:
+				s.list.ScrollBy(-mouseScrollLines)
+			case tea.MouseWheelDown:
+				s.list.ScrollBy(mouseScrollLines)
+			}
+			start, end := s.list.VisibleItemIndices()
+			sel := s.list.Selected()
+			if sel < start {
+				s.list.SetSelected(start)
+			} else if sel > end {
+				s.list.SetSelected(end)
+			}
+		}
+		return nil
 	case tea.KeyPressMsg:
 		switch s.sessionsMode {
 		case sessionsModeDeleting:
@@ -243,14 +279,6 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s.list.SetSize(listWidth, listHeight)
 	s.help.SetWidth(innerWidth)
 
-	// This makes it so we do not scroll the list if we don't have to
-	start, end := s.list.VisibleItemIndices()
-
-	// if selected index is outside visible range, scroll to it
-	if s.selectedSessionInx < start || s.selectedSessionInx > end {
-		s.list.ScrollToSelected()
-	}
-
 	var cur *tea.Cursor
 	rc := NewRenderContext(t, width)
 	rc.Title = "Sessions"
@@ -320,6 +348,14 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = s.help.View(s)
 
 	view := rc.Render()
+
+	// Compute list screen Y for mouse hover detection.
+	viewWidth, viewHeight := lipgloss.Size(view)
+	centerRect := common.CenterRect(area, viewWidth, viewHeight)
+	listYFromDialogTop := heightOffset -
+		t.Dialog.View.GetBorderBottomSize() - t.Dialog.View.GetPaddingBottom() -
+		t.Dialog.HelpView.GetVerticalFrameSize()
+	s.listScreenY = centerRect.Min.Y + listYFromDialogTop
 
 	DrawCenterCursor(scr, area, view, cur)
 	return cur

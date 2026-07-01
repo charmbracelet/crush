@@ -752,26 +752,49 @@ func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 		},
 	}
 
-	cfg := &Config{
-		Providers: csync.NewMapFrom(map[string]ProviderConfig{
-			"openai": {
-				Disable: true,
-			},
-		}),
-	}
-	cfg.setDefaults("/tmp", "")
+	t.Run("with API key", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"openai": {
+					Disable: true,
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
 
-	env := env.NewFromMap(map[string]string{
-		"OPENAI_API_KEY": "test-key",
+		env := env.NewFromMap(map[string]string{
+			"OPENAI_API_KEY": "test-key",
+		})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		require.Equal(t, 1, cfg.Providers.Len())
+		prov, exists := cfg.Providers.Get("openai")
+		require.True(t, exists)
+		require.True(t, prov.Disable)
 	})
-	resolver := NewShellVariableResolver(env)
-	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
-	require.NoError(t, err)
 
-	require.Equal(t, cfg.Providers.Len(), 1)
-	prov, exists := cfg.Providers.Get("openai")
-	require.True(t, exists)
-	require.True(t, prov.Disable)
+	t.Run("without API key", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"openai": {
+					Disable: true,
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		require.Equal(t, 1, cfg.Providers.Len())
+		prov, exists := cfg.Providers.Get("openai")
+		require.True(t, exists)
+		require.True(t, prov.Disable)
+	})
 }
 
 func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {

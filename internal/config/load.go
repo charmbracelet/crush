@@ -211,6 +211,9 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		config, configExists := c.Providers.Get(string(p.ID))
 		// if the user configured a known provider we need to allow it to override a couple of parameters
 		if configExists {
+			if config.Disable {
+				continue
+			}
 			if config.BaseURL != "" {
 				p.APIEndpoint = config.BaseURL
 			}

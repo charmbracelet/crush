@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -88,6 +89,10 @@ type App struct {
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
+
+	// hookRunner is shared across all hook events. Nil when no hooks
+	// are configured.
+	hookRunner *hooks.Runner
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -132,6 +137,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// (e.g., headless environment), clipboard operations will return nil.
 	if err := clipboard.Init(); err != nil {
 		slog.Warn("Clipboard initialization failed", "error", err)
+	}
+
+	// Create hook runner if any hooks are configured.
+	if len(app.config.Config().Hooks) > 0 {
+		app.hookRunner = hooks.NewRunner(app.config.Config().Hooks, store.WorkingDir(), store.WorkingDir())
 	}
 
 	// Check for updates in the background.
@@ -250,7 +260,30 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 		return sess, nil
 
 	default:
-		return app.Sessions.Create(ctx, agent.DefaultSessionName)
+		return app.CreateSession(ctx, agent.DefaultSessionName)
+	}
+}
+
+// CreateSession creates a new session and fires the SessionStart
+// lifecycle hook. All session creation paths should use this method
+// to ensure the hook fires consistently.
+func (app *App) CreateSession(ctx context.Context, title string) (session.Session, error) {
+	sess, err := app.Sessions.Create(ctx, title)
+	if err != nil {
+		return session.Session{}, err
+	}
+	app.fireSessionStartHook(ctx, sess.ID)
+	return sess, nil
+}
+
+// fireSessionStartHook fires the SessionStart lifecycle hook if a
+// runner is configured.
+func (app *App) fireSessionStartHook(ctx context.Context, sessionID string) {
+	if app.hookRunner == nil {
+		return
+	}
+	if _, err := app.hookRunner.Run(ctx, hooks.EventSessionStart, sessionID, "", ""); err != nil {
+		slog.Warn("SessionStart hook failed", "error", err)
 	}
 }
 
@@ -624,6 +657,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.agentNotifications,
 		app.runCompletions,
 		app.Skills,
+		app.hookRunner,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -669,6 +703,15 @@ func (app *App) Subscribe(program *tea.Program) {
 func (app *App) Shutdown() {
 	start := time.Now()
 	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
+
+	// Fire SessionEnd lifecycle hooks before tearing down agents.
+	if app.hookRunner != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if _, err := app.hookRunner.Run(shutdownCtx, hooks.EventSessionEnd, "", "", ""); err != nil {
+			slog.Warn("SessionEnd hook failed", "error", err)
+		}
+		shutdownCancel()
+	}
 
 	// First, cancel all agents and wait for them to finish. This must complete
 	// before closing the DB so agents can finish writing their state.

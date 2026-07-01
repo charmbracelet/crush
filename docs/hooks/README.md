@@ -17,8 +17,8 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush supports 12 hook events covering the full agent lifecycle: tool use,
+  session management, turn control, permissions, compaction, and error handling
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -162,12 +162,12 @@ and project-level, with project level hooks taking precedence.
 >   "hooks": {
 >     "PreToolUse": [
 >       {
->         "command": "/home/you/.config/crush/hooks/no-haskell.sh"
+>         "command": "/home/you/.config/crush/hooks/no-haskell.sh",
 >         // or use an inline command:
 >         // "command": "echo '{\"decision\":\"allow\"}'"
->       }
->     ]
->   }
+>       },
+>     ],
+>   },
 > }
 > ```
 
@@ -176,29 +176,127 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+Crush supports 12 hook events. Event names are case-insensitive and accept
+snake_case (`PreToolUse`, `pre_tool_use`, `PRETOOLUSE` all work).
 
-### PreToolUse
+| Event               | Fires When                          | Control                                  | Matcher   |
+| ------------------- | ----------------------------------- | ---------------------------------------- | --------- |
+| `PreToolUse`        | Before tool execution               | allow/deny, halt, rewrite input, context | tool name |
+| `PostToolUse`       | After tool execution                | halt, replace output, context            | tool name |
+| `SessionStart`      | Session created                     | observe                                  | —         |
+| `SessionEnd`        | App shutdown (2s timeout)           | observe                                  | —         |
+| `TurnStart`         | Agent begins processing prompt      | observe                                  | —         |
+| `TurnEnd`           | Agent finishes turn (idle)          | observe                                  | —         |
+| `StopFailure`       | Turn ends due to API error          | observe                                  | —         |
+| `Interrupt`         | User cancels (ctrl-c, escape)       | observe                                  | —         |
+| `PermissionRequest` | Permission prompt shown (blocked)   | observe                                  | —         |
+| `PermissionResult`  | Permission decided (granted/denied) | observe                                  | —         |
+| `PreCompact`        | Before context compaction           | halt to prevent                          | —         |
+| `PostCompact`       | After context compaction            | observe                                  | —         |
 
-This hook fires before every tool call. Use it to block dangerous commands,
-enforce policies, rewrite tool input, inject context the model should see, log
-stuff, and so on.
+**Matcher** only applies to tool events (`PreToolUse`, `PostToolUse`). It's a
+regex tested against the tool name (e.g. `^bash$`, `^(edit|write)$`,
+`^mcp_`). Omit to match all tools. Lifecycle events run all configured hooks
+unconditionally.
 
-**Matched against**: the tool name (e.g. `bash`, `edit`, `write`,
-`mcp_github_create_pull_request`).
+> **Note:** `TurnEnd` carries the assistant's rendered text content in its
+> stdin payload (`text` field). See [Stdin payload — TurnEnd](#stdin-payload--turnend)
+> below. All other lifecycle events use only the common fields.
 
-> [!NOTE]
-> Event names are case insensitive and snake-caseable, so `PreToolUse`,
-> `pretooluse`, `PRETOOLUSE`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
+**Scope**: tool events only fire on the **top-level agent's** tool calls.
+Sub-agents run without hook interception. The outer sub-agent tool call itself
+_is_ hooked.
 
-**Scope**: `PreToolUse` only fires on the **top-level agent's** tool calls.
-Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run without hook
-interception so a single delegated turn doesn't trigger your hook N times. The
-outer sub-agent tool call itself _is_ hooked, so policy like "never let the
-agent spawn sub-agents" still works.
+### What each control field does
 
-Hooks are keyed by event name. Only `command` is required, and you can omit
-`matcher` to match all tools.
+- **`decision: "allow"`** — pre-approves the tool call, skips the permission
+  prompt. `"deny"` blocks it; the model sees the error and may retry.
+- **`halt: true`** — ends the entire turn. For `PreCompact`, prevents
+  compaction instead.
+- **`updated_input`** — for `PreToolUse`: shallow-merge patch against tool
+  input. For `PostToolUse`: replaces what the model sees as the tool's response.
+- **`context`** — string or array appended to what the model sees. Works on
+  both tool events.
+
+Events marked "observe" ignore all control fields. They exist for logging,
+monitoring, and external integrations (e.g. herdr, dashboards). To auto-approve
+tools, use `PreToolUse` with `decision: "allow"` rather than
+`PermissionRequest`.
+
+### Control field examples
+
+**PreToolUse — rewrite input:**
+
+```bash
+#!/usr/bin/env bash
+# Replace npm with bun in every bash call.
+read -r input
+cmd=$(echo "$input" | jq -r '.tool_input.command')
+if echo "$cmd" | grep -q '^npm '; then
+  new_cmd=$(echo "$cmd" | sed 's/^npm /bun /')
+  echo "{\"updated_input\":{\"command\":\"$new_cmd\"}}"
+fi
+```
+
+**PostToolUse — redact secrets from output:**
+
+```bash
+#!/usr/bin/env bash
+# Replace anything that looks like an API key in tool output.
+read -r input
+output=$(echo "$input" | jq -r '.tool_input // empty')
+redacted=$(echo "$output" | sed -E 's/(sk-|ghp_|AKIA)[A-Za-z0-9]{20,}/[REDACTED]/g')
+echo "{\"updated_input\":\"$redacted\"}"
+```
+
+**PostToolUse — halt on unexpected output:**
+
+```bash
+#!/usr/bin/env bash
+# Stop the turn if bash output contains a credential leak warning.
+read -r input
+if echo "$input" | jq -r '.tool_input // ""' | grep -qi 'credential.*leak'; then
+  echo '{"halt":true,"reason":"Possible credential leak detected in tool output"}'
+  exit 0
+fi
+```
+
+**PreCompact — skip compaction during critical work:**
+
+```bash
+#!/usr/bin/env bash
+# Don't compact if we're in the middle of a migration.
+if [ -f .migration-in-progress ]; then
+  echo '{"halt":true}'
+fi
+```
+
+**PreToolUse — inject context:**
+
+```bash
+#!/usr/bin/env bash
+# Remind the model about formatting rules when editing Go files.
+read -r input
+path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
+if [[ "$path" == *.go ]]; then
+  echo '{"context":"Remember: run gofumpt -w after editing Go files."}'
+fi
+```
+
+### Configuration
+
+Hooks are keyed by event name. Only `command` is required:
+
+```jsonc
+{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "^bash$", "command": "./hooks/check.sh" }],
+    "PostToolUse": [{ "matcher": "^bash$", "command": "./hooks/redact.sh" }],
+    "TurnEnd": [{ "command": "./hooks/notify-idle.sh" }],
+    "PreCompact": [{ "command": "./hooks/maybe-skip-compact.sh" }],
+  },
+}
+```
 
 ## Building Hooks
 
@@ -633,9 +731,9 @@ Present in every hook event:
 }
 ```
 
-### Stdin payload — PreToolUse
+### Stdin payload — Tool Events (PreToolUse, PostToolUse)
 
-Extends the common payload:
+Extends the common payload with tool-specific fields:
 
 ```jsonc
 {
@@ -648,6 +746,28 @@ Extends the common payload:
   "tool_input": {
     "command": "npm test",
   },
+}
+```
+
+### Stdin payload — Lifecycle Events
+
+All other events (SessionStart, SessionEnd, TurnStart, StopFailure,
+Interrupt, PermissionRequest, PermissionResult, PreCompact, PostCompact) use
+only the common payload fields (`event`, `session_id`, `cwd`). No tool-specific
+fields are included.
+
+### Stdin payload — TurnEnd
+
+`TurnEnd` extends the common payload with the assistant's rendered text
+content for the completed turn. The hook remains observe-only; output is
+ignored.
+
+```jsonc
+{
+  // ...common fields...
+
+  // string. The assistant's rendered text output for this turn.
+  "text": "Here's what I found..."
 }
 ```
 
@@ -697,6 +817,17 @@ Extends the common envelope:
 }
 ```
 
+### Output envelope — PostToolUse
+
+Same as the common envelope plus `updated_input`, which **replaces** (not
+patches) what the model sees as the tool's response. `decision` is not
+supported since the tool has already executed.
+
+### Output envelope — PreCompact
+
+Same as the common envelope. `halt: true` prevents compaction; the agent
+continues with the full context intact.
+
 ### Exit codes
 
 | Code  | Meaning                                                                  |
@@ -731,6 +862,16 @@ PreToolUse-specific rules:
 5. `updated_input` patches shallow-merge sequentially against the original
    `tool_input`. Later patches override earlier ones on colliding keys. Patches
    are **ignored** if the final decision is deny or halt.
+
+PostToolUse-specific rules:
+
+6. `updated_input` **replaces** the tool output (not a shallow-merge patch like
+   PreToolUse). Later hooks override earlier ones entirely.
+
+PreCompact-specific rules:
+
+7. `halt` prevents context compaction. The agent continues with the full
+   context intact.
 
 ### Environment variables
 

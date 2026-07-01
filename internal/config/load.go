@@ -1237,16 +1237,32 @@ func ProjectSkillsDir(workingDir string) []string {
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
 
+// hookEventNormMap maps lowercased-no-underscores event names to their
+// canonical form. Must stay in sync with hooks.AllEvents; this
+// duplication is forced by the config→hooks import cycle (hooks
+// imports config.HookConfig).
+var hookEventNormMap = map[string]string{
+	"pretooluse":        "PreToolUse",
+	"posttooluse":       "PostToolUse",
+	"sessionstart":      "SessionStart",
+	"sessionend":        "SessionEnd",
+	"turnstart":         "TurnStart",
+	"turnend":           "TurnEnd",
+	"stopfailure":       "StopFailure",
+	"interrupt":         "Interrupt",
+	"permissionrequest": "PermissionRequest",
+	"permissionresult":  "PermissionResult",
+	"precompact":        "PreCompact",
+	"postcompact":       "PostCompact",
+}
+
 // normalizeHookEvent maps user-provided event names to their canonical
-// form. Matching is case-insensitive and accepts snake_case variants
-// (e.g. "pre_tool_use" → "PreToolUse").
+// form. Matching is case-insensitive and accepts snake_case variants.
 func normalizeHookEvent(name string) string {
-	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
-	case "pretooluse":
-		return "PreToolUse"
-	default:
-		return name
+	if canonical, ok := hookEventNormMap[strings.ToLower(strings.ReplaceAll(name, "_", ""))]; ok {
+		return canonical
 	}
+	return name
 }
 
 // ValidateHooks normalizes event names and checks that every configured

@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -165,6 +166,7 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	hookRunner           *hooks.Runner
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -207,6 +209,47 @@ type sessionAgent struct {
 	acceptSeqGen uint64
 }
 
+// fireLifecycleHook runs a lifecycle hook event that can control
+// agent behavior (e.g. PreCompact halt). Returns the aggregated
+// result so callers can inspect halt/decision. Errors are logged but
+// do not interrupt the agent.
+func (a *sessionAgent) fireLifecycleHook(ctx context.Context, eventName, sessionID string) hooks.AggregateResult {
+	if a.hookRunner == nil {
+		return hooks.AggregateResult{}
+	}
+	result, err := a.hookRunner.Run(ctx, eventName, sessionID, "", "")
+	if err != nil {
+		slog.Warn("Lifecycle hook failed", "event", eventName, "error", err)
+		return hooks.AggregateResult{}
+	}
+	return result
+}
+
+// fireObservabilityHook runs a lifecycle hook event for observation
+// only (e.g. TurnStart). Errors are logged and discarded.
+func (a *sessionAgent) fireObservabilityHook(ctx context.Context, eventName, sessionID string) {
+	if a.hookRunner == nil {
+		return
+	}
+	if _, err := a.hookRunner.Run(ctx, eventName, sessionID, "", ""); err != nil {
+		slog.Warn("Lifecycle hook failed", "event", eventName, "error", err)
+	}
+}
+
+// fireTurnEndHook runs the TurnEnd lifecycle hook with the
+// assistant's rendered text content. Observe-only; errors are
+// logged and discarded.
+func (a *sessionAgent) fireTurnEndHook(ctx context.Context, sessionID string, msg *message.Message) {
+	if a.hookRunner == nil {
+		return
+	}
+	var text string
+	if msg != nil {
+		text = msg.Content().String()
+	}
+	a.hookRunner.RunTurnEnd(ctx, sessionID, text)
+}
+
 type SessionAgentOptions struct {
 	LargeModel           Model
 	SmallModel           Model
@@ -220,6 +263,7 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	LifecycleHooks       *hooks.Runner
 }
 
 func NewSessionAgent(
@@ -238,6 +282,7 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		hookRunner:           opts.LifecycleHooks,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -779,6 +824,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
+	a.fireObservabilityHook(ctx, hooks.EventTurnStart, call.SessionID)
 
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
@@ -1034,6 +1080,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err != nil {
 		isHyper := largeModel.ModelCfg.Provider == hyper.Name
 		isCancelErr := errors.Is(err, context.Canceled)
+		if isCancelErr {
+			a.fireObservabilityHook(ctx, hooks.EventInterrupt, call.SessionID)
+		}
 		if currentAssistant == nil {
 			// Cancel-before-assistant-creation window: the run was
 			// canceled after activeRequests.Set but before PrepareStep
@@ -1149,7 +1198,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if updateErr != nil {
 			return nil, updateErr
 		}
+		a.fireObservabilityHook(ctx, hooks.EventStopFailure, call.SessionID)
 		return nil, err
+	}
+
+	if shouldSummarize {
+		preCompact := a.fireLifecycleHook(ctx, hooks.EventPreCompact, call.SessionID)
+		if preCompact.Halt {
+			slog.Info("PreCompact hook halted compaction", "session_id", call.SessionID)
+			shouldSummarize = false
+		}
 	}
 
 	if shouldSummarize {
@@ -1157,6 +1215,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
+		a.fireObservabilityHook(ctx, hooks.EventPostCompact, call.SessionID)
 		// If the agent wasn't done...
 		if len(currentAssistant.ToolCalls()) > 0 {
 			existing, ok := a.messageQueue.Get(call.SessionID)
@@ -1175,6 +1234,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// subscribers see stale busy state at the moment of receipt.
 	a.activeRequests.Del(call.SessionID)
 	cancel()
+	a.fireTurnEndHook(ctx, call.SessionID, currentAssistant)
 
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions).

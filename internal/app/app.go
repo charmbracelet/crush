@@ -37,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -64,7 +65,9 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
-	Skills *skills.Manager
+	Skills          *skills.Manager
+	Subagents       *subagents.Manager
+	SubagentRuntime *subagents.Runtime
 
 	config *config.ConfigStore
 
@@ -93,8 +96,9 @@ type App struct {
 // New initializes a new application instance. skillsMgr carries the
 // per-workspace skill discovery results computed by the caller; the
 // caller is responsible for constructing it (typically via
-// skills.NewManager + skills.DiscoverFromConfig).
-func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
+// skills.NewManager + skills.DiscoverFromConfig). subagentsMgr carries
+// the per-workspace subagent discovery results; may be nil.
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, subagentsMgr *subagents.Manager) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
@@ -114,6 +118,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
+		Subagents:   subagentsMgr,
 
 		globalCtx: ctx,
 
@@ -611,6 +616,9 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
+	if app.SubagentRuntime == nil {
+		app.SubagentRuntime = subagents.NewRuntime()
+	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
@@ -624,6 +632,8 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.agentNotifications,
 		app.runCompletions,
 		app.Skills,
+		app.Subagents,
+		app.SubagentRuntime,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -648,6 +658,24 @@ func (app *App) Subscribe(program *tea.Program) {
 		return nil
 	})
 	defer app.tuiWG.Done()
+
+	if app.SubagentRuntime != nil {
+		rtEvents := app.SubagentRuntime.Subscribe(tuiCtx)
+		go func() {
+			for ev := range rtEvents {
+				program.Send(ev)
+			}
+		}()
+	}
+
+	if app.Subagents != nil {
+		discEvents := app.Subagents.SubscribeEvents(tuiCtx)
+		go func() {
+			for ev := range discEvents {
+				program.Send(ev)
+			}
+		}()
+	}
 
 	events := app.events.Subscribe(tuiCtx)
 	for {

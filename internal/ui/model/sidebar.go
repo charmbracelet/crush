@@ -150,12 +150,18 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	blocks := []string{
 		sidebarLogo,
 		title,
+	}
+	if bc := parentBreadcrumbLine(t, m.subagentColor, m.parentTitle, width); bc != "" {
+		blocks = append(blocks, bc)
+	}
+	blocks = append(
+		blocks,
 		"",
 		cwd,
 		"",
 		m.modelInfo(width),
 		"",
-	}
+	)
 
 	sidebarHeader := lipgloss.JoinVertical(
 		lipgloss.Left,

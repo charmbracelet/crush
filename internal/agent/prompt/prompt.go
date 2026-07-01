@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"text/template"
+	"text/template" // nosemgrep: go.lang.security.audit.xss.import-text-template.import-text-template
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -21,11 +21,17 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name       string
-	template   string
-	now        func() time.Time
-	platform   string
-	workingDir string
+	name               string
+	template           string
+	now                func() time.Time
+	platform           string
+	workingDir         string
+	subagentBody       string
+	preloadedSkillsXML string
+	// suppressAvailableSkills omits the <available_skills> discovery list. Set
+	// for subagents that pin an explicit skills set, so the preloaded skills are
+	// their only skill exposure.
+	suppressAvailableSkills bool
 }
 
 type PromptDat struct {
@@ -40,6 +46,8 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	SubagentBody       string
+	PreloadedSkillsXML string
 }
 
 type ContextFile struct {
@@ -65,6 +73,18 @@ func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
 	}
+}
+
+func WithSuppressAvailableSkills(suppress bool) Option {
+	return func(p *Prompt) { p.suppressAvailableSkills = suppress }
+}
+
+func WithSubagentBody(body string) Option {
+	return func(p *Prompt) { p.subagentBody = body }
+}
+
+func WithPreloadedSkillsXML(xml string) Option {
+	return func(p *Prompt) { p.preloadedSkillsXML = xml }
 }
 
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
@@ -163,6 +183,15 @@ func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]Co
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
+	if store == nil {
+		return PromptDat{
+			Provider:           provider,
+			Model:              model,
+			SubagentBody:       p.subagentBody,
+			PreloadedSkillsXML: p.preloadedSkillsXML,
+		}, nil
+	}
+
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
@@ -170,50 +199,55 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	contextFiles := loadContextFiles(cfg.Options.ContextPaths, store)
 	globalContextFiles := loadContextFiles(cfg.Options.GlobalContextPaths, store)
 
-	// Discover and load skills metadata.
+	// Discover and load skills metadata. Skipped entirely when the prompt
+	// suppresses the available-skills list (subagents that pin an explicit
+	// skills set), which also avoids the discovery filesystem walk.
 	var availSkillXML string
-
-	// Start with builtin skills.
-	allSkills := skills.DiscoverBuiltin()
-	builtinNames := make(map[string]bool, len(allSkills))
-	for _, s := range allSkills {
-		builtinNames[s.Name] = true
-	}
-
-	// Discover user skills from configured paths.
-	if len(cfg.Options.SkillsPaths) > 0 {
-		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
-		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, store))
+	if !p.suppressAvailableSkills {
+		// Start with builtin skills.
+		allSkills := skills.DiscoverBuiltin()
+		builtinNames := make(map[string]bool, len(allSkills))
+		for _, s := range allSkills {
+			builtinNames[s.Name] = true
 		}
-		for _, userSkill := range skills.Discover(expandedPaths) {
-			if builtinNames[userSkill.Name] {
-				slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+
+		// Discover user skills from configured paths.
+		if len(cfg.Options.SkillsPaths) > 0 {
+			expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
+			for _, pth := range cfg.Options.SkillsPaths {
+				expandedPaths = append(expandedPaths, expandPath(pth, store))
 			}
-			allSkills = append(allSkills, userSkill)
+			for _, userSkill := range skills.Discover(expandedPaths) {
+				if builtinNames[userSkill.Name] {
+					slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+				}
+				allSkills = append(allSkills, userSkill)
+			}
 		}
-	}
 
-	// Deduplicate: user skills override builtins with the same name.
-	allSkills = skills.Deduplicate(allSkills)
+		// Deduplicate: user skills override builtins with the same name.
+		allSkills = skills.Deduplicate(allSkills)
 
-	// Filter out disabled skills.
-	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
+		// Filter out disabled skills.
+		allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
 
-	if len(allSkills) > 0 {
-		availSkillXML = skills.ToPromptXML(allSkills)
+		if len(allSkills) > 0 {
+			availSkillXML = skills.ToPromptXML(allSkills)
+		}
 	}
 
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
-		Provider:      provider,
-		Model:         model,
-		Config:        *cfg,
-		WorkingDir:    filepath.ToSlash(workingDir),
-		IsGitRepo:     isGit,
-		Platform:      platform,
-		Date:          p.now().Format("1/2/2006"),
-		AvailSkillXML: availSkillXML,
+		Provider:           provider,
+		Model:              model,
+		Config:             *cfg,
+		WorkingDir:         filepath.ToSlash(workingDir),
+		IsGitRepo:          isGit,
+		Platform:           platform,
+		Date:               p.now().Format("1/2/2006"),
+		AvailSkillXML:      availSkillXML,
+		SubagentBody:       p.subagentBody,
+		PreloadedSkillsXML: p.preloadedSkillsXML,
 	}
 	if isGit {
 		var err error

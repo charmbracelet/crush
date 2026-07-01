@@ -123,22 +123,35 @@ type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
 }
 
+// agentRenderLabel returns the header label for an agent tool row: the plain
+// "Agent" string for the default task agent, or "Agent: <name>" when a
+// specialized subagent has been dispatched.
+func agentRenderLabel(subagentType string) string {
+	if subagentType == "" || subagentType == "task" {
+		return "Agent"
+	}
+	return "Agent: " + subagentType
+}
+
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
-		return pendingTool(sty, "Agent", opts.Anim, opts.Compact)
-	}
 
 	var params agent.AgentParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+
+	label := agentRenderLabel(params.SubagentType)
+
+	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
+		return pendingTool(sty, label, opts.Anim, opts.Compact)
+	}
 
 	prompt := params.Prompt
 	if !opts.ExpandedContent {
 		prompt = strings.ReplaceAll(prompt, "\n", " ")
 	}
 
-	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
+	header := toolHeader(sty, opts.Status, label, cappedWidth, opts)
 	if opts.Compact {
 		return header
 	}

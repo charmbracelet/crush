@@ -65,6 +65,9 @@ type Service interface {
 	// message known to the service. Intended for shutdown and
 	// session-switch paths.
 	FlushAll(ctx context.Context) error
+
+	// Stats returns broker health metrics for diagnostics.
+	Stats() pubsub.BrokerStats
 }
 
 // pendingState holds the in-memory coalescing buffer for a single
@@ -123,7 +126,7 @@ func WithDebounce(d time.Duration) ServiceOption {
 
 func NewService(q db.Querier, opts ...ServiceOption) Service {
 	s := &service{
-		Broker:   pubsub.NewBroker[Message](),
+		Broker:   pubsub.NewBrokerWithName[Message]("messages"),
 		q:        q,
 		debounce: defaultUpdateDebounce,
 		pending:  make(map[string]*pendingState),

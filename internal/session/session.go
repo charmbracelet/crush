@@ -79,6 +79,9 @@ type Service interface {
 	CreateAgentToolSessionID(messageID, toolCallID string) string
 	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
 	IsAgentToolSession(sessionID string) bool
+
+	// Stats returns broker health metrics for diagnostics.
+	Stats() pubsub.BrokerStats
 }
 
 type service struct {
@@ -338,7 +341,7 @@ func unmarshalTodos(data string) ([]Todo, error) {
 }
 
 func NewService(q *db.Queries, conn *sql.DB) Service {
-	broker := pubsub.NewBroker[Session]()
+	broker := pubsub.NewBrokerWithName[Session]("sessions")
 	return &service{
 		Broker:         broker,
 		db:             conn,

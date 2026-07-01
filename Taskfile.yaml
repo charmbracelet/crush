@@ -142,6 +142,11 @@ tasks:
     cmds:
       - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/allocs'
 
+  profile:pubsub:
+    desc: Pubsub broker buffer stats
+    cmds:
+      - curl -s 'http://localhost:6060/debug/pubsub' | jq .
+
   schema:
     desc: Generate JSON schema for configuration
     cmds:

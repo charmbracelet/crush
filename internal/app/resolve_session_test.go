@@ -89,6 +89,10 @@ func (m *mockSessionService) IsAgentToolSession(sessionID string) bool {
 	return ok
 }
 
+func (m *mockSessionService) Stats() pubsub.BrokerStats {
+	return pubsub.BrokerStats{}
+}
+
 func newTestApp(sessions session.Service) *App {
 	return &App{Sessions: sessions}
 }

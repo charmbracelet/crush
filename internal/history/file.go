@@ -39,6 +39,9 @@ type Service interface {
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
+
+	// Stats returns broker health metrics for diagnostics.
+	Stats() pubsub.BrokerStats
 }
 
 type service struct {
@@ -49,7 +52,7 @@ type service struct {
 
 func NewService(q *db.Queries, db *sql.DB) Service {
 	return &service{
-		Broker: pubsub.NewBroker[File](),
+		Broker: pubsub.NewBrokerWithName[File]("history"),
 		q:      q,
 		db:     db,
 	}

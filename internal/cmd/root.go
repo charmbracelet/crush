@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -307,6 +308,14 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		_ = conn.Close()
 		slog.Error("Failed to create app instance", "error", err)
 		return nil, nil, err
+	}
+
+	// Register pubsub debug endpoints when profiling is enabled.
+	if os.Getenv("CRUSH_PROFILE") != "" {
+		http.HandleFunc("/debug/pubsub", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(appInstance.PubsubStats())
+		})
 	}
 
 	if shouldEnableMetrics(cfg) {

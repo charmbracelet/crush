@@ -75,7 +75,7 @@ func NewManager(allSkills, activeSkills []*Skill, states []*SkillState, opts ...
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		states:       states,
-		broker:       pubsub.NewBroker[Event](),
+		broker:       pubsub.NewBrokerWithName[Event]("skills_manager"),
 	}
 	for _, opt := range opts {
 		opt(m)

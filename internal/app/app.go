@@ -119,11 +119,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 		config: store,
 
-		events:             pubsub.NewBroker[tea.Msg](),
+		events:             pubsub.NewBrokerWithName[tea.Msg]("events"),
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
-		agentNotifications: pubsub.NewBroker[notify.Notification](),
-		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+		agentNotifications: pubsub.NewBrokerWithName[notify.Notification]("agent_notifications"),
+		runCompletions:     pubsub.NewBrokerWithName[notify.RunComplete]("run_completions"),
 	}
 
 	app.setupEvents()
@@ -663,6 +663,24 @@ func (app *App) Subscribe(program *tea.Program) {
 			program.Send(ev.Payload)
 		}
 	}
+}
+
+// PubsubStats returns a snapshot of all broker buffer occupancies and
+// drop counters. Intended for the /debug/pubsub pprof endpoint.
+func (app *App) PubsubStats() map[string]pubsub.BrokerStats {
+	stats := make(map[string]pubsub.BrokerStats, 7)
+	for _, s := range []pubsub.BrokerStats{
+		app.events.Stats(),
+		app.agentNotifications.Stats(),
+		app.runCompletions.Stats(),
+		app.Sessions.Stats(),
+		app.Messages.Stats(),
+		app.History.Stats(),
+		app.Permissions.Stats(),
+	} {
+		stats[s.Name] = s
+	}
+	return stats
 }
 
 // Shutdown performs a graceful shutdown of the application.

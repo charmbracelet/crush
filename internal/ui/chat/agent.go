@@ -134,7 +134,9 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
+	if !opts.ExpandedContent {
+		prompt = strings.ReplaceAll(prompt, "\n", " ")
+	}
 
 	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
 	if opts.Compact {
@@ -295,7 +297,9 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
+	if !opts.ExpandedContent {
+		prompt = strings.ReplaceAll(prompt, "\n", " ")
+	}
 
 	// Build header with optional URL param.
 	var toolParams []string

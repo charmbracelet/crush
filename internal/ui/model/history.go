@@ -129,8 +129,7 @@ func (m *UI) syncBangModeFromTextarea() {
 		m.bangMode = false
 		m.bangWasEmpty = false
 	}
-	yolo := m.com.Workspace.PermissionSkipRequests()
-	m.setEditorPrompt(yolo)
+	m.setEditorPrompt(m.com.Workspace.PermissionMode())
 }
 
 // historyPrev changes the text area content to the previous message in the history

@@ -123,6 +123,14 @@ reviewed.
           "id": "deepseek-chat",
           "name": "Deepseek V3",
           "context_window": 64000
+        },
+        {
+          "id": "deepseek-reasoner",
+          "name": "Deepseek R1",
+          "context_window": 64000,
+          "can_reason": true,
+          "reasoning_levels": ["low", "medium", "high", "max"],
+          "default_reasoning_effort": "medium"
         }
       ]
     }
@@ -134,6 +142,16 @@ reviewed.
 - `api_key`, `base_url`, `api_endpoint`, and `extra_headers` are shell-expanded (see [Shell Expansion](#shell-expansion)).
 - `extra_body` is a JSON passthrough and is **not** expanded.
 - Additional fields: `disable`, `system_prompt_prefix`, `extra_headers`, `extra_body`, `provider_options`.
+- Per-model reasoning (only meaningful when the model supports it):
+  - `can_reason` (boolean, default `false`): enable reasoning for this model.
+  - `reasoning_levels` (array of strings): the effort levels the model accepts,
+    shown in the UI picker. Use provider-native names (e.g. `low`/`medium`/`high`,
+    or `xhigh`/`max`) — Crush does not translate them.
+  - `default_reasoning_effort` (string): the level sent when the user has not
+    picked one and one is required. Crush resolves the effective effort in this
+    order: user-selected level (if valid) → `default_reasoning_effort` (if valid)
+    → first entry of `reasoning_levels`. An invalid or missing
+    `default_reasoning_effort` is silently ignored, so omitting it is safe.
 
 ## LSP Configuration
 

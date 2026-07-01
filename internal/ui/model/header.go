@@ -54,8 +54,25 @@ func (h *header) refresh() {
 	if isHyper {
 		name = "HYPERCRUSH"
 	}
-	h.compactLogo = t.Header.Charm.Render(charm) + " " +
+	wordmark := t.Header.Charm.Render(charm) + " " +
 		styles.ApplyBoldForegroundGrad(t.Header.LogoGradCanvas, name, t.Header.LogoGradFromColor, t.Header.LogoGradToColor) + " "
+
+	style := config.LogoStyleWordmark
+	if h.com != nil && h.com.Workspace != nil {
+		style = sessionLogoStyle(h.com.Config())
+	}
+	switch style {
+	case config.LogoStyleHidden:
+		h.compactLogo = ""
+	case config.LogoStyleGradient:
+		// Text-free gradient field the same width as the wordmark so the header
+		// details layout is unaffected.
+		field := strings.Repeat(headerDiag, max(0, lipgloss.Width(wordmark)-1))
+		h.compactLogo = styles.ApplyForegroundGrad(t.Header.LogoGradCanvas, field, t.Header.LogoGradFromColor, t.Header.LogoGradToColor) + " "
+	default:
+		h.compactLogo = wordmark
+	}
+
 	// Force drawHeader to re-render the wide logo on the next frame.
 	h.width = 0
 	h.logo = ""
@@ -73,7 +90,9 @@ func (h *header) drawHeader(
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
-		h.logo = renderLogo(h.com.Styles, compact, h.com.IsHyper(), width)
+		// The wide/landing logo keeps the wordmark; the configurable session
+		// logo style applies to the sidebar and the compact header logo.
+		h.logo = renderLogo(h.com.Styles, compact, h.com.IsHyper(), width, config.LogoStyleWordmark)
 	}
 
 	h.width = width

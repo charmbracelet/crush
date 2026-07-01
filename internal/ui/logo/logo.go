@@ -28,6 +28,11 @@ type Opts struct {
 	Width        int         // width of the rendered logo, used for truncation
 	Hyper        bool        // whether it is Crush or Hypercrush
 
+	// TextFree renders a gradient diagonal field with no wordmark, using the
+	// title gradient (TitleColorA -> TitleColorB). Used for the "gradient" logo
+	// style.
+	TextFree bool
+
 	// When true, stretch a random letterform on each render. Has no effect in
 	// compact mode. Mainly for testing. In production you will want to cache
 	// the stretched letterform to keep the logo from jittering on resize.
@@ -107,7 +112,18 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	// Narrow version. If this is Hypercrush, this is also a stacked version.
 	if compact {
 		field := fg(o.FieldColor, strings.Repeat(diag, crushWidth))
-		return strings.Join([]string{field, field, crush, field, ""}, "\n")
+		block := strings.Join([]string{field, field, crush, field, ""}, "\n")
+		if o.TextFree {
+			// Replace the wordmark with a text-free gradient field of the same
+			// height so the surrounding layout does not shift.
+			line := strings.Repeat(diag, crushWidth)
+			rows := make([]string, lipgloss.Height(block))
+			for i := range rows {
+				rows[i] = styles.ApplyForegroundGrad(base, line, o.TitleColorA, o.TitleColorB)
+			}
+			return strings.Join(rows, "\n")
+		}
+		return block
 	}
 
 	fieldHeight := lipgloss.Height(crush)
@@ -149,6 +165,15 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 // SmallRender renders a smaller version of the Crush logo, suitable for
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int, o Opts) string {
+	if o.TextFree {
+		// Single-line text-free gradient field for the compact sidebar.
+		return styles.ApplyForegroundGrad(
+			t.Logo.GradCanvas,
+			strings.Repeat(diag, max(0, width)),
+			t.Logo.SmallGradFromColor,
+			t.Logo.SmallGradToColor,
+		)
+	}
 	name := "Crush"
 	if o.Hyper {
 		name = "HYPERCRUSH"

@@ -56,6 +56,11 @@ type (
 	ActionSelectNotificationStyle struct {
 		Style string
 	}
+	// ActionSelectLogoStyle is sent when a session logo style is selected from
+	// the logo picker dialog.
+	ActionSelectLogoStyle struct {
+		Style string
+	}
 	ActionToggleTransparentBackground struct{}
 	ActionInitializeProject           struct{}
 	ActionSummarize                   struct {

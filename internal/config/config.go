@@ -218,9 +218,25 @@ type LSPConfig struct {
 	Timeout     int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for LSP server initialization,default=30,example=60,example=120"`
 }
 
+// LogoStyle selects how the session logo is rendered in the TUI. It applies
+// to the sidebar logo in normal mode and the header logo in compact mode.
+type LogoStyle string
+
+const (
+	// LogoStyleWordmark renders the Crush wordmark. This is the default and is
+	// also used when the value is empty.
+	LogoStyleWordmark LogoStyle = "wordmark"
+	// LogoStyleGradient renders a text-free diagonal field using the title
+	// gradient, dropping the wordmark.
+	LogoStyleGradient LogoStyle = "gradient"
+	// LogoStyleHidden renders no logo at all.
+	LogoStyleHidden LogoStyle = "hidden"
+)
+
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	CompactMode bool      `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string    `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	Logo        LogoStyle `json:"logo,omitempty" jsonschema:"description=Session logo style for the TUI. Applies to the sidebar logo in normal mode and the header logo in compact mode,enum=wordmark,enum=gradient,enum=hidden,default=wordmark"`
 	// Here we can add themes later or any TUI related options
 	//
 

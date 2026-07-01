@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -58,6 +59,7 @@ type App struct {
 	Messages    message.Service
 	History     history.Service
 	Permissions permission.Service
+	Questions   question.Service
 	FileTracker filetracker.Service
 
 	AgentCoordinator agent.Coordinator
@@ -111,6 +113,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
@@ -258,6 +261,11 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
+
+	// Re-initialize the coder agent without interactive-only tools.
+	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
+		return fmt.Errorf("failed to reinitialize agent for non-interactive mode: %w", err)
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -532,6 +540,8 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "question-batches", app.Questions.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "question-notifications", app.Questions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
@@ -607,24 +617,35 @@ func setupSubscriberMustDeliver[T any](
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {
+	return app.initCoderAgent(ctx, true)
+}
+
+// InitCoderAgentNonInteractive initializes the coder agent without
+// interactive-only tools (e.g. question).
+func (app *App) InitCoderAgentNonInteractive(ctx context.Context) error {
+	return app.initCoderAgent(ctx, false)
+}
+
+func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
-	app.AgentCoordinator, err = agent.NewCoordinator(
-		ctx,
-		app.config,
-		app.Sessions,
-		app.Messages,
-		app.Permissions,
-		app.History,
-		app.FileTracker,
-		app.LSPManager,
-		app.agentNotifications,
-		app.runCompletions,
-		app.Skills,
-	)
+	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+		Config:      app.config,
+		Sessions:    app.Sessions,
+		Messages:    app.Messages,
+		Permissions: app.Permissions,
+		Questions:   app.Questions,
+		History:     app.History,
+		FileTracker: app.FileTracker,
+		LSPManager:  app.LSPManager,
+		Notify:      app.agentNotifications,
+		RunComplete: app.runCompletions,
+		Skills:      app.Skills,
+		Interactive: interactive,
+	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err

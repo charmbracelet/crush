@@ -465,7 +465,13 @@ func (m *Chat) ScrollToTop() tea.Cmd {
 // ScrollBy scrolls the chat view by the given number of line deltas.
 func (m *Chat) ScrollBy(lines int) tea.Cmd {
 	m.list.ScrollBy(lines)
-	m.follow = lines > 0 && m.AtBottom() // Disable follow mode if user scrolls up
+	if lines < 0 {
+		// Scrolling up always disables follow mode.
+		m.follow = false
+	} else if m.AtBottom() {
+		// Scrolling down re-enables follow when we reach the bottom.
+		m.follow = true
+	}
 	return m.showScrollbar()
 }
 
@@ -700,10 +706,11 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
+		wasFollowing := m.follow
 		if !expandable.ToggleExpanded() {
 			m.ScrollToIndex(m.list.Selected())
 		}
-		if m.AtBottom() {
+		if wasFollowing {
 			m.ScrollToBottom()
 		}
 	}
@@ -830,13 +837,14 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 		// toggling expansion for clicks outside the clickable area.
 		if handled {
 			if expandable, ok := selectedItem.(chat.Expandable); ok {
+				wasFollowing := m.follow
 				if !expandable.ToggleExpanded() {
 					m.ScrollToIndex(m.list.Selected())
 				}
+				if wasFollowing {
+					m.ScrollToBottom()
+				}
 			}
-		}
-		if m.AtBottom() {
-			m.ScrollToBottom()
 		}
 		return handled
 	}

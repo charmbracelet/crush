@@ -4,6 +4,7 @@ Render a chart in the terminal to visualize numeric data. The chart is rendered 
 
 - **line**: Plot one or more data series as lines. Good for trends, time series, and continuous measurements.
 - **bar**: Plot discrete values as horizontal bars. Good for comparisons across categories.
+- **heatmap**: Plot a 2D matrix of values as a color-mapped grid. Good for correlation matrices, activity grids, and 2D density distributions. Pass data as a 2D array where each inner array is a **row** (not a series). For example, a 5x5 correlation matrix has 5 rows of 5 values each. Labels are used for both the x and y axes.
 
 ## Parameters
 
@@ -62,5 +63,17 @@ Multi-series line chart:
   "title": "Crossing Trends",
   "x_label": "Day",
   "y_label": "Value"
+}
+```
+
+Heatmap of a correlation matrix:
+```json
+{
+  "type": "heatmap",
+  "data": [[1.0, 0.8, 0.3], [0.8, 1.0, 0.5], [0.3, 0.5, 1.0]],
+  "labels": ["A", "B", "C"],
+  "title": "Feature Correlation",
+  "x_label": "Feature",
+  "y_label": "Feature"
 }
 ```

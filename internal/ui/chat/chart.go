@@ -111,6 +111,8 @@ func renderChartBody(sty *styles.Styles, meta tools.ChartResponseMetadata, avail
 		return renderLineChart(sty, meta, renderWidth)
 	case "bar":
 		return renderBarChart(sty, meta, renderWidth)
+	case "heatmap":
+		return renderHeatmap(sty, meta, renderWidth)
 	default:
 		return ""
 	}
@@ -242,6 +244,17 @@ func yAxisLabels(maxVal float64, rows int) (labels []string, width int) {
 func axisRowPrefix(label string, width int, labelStyle, sepStyle lipgloss.Style) string {
 	padding := max(width-len(label), 0)
 	return labelStyle.Render(strings.Repeat(" ", padding)+label) + sepStyle.Render("│")
+}
+
+// centerStr centers s within a field of the given width, padding with
+// spaces. Strings wider than the field are truncated.
+func centerStr(s string, w int) string {
+	if len(s) >= w {
+		return s[:w]
+	}
+	total := w - len(s)
+	left := total / 2
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", total-left)
 }
 
 // wrapWithAxisTitles prepends the y-axis title above the chart body and

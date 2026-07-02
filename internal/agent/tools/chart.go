@@ -55,9 +55,9 @@ func NewChartTool() fantasy.AgentTool {
 			}
 
 			switch chartType {
-			case "line", "bar":
+			case "line", "bar", "heatmap":
 			default:
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("unsupported chart type %q: use 'line' or 'bar'", params.Type)), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("unsupported chart type %q: use 'line', 'bar', or 'heatmap'", params.Type)), nil
 			}
 
 			height := params.Height
@@ -93,6 +93,15 @@ func buildChartSummary(chartType string, params ChartParams) string {
 	title := params.Title
 	if title == "" {
 		title = chartType + " chart"
+	}
+
+	if chartType == "heatmap" {
+		rows := len(params.Data)
+		cols := 0
+		if rows > 0 {
+			cols = len(params.Data[0])
+		}
+		return fmt.Sprintf("%s (%dx%d grid)", title, rows, cols)
 	}
 
 	numSeries := len(params.Data)

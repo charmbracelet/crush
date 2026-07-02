@@ -296,7 +296,8 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					Background:       true,
 					ShellID:          bgShell.ID,
 				}
-				response := fmt.Sprintf("Background shell started with ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+				elapsed := time.Since(startTime).Round(100 * time.Millisecond)
+			response := fmt.Sprintf("Background shell started with ID: %s\n\nElapsed: %s. Use job_output tool to view output or job_kill to terminate.", bgShell.ID, elapsed)
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 			}
 
@@ -380,7 +381,8 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				Background:       true,
 				ShellID:          bgShell.ID,
 			}
-			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+			elapsed := time.Since(startTime).Round(100 * time.Millisecond)
+			response := fmt.Sprintf("Command ran for %s (threshold: %ds) and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", elapsed, autoBackgroundAfter, bgShell.ID)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
 	)

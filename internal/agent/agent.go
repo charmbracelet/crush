@@ -945,7 +945,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			toolResult := a.convertToToolResult(result)
 			if sanitizedToolCalls[result.ToolCallID] {
-				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
+				toolResult.Content = "Tool call failed: arguments were not valid JSON, so the call was not executed. Retry with a single valid JSON object that matches this tool's input schema; use double-quoted property names and strings, no trailing commas, and include all required fields."
 				toolResult.IsError = true
 			}
 			// Use parent ctx instead of genCtx to ensure the message is created

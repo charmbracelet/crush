@@ -717,20 +717,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
-			prevHasInProgress := hasInProgressTodo(m.session.Todos)
 			prevPillsHeight := m.pillsAreaHeight()
 			m.session = &msg.Payload
-			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
+			if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
 			}
-			// The pills panel reserves vertical space that the chat area
-			// must yield. Recompute the layout whenever that footprint
-			// changes (todos appearing, the list growing, etc.) so the
-			// box renders on first paint rather than waiting for a toggle.
-			// When the footprint is unchanged we still re-render the pill
-			// content so status changes (e.g. the in-progress spinner)
-			// show up.
+			if m.todoIsSpinning && !m.isAgentBusy() {
+				m.todoIsSpinning = false
+			}
 			if m.pillsAreaHeight() != prevPillsHeight {
 				m.updateLayoutAndSize()
 			} else {

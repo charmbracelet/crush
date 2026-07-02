@@ -54,12 +54,8 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 				oldStatusByContent[todo.Content] = todo.Status
 			}
 
-			for _, item := range params.Todos {
-				switch item.Status {
-				case "pending", "in_progress", "completed":
-				default:
-					return fantasy.ToolResponse{}, fmt.Errorf("invalid status %q for todo %q", item.Status, item.Content)
-				}
+			if err := validateTodoUpdate(currentSession.Todos, params.Todos, oldStatusByContent); err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			todos := make([]session.Todo, len(params.Todos))
@@ -132,4 +128,62 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
 	)
+}
+
+func validateTodoUpdate(currentTodos []session.Todo, nextTodos []TodoItem, oldStatusByContent map[string]session.TodoStatus) error {
+	inProgressCount := 0
+	incompleteCount := 0
+	seenContent := make(map[string]struct{}, len(nextTodos))
+
+	for _, item := range nextTodos {
+		newStatus := session.TodoStatus(item.Status)
+		switch newStatus {
+		case session.TodoStatusPending, session.TodoStatusInProgress, session.TodoStatusCompleted:
+		default:
+			return fmt.Errorf("invalid status %q for todo %q", item.Status, item.Content)
+		}
+
+		if item.Content == "" {
+			return fmt.Errorf("todo content is required")
+		}
+		if _, ok := seenContent[item.Content]; ok {
+			return fmt.Errorf("duplicate todo %q", item.Content)
+		}
+		seenContent[item.Content] = struct{}{}
+
+		if newStatus != session.TodoStatusCompleted {
+			incompleteCount++
+		}
+		if newStatus == session.TodoStatusInProgress {
+			inProgressCount++
+			if inProgressCount > 1 {
+				return fmt.Errorf("only one todo can be in_progress")
+			}
+		}
+
+		oldStatus, existed := oldStatusByContent[item.Content]
+		if !existed {
+			continue
+		}
+		if oldStatus == session.TodoStatusCompleted && newStatus != session.TodoStatusCompleted {
+			return fmt.Errorf("completed todo %q cannot move back to %q", item.Content, item.Status)
+		}
+		if oldStatus == session.TodoStatusInProgress && newStatus == session.TodoStatusPending {
+			return fmt.Errorf("in_progress todo %q cannot move back to pending", item.Content)
+		}
+	}
+
+	for _, todo := range currentTodos {
+		if todo.Status == session.TodoStatusCompleted {
+			continue
+		}
+		if _, ok := seenContent[todo.Content]; !ok {
+			return fmt.Errorf("incomplete todo %q cannot be removed", todo.Content)
+		}
+	}
+	if incompleteCount > 0 && inProgressCount == 0 {
+		return fmt.Errorf("one incomplete todo must be in_progress")
+	}
+
+	return nil
 }

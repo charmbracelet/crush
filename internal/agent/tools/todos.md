@@ -1,1 +1,1 @@
-Manage a structured task list for multi-step work; each task has pending/in_progress/completed state. Keep exactly one task in_progress at a time. Skip for simple or single-step tasks.
+Manage a structured task list for multi-step work; each task has pending/in_progress/completed state. Progress tasks forward only: pending -> in_progress -> completed. Keep exactly one incomplete task in_progress, mark finished tasks completed promptly, and complete all todos when the work is done so stale incomplete todos do not remain. Skip for simple or single-step tasks.

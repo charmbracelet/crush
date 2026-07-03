@@ -37,8 +37,10 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if req == nil {
 		return nil, fmt.Errorf("HTTP request is nil")
 	}
-	if req.Body == http.NoBody {
-		// No body to inspect; default to user.
+	if req.Body == nil || req.Body == http.NoBody {
+		// No body to inspect; default to user. A nil Body is valid for
+		// bodyless requests (e.g. GET), and is distinct from http.NoBody,
+		// so both must be handled before reading below.
 		req.Header.Set(xInitiatorHeader, userInitiator)
 		slog.Debug("Setting X-Initiator header to user (no request body)")
 		return t.roundTrip(req)

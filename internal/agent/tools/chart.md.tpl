@@ -3,7 +3,7 @@ Render a chart in the terminal to visualize numeric data. The chart is rendered 
 ## Chart types
 
 - **line**: Plot one or more data series as lines. Good for trends, time series, and continuous measurements.
-- **bar**: Plot discrete values as horizontal bars. Good for comparisons across categories.
+- **bar**: Plot discrete values as bars. For a simple bar chart, pass a single data array. For a stacked bar chart (showing part-of-whole composition), pass multiple data arrays (one per layer) and provide `series_labels` to name each segment.
 - **heatmap**: Plot a 2D matrix of values as a color-mapped grid. Good for correlation matrices, activity grids, and 2D density distributions. Pass data as a 2D array where each inner array is a **row** (not a series). For example, a 5x5 correlation matrix has 5 rows of 5 values each. Labels are used for both the x and y axes.
 
 ## Parameters
@@ -11,6 +11,7 @@ Render a chart in the terminal to visualize numeric data. The chart is rendered 
 - **type**: "line" or "bar" (default: "line")
 - **data**: Array of series. For line charts, each inner array is one series (e.g. `[[1,4,9,16]]` for a single series, `[[1,2,3],[3,2,1]]` for two). For bar charts, use a single series `[[10,25,40]]`.
 - **labels**: Bar labels for bar charts, or x-axis tick labels for line charts.
+- **series_labels**: Names for each data layer in stacked bar charts (e.g. ["Desktop", "Mobile", "API"]). Each label gets a colored swatch in the legend.
 - **title**: Chart title shown in the tool call header.
 - **x_label**: X-axis label (e.g. "Time", "Month"). Provide this when the x-axis represents a meaningful dimension.
 - **y_label**: Y-axis label (e.g. "Revenue ($)", "Count", "Temperature (°C)"). Provide this when the y-axis represents a meaningful dimension.
@@ -52,6 +53,18 @@ Step chart for discrete state changes:
   "title": "System State Over Time",
   "x_label": "Time",
   "y_label": "State"
+}
+```
+
+Stacked bar chart showing composition:
+```json
+{
+  "type": "bar",
+  "data": [[45, 30, 60], [25, 40, 20], [10, 15, 10]],
+  "labels": ["Q1", "Q2", "Q3"],
+  "series_labels": ["Desktop", "Mobile", "API"],
+  "title": "Revenue by Channel",
+  "y_label": "Revenue ($K)"
 }
 ```
 

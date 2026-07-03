@@ -407,6 +407,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				options[openai.Name] = parsed
 			}
 		}
+
 	case anthropic.Name, bedrock.Name:
 		var (
 			_, hasEffort = mergedOptions["effort"]
@@ -454,6 +455,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[openrouter.Name] = parsed
 		}
+
 	case vercel.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
 		if !hasReasoning && shouldSetEffort {
@@ -466,6 +468,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[vercel.Name] = parsed
 		}
+
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
 		if !hasReasoning {
@@ -485,6 +488,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
+
 	case openaicompat.Name, hyper.Name:
 		extraBody := make(map[string]any)
 
@@ -513,16 +517,14 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					extraBody["reasoning"] = map[string]string{"effort": "none"}
 				}
 			}
+
 		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
 			if model.ModelCfg.Think || reasoningEffort != "" {
-				extraBody["thinking"] = map[string]any{
-					"type": "enabled",
-				}
+				extraBody["thinking"] = map[string]any{"type": "enabled"}
 			} else {
-				extraBody["thinking"] = map[string]any{
-					"type": "disabled",
-				}
+				extraBody["thinking"] = map[string]any{"type": "disabled"}
 			}
+
 		case string(catwalk.InferenceProviderFireworks):
 			// NOTE: Fireworks break if we set both `reasoning_effort` and `thinking`.
 			if reasoningEffort == "" {
@@ -532,6 +534,12 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					extraBody["thinking"] = map[string]any{"type": "disabled"}
 				}
 			}
+
+		case string(catwalk.InferenceProviderBaseten):
+			extraBody["chat_template_args"] = map[string]any{
+				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "",
+			}
+
 		case string(catwalk.InferenceProviderAlibabaSingapore):
 			if model.CatwalkCfg.CanReason {
 				extraBody["enable_thinking"] = model.ModelCfg.Think
@@ -544,6 +552,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[openaicompat.Name] = parsed
 		}
+
 	default:
 		// Known custom providers (litellm, ollama, omlx) are
 		// openai-compat under the hood.

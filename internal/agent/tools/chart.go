@@ -16,9 +16,10 @@ var chartDescription string
 
 // ChartParams defines the input for the chart tool.
 type ChartParams struct {
-	Type          string      `json:"type" description:"Chart type: 'line' or 'bar'"`
-	Data          [][]float64 `json:"data" description:"Data series. For line charts, each inner slice is a series. For bar charts, use a single series."`
-	Labels        []string    `json:"labels,omitempty" description:"Labels for data points (x-axis for line charts, bar labels for bar charts)"`
+	Type          string      `json:"type" description:"Chart type: 'line', 'bar', or 'heatmap'"`
+	Data          [][]float64 `json:"data" description:"Data series. For line charts, each inner slice is a series. For bar charts with one series, use a single array of values. For stacked bar charts, use multiple arrays (one per layer). For heatmaps, each inner array is a row."`
+	Labels        []string    `json:"labels,omitempty" description:"Labels for data points (x-axis for line charts, bar labels for bar charts, row/column labels for heatmaps)"`
+	SeriesLabels  []string    `json:"series_labels,omitempty" description:"Names for each data series/layer (used in stacked bar charts to label each segment)"`
 	Title         string      `json:"title,omitempty" description:"Chart title"`
 	XLabel        string      `json:"x_label,omitempty" description:"Label for the x-axis (e.g. 'Time', 'Category')"`
 	YLabel        string      `json:"y_label,omitempty" description:"Label for the y-axis (e.g. 'Revenue ($)', 'Count')"`
@@ -32,6 +33,7 @@ type ChartResponseMetadata struct {
 	Type          string      `json:"type"`
 	Data          [][]float64 `json:"data"`
 	Labels        []string    `json:"labels,omitempty"`
+	SeriesLabels  []string    `json:"series_labels,omitempty"`
 	Title         string      `json:"title,omitempty"`
 	XLabel        string      `json:"x_label,omitempty"`
 	YLabel        string      `json:"y_label,omitempty"`
@@ -71,6 +73,7 @@ func NewChartTool() fantasy.AgentTool {
 				Type:          chartType,
 				Data:          params.Data,
 				Labels:        params.Labels,
+				SeriesLabels:  params.SeriesLabels,
 				Title:         params.Title,
 				XLabel:        params.XLabel,
 				YLabel:        params.YLabel,
@@ -102,6 +105,14 @@ func buildChartSummary(chartType string, params ChartParams) string {
 			cols = len(params.Data[0])
 		}
 		return fmt.Sprintf("%s (%dx%d grid)", title, rows, cols)
+	}
+
+	if chartType == "bar" && len(params.Data) > 1 {
+		bars := 0
+		if len(params.Data) > 0 {
+			bars = len(params.Data[0])
+		}
+		return fmt.Sprintf("%s (%d bars, %d layers)", title, bars, len(params.Data))
 	}
 
 	numSeries := len(params.Data)

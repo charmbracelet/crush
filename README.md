@@ -194,6 +194,7 @@ That said, you can also set environment variables for preferred providers.
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
 | `ALIBABA_SINGAPORE_API_KEY` | Alibaba (Singapore)                                |
+| `ALIBABA_US_API_KEY`        | Alibaba (United States)                            |
 | `GROQ_API_KEY`              | Groq                                               |
 | `AVIAN_API_KEY`             | Avian                                              |
 | `OPENCODE_API_KEY`          | OpenCode Zen & Go                                  |

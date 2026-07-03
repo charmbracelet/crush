@@ -51,11 +51,11 @@ func TestInitiatorTransportSetsHeader(t *testing.T) {
 			var err error
 			switch kind {
 			case 0:
-				req, err = http.NewRequest(http.MethodGet, srv.URL, nil)
+				req, err = http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 			case -1:
-				req, err = http.NewRequest(http.MethodGet, srv.URL, http.NoBody)
+				req, err = http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, http.NoBody)
 			default:
-				req, err = http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(payload))
+				req, err = http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, strings.NewReader(payload))
 			}
 			require.NoError(t, err)
 

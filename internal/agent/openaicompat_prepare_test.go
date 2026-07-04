@@ -50,8 +50,9 @@ func TestStripFunctionStrictMiddleware(t *testing.T) {
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
-	_, err = client.Do(req)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
+	defer resp.Body.Close()
 
 	tools, ok := capturedBody["tools"].([]any)
 	require.True(t, ok)

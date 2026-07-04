@@ -66,7 +66,17 @@ type Backend struct {
 	// concurrent CreateWorkspace calls at the same path deduplicate
 	// deterministically.
 	pathIndex map[string]string
-	mu        sync.Mutex
+	// pending counts CreateWorkspace calls that have committed to the
+	// slow initialization path (config/db/app setup) but have not yet
+	// registered their workspace in the map. It is guarded by mu.
+	// teardown must observe pending == 0 in addition to an empty
+	// workspace map before triggering server shutdown: otherwise a
+	// teardown of the last live workspace could race ahead of a
+	// concurrent create — which releases mu during its slow init — and
+	// shut the whole server down out from under the workspace being
+	// born.
+	pending int
+	mu      sync.Mutex
 
 	cfg         *config.ConfigStore
 	ctx         context.Context
@@ -268,7 +278,30 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		// removed; clean the stale entry and fall through.
 		delete(b.pathIndex, key)
 	}
+	// Commit to the slow creation path. Mark this create as pending
+	// while mu is still held so a teardown that runs during the
+	// unlocked init below cannot observe an empty backend and shut the
+	// server down. The deferred decrement runs after the workspace has
+	// been registered (or the create has failed), keeping the invariant
+	// that pending only drops once the workspace is visible in the map.
+	b.pending++
 	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.pending--
+		// If this create ended up registering nothing (it failed, or
+		// deduped onto an existing workspace that has since gone) and
+		// it was holding the last teardown back, the server may now be
+		// idle with no pending work. Reap it here so a failed create
+		// racing the last teardown does not leak an empty server that
+		// a plain teardown already declined to shut down.
+		idle := b.pending == 0 && b.workspaces.Len() == 0
+		b.mu.Unlock()
+		if idle && b.shutdownFn != nil {
+			slog.Info("No workspaces remain after create settled, shutting down server...")
+			b.shutdownFn()
+		}
+	}()
 
 	id := uuid.New().String()
 	cfg, err := config.Init(args.Path, args.DataDir, args.Debug)
@@ -579,11 +612,16 @@ func (b *Backend) teardown(ws *Workspace) {
 	}
 	b.workspaces.Del(ws.ID)
 	remaining := b.workspaces.Len()
+	pending := b.pending
 	b.mu.Unlock()
 
 	ws.invokeShutdown()
 
-	if remaining == 0 && b.shutdownFn != nil {
+	// Only shut the server down once there is genuinely nothing left:
+	// no live workspaces AND no create in flight. Ignoring pending here
+	// is what let a teardown race a concurrent create and kill the
+	// server while a new workspace was still being initialized.
+	if remaining == 0 && pending == 0 && b.shutdownFn != nil {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
 	}

@@ -1317,3 +1317,46 @@ func TestAttachedClients_UnknownWorkspace(t *testing.T) {
 	_, err := b.AttachedClients("00000000-0000-0000-0000-000000000000", "S1")
 	require.ErrorIs(t, err, ErrWorkspaceNotFound)
 }
+
+// TestTeardown_DefersShutdownWhileCreatePending verifies the core of the
+// "coder agent offline after more than one session" fix: tearing down the
+// last live workspace must NOT shut the server down while another
+// CreateWorkspace is mid-flight (it has committed to the slow init path
+// but not yet registered its workspace). Without the pending guard, the
+// teardown observed an empty workspace map and killed the whole server
+// out from under the workspace being born.
+func TestTeardown_DefersShutdownWhileCreatePending(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/pending-guard")
+
+	// Simulate a concurrent create that has passed the pending++ point
+	// but has not yet registered its workspace.
+	b.mu.Lock()
+	b.pending = 1
+	b.mu.Unlock()
+
+	b.teardown(ws)
+
+	require.Equal(t, int32(1), wsShutdowns.Load(),
+		"the torn-down workspace's own resources must still be released")
+	require.Equal(t, int32(0), serverShutdowns.Load(),
+		"server must not shut down while a create is in flight")
+}
+
+// TestTeardown_ShutsDownWhenIdleAndNoPending is the control for the guard
+// above: with no create in flight, tearing down the last workspace still
+// triggers the server shutdown, preserving the "shut down when empty"
+// behavior.
+func TestTeardown_ShutsDownWhenIdleAndNoPending(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	ws, _ := insertTestWorkspace(t, b, "/tmp/idle-shutdown")
+
+	b.teardown(ws)
+
+	require.Equal(t, int32(1), serverShutdowns.Load(),
+		"server must shut down once the last workspace is gone and nothing is pending")
+}

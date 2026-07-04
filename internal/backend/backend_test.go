@@ -1360,3 +1360,65 @@ func TestTeardown_ShutsDownWhenIdleAndNoPending(t *testing.T) {
 	require.Equal(t, int32(1), serverShutdowns.Load(),
 		"server must shut down once the last workspace is gone and nothing is pending")
 }
+
+// TestCreateWorkspace_PendingBalancedOnSuccess drives the real
+// CreateWorkspace path and asserts the in-flight `pending` counter it
+// uses to hold off server shutdown is balanced back to zero once the
+// workspace is registered. This guards the bookkeeping the unit-level
+// teardown tests stub out: a refactor that drops the increment or
+// misplaces the deferred decrement would reintroduce the shutdown race.
+func TestCreateWorkspace_PendingBalancedOnSuccess(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	b, shutdownCount := newTestBackend(t)
+	// Keep the create hold alive so its grace timer can't fire and tear
+	// the workspace down mid-assertion.
+	b.SetCreateGrace(time.Hour)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	require.NoError(t, err)
+
+	b.mu.Lock()
+	pending := b.pending
+	b.mu.Unlock()
+	require.Equal(t, 0, pending, "pending must return to zero after a successful create")
+	require.Equal(t, int32(0), shutdownCount.Load(), "a live workspace must not trigger shutdown")
+}
+
+// TestCreateWorkspace_PendingBalancedAndReapsOnFailure asserts that a
+// create which fails during its slow init still decrements `pending`, and
+// that the deferred reap shuts an otherwise-idle server down (the safety
+// net that keeps a failed create racing the last teardown from leaking an
+// empty server the plain teardown declined to close).
+func TestCreateWorkspace_PendingBalancedAndReapsOnFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	b, shutdownCount := newTestBackend(t)
+
+	// A data dir whose parent is a regular file makes the workspace's
+	// data-directory creation fail deterministically, after the pending
+	// counter has been incremented.
+	tmp := t.TempDir()
+	fileAsParent := filepath.Join(tmp, "notadir")
+	require.NoError(t, os.WriteFile(fileAsParent, []byte("x"), 0o600))
+	badDataDir := filepath.Join(fileAsParent, "data")
+
+	_, _, err := b.CreateWorkspace(protoWS(tmp, badDataDir, uuid.New().String()))
+	require.Error(t, err, "create must fail when the data dir cannot be created")
+
+	b.mu.Lock()
+	pending := b.pending
+	remaining := b.workspaces.Len()
+	b.mu.Unlock()
+	require.Equal(t, 0, pending, "pending must return to zero after a failed create")
+	require.Zero(t, remaining, "no workspace should be registered after a failed create")
+	require.Equal(t, int32(1), shutdownCount.Load(),
+		"a failed create that leaves the server idle must reap it")
+}

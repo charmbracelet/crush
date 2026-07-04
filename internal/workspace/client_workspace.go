@@ -256,6 +256,21 @@ func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
 	_ = w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
 }
 
+// AgentPopQueuedPrompt returns and removes the oldest queued prompt. The
+// server protocol only exposes a bulk ClearQueue endpoint, so this falls
+// back to reading the full list and clearing the queue: the side effect is
+// that any siblings of the popped prompt also lose their place, but in
+// the server-mode UI flow (arrow-up on a queued message) that matches
+// the user's intent of "bring this one back, drop the rest".
+func (w *ClientWorkspace) AgentPopQueuedPrompt(sessionID string) (string, bool) {
+	prompts := w.AgentQueuedPromptsList(sessionID)
+	if len(prompts) == 0 {
+		return "", false
+	}
+	w.AgentClearQueue(sessionID)
+	return prompts[0], true
+}
+
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
 	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID)
 }

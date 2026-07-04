@@ -392,3 +392,54 @@ func TestClientWorkspace_SubscriptionStopsWhenServerDown(t *testing.T) {
 		t.Fatal("runSubscription did not return after Shutdown while server was down")
 	}
 }
+
+// TestClientWorkspace_AgentReadyErr distinguishes a server that reports
+// an uninitialized agent from a server that cannot be reached, so the UI
+// can show an actionable message instead of a blanket "agent offline".
+func TestClientWorkspace_AgentReadyErr(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ready", func(t *testing.T) {
+		t.Parallel()
+		ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: true})
+		require.NoError(t, ws.AgentReadyErr())
+		require.True(t, ws.AgentIsReady())
+	})
+
+	t.Run("not initialized", func(t *testing.T) {
+		t.Parallel()
+		ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: false})
+		err := ws.AgentReadyErr()
+		require.ErrorIs(t, err, ErrAgentNotInitialized)
+		require.NotErrorIs(t, err, ErrServerUnreachable)
+		require.False(t, ws.AgentIsReady())
+	})
+
+	t.Run("server unreachable", func(t *testing.T) {
+		t.Parallel()
+		c, err := client.NewClient(t.TempDir(), "tcp", "127.0.0.1:1")
+		require.NoError(t, err)
+		ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+		readyErr := ws.AgentReadyErr()
+		require.ErrorIs(t, readyErr, ErrServerUnreachable)
+		require.NotErrorIs(t, readyErr, ErrAgentNotInitialized)
+		require.False(t, ws.AgentIsReady())
+	})
+}
+
+// agentInfoWorkspace returns a ClientWorkspace whose server answers the
+// agent-info endpoint with the given info.
+func agentInfoWorkspace(t *testing.T, info proto.AgentInfo) *ClientWorkspace {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/agent", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(info))
+	}))
+	t.Cleanup(srv.Close)
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	return NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+}

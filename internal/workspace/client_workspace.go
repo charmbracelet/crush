@@ -248,11 +248,21 @@ func (w *ClientWorkspace) AgentModel() AgentModel {
 }
 
 func (w *ClientWorkspace) AgentIsReady() bool {
+	return w.AgentReadyErr() == nil
+}
+
+func (w *ClientWorkspace) AgentReadyErr() error {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {
-		return false
+		// The workspace/server could not be reached. This is distinct
+		// from an initialized-but-not-ready agent: the server may have
+		// torn the workspace down or restarted underneath us.
+		return fmt.Errorf("%w: %v", ErrServerUnreachable, err)
 	}
-	return info.IsReady
+	if !info.IsReady {
+		return ErrAgentNotInitialized
+	}
+	return nil
 }
 
 func (w *ClientWorkspace) AgentQueuedPrompts(sessionID string) int {

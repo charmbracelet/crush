@@ -265,6 +265,7 @@ Before writing code:
 4. Use same libraries/frameworks
 5. Follow security best practices (never log secrets)
 6. Don't use one-letter variable names unless requested
+7. Never use em dashes in source code; use commas, periods, parentheses, or semicolons instead. Hyphens are not a stand-in for em dashes.
 
 Never assume libraries are available - verify first.
 

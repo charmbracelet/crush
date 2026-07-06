@@ -347,7 +347,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		)
 
 		switch providerCfg.ID {
-		case string(catwalk.InferenceProviderAlibabaSingapore):
+		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
 			switch {
 			case !hasEffort && shouldSetEffort:
 				extraBody["reasoning_effort"] = reasoningEffort
@@ -473,7 +473,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
 			if model.CatwalkCfg.CanReason {
-				extraBody["enable_thinking"] = model.ModelCfg.Think
+				extraBody["enable_thinking"] = model.ModelCfg.Think || reasoningEffort != ""
 			}
 		}
 

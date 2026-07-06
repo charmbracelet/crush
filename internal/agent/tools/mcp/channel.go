@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"log/slog"
 	"regexp"
 	"sort"
@@ -64,30 +65,6 @@ type channelParams struct {
 	Meta    map[string]string `json:"meta"`
 }
 
-// bodyEscaper escapes a payload body so it cannot break out of the <channel>
-// element or forge additional tags. It is intentionally minimal: escaping the
-// three XML-significant characters is enough to guarantee the body renders as
-// inert text.
-var bodyEscaper = strings.NewReplacer(
-	"&", "&amp;",
-	"<", "&lt;",
-	">", "&gt;",
-)
-
-// attrEscaper escapes an attribute value. In addition to the XML-significant
-// characters it neutralises the double quote (so a value cannot close the
-// attribute and inject new ones) and collapses control whitespace to spaces
-// (so a value cannot span lines or smuggle structure).
-var attrEscaper = strings.NewReplacer(
-	"&", "&amp;",
-	"<", "&lt;",
-	">", "&gt;",
-	`"`, "&quot;",
-	"\n", " ",
-	"\r", " ",
-	"\t", " ",
-)
-
 // parseChannelParams validates and sanitises a raw notifications/claude/channel
 // params object. It fails closed: any structural problem returns ok=false and
 // the caller drops the notification. On success it returns a params value whose
@@ -134,14 +111,16 @@ func parseChannelParams(raw json.RawMessage) (channelParams, bool) {
 }
 
 // renderChannel builds the safe <channel> element injected into the session.
-// The source attribute is set from the (trusted) server name; all body and
-// attribute values are escaped. Meta keys are emitted in sorted order so the
-// output is deterministic.
+// The source attribute is set from the (trusted) server name; the (untrusted)
+// body and meta values are escaped by encoding/xml, so content cannot break out
+// of the element or forge attributes. Meta keys are emitted in sorted order so
+// the output is deterministic.
 func renderChannel(source string, p channelParams) string {
-	var b strings.Builder
-	b.WriteString(`<channel source="`)
-	b.WriteString(attrEscaper.Replace(source))
-	b.WriteString(`"`)
+	start := xml.StartElement{
+		Name: xml.Name{Local: "channel"},
+		Attr: make([]xml.Attr, 0, 1+len(p.Meta)),
+	}
+	start.Attr = append(start.Attr, xml.Attr{Name: xml.Name{Local: "source"}, Value: source})
 
 	keys := make([]string, 0, len(p.Meta))
 	for k := range p.Meta {
@@ -149,15 +128,18 @@ func renderChannel(source string, p channelParams) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		b.WriteString(" ")
-		b.WriteString(k) // key already validated against metaKeyPattern
-		b.WriteString(`="`)
-		b.WriteString(attrEscaper.Replace(p.Meta[k]))
-		b.WriteString(`"`)
+		// k is already validated against metaKeyPattern.
+		start.Attr = append(start.Attr, xml.Attr{Name: xml.Name{Local: k}, Value: p.Meta[k]})
 	}
-	b.WriteString(">\n")
-	b.WriteString(bodyEscaper.Replace(p.Content))
-	b.WriteString("\n</channel>")
+
+	var b strings.Builder
+	enc := xml.NewEncoder(&b)
+	// EncodeToken and Flush only fail on malformed tokens or a failing writer;
+	// the tokens here are well-formed and strings.Builder never errors.
+	_ = enc.EncodeToken(start)
+	_ = enc.EncodeToken(xml.CharData(p.Content))
+	_ = enc.EncodeToken(start.End())
+	_ = enc.Flush()
 	return b.String()
 }
 

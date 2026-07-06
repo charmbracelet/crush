@@ -119,6 +119,10 @@ func (m *UI) updateSidebarScrollState() {
 		"",
 		skillsSection,
 	)
+	if len(m.runningSubagents) > 0 {
+		subagentsSection := m.subagentsInfo(contentWidth, len(m.runningSubagents), true)
+		blocks = append(blocks, "", subagentsSection)
+	}
 	content := lipgloss.JoinVertical(lipgloss.Left, blocks...)
 
 	totalLines := strings.Count(content, "\n") + 1

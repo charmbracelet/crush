@@ -365,6 +365,47 @@ which do expand.
 }
 ```
 
+#### Channels (experimental)
+
+An MCP server can also act as a **channel**: instead of only exposing tools it
+calls, it *pushes* events straight into your session so Crush reacts to things
+happening outside the terminal — a webhook, a CI failure, a chat message. See
+the [channels reference](https://code.claude.com/docs/en/channels-reference)
+for the protocol.
+
+A server becomes a channel by declaring the `claude/channel` capability in its
+`initialize` result (`capabilities.experimental["claude/channel"] = {}`) and
+emitting `notifications/claude/channel` events with a `content` body and an
+optional `meta` map. Crush injects each event into the active session as a
+`<channel>` element:
+
+```text
+<channel source="webhook" severity="high" run_id="1234">
+build failed on main: https://ci.example.com/run/1234
+</channel>
+```
+
+Listing a channel server in `mcp` is **not** enough to enable it — pushing is
+gated behind an explicit per-session opt-in, so a server present in config
+stays silent until you ask for it:
+
+```bash
+# Enable one or more configured MCP servers as channels for this session.
+crush --channels server:webhook
+crush --channels server:webhook --channels server:alerts
+```
+
+The `source` attribute is always the (trusted) server name. Payloads are
+untrusted, server-initiated input: Crush validates their structure, caps the
+body and attribute sizes, restricts `meta` keys to identifiers
+(`[A-Za-z0-9_]`), escapes all content so a payload cannot break out of the
+`<channel>` element or forge attributes, and drops malformed payloads. A
+server that has not been opted in via `--channels`, or that never declared the
+capability, cannot inject anything.
+
+Channel delivery currently lands in the interactive TUI (the default `crush`),
+where events are routed into the session you have open.
+
 ### Hooks
 
 Crush has preliminary support for hooks. For details, see

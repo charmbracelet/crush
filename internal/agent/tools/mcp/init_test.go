@@ -510,7 +510,7 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 			states.Del(tc.mcpName)
 			t.Cleanup(func() { states.Del(tc.mcpName) })
 
-			sess, err := createSession(t.Context(), tc.mcpName, tc.cfg, r)
+			sess, err := createSession(t.Context(), tc.mcpName, tc.cfg, r, false)
 			require.Error(t, err)
 			require.Nil(t, sess)
 			require.Contains(t, err.Error(), tc.wantErrContains)

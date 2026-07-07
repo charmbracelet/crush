@@ -790,6 +790,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, handleMCPToolsEvent(m.com.Workspace, msg.Payload.Name)
 		case mcp.EventResourcesListChanged:
 			return m, handleMCPResourcesEvent(m.com.Workspace, msg.Payload.Name)
+		case mcp.EventChannelMessage:
+			return m, m.handleChannelMessage(msg.Payload)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
@@ -3549,6 +3551,26 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return nil
 	})
 	return tea.Batch(cmds...)
+}
+
+// handleChannelMessage injects a channel event pushed by an MCP server into
+// the active session so the agent reacts to it on its next turn. The rendered
+// <channel> element is already validated and escaped by the mcp package. It
+// requires an active session; when there is none, the event is dropped (there
+// is no session to route it into). If the agent is busy, AgentRun enqueues the
+// message and it is picked up on the next step.
+func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
+	if ev.ChannelMessage == "" || !m.com.Workspace.AgentIsReady() || !m.hasSession() {
+		return nil
+	}
+	sessionID := m.session.ID
+	content := ev.ChannelMessage
+	return func() tea.Msg {
+		if err := m.com.Workspace.AgentRun(context.Background(), sessionID, content); err != nil {
+			slog.Debug("Failed to inject channel message", "error", err, "session", sessionID)
+		}
+		return nil
+	}
 }
 
 // runShellCommand executes a shell command server-side without triggering

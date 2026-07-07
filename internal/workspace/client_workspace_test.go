@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -188,6 +189,30 @@ func TestTranslateEvent_Skills(t *testing.T) {
 	cached := skills.GetLatestStates()
 	require.Len(t, cached, 1)
 	require.Equal(t, "from-server", cached[0].Name)
+}
+
+// TestTranslateEvent_MCPChannel verifies the client reconstructs a channel
+// push from the wire with its type and rendered <channel> body intact, so the
+// TUI's channel handler fires in client/server mode.
+func TestTranslateEvent_MCPChannel(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	ev := pubsub.Event[proto.MCPEvent]{
+		Type: pubsub.CreatedEvent,
+		Payload: proto.MCPEvent{
+			Type:           proto.MCPEventChannelMessage,
+			Name:           "webhook",
+			ChannelMessage: `<channel source="webhook">build failed</channel>`,
+		},
+	}
+
+	out := w.translateEvent(ev)
+	got, ok := out.(pubsub.Event[mcp.Event])
+	require.True(t, ok, "expected pubsub.Event[mcp.Event], got %T", out)
+	require.Equal(t, mcp.EventChannelMessage, got.Payload.Type)
+	require.Equal(t, "webhook", got.Payload.Name)
+	require.Equal(t, `<channel source="webhook">build failed</channel>`, got.Payload.ChannelMessage)
 }
 
 // TestNewClientWorkspace_SeedsSkillsCache verifies that the snapshot in

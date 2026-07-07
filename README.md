@@ -403,9 +403,11 @@ body and attribute sizes, restricts `meta` keys to identifiers
 server that has not been opted in via `--channels`, or that never declared the
 capability, cannot inject anything.
 
-Channel delivery lands in the interactive TUI (the default `crush`). If no
-session is open when an event arrives, Crush starts one so the event is never
-dropped; otherwise it routes into the session you have open.
+Channel delivery works in the interactive TUI, both in the default in-process
+`crush` and against a shared `crush serve` backend (events cross the SSE event
+stream to each connected client). If no session is open when an event arrives,
+Crush starts one so the event is never dropped; otherwise it routes into the
+session you have open.
 
 **Two-way channels.** A channel can also be interactive. Because a channel is a
 regular MCP server, any tool it exposes (a `reply` tool, say) is available to

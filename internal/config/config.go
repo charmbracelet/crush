@@ -533,9 +533,10 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls   ToolLs   `json:"ls,omitzero"`
-	Grep ToolGrep `json:"grep,omitzero"`
-	Glob ToolGlob `json:"glob,omitzero"`
+	Ls        ToolLs        `json:"ls,omitzero"`
+	Grep      ToolGrep      `json:"grep,omitzero"`
+	Glob      ToolGlob      `json:"glob,omitzero"`
+	WebSearch ToolWebSearch `json:"web_search,omitzero"`
 }
 
 type ToolLs struct {
@@ -564,6 +565,18 @@ type ToolGlob struct {
 // GetTimeout returns the user-defined timeout or the default.
 func (t ToolGlob) GetTimeout() time.Duration {
 	return ptrValOr(t.Timeout, 30*time.Second)
+}
+
+type ToolWebSearch struct {
+	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the web search engine,default=https://lite.duckduckgo.com/lite/,example=https://lite.duckduckgo.com/lite/"`
+}
+
+// GetBaseURL returns the user-defined base URL or the default.
+func (t ToolWebSearch) GetBaseURL() string {
+	if t.BaseURL != "" {
+		return t.BaseURL
+	}
+	return "https://lite.duckduckgo.com/lite/"
 }
 
 // HookConfig defines a user-configured shell command that fires on a hook

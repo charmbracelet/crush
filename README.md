@@ -178,7 +178,7 @@ picker. Follow the steps to authenticate and you'll be good to go.
 
 [Hyper], from Charm, is the official Crush provider. It’s subscription-based,
 with a free tier, and optimized for Crush. It’s privacy focused, with zero data
-retention is and designed to support GDPR. [More on Hyper][hyper].
+retention (ZDR) is and designed to comply with GDPR. [More on Hyper][hyper].
 
 <p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
 

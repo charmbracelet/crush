@@ -3503,6 +3503,30 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 	}
 }
 
+// ensureSession makes sure a session is active, creating one if none is. It
+// returns a command that loads the freshly created session (nil when a session
+// already existed) and an error if creation failed. It mutates UI state, so
+// callers must run on the Update goroutine.
+func (m *UI) ensureSession() (tea.Cmd, error) {
+	if m.hasSession() {
+		return nil, nil
+	}
+	newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
+	if err != nil {
+		return nil, err
+	}
+	if m.forceCompactMode {
+		m.isCompact = true
+	}
+	var cmd tea.Cmd
+	if newSession.ID != "" {
+		m.session = &newSession
+		cmd = m.loadSession(newSession.ID)
+	}
+	m.setState(uiChat, m.focus)
+	return cmd, nil
+}
+
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if !m.com.Workspace.AgentIsReady() {
@@ -3510,19 +3534,12 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	}
 
 	var cmds []tea.Cmd
-	if !m.hasSession() {
-		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
-		if err != nil {
-			return util.ReportError(err)
-		}
-		if m.forceCompactMode {
-			m.isCompact = true
-		}
-		if newSession.ID != "" {
-			m.session = &newSession
-			cmds = append(cmds, m.loadSession(newSession.ID))
-		}
-		m.setState(uiChat, m.focus)
+	loadCmd, err := m.ensureSession()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	if loadCmd != nil {
+		cmds = append(cmds, loadCmd)
 	}
 
 	ctx := context.Background()
@@ -3553,24 +3570,36 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	return tea.Batch(cmds...)
 }
 
-// handleChannelMessage injects a channel event pushed by an MCP server into
-// the active session so the agent reacts to it on its next turn. The rendered
-// <channel> element is already validated and escaped by the mcp package. It
-// requires an active session; when there is none, the event is dropped (there
-// is no session to route it into). If the agent is busy, AgentRun enqueues the
-// message and it is picked up on the next step.
+// handleChannelMessage injects a channel event pushed by an MCP server into a
+// session so the agent reacts to it on its next turn. The rendered <channel>
+// element is already validated and escaped by the mcp package. If no session is
+// active yet, one is created so a pushed event is never silently dropped; if the
+// agent is busy, AgentRun enqueues the message and it is picked up on the next
+// step.
 func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
-	if ev.ChannelMessage == "" || !m.com.Workspace.AgentIsReady() || !m.hasSession() {
+	if ev.ChannelMessage == "" || !m.com.Workspace.AgentIsReady() {
 		return nil
+	}
+	loadCmd, err := m.ensureSession()
+	if err != nil {
+		slog.Debug("Failed to create session for channel message", "error", err)
+		return nil
+	}
+	if !m.hasSession() {
+		return loadCmd
 	}
 	sessionID := m.session.ID
 	content := ev.ChannelMessage
-	return func() tea.Msg {
+	runCmd := func() tea.Msg {
 		if err := m.com.Workspace.AgentRun(context.Background(), sessionID, content); err != nil {
 			slog.Debug("Failed to inject channel message", "error", err, "session", sessionID)
 		}
 		return nil
 	}
+	if loadCmd != nil {
+		return tea.Batch(loadCmd, runCmd)
+	}
+	return runCmd
 }
 
 // runShellCommand executes a shell command server-side without triggering

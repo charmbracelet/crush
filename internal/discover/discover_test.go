@@ -182,6 +182,71 @@ func TestDiscoverModels_SkipsEmptyExtraHeaders(t *testing.T) {
 	require.Len(t, models, 1)
 }
 
+func TestDiscoverModels_ContextLength(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"object": "list",
+			"data": [
+				{"id": "glm-4.7", "object": "model", "context_length": 131072},
+				{"id": "gemma-4", "object": "model", "context_length": 262144},
+				{"id": "no-context", "object": "model"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		ID:      "test",
+		BaseURL: server.URL + "/v1",
+		APIKey:  "test-key",
+	}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.NoError(t, err)
+	require.Len(t, models, 3)
+
+	require.Equal(t, "glm-4.7", models[0].ID)
+	require.Equal(t, int64(131072), models[0].ContextWindow)
+
+	require.Equal(t, "gemma-4", models[1].ID)
+	require.Equal(t, int64(262144), models[1].ContextWindow)
+
+	require.Equal(t, "no-context", models[2].ID)
+	require.Equal(t, int64(0), models[2].ContextWindow)
+}
+
+func TestDiscoverModels_MetadataFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": [
+				{"id": "vllm-model", "object": "model", "metadata": {"max_model_len": 65536}},
+				{"id": "ctx-model", "object": "model", "metadata": {"max_context_length": 32768}},
+				{"id": "both-model", "object": "model", "context_length": 100000, "metadata": {"max_model_len": 65536}}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		ID:      "test",
+		BaseURL: server.URL + "/v1",
+		APIKey:  "test-key",
+	}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.NoError(t, err)
+	require.Len(t, models, 3)
+
+	// metadata.max_model_len fallback
+	require.Equal(t, int64(65536), models[0].ContextWindow)
+	// metadata.max_context_length fallback
+	require.Equal(t, int64(32768), models[1].ContextWindow)
+	// context_length takes precedence over metadata
+	require.Equal(t, int64(100000), models[2].ContextWindow)
+}
+
 func TestDiscoverModels_NoAuthWhenNoAPIKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Empty(t, r.Header.Get("Authorization"))

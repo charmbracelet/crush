@@ -407,7 +407,8 @@ Channel delivery works in the interactive TUI, both in the default in-process
 `crush` and against a shared `crush serve` backend (events cross the SSE event
 stream to each connected client). If no session is open when an event arrives,
 Crush starts one so the event is never dropped; otherwise it routes into the
-session you have open.
+session you have open. Servers that are live channels are marked `channel` in
+the MCP list so you can confirm the opt-in took effect.
 
 **Two-way channels.** A channel can also be interactive. Because a channel is a
 regular MCP server, any tool it exposes (a `reply` tool, say) is available to

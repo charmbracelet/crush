@@ -235,7 +235,7 @@ func TestRenderChannelDeterministicMetaOrder(t *testing.T) {
 	ai := strings.Index(out, `a="1"`)
 	bi := strings.Index(out, `b="2"`)
 	ci := strings.Index(out, `c="3"`)
-	if !(ai < bi && bi < ci) {
+	if ai >= bi || bi >= ci {
 		t.Errorf("meta not sorted: %q", out)
 	}
 }

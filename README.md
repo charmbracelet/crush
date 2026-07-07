@@ -403,8 +403,17 @@ body and attribute sizes, restricts `meta` keys to identifiers
 server that has not been opted in via `--channels`, or that never declared the
 capability, cannot inject anything.
 
-Channel delivery currently lands in the interactive TUI (the default `crush`),
-where events are routed into the session you have open.
+Channel delivery lands in the interactive TUI (the default `crush`). If no
+session is open when an event arrives, Crush starts one so the event is never
+dropped; otherwise it routes into the session you have open.
+
+**Two-way channels.** A channel can also be interactive. Because a channel is a
+regular MCP server, any tool it exposes (a `reply` tool, say) is available to
+the agent through the normal MCP tool path — nothing channel-specific is
+required. Declare `tools` in the server's capabilities, register the tool, and
+use the server's `instructions` string (injected into the system prompt) to
+tell Crush when to call it and which `<channel>` attribute to pass back (like a
+`chat_id`).
 
 ### Hooks
 

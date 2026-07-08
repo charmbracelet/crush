@@ -12,7 +12,7 @@ Open PowerShell in this folder and run:
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-On a new PC, the installer creates a dedicated Ed25519 key. If the VPS does not already trust that key, SSH asks for the VPS password once and adds the public key to `~/.ssh/authorized_keys`. Future starts use the key without a password.
+On a new PC, the installer creates a dedicated Ed25519 key. It does not overwrite any existing SSH keys and it does not replace `~/.ssh/authorized_keys`; it appends the dedicated public key only if that exact line is missing. If you already have SSH key access to the VPS, the installer uses that to bootstrap the dedicated key. Otherwise, SSH asks for the VPS password once and OpenSSH hides the input. Future starts use the dedicated key without a password.
 
 The installed process starts immediately and whenever the current Windows user signs in. It runs in the interactive user session because a Windows system service cannot reliably access that user's clipboard.
 

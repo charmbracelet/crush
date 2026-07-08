@@ -47,19 +47,13 @@ $testArgs = @(
     $target,
     "true"
 )
-& ssh @testArgs
+& ssh @testArgs *> $null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "The dedicated key is not installed on the VPS."
-    Write-Host "Enter the VPS password once when SSH asks for it."
-    $remotePublicKeyPath = "/tmp/crush_clip_bridge_$PID.pub"
-    $remotePublicKeyTarget = "${target}:$remotePublicKeyPath"
-    & scp -P $SshPort -o StrictHostKeyChecking=accept-new "$keyPath.pub" $remotePublicKeyTarget
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not upload the SSH public key. Confirm password login is enabled, then rerun install.ps1."
-    }
-
-    $remoteInstall = 'umask 077; mkdir -p "$HOME/.ssh"; touch "$HOME/.ssh/authorized_keys"; key=$(tr -d "\r" < "__PUBKEY__" | head -n 1); grep -qxF "$key" "$HOME/.ssh/authorized_keys" 2>/dev/null || printf "%s\n" "$key" >> "$HOME/.ssh/authorized_keys"; rm -f "__PUBKEY__"'
-    $remoteInstall = $remoteInstall.Replace("__PUBKEY__", $remotePublicKeyPath)
+    Write-Host "Enter the VPS password once if SSH asks for it. OpenSSH will hide the input."
+    $publicKey = (Get-Content -Raw -LiteralPath "$keyPath.pub").Trim()
+    $publicKey64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($publicKey))
+    $remoteInstall = "set -eu; umask 077; mkdir -p ~/.ssh; chmod 700 ~/.ssh; tmp=~/.ssh/crush_clip_bridge.pub.tmp; printf '%s' '$publicKey64' | base64 -d > `$tmp; touch ~/.ssh/authorized_keys; grep -qxFf `$tmp ~/.ssh/authorized_keys || cat `$tmp >> ~/.ssh/authorized_keys; rm -f `$tmp; chmod 600 ~/.ssh/authorized_keys"
     & ssh -p $SshPort -o StrictHostKeyChecking=accept-new $target $remoteInstall
     if ($LASTEXITCODE -ne 0) {
         throw "Could not install the SSH key. Confirm password login is enabled, then rerun install.ps1."

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -166,6 +167,29 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 
 	require.Equal(t, 1, perms.requestCount)
 	require.Contains(t, resp.Content, "User denied permission")
+}
+
+func TestBashTool_DefaultLongCommandReturnsAsBackgroundJob(t *testing.T) {
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	start := time.Now()
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "default long command",
+		Command:     "sleep 30",
+	})
+	require.Less(t, time.Since(start), 7*time.Second)
+
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.True(t, meta.Background)
+	require.NotEmpty(t, meta.ShellID)
+	require.NoError(t, shell.GetBackgroundShellManager().Kill(meta.ShellID))
+}
+
+func TestBashToolPolicy_HasNoSourceLevelCommandBlacklist(t *testing.T) {
+	require.Empty(t, blockFuncs())
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {

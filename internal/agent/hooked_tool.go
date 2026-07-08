@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -13,28 +14,32 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// hookedTool wraps a fantasy.AgentTool to run PreToolUse hooks before
-// delegating to the inner tool.
+// hookedTool wraps a fantasy.AgentTool to run hook policy and session-local
+// recovery checks before delegating to the inner tool.
 type hookedTool struct {
-	inner  fantasy.AgentTool
-	runner *hooks.Runner
+	inner             fantasy.AgentTool
+	preRunner         *hooks.Runner
+	postRunner        *hooks.Runner
+	postFailureRunner *hooks.Runner
+	ledger            *toolFailureLedger
 }
 
-func newHookedTool(inner fantasy.AgentTool, runner *hooks.Runner) *hookedTool {
-	return &hookedTool{inner: inner, runner: runner}
+func newHookedTool(inner fantasy.AgentTool, preRunner, postRunner, postFailureRunner *hooks.Runner, ledger *toolFailureLedger) *hookedTool {
+	return &hookedTool{inner: inner, preRunner: preRunner, postRunner: postRunner, postFailureRunner: postFailureRunner, ledger: ledger}
 }
 
 // wrapToolsWithHooks returns a tool slice with each entry wrapped in a
 // hookedTool. Returns the original slice unchanged when runner is nil or
 // when isSubAgent is true — sub-agents never fire hooks, the top-level
 // invocation of the sub-agent tool itself is wrapped on the caller's side.
-func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
-	if runner == nil || isSubAgent {
+func wrapToolsWithHooks(tools []fantasy.AgentTool, preRunner, postRunner, postFailureRunner *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
+	if isSubAgent {
 		return tools
 	}
+	ledger := newToolFailureLedger()
 	out := make([]fantasy.AgentTool, len(tools))
 	for i, tool := range tools {
-		out[i] = newHookedTool(tool, runner)
+		out[i] = newHookedTool(tool, preRunner, postRunner, postFailureRunner, ledger)
 	}
 	return out
 }
@@ -53,39 +58,104 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID := tools.GetSessionFromContext(ctx)
-	result, err := h.runner.Run(ctx, hooks.EventPreToolUse, sessionID, call.Name, call.Input)
-	if err != nil {
-		slog.Warn("Hook execution error, proceeding with tool call",
-			"tool", call.Name, "error", err)
-	}
-
-	if result.Decision == hooks.DecisionDeny || result.Halt {
-		reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", result.Reason)
-		if result.Halt {
-			reason = fmt.Sprintf("Turn halted by hook. Reason: %s", result.Reason)
+	var result hooks.AggregateResult
+	if h.preRunner != nil {
+		var err error
+		result, err = h.preRunner.Run(ctx, hooks.EventPreToolUse, sessionID, call.Name, call.Input)
+		if err != nil {
+			slog.Warn("Hook execution error, proceeding with tool call",
+				"tool", call.Name, "error", err)
 		}
-		resp := fantasy.NewTextErrorResponse(reason)
-		// Halt ends the whole turn; a plain deny only blocks this tool
-		// call so the model can see the error and try something else.
-		resp.StopTurn = result.Halt
-		resp.Metadata = hookMetadataJSON(result)
-		return resp, nil
+
+		if result.Decision == hooks.DecisionDeny || result.Decision == hooks.DecisionBlock || result.Halt {
+			reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", result.Reason)
+			if result.Halt {
+				reason = fmt.Sprintf("Turn halted by hook. Reason: %s", result.Reason)
+			}
+			resp := fantasy.NewTextErrorResponse(reason)
+			// Halt ends the whole turn; a plain deny only blocks this tool
+			// call so the model can see the error and try something else.
+			resp.StopTurn = result.Halt
+			resp.Metadata = hookMetadataJSON(result)
+			return resp, nil
+		}
+
+		if result.UpdatedInput != "" {
+			call.Input = result.UpdatedInput
+		}
+
+		// An explicit allow from a hook pre-approves the permission prompt for
+		// this tool call. Deny is already handled above; silence falls through
+		// to the normal permission flow.
+		if result.Decision == hooks.DecisionAllow {
+			ctx = permission.WithHookApproval(ctx, call.ID)
+		}
 	}
 
-	if result.UpdatedInput != "" {
-		call.Input = result.UpdatedInput
+	if call.Name == AgentToolName && !h.ledger.hasGrounding(sessionID) {
+		return fantasy.NewTextErrorResponse("Sub-agent call blocked until the root agent grounds the task. First inspect the current workspace/target with ls, view, grep, bash, crush_info, or an MCP filesystem/GitHub/docs tool, then call agent with the verified path and objective."), nil
 	}
 
-	// An explicit allow from a hook pre-approves the permission prompt for
-	// this tool call. Deny is already handled above; silence falls through
-	// to the normal permission flow.
-	if result.Decision == hooks.DecisionAllow {
-		ctx = permission.WithHookApproval(ctx, call.ID)
+	if previous, ok := h.ledger.previousFailure(sessionID, call.Name, call.Input); ok {
+		return fantasy.NewTextErrorResponse(repeatFailureMessage(previous)), nil
 	}
 
 	resp, err := h.inner.Run(ctx, call)
 	if err != nil {
+		h.ledger.recordFailure(sessionID, call.Name, call.Input, err.Error())
 		return resp, err
+	}
+
+	failed := resp.IsError
+	runner := h.postRunner
+	eventName := hooks.EventPostToolUse
+	if failed && h.postFailureRunner != nil {
+		runner = h.postFailureRunner
+		eventName = hooks.EventPostToolUseFailure
+	}
+	if runner != nil {
+		postPayload, _ := json.Marshal(map[string]any{
+			"content":   resp.Content,
+			"is_error":  resp.IsError,
+			"metadata":  resp.Metadata,
+			"stop_turn": resp.StopTurn,
+		})
+		postResult, postErr := runner.RunPayload(ctx, eventName, sessionID, call.Name, call.Input, hooks.Payload{
+			ToolName:   call.Name,
+			ToolInput:  json.RawMessage(call.Input),
+			ToolResult: json.RawMessage(postPayload),
+		})
+		if postErr != nil {
+			slog.Warn(eventName+" hook execution error, proceeding with tool result",
+				"tool", call.Name, "error", postErr)
+		}
+		blockedByPostHook := postResult.Decision == hooks.DecisionDeny || postResult.Decision == hooks.DecisionBlock
+		if blockedByPostHook {
+			resp = fantasy.NewTextErrorResponse(postHookFeedback(postResult, eventName))
+		}
+		if postResult.Context != "" && !blockedByPostHook {
+			if resp.Content != "" {
+				resp.Content += "\n"
+			}
+			resp.Content += postResult.Context
+		}
+		if postResult.Halt {
+			if postResult.Reason != "" {
+				if resp.Content != "" {
+					resp.Content += "\n"
+				}
+				resp.Content += "Turn halted by post-tool hook. Reason: " + postResult.Reason
+			}
+			resp.StopTurn = true
+		}
+		resp.Metadata = mergeHookMetadata(resp.Metadata, postResult)
+	}
+
+	if resp.IsError {
+		h.ledger.recordFailure(sessionID, call.Name, call.Input, resp.Content)
+	} else {
+		h.ledger.clearFailure(sessionID, call.Name, call.Input)
+		h.ledger.markGrounded(sessionID, call.Name)
 	}
 
 	if result.Context != "" {
@@ -97,6 +167,20 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 
 	resp.Metadata = mergeHookMetadata(resp.Metadata, result)
 	return resp, nil
+}
+
+func postHookFeedback(result hooks.AggregateResult, eventName string) string {
+	var parts []string
+	if result.Reason != "" {
+		parts = append(parts, result.Reason)
+	}
+	if result.Context != "" && result.Context != result.Reason {
+		parts = append(parts, result.Context)
+	}
+	if len(parts) == 0 {
+		parts = append(parts, eventName+" hook blocked normal tool result processing.")
+	}
+	return strings.Join(parts, "\n")
 }
 
 // buildHookMetadata creates a HookMetadata from an AggregateResult.

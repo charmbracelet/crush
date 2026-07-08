@@ -1,1 +1,1 @@
-Get stdout/stderr from a background shell by ID; set wait=true to block until completion.
+Get stdout/stderr from a background shell by ID. This returns a current snapshot immediately by default. If wait=true, wait at most one second, then return a snapshot while a running shell continues. Status is running, completed, failed, or canceled. A failed status means output retrieval succeeded but the underlying command failed; inspect that output before choosing a different recovery. Never wait indefinitely for log followers, watchers, or servers.

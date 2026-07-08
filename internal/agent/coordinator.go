@@ -597,6 +597,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		UserPromptHooks:      c.buildHookRunner(hooks.EventUserPromptSubmit, isSubAgent),
+		StopHooks:            c.buildHookRunner(hooks.EventStop, isSubAgent),
 	})
 
 	c.readyWg.Go(func() error {
@@ -648,11 +650,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
+	hookRunner := c.buildHookRunner(hooks.EventPreToolUse, isSubAgent)
+	postToolHookRunner := c.buildHookRunner(hooks.EventPostToolUse, isSubAgent)
+	postToolFailureHookRunner := c.buildHookRunner(hooks.EventPostToolUseFailure, isSubAgent)
 
 	allTools = append(
 		allTools,
@@ -660,6 +660,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
+		tools.NewJobListTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
@@ -726,9 +727,20 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// without hook interception to avoid firing the user's hook N times
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, postToolHookRunner, postToolFailureHookRunner, isSubAgent)
 
 	return filteredTools, nil
+}
+
+func (c *coordinator) buildHookRunner(event string, isSubAgent bool) *hooks.Runner {
+	if isSubAgent {
+		return nil
+	}
+	eventHooks := c.cfg.Config().Hooks[event]
+	if len(eventHooks) == 0 {
+		return nil
+	}
+	return hooks.NewRunner(eventHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config

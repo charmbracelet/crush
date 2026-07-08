@@ -12,7 +12,11 @@ import (
 
 // Hook event name constants.
 const (
-	EventPreToolUse = "PreToolUse"
+	EventPreToolUse         = "PreToolUse"
+	EventPostToolUse        = "PostToolUse"
+	EventPostToolUseFailure = "PostToolUseFailure"
+	EventUserPromptSubmit   = "UserPromptSubmit"
+	EventStop               = "Stop"
 )
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the
@@ -52,6 +56,8 @@ const (
 	DecisionAllow
 	// DecisionDeny means the hook blocked the action.
 	DecisionDeny
+	// DecisionBlock means the hook blocked normal processing after an event.
+	DecisionBlock
 )
 
 func (d Decision) String() string {
@@ -60,6 +66,8 @@ func (d Decision) String() string {
 		return "allow"
 	case DecisionDeny:
 		return "deny"
+	case DecisionBlock:
+		return "block"
 	default:
 		return "none"
 	}
@@ -67,27 +75,29 @@ func (d Decision) String() string {
 
 // HookResult holds the parsed output of a single hook execution.
 type HookResult struct {
-	Decision     Decision
-	Halt         bool   // If true, halt the whole turn.
-	Reason       string // Deny or halt reason (same field, different audience).
-	Context      string
-	UpdatedInput string // Shallow-merge patch against tool_input (opaque JSON).
+	Decision      Decision
+	Halt          bool   // If true, halt the whole turn.
+	Reason        string // Deny or halt reason (same field, different audience).
+	Context       string
+	UpdatedInput  string // Shallow-merge patch against tool_input (opaque JSON).
+	UpdatedPrompt string // Full replacement for prompt-submit hooks.
 }
 
 // AggregateResult holds the combined outcome of all hooks for an event.
 type AggregateResult struct {
-	Decision     Decision
-	Halt         bool       // Any hook requested halt.
-	HookCount    int        // Number of hooks that ran.
-	Hooks        []HookInfo // Info about each hook that ran (config order).
-	Reason       string     // Concatenated deny/halt reasons (newline-separated).
-	Context      string     // Concatenated context from all hooks.
-	UpdatedInput string     // Merged tool_input JSON (empty if no patches).
+	Decision      Decision
+	Halt          bool       // Any hook requested halt.
+	HookCount     int        // Number of hooks that ran.
+	Hooks         []HookInfo // Info about each hook that ran (config order).
+	Reason        string     // Concatenated deny/halt reasons (newline-separated).
+	Context       string     // Concatenated context from all hooks.
+	UpdatedInput  string     // Merged tool_input JSON (empty if no patches).
+	UpdatedPrompt string     // Last prompt replacement emitted by prompt hooks.
 }
 
 // aggregate merges multiple HookResults into a single AggregateResult.
 // Results are processed in config order (the order of the slice). Deny
-// wins over allow, allow wins over none. Halt is sticky. Reasons and
+// and block win over allow, allow wins over none. Halt is sticky. Reasons and
 // context concatenate in order. updated_input patches shallow-merge in
 // order against the original tool input; later patches override earlier
 // ones on colliding keys.
@@ -99,6 +109,7 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 		contexts []string
 		merged   = origToolInput
 		anyPatch = false
+		prompt   string
 	)
 	for _, r := range results {
 		switch r.Decision {
@@ -107,8 +118,13 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 			if r.Reason != "" {
 				reasons = append(reasons, r.Reason)
 			}
+		case DecisionBlock:
+			decision = DecisionBlock
+			if r.Reason != "" {
+				reasons = append(reasons, r.Reason)
+			}
 		case DecisionAllow:
-			if decision != DecisionDeny {
+			if decision != DecisionDeny && decision != DecisionBlock {
 				decision = DecisionAllow
 			}
 		case DecisionNone:
@@ -138,6 +154,9 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 			merged = next
 			anyPatch = true
 		}
+		if r.UpdatedPrompt != "" {
+			prompt = r.UpdatedPrompt
+		}
 	}
 
 	agg := AggregateResult{
@@ -153,6 +172,9 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 	}
 	if len(contexts) > 0 {
 		agg.Context = strings.Join(contexts, "\n")
+	}
+	if prompt != "" {
+		agg.UpdatedPrompt = prompt
 	}
 	return agg
 }

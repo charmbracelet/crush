@@ -736,6 +736,7 @@ func allToolNames() []string {
 		"crush_info",
 		"crush_logs",
 		"job_output",
+		"job_list",
 		"job_kill",
 		"download",
 		"edit",

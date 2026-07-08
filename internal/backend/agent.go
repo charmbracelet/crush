@@ -45,6 +45,15 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
+	// A standalone stop message is a control signal, not another prompt to
+	// queue behind the active work. RunID calls are excluded because their
+	// callers require a terminal event for the newly submitted run.
+	if msg.RunID == "" && len(msg.Attachments) == 0 && agent.IsExplicitCancelPrompt(msg.Prompt) &&
+		(ws.AgentCoordinator.IsSessionBusy(msg.SessionID) || ws.AgentCoordinator.QueuedPrompts(msg.SessionID) > 0) {
+		ws.AgentCoordinator.Cancel(msg.SessionID)
+		return nil
+	}
+
 	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
 
 	ws.runMu.Lock()

@@ -88,7 +88,21 @@ func (r *Runner) Hooks() []config.HookConfig {
 // Run executes all matching hooks for the given event and tool, returning
 // an aggregated result.
 func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
-	matching := r.matchingHooks(toolName)
+	return r.RunPayload(ctx, eventName, sessionID, toolName, toolInputJSON, Payload{
+		Event:     eventName,
+		SessionID: sessionID,
+		CWD:       r.cwd,
+		ToolName:  toolName,
+		ToolInput: rawObjectOrEmpty(toolInputJSON),
+	})
+}
+
+// RunPayload executes matching hooks with an event-specific stdin payload.
+// matchTarget is tested against the hook matcher; for tool events this is
+// the tool name, while lifecycle events use a stable event target such as
+// "prompt" or "stop".
+func (r *Runner) RunPayload(ctx context.Context, eventName, sessionID, matchTarget, origToolInput string, payload Payload) (AggregateResult, error) {
+	matching := r.matchingHooks(matchTarget)
 	if len(matching) == 0 {
 		return AggregateResult{Decision: DecisionNone}, nil
 	}
@@ -104,8 +118,11 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 		deduped = append(deduped, h)
 	}
 
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
+	payload.Event = eventName
+	payload.SessionID = sessionID
+	payload.CWD = r.cwd
+	envVars := BuildEnv(eventName, matchTarget, sessionID, r.cwd, r.projectDir, origToolInput)
+	payloadBytes := BuildPayloadFrom(payload)
 
 	results := make([]HookResult, len(deduped))
 	var wg sync.WaitGroup
@@ -114,12 +131,12 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	for i, h := range deduped {
 		go func(idx int, hook config.HookConfig) {
 			defer wg.Done()
-			results[idx] = r.runOne(ctx, hook, envVars, payload)
+			results[idx] = r.runOne(ctx, hook, envVars, payloadBytes)
 		}(i, h)
 	}
 	wg.Wait()
 
-	agg := aggregate(results, toolInputJSON)
+	agg := aggregate(results, origToolInput)
 	agg.Hooks = make([]HookInfo, len(deduped))
 	for i, h := range deduped {
 		agg.Hooks[i] = HookInfo{
@@ -134,7 +151,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	slog.Info(
 		"Hook completed",
 		"event", eventName,
-		"tool", toolName,
+		"target", matchTarget,
 		"hooks", len(deduped),
 		"decision", agg.Decision.String(),
 	)

@@ -8,9 +8,9 @@ Common shell builtins and core utils available on Windows.
 
 <execution_steps>
 1. Directory Verification: If creating directories/files, use LS tool to verify parent exists
-2. Security Check: Banned commands ({{ .BannedCommands }}) return error - explain to user. Safe read-only commands execute without prompts
+2. Policy Check: Safe read-only commands execute directly. Other commands use the configured permission mode and PreToolUse hooks
 3. Command Execution: Execute with proper quoting, capture output
-4. Auto-Background: Commands exceeding 1 minute (default, configurable via `auto_background_after`) automatically move to background and return shell ID
+4. Auto-Background: Commands exceeding 5 seconds (default, configurable via `auto_background_after`) automatically move to background and return a shell ID
 5. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters
 6. Return Result: Include errors, metadata with <cwd></cwd> tags
 </execution_steps>
@@ -21,6 +21,7 @@ Common shell builtins and core utils available on Windows.
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 - Each command runs in independent shell (no state persistence between calls)
 - Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)
+- For log readers and other commands that may follow indefinitely, prefer the command's finite/non-follow mode when available. Otherwise set run_in_background=true and inspect snapshots with job_output
 {{- if .RgAvailable }}
 - Ripgrep (`rg`) is available; prefer it over `grep` for faster, more intuitive searching
 {{- end }}

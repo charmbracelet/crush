@@ -2,10 +2,13 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -331,4 +334,86 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 		require.True(t, ok, "Should be able to retrieve background shell")
 		require.Equal(t, bgShell.ID, retrieved.ID)
 	})
+}
+
+func TestJobOutputWaitReturnsSnapshotForRunningShell(t *testing.T) {
+	workingDir := t.TempDir()
+	ctx := context.Background()
+
+	bgManager := shell.GetBackgroundShellManager()
+	bgShell, err := bgManager.Start(ctx, workingDir, nil, "echo 'snapshot-ready'; sleep 30", "snapshot test")
+	require.NoError(t, err)
+	defer bgManager.Kill(bgShell.ID)
+
+	require.Eventually(t, func() bool {
+		stdout, _, _, _ := bgShell.GetOutput()
+		return strings.Contains(stdout, "snapshot-ready")
+	}, time.Second, 25*time.Millisecond)
+
+	tool := NewJobOutputTool()
+	input, err := json.Marshal(JobOutputParams{ShellID: bgShell.ID, Wait: true})
+	require.NoError(t, err)
+	start := time.Now()
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "job-output-test",
+		Name:  JobOutputToolName,
+		Input: string(input),
+	})
+	require.NoError(t, err)
+	require.Less(t, time.Since(start), 2*time.Second)
+	require.Contains(t, resp.Content, "Status: running")
+	require.Contains(t, resp.Content, "snapshot-ready")
+	require.Contains(t, resp.Content, "Returned current output snapshot")
+}
+
+func TestJobOutputReportsUnderlyingCommandFailure(t *testing.T) {
+	workingDir := t.TempDir()
+	ctx := context.Background()
+
+	bgManager := shell.GetBackgroundShellManager()
+	bgShell, err := bgManager.Start(ctx, workingDir, nil, "echo 'failure-detail' >&2; exit 42", "failure test")
+	require.NoError(t, err)
+	defer bgManager.Kill(bgShell.ID)
+	bgShell.Wait()
+
+	tool := NewJobOutputTool()
+	input, err := json.Marshal(JobOutputParams{ShellID: bgShell.ID})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "job-output-failure-test",
+		Name:  JobOutputToolName,
+		Input: string(input),
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "reading job output succeeded even though the command failed")
+	require.Contains(t, resp.Content, "Status: failed")
+	require.Contains(t, resp.Content, "failure-detail")
+	require.Contains(t, resp.Content, "Exit code 42")
+
+	var meta JobOutputResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.True(t, meta.Done)
+	require.True(t, meta.Failed)
+	require.Equal(t, 42, meta.ExitCode)
+}
+
+func TestJobListToolShowsRunningShellID(t *testing.T) {
+	workingDir := t.TempDir()
+	ctx := context.Background()
+
+	bgManager := shell.GetBackgroundShellManager()
+	bgShell, err := bgManager.Start(ctx, workingDir, nil, "sleep 30", "list test")
+	require.NoError(t, err)
+	defer bgManager.Kill(bgShell.ID)
+
+	tool := NewJobListTool()
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "job-list-test",
+		Name:  JobListToolName,
+		Input: `{}`,
+	})
+	require.NoError(t, err)
+	require.Contains(t, resp.Content, bgShell.ID)
+	require.Contains(t, resp.Content, "sleep 30")
+	require.Contains(t, resp.Content, "running")
 }

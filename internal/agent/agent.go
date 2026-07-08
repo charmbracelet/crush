@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -165,6 +166,8 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	userPromptHooks      *hooks.Runner
+	stopHooks            *hooks.Runner
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -220,6 +223,8 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	UserPromptHooks      *hooks.Runner
+	StopHooks            *hooks.Runner
 }
 
 func NewSessionAgent(
@@ -238,6 +243,8 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		userPromptHooks:      opts.UserPromptHooks,
+		stopHooks:            opts.StopHooks,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -727,6 +734,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
+	outboundPrompt := call.Prompt
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -765,6 +773,33 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		} else if ctx.Err() != nil {
 			complete.Cancelled = true
 		}
+		if a.stopHooks != nil {
+			stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), 35*time.Second)
+			stopResult, hookErr := a.stopHooks.RunPayload(stopCtx, hooks.EventStop, call.SessionID, "stop", "", hooks.Payload{
+				Response:  complete.Text,
+				Error:     complete.Error,
+				Cancelled: complete.Cancelled,
+			})
+			stopCancel()
+			if hookErr != nil {
+				slog.Warn("Stop hook execution error, publishing run completion", "error", hookErr)
+			}
+			if stopResult.Context != "" {
+				if complete.Text != "" {
+					complete.Text += "\n"
+				}
+				complete.Text += stopResult.Context
+			}
+			if stopResult.Decision == hooks.DecisionDeny || stopResult.Halt {
+				reason := stopResult.Reason
+				if reason == "" {
+					reason = "run blocked by stop hook"
+				}
+				if complete.Error == "" {
+					complete.Error = reason
+				}
+			}
+		}
 		// Prefer the per-call hook when supplied so the coordinator
 		// can coalesce retries (e.g. unauthorized → re-auth → retry)
 		// into a single user-visible terminal event. The fallback
@@ -774,6 +809,33 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// non-interactive clients waiting on RunComplete.
 		a.publishRunComplete(ctx, call, complete)
 	}()
+
+	if a.userPromptHooks != nil {
+		var attachmentPaths []string
+		for _, attachment := range call.Attachments {
+			attachmentPaths = append(attachmentPaths, attachment.FilePath)
+		}
+		promptResult, hookErr := a.userPromptHooks.RunPayload(ctx, hooks.EventUserPromptSubmit, call.SessionID, "prompt", "", hooks.Payload{
+			Prompt:      call.Prompt,
+			Attachments: attachmentPaths,
+		})
+		if hookErr != nil {
+			slog.Warn("UserPromptSubmit hook execution error, continuing with original prompt", "error", hookErr)
+		}
+		if promptResult.Decision == hooks.DecisionDeny || promptResult.Halt {
+			reason := promptResult.Reason
+			if reason == "" {
+				reason = "prompt blocked by hook"
+			}
+			return nil, fmt.Errorf("prompt blocked by hook: %s", reason)
+		}
+		if promptResult.UpdatedPrompt != "" {
+			outboundPrompt = promptResult.UpdatedPrompt
+		}
+		if promptResult.Context != "" {
+			outboundPrompt = "<hook_context>\n" + promptResult.Context + "\n</hook_context>\n\n" + outboundPrompt
+		}
+	}
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
@@ -789,7 +851,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		maxOutputTokens = &call.MaxOutputTokens
 	}
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		ProviderOptions:  call.ProviderOptions,

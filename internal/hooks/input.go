@@ -24,28 +24,51 @@ type Payload struct {
 	Event     string          `json:"event"`
 	SessionID string          `json:"session_id"`
 	CWD       string          `json:"cwd"`
-	ToolName  string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
+	ToolName  string          `json:"tool_name,omitempty"`
+	ToolInput json.RawMessage `json:"tool_input,omitempty"`
+	Prompt    string          `json:"prompt,omitempty"`
+	// Attachments contains attachment paths rather than contents so
+	// hooks can make routing decisions without receiving file bytes.
+	Attachments []string        `json:"attachments,omitempty"`
+	ToolResult  json.RawMessage `json:"tool_result,omitempty"`
+	Response    string          `json:"response,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	Cancelled   bool            `json:"cancelled,omitempty"`
 }
 
 // BuildPayload constructs the JSON stdin payload for a hook command.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
-	toolInput := json.RawMessage(toolInputJSON)
-	if !json.Valid(toolInput) {
-		toolInput = json.RawMessage("{}")
-	}
-	p := Payload{
+	return BuildPayloadFrom(Payload{
 		Event:     eventName,
 		SessionID: sessionID,
 		CWD:       cwd,
 		ToolName:  toolName,
-		ToolInput: toolInput,
+		ToolInput: rawObjectOrEmpty(toolInputJSON),
+	})
+}
+
+// BuildPayloadFrom constructs the JSON stdin payload for a hook command
+// from an event-specific payload.
+func BuildPayloadFrom(p Payload) []byte {
+	if len(p.ToolInput) > 0 && !json.Valid(p.ToolInput) {
+		p.ToolInput = json.RawMessage("{}")
+	}
+	if len(p.ToolResult) > 0 && !json.Valid(p.ToolResult) {
+		p.ToolResult = json.RawMessage("{}")
 	}
 	data, err := json.Marshal(p)
 	if err != nil {
 		return []byte("{}")
 	}
 	return data
+}
+
+func rawObjectOrEmpty(value string) json.RawMessage {
+	toolInput := json.RawMessage(value)
+	if !json.Valid(toolInput) {
+		return json.RawMessage("{}")
+	}
+	return toolInput
 }
 
 // BuildEnv constructs the environment variable slice for a hook command.
@@ -94,12 +117,15 @@ func parseStdout(stdout string) HookResult {
 	}
 
 	var parsed struct {
-		Version      int             `json:"version"`
-		Decision     string          `json:"decision"`
-		Halt         bool            `json:"halt"`
-		Reason       string          `json:"reason"`
-		Context      json.RawMessage `json:"context"`
-		UpdatedInput json.RawMessage `json:"updated_input"`
+		Version                int             `json:"version"`
+		Decision               string          `json:"decision"`
+		Halt                   bool            `json:"halt"`
+		Reason                 string          `json:"reason"`
+		Context                json.RawMessage `json:"context"`
+		AdditionalContext      json.RawMessage `json:"additionalContext"`
+		AdditionalContextSnake json.RawMessage `json:"additional_context"`
+		UpdatedInput           json.RawMessage `json:"updated_input"`
+		UpdatedPrompt          string          `json:"updated_prompt"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
 		return HookResult{Decision: DecisionNone}
@@ -114,9 +140,16 @@ func parseStdout(stdout string) HookResult {
 	}
 
 	result := HookResult{
-		Halt:    parsed.Halt,
-		Reason:  parsed.Reason,
-		Context: parseContext(parsed.Context),
+		Halt:          parsed.Halt,
+		Reason:        parsed.Reason,
+		Context:       parseContext(parsed.Context),
+		UpdatedPrompt: parsed.UpdatedPrompt,
+	}
+	if result.Context == "" {
+		result.Context = parseContext(parsed.AdditionalContext)
+	}
+	if result.Context == "" {
+		result.Context = parseContext(parsed.AdditionalContextSnake)
 	}
 	result.Decision = parseDecision(parsed.Decision)
 	result.UpdatedInput = rawToString(parsed.UpdatedInput)
@@ -205,6 +238,8 @@ func parseDecision(s string) Decision {
 		return DecisionAllow
 	case "deny":
 		return DecisionDeny
+	case "block":
+		return DecisionBlock
 	default:
 		return DecisionNone
 	}

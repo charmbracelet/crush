@@ -1538,6 +1538,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.ImageSourceID)
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1728,7 +1729,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionClipboardImageSelected:
 		cmds = append(cmds, tea.Sequence(
 			func() tea.Msg {
-				m.dialog.CloseDialog(dialog.FilePickerID)
+				m.dialog.CloseDialog(dialog.ImageSourceID)
 				return nil
 			},
 			m.pasteImageFromClipboard,
@@ -2113,7 +2114,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.currentModelSupportsImages() {
 					break
 				}
-				if cmd := m.openFilesDialog(); cmd != nil {
+				if cmd := m.openImageSourceDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 
@@ -3728,6 +3729,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ImageSourceID:
+		if cmd := m.openImageSourceDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3850,6 +3855,17 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(dialog)
+	return nil
+}
+
+// openImageSourceDialog opens the image source picker dialog.
+func (m *UI) openImageSourceDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ImageSourceID) {
+		m.dialog.BringToFront(dialog.ImageSourceID)
+		return nil
+	}
+
+	m.dialog.OpenDialog(dialog.NewImageSource(m.com))
 	return nil
 }
 

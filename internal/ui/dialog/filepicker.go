@@ -35,7 +35,6 @@ type FilePicker struct {
 	help            help.Model
 	previewingImage bool // indicates if an image is being previewed
 	isTmux          bool
-	clipboardRow    bool
 
 	km struct {
 		Select,
@@ -107,7 +106,6 @@ func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
 	fp.CurrentDirectory = f.WorkingDir()
 
 	f.fp = fp
-	f.clipboardRow = true
 
 	return f, f.fp.Init()
 }
@@ -174,13 +172,8 @@ func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, f.km.Select) && f.clipboardRow:
-			return ActionClipboardImageSelected{}
 		case key.Matches(msg, f.km.Close):
 			return ActionClose{}
-		case key.Matches(msg, f.km.Down) && f.clipboardRow:
-			f.clipboardRow = false
-			return ActionCmd{tea.Batch(cmds...)}
 		}
 	}
 
@@ -253,18 +246,8 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview(imgPrevWidth, imgPrevHeight))
 	rc.AddPart(imgPreview)
 
-	var picker strings.Builder
-	clipboardLabel := "Windows clipboard image"
-	if f.clipboardRow {
-		picker.WriteString(styles.Selected.PaddingLeft(1).Width(innerWidth).Render(clipboardLabel))
-	} else {
-		picker.WriteString(styles.File.Width(innerWidth).Render(clipboardLabel))
-	}
-	if files := strings.TrimSpace(f.fp.View()); files != "" {
-		picker.WriteRune('\n')
-		picker.WriteString(files)
-	}
-	rc.AddPart(picker.String())
+	files := strings.TrimSpace(f.fp.View())
+	rc.AddPart(files)
 
 	view := rc.Render()
 

@@ -140,6 +140,10 @@ type ActionFilePickerSelected struct {
 	Path string
 }
 
+// ActionClipboardImageSelected is a message indicating the clipboard image
+// option has been selected in the file picker dialog.
+type ActionClipboardImageSelected struct{}
+
 // Cmd returns a command that reads the file at path and sends a
 // [message.Attachement] to the program.
 func (a ActionFilePickerSelected) Cmd() tea.Cmd {

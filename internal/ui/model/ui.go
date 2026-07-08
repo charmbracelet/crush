@@ -1725,6 +1725,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			},
 		))
 
+	case dialog.ActionClipboardImageSelected:
+		cmds = append(cmds, tea.Sequence(
+			func() tea.Msg {
+				m.dialog.CloseDialog(dialog.FilePickerID)
+				return nil
+			},
+			m.pasteImageFromClipboard,
+			func() tea.Msg {
+				fimage.ResetCache()
+				return nil
+			},
+		))
+
 	case dialog.ActionRunCustomCommand:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()

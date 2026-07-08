@@ -1,15 +1,20 @@
 package model
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/stretchr/testify/require"
 )
 
 // testMessageItem is a minimal chat item used to populate the chat list
@@ -26,6 +31,23 @@ func (m testMessageItem) Version() uint64      { return 0 }
 func (m testMessageItem) Finished() bool       { return true }
 
 var _ chat.MessageItem = testMessageItem{}
+
+type todoBusyWorkspace struct {
+	workspace.Workspace
+	busySessions map[string]bool
+}
+
+func (w *todoBusyWorkspace) AgentIsReady() bool {
+	return true
+}
+
+func (w *todoBusyWorkspace) AgentIsBusy() bool {
+	return true
+}
+
+func (w *todoBusyWorkspace) AgentIsSessionBusy(sessionID string) bool {
+	return w.busySessions[sessionID]
+}
 
 // newTestUI builds a focused uiChat model with dynamic textarea sizing enabled.
 // It intentionally keeps dependencies minimal so layout behavior can be tested
@@ -129,6 +151,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.height = 50
+		u.todoActive = true
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 			{Status: session.TodoStatusPending, Content: "do more"},
@@ -149,6 +172,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.height = 30
+		u.todoActive = true
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
@@ -165,6 +189,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.height = 50
+		u.todoActive = true
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusCompleted, Content: "done"},
 		}}
@@ -182,6 +207,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 		u := newTestUI()
 		u.height = 50
 		u.pillsExpanded = true
+		u.todoActive = true
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
@@ -225,4 +251,123 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 			t.Fatal("expected pillsExpanded to be false when there is no session")
 		}
 	})
+}
+
+func TestTodoActivityFollowsTurnLifecycle(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		{Status: session.TodoStatusInProgress, Content: "do work"},
+		{Status: session.TodoStatusPending, Content: "do more"},
+	}}
+
+	u.noteTodoUpdate(nil, true)
+	require.True(t, u.hasActiveTodos())
+	require.Equal(t, pillHeightWithBorder, u.pillsAreaHeight())
+
+	u.finishTodoTurn("other-session", false)
+	require.True(t, u.hasActiveTodos())
+
+	wantTodos := slices.Clone(u.session.Todos)
+	u.finishTodoTurn("s1", false)
+	require.False(t, u.hasActiveTodos())
+	require.Zero(t, u.pillsAreaHeight())
+	require.Equal(t, wantTodos, u.session.Todos)
+}
+
+func TestTodoActivityStartsForRepeatedToolSnapshot(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		{Status: session.TodoStatusInProgress, Content: "do work"},
+	}}
+	toolMessage := message.Message{}
+	toolMessage.AddToolCall(message.ToolCall{Name: tools.TodosToolName, Finished: true})
+
+	u.noteTodoMessage(toolMessage, true)
+	require.True(t, u.hasActiveTodos())
+
+	u.finishTodoTurn("s1", false)
+	u.noteTodoMessage(toolMessage, false)
+	require.False(t, u.hasActiveTodos())
+}
+
+func TestTodoTerminalEventDoesNotCloseNewBusyTurn(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		{Status: session.TodoStatusInProgress, Content: "do work"},
+	}}
+	u.todoActive = true
+
+	u.finishTodoTurn("s1", true)
+	require.True(t, u.hasActiveTodos())
+
+	u.finishTodoTurn("s1", false)
+	require.False(t, u.hasActiveTodos())
+}
+
+func TestRestoreTodoActivityForBusySession(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		{Status: session.TodoStatusInProgress, Content: "do work"},
+	}}
+
+	u.restoreTodoActivity(true)
+	require.True(t, u.hasActiveTodos())
+
+	u.restoreTodoActivity(false)
+	require.False(t, u.hasActiveTodos())
+}
+
+func TestTodoTurnCompletionFocusesRemainingQueue(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		{Status: session.TodoStatusInProgress, Content: "do work"},
+	}}
+	u.todoActive = true
+	u.promptQueue = 1
+	u.pillsExpanded = true
+	u.focusedPillSection = pillSectionTodos
+
+	u.finishTodoTurn("s1", false)
+	require.False(t, u.hasActiveTodos())
+	require.True(t, u.pillsExpanded)
+	require.Equal(t, pillSectionQueue, u.focusedPillSection)
+}
+
+func TestTodoBusyStateIsScopedToSession(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.com.Workspace = &todoBusyWorkspace{busySessions: map[string]bool{
+		"busy-session": true,
+	}}
+
+	require.True(t, u.isTodoSessionBusy("busy-session"))
+	require.False(t, u.isTodoSessionBusy("idle-session"))
+}
+
+func TestNormalizePillFocusWhenQueueDisappears(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		{Status: session.TodoStatusInProgress, Content: "do work"},
+		{Status: session.TodoStatusPending, Content: "do more"},
+	}}
+	u.todoActive = true
+	u.pillsExpanded = true
+	u.focusedPillSection = pillSectionQueue
+
+	u.updateLayoutAndSize()
+	require.Equal(t, pillSectionTodos, u.focusedPillSection)
+	require.Equal(t, u.pillsAreaHeight(), u.layout.pills.Dy())
 }

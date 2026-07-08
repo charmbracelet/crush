@@ -660,6 +660,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if s := instructions.String(); s != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
+	systemPrompt = addTodoTrackingInstructions(systemPrompt, agentTools)
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -775,7 +776,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}()
 
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, currentSession.Todos, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -1311,7 +1312,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, currentSession.Todos)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
@@ -1468,15 +1469,52 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func todoReminder(todos []session.Todo) string {
+	if len(todos) == 0 || !session.HasIncompleteTodos(todos) {
+		return `This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
+If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
+If not, please feel free to ignore. Again do not mention this message to the user.`
+	}
+
+	var reminder strings.Builder
+	reminder.WriteString("This is a reminder of your current todo list:\n")
+	for _, todo := range todos {
+		fmt.Fprintf(&reminder, "- [%s] %s\n", todo.Status, todo.Content)
+	}
+	reminder.WriteString(`Continue using the "todos" tool to keep this list accurate. Mark finished tasks completed promptly, and complete all todos when the work is done so stale incomplete todos do not remain.
+Do not mention this reminder to the user.`)
+	return reminder.String()
+}
+
+const todoTrackingInstructions = `<todo_tracking>
+Use the todos tool for non-trivial work that benefits from a visible task list.
+There should always be exactly one in_progress todo until everything is done.
+Mark finished todos completed promptly and move the next todo to in_progress.
+Before your final response, call the todos tool to mark all finished todos completed.
+When the work is fully done, no todo may remain pending or in_progress.
+Do not clear a completed todo list; the completed snapshot is retained in history.
+</todo_tracking>`
+
+func addTodoTrackingInstructions(systemPrompt string, agentTools []fantasy.AgentTool) string {
+	for _, tool := range agentTools {
+		if tool.Info().Name != tools.TodosToolName {
+			continue
+		}
+		if systemPrompt == "" {
+			return todoTrackingInstructions
+		}
+		return systemPrompt + "\n\n" + todoTrackingInstructions
+	}
+	return systemPrompt
+}
+
+func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, todos []session.Todo, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
 	if !a.isSubAgent {
 		history = append(history, fantasy.NewUserMessage(
 			fmt.Sprintf(
 				"<system_reminder>%s</system_reminder>",
-				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
-If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
-If not, please feel free to ignore. Again do not mention this message to the user.`,
+				todoReminder(todos),
 			),
 		))
 	}

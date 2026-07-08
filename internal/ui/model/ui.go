@@ -302,6 +302,7 @@ type UI struct {
 	// Todo spinner
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
+	todoActive     bool
 
 	// mouse highlighting related state
 	lastClickTime time.Time
@@ -600,6 +601,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		queueSize := m.com.Workspace.AgentQueuedPrompts(m.session.ID)
 		if queueSize != m.promptQueue {
 			m.promptQueue = queueSize
+			m.normalizePillFocus()
 			m.updateLayoutAndSize()
 		}
 	}
@@ -624,12 +626,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case pubsub.Event[notify.RunComplete]:
+		previousPillsHeight := m.pillsAreaHeight()
+		m.finishTodoTurn(msg.Payload.SessionID, m.isTodoSessionBusy(msg.Payload.SessionID))
+		if m.pillsAreaHeight() != previousPillsHeight {
+			m.updateLayoutAndSize()
+		} else {
+			m.renderPills()
+		}
 	case loadSessionMsg:
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
+		m.restoreTodoActivity(m.isTodoSessionBusy(m.session.ID))
 		m.sessionFiles = msg.files
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
@@ -649,9 +660,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.runShellCommandInternal(m.pendingBangCommand, true))
 			m.pendingBangCommand = ""
 		}
-		if hasInProgressTodo(m.session.Todos) {
+		if m.hasActiveTodos() && hasInProgressTodo(m.session.Todos) {
 			// only start spinner if there is an in-progress todo
-			if m.isAgentBusy() {
+			if m.isTodoSessionBusy(m.session.ID) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
 			}
@@ -718,12 +729,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevPillsHeight := m.pillsAreaHeight()
+			previousTodos := m.session.Todos
 			m.session = &msg.Payload
-			if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
+			agentBusy := m.isTodoSessionBusy(m.session.ID)
+			m.noteTodoUpdate(previousTodos, agentBusy)
+			if m.hasActiveTodos() && hasInProgressTodo(m.session.Todos) && agentBusy && !m.todoIsSpinning {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
 			}
-			if m.todoIsSpinning && !m.isAgentBusy() {
+			if m.todoIsSpinning && !agentBusy {
 				m.todoIsSpinning = false
 			}
 			if m.pillsAreaHeight() != prevPillsHeight {
@@ -745,6 +759,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
+		previousPillsHeight := m.pillsAreaHeight()
+		agentBusy := m.isTodoSessionBusy(m.session.ID)
+		m.noteTodoMessage(msg.Payload, agentBusy)
 		switch msg.Type {
 		case pubsub.CreatedEvent:
 			cmds = append(cmds, m.appendSessionMessage(msg.Payload))
@@ -754,16 +771,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.RemoveMessage(msg.Payload.ID)
 		}
 		// start the spinner if there is a new message
-		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
+		if m.hasActiveTodos() && hasInProgressTodo(m.session.Todos) && agentBusy && !m.todoIsSpinning {
 			m.todoIsSpinning = true
 			cmds = append(cmds, m.todoSpinner.Tick)
 		}
 		// stop the spinner if the agent is not busy anymore
-		if m.todoIsSpinning && !m.isAgentBusy() {
+		if m.todoIsSpinning && !agentBusy {
 			m.todoIsSpinning = false
 		}
-		// there is a number of things that could change the pills here so we want to re-render
-		m.renderPills()
+		if m.pillsAreaHeight() != previousPillsHeight {
+			m.updateLayoutAndSize()
+		} else {
+			m.renderPills()
+		}
+		m.autoExpandPillsIfReasonable()
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
@@ -971,7 +992,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		if m.state == uiChat && m.hasSession() && hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
+		if m.state == uiChat && m.hasActiveTodos() && hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
 			var cmd tea.Cmd
 			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
 			if cmd != nil {
@@ -2620,7 +2641,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
-			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+			if m.pillsExpanded && m.hasActiveTodos() && m.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
 			}
 		}
@@ -2739,7 +2760,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.ClearHighlight,
 				},
 			)
-			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+			if m.pillsExpanded && m.hasActiveTodos() && m.promptQueue > 0 {
 				binds = append(binds, []key.Binding{k.Chat.PillLeft})
 			}
 		}
@@ -2817,6 +2838,8 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 
 // updateLayoutAndSize updates the layout and sizes of UI components.
 func (m *UI) updateLayoutAndSize() {
+	m.normalizePillFocus()
+
 	// Determine if we should be in compact mode
 	if m.state == uiChat {
 		if m.forceCompactMode {
@@ -3770,7 +3793,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	if hasSession {
 		sessionID = m.session.ID
 	}
-	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
+	hasTodos := hasSession && m.hasActiveTodos()
 	hasQueue := m.promptQueue > 0
 
 	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
@@ -3896,6 +3919,13 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	switch n.Type {
 	case notify.TypeAgentFinished:
+		previousPillsHeight := m.pillsAreaHeight()
+		m.finishTodoTurn(n.SessionID, m.isTodoSessionBusy(n.SessionID))
+		if m.pillsAreaHeight() != previousPillsHeight {
+			m.updateLayoutAndSize()
+		} else {
+			m.renderPills()
+		}
 		var cmds []tea.Cmd
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",

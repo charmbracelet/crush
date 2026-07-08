@@ -2,10 +2,13 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -50,6 +53,70 @@ func hasInProgressTodo(todos []session.Todo) bool {
 		}
 	}
 	return false
+}
+
+func (m *UI) hasActiveTodos() bool {
+	return m.todoActive && m.hasSession() && hasIncompleteTodos(m.session.Todos)
+}
+
+func (m *UI) isTodoSessionBusy(sessionID string) bool {
+	return sessionID != "" && m.com != nil && m.com.Workspace != nil &&
+		m.com.Workspace.AgentIsReady() && m.com.Workspace.AgentIsSessionBusy(sessionID)
+}
+
+func (m *UI) normalizePillFocus() {
+	hasTodos := m.hasActiveTodos()
+	hasQueue := m.promptQueue > 0
+	switch {
+	case hasTodos && !hasQueue:
+		m.focusedPillSection = pillSectionTodos
+	case hasQueue && !hasTodos:
+		m.focusedPillSection = pillSectionQueue
+	}
+}
+
+func (m *UI) noteTodoUpdate(previous []session.Todo, agentBusy bool) {
+	if !m.hasSession() || slices.Equal(previous, m.session.Todos) {
+		return
+	}
+	m.todoActive = agentBusy && len(m.session.Todos) > 0
+	if !m.todoActive {
+		m.todoIsSpinning = false
+	}
+	m.normalizePillFocus()
+}
+
+func (m *UI) noteTodoMessage(msg message.Message, agentBusy bool) {
+	if !agentBusy {
+		return
+	}
+	for _, toolCall := range msg.ToolCalls() {
+		if toolCall.Name == agenttools.TodosToolName {
+			m.todoActive = true
+			m.normalizePillFocus()
+			return
+		}
+	}
+}
+
+func (m *UI) restoreTodoActivity(agentBusy bool) {
+	m.todoActive = agentBusy && m.hasSession() && hasIncompleteTodos(m.session.Todos)
+	m.todoIsSpinning = false
+	m.normalizePillFocus()
+}
+
+func (m *UI) finishTodoTurn(sessionID string, agentBusy bool) {
+	if !m.hasSession() || m.session.ID != sessionID || agentBusy {
+		return
+	}
+	m.todoActive = false
+	m.todoIsSpinning = false
+	m.normalizePillFocus()
+	if m.promptQueue > 0 {
+		return
+	}
+	m.pillsExpanded = false
+	m.pillsAutoExpanded = false
 }
 
 // queuePill renders the queue count pill with gradient triangles.
@@ -145,10 +212,11 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
+	m.normalizePillFocus()
 	if m.height < pillsHeightReasonableTerminalHeight {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := m.hasActiveTodos() || m.promptQueue > 0
 	if !hasPills {
 		return nil
 	}
@@ -160,7 +228,7 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	}
 	m.pillsExpanded = true
 	m.pillsAutoExpanded = true
-	if hasIncompleteTodos(m.session.Todos) {
+	if m.hasActiveTodos() {
 		m.focusedPillSection = pillSectionTodos
 	} else {
 		m.focusedPillSection = pillSectionQueue
@@ -177,13 +245,13 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := m.hasActiveTodos() || m.promptQueue > 0
 	if !hasPills {
 		return nil
 	}
 	m.pillsExpanded = !m.pillsExpanded
 	if m.pillsExpanded {
-		if hasIncompleteTodos(m.session.Todos) {
+		if m.hasActiveTodos() {
 			m.focusedPillSection = pillSectionTodos
 		} else {
 			m.focusedPillSection = pillSectionQueue
@@ -206,7 +274,7 @@ func (m *UI) switchPillSection(dir int) tea.Cmd {
 	if !m.pillsExpanded || !m.hasSession() {
 		return nil
 	}
-	hasIncompleteTodos := hasIncompleteTodos(m.session.Todos)
+	hasIncompleteTodos := m.hasActiveTodos()
 	hasQueue := m.promptQueue > 0
 
 	if dir < 0 && m.focusedPillSection == pillSectionQueue && hasIncompleteTodos {
@@ -227,7 +295,7 @@ func (m *UI) pillsAreaHeight() int {
 	if !m.hasSession() {
 		return 0
 	}
-	hasIncomplete := hasIncompleteTodos(m.session.Todos)
+	hasIncomplete := m.hasActiveTodos()
 	hasQueue := m.promptQueue > 0
 	hasPills := hasIncomplete || hasQueue
 	if !hasPills {
@@ -260,7 +328,7 @@ func (m *UI) renderPills() {
 	paddingLeft := 3
 	contentWidth := max(width-paddingLeft, 0)
 
-	hasIncomplete := hasIncompleteTodos(m.session.Todos)
+	hasIncomplete := m.hasActiveTodos()
 	hasQueue := m.promptQueue > 0
 
 	if !hasIncomplete && !hasQueue {

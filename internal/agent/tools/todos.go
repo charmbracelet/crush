@@ -15,7 +15,7 @@ var todosDescription string
 const TodosToolName = "todos"
 
 type TodosParams struct {
-	Todos []TodoItem `json:"todos" description:"The updated todo list"`
+	Todos []TodoItem `json:"todos" description:"The complete replacement todo list; include every existing incomplete todo"`
 }
 
 type TodoItem struct {
@@ -48,13 +48,21 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to get session: %w", err)
 			}
 
-			isNew := len(currentSession.Todos) == 0
+			isNew := !session.HasIncompleteTodos(currentSession.Todos)
+			if isNew && len(currentSession.Todos) > 0 && len(params.Todos) == 0 {
+				return fantasy.ToolResponse{}, fmt.Errorf("completed todo list cannot be cleared; start a new list or leave it unchanged")
+			}
+
+			currentTodos := currentSession.Todos
+			if isNew {
+				currentTodos = nil
+			}
 			oldStatusByContent := make(map[string]session.TodoStatus)
-			for _, todo := range currentSession.Todos {
+			for _, todo := range currentTodos {
 				oldStatusByContent[todo.Content] = todo.Status
 			}
 
-			if err := validateTodoUpdate(currentSession.Todos, params.Todos, oldStatusByContent); err != nil {
+			if err := validateTodoUpdate(currentTodos, params.Todos, oldStatusByContent); err != nil {
 				return fantasy.ToolResponse{}, err
 			}
 
@@ -114,7 +122,14 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 			response += fmt.Sprintf("Status: %d pending, %d in progress, %d completed\n",
 				pendingCount, inProgressCount, completedCount)
 
-			response += "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable."
+			switch {
+			case len(todos) == 0:
+				response += "Todo list cleared successfully. You may now provide your final response."
+			case completedCount == len(todos):
+				response += "All todos are completed. You may now provide your final response."
+			default:
+				response += "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable."
+			}
 
 			metadata := TodosResponseMetadata{
 				IsNew:         isNew,
@@ -167,9 +182,6 @@ func validateTodoUpdate(currentTodos []session.Todo, nextTodos []TodoItem, oldSt
 		}
 		if oldStatus == session.TodoStatusCompleted && newStatus != session.TodoStatusCompleted {
 			return fmt.Errorf("completed todo %q cannot move back to %q", item.Content, item.Status)
-		}
-		if oldStatus == session.TodoStatusInProgress && newStatus == session.TodoStatusPending {
-			return fmt.Errorf("in_progress todo %q cannot move back to pending", item.Content)
 		}
 	}
 

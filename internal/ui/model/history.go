@@ -120,12 +120,14 @@ func (m *UI) updateHistoryDraft(oldValue string) {
 func (m *UI) syncBangModeFromTextarea() {
 	val := m.textarea.Value()
 	hasBang := strings.HasPrefix(val, "!")
-	if hasBang && !m.bangMode {
-		m.bangMode = true
-		m.bangWasEmpty = false
-		m.textarea.SetValue(val[1:])
+	if hasBang {
+		if !m.bangMode {
+			m.bangMode = true
+			m.bangWasEmpty = false
+		}
+		m.textarea.SetValue(strings.TrimPrefix(val, "!"))
 		m.textarea.MoveToBegin()
-	} else if !hasBang && m.bangMode {
+	} else if m.bangMode {
 		m.bangMode = false
 		m.bangWasEmpty = false
 	}

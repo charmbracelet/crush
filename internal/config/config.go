@@ -52,14 +52,17 @@ func (s SelectedModelType) String() string {
 }
 
 const (
-	SelectedModelTypeLarge SelectedModelType = "large"
-	SelectedModelTypeSmall SelectedModelType = "small"
+	SelectedModelTypeLarge   SelectedModelType = "large"
+	SelectedModelTypeSmall   SelectedModelType = "small"
+	SelectedModelTypeSummary SelectedModelType = "summary"
+	SelectedModelTypeReview  SelectedModelType = "review"
 )
 
 const (
-	AgentCoder string = "coder"
-	AgentPlan  string = "plan"
-	AgentTask  string = "task"
+	AgentCoder  string = "coder"
+	AgentPlan   string = "plan"
+	AgentTask   string = "task"
+	AgentReview string = "review"
 )
 
 type SelectedModel struct {
@@ -526,7 +529,7 @@ type Agent struct {
 	// This is the id of the system prompt used by the agent
 	Disabled bool `json:"disabled,omitempty"`
 
-	Model SelectedModelType `json:"model" jsonschema:"required,description=The model type to use for this agent,enum=large,enum=small,default=large"`
+	Model SelectedModelType `json:"model" jsonschema:"required,description=The model type to use for this agent,enum=large,enum=small,enum=summary,enum=review,default=large"`
 
 	// The available tools for the agent
 	//  if this is nil, all tools are available
@@ -613,7 +616,7 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
 
-	// We currently only support large/small as values here.
+	// We currently support large, small, summary, and review as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 
 	// Recently used models stored in the data directory config.
@@ -737,6 +740,22 @@ func (c *Config) SmallModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
+func (c *Config) SummaryModel() *catwalk.Model {
+	model, ok := c.Models[SelectedModelTypeSummary]
+	if !ok {
+		return nil
+	}
+	return c.GetModel(model.Provider, model.Model)
+}
+
+func (c *Config) ReviewModel() *catwalk.Model {
+	model, ok := c.Models[SelectedModelTypeReview]
+	if !ok {
+		return nil
+	}
+	return c.GetModel(model.Provider, model.Model)
+}
+
 const maxRecentModelsPerType = 5
 
 func allToolNames() []string {
@@ -834,6 +853,16 @@ func (c *Config) SetupAgents() {
 			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
+		},
+
+		AgentReview: {
+			ID:           AgentReview,
+			Name:         "Review",
+			Description:  "An agent that reviews code, plans, and recent work without modifying files.",
+			Model:        SelectedModelTypeReview,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: resolvePlanTools(allowedTools),
+			AllowedMCP:   map[string][]string{},
 		},
 	}
 	c.Agents = agents

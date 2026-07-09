@@ -131,6 +131,8 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 	cfg.Models[SelectedModelTypeLarge] = resolved.Large
 	cfg.Models[SelectedModelTypeSmall] = resolved.Small
+	cfg.Models[SelectedModelTypeSummary] = resolved.Summary
+	cfg.Models[SelectedModelTypeReview] = resolved.Review
 
 	// Persist any fallback corrections while we still hold writeMu.
 	if resolved.LargeFallback {
@@ -145,6 +147,20 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 			return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
 		}); err != nil {
 			return nil, fmt.Errorf("failed to update preferred small model: %w", err)
+		}
+	}
+	if resolved.SummaryFallback {
+		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+			return store.updatePreferredModelFields(c, SelectedModelTypeSummary, resolved.Summary)
+		}); err != nil {
+			return nil, fmt.Errorf("failed to update preferred summary model: %w", err)
+		}
+	}
+	if resolved.ReviewFallback {
+		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+			return store.updatePreferredModelFields(c, SelectedModelTypeReview, resolved.Review)
+		}); err != nil {
+			return nil, fmt.Errorf("failed to update preferred review model: %w", err)
 		}
 	}
 	store.SetupAgents()
@@ -733,8 +749,12 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 type resolvedModels struct {
 	Large         SelectedModel
 	Small         SelectedModel
+	Summary       SelectedModel
+	Review        SelectedModel
 	LargeFallback bool // true if Large was corrected to a default
 	SmallFallback bool // true if Small was corrected to a default
+	SummaryFallback bool // true if Summary was corrected to a default
+	ReviewFallback bool // true if Review was corrected to a default
 }
 
 // resolveSelectedModels validates the user's configured model selections
@@ -748,91 +768,13 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 	if err != nil {
 		return result, fmt.Errorf("failed to select default models: %w", err)
 	}
-	large, small := defaultLarge, defaultSmall
-
 	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
-	if largeModelConfigured {
-		if largeModelSelected.Model != "" {
-			large.Model = largeModelSelected.Model
-		}
-		if largeModelSelected.Provider != "" {
-			large.Provider = largeModelSelected.Provider
-		}
-		model := cfg.GetModel(large.Provider, large.Model)
-		if model == nil {
-			large = defaultLarge
-			result.LargeFallback = true
-		} else {
-			if largeModelSelected.MaxTokens > 0 {
-				large.MaxTokens = largeModelSelected.MaxTokens
-			} else {
-				large.MaxTokens = model.DefaultMaxTokens
-			}
-			if largeModelSelected.ReasoningEffort != "" {
-				large.ReasoningEffort = largeModelSelected.ReasoningEffort
-			} else {
-				large.ReasoningEffort = model.DefaultReasoningEffort
-			}
-			large.Think = largeModelSelected.Think
-			if largeModelSelected.Temperature != nil {
-				large.Temperature = largeModelSelected.Temperature
-			}
-			if largeModelSelected.TopP != nil {
-				large.TopP = largeModelSelected.TopP
-			}
-			if largeModelSelected.TopK != nil {
-				large.TopK = largeModelSelected.TopK
-			}
-			if largeModelSelected.FrequencyPenalty != nil {
-				large.FrequencyPenalty = largeModelSelected.FrequencyPenalty
-			}
-			if largeModelSelected.PresencePenalty != nil {
-				large.PresencePenalty = largeModelSelected.PresencePenalty
-			}
-		}
-	}
 	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
-	if smallModelConfigured {
-		if smallModelSelected.Model != "" {
-			small.Model = smallModelSelected.Model
-		}
-		if smallModelSelected.Provider != "" {
-			small.Provider = smallModelSelected.Provider
-		}
 
-		model := cfg.GetModel(small.Provider, small.Model)
-		if model == nil {
-			small = defaultSmall
-			result.SmallFallback = true
-		} else {
-			if smallModelSelected.MaxTokens > 0 {
-				small.MaxTokens = smallModelSelected.MaxTokens
-			} else {
-				small.MaxTokens = model.DefaultMaxTokens
-			}
-			if smallModelSelected.ReasoningEffort != "" {
-				small.ReasoningEffort = smallModelSelected.ReasoningEffort
-			} else {
-				small.ReasoningEffort = model.DefaultReasoningEffort
-			}
-			if smallModelSelected.Temperature != nil {
-				small.Temperature = smallModelSelected.Temperature
-			}
-			if smallModelSelected.TopP != nil {
-				small.TopP = smallModelSelected.TopP
-			}
-			if smallModelSelected.TopK != nil {
-				small.TopK = smallModelSelected.TopK
-			}
-			if smallModelSelected.FrequencyPenalty != nil {
-				small.FrequencyPenalty = smallModelSelected.FrequencyPenalty
-			}
-			if smallModelSelected.PresencePenalty != nil {
-				small.PresencePenalty = smallModelSelected.PresencePenalty
-			}
-			small.Think = smallModelSelected.Think
-		}
-	}
+	large, largeFallback := cfg.resolveSelectedModel(largeModelSelected, largeModelConfigured, defaultLarge)
+	small, smallFallback := cfg.resolveSelectedModel(smallModelSelected, smallModelConfigured, defaultSmall)
+	result.LargeFallback = largeFallback
+	result.SmallFallback = smallFallback
 
 	// When small isn't explicitly configured and the provider isn't a
 	// known built-in, use the large model as the small model. This
@@ -852,9 +794,63 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 		}
 	}
 
+	summaryModelSelected, summaryModelConfigured := cfg.Models[SelectedModelTypeSummary]
+	summary, summaryFallback := cfg.resolveSelectedModel(summaryModelSelected, summaryModelConfigured, large)
+	result.SummaryFallback = summaryFallback
+
+	reviewModelSelected, reviewModelConfigured := cfg.Models[SelectedModelTypeReview]
+	review, reviewFallback := cfg.resolveSelectedModel(reviewModelSelected, reviewModelConfigured, large)
+	result.ReviewFallback = reviewFallback
+
 	result.Large = large
 	result.Small = small
+	result.Summary = summary
+	result.Review = review
 	return result, nil
+}
+
+func (cfg *Config) resolveSelectedModel(selected SelectedModel, configured bool, fallback SelectedModel) (SelectedModel, bool) {
+	resolved := fallback
+	if !configured {
+		return resolved, false
+	}
+	if selected.Model != "" {
+		resolved.Model = selected.Model
+	}
+	if selected.Provider != "" {
+		resolved.Provider = selected.Provider
+	}
+	model := cfg.GetModel(resolved.Provider, resolved.Model)
+	if model == nil {
+		return fallback, true
+	}
+	if selected.MaxTokens > 0 {
+		resolved.MaxTokens = selected.MaxTokens
+	} else {
+		resolved.MaxTokens = model.DefaultMaxTokens
+	}
+	if selected.ReasoningEffort != "" {
+		resolved.ReasoningEffort = selected.ReasoningEffort
+	} else {
+		resolved.ReasoningEffort = model.DefaultReasoningEffort
+	}
+	resolved.Think = selected.Think
+	if selected.Temperature != nil {
+		resolved.Temperature = selected.Temperature
+	}
+	if selected.TopP != nil {
+		resolved.TopP = selected.TopP
+	}
+	if selected.TopK != nil {
+		resolved.TopK = selected.TopK
+	}
+	if selected.FrequencyPenalty != nil {
+		resolved.FrequencyPenalty = selected.FrequencyPenalty
+	}
+	if selected.PresencePenalty != nil {
+		resolved.PresencePenalty = selected.PresencePenalty
+	}
+	return resolved, false
 }
 
 // lookupConfigs searches config files starting at cwd and walking up

@@ -435,6 +435,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "mode_build", "Build Mode", "", ActionSetAgentMode{AgentID: config.AgentCoder}).WithAliases("build", "/build", "coder"),
 		NewCommandItem(c.com.Styles, "mode_plan", "Plan Mode", "", ActionSetAgentMode{AgentID: config.AgentPlan}).WithAliases("plan", "/plan"),
 		NewCommandItem(c.com.Styles, "mode_task", "Task Mode", "", ActionSetAgentMode{AgentID: config.AgentTask}).WithAliases("task", "/task"),
+		NewCommandItem(c.com.Styles, "mode_review", "Review Mode", "", ActionSetAgentMode{AgentID: config.AgentReview}).WithAliases("review", "/review"),
 	}
 
 	// Only show compact command if there's an active session
@@ -472,10 +473,8 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.hasSession {
-		cfgPrime := c.com.Config()
-		agentCfg := cfgPrime.Agents[config.AgentCoder]
-		model := cfgPrime.GetModelByType(agentCfg.Model)
-		if model != nil && model.SupportsImages {
+		model := c.com.Workspace.AgentModel()
+		if model.CatwalkCfg.SupportsImages {
 			commands = append(commands, NewCommandItem(c.com.Styles, "image_source", "Add Image", "ctrl+f", ActionOpenDialog{
 				DialogID: ImageSourceID,
 			}))

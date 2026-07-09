@@ -221,6 +221,8 @@ func (c *coordinator) promptForAgent(agentID string) (*prompt.Prompt, error) {
 		return planPrompt(opts...)
 	case config.AgentTask:
 		return taskPrompt(opts...)
+	case config.AgentReview:
+		return reviewPrompt(opts...)
 	default:
 		return coderPrompt(opts...)
 	}
@@ -616,19 +618,35 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 }
 
 func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
-	large, small, err := c.buildAgentModels(ctx, isSubAgent)
+	models, err := c.buildAgentModels(ctx, agent.Model, isSubAgent)
 	if err != nil {
 		return nil, err
 	}
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	primaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Primary.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	summaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Summary.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	reviewProviderCfg, ok := c.cfg.Config().Providers.Get(models.Review.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           large,
-		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		LargeModel:           models.Primary,
+		SmallModel:           models.Small,
+		SummaryModel:         models.Summary,
+		ReviewModel:          models.Review,
+		SummaryProviderOpts:  getProviderOptions(models.Summary, summaryProviderCfg),
+		ReviewProviderOpts:   getProviderOptions(models.Review, reviewProviderCfg),
+		SystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+		AutoReviewEnabled:    agent.ID != config.AgentReview && !isSubAgent,
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
@@ -640,7 +658,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := prompt.Build(ctx, models.Primary.Model.Provider(), models.Primary.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
@@ -784,90 +802,80 @@ func (c *coordinator) buildHookRunner(event string, isSubAgent bool) *hooks.Runn
 	return hooks.NewRunner(eventHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 }
 
-// TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
-func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
-	if !ok {
-		return Model{}, Model{}, errLargeModelNotSelected
-	}
-	smallModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeSmall]
-	if !ok {
-		return Model{}, Model{}, errSmallModelNotSelected
-	}
+type agentModels struct {
+	Primary Model
+	Small   Model
+	Summary Model
+	Review  Model
+}
 
-	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errLargeModelProviderNotConfigured
+func (c *coordinator) buildAgentModels(ctx context.Context, primaryType config.SelectedModelType, isSubAgent bool) (agentModels, error) {
+	if primaryType == "" {
+		primaryType = config.SelectedModelTypeLarge
 	}
-
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
+	primary, err := c.buildModel(ctx, primaryType, isSubAgent)
 	if err != nil {
-		return Model{}, Model{}, err
+		return agentModels{}, err
 	}
-
-	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errSmallModelProviderNotConfigured
-	}
-
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
+	small, err := c.buildModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
-		return Model{}, Model{}, err
+		return agentModels{}, err
+	}
+	summary, err := c.buildModel(ctx, config.SelectedModelTypeSummary, isSubAgent)
+	if err != nil {
+		return agentModels{}, err
+	}
+	review, err := c.buildModel(ctx, config.SelectedModelTypeReview, isSubAgent)
+	if err != nil {
+		return agentModels{}, err
+	}
+	return agentModels{
+		Primary: primary,
+		Small:   small,
+		Summary: summary,
+		Review:  review,
+	}, nil
+}
+
+func (c *coordinator) buildModel(ctx context.Context, modelType config.SelectedModelType, isSubAgent bool) (Model, error) {
+	modelCfg, ok := c.cfg.Config().Models[modelType]
+	if !ok {
+		return Model{}, fmt.Errorf("%s model not selected", modelType)
+	}
+	providerCfg, ok := c.cfg.Config().Providers.Get(modelCfg.Provider)
+	if !ok {
+		return Model{}, fmt.Errorf("%s model provider not configured", modelType)
+	}
+	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent)
+	if err != nil {
+		return Model{}, err
 	}
 
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
+	var catwalkModel *catwalk.Model
+	for _, m := range providerCfg.Models {
+		if m.ID == modelCfg.Model {
+			catwalkModel = &m
+			break
 		}
 	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
+	if catwalkModel == nil {
+		return Model{}, fmt.Errorf("%s model not found in provider config", modelType)
 	}
 
-	if largeCatwalkModel == nil {
-		return Model{}, Model{}, errLargeModelNotFound
+	modelID := modelCfg.Model
+	if modelCfg.Provider == openrouter.Name && isExactoSupported(modelID) {
+		modelID += ":exacto"
 	}
-
-	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errSmallModelNotFound
-	}
-
-	largeModelID := largeModelCfg.Model
-	smallModelID := smallModelCfg.Model
-
-	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
-		largeModelID += ":exacto"
-	}
-
-	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
-		smallModelID += ":exacto"
-	}
-
-	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
+	languageModel, err := provider.LanguageModel(ctx, modelID)
 	if err != nil {
-		return Model{}, Model{}, err
+		return Model{}, err
 	}
-	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+		Model:      languageModel,
+		CatwalkCfg: *catwalkModel,
+		ModelCfg:   modelCfg,
+		FlatRate:   providerCfg.FlatRate,
+	}, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -1189,17 +1197,31 @@ func (c *coordinator) Model() Model {
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// build the models again so we make sure we get the latest config
-	large, small, err := c.buildAgentModels(ctx, false)
-	if err != nil {
-		return err
-	}
-	c.currentAgent.SetModels(large, small)
-
 	agentID := c.CurrentAgentID()
 	agentCfg, ok := c.cfg.Config().Agents[agentID]
 	if !ok {
 		return fmt.Errorf("%w: %s", errAgentNotConfigured, agentID)
 	}
+	models, err := c.buildAgentModels(ctx, agentCfg.Model, false)
+	if err != nil {
+		return err
+	}
+	summaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Summary.ModelCfg.Provider)
+	if !ok {
+		return errModelProviderNotConfigured
+	}
+	reviewProviderCfg, ok := c.cfg.Config().Providers.Get(models.Review.ModelCfg.Provider)
+	if !ok {
+		return errModelProviderNotConfigured
+	}
+	c.currentAgent.SetModels(
+		models.Primary,
+		models.Small,
+		models.Summary,
+		models.Review,
+		getProviderOptions(models.Summary, summaryProviderCfg),
+		getProviderOptions(models.Review, reviewProviderCfg),
+	)
 
 	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
@@ -1218,7 +1240,8 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+	summaryModel := c.currentAgent.SummaryModel()
+	providerCfg, ok := c.cfg.Config().Providers.Get(summaryModel.ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
 	}
@@ -1228,7 +1251,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	}
 
 	summarize := func() error {
-		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+		return c.currentAgent.Summarize(ctx, sessionID)
 	}
 
 	return c.runWithUnauthorizedRetry(ctx, providerCfg, summarize)

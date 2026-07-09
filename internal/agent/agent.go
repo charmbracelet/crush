@@ -68,6 +68,9 @@ var titlePrompt []byte
 //go:embed templates/summary.md
 var summaryPrompt []byte
 
+//go:embed templates/auto_review.md
+var autoReviewPrompt []byte
+
 // Used to remove <think> tags from generated titles.
 var (
 	thinkTagRegex       = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -130,7 +133,7 @@ type SessionAgentCall struct {
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
-	SetModels(large Model, small Model)
+	SetModels(large Model, small Model, summary Model, review Model, summaryProviderOptions fantasy.ProviderOptions, reviewProviderOptions fantasy.ProviderOptions)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
@@ -140,8 +143,9 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string, fantasy.ProviderOptions) error
+	Summarize(context.Context, string) error
 	Model() Model
+	SummaryModel() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
 
@@ -153,8 +157,12 @@ type Model struct {
 }
 
 type sessionAgent struct {
-	largeModel         *csync.Value[Model]
-	smallModel         *csync.Value[Model]
+	largeModel          *csync.Value[Model]
+	smallModel          *csync.Value[Model]
+	summaryModel        *csync.Value[Model]
+	reviewModel         *csync.Value[Model]
+	summaryProviderOpts *csync.Value[fantasy.ProviderOptions]
+	reviewProviderOpts  *csync.Value[fantasy.ProviderOptions]
 	systemPromptPrefix *csync.Value[string]
 	systemPrompt       *csync.Value[string]
 	tools              *csync.Slice[fantasy.AgentTool]
@@ -163,6 +171,7 @@ type sessionAgent struct {
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
+	autoReviewEnabled    bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -213,10 +222,15 @@ type sessionAgent struct {
 type SessionAgentOptions struct {
 	LargeModel           Model
 	SmallModel           Model
+	SummaryModel         Model
+	ReviewModel          Model
+	SummaryProviderOpts  fantasy.ProviderOptions
+	ReviewProviderOpts   fantasy.ProviderOptions
 	SystemPromptPrefix   string
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	AutoReviewEnabled    bool
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -230,15 +244,28 @@ type SessionAgentOptions struct {
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
+	summaryModel := opts.SummaryModel
+	if summaryModel.Model == nil {
+		summaryModel = opts.LargeModel
+	}
+	reviewModel := opts.ReviewModel
+	if reviewModel.Model == nil {
+		reviewModel = opts.LargeModel
+	}
 	return &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
+		summaryModel:         csync.NewValue(summaryModel),
+		reviewModel:          csync.NewValue(reviewModel),
+		summaryProviderOpts:  csync.NewValue(opts.SummaryProviderOpts),
+		reviewProviderOpts:   csync.NewValue(opts.ReviewProviderOpts),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		autoReviewEnabled:    opts.AutoReviewEnabled,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
@@ -830,6 +857,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
+	finalFinishReason := message.FinishReasonUnknown
 	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
@@ -1034,6 +1062,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					}
 				}
 			}
+			finalFinishReason = finishReason
 			currentAssistant.AddFinish(finishReason, "", "")
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
@@ -1169,6 +1198,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
+		autoReviewReason, shouldAutoReview := a.shouldAutoReviewError(err, largeModel)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
@@ -1200,12 +1230,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if updateErr != nil {
 			return nil, updateErr
 		}
+		if shouldAutoReview {
+			a.activeRequests.Del(call.SessionID)
+			cancel()
+			if reviewErr := a.autoReview(ctx, call.SessionID, autoReviewReason, true); reviewErr != nil {
+				slog.Error("Failed to auto-review failed turn", "error", reviewErr)
+			}
+		}
 		return nil, err
 	}
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
+		if summarizeErr := a.Summarize(genCtx, call.SessionID); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1217,6 +1254,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
+		}
+	} else if a.shouldAutoReviewMaxTokens(finalFinishReason) {
+		a.activeRequests.Del(call.SessionID)
+		cancel()
+		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn stopped because it reached the maximum output token limit.", false); reviewErr != nil {
+			slog.Error("Failed to auto-review max-token turn", "error", reviewErr)
 		}
 	}
 
@@ -1340,13 +1383,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
 
 	// Copy mutable fields under lock to avoid races with SetModels.
-	largeModel := a.largeModel.Get()
+	summaryModel := a.summaryModel.Get()
+	summaryProviderOpts := a.summaryProviderOpts.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
@@ -1362,7 +1406,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(msgs, summaryModel.CatwalkCfg.SupportsImages)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
@@ -1375,14 +1419,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}()
 
 	agent := fantasy.NewAgent(
-		largeModel.Model,
+		summaryModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
-		Model:            largeModel.ModelCfg.Model,
-		Provider:         largeModel.ModelCfg.Provider,
+		Model:            summaryModel.ModelCfg.Model,
+		Provider:         summaryModel.ModelCfg.Provider,
 		IsSummaryMessage: true,
 	})
 	if err != nil {
@@ -1394,7 +1438,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
-		ProviderOptions: opts,
+		ProviderOptions: summaryProviderOpts,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
@@ -1456,7 +1500,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		extractHyperCredits(step.ProviderMetadata)
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	a.updateSessionUsage(summaryModel, &currentSession, resp.TotalUsage, openrouterCost, false)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
@@ -1483,6 +1527,170 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
+}
+
+func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason string, drainQueued bool) error {
+	if a.IsSessionBusy(sessionID) {
+		return ErrSessionBusy
+	}
+
+	reviewModel := a.reviewModel.Get()
+	reviewProviderOpts := a.reviewProviderOpts.Get()
+	systemPromptPrefix := a.systemPromptPrefix.Get()
+
+	currentSession, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+	msgs, err := a.getSessionMessages(ctx, currentSession)
+	if err != nil {
+		return err
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	aiMsgs, _ := a.preparePrompt(msgs, reviewModel.CatwalkCfg.SupportsImages)
+
+	genCtx, cancel := context.WithCancel(ctx)
+	a.activeRequests.Set(sessionID, cancel)
+	defer a.activeRequests.Del(sessionID)
+	defer cancel()
+	defer func() {
+		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+			slog.Error("Failed to flush pending message updates after auto review", "error", flushErr)
+		}
+	}()
+
+	agent := fantasy.NewAgent(
+		reviewModel.Model,
+		fantasy.WithSystemPrompt(string(autoReviewPrompt)),
+		fantasy.WithUserAgent(userAgent),
+	)
+	reviewMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
+		Role:     message.Assistant,
+		Model:    reviewModel.ModelCfg.Model,
+		Provider: reviewModel.ModelCfg.Provider,
+	})
+	if err != nil {
+		return err
+	}
+
+	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
+		Prompt:          buildAutoReviewPrompt(reason),
+		Messages:        aiMsgs,
+		ProviderOptions: reviewProviderOpts,
+		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			prepared.Messages = options.Messages
+			if systemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
+			}
+			return callContext, prepared, nil
+		},
+		OnReasoningDelta: func(id string, text string) error {
+			reviewMessage.AppendReasoningContent(text)
+			return a.messages.Update(genCtx, reviewMessage)
+		},
+		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
+				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
+					reviewMessage.AppendReasoningSignature(signature.Signature)
+				}
+			}
+			reviewMessage.FinishThinking()
+			return a.messages.Update(genCtx, reviewMessage)
+		},
+		OnTextDelta: func(id, text string) error {
+			reviewMessage.AppendContent(text)
+			return a.messages.Update(genCtx, reviewMessage)
+		},
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return a.messages.Delete(ctx, reviewMessage.ID)
+		}
+		reviewMessage.AddFinish(message.FinishReasonError, "Review Error", err.Error())
+		if updateErr := a.messages.Update(ctx, reviewMessage); updateErr != nil {
+			return updateErr
+		}
+		return err
+	}
+
+	reviewMessage.AddFinish(message.FinishReasonEndTurn, "", "")
+	if err := a.messages.Update(genCtx, reviewMessage); err != nil {
+		return err
+	}
+
+	var openrouterCost *float64
+	for _, step := range resp.Steps {
+		stepCost := a.openrouterCost(step.ProviderMetadata)
+		if stepCost != nil {
+			newCost := *stepCost
+			if openrouterCost != nil {
+				newCost += *openrouterCost
+			}
+			openrouterCost = &newCost
+		}
+		extractHyperCredits(step.ProviderMetadata)
+	}
+
+	a.updateSessionUsage(reviewModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	if _, err := a.sessions.Save(genCtx, currentSession); err != nil {
+		return err
+	}
+
+	a.activeRequests.Del(sessionID)
+	cancel()
+
+	if !drainQueued {
+		return nil
+	}
+	queuedMessages, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedMessages) == 0 {
+		return nil
+	}
+	firstQueuedMessage := queuedMessages[0]
+	a.messageQueue.Set(sessionID, queuedMessages[1:])
+	_, qErr := a.Run(ctx, firstQueuedMessage)
+	return qErr
+}
+
+func (a *sessionAgent) shouldAutoReviewError(err error, model Model) (string, bool) {
+	if !a.autoReviewEnabled || err == nil || errors.Is(err, context.Canceled) {
+		return "", false
+	}
+
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) {
+		if providerErr.StatusCode == http.StatusUnauthorized || providerErr.StatusCode == http.StatusPaymentRequired {
+			return "", false
+		}
+		if model.ModelCfg.Provider == hyper.Name && (providerErr.StatusCode == http.StatusUnauthorized || providerErr.StatusCode == http.StatusPaymentRequired) {
+			return "", false
+		}
+		if providerErr.Message == "The requested model is not supported." {
+			return "", false
+		}
+		return fmt.Sprintf("The previous provider request failed: %s", cmp.Or(providerErr.Message, providerErr.Title, err.Error())), true
+	}
+
+	var fantasyErr *fantasy.Error
+	if errors.As(err, &fantasyErr) {
+		return fmt.Sprintf("The previous model request failed: %s", cmp.Or(fantasyErr.Message, fantasyErr.Title, err.Error())), true
+	}
+
+	return fmt.Sprintf("The previous assistant turn failed: %s", err.Error()), true
+}
+
+func (a *sessionAgent) shouldAutoReviewMaxTokens(reason message.FinishReason) bool {
+	return a.autoReviewEnabled && reason == message.FinishReasonMaxTokens
+}
+
+func buildAutoReviewPrompt(reason string) string {
+	if strings.TrimSpace(reason) == "" {
+		reason = "The previous assistant turn failed or stopped before completing normally."
+	}
+	return "Automatically review the previous assistant turn.\n\nReason: " + reason + "\n\nReturn a concise review with findings first, then the safest next step."
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
@@ -2026,12 +2234,6 @@ func (a *sessionAgent) Cancel(sessionID string) {
 		cancel()
 	}
 
-	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
-		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
-		cancel()
-	}
-
 	// Record a pending cancel only when a dispatched-but-not-yet-active
 	// run exists. This catches runs still in the goroutine scheduler or
 	// about to enter Run's busy-queue branch, while leaving an idle
@@ -2124,9 +2326,19 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 	return prompts
 }
 
-func (a *sessionAgent) SetModels(large Model, small Model) {
+func (a *sessionAgent) SetModels(large Model, small Model, summary Model, review Model, summaryProviderOptions fantasy.ProviderOptions, reviewProviderOptions fantasy.ProviderOptions) {
+	if summary.Model == nil {
+		summary = large
+	}
+	if review.Model == nil {
+		review = large
+	}
 	a.largeModel.Set(large)
 	a.smallModel.Set(small)
+	a.summaryModel.Set(summary)
+	a.reviewModel.Set(review)
+	a.summaryProviderOpts.Set(summaryProviderOptions)
+	a.reviewProviderOpts.Set(reviewProviderOptions)
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
@@ -2139,6 +2351,10 @@ func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 
 func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
+}
+
+func (a *sessionAgent) SummaryModel() Model {
+	return a.summaryModel.Get()
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.

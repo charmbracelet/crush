@@ -1,4 +1,4 @@
-// Package logo renders a Crush wordmark in a stylized way.
+// Package logo renders the terminal wordmark in a stylized way.
 package logo
 
 import (
@@ -18,15 +18,15 @@ type letterform func(bool) string
 
 const diag = `╱`
 
-// Opts are the options for rendering the Crush title art.
+// Opts are the options for rendering the title art.
 type Opts struct {
 	FieldColor   color.Color // diagonal lines
 	TitleColorA  color.Color // left gradient ramp point
 	TitleColorB  color.Color // right gradient ramp point
-	CharmColor   color.Color // Charm™ text color
+	CharmColor   color.Color // re™ text color
 	VersionColor color.Color // version text color
 	Width        int         // width of the rendered logo, used for truncation
-	Hyper        bool        // whether it is Crush or Hypercrush
+	Hyper        bool        // whether it is CODE or HYPERCODE
 
 	// When true, stretch a random letterform on each render. Has no effect in
 	// compact mode. Mainly for testing. In production you will want to cache
@@ -34,13 +34,13 @@ type Opts struct {
 	Unstable bool
 }
 
-// Render renders the Crush logo. Set the argument to true to render the narrow
+// Render renders the CODE logo. Set the argument to true to render the narrow
 // version, intended for use in a sidebar.
 //
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
 func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
-	charm := "Charm™"
+	charm := "re™"
 	if !o.Hyper {
 		charm = " " + charm
 	}
@@ -63,10 +63,9 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	}
 	crushLetterforms := []letterform{
 		LetterC,
-		LetterR,
-		LetterU,
-		LetterSAlt,
-		LetterH,
+		LetterO,
+		LetterD,
+		LetterE,
 	}
 	if o.Hyper && !compact {
 		crushLetterforms = append(hyperLetterforms, crushLetterforms...)
@@ -101,7 +100,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	gap := max(0, crushWidth-lipgloss.Width(charm)-lipgloss.Width(version))
 	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
 
-	// Join the meta row and big Crush title.
+	// Join the meta row and big title.
 	crush = strings.TrimSpace(metaRow + "\n" + crush)
 
 	// Narrow version. If this is Hypercrush, this is also a stacked version.
@@ -146,14 +145,14 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	return logo
 }
 
-// SmallRender renders a smaller version of the Crush logo, suitable for
+// SmallRender renders a smaller version of the CODE logo, suitable for
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int, o Opts) string {
-	name := "Crush"
+	name := "CODE"
 	if o.Hyper {
-		name = "HYPERCRUSH"
+		name = "HYPERCODE"
 	}
-	charm := "Charm™"
+	charm := "re™"
 	if !o.Hyper {
 		charm = " " + charm
 	}

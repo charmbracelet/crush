@@ -97,6 +97,28 @@ func CharmtonePantera() Styles {
 	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsBlurred.
 		Foreground(charmtone.Larple)
 
+	logoOrange := charmtone.Salmon
+	logoRed := charmtone.Sriracha
+	logoLabel := charmtone.Zest
+
+	// Logo and working indicator overrides use a warmer re:configured palette.
+	s.Header.Charm = s.Header.Charm.Foreground(logoOrange)
+	s.Header.Diagonals = s.Header.Diagonals.Foreground(logoRed)
+	s.Header.LogoGradFromColor = logoOrange
+	s.Header.LogoGradToColor = logoRed
+	s.Logo.FieldColor = logoRed
+	s.Logo.TitleColorA = logoOrange
+	s.Logo.TitleColorB = logoRed
+	s.Logo.CharmColor = logoLabel
+	s.Logo.VersionColor = logoRed
+	s.Logo.SmallCharm = s.Logo.SmallCharm.Foreground(logoLabel)
+	s.Logo.SmallDiagonals = s.Logo.SmallDiagonals.Foreground(logoRed)
+	s.Logo.SmallGradFromColor = logoOrange
+	s.Logo.SmallGradToColor = logoRed
+	s.WorkingGradFromColor = logoOrange
+	s.WorkingGradToColor = logoRed
+	s.WorkingLabelColor = logoLabel
+
 	// Shell bar/prompt overrides - use Charple/Iron/Hazy colors.
 	s.Messages.ShellBarFocused = s.Messages.ShellBarFocused.
 		BorderForeground(charmtone.Charple)

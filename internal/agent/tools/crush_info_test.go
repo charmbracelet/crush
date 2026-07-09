@@ -52,6 +52,8 @@ func TestCrushInfo_Models(t *testing.T) {
 		Models: map[config.SelectedModelType]config.SelectedModel{
 			config.SelectedModelTypeLarge: {Model: "claude-sonnet-4-20250514", Provider: "anthropic"},
 			config.SelectedModelTypeSmall: {Model: "claude-haiku-3-20250307", Provider: "anthropic"},
+			config.SelectedModelTypeSummary: {Model: "qwen3-9b", Provider: "lmstudio"},
+			config.SelectedModelTypeReview: {Model: "qwen3-9b", Provider: "lmstudio"},
 		},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
@@ -59,6 +61,8 @@ func TestCrushInfo_Models(t *testing.T) {
 	require.Contains(t, output, "[model]")
 	require.Contains(t, output, "large = claude-sonnet-4-20250514 (anthropic)")
 	require.Contains(t, output, "small = claude-haiku-3-20250307 (anthropic)")
+	require.Contains(t, output, "summary = qwen3-9b (lmstudio)")
+	require.Contains(t, output, "review = qwen3-9b (lmstudio)")
 }
 
 func TestCrushInfo_Providers(t *testing.T) {

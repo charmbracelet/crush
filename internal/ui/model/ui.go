@@ -1919,10 +1919,24 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			// re-render of the transcript on every selection.
 			m.applyThemeForProvider(providerID)
 		}
-		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; msg.ModelType != config.SelectedModelTypeSmall && !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
 			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
+		}
+		defaultLargeModel := msg.Model
+		if largeModel, ok := cfg.Models[config.SelectedModelTypeLarge]; ok {
+			defaultLargeModel = largeModel
+		}
+		if _, ok := cfg.Models[config.SelectedModelTypeSummary]; msg.ModelType != config.SelectedModelTypeSummary && !ok {
+			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSummary, defaultLargeModel); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
+		}
+		if _, ok := cfg.Models[config.SelectedModelTypeReview]; msg.ModelType != config.SelectedModelTypeReview && !ok {
+			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeReview, defaultLargeModel); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}
 		}
@@ -2828,16 +2842,11 @@ func (m *UI) FullHelp() [][]key.Binding {
 }
 
 func (m *UI) currentModelSupportsImages() bool {
-	cfg := m.com.Config()
-	if cfg == nil {
+	if !m.com.Workspace.AgentIsReady() {
 		return false
 	}
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
-		return false
-	}
-	model := cfg.GetModelByType(agentCfg.Model)
-	return model != nil && model.SupportsImages
+	model := m.com.Workspace.AgentModel()
+	return model.CatwalkCfg.SupportsImages
 }
 
 // toggleCompactMode toggles compact mode between uiChat and uiChatCompact states.
@@ -3541,6 +3550,8 @@ func agentModeLabel(agentID string) string {
 		return "Plan"
 	case config.AgentTask:
 		return "Task"
+	case config.AgentReview:
+		return "Review"
 	default:
 		return "Build"
 	}
@@ -3554,6 +3565,8 @@ func agentModeFromCommand(content string) (string, bool) {
 		return config.AgentPlan, true
 	case "/task":
 		return config.AgentTask, true
+	case "/review":
+		return config.AgentReview, true
 	default:
 		return "", false
 	}
@@ -3565,6 +3578,8 @@ func nextAgentMode(current string) string {
 		return config.AgentPlan
 	case config.AgentPlan:
 		return config.AgentTask
+	case config.AgentTask:
+		return config.AgentReview
 	default:
 		return config.AgentCoder
 	}

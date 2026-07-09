@@ -57,6 +57,8 @@ func NewCoordinator(
 	selected := config.SelectedModel{Provider: providerID, Model: modelID}
 	cfg.OverridePreferredModel(config.SelectedModelTypeLarge, selected)
 	cfg.OverridePreferredModel(config.SelectedModelTypeSmall, selected)
+	cfg.OverridePreferredModel(config.SelectedModelTypeSummary, selected)
+	cfg.OverridePreferredModel(config.SelectedModelTypeReview, selected)
 	cfg.SetupAgents()
 
 	// Keep buildTools light: no sub-agent or agentic-fetch construction.

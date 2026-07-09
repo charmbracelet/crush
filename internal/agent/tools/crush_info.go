@@ -101,7 +101,12 @@ func writeModels(b *strings.Builder, cfg *config.ConfigStore) {
 		return
 	}
 	b.WriteString("[model]\n")
-	for _, typ := range []config.SelectedModelType{config.SelectedModelTypeLarge, config.SelectedModelTypeSmall} {
+	for _, typ := range []config.SelectedModelType{
+		config.SelectedModelTypeLarge,
+		config.SelectedModelTypeSmall,
+		config.SelectedModelTypeSummary,
+		config.SelectedModelTypeReview,
+	} {
 		m, ok := c.Models[typ]
 		if !ok {
 			continue

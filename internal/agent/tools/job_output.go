@@ -5,16 +5,12 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
-const (
-	JobOutputToolName = "job_output"
-	jobOutputWaitMax  = time.Second
-)
+const JobOutputToolName = "job_output"
 
 //go:embed job_output.md
 var jobOutputDescription string
@@ -53,9 +49,7 @@ func NewJobOutputTool() fantasy.AgentTool {
 
 			waitTimedOut := false
 			if params.Wait {
-				waitCtx, cancel := context.WithTimeout(ctx, jobOutputWaitMax)
-				defer cancel()
-				waitTimedOut = !bgShell.WaitContext(waitCtx)
+				waitTimedOut = !bgShell.WaitContext(ctx)
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()
@@ -89,7 +83,7 @@ func NewJobOutputTool() fantasy.AgentTool {
 					}
 				}
 			} else if waitTimedOut {
-				outputParts = append(outputParts, fmt.Sprintf("Wait requested, but the background shell is still running after %s. Returned current output snapshot.", jobOutputWaitMax))
+				outputParts = append(outputParts, "Wait requested, but the wait context ended before the background shell completed. Returned current output snapshot.")
 			}
 
 			output := strings.Join(outputParts, "\n")

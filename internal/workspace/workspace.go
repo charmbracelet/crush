@@ -88,6 +88,8 @@ type Workspace interface {
 	AgentIsBusy() bool
 	AgentIsSessionBusy(sessionID string) bool
 	AgentModel() AgentModel
+	AgentMode() string
+	SetAgentMode(ctx context.Context, agentID string) error
 	AgentIsReady() bool
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string

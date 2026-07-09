@@ -1549,6 +1549,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.com.Workspace.PermissionSetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSetAgentMode:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before switching modes..."))
+			break
+		}
+		cmds = append(cmds, m.setAgentMode(msg.AgentID))
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -2146,6 +2153,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
 				}
+				if agentID, ok := agentModeFromCommand(value); ok {
+					m.randomizePlaceholders()
+					m.historyReset()
+					return tea.Batch(m.setAgentMode(agentID), m.loadPromptHistory())
+				}
 
 				if m.bangMode && value != "" {
 					m.bangMode = false
@@ -2178,12 +2190,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Tab):
-				if m.state != uiLanding {
+				if strings.TrimSpace(m.textarea.Value()) == "" {
+					cmds = append(cmds, m.cycleAgentMode())
+				} else if m.state != uiLanding {
 					m.setState(m.state, uiFocusMain)
 					m.textarea.Blur()
 					m.chat.Focus()
 					m.chat.SetSelected(m.chat.Len() - 1)
 				}
+			case msg.Code == tea.KeyBackspace && strings.TrimSpace(m.textarea.Value()) == "" && m.com.Workspace.AgentMode() != config.AgentCoder:
+				cmds = append(cmds, m.setAgentMode(config.AgentCoder))
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
@@ -2612,7 +2628,11 @@ func (m *UI) ShortHelp() []key.Binding {
 		}
 
 		if m.focus == uiFocusEditor {
-			tab.SetHelp("tab", "focus chat")
+			if strings.TrimSpace(m.textarea.Value()) == "" {
+				tab.SetHelp("tab", "mode")
+			} else {
+				tab.SetHelp("tab", "focus chat")
+			}
 		} else {
 			tab.SetHelp("tab", "focus editor")
 		}
@@ -3515,10 +3535,61 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 	}
 }
 
+func agentModeLabel(agentID string) string {
+	switch agentID {
+	case config.AgentPlan:
+		return "Plan"
+	case config.AgentTask:
+		return "Task"
+	default:
+		return "Build"
+	}
+}
+
+func agentModeFromCommand(content string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(content)) {
+	case "/build", "/coder":
+		return config.AgentCoder, true
+	case "/plan":
+		return config.AgentPlan, true
+	case "/task":
+		return config.AgentTask, true
+	default:
+		return "", false
+	}
+}
+
+func nextAgentMode(current string) string {
+	switch current {
+	case config.AgentCoder, "":
+		return config.AgentPlan
+	case config.AgentPlan:
+		return config.AgentTask
+	default:
+		return config.AgentCoder
+	}
+}
+
+func (m *UI) setAgentMode(agentID string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.com.Workspace.SetAgentMode(context.Background(), agentID); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Agent mode set to " + agentModeLabel(agentID))
+	}
+}
+
+func (m *UI) cycleAgentMode() tea.Cmd {
+	return m.setAgentMode(nextAgentMode(m.com.Workspace.AgentMode()))
+}
+
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if !m.com.Workspace.AgentIsReady() {
-		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
+		return util.ReportError(fmt.Errorf("agent is not initialized"))
+	}
+	if agentID, ok := agentModeFromCommand(content); ok && len(attachments) == 0 {
+		return m.setAgentMode(agentID)
 	}
 
 	var cmds []tea.Cmd

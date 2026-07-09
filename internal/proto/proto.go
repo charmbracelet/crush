@@ -103,6 +103,7 @@ type SkillReadResult struct {
 
 // AgentInfo represents information about the agent.
 type AgentInfo struct {
+	AgentID  string               `json:"agent_id,omitempty"`
 	IsBusy   bool                 `json:"is_busy"`
 	IsReady  bool                 `json:"is_ready"`
 	Model    catwalk.Model        `json:"model"`
@@ -112,6 +113,11 @@ type AgentInfo struct {
 // IsZero checks if the AgentInfo is zero-valued.
 func (a AgentInfo) IsZero() bool {
 	return !a.IsBusy && !a.IsReady && a.Model.ID == ""
+}
+
+// AgentModeRequest requests switching the primary agent mode.
+type AgentModeRequest struct {
+	AgentID string `json:"agent_id"`
 }
 
 // AgentMessage represents a message sent to the agent.

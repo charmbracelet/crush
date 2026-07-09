@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 //go:embed web_fetch.md.tpl
@@ -21,8 +22,11 @@ var webFetchDescriptionTpl = template.Must(
 		Parse(string(webFetchDescriptionTmpl)),
 )
 
-// NewWebFetchTool creates a simple web fetch tool for sub-agents (no permissions needed).
-func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
+// NewWebFetchTool creates a web fetch tool.
+func NewWebFetchTool(permissions permission.Service, workingDir, scratchDir string, client *http.Client) fantasy.AgentTool {
+	if scratchDir == "" {
+		scratchDir = workingDir
+	}
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
@@ -42,6 +46,32 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("url is required"), nil
 			}
+			if !strings.HasPrefix(params.URL, "http://") && !strings.HasPrefix(params.URL, "https://") {
+				return fantasy.NewTextErrorResponse("URL must start with http:// or https://"), nil
+			}
+
+			if permissions != nil {
+				sessionID := GetSessionFromContext(ctx)
+				if sessionID == "" {
+					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for web fetch")
+				}
+				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        workingDir,
+					Resource:    params.URL,
+					ToolCallID:  call.ID,
+					ToolName:    WebFetchToolName,
+					Action:      "fetch",
+					Description: fmt.Sprintf("Fetch web content from URL: %s", params.URL),
+					Params:      WebFetchPermissionsParams(params),
+				})
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if !granted {
+					return NewPermissionDeniedResponse(), nil
+				}
+			}
 
 			content, err := FetchURLAndConvert(ctx, client, params.URL)
 			if err != nil {
@@ -52,7 +82,10 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 			var result strings.Builder
 
 			if hasLargeContent {
-				tempFile, err := os.CreateTemp(workingDir, "page-*.md")
+				if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create scratch directory: %s", err)), nil
+				}
+				tempFile, err := os.CreateTemp(scratchDir, "page-*.md")
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary file: %s", err)), nil
 				}

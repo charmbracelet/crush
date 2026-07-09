@@ -3,12 +3,14 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 //go:embed web_search.md.tpl
@@ -19,8 +21,8 @@ var webSearchDescriptionTpl = template.Must(
 		Parse(string(webSearchDescriptionTmpl)),
 )
 
-// NewWebSearchTool creates a web search tool for sub-agents (no permissions needed).
-func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
+// NewWebSearchTool creates a web search tool.
+func NewWebSearchTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
@@ -39,6 +41,29 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("query is required"), nil
+			}
+
+			if permissions != nil {
+				sessionID := GetSessionFromContext(ctx)
+				if sessionID == "" {
+					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for web search")
+				}
+				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        workingDir,
+					Resource:    params.Query,
+					ToolCallID:  call.ID,
+					ToolName:    WebSearchToolName,
+					Action:      "search",
+					Description: fmt.Sprintf("Search the web for: %s", params.Query),
+					Params:      WebSearchPermissionsParams(params),
+				})
+				if err != nil {
+					return fantasy.ToolResponse{}, err
+				}
+				if !granted {
+					return NewPermissionDeniedResponse(), nil
+				}
 			}
 
 			maxResults := params.MaxResults

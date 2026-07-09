@@ -48,6 +48,8 @@ func (c *blockingCoordinator) RunAccepted(ctx context.Context, accept *agent.Acc
 	return nil, nil
 }
 
+func (c *blockingCoordinator) SetMainAgent(context.Context, string) error        { return nil }
+func (c *blockingCoordinator) CurrentAgentID() string                            { return "coder" }
 func (c *blockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
 func (c *blockingCoordinator) Cancel(string)                                     { c.cancels.Add(1) }
 func (c *blockingCoordinator) CancelAll()                                        {}

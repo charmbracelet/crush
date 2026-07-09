@@ -102,15 +102,19 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	cfg := store.Config()
 	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
+	var permissionRules []permission.Rule
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
+	}
+	if cfg.Permissions != nil && len(cfg.Permissions.Rules) > 0 {
+		permissionRules = permissionRulesFromConfig(cfg.Permissions.Rules)
 	}
 
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools, permissionRules),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
@@ -178,6 +182,19 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	go app.LSPManager.TrackConfigured()
 
 	return app, nil
+}
+
+func permissionRulesFromConfig(rules []config.PermissionRule) []permission.Rule {
+	out := make([]permission.Rule, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, permission.Rule{
+			Tool:     rule.Tool,
+			Action:   rule.Action,
+			Resource: rule.Resource,
+			Effect:   permission.RuleEffect(rule.Effect),
+		})
+	}
+	return out
 }
 
 // Config returns the pure-data configuration.

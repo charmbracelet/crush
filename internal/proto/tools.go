@@ -99,6 +99,18 @@ const AgenticFetchToolName = tools.AgenticFetchToolName
 // agentic_fetch tool.
 type AgenticFetchPermissionsParams = tools.AgenticFetchPermissionsParams
 
+// WebFetchToolName is the name of the web_fetch tool.
+const WebFetchToolName = tools.WebFetchToolName
+
+// WebFetchPermissionsParams represents the permission parameters for web_fetch.
+type WebFetchPermissionsParams = tools.WebFetchPermissionsParams
+
+// WebSearchToolName is the name of the web_search tool.
+const WebSearchToolName = tools.WebSearchToolName
+
+// WebSearchPermissionsParams represents the permission parameters for web_search.
+type WebSearchPermissionsParams = tools.WebSearchPermissionsParams
+
 const GlobToolName = "glob"
 
 // GlobParams represents the parameters for the glob tool.

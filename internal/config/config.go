@@ -58,6 +58,7 @@ const (
 
 const (
 	AgentCoder string = "coder"
+	AgentPlan  string = "plan"
 	AgentTask  string = "task"
 )
 
@@ -247,7 +248,15 @@ const (
 )
 
 type Permissions struct {
-	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	AllowedTools []string         `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	Rules        []PermissionRule `json:"rules,omitempty" jsonschema:"description=Permission rules evaluated before allowed_tools"`
+}
+
+type PermissionRule struct {
+	Tool     string `json:"tool,omitempty" jsonschema:"description=Tool name to match,example=web_search"`
+	Action   string `json:"action,omitempty" jsonschema:"description=Tool action to match,example=fetch"`
+	Resource string `json:"resource,omitempty" jsonschema:"description=Resource pattern to match,example=https://example.com/*"`
+	Effect   string `json:"effect" jsonschema:"required,description=Permission effect,enum=allow,enum=ask,enum=deny"`
 }
 
 type TrailerStyle string
@@ -745,6 +754,8 @@ func allToolNames() []string {
 		"lsp_references",
 		"lsp_restart",
 		"fetch",
+		"web_fetch",
+		"web_search",
 		"agentic_fetch",
 		"glob",
 		"grep",
@@ -767,9 +778,14 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
+	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view", "web_fetch", "web_search"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
+}
+
+func resolvePlanTools(tools []string) []string {
+	planTools := []string{"fetch", "glob", "grep", "lsp_diagnostics", "lsp_references", "ls", "sourcegraph", "todos", "view", "web_fetch", "web_search"}
+	return filterSlice(tools, planTools, true)
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
@@ -795,6 +811,16 @@ func (c *Config) SetupAgents() {
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: allowedTools,
+		},
+
+		AgentPlan: {
+			ID:           AgentPlan,
+			Name:         "Plan",
+			Description:  "An agent that researches, analyzes, and proposes changes without modifying files.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: resolvePlanTools(allowedTools),
+			AllowedMCP:   map[string][]string{},
 		},
 
 		AgentTask: {

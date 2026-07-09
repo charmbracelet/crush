@@ -9,7 +9,7 @@ The bridge binds only to `127.0.0.1` on Windows. OpenSSH creates a reverse tunne
 Open PowerShell in this folder and run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -VpsHost your-vps.example.com -VpsUser your-user
 ```
 
 On a new PC, the installer creates a dedicated Ed25519 key. It does not overwrite any existing SSH keys and it does not replace `~/.ssh/authorized_keys`; it appends the dedicated public key only if that exact line is missing. If you already have SSH key access to the VPS, the installer uses that to bootstrap the dedicated key. Otherwise, SSH asks for the VPS password once and OpenSSH hides the input. Future starts use the dedicated key without a password.
@@ -18,7 +18,6 @@ The installed process starts immediately and whenever the current Windows user s
 
 Defaults:
 
-- VPS: `root@157.173.127.84`
 - Windows loopback: `127.0.0.1:47831`
 - VPS loopback: `127.0.0.1:48731`
 - Maximum image size: 5 MB
@@ -26,7 +25,7 @@ Defaults:
 Override values during installation when needed:
 
 ```powershell
-.\install.ps1 -VpsHost 157.173.127.84 -VpsUser root -SshPort 22 -LocalPort 47831 -RemotePort 48731
+.\install.ps1 -VpsHost your-vps.example.com -VpsUser your-user -SshPort 22 -LocalPort 47831 -RemotePort 48731
 ```
 
 Only one PC can own the same VPS reverse port at a time. Assign a different `-RemotePort` if multiple PCs must remain connected simultaneously, and configure Crush to use the desired bridge.

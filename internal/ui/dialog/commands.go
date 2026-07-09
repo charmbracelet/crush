@@ -432,6 +432,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "mode_build", "Build Mode", "", ActionSetAgentMode{AgentID: config.AgentCoder}).WithAliases("build", "/build", "coder"),
+		NewCommandItem(c.com.Styles, "mode_plan", "Plan Mode", "", ActionSetAgentMode{AgentID: config.AgentPlan}).WithAliases("plan", "/plan"),
+		NewCommandItem(c.com.Styles, "mode_task", "Task Mode", "", ActionSetAgentMode{AgentID: config.AgentTask}).WithAliases("task", "/task"),
 	}
 
 	// Only show compact command if there's an active session

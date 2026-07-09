@@ -12,6 +12,7 @@ Hooks are commands in `crush.json` that fire at deterministic points in the agen
 - `UserPromptSubmit`: after the user submits a prompt and before the prompt is sent to the model.
 - `PreToolUse`: before a tool runs and before permission checks.
 - `PostToolUse`: after a tool returns.
+- `PostToolUseFailure`: after a tool returns an error result; when configured, it runs instead of `PostToolUse` for that failed result.
 - `Stop`: when a turn is complete and before the run-complete event is published.
 
 Event names are case-insensitive and accept snake case, so `pre_tool_use` normalizes to `PreToolUse`.
@@ -39,6 +40,13 @@ Event names are case-insensitive and accept snake case, so `pre_tool_use` normal
       {
         "matcher": "^bash$",
         "command": "./hooks/post-bash.sh",
+        "timeout": 10
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "^bash$",
+        "command": "./hooks/recover-failed-bash.sh",
         "timeout": 10
       }
     ],
@@ -110,6 +118,19 @@ Hooks also receive JSON on stdin.
 }
 ```
 
+`PostToolUseFailure` uses the same payload shape as `PostToolUse`, but `event` is `PostToolUseFailure` and `tool_result.is_error` is true.
+
+```json
+{
+  "event": "PostToolUseFailure",
+  "session_id": "abc",
+  "cwd": "/repo",
+  "tool_name": "bash",
+  "tool_input": {"command": "npm test"},
+  "tool_result": {"content": "Exit code 1", "is_error": true, "metadata": "{}"}
+}
+```
+
 `Stop`:
 
 ```json
@@ -153,7 +174,7 @@ JSON envelope:
 - `reason`: shown when denying or halting.
 - `context`: string or array of strings. Concatenated in config order.
 - `updated_input`: shallow-merge patch against `tool_input`; only meaningful for `PreToolUse`.
-- `updated_prompt`: full replacement for the prompt sent to the model; only meaningful for `UserPromptSubmit`.
+- `updated_prompt`: full replacement for the admitted prompt sent to the model and saved in history; only meaningful for `UserPromptSubmit`.
 
 Claude Code-style `hookSpecificOutput` is also accepted for permission decisions, `updatedInput`, and `additionalContext`.
 

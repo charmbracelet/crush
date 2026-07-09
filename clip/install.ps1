@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$VpsHost = "157.173.127.84",
-    [string]$VpsUser = "root",
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$VpsHost,
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$VpsUser,
     [ValidateRange(1, 65535)][int]$SshPort = 22,
     [ValidateRange(1024, 65535)][int]$LocalPort = 47831,
     [ValidateRange(1024, 65535)][int]$RemotePort = 48731,

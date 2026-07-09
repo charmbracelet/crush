@@ -64,6 +64,8 @@ func (s *runCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepted
 	return s.Run(ctx, sessionID, prompt, attachments...)
 }
 
+func (s *runCoordinator) SetMainAgent(context.Context, string) error { return nil }
+func (s *runCoordinator) CurrentAgentID() string                     { return "coder" }
 func (s *runCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }

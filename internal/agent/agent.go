@@ -604,6 +604,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				RunID:     call.RunID,
 				Cancelled: true,
 			}
+			admitted, admitErr := a.admitUserPrompt(ctx, call)
+			if admitErr != nil {
+				complete.Error = admitErr.Error()
+				a.publishRunComplete(ctx, call, complete)
+				return nil, admitErr
+			}
+			call = admitted.call
 			if err := a.persistCanceledTurn(ctx, call, false); err != nil {
 				complete.Error = err.Error()
 				a.publishRunComplete(ctx, call, complete)
@@ -691,6 +698,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 
+	admitted, err := a.admitUserPrompt(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	call = admitted.call
+	outboundPrompt := admitted.modelPrompt
+
 	var wg sync.WaitGroup
 	// Generate title from the first real (non-shell) user prompt.
 	if !hasUserTextMessage(msgs) {
@@ -701,7 +715,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	defer wg.Wait()
 
-	// Add the user message to the session.
+	// Add the admitted user message to the session.
 	_, err = a.createUserMessage(ctx, call)
 	if err != nil {
 		return nil, err
@@ -884,11 +898,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
 			a.publishCanceledQueueDrops(canceledRunIDs)
 			for _, queued := range fold {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
-				if createErr != nil {
+				admittedQueued, admitErr := a.admitUserPrompt(callContext, queued)
+				if admitErr != nil {
+					return callContext, prepared, admitErr
+				}
+				if _, createErr := a.createUserMessage(callContext, admittedQueued.call); createErr != nil {
 					return callContext, prepared, createErr
 				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				prepared.Messages = append(prepared.Messages, userPromptToAIMessage(admittedQueued.modelPrompt, admittedQueued.call.Attachments))
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
@@ -1511,6 +1528,69 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
 		},
 	}
+}
+
+type admittedUserPrompt struct {
+	call        SessionAgentCall
+	modelPrompt string
+}
+
+func (a *sessionAgent) admitUserPrompt(ctx context.Context, call SessionAgentCall) (admittedUserPrompt, error) {
+	admitted := admittedUserPrompt{call: call, modelPrompt: call.Prompt}
+	if a.userPromptHooks == nil {
+		return admitted, nil
+	}
+
+	var attachmentPaths []string
+	for _, attachment := range call.Attachments {
+		attachmentPaths = append(attachmentPaths, attachment.FilePath)
+	}
+	promptResult, hookErr := a.userPromptHooks.RunPayload(ctx, hooks.EventUserPromptSubmit, call.SessionID, "prompt", "", hooks.Payload{
+		Prompt:      call.Prompt,
+		Attachments: attachmentPaths,
+	})
+	if hookErr != nil {
+		slog.Warn("UserPromptSubmit hook execution error, continuing with original prompt", "error", hookErr)
+		return admitted, nil
+	}
+	if promptResult.Decision == hooks.DecisionDeny || promptResult.Halt {
+		reason := promptResult.Reason
+		if reason == "" {
+			reason = "prompt blocked by hook"
+		}
+		return admittedUserPrompt{}, fmt.Errorf("prompt blocked by hook: %s", reason)
+	}
+	if promptResult.UpdatedPrompt != "" {
+		admitted.call.Prompt = promptResult.UpdatedPrompt
+		admitted.modelPrompt = promptResult.UpdatedPrompt
+	}
+	if promptResult.Context != "" {
+		admitted.modelPrompt = promptWithHookContext(promptResult.Context, admitted.modelPrompt)
+	}
+	return admitted, nil
+}
+
+func promptWithHookContext(contextText, prompt string) string {
+	return "<hook_context>\n" + contextText + "\n</hook_context>\n\n" + prompt
+}
+
+func userPromptToAIMessage(prompt string, attachments []message.Attachment) fantasy.Message {
+	var parts []fantasy.MessagePart
+	text := strings.TrimSpace(message.PromptWithTextAttachments(prompt, attachments))
+	if text != "" {
+		parts = append(parts, fantasy.TextPart{Text: text})
+	}
+	for _, attachment := range attachments {
+		if strings.HasPrefix(attachment.MimeType, "text/") {
+			continue
+		}
+		parts = append(parts, fantasy.FilePart{
+			Filename:  attachment.FilePath,
+			Data:      attachment.Content,
+			MediaType: attachment.MimeType,
+		})
+	}
+	return fantasy.Message{Role: fantasy.MessageRoleUser, Content: parts}
 }
 
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {

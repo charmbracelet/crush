@@ -228,6 +228,18 @@ func (w *ClientWorkspace) AgentModel() AgentModel {
 	}
 }
 
+func (w *ClientWorkspace) AgentMode() string {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil || info.AgentID == "" {
+		return config.AgentCoder
+	}
+	return info.AgentID
+}
+
+func (w *ClientWorkspace) SetAgentMode(ctx context.Context, agentID string) error {
+	return w.client.SetAgentMode(ctx, w.workspaceID(), agentID)
+}
+
 func (w *ClientWorkspace) AgentIsReady() bool {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {

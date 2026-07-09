@@ -1,2 +1,2 @@
-Search the web via DuckDuckGo; returns titles, URLs, and snippets. Follow up with web_fetch to get full page content.
+Search the web via DuckDuckGo for current, recent, or external information; returns titles, URLs, and snippets. Include the current year when searching for latest or recent information. Follow up with web_fetch to get full page content from URLs returned by search or provided by the user. Use sourcegraph for public code search, not general web facts. Never guess URLs.
 {{- if .GhAvailable }} For GitHub searches when an exact repo name, issue, or link is provided, use `gh search` in bash instead.{{- end }}

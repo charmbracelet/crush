@@ -336,7 +336,34 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 	})
 }
 
-func TestJobOutputWaitReturnsSnapshotForRunningShell(t *testing.T) {
+func TestJobOutputWaitBlocksUntilCompletion(t *testing.T) {
+	workingDir := t.TempDir()
+	ctx := context.Background()
+
+	bgManager := shell.GetBackgroundShellManager()
+	bgShell, err := bgManager.Start(ctx, workingDir, nil, "sleep 0.1; echo 'wait-complete'", "wait completion test")
+	require.NoError(t, err)
+	defer bgManager.Kill(bgShell.ID)
+
+	tool := NewJobOutputTool()
+	input, err := json.Marshal(JobOutputParams{ShellID: bgShell.ID, Wait: true})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "job-output-wait-complete-test",
+		Name:  JobOutputToolName,
+		Input: string(input),
+	})
+	require.NoError(t, err)
+	require.Contains(t, resp.Content, "Status: completed")
+	require.Contains(t, resp.Content, "wait-complete")
+
+	var meta JobOutputResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.True(t, meta.Done)
+	require.False(t, meta.WaitTimedOut)
+}
+
+func TestJobOutputWaitReturnsTruthfulSnapshotWhenContextEnds(t *testing.T) {
 	workingDir := t.TempDir()
 	ctx := context.Background()
 
@@ -353,8 +380,10 @@ func TestJobOutputWaitReturnsSnapshotForRunningShell(t *testing.T) {
 	tool := NewJobOutputTool()
 	input, err := json.Marshal(JobOutputParams{ShellID: bgShell.ID, Wait: true})
 	require.NoError(t, err)
+	waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
 	start := time.Now()
-	resp, err := tool.Run(ctx, fantasy.ToolCall{
+	resp, err := tool.Run(waitCtx, fantasy.ToolCall{
 		ID:    "job-output-test",
 		Name:  JobOutputToolName,
 		Input: string(input),
@@ -364,6 +393,11 @@ func TestJobOutputWaitReturnsSnapshotForRunningShell(t *testing.T) {
 	require.Contains(t, resp.Content, "Status: running")
 	require.Contains(t, resp.Content, "snapshot-ready")
 	require.Contains(t, resp.Content, "Returned current output snapshot")
+
+	var meta JobOutputResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.False(t, meta.Done)
+	require.True(t, meta.WaitTimedOut)
 }
 
 func TestJobOutputReportsUnderlyingCommandFailure(t *testing.T) {

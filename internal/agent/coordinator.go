@@ -53,6 +53,8 @@ import (
 // Coordinator errors.
 var (
 	errCoderAgentNotConfigured         = errors.New("coder agent not configured")
+	errAgentNotConfigured              = errors.New("agent not configured")
+	errAgentSwitchWhileBusy            = errors.New("cannot switch agent while busy")
 	errModelProviderNotConfigured      = errors.New("model provider not configured")
 	errLargeModelNotSelected           = errors.New("large model not selected")
 	errSmallModelNotSelected           = errors.New("small model not selected")
@@ -79,8 +81,8 @@ var opencodeMessagesModels = map[string]bool{
 }
 
 type Coordinator interface {
-	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
-	// SetMainAgent(string)
+	SetMainAgent(ctx context.Context, agentID string) error
+	CurrentAgentID() string
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
@@ -115,8 +117,9 @@ type coordinator struct {
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
 
-	currentAgent SessionAgent
-	agents       map[string]SessionAgent
+	currentAgent   SessionAgent
+	currentAgentID string
+	agents         map[string]SessionAgent
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -168,24 +171,59 @@ func NewCoordinator(
 		skillTracker: skillTracker,
 	}
 
-	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
-	if !ok {
+	if _, ok := cfg.Config().Agents[config.AgentCoder]; !ok {
 		return nil, errCoderAgentNotConfigured
 	}
-
-	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
-	if err != nil {
+	if err := c.SetMainAgent(ctx, config.AgentCoder); err != nil {
 		return nil, err
 	}
-
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
-	if err != nil {
-		return nil, err
-	}
-	c.currentAgent = agent
-	c.agents[config.AgentCoder] = agent
 	return c, nil
+}
+
+func (c *coordinator) SetMainAgent(ctx context.Context, agentID string) error {
+	if c.currentAgent != nil && c.currentAgent.IsBusy() {
+		return errAgentSwitchWhileBusy
+	}
+	if agent, ok := c.agents[agentID]; ok {
+		c.currentAgent = agent
+		c.currentAgentID = agentID
+		return nil
+	}
+	agentCfg, ok := c.cfg.Config().Agents[agentID]
+	if !ok || agentCfg.ID == "" {
+		return fmt.Errorf("%w: %s", errAgentNotConfigured, agentID)
+	}
+	systemPrompt, err := c.promptForAgent(agentID)
+	if err != nil {
+		return err
+	}
+	agent, err := c.buildAgent(ctx, systemPrompt, agentCfg, false)
+	if err != nil {
+		return err
+	}
+	c.agents[agentID] = agent
+	c.currentAgent = agent
+	c.currentAgentID = agentID
+	return nil
+}
+
+func (c *coordinator) CurrentAgentID() string {
+	if c.currentAgentID == "" {
+		return config.AgentCoder
+	}
+	return c.currentAgentID
+}
+
+func (c *coordinator) promptForAgent(agentID string) (*prompt.Prompt, error) {
+	opts := []prompt.Option{prompt.WithWorkingDir(c.cfg.WorkingDir())}
+	switch agentID {
+	case config.AgentPlan:
+		return planPrompt(opts...)
+	case config.AgentTask:
+		return taskPrompt(opts...)
+	default:
+		return coderPrompt(opts...)
+	}
 }
 
 // Run implements Coordinator.
@@ -666,6 +704,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
+		tools.NewWebFetchTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, nil),
+		tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
 		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
@@ -1154,9 +1194,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	}
 	c.currentAgent.SetModels(large, small)
 
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	agentID := c.CurrentAgentID()
+	agentCfg, ok := c.cfg.Config().Agents[agentID]
 	if !ok {
-		return errCoderAgentNotConfigured
+		return fmt.Errorf("%w: %s", errAgentNotConfigured, agentID)
 	}
 
 	tools, err := c.buildTools(ctx, agentCfg, false)

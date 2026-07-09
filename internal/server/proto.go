@@ -811,6 +811,39 @@ func (c *controllerV1) handlePostWorkspaceAgentUpdate(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentMode switches the primary agent mode for a workspace.
+//
+//	@Summary		Switch agent mode
+//	@Tags			agent
+//	@Accept			json
+//	@Param			id		path	string				true	"Workspace ID"
+//	@Param			request	body	proto.AgentModeRequest	true	"Agent mode request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		409	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/mode [post]
+func (c *controllerV1) handlePostWorkspaceAgentMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.AgentModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if req.AgentID == "" {
+		jsonError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
+	if err := c.backend.SetAgentMode(r.Context(), id, req.AgentID); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceAgentSession returns a specific agent session.
 //
 //	@Summary		Get agent session

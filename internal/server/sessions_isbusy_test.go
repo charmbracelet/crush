@@ -35,6 +35,8 @@ func (s *stubCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepte
 	return nil, nil
 }
 
+func (s *stubCoordinator) SetMainAgent(context.Context, string) error { return nil }
+func (s *stubCoordinator) CurrentAgentID() string                     { return "coder" }
 func (s *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }

@@ -468,6 +468,14 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
 		}
+	case tools.WebFetchToolName:
+		if params, ok := p.permission.Params.(tools.WebFetchPermissionsParams); ok {
+			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
+		}
+	case tools.WebSearchToolName:
+		if params, ok := p.permission.Params.(tools.WebSearchPermissionsParams); ok {
+			lines = append(lines, p.renderKeyValue("Query", params.Query, contentWidth))
+		}
 	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ViewToolName:
 		var filePath string
 		switch params := p.permission.Params.(type) {
@@ -542,6 +550,10 @@ func (p *Permissions) renderContent(width int) string {
 		return p.renderFetchContent(width)
 	case tools.AgenticFetchToolName:
 		return p.renderAgenticFetchContent(width)
+	case tools.WebFetchToolName:
+		return p.renderWebFetchContent(width)
+	case tools.WebSearchToolName:
+		return p.renderWebSearchContent(width)
 	case tools.ViewToolName:
 		return p.renderViewContent(width)
 	case tools.LSToolName:
@@ -649,6 +661,26 @@ func (p *Permissions) renderAgenticFetchContent(width int) string {
 		content = fmt.Sprintf("Prompt: %s", params.Prompt)
 	}
 
+	return p.renderContentPanel(content, width)
+}
+
+func (p *Permissions) renderWebFetchContent(width int) string {
+	params, ok := p.permission.Params.(tools.WebFetchPermissionsParams)
+	if !ok {
+		return ""
+	}
+	return p.renderContentPanel(params.URL, width)
+}
+
+func (p *Permissions) renderWebSearchContent(width int) string {
+	params, ok := p.permission.Params.(tools.WebSearchPermissionsParams)
+	if !ok {
+		return ""
+	}
+	content := fmt.Sprintf("Query: %s", params.Query)
+	if params.MaxResults > 0 {
+		content += fmt.Sprintf("\nMax results: %d", params.MaxResults)
+	}
 	return p.renderContentPanel(content, width)
 }
 

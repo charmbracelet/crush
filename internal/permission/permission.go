@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -43,6 +45,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Resource    string `json:"resource,omitempty"`
 }
 
 type PermissionNotification struct {
@@ -60,6 +63,22 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Resource    string `json:"resource,omitempty"`
+}
+
+type RuleEffect string
+
+const (
+	RuleEffectAllow RuleEffect = "allow"
+	RuleEffectAsk   RuleEffect = "ask"
+	RuleEffectDeny  RuleEffect = "deny"
+)
+
+type Rule struct {
+	Tool     string
+	Action   string
+	Resource string
+	Effect   RuleEffect
 }
 
 type Service interface {
@@ -89,7 +108,7 @@ type PermissionKey struct {
 	SessionID string
 	ToolName  string
 	Action    string
-	Path      string
+	Resource  string
 }
 
 type permissionService struct {
@@ -103,6 +122,7 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
+	rules                 []Rule
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -165,7 +185,7 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
 			SessionID: permission.SessionID,
 			ToolName:  permission.ToolName,
 			Action:    permission.Action,
-			Path:      permission.Path,
+			Resource:  permission.Resource,
 		}, true)
 	})
 }
@@ -182,10 +202,24 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	if s.skip.Load() {
 		return true, nil
 	}
+	resource := requestResource(opts)
 
+	switch s.evaluateRules(opts.ToolName, opts.Action, resource) {
+	case RuleEffectDeny:
+		return false, nil
+	case RuleEffectAllow:
+		return true, nil
+	case RuleEffectAsk:
+		return s.prompt(ctx, opts, resource, true)
+	}
+
+	return s.prompt(ctx, opts, resource, false)
+}
+
+func (s *permissionService) prompt(ctx context.Context, opts CreatePermissionRequest, resource string, forcePrompt bool) (bool, error) {
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+	if !forcePrompt && (slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName)) {
 		return true, nil
 	}
 
@@ -193,7 +227,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// with the tool call ID. Treat that as a pre-approval and skip the
 	// prompt entirely. We still publish a granted notification so the UI
 	// and audit subscribers see the outcome.
-	if hookApproved(ctx, opts.ToolCallID) {
+	if !forcePrompt && hookApproved(ctx, opts.ToolCallID) {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
@@ -213,7 +247,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	autoApprove := s.autoApproveSessions[opts.SessionID]
 	s.autoApproveSessionsMu.RUnlock()
 
-	if autoApprove {
+	if !forcePrompt && autoApprove {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
@@ -243,14 +277,15 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+		Resource:    resource,
 	}
 
 	if _, ok := s.sessionPermissions.Get(PermissionKey{
 		SessionID: permission.SessionID,
 		ToolName:  permission.ToolName,
 		Action:    permission.Action,
-		Path:      permission.Path,
-	}); ok {
+		Resource:  permission.Resource,
+	}); ok && !forcePrompt {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
@@ -295,7 +330,11 @@ func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
 }
 
-func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+func NewPermissionService(workingDir string, skip bool, allowedTools []string, rules ...[]Rule) Service {
+	var flattenedRules []Rule
+	for _, set := range rules {
+		flattenedRules = append(flattenedRules, set...)
+	}
 	svc := &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
@@ -303,8 +342,94 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),
 		allowedTools:        allowedTools,
+		rules:               flattenedRules,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
 	svc.skip.Store(skip)
 	return svc
+}
+
+func (s *permissionService) evaluateRules(tool, action, resource string) RuleEffect {
+	var matched RuleEffect
+	for _, rule := range s.rules {
+		if !ruleMatches(rule, tool, action, resource) {
+			continue
+		}
+		switch rule.Effect {
+		case RuleEffectDeny:
+			return RuleEffectDeny
+		case RuleEffectAllow:
+			matched = RuleEffectAllow
+		case RuleEffectAsk:
+			if matched == "" {
+				matched = RuleEffectAsk
+			}
+		}
+	}
+	return matched
+}
+
+func ruleMatches(rule Rule, tool, action, resource string) bool {
+	return wildcardMatch(rule.Tool, tool) && wildcardMatch(rule.Action, action) && wildcardMatch(rule.Resource, resource)
+}
+
+func wildcardMatch(pattern, value string) bool {
+	if pattern == "" || pattern == "*" {
+		return true
+	}
+	if !strings.Contains(pattern, "*") {
+		return pattern == value
+	}
+	parts := strings.Split(pattern, "*")
+	if parts[0] != "" && !strings.HasPrefix(value, parts[0]) {
+		return false
+	}
+	if last := parts[len(parts)-1]; last != "" && !strings.HasSuffix(value, last) {
+		return false
+	}
+	pos := 0
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		idx := strings.Index(value[pos:], part)
+		if idx < 0 {
+			return false
+		}
+		pos += idx + len(part)
+	}
+	return true
+}
+
+func requestResource(opts CreatePermissionRequest) string {
+	if opts.Resource != "" {
+		return opts.Resource
+	}
+	if value := stringField(opts.Params, "URL", "Query", "Command", "FilePath", "Path"); value != "" {
+		return value
+	}
+	return opts.Path
+}
+
+func stringField(v any, names ...string) string {
+	if v == nil {
+		return ""
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return ""
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return ""
+	}
+	for _, name := range names {
+		field := rv.FieldByName(name)
+		if field.IsValid() && field.Kind() == reflect.String && field.String() != "" {
+			return field.String()
+		}
+	}
+	return ""
 }

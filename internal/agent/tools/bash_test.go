@@ -45,6 +45,8 @@ func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) 
 }
 
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
+	require.Equal(t, 60, DefaultAutoBackgroundAfter)
+
 	workingDir := t.TempDir()
 	tool := newBashToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
@@ -169,17 +171,18 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 	require.Contains(t, resp.Content, "User denied permission")
 }
 
-func TestBashTool_DefaultLongCommandReturnsAsBackgroundJob(t *testing.T) {
+func TestBashTool_ExplicitLongCommandReturnsAsBackgroundJob(t *testing.T) {
 	workingDir := t.TempDir()
 	tool := newBashToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	start := time.Now()
 	resp := runBashTool(t, tool, ctx, BashParams{
-		Description: "default long command",
-		Command:     "sleep 30",
+		Description:         "explicit long command",
+		Command:             "sleep 30",
+		AutoBackgroundAfter: 1,
 	})
-	require.Less(t, time.Since(start), 7*time.Second)
+	require.Less(t, time.Since(start), 3*time.Second)
 
 	var meta BashResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))

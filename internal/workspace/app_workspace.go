@@ -187,6 +187,20 @@ func (w *AppWorkspace) AgentModel() AgentModel {
 	}
 }
 
+func (w *AppWorkspace) AgentMode() string {
+	if w.app.AgentCoordinator == nil {
+		return config.AgentCoder
+	}
+	return w.app.AgentCoordinator.CurrentAgentID()
+}
+
+func (w *AppWorkspace) SetAgentMode(ctx context.Context, agentID string) error {
+	if w.app.AgentCoordinator == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	return w.app.AgentCoordinator.SetMainAgent(ctx, agentID)
+}
+
 func (w *AppWorkspace) AgentIsReady() bool {
 	return w.app.AgentCoordinator != nil
 }

@@ -43,6 +43,37 @@ function Write-HttpResponse {
     $Stream.Flush()
 }
 
+function Read-BoundedLine {
+    param(
+        [IO.StreamReader]$Reader,
+        [int]$MaxLength
+    )
+
+    $builder = [Text.StringBuilder]::new()
+    while ($true) {
+        $value = $Reader.Read()
+        if ($value -lt 0) {
+            if ($builder.Length -eq 0) {
+                return $null
+            }
+            break
+        }
+
+        $char = [char]$value
+        if ($char -eq "`n") {
+            break
+        }
+        if ($char -eq "`r") {
+            continue
+        }
+        if ($builder.Length -ge $MaxLength) {
+            throw "HTTP line exceeds $MaxLength characters."
+        }
+        [void]$builder.Append($char)
+    }
+    return $builder.ToString()
+}
+
 function Get-ClipboardPng {
     if (-not [Windows.Forms.Clipboard]::ContainsImage()) {
         return $null
@@ -75,21 +106,31 @@ try {
     $listener.Start()
     Write-BridgeLog "clipboard bridge listening on 127.0.0.1:$($config.local_port)"
 
-    while ($true) {
+    :acceptLoop while ($true) {
         $client = $listener.AcceptTcpClient()
         try {
+            $client.ReceiveTimeout = 5000
+            $client.SendTimeout = 5000
             $stream = $client.GetStream()
+            $stream.ReadTimeout = 5000
+            $stream.WriteTimeout = 5000
             $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::ASCII, $false, 4096, $true)
-            $requestLine = $reader.ReadLine()
+            $requestLine = Read-BoundedLine -Reader $reader -MaxLength 8192
             if ([string]::IsNullOrWhiteSpace($requestLine)) {
                 continue
             }
 
             $headers = @{}
+            $headerChars = 0
             while ($true) {
-                $line = $reader.ReadLine()
+                $line = Read-BoundedLine -Reader $reader -MaxLength 8192
                 if ([string]::IsNullOrEmpty($line)) {
                     break
+                }
+                $headerChars += $line.Length
+                if ($headerChars -gt 32768) {
+                    Write-HttpResponse -Stream $stream -Status 431 -Reason "Request Header Fields Too Large"
+                    continue acceptLoop
                 }
                 $separator = $line.IndexOf(":")
                 if ($separator -gt 0) {
@@ -143,7 +184,17 @@ try {
 
             Write-HttpResponse -Stream $stream -Status 200 -Reason "OK" -Body $imageBytes -ContentType "image/png" -Headers @{ "X-Content-SHA256" = $digest }
         }
+        catch [IO.IOException] {
+            Write-BridgeLog "request timed out or disconnected: $($_.Exception.Message)"
+        }
         catch {
+            if ($null -ne $stream) {
+                try {
+                    Write-HttpResponse -Stream $stream -Status 400 -Reason "Bad Request"
+                }
+                catch {
+                }
+            }
             Write-BridgeLog "request failed: $($_.Exception.Message)"
         }
         finally {

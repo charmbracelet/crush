@@ -186,9 +186,9 @@ func LetterD(stretch bool) string {
 		left,
 		stretchLetterformPart(middle, letterformProps{
 			stretch:    stretch,
-			width:      3,
-			minStretch: 7,
-			maxStretch: 12,
+			width:      2,
+			minStretch: 6,
+			maxStretch: 11,
 		}),
 		right,
 	)
@@ -223,9 +223,9 @@ func LetterO(stretch bool) string {
 		left,
 		stretchLetterformPart(middle, letterformProps{
 			stretch:    stretch,
-			width:      3,
-			minStretch: 7,
-			maxStretch: 12,
+			width:      2,
+			minStretch: 6,
+			maxStretch: 11,
 		}),
 		right,
 	)

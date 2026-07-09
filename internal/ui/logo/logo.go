@@ -72,10 +72,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	}
 
 	stretchIndex := -1 // -1 means no stretching.
-	if !compact && !o.Unstable {
-		// Always stretch the same letterform, which is picked once at random.
-		stretchIndex = cachedRandN(len(crushLetterforms))
-	} else if !compact && o.Unstable {
+	if !compact && o.Unstable {
 		// Stretch a random letterform on every render.
 		stretchIndex = rand.IntN(len(crushLetterforms))
 	}

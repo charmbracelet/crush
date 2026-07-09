@@ -35,10 +35,10 @@ func ThemeForProvider(providerID string) Styles {
 // for the UI.
 func CharmtonePantera() Styles {
 	s := quickStyle(quickStyleOpts{
-		primary:   charmtone.Charple,
-		secondary: charmtone.Dolly,
-		accent:    charmtone.Bok,
-		keyword:   charmtone.Blush,
+		primary:   charmtone.Sriracha,
+		secondary: charmtone.Salmon,
+		accent:    charmtone.Zest,
+		keyword:   charmtone.Zest,
 
 		fgBase:       charmtone.Sash,
 		fgMoreSubtle: charmtone.Squid,
@@ -73,8 +73,8 @@ func CharmtonePantera() Styles {
 		ansiRed:     charmtone.Coral,
 		ansiGreen:   charmtone.Guac,
 		ansiYellow:  charmtone.Mustard,
-		ansiBlue:    charmtone.Charple,
-		ansiMagenta: charmtone.Dolly,
+		ansiBlue:    charmtone.Sriracha,
+		ansiMagenta: charmtone.Salmon,
 		ansiCyan:    charmtone.Malibu,
 		ansiWhite:   charmtone.Smoke,
 
@@ -82,20 +82,20 @@ func CharmtonePantera() Styles {
 		ansiBrightRed:     charmtone.Tuna,
 		ansiBrightGreen:   charmtone.Julep,
 		ansiBrightYellow:  charmtone.Zest,
-		ansiBrightBlue:    charmtone.Guppy,
-		ansiBrightMagenta: charmtone.Blush,
+		ansiBrightBlue:    charmtone.Tuna,
+		ansiBrightMagenta: charmtone.Zest,
 		ansiBrightCyan:    charmtone.Sardine,
 		ansiBrightWhite:   charmtone.Salt,
 	})
 
-	// Bang ! prompt overrides - use Salt/Hazy/Larple colors.
+	// Bang ! prompt overrides.
 	s.Editor.PromptBangIconFocused = s.Editor.PromptBangIconFocused.
 		Foreground(charmtone.Salt).
-		Background(charmtone.Hazy)
+		Background(charmtone.Sriracha)
 	s.Editor.PromptBangDotsFocused = s.Editor.PromptBangDotsFocused.
-		Foreground(charmtone.Hazy)
+		Foreground(charmtone.Salmon)
 	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsBlurred.
-		Foreground(charmtone.Larple)
+		Foreground(charmtone.Zest)
 
 	logoOrange := charmtone.Salmon
 	logoRed := charmtone.Sriracha
@@ -119,15 +119,15 @@ func CharmtonePantera() Styles {
 	s.WorkingGradToColor = logoRed
 	s.WorkingLabelColor = logoLabel
 
-	// Shell bar/prompt overrides - use Charple/Iron/Hazy colors.
+	// Shell bar/prompt overrides.
 	s.Messages.ShellBarFocused = s.Messages.ShellBarFocused.
-		BorderForeground(charmtone.Charple)
+		BorderForeground(charmtone.Sriracha)
 	s.Messages.ShellBarBlurred = s.Messages.ShellBarBlurred.
 		BorderForeground(charmtone.Iron)
 	s.Messages.ShellPrompt = s.Messages.ShellPrompt.
-		Foreground(charmtone.Hazy)
+		Foreground(charmtone.Salmon)
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
-		Foreground(charmtone.Hazy)
+		Foreground(charmtone.Zest)
 
 	return s
 }

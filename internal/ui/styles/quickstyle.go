@@ -278,13 +278,13 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(charmtone.Zest),
 				},
 				KeywordNamespace: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(charmtone.Zest),
 				},
 				KeywordType: ansi.StylePrimitive{
-					Color: hex(charmtone.Guppy),
+					Color: hex(charmtone.Tuna),
 				},
 				Operator: ansi.StylePrimitive{
 					Color: hex(charmtone.Salmon),
@@ -299,10 +299,10 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(charmtone.Cheeky),
 				},
 				NameTag: ansi.StylePrimitive{
-					Color: hex(charmtone.Mauve),
+					Color: hex(charmtone.Salmon),
 				},
 				NameAttribute: ansi.StylePrimitive{
-					Color: hex(charmtone.Hazy),
+					Color: hex(charmtone.Zest),
 				},
 				NameClass: ansi.StylePrimitive{
 					Color:     hex(charmtone.Salt),

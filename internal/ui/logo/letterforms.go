@@ -164,14 +164,14 @@ func LetterD(stretch bool) string {
 	if stretch {
 		return heredoc.Doc(`
 			█▀▀▄
-			█  ▌
-			▀▀▀
+			█  █
+			▀▀▀▀
 		`)
 	}
 	return heredoc.Doc(`
 		█▀▄
-		█ ▌
-		▀▀
+		█ █
+		▀▀▀
 	`)
 }
 
@@ -182,13 +182,13 @@ func LetterO(stretch bool) string {
 	if stretch {
 		return heredoc.Doc(`
 			▄▀▀▄
-			▌  ▌
+			█  █
 			▀▄▄▀
 		`)
 	}
 	return heredoc.Doc(`
 		▄▀▄
-		▌ ▌
+		█ █
 		▀▄▀
 	`)
 }

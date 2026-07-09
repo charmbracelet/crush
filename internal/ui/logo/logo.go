@@ -4,6 +4,7 @@ package logo
 import (
 	"fmt"
 	"image/color"
+	"math/rand/v2"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -27,7 +28,9 @@ type Opts struct {
 	Width        int         // width of the rendered logo, used for truncation
 	Hyper        bool        // whether it is CODE or HYPERCODE
 
-	// Unstable is retained for compatibility with older logo callers.
+	// When true, stretch a random letterform on each render. Has no effect in
+	// compact mode. Mainly for testing. In production you will want to cache
+	// the stretched letterform to keep the logo from jittering on resize.
 	Unstable bool
 }
 
@@ -47,14 +50,40 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	}
 
 	// Title.
-	crush := "CODE"
+	const spacing = 1
+	var hyperLetterforms []letterform
 	if o.Hyper {
-		crush = "HYPERCODE"
+		hyperLetterforms = []letterform{
+			LetterH,
+			LetterYAlt,
+			LetterP,
+			LetterE,
+			LetterR,
+		}
+	}
+	crushLetterforms := []letterform{
+		LetterC,
+		LetterO,
+		LetterD,
+		LetterE,
+	}
+	if o.Hyper && !compact {
+		crushLetterforms = append(hyperLetterforms, crushLetterforms...)
+	}
+
+	stretchIndex := -1 // -1 means no stretching.
+	if !compact && o.Unstable {
+		// Stretch a random letterform on every render.
+		stretchIndex = rand.IntN(len(crushLetterforms))
+	}
+	crush := renderWord(spacing, stretchIndex, crushLetterforms...)
+	if o.Hyper && compact {
+		crush = renderWord(spacing, stretchIndex, hyperLetterforms...) + "\n" + crush
 	}
 	crushWidth := lipgloss.Width(crush)
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(crush, "\n") {
-		fmt.Fprintln(b, styles.ApplyBoldForegroundGrad(base, r, o.TitleColorA, o.TitleColorB))
+		fmt.Fprintln(b, styles.ApplyForegroundGrad(base, r, o.TitleColorA, o.TitleColorB))
 	}
 	crush = b.String()
 

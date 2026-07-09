@@ -157,6 +157,13 @@ func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID strin
 	return w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID)
 }
 
+// RoutesChannelEvents reports true: the server backend injects each
+// channel event exactly once (see backend.startChannelRouter), so this
+// client must not inject on EventChannelMessage — with several clients
+// attached, per-client injection would run the same event multiple
+// times, and it would never run with zero clients attached.
+func (w *ClientWorkspace) RoutesChannelEvents() bool { return true }
+
 // -- Messages --
 
 func (w *ClientWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

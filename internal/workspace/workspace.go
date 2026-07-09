@@ -81,6 +81,15 @@ type Workspace interface {
 	ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListAllUserMessages(ctx context.Context) ([]message.Message, error)
 
+	// RoutesChannelEvents reports whether the workspace's backing
+	// process routes MCP channel events into sessions itself. When
+	// true (client/server mode), frontends must not inject channel
+	// messages on EventChannelMessage — the server injects each event
+	// exactly once and the resulting turn arrives through the normal
+	// session/message event stream. When false (in-process mode), the
+	// frontend owns injection.
+	RoutesChannelEvents() bool
+
 	// Agent
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)

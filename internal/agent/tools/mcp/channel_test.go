@@ -281,8 +281,8 @@ func TestChannelEnabled(t *testing.T) {
 		{[]string{"SERVER:webhook"}, "webhook", true},
 	}
 	for _, tt := range tests {
-		if got := channelEnabled(tt.enabled, tt.name); got != tt.want {
-			t.Errorf("channelEnabled(%v, %q) = %v, want %v", tt.enabled, tt.name, got, tt.want)
+		if got := ChannelEnabled(tt.enabled, tt.name); got != tt.want {
+			t.Errorf("ChannelEnabled(%v, %q) = %v, want %v", tt.enabled, tt.name, got, tt.want)
 		}
 	}
 }

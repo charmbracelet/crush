@@ -185,9 +185,11 @@ func (w *Workspace) Shutdown() {
 	}
 }
 
-// New creates a new [Backend].
+// New creates a new [Backend]. The returned backend routes MCP channel
+// events into hosted workspaces for its lifetime (until ctx is
+// canceled); see [Backend.startChannelRouter].
 func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) *Backend {
-	return &Backend{
+	b := &Backend{
 		workspaces:  csync.NewMap[string, *Workspace](),
 		pathIndex:   make(map[string]string),
 		cfg:         cfg,
@@ -195,6 +197,8 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		shutdownFn:  shutdownFn,
 		createGrace: DefaultCreateGrace,
 	}
+	b.startChannelRouter()
+	return b
 }
 
 // SetCreateGrace overrides the create-grace window. Intended for tests

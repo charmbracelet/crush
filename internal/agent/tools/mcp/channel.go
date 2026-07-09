@@ -153,11 +153,13 @@ func hasChannelCapability(res *mcp.InitializeResult) bool {
 	return ok
 }
 
-// channelEnabled reports whether the given server name was opted in via the
-// --channels flag. A server present in MCP config is not a channel until it is
-// explicitly enabled, matching the "listed is not enabled" model. Entries may
-// be written as "server:<name>" or as a bare "<name>".
-func channelEnabled(enabled []string, name string) bool {
+// ChannelEnabled reports whether the given server name was opted in via the
+// --channels flag. A server present in MCP config is not a channel until it
+// is explicitly enabled, matching the "listed is not enabled" model. Entries
+// may be written as "server:<name>" or as a bare "<name>". Exported for the
+// server backend, which routes channel events per workspace and needs the
+// same opt-in semantics.
+func ChannelEnabled(enabled []string, name string) bool {
 	for _, e := range enabled {
 		e = strings.TrimSpace(e)
 		if e == name {

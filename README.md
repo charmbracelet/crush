@@ -403,12 +403,17 @@ body and attribute sizes, restricts `meta` keys to identifiers
 server that has not been opted in via `--channels`, or that never declared the
 capability, cannot inject anything.
 
-Channel delivery works in the interactive TUI, both in the default in-process
-`crush` and against a shared `crush serve` backend (events cross the SSE event
-stream to each connected client). If no session is open when an event arrives,
-Crush starts one so the event is never dropped; otherwise it routes into the
-session you have open. Servers that are live channels are marked `channel` in
-the MCP list so you can confirm the opt-in took effect.
+Channel delivery works in the default in-process `crush` and against a shared
+`crush serve` backend. In-process, an event routes into the session you have
+open, or starts one if none is open, so it is never dropped. Against a
+`crush serve` backend the server routes each event exactly once — into the
+session an attached client is viewing (the most recently updated one when
+clients are viewing different sessions), otherwise into the workspace's most
+recent session, creating one only when none exists. That holds even with no
+clients connected, so a headless server still processes channel pushes;
+attached clients see the injected turn arrive through the normal event
+stream. Servers that are live channels are marked `channel` in the MCP list
+so you can confirm the opt-in took effect.
 
 **Two-way channels.** A channel can also be interactive. Because a channel is a
 regular MCP server, any tool it exposes (a `reply` tool, say) is available to

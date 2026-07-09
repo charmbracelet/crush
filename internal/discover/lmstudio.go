@@ -22,10 +22,17 @@ type lmstudioModelsResponse struct {
 
 // lmstudioModelEntry is a single entry from /api/v1/models.
 type lmstudioModelEntry struct {
-	Key              string             `json:"key"`
-	DisplayName      string             `json:"display_name"`
-	MaxContextLength int64              `json:"max_context_length"`
-	LoadedInstances  []lmstudioInstance `json:"loaded_instances"`
+	Key              string                `json:"key"`
+	DisplayName      string                `json:"display_name"`
+	MaxContextLength int64                 `json:"max_context_length"`
+	LoadedInstances  []lmstudioInstance    `json:"loaded_instances"`
+	Capabilities     lmstudioCapabilities  `json:"capabilities"`
+}
+
+// lmstudioCapabilities holds optional model capability flags from
+// LM Studio's /api/v1/models endpoint.
+type lmstudioCapabilities struct {
+	Vision bool `json:"vision"`
 }
 
 // lmstudioInstance is a currently loaded model instance with its
@@ -40,8 +47,8 @@ type lmstudioInstanceConfig struct {
 }
 
 // lmstudioEnricher fetches model metadata from LM Studio's native
-// /api/v1/models endpoint and populates context window and display
-// name on discovered models.
+// /api/v1/models endpoint and populates context window, display name,
+// and vision support on discovered models.
 type lmstudioEnricher struct{}
 
 func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
@@ -87,8 +94,10 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 			models[i].Name = meta.DisplayName
 		}
 
-		// TODO: populate vision/tool-use flags when catwalk.Model
-		// gains dedicated fields for them.
+		// Vision support from capabilities.
+		if meta.Capabilities.Vision {
+			models[i].SupportsImages = true
+		}
 	}
 
 	return models, nil

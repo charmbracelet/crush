@@ -748,7 +748,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
-	outboundPrompt := call.Prompt
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -823,33 +822,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// non-interactive clients waiting on RunComplete.
 		a.publishRunComplete(ctx, call, complete)
 	}()
-
-	if a.userPromptHooks != nil {
-		var attachmentPaths []string
-		for _, attachment := range call.Attachments {
-			attachmentPaths = append(attachmentPaths, attachment.FilePath)
-		}
-		promptResult, hookErr := a.userPromptHooks.RunPayload(ctx, hooks.EventUserPromptSubmit, call.SessionID, "prompt", "", hooks.Payload{
-			Prompt:      call.Prompt,
-			Attachments: attachmentPaths,
-		})
-		if hookErr != nil {
-			slog.Warn("UserPromptSubmit hook execution error, continuing with original prompt", "error", hookErr)
-		}
-		if promptResult.Decision == hooks.DecisionDeny || promptResult.Halt {
-			reason := promptResult.Reason
-			if reason == "" {
-				reason = "prompt blocked by hook"
-			}
-			return nil, fmt.Errorf("prompt blocked by hook: %s", reason)
-		}
-		if promptResult.UpdatedPrompt != "" {
-			outboundPrompt = promptResult.UpdatedPrompt
-		}
-		if promptResult.Context != "" {
-			outboundPrompt = "<hook_context>\n" + promptResult.Context + "\n</hook_context>\n\n" + outboundPrompt
-		}
-	}
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 

@@ -50,7 +50,7 @@ type BashResponseMetadata struct {
 const (
 	BashToolName = "bash"
 
-	DefaultAutoBackgroundAfter = 5 // Return control quickly while long-running work continues as a job
+	DefaultAutoBackgroundAfter = 60 // Commands taking longer automatically become background jobs
 	MaxOutputLength            = 30000
 	BashNoOutput               = "no output"
 )

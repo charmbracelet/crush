@@ -35,6 +35,19 @@ import (
 
 const defaultCatwalkURL = "https://catwalk.charm.land"
 
+// EmbeddedLMStudioBaseURL optionally injects a built-in LM Studio provider
+// for portable test builds. It is intentionally empty in normal builds and
+// is set with -ldflags for shareable binaries.
+var (
+	EmbeddedLMStudioBaseURL = ""
+	EmbeddedLMStudioAPIKey  = "$TAILNET_QWEN_API_KEY"
+)
+
+const (
+	embeddedLMStudioProviderID   = "tailnet-lmstudio"
+	embeddedLMStudioProviderName = "Tailnet LM Studio"
+)
+
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -546,6 +559,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
 	}
+	c.addEmbeddedLMStudioProvider()
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
 	}
@@ -605,6 +619,51 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
+}
+
+func (c *Config) addEmbeddedLMStudioProvider() {
+	if EmbeddedLMStudioBaseURL == "" {
+		return
+	}
+	if _, ok := c.Providers.Get(embeddedLMStudioProviderID); ok {
+		return
+	}
+	discoverModels := true
+	c.Providers.Set(embeddedLMStudioProviderID, ProviderConfig{
+		ID:                 embeddedLMStudioProviderID,
+		Name:               embeddedLMStudioProviderName,
+		BaseURL:            EmbeddedLMStudioBaseURL,
+		APIKey:             EmbeddedLMStudioAPIKey,
+		Type:               catwalk.Type("lmstudio"),
+		AutoDiscoverModels: &discoverModels,
+		Models: []catwalk.Model{
+			{
+				Name:                   "Qwen3.5 4B",
+				ID:                     "qwen3.5-4b-claude-4.6-opus-reasoning-distilled-v2",
+				ContextWindow:          65536,
+				DefaultMaxTokens:       8192,
+				CanReason:              true,
+				ReasoningLevels:        []string{"low", "medium", "high"},
+				DefaultReasoningEffort: "high",
+				SupportsImages:         true,
+			},
+			{
+				Name:                   "Qwen3.5 9B",
+				ID:                     "qwen3.5-9b",
+				ContextWindow:          262144,
+				DefaultMaxTokens:       8192,
+				CanReason:              true,
+				ReasoningLevels:        []string{"low", "medium", "high"},
+				DefaultReasoningEffort: "medium",
+			},
+			{
+				Name:             "Qwen2.5 3B Instruct",
+				ID:               "qwen2.5-3b-instruct",
+				ContextWindow:    32768,
+				DefaultMaxTokens: 4096,
+			},
+		},
+	})
 }
 
 // powernapDefaults caches the powernap default LSP server catalog. The

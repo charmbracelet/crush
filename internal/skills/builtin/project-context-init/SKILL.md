@@ -9,8 +9,15 @@ Create instruction files from observed repository facts only.
 
 ## Discovery
 
-1. List the project root.
-2. Read existing instruction files when present:
+1. Treat the current working directory as the target project root unless the
+   user explicitly provides another path.
+2. List the target project root.
+3. If the target appears to be a home directory, system directory, workspace
+   parent, or other container of multiple projects rather than a single source
+   project, stop and say that the directory is not a project root. Ask the user
+   to rerun from the intended project or provide the exact path. Do not choose
+   a nested repository yourself.
+4. Read existing instruction files when present:
    - AGENTS.md, agents.md, Agents.md
    - CLAUDE.md, CLAUDE.local.md
    - CRUSH.md, crush.md, local variants
@@ -18,9 +25,9 @@ Create instruction files from observed repository facts only.
    - LLM.md, LLMs.md, docs/LLMs.md
    - .cursorrules, .cursor/rules/*.md
    - .github/copilot-instructions.md
-3. Identify project type from config files and directory structure.
-4. Find build, run, lint, test, typecheck, deploy, and migration commands from scripts, Makefiles, CI, or docs.
-5. Read representative source files to capture architecture, data flow, naming, and non-obvious conventions.
+5. Identify project type from config files and directory structure.
+6. Find build, run, lint, test, typecheck, deploy, and migration commands from scripts, Makefiles, CI, or docs.
+7. Read representative source files to capture architecture, data flow, naming, and non-obvious conventions.
 
 ## Content Rules
 
@@ -30,6 +37,8 @@ Create instruction files from observed repository facts only.
 - Preserve user or project preferences from existing instruction files.
 - Note verification commands and when to use each one.
 - Prefer concise sections with concrete paths and commands.
+- Never write a project instruction file outside the target project root unless
+  the user explicitly asks for that path.
 
 ## Multi-Agent Compatibility
 

@@ -90,6 +90,12 @@ func unmarshalToolParams(toolName string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return params, nil
+	case TmuxToolName:
+		var params TmuxPermissionsParams
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, err
+		}
+		return params, nil
 	case DownloadToolName:
 		var params DownloadPermissionsParams
 		if err := json.Unmarshal(raw, &params); err != nil {

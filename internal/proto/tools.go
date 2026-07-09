@@ -25,6 +25,8 @@ type ToolResponse struct {
 
 const BashToolName = "bash"
 
+const TmuxToolName = "tmux"
+
 // BashParams represents the parameters for the bash tool.
 type BashParams struct {
 	Command string `json:"command"`
@@ -33,6 +35,8 @@ type BashParams struct {
 
 // BashPermissionsParams represents the permission parameters for the bash tool.
 type BashPermissionsParams = tools.BashPermissionsParams
+
+type TmuxPermissionsParams = tools.TmuxPermissionsParams
 
 // BashResponseMetadata represents the metadata for a bash tool response.
 type BashResponseMetadata struct {

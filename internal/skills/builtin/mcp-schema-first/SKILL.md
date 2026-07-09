@@ -16,6 +16,12 @@ Use MCP tools only after understanding the server's advertised contract.
 5. Authenticate only when the server advertises an auth flow or the user explicitly asks.
 6. Do not guess parameter names. If the schema is unavailable, say so and use a safer path.
 
+## Native Web And Code Search
+
+- `web_search` and `web_fetch` are native tools, not MCP tools. Use them first for current web facts and explicit URL follow-up.
+- Use Sourcegraph or GitHub Grep for public code search. Do not use general web search for symbol lookup when a code-search tool is available.
+- Use external MCP search/fetch only when native web tools are unavailable or the MCP provider has a clear advantage for the task.
+
 ## Filesystem MCP
 
 - Read before edit.

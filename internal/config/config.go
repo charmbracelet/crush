@@ -747,6 +747,7 @@ func allToolNames() []string {
 		"job_output",
 		"job_list",
 		"job_kill",
+		"tmux",
 		"download",
 		"edit",
 		"multiedit",

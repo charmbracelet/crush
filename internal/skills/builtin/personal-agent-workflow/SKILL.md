@@ -25,6 +25,19 @@ Use a deliberate agent loop. Do not optimize every turn for speed. Fast response
 - Remote/server change: read-only check first, then apply with rollback awareness.
 - Deployment, push, commit, delete, credential, or binary replacement: require explicit user approval for that specific action unless already given.
 
+## Terminal And Long-Running Work
+
+- Use normal Bash for finite commands that need truthful exit status: tests, builds, git, config validation, and one-shot inspection.
+- Use the `tmux` tool for persistent shells, REPLs, dev servers, log streams, and commands that need interactive shell startup across turns.
+- Capture tmux output before deciding what happened. A visible pane is not proof of success unless it shows a completed successful result.
+- Clean up tmux sessions when they are no longer useful.
+
+## Model Escalation
+
+- Current Crush model selection is explicit: choose from the model menu or use `crush run -m provider/model` for one-off runs.
+- Do not claim automatic fallback to a larger model unless the code implements it and the run logs show it happened.
+- A future auto-escalation feature must avoid replaying side-effectful tool calls, preserve session state, and disclose when escalation occurs.
+
 ## Provider and Channel Expansion
 
 When adding Telegram, Slack, web, CLI, or other providers:

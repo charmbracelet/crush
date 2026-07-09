@@ -244,19 +244,45 @@ Skills with `disable-model-invocation` won't appear in the model's available ski
 
 ## Hooks
 
-Hooks are user-defined shell commands that fire on agent events. Currently only `PreToolUse` is supported, which runs before a tool is executed.
+Hooks are user-defined shell commands that fire on agent events. Use the dedicated `crush-hooks` skill for full payload details and examples.
+
+Supported events:
+
+- `UserPromptSubmit`: prompt admission, rewrite, denial, and transient context before the prompt reaches the model.
+- `PreToolUse`: tool policy, permission pre-approval, and tool-input rewriting before a tool runs.
+- `PostToolUse`: successful tool-result inspection or context injection.
+- `PostToolUseFailure`: failed tool-result inspection or recovery guidance; runs instead of `PostToolUse` for failed results.
+- `Stop`: final turn validation before run completion.
 
 ```json
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "prompt",
+        "command": ".crush/hooks/prompt-policy.sh",
+        "timeout": 10
+      }
+    ],
     "PreToolUse": [
       {
-        "matcher": "^(edit|write|multiedit)$",
-        "command": ".crush/hooks/protect-files.sh"
-      },
+        "matcher": "^(bash|tmux)$",
+        "command": ".crush/hooks/shell-policy.sh",
+        "timeout": 10
+      }
+    ],
+    "PostToolUseFailure": [
       {
         "matcher": "^bash$",
-        "command": ".crush/hooks/no-haskell.sh"
+        "command": ".crush/hooks/recover-failed-bash.sh",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "stop",
+        "command": ".crush/hooks/final-check.sh",
+        "timeout": 10
       }
     ]
   }
@@ -266,102 +292,67 @@ Hooks are user-defined shell commands that fire on agent events. Currently only 
 ### Hook Properties
 
 - `command` (required): Shell command to execute. Runs via `sh -c`.
-- `matcher` (optional): Regex pattern tested against the tool name. Empty or absent means match all tools.
+- `matcher` (optional): Regex pattern tested against the tool name or lifecycle target. Empty or absent means match all hooks for that event.
 - `timeout` (optional): Timeout in seconds. Defaults to 30.
 
-### Event Name Normalization
-
-Event names are case-insensitive and accept snake_case variants: `PreToolUse`, `pretooluse`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
-
-### How Hooks Work
-
-1. When a tool is about to be called, all `PreToolUse` hooks with a matching `matcher` (or no matcher) run in parallel.
-2. Duplicate commands are deduplicated — each unique command runs at most once.
-3. The hook receives JSON on **stdin** and hook-specific **environment variables**.
-
-### Hook Input (stdin)
-
-A JSON payload is piped to the hook command:
-
-```json
-{
-  "event": "PreToolUse",
-  "session_id": "abc-123",
-  "cwd": "/path/to/project",
-  "tool_name": "bash",
-  "tool_input": {"command": "ls -la"}
-}
-```
-
-### Hook Environment Variables
-
-| Variable | Description |
-|---|---|
-| `CRUSH_EVENT` | Event name (e.g. `PreToolUse`) |
-| `CRUSH_TOOL_NAME` | Name of the tool being called |
-| `CRUSH_SESSION_ID` | Current session ID |
-| `CRUSH_CWD` | Current working directory |
-| `CRUSH_PROJECT_DIR` | Project root directory |
-| `CRUSH_TOOL_INPUT_COMMAND` | Value of `command` from tool input (if present) |
-| `CRUSH_TOOL_INPUT_FILE_PATH` | Value of `file_path` from tool input (if present) |
+Event names are case-insensitive and accept snake_case variants: `PreToolUse`, `pretooluse`, `pre_tool_use`, and `PRE_TOOL_USE` all normalize to the same event.
 
 ### Hook Output
 
-**Exit code 0** — the hook succeeded. Stdout is parsed as JSON:
-
-```json
-{"decision": "allow", "context": "optional context appended to tool result"}
-```
-
-- `decision`: `allow` to explicitly allow, `deny` to block, `none` (or omit) for no opinion.
-- `reason`: Explanation text (used when denying).
-- `context`: Extra context appended to the tool result.
-- `updated_input`: Replacement JSON for the tool input. Last non-empty value wins.
-
-**Exit code 2** — the tool call is blocked. Stderr is used as the deny reason.
-
-```bash
-echo "No Haskell allowed" >&2
-exit 2
-```
-
-**Any other exit code** — non-blocking error. The tool call proceeds as normal.
-
-### Claude Code Compatibility
-
-Crush also supports the Claude Code hook output format:
+Exit code `0` parses stdout as JSON. Exit code `2` denies or blocks the current event. Exit code `49` halts the whole turn. Other exit codes are non-blocking hook failures.
 
 ```json
 {
-  "hookSpecificOutput": {
-    "permissionDecision": "allow",
-    "permissionDecisionReason": "Auto-approved",
-    "updatedInput": {"command": "echo rewritten"}
-  }
+  "version": 1,
+  "decision": "allow",
+  "halt": false,
+  "reason": "optional reason",
+  "context": "extra model-visible context",
+  "updated_input": {"command": "rewritten command"},
+  "updated_prompt": "replacement prompt"
 }
 ```
 
-Existing Claude Code hooks should work without modification.
+- `decision`: `allow`, `deny`, or omit. `allow` pre-approves permission prompts only for `PreToolUse`.
+- `reason`: explanation shown when denying or halting.
+- `context`: extra model-visible context. Prompt-hook context is transient and is not persisted as user history.
+- `updated_input`: shallow merge patch against `tool_input`; only meaningful for `PreToolUse`.
+- `updated_prompt`: full replacement for the admitted prompt sent to the model and saved in history; only meaningful for `UserPromptSubmit`.
 
-### Decision Aggregation
-
-When multiple hooks match, their decisions are aggregated:
-
-- **Deny wins over allow** — if any hook denies, the tool call is blocked.
-- **Allow wins over none** — if no hook denies but at least one allows, the call proceeds.
-- All deny reasons are concatenated (newline-separated).
-- All context strings are concatenated (newline-separated).
-- For `updated_input`, the last non-empty value wins.
+Claude Code-style `hookSpecificOutput` is also accepted for permission decisions, `updatedInput`, and `additionalContext`.
 
 ## Tool Permissions
+
+`allowed_tools` remains the legacy auto-allow fallback. Prefer `rules` when resource-specific policy matters.
 
 ```json
 {
   "permissions": {
-    "allowed_tools": ["view", "ls", "grep", "edit"]
+    "allowed_tools": ["view", "ls", "grep"],
+    "rules": [
+      {"tool": "web_fetch", "action": "fetch", "resource": "https://docs.example.com/*", "effect": "allow"},
+      {"tool": "bash", "action": "execute", "resource": "rm *", "effect": "deny"},
+      {"tool": "tmux", "action": "start", "resource": "*", "effect": "ask"}
+    ]
   }
 }
 ```
+
+Rule fields:
+
+- `tool`: tool name such as `bash`, `tmux`, `web_search`, `web_fetch`, `edit`, or `write`.
+- `action`: tool action such as `execute`, `start`, `send`, `fetch`, `search`, `read`, or `write`.
+- `resource`: command, query, URL, or path. `*` wildcards are supported.
+- `effect`: `allow`, `ask`, or `deny`.
+
+Evaluation order:
+
+1. Yolo/skip mode grants everything.
+2. Explicit deny rules block before prompts, saved grants, hooks, or `allowed_tools`.
+3. Explicit allow rules grant.
+4. Explicit ask rules force a prompt.
+5. `allowed_tools` grants backward-compatible auto-allow.
+6. Hook allow can grant only when no explicit deny matched.
 
 ## Environment Variables
 

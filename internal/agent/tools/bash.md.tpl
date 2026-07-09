@@ -1,9 +1,11 @@
 Execute shell commands; long-running commands automatically move to background and return a shell ID.
 
 <cross_platform>
-Uses mvdan/sh interpreter (Bash-compatible on all platforms including Windows).
+This tool is named `bash` for compatibility, but it is Crush's cross-platform shell tool, not a guarantee that GNU Bash, WSL, cmd.exe, or PowerShell is available.
+It uses the mvdan/sh interpreter with portable shell syntax on all platforms, including Windows.
 Use forward slashes for paths: "ls C:/foo/bar" not "ls C:\foo\bar".
-Common shell builtins and core utils available on Windows.
+Prefer portable commands and built-in file/search tools over OS-specific shell features. Only use cmd.exe, PowerShell, WSL, or Unix-only commands when the user or environment explicitly requires them.
+Common shell builtins and core utils are available on Windows.
 </cross_platform>
 
 <execution_steps>

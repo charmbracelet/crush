@@ -41,6 +41,52 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestConfig_LoadFromConfigPaths_EmbeddedConfig(t *testing.T) {
+	previous := EmbeddedConfigJSON
+	EmbeddedConfigJSON = `{
+		"models": {
+			"large": {
+				"provider": "embedded-provider",
+				"model": "embedded-large"
+			}
+		},
+		"permissions": {
+			"rules": [
+				{ "tool": "*", "effect": "allow" }
+			]
+		}
+	}`
+	t.Cleanup(func() { EmbeddedConfigJSON = previous })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+		"models": {
+			"large": {
+				"model": "user-large"
+			}
+		}
+	}`), 0o600))
+
+	cfg, loaded, err := loadFromConfigPaths([]string{path})
+	require.NoError(t, err)
+	require.Equal(t, []string{"<embedded>", path}, loaded)
+	require.Equal(t, "embedded-provider", cfg.Models[SelectedModelTypeLarge].Provider)
+	require.Equal(t, "user-large", cfg.Models[SelectedModelTypeLarge].Model)
+	require.Len(t, cfg.Permissions.Rules, 1)
+	require.Equal(t, "allow", cfg.Permissions.Rules[0].Effect)
+}
+
+func TestConfig_LoadFromConfigPaths_InvalidEmbeddedConfig(t *testing.T) {
+	previous := EmbeddedConfigJSON
+	EmbeddedConfigJSON = `{`
+	t.Cleanup(func() { EmbeddedConfigJSON = previous })
+
+	_, _, err := loadFromConfigPaths(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid embedded JSON config")
+}
+
 func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	// Force GlobalConfig and GlobalConfigData to point at locations we
 	// control so they can be present in the result without polluting

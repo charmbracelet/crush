@@ -41,6 +41,9 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 var (
 	EmbeddedLMStudioBaseURL = ""
 	EmbeddedLMStudioAPIKey  = "$TAILNET_QWEN_API_KEY"
+	// EmbeddedConfigJSON optionally injects default JSON config before user
+	// and workspace config files are loaded. Later config files still win.
+	EmbeddedConfigJSON = ""
 )
 
 const (
@@ -942,6 +945,15 @@ func lookupConfigs(cwd string) []string {
 func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 	var configs [][]byte
 	var loaded []string
+
+	if EmbeddedConfigJSON != "" {
+		data := []byte(EmbeddedConfigJSON)
+		if !json.Valid(data) {
+			return nil, nil, fmt.Errorf("invalid embedded JSON config")
+		}
+		configs = append(configs, data)
+		loaded = append(loaded, "<embedded>")
+	}
 
 	for _, path := range configPaths {
 		data, err := os.ReadFile(path)

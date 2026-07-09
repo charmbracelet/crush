@@ -93,7 +93,7 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 	}
 
 	if call.Name == AgentToolName && !h.ledger.hasGrounding(sessionID) {
-		return fantasy.NewTextErrorResponse("Sub-agent call blocked until the root agent grounds the task. First inspect the current workspace/target with ls, view, grep, bash, crush_info, or an MCP filesystem/GitHub/docs tool, then call agent with the verified path and objective."), nil
+		return fantasy.NewTextErrorResponse("Sub-agent call blocked until the root agent grounds the task. First inspect the current workspace/target with ls, view, grep, the shell tool, crush_info, or an MCP filesystem/GitHub/docs tool, then call agent with the verified path and objective."), nil
 	}
 
 	if previous, ok := h.ledger.previousFailure(sessionID, call.Name, call.Input); ok {

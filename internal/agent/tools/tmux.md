@@ -1,6 +1,6 @@
 Manage persistent tmux sessions for interactive shells, REPLs, development servers, watchers, and command streams that benefit from real terminal state.
 
-Use this tool when a task needs shell state to persist across turns or when an interactive shell setup matters. For finite verification commands, builds, tests, git operations, and one-shot file inspection, prefer the normal bash/read tools because they return clearer exit status.
+Use this tool when a task needs shell state to persist across turns or when an interactive shell setup matters. For finite verification commands, builds, tests, git operations, and one-shot file inspection, prefer the normal shell/read tools because they return clearer exit status.
 
 Actions:
 

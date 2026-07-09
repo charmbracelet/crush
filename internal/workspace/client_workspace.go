@@ -560,6 +560,7 @@ func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
 				Resources: v.ResourceCount,
 			},
 			ConnectedAt: v.ConnectedAt,
+			Channel:     v.Channel,
 		}
 	}
 	return result

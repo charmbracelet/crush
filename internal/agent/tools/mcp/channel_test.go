@@ -240,6 +240,32 @@ func TestRenderChannelDeterministicMetaOrder(t *testing.T) {
 	}
 }
 
+func TestUpdateStatePropagatesChannel(t *testing.T) {
+	const name = "test-channel-propagation"
+	t.Cleanup(func() { states.Del(name) })
+
+	updateState(name, StateConnected, nil, &ClientSession{channel: true}, Counts{Tools: 1})
+	info, ok := GetState(name)
+	if !ok {
+		t.Fatal("expected state to be recorded")
+	}
+	if !info.Channel {
+		t.Error("ClientInfo.Channel should reflect the session's channel flag")
+	}
+
+	// A non-channel session must not report as a channel.
+	updateState(name, StateConnected, nil, &ClientSession{channel: false}, Counts{})
+	if info, _ := GetState(name); info.Channel {
+		t.Error("non-channel session must not report Channel=true")
+	}
+
+	// A nil client (e.g. error/disabled state) must not panic or report a channel.
+	updateState(name, StateError, nil, nil, Counts{})
+	if info, _ := GetState(name); info.Channel {
+		t.Error("nil client must not report Channel=true")
+	}
+}
+
 func TestChannelEnabled(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

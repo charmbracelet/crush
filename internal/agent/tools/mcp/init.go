@@ -45,6 +45,9 @@ func parseLevel(level mcp.LoggingLevel) slog.Level {
 type ClientSession struct {
 	*mcp.ClientSession
 	cancel context.CancelFunc
+	// channel reports whether this server is an active channel (it declared
+	// the claude/channel capability and was opted in via --channels).
+	channel bool
 }
 
 // Close cancels the session context and then closes the underlying session.
@@ -127,6 +130,9 @@ type ClientInfo struct {
 	Client      *ClientSession
 	Counts      Counts
 	ConnectedAt time.Time
+	// Channel reports whether this server is an active channel (declared the
+	// claude/channel capability and opted in via --channels).
+	Channel bool
 }
 
 // SubscribeEvents returns a channel for MCP events
@@ -332,11 +338,12 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 // updateState updates the state of an MCP client and publishes an event
 func updateState(name string, state State, err error, client *ClientSession, counts Counts) {
 	info := ClientInfo{
-		Name:   name,
-		State:  state,
-		Error:  err,
-		Client: client,
-		Counts: counts,
+		Name:    name,
+		State:   state,
+		Error:   err,
+		Client:  client,
+		Counts:  counts,
+		Channel: client != nil && client.channel,
 	}
 	switch state {
 	case StateConnected:
@@ -425,12 +432,13 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	// Open the channel gate only for a server that both declares the
 	// claude/channel capability and was opted in via --channels. Listed in MCP
 	// config is not enough; this enforces the "listed is not enabled" model.
-	if channelOptIn && hasChannelCapability(session.InitializeResult()) {
+	isChannel := channelOptIn && hasChannelCapability(session.InitializeResult())
+	if isChannel {
 		channelGate.Store(true)
 		slog.Info("MCP channel enabled", "name", name)
 	}
 
-	return &ClientSession{session, cancel}, nil
+	return &ClientSession{ClientSession: session, cancel: cancel, channel: isChannel}, nil
 }
 
 // maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail

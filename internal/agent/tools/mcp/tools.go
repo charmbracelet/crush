@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -27,6 +30,8 @@ type ToolResult struct {
 
 var allTools = csync.NewMap[string, []*Tool]()
 
+const defaultToolTimeout = 60 * time.Second
+
 // Tools returns all available MCP tools.
 func Tools() iter.Seq2[string, []*Tool] {
 	return allTools.Seq2()
@@ -43,11 +48,20 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	if err != nil {
 		return ToolResult{}, err
 	}
-	result, err := c.CallTool(ctx, &mcp.CallToolParams{
+
+	toolTimeout := mcpToolTimeout(cfg.Config().MCP[name])
+	callCtx, cancel := context.WithTimeout(ctx, toolTimeout)
+	defer cancel()
+
+	result, err := c.CallTool(callCtx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
 	})
 	if err != nil {
+		err = maybeToolTimeoutErr(callCtx, err, toolTimeout, name, toolName)
+		if isToolTimeout(callCtx, err) {
+			markToolTimeout(name, c, err)
+		}
 		return ToolResult{}, err
 	}
 
@@ -106,6 +120,37 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		Type:    "text",
 		Content: textContent,
 	}, nil
+}
+
+func mcpToolTimeout(m config.MCPConfig) time.Duration {
+	if m.ToolTimeout <= 0 {
+		return defaultToolTimeout
+	}
+	return time.Duration(m.ToolTimeout) * time.Second
+}
+
+func maybeToolTimeoutErr(ctx context.Context, err error, timeout time.Duration, name, toolName string) error {
+	if isToolTimeout(ctx, err) {
+		return fmt.Errorf("mcp tool call %s/%s timed out after %s", name, toolName, timeout)
+	}
+	return err
+}
+
+func isToolTimeout(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.DeadlineExceeded) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) && errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
+func markToolTimeout(name string, session *ClientSession, err error) {
+	state, _ := states.Get(name)
+	if closeErr := session.Close(); closeErr != nil &&
+		!errors.Is(closeErr, context.Canceled) &&
+		!errors.Is(closeErr, io.EOF) &&
+		closeErr.Error() != "signal: killed" {
+		slog.Warn("Failed to close timed out MCP session", "name", name, "error", closeErr)
+	}
+	updateState(name, StateError, err, nil, state.Counts)
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

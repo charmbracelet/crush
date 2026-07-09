@@ -179,7 +179,8 @@ reviewed.
 
 - `type` (required): `stdio`, `sse`, or `http`
 - `command`, `args`, `env`, `headers`, and `url` are shell-expanded (see [Shell Expansion](#shell-expansion)).
-- Additional fields: `env`, `disabled`, `disabled_tools`, `timeout`.
+- Additional fields: `env`, `disabled`, `disabled_tools`, `enabled_tools`, `timeout`, `tool_timeout`.
+- `timeout` bounds MCP startup/ping behavior. `tool_timeout` bounds individual MCP tool calls so one stalled server or broad operation cannot pin the agent loop indefinitely.
 
 ## Options
 

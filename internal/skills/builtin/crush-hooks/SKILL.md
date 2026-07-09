@@ -17,6 +17,16 @@ Hooks are commands in `crush.json` that fire at deterministic points in the agen
 
 Event names are case-insensitive and accept snake case, so `pre_tool_use` normalizes to `PreToolUse`.
 
+## Prompt Admission Contract
+
+`UserPromptSubmit` is the prompt admission gate.
+
+- A denied prompt is not admitted to the agent turn.
+- `updated_prompt` replaces the submitted prompt for the current model input and persisted user message.
+- The original prompt must not be saved as history when a hook replaces it.
+- Hook `context` is transient model guidance for the current turn; it is not stored as a user message.
+- Use prompt hooks for intent classification and scope constraints, not for hiding tool capabilities that should remain available.
+
 ## Configuration
 
 ```jsonc

@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -22,18 +21,18 @@ func TestRenderA2UI(t *testing.T) {
 	// A valid A2UI card routes through a2tea. The renderers are still stubs,
 	// so the element renders as the "[a2tea: card]" placeholder — the point is
 	// that crush recognized the document and handed it to a2tea.
-	out, ok := renderA2UI(`{"kind":"card","id":"c","title":"Hi"}`, 80)
-	require.True(t, ok)
+	out, err := renderA2UI(`{"kind":"card","id":"c","title":"Hi"}`, 80)
+	require.NoError(t, err)
 	require.Contains(t, out, "[a2tea: card]")
 
-	// An unknown kind is not valid A2UI: renderA2UI reports false so the caller
-	// falls back to plain markdown rather than swallowing the error.
-	_, ok = renderA2UI(`{"kind":"table"}`, 80)
-	require.False(t, ok)
+	// An unknown kind is not valid A2UI: renderA2UI returns the a2tea error so
+	// the caller can show an alert rather than swallowing it.
+	_, err = renderA2UI(`{"kind":"table"}`, 80)
+	require.Error(t, err)
 
-	// Malformed JSON likewise falls back.
-	_, ok = renderA2UI(`{not json`, 80)
-	require.False(t, ok)
+	// Malformed JSON likewise returns an error.
+	_, err = renderA2UI(`{not json`, 80)
+	require.Error(t, err)
 }
 
 func TestRenderContentWithA2UI(t *testing.T) {
@@ -57,16 +56,21 @@ func TestRenderContentWithA2UI(t *testing.T) {
 	require.NotContains(t, plain, "\"kind\"")
 }
 
-func TestRenderContentWithA2UIInvalidBlockFallsBack(t *testing.T) {
+func TestRenderContentWithA2UIInvalidBlockShowsAlert(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
 	item := &AssistantMessageItem{sty: &sty}
 
-	// An a2ui block that is not valid A2UI is rendered as its original markdown
-	// so nothing is dropped.
+	// An a2ui block that is not valid A2UI is replaced with an alert element
+	// that names the failure and echoes the payload — not dropped, not shown as
+	// a rendered element.
 	content := "```a2ui\n{\"kind\":\"table\"}\n```"
 	out := item.renderContentWithA2UI(content, 80)
-	require.NotContains(t, out, "[a2tea:")
-	require.True(t, strings.Contains(out, "table") || strings.Contains(out, "kind"))
+	plain := ansi.Strip(out)
+
+	require.NotContains(t, plain, "[a2tea:")   // no successful element
+	require.Contains(t, plain, "A2UI")         // alert tag
+	require.Contains(t, plain, "unknown kind") // the a2tea error reason
+	require.Contains(t, plain, "table")        // the echoed payload
 }

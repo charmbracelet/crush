@@ -156,13 +156,45 @@ type Model struct {
 	FlatRate   bool
 }
 
+type providerOptionsValue struct {
+	mu sync.RWMutex
+	v  fantasy.ProviderOptions
+}
+
+func newProviderOptionsValue(opts fantasy.ProviderOptions) *providerOptionsValue {
+	return &providerOptionsValue{v: cloneProviderOptions(opts)}
+}
+
+func (v *providerOptionsValue) Get() fantasy.ProviderOptions {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return cloneProviderOptions(v.v)
+}
+
+func (v *providerOptionsValue) Set(opts fantasy.ProviderOptions) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.v = cloneProviderOptions(opts)
+}
+
+func cloneProviderOptions(opts fantasy.ProviderOptions) fantasy.ProviderOptions {
+	if opts == nil {
+		return nil
+	}
+	cloned := fantasy.ProviderOptions{}
+	for key, value := range opts {
+		cloned[key] = value
+	}
+	return cloned
+}
+
 type sessionAgent struct {
 	largeModel          *csync.Value[Model]
 	smallModel          *csync.Value[Model]
 	summaryModel        *csync.Value[Model]
 	reviewModel         *csync.Value[Model]
-	summaryProviderOpts *csync.Value[fantasy.ProviderOptions]
-	reviewProviderOpts  *csync.Value[fantasy.ProviderOptions]
+	summaryProviderOpts *providerOptionsValue
+	reviewProviderOpts  *providerOptionsValue
 	systemPromptPrefix  *csync.Value[string]
 	systemPrompt        *csync.Value[string]
 	tools               *csync.Slice[fantasy.AgentTool]
@@ -257,8 +289,8 @@ func NewSessionAgent(
 		smallModel:           csync.NewValue(opts.SmallModel),
 		summaryModel:         csync.NewValue(summaryModel),
 		reviewModel:          csync.NewValue(reviewModel),
-		summaryProviderOpts:  csync.NewValue(opts.SummaryProviderOpts),
-		reviewProviderOpts:   csync.NewValue(opts.ReviewProviderOpts),
+		summaryProviderOpts:  newProviderOptionsValue(opts.SummaryProviderOpts),
+		reviewProviderOpts:   newProviderOptionsValue(opts.ReviewProviderOpts),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		isSubAgent:           opts.IsSubAgent,

@@ -50,10 +50,10 @@ func TestCrushInfo_Models(t *testing.T) {
 
 	cfg := config.NewTestStore(&config.Config{
 		Models: map[config.SelectedModelType]config.SelectedModel{
-			config.SelectedModelTypeLarge: {Model: "claude-sonnet-4-20250514", Provider: "anthropic"},
-			config.SelectedModelTypeSmall: {Model: "claude-haiku-3-20250307", Provider: "anthropic"},
+			config.SelectedModelTypeLarge:   {Model: "claude-sonnet-4-20250514", Provider: "anthropic"},
+			config.SelectedModelTypeSmall:   {Model: "claude-haiku-3-20250307", Provider: "anthropic"},
 			config.SelectedModelTypeSummary: {Model: "qwen3-9b", Provider: "lmstudio"},
-			config.SelectedModelTypeReview: {Model: "qwen3-9b", Provider: "lmstudio"},
+			config.SelectedModelTypeReview:  {Model: "qwen3-9b", Provider: "lmstudio"},
 		},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})

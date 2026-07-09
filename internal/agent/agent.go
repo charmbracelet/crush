@@ -163,9 +163,9 @@ type sessionAgent struct {
 	reviewModel         *csync.Value[Model]
 	summaryProviderOpts *csync.Value[fantasy.ProviderOptions]
 	reviewProviderOpts  *csync.Value[fantasy.ProviderOptions]
-	systemPromptPrefix *csync.Value[string]
-	systemPrompt       *csync.Value[string]
-	tools              *csync.Slice[fantasy.AgentTool]
+	systemPromptPrefix  *csync.Value[string]
+	systemPrompt        *csync.Value[string]
+	tools               *csync.Slice[fantasy.AgentTool]
 
 	isSubAgent           bool
 	sessions             session.Service

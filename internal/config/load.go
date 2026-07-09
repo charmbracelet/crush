@@ -747,14 +747,14 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 // resolvedModels holds the result of resolving user-configured model
 // selections against the provider catalog.
 type resolvedModels struct {
-	Large         SelectedModel
-	Small         SelectedModel
-	Summary       SelectedModel
-	Review        SelectedModel
-	LargeFallback bool // true if Large was corrected to a default
-	SmallFallback bool // true if Small was corrected to a default
+	Large           SelectedModel
+	Small           SelectedModel
+	Summary         SelectedModel
+	Review          SelectedModel
+	LargeFallback   bool // true if Large was corrected to a default
+	SmallFallback   bool // true if Small was corrected to a default
 	SummaryFallback bool // true if Summary was corrected to a default
-	ReviewFallback bool // true if Review was corrected to a default
+	ReviewFallback  bool // true if Review was corrected to a default
 }
 
 // resolveSelectedModels validates the user's configured model selections

@@ -222,7 +222,6 @@ nfpms:
       - deb
       - rpm
       - archlinux
-      - termux.deb
     file_name_template: "{{ .ConventionalFileName }}"
     contents:
       - src: ./completions/crush.bash

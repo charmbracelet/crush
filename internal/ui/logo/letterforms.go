@@ -181,15 +181,15 @@ func LetterD(stretch bool) string {
 func LetterO(stretch bool) string {
 	if stretch {
 		return heredoc.Doc(`
-			▄▀▀▄
+			█▀▀█
 			█  █
-			▀▄▄▀
+			▀▀▀▀
 		`)
 	}
 	return heredoc.Doc(`
-		▄▀▄
+		█▀█
 		█ █
-		▀▄▀
+		▀▀▀
 	`)
 }
 

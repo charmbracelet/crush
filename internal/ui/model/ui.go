@@ -196,6 +196,11 @@ type UI struct {
 
 	isTransparent bool
 
+	// themeKey identifies the currently applied theme so applyTheme can
+	// skip the expensive style rebuild when switching to a provider that
+	// resolves to the same theme.
+	themeKey string
+
 	focus uiFocusState
 	state uiState
 
@@ -325,7 +330,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.MaxHeight = TextareaMaxHeight
 	ta.Focus()
 
-	ch := NewChat(com)
+	scrollbarMode := config.ScrollbarDefault
+	if cfg := com.Config(); cfg.Options.TUI != nil && cfg.Options.TUI.Scrollbar != "" {
+		scrollbarMode = cfg.Options.TUI.Scrollbar
+	}
+	ch := NewChat(com, scrollbarMode)
 
 	keyMap := DefaultKeyMap()
 
@@ -379,6 +388,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 
 	status := NewStatus(com, ui)
+
+	// Seed the active theme key from the large model provider so the
+	// first model selection can correctly skip a redundant theme swap.
+	if cfg := com.Config(); cfg != nil {
+		ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
+	}
 
 	ui.setEditorPrompt(com.Workspace.PermissionSkipRequests())
 	ui.randomizePlaceholders()
@@ -703,11 +718,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
+			prevPillsHeight := m.pillsAreaHeight()
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
+			}
+			// The pills panel reserves vertical space that the chat area
+			// must yield. Recompute the layout whenever that footprint
+			// changes (todos appearing, the list growing, etc.) so the
+			// box renders on first paint rather than waiting for a toggle.
+			// When the footprint is unchanged we still re-render the pill
+			// content so status changes (e.g. the in-progress spinner)
+			// show up.
+			if m.pillsAreaHeight() != prevPillsHeight {
 				m.updateLayoutAndSize()
+			} else {
+				m.renderPills()
 			}
 			m.autoExpandPillsIfReasonable()
 		}
@@ -938,6 +965,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	case scrollbarHideMsg:
+		if m.state == uiChat {
+			m.chat.HideScrollbar(msg.seq)
+		}
 	case spinner.TickMsg:
 		if m.dialog.HasVisibleDialogs() {
 			// route to dialog
@@ -1131,8 +1162,10 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		}
 	}
 
-	m.chat.SetMessages(items...)
-	if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+	if cmd := m.chat.SetMessages(items...); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if cmd := m.chat.RestartPausedVisibleAnimations(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	m.chat.SelectLast()
@@ -1769,18 +1802,36 @@ func (m *UI) refreshHyperAndRetrySelect(msg dialog.ActionSelectModel) tea.Cmd {
 // remaining Hyper credits from the API.
 func (m *UI) fetchHyperCredits() tea.Cmd {
 	return func() tea.Msg {
-		cfg := m.com.Config()
-		if cfg == nil {
+		var (
+			apiKey      string
+			cfg         *config.Config
+			providerCfg config.ProviderConfig
+		)
+		getAPIKey := func() (ok bool) {
+			if cfg = m.com.Config(); cfg == nil {
+				return false
+			}
+			if providerCfg, ok = cfg.Providers.Get(hyper.Name); !ok {
+				return false
+			}
+			var err error
+			apiKey, err = m.com.Workspace.Resolver().ResolveValue(providerCfg.APIKey)
+			return err == nil && apiKey != ""
+		}
+		if !getAPIKey() {
 			return nil
 		}
-		providerCfg, ok := cfg.Providers.Get(hyper.Name)
-		if !ok {
-			return nil
+
+		if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
+			ctxRefresh, cancelRefresh := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancelRefresh()
+			if err := m.com.Workspace.RefreshOAuthToken(ctxRefresh, config.ScopeGlobal, hyper.Name); err != nil {
+				slog.Warn("Hyper OAuth refresh failed before fetching credits, trying with existing token", "error", err)
+			} else if !getAPIKey() {
+				return nil
+			}
 		}
-		apiKey, err := m.com.Workspace.Resolver().ResolveValue(providerCfg.APIKey)
-		if err != nil || apiKey == "" {
-			return nil
-		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		credits, err := hyper.FetchCredits(ctx, apiKey)
@@ -1842,8 +1893,10 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	} else {
 		if msg.ModelType == config.SelectedModelTypeLarge {
 			// Swap the theme live based on the newly selected large
-			// model's provider.
-			m.applyTheme(styles.ThemeForProvider(providerID))
+			// model's provider. Skipped when the provider resolves to
+			// the already-active theme, which avoids a full markdown
+			// re-render of the transcript on every selection.
+			m.applyThemeForProvider(providerID)
 		}
 		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
@@ -2417,6 +2470,13 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if m.layout != layout {
 		m.layout = layout
 		m.updateSize()
+	} else if m.state == uiChat && m.hasSession() {
+		// Re-render pills on every draw so the box appears even when
+		// the layout footprint hasn't changed (e.g. todos arrived
+		// while the panel was collapsed). updateSize already calls
+		// renderPills, but only when the layout actually differs;
+		// this catches the steady-state case.
+		m.renderPills()
 	}
 
 	// Clear the screen first
@@ -3447,6 +3507,21 @@ func (m *UI) renderEditorView(width int) string {
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+}
+
+// applyThemeForProvider swaps the active theme to the one associated with
+// the given provider, but only when that theme differs from the one
+// already applied. Most providers share a single theme, so re-selecting a
+// model from the same theme family would otherwise pay the full cost of
+// invalidating the markdown renderer cache and re-rendering the entire
+// transcript for no visible change.
+func (m *UI) applyThemeForProvider(providerID string) {
+	key := styles.ThemeKeyForProvider(providerID)
+	if key == m.themeKey {
+		return
+	}
+	m.themeKey = key
+	m.applyTheme(styles.ThemeForProvider(providerID))
 }
 
 // applyTheme replaces the active styles with the given theme, drops the

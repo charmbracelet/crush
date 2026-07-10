@@ -4,11 +4,26 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
+// ThemeKeyForProvider returns a stable identifier for the theme
+// associated with the given provider ID. Providers that share a theme
+// yield the same key, so callers can cheaply detect when switching
+// providers would not actually change the active theme and skip the
+// expensive style rebuild. This is the single source of truth for the
+// provider-to-theme mapping; [ThemeForProvider] builds on it.
+func ThemeKeyForProvider(providerID string) string {
+	switch providerID {
+	case "hyper":
+		return "hyper"
+	default:
+		return "default"
+	}
+}
+
 // ThemeForProvider returns the Styles associated with the given provider
 // ID. Unknown or empty provider IDs yield the default Charmtone Pantera
 // theme.
 func ThemeForProvider(providerID string) Styles {
-	switch providerID {
+	switch ThemeKeyForProvider(providerID) {
 	case "hyper":
 		return HypercrushObsidiana()
 	default:

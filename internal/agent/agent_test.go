@@ -1039,6 +1039,9 @@ func TestAutoReviewTriggerGuards(t *testing.T) {
 	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{Message: "The requested model is not supported."}, Model{})
 	require.False(t, ok)
 
+	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 400, Message: "request exceeds the available context size"}, Model{})
+	require.False(t, ok)
+
 	reason, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 500, Message: "upstream failed"}, Model{})
 	require.True(t, ok)
 	require.Contains(t, reason, "upstream failed")

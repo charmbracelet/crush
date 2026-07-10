@@ -128,6 +128,18 @@ type SessionAgentCall struct {
 	// paths treat as covered by any present mark, preserving the
 	// pre-sequence behavior.
 	acceptSeq uint64
+	// contextRetry is an internal one-shot retry path used when a
+	// provider rejects the request before generation because the prompt
+	// exceeds the model context window. The retry keeps the user's
+	// persisted prompt intact but sends a leaner tool surface.
+	contextRetry bool
+	// skipUserMessage prevents contextRetry from persisting the same
+	// user prompt twice.
+	skipUserMessage bool
+	// retryUserMessageID is removed from prepared history during
+	// contextRetry because the current prompt is supplied through
+	// AgentStreamCall.Prompt, not as history.
+	retryUserMessageID string
 }
 
 type SessionAgent interface {
@@ -630,6 +642,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		cancel           context.CancelFunc
 		activeRegistered bool
 		userMsgCreated   bool
+		userMsg          message.Message
 	)
 
 	if call.Accepted != nil {
@@ -715,6 +728,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
+	if call.contextRetry {
+		agentTools = contextRetryTools(agentTools)
+	}
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	var instructions strings.Builder
@@ -756,6 +772,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
+	if call.retryUserMessageID != "" {
+		msgs = removeMessageByID(msgs, call.retryUserMessageID)
+	}
 
 	admitted, err := a.admitUserPrompt(ctx, call)
 	if err != nil {
@@ -766,7 +785,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	var wg sync.WaitGroup
 	// Generate title from the first real (non-shell) user prompt.
-	if !hasUserTextMessage(msgs) {
+	if !call.skipUserMessage && !hasUserTextMessage(msgs) {
 		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
 		wg.Go(func() {
 			a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
@@ -775,11 +794,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	defer wg.Wait()
 
 	// Add the admitted user message to the session.
-	_, err = a.createUserMessage(ctx, call)
-	if err != nil {
-		return nil, err
+	if call.skipUserMessage {
+		userMsgCreated = true
+	} else {
+		userMsg, err = a.createUserMessage(ctx, call)
+		if err != nil {
+			return nil, err
+		}
+		userMsgCreated = true
 	}
-	userMsgCreated = true
 
 	// Add the session to the context.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
@@ -916,6 +939,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			// Use latest tools (updated by SetTools when MCP tools change).
 			prepared.Tools = a.tools.Copy()
+			if call.contextRetry {
+				prepared.Tools = contextRetryTools(prepared.Tools)
+			}
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -1144,6 +1170,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		isHyper := largeModel.ModelCfg.Provider == hyper.Name
 		isCancelErr := errors.Is(err, context.Canceled)
 		if currentAssistant == nil {
+			if !isCancelErr && isContextOverflowError(err) && !call.contextRetry {
+				a.activeRequests.Del(call.SessionID)
+				cancel()
+				skipRunComplete = true
+				retryCall := call
+				retryCall.contextRetry = true
+				retryCall.skipUserMessage = userMsg.ID != ""
+				retryCall.retryUserMessageID = userMsg.ID
+				return a.Run(ctx, retryCall)
+			}
 			// Cancel-before-assistant-creation window: the run was
 			// canceled after activeRequests.Set but before PrepareStep
 			// created the assistant message. Without this, the turn
@@ -1167,6 +1203,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// timeout bounds the cleanup writes.
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cleanupCancel()
+		if !isCancelErr && isContextOverflowError(err) && !call.contextRetry {
+			if deleteErr := a.messages.Delete(cleanupCtx, currentAssistant.ID); deleteErr != nil {
+				return nil, deleteErr
+			}
+			a.activeRequests.Del(call.SessionID)
+			cancel()
+			skipRunComplete = true
+			retryCall := call
+			retryCall.contextRetry = true
+			retryCall.skipUserMessage = userMsg.ID != ""
+			retryCall.retryUserMessageID = userMsg.ID
+			return a.Run(ctx, retryCall)
+		}
 		// Ensure we finish thinking on error to close the reasoning state.
 		currentAssistant.FinishThinking()
 		toolCalls := currentAssistant.ToolCalls()
@@ -1675,6 +1724,9 @@ func (a *sessionAgent) shouldAutoReviewError(err error, model Model) (string, bo
 	if !a.autoReviewEnabled || err == nil || errors.Is(err, context.Canceled) {
 		return "", false
 	}
+	if isContextOverflowError(err) {
+		return "", false
+	}
 
 	var providerErr *fantasy.ProviderError
 	if errors.As(err, &providerErr) {
@@ -1696,6 +1748,73 @@ func (a *sessionAgent) shouldAutoReviewError(err error, model Model) (string, bo
 	}
 
 	return fmt.Sprintf("The previous assistant turn failed: %s", err.Error()), true
+}
+
+func isContextOverflowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var parts []string
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) {
+		parts = append(parts, providerErr.Title, providerErr.Message)
+	}
+	var fantasyErr *fantasy.Error
+	if errors.As(err, &fantasyErr) {
+		parts = append(parts, fantasyErr.Title, fantasyErr.Message)
+	}
+	parts = append(parts, err.Error())
+	text := strings.ToLower(strings.Join(parts, "\n"))
+	for _, marker := range []string{
+		"exceed_context_size",
+		"exceeds the available context size",
+		"exceeds context",
+		"context size",
+		"context window",
+		"maximum context",
+		"prompt is too long",
+		"too many tokens",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func contextRetryTools(agentTools []fantasy.AgentTool) []fantasy.AgentTool {
+	allowed := map[string]bool{
+		tools.BashToolName:      true,
+		tools.CrushInfoToolName: true,
+		tools.FetchToolName:     true,
+		tools.GlobToolName:      true,
+		tools.GrepToolName:      true,
+		tools.JobKillToolName:   true,
+		tools.JobListToolName:   true,
+		tools.JobOutputToolName: true,
+		tools.LSToolName:        true,
+		tools.TmuxToolName:      true,
+		tools.TodosToolName:     true,
+		tools.ViewToolName:      true,
+		tools.WebFetchToolName:  true,
+		tools.WebSearchToolName: true,
+	}
+	if raw := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_TOOLS")); raw != "" {
+		allowed = map[string]bool{}
+		for _, name := range strings.Split(raw, ",") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				allowed[name] = true
+			}
+		}
+	}
+	filtered := make([]fantasy.AgentTool, 0, len(agentTools))
+	for _, tool := range agentTools {
+		if allowed[tool.Info().Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 func (a *sessionAgent) shouldAutoReviewMaxTokens(reason message.FinishReason) bool {
@@ -1817,6 +1936,20 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 		return message.Message{}, fmt.Errorf("failed to create user message: %w", err)
 	}
 	return msg, nil
+}
+
+func removeMessageByID(msgs []message.Message, id string) []message.Message {
+	if id == "" {
+		return msgs
+	}
+	filtered := msgs[:0]
+	for _, msg := range msgs {
+		if msg.ID == id {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return filtered
 }
 
 func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {

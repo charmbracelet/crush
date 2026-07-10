@@ -297,6 +297,7 @@ type Options struct {
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
 	NotificationStyle         string       `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	AWSAuthRefresh            string       `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command executed before Bedrock calls to refresh AWS credentials. Stdin/stdout/stderr are attached to the terminal so interactive prompts (e.g. SSO or MFA) work. Runs on startup and again after a 401 or 403 from Bedrock before retrying the request.,example=exec duo-sso -profile myprofile -valid-session-threshold 7200"`
 }
 
 type MCPs map[string]MCPConfig

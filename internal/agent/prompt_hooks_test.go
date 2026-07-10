@@ -75,6 +75,15 @@ func (m *capturingStreamModel) allPromptText() string {
 	return fantasyMessagesText(m.prompts...)
 }
 
+func (m *capturingStreamModel) lastPrompt() []fantasy.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.prompts) == 0 {
+		return nil
+	}
+	return cloneFantasyMessages(m.prompts[len(m.prompts)-1])
+}
+
 func newUserPromptRunner(t *testing.T, cmd string) *hooks.Runner {
 	t.Helper()
 	cfg := &config.Config{
@@ -204,4 +213,33 @@ func TestRun_UserPromptSubmitDenyBlocksFoldedQueuedPromptBeforePersistence(t *te
 	users := userMessages(t, env, sess.ID)
 	require.Len(t, users, 1)
 	require.Equal(t, "main prompt", users[0].Content().String())
+}
+
+func TestRun_SystemPromptPrefixMergesIntoSingleSystemMessage(t *testing.T) {
+	t.Parallel()
+	sa, env, model := newPromptHookTestAgent(t, nil)
+	sa.systemPromptPrefix.Set("provider prefix")
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	result, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "hello"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	prompt := model.lastPrompt()
+	require.NotEmpty(t, prompt)
+	require.Equal(t, fantasy.MessageRoleSystem, prompt[0].Role)
+
+	var systemMessages []fantasy.Message
+	for _, msg := range prompt {
+		if msg.Role == fantasy.MessageRoleSystem {
+			systemMessages = append(systemMessages, msg)
+		}
+	}
+	require.Len(t, systemMessages, 1)
+
+	systemText := fantasyMessagesText(systemMessages)
+	require.Contains(t, systemText, "provider prefix")
+	require.Contains(t, systemText, "system")
 }

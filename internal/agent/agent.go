@@ -717,7 +717,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
-	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
 
 	for _, server := range mcp.GetStates() {
@@ -733,6 +732,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if s := instructions.String(); s != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
+	systemPrompt = mergeSystemPromptPrefix(a.systemPromptPrefix.Get(), systemPrompt)
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -956,10 +956,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				if i > len(prepared.Messages)-3 {
 					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
 				}
-			}
-
-			if promptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
 			sessionLock.Lock()
@@ -1423,7 +1419,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	// Copy mutable fields under lock to avoid races with SetModels.
 	summaryModel := a.summaryModel.Get()
 	summaryProviderOpts := a.summaryProviderOpts.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
+	summarySystemPrompt := mergeSystemPromptPrefix(a.systemPromptPrefix.Get(), string(summaryPrompt))
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -1452,7 +1448,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 
 	agent := fantasy.NewAgent(
 		summaryModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		fantasy.WithSystemPrompt(summarySystemPrompt),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1471,13 +1467,6 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		ProviderOptions: summaryProviderOpts,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, summaryMessage)
@@ -1568,7 +1557,7 @@ func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason 
 
 	reviewModel := a.reviewModel.Get()
 	reviewProviderOpts := a.reviewProviderOpts.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
+	reviewSystemPrompt := mergeSystemPromptPrefix(a.systemPromptPrefix.Get(), string(autoReviewPrompt))
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -1596,7 +1585,7 @@ func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason 
 
 	agent := fantasy.NewAgent(
 		reviewModel.Model,
-		fantasy.WithSystemPrompt(string(autoReviewPrompt)),
+		fantasy.WithSystemPrompt(reviewSystemPrompt),
 		fantasy.WithUserAgent(userAgent),
 	)
 	reviewMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1612,13 +1601,6 @@ func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason 
 		Prompt:          buildAutoReviewPrompt(reason),
 		Messages:        aiMsgs,
 		ProviderOptions: reviewProviderOpts,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
 		OnReasoningDelta: func(id string, text string) error {
 			reviewMessage.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, reviewMessage)
@@ -2043,9 +2025,10 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
+		systemPrompt := mergeSystemPromptPrefix(systemPromptPrefix, string(p)+"\n /no_think")
 		return fantasy.NewAgent(
 			m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
+			fantasy.WithSystemPrompt(systemPrompt),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
 		)
@@ -2053,15 +2036,6 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 
 	streamCall := fantasy.AgentStreamCall{
 		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
-		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = opts.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{
-					fantasy.NewSystemMessage(systemPromptPrefix),
-				}, prepared.Messages...)
-			}
-			return callCtx, prepared, nil
-		},
 	}
 
 	type modelAttempt struct {
@@ -2379,6 +2353,17 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+func mergeSystemPromptPrefix(prefix, system string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return system
+	}
+	if strings.TrimSpace(system) == "" {
+		return prefix
+	}
+	return prefix + "\n\n" + system
 }
 
 func (a *sessionAgent) Model() Model {

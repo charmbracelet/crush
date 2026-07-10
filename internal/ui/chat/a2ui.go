@@ -1,94 +1,41 @@
 package chat
 
 import (
-	"encoding/json"
-	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/joestump-agent/a2tea"
 )
 
-// a2uiFence matches a fenced ```a2ui code block. The single capture group is
-// the JSON body between the fences. This is how an agent signals that a chunk
-// of its reply is an A2UI document rather than prose, e.g.
-//
-//	```a2ui
-//	{ "kind": "card", "title": "Hi", "buttons": [ ... ] }
-//	```
-var a2uiFence = regexp.MustCompile("(?s)```a2ui[ \\t]*\\r?\\n(.*?)```")
-
-// contentHasA2UI reports whether content contains at least one a2ui block, so
-// the renderer can take the (slightly more expensive) segmented path only when
-// there is actually something for a2tea to render.
+// contentHasA2UI reports whether the assistant content carries any A2UI, so the
+// renderer only takes the a2tea path when there is UI to draw. Detection (and
+// all parsing) lives in a2tea — crush does not hand-roll it.
 func contentHasA2UI(content string) bool {
-	return strings.Contains(content, "```a2ui")
+	return a2tea.Contains(content)
 }
 
-// renderA2UI renders a single A2UI JSON document to a display string via the
-// a2tea bridge. It returns the a2tea.Render error (unwrapped) when the document
-// is not valid A2UI, so the caller can show an alert element rather than
-// silently dropping or misrendering the payload — this relies on a2tea.Render
-// returning a real error for bad/unknown documents rather than a silent
-// placeholder.
-func renderA2UI(raw string, width int) (string, error) {
-	model, err := a2tea.Render(json.RawMessage(strings.TrimSpace(raw)))
-	if err != nil {
-		return "", err
-	}
-	// a2tea renderers are embeddable children: give the element the width the
-	// host allocated to the message. (Stub renderers ignore it today.)
-	if sz, ok := model.(interface{ SetSize(width, height int) }); ok {
-		sz.SetSize(width, 0)
-	}
-	return strings.TrimRight(model.View().Content, "\n"), nil
-}
-
-// a2uiErrorMaxLines bounds how much of an unrenderable payload the alert
-// element echoes back, so a large malformed document cannot flood the chat.
-const a2uiErrorMaxLines = 12
-
-// renderA2UIError builds an alert element shown in place of an a2ui block that
-// a2tea could not render. It tells the user the embedded content (usually JSON)
-// failed to render, why, and echoes the offending payload so it is inspectable
-// rather than lost. Styled in crush's existing error-message language.
-func (a *AssistantMessageItem) renderA2UIError(raw string, err error, width int) string {
-	inner := max(width-2, 1)
-
-	tag := a.sty.Messages.ErrorTag.Render("A2UI")
-	title := a.sty.Messages.ErrorTitle.Render("couldn't render this element")
-	header := tag + " " + title
-
-	reason := a.sty.Messages.ErrorDetails.Width(inner).Render(err.Error())
-
-	payload := clampLines(strings.TrimSpace(raw), a2uiErrorMaxLines)
-	body := a.sty.Messages.ErrorDetails.Width(inner).Render(payload)
-
-	return header + "\n\n" + reason + "\n\n" + body
-}
-
-// clampLines trims s to at most n lines, appending an elision note when it had
-// to cut.
-func clampLines(s string, n int) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) <= n {
-		return s
-	}
-	kept := lines[:n]
-	return strings.Join(kept, "\n") + fmt.Sprintf("\n… (%d more lines)", len(lines)-n)
-}
-
-// renderContentWithA2UI renders assistant content that contains one or more
-// a2ui blocks. Prose segments are rendered as markdown as usual; each a2ui
-// block is handed to a2tea and its rendered element is stitched in place. A
-// block that is not valid A2UI falls back to being rendered as its original
-// fenced markdown, so nothing is ever dropped.
+// renderContentWithA2UI renders assistant content that contains A2UI. a2tea
+// scans the content into ordered parts of prose text and typed A2UI messages;
+// crush renders the prose as markdown and hands each part's messages to
+// a2tea.Render, stitching the rendered surface in place.
 //
-// This deliberately bypasses the streaming-markdown prefix cache (which
-// assumes a single glamour render per item) and renders each segment directly.
-// The renderer is shared, so the whole multi-render sequence holds its lock.
+// If the content advertised A2UI (contentHasA2UI gated us here) but the parser
+// produced no messages at all — malformed or unsupported JSON, which a2tea/
+// a2uistream drops silently — an alert element is appended so the block is
+// never silently lost. Messages that parse but describe nothing to draw (e.g.
+// a data-model update) are skipped without an alert.
+//
+// This deliberately bypasses the streaming-markdown prefix cache (which assumes
+// a single glamour render per item) and renders each segment directly. The
+// renderer is shared, so the whole multi-render sequence holds its lock.
 func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int) string {
+	parts, err := a2tea.Scan(content)
+	if err != nil {
+		// Not parseable as A2UI — render everything as markdown so nothing is
+		// lost.
+		return a.renderMarkdown(content, width)
+	}
+
 	renderer := common.MarkdownRenderer(a.sty, width)
 	mu := common.LockMarkdownRenderer(renderer)
 	mu.Lock()
@@ -116,21 +63,45 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int) 
 		b.WriteString(s)
 	}
 
-	// Split() yields the prose between blocks; FindAllStringSubmatch() yields
-	// the blocks. len(segments) == len(blocks)+1, so they interleave cleanly.
-	segments := a2uiFence.Split(content, -1)
-	blocks := a2uiFence.FindAllStringSubmatch(content, -1)
-	for i, seg := range segments {
-		writeChunk(renderMarkdown(seg))
-		if i < len(blocks) {
-			if rendered, err := renderA2UI(blocks[i][1], width); err == nil {
-				writeChunk(rendered)
-			} else {
-				// Not valid A2UI — show an alert element echoing the payload
-				// instead of dropping it or dumping raw JSON as prose.
-				writeChunk(a.renderA2UIError(blocks[i][1], err, width))
-			}
+	messageBearingParts := 0
+	for _, p := range parts {
+		writeChunk(renderMarkdown(p.Text))
+		if len(p.Messages) == 0 {
+			continue
 		}
+		messageBearingParts++
+		model, err := a2tea.Render(p.Messages)
+		if err != nil {
+			// Valid A2UI messages with nothing to draw (e.g. a data-model
+			// update). Not an error worth alarming the user about.
+			continue
+		}
+		if sz, ok := model.(interface{ SetSize(width, height int) }); ok {
+			sz.SetSize(width, 0)
+		}
+		writeChunk(strings.TrimRight(model.View().Content, "\n"))
 	}
+
+	// Each <a2ui-json> block that a2tea parsed becomes one message-bearing
+	// part; a block that was malformed or used unsupported components is
+	// dropped by the parser and yields no part. If fewer blocks parsed than
+	// were advertised, at least one was dropped — alert rather than silently
+	// losing it.
+	if messageBearingParts < strings.Count(content, "<a2ui-json>") {
+		writeChunk(a.renderA2UIAlert(width))
+	}
+
 	return b.String()
+}
+
+// renderA2UIAlert builds an alert element shown when content advertised A2UI but
+// a2tea could not turn it into a surface. Styled in crush's existing
+// error-message language.
+func (a *AssistantMessageItem) renderA2UIAlert(width int) string {
+	inner := max(width-2, 1)
+	tag := a.sty.Messages.ErrorTag.Render("A2UI")
+	title := a.sty.Messages.ErrorTitle.Render("couldn't render a UI block in this message")
+	reason := a.sty.Messages.ErrorDetails.Width(inner).Render(
+		"The A2UI content was malformed or used unsupported components.")
+	return tag + " " + title + "\n\n" + reason
 }

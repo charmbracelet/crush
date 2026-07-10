@@ -128,6 +128,18 @@ func CharmtonePantera() Styles {
 		Foreground(charmtone.Salmon)
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
 		Foreground(charmtone.Zest)
+	s.Tool.ContentLine = s.Tool.ContentLine.
+		Background(charmtone.Pepper)
+	s.Tool.ContentTruncation = s.Tool.ContentTruncation.
+		Background(charmtone.Pepper)
+	s.Tool.ContentBg = s.Tool.ContentBg.
+		Background(charmtone.Pepper)
+	s.TextSelection = s.TextSelection.
+		Foreground(charmtone.Salt).
+		Background(charmtone.Char)
+	if s.Markdown.H1.StylePrimitive.BackgroundColor != nil {
+		s.Markdown.H1.StylePrimitive.BackgroundColor = nil
+	}
 
 	return s
 }

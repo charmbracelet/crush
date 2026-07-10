@@ -19,7 +19,9 @@ Common shell builtins and core utils are available on Windows.
 
 <usage_notes>
 - Command required, working_dir optional (defaults to current directory)
-- IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep'. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls'
+- For repository file discovery and content search, prefer the native Grep/Glob/View/LS/Agent tools
+- For host/runtime facts such as disk usage, cache sizes, process state, server state, git output, package-manager output, or finite system snapshots, use bounded shell commands with specific paths plus timeout/head/maxdepth when useful
+- Do not run broad unbounded filesystem walks; narrow the path or use native tools when the target is inside the repository
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 - Each command runs in independent shell (no state persistence between calls)
 - Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)

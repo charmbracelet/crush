@@ -90,9 +90,11 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	// Charm and version.
 	metaRowGap := 1
 	maxVersionWidth := crushWidth - lipgloss.Width(charm) - metaRowGap
-	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
-	if o.Hyper && compact {
-		version += " "
+	if version != "" {
+		version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
+		if o.Hyper && compact {
+			version += " "
+		}
 	}
 	gap := max(0, crushWidth-lipgloss.Width(charm)-lipgloss.Width(version))
 	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
@@ -102,7 +104,11 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 
 	// Narrow version. If this is Hypercrush, this is also a stacked version.
 	if compact {
-		field := fg(o.FieldColor, strings.Repeat(diag, crushWidth))
+		fieldWidth := crushWidth
+		if o.Width > 0 {
+			fieldWidth = max(fieldWidth, o.Width)
+		}
+		field := fg(o.FieldColor, strings.Repeat(diag, fieldWidth))
 		return strings.Join([]string{field, field, crush, field, ""}, "\n")
 	}
 

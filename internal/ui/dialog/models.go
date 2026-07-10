@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ModelType represents the type of model to select.
@@ -34,6 +35,22 @@ func (mt ModelType) String() string {
 		return "Large Task"
 	case ModelTypeSmall:
 		return "Small Task"
+	case ModelTypeSummary:
+		return "Summary"
+	case ModelTypeReview:
+		return "Review"
+	default:
+		return "Unknown"
+	}
+}
+
+// ShortLabel returns a compact label for summary rows.
+func (mt ModelType) ShortLabel() string {
+	switch mt {
+	case ModelTypeLarge:
+		return "Large"
+	case ModelTypeSmall:
+		return "Small"
 	case ModelTypeSummary:
 		return "Summary"
 	case ModelTypeReview:
@@ -296,6 +313,11 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
+	selectedModelsView := ""
+	if !m.isOnboarding {
+		selectedModelsView = m.selectedModelsView(innerWidth)
+		heightOffset += lipgloss.Height(selectedModelsView)
+	}
 
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 	m.help.SetWidth(innerWidth)
@@ -313,6 +335,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
 		rc.AddPart(titleText)
 	}
+	rc.AddPart(selectedModelsView)
 
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
@@ -327,6 +350,9 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = m.help.View(m)
 
 	cur := m.Cursor()
+	if !m.isOnboarding && cur != nil {
+		cur.Y += lipgloss.Height(selectedModelsView)
+	}
 
 	if m.isOnboarding {
 		rc.Title = ""
@@ -379,6 +405,61 @@ func (m *Models) isSelectedConfigured() bool {
 	providerID := string(modelItem.prov.ID)
 	_, isConfigured := m.com.Config().Providers.Get(providerID)
 	return isConfigured
+}
+
+func (m *Models) selectedModelsView(width int) string {
+	colWidth := max(12, width/2-1)
+	row := func(left, right ModelType) string {
+		return lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			m.selectedModelSegment(left, colWidth),
+			" ",
+			m.selectedModelSegment(right, colWidth),
+		)
+	}
+	return lipgloss.NewStyle().Padding(1, 1).Render(lipgloss.JoinVertical(
+		lipgloss.Left,
+		row(ModelTypeLarge, ModelTypeSmall),
+		row(ModelTypeSummary, ModelTypeReview),
+	))
+}
+
+func (m *Models) selectedModelSegment(modelType ModelType, width int) string {
+	cfg := m.com.Config()
+	selected, ok := cfg.Models[modelType.Config()]
+	modelName := "unset"
+	if ok && selected.Model != "" {
+		modelName = m.selectedModelName(selected)
+	}
+	label := fmt.Sprintf("%s: %s", modelType.ShortLabel(), modelName)
+	label = ansi.Truncate(label, max(0, width), "…")
+	style := m.com.Styles.Radio.Label
+	if modelType == m.modelType {
+		style = m.com.Styles.Dialog.TitleAccent
+	}
+	return style.Width(width).Render(label)
+}
+
+func (m *Models) selectedModelName(selected config.SelectedModel) string {
+	cfg := m.com.Config()
+	if providerConfig, ok := cfg.Providers.Get(selected.Provider); ok {
+		for _, model := range providerConfig.Models {
+			if model.ID == selected.Model {
+				return cmp.Or(model.Name, model.ID)
+			}
+		}
+	}
+	for _, provider := range m.providers {
+		if string(provider.ID) != selected.Provider {
+			continue
+		}
+		for _, model := range provider.Models {
+			if model.ID == selected.Model {
+				return cmp.Or(model.Name, model.ID)
+			}
+		}
+	}
+	return selected.Model
 }
 
 // setProviderItems sets the provider items in the list.

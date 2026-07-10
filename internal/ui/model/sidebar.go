@@ -7,7 +7,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 )
@@ -133,24 +132,17 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		return
 	}
 
-	const logoHeightBreakpoint = 30
-
 	t := m.com.Styles
 	width := area.Dx()
 	height := area.Dy()
 
-	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 	sidebarLogo := m.sidebarLogo
-	if height < logoHeightBreakpoint {
-		sidebarLogo = logo.SmallRender(m.com.Styles, width, logo.Opts{
-			Hyper: m.com.IsHyper(),
-		})
+	if sidebarLogo == "" {
+		sidebarLogo = renderSidebarLogo(m.com.Styles, true, m.com.IsHyper(), width)
 	}
 	blocks := []string{
 		sidebarLogo,
-		title,
-		"",
 		cwd,
 		"",
 		m.modelInfo(width),

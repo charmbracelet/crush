@@ -3471,7 +3471,7 @@ func (m *UI) renderEditorView(width int) string {
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+	m.sidebarLogo = renderSidebarLogo(m.com.Styles, true, m.com.IsHyper(), width)
 }
 
 // applyThemeForProvider swaps the active theme to the one associated with
@@ -4451,6 +4451,18 @@ func (m *UI) disableDockerMCP() tea.Msg {
 // renderLogo renders the Crush logo with the given styles and dimensions.
 func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 	return logo.Render(t.Logo.GradCanvas, version.Version, compact, logo.Opts{
+		FieldColor:   t.Logo.FieldColor,
+		TitleColorA:  t.Logo.TitleColorA,
+		TitleColorB:  t.Logo.TitleColorB,
+		CharmColor:   t.Logo.CharmColor,
+		VersionColor: t.Logo.VersionColor,
+		Width:        width,
+		Hyper:        hyper,
+	})
+}
+
+func renderSidebarLogo(t *styles.Styles, compact, hyper bool, width int) string {
+	return logo.Render(t.Logo.GradCanvas, "", compact, logo.Opts{
 		FieldColor:   t.Logo.FieldColor,
 		TitleColorA:  t.Logo.TitleColorA,
 		TitleColorB:  t.Logo.TitleColorB,

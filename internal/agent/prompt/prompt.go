@@ -26,6 +26,7 @@ type Prompt struct {
 	now        func() time.Time
 	platform   string
 	workingDir string
+	a2ui       bool
 }
 
 type PromptDat struct {
@@ -40,6 +41,7 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	A2UI               bool
 }
 
 type ContextFile struct {
@@ -64,6 +66,16 @@ func WithPlatform(platform string) Option {
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+// WithA2UI enables the template's A2UI section, which tells the model it may
+// emit <a2ui-json> surfaces. Only hosts that actually render A2UI (the chat
+// TUI, via a2tea) should set this — everywhere else the blocks would surface
+// as raw text.
+func WithA2UI() Option {
+	return func(p *Prompt) {
+		p.a2ui = true
 	}
 }
 
@@ -214,6 +226,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		Platform:      platform,
 		Date:          p.now().Format("1/2/2006"),
 		AvailSkillXML: availSkillXML,
+		A2UI:          p.a2ui,
 	}
 	if isGit {
 		var err error

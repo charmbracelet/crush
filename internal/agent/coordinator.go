@@ -174,7 +174,14 @@ func NewCoordinator(
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	// WithA2UI: the chat TUI renders <a2ui-json> blocks in assistant replies
+	// via a2tea, so the coder is told it may emit them. Headless consumers of
+	// this coordinator see the blocks as plain text; the prompt phrases the
+	// capability as rare and optional, which keeps that acceptable.
+	prompt, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithA2UI(),
+	)
 	if err != nil {
 		return nil, err
 	}

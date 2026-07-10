@@ -59,6 +59,50 @@ func TestLmstudioEnricher(t *testing.T) {
 		require.Equal(t, "unknown-model", result[2].Name)
 	})
 
+	t.Run("marks qwen3 architecture models as reasoning capable", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+				Models: []lmstudioModelEntry{
+					{
+						Key:          "qwythos-9b-claude-mythos-5-1m",
+						DisplayName:  "Qwythos 9B Claude Mythos 5 1M",
+						Architecture: "qwen35",
+						Type:         "llm",
+					},
+					{
+						Key:          "qwen2.5-3b-instruct",
+						DisplayName:  "Qwen2.5 3B Instruct",
+						Architecture: "qwen2",
+						Type:         "llm",
+					},
+					{
+						Key:          "text-embedding-nomic-embed-text-v1.5",
+						DisplayName:  "Nomic Embed Text v1.5",
+						Architecture: "",
+						Type:         "embedding",
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL + "/v1"}
+		models := []catwalk.Model{
+			{ID: "qwythos-9b-claude-mythos-5-1m", Name: "qwythos-9b-claude-mythos-5-1m"},
+			{ID: "qwen2.5-3b-instruct", Name: "qwen2.5-3b-instruct"},
+			{ID: "text-embedding-nomic-embed-text-v1.5", Name: "text-embedding-nomic-embed-text-v1.5"},
+		}
+
+		e := &lmstudioEnricher{}
+		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.True(t, result[0].CanReason)
+		require.False(t, result[1].CanReason)
+		require.False(t, result[2].CanReason)
+	})
+
 	t.Run("prefers loaded instance context length over model max", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

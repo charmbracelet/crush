@@ -154,6 +154,7 @@ func (c *ProviderConfig) ToProvider() catwalk.Provider {
 	provider := catwalk.Provider{
 		Name:   c.Name,
 		ID:     catwalk.InferenceProvider(c.ID),
+		Type:   c.Type,
 		Models: make([]catwalk.Model, len(c.Models)),
 	}
 

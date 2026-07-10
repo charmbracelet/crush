@@ -373,6 +373,27 @@ func effectiveReasoningEffort(model Model) string {
 	return ""
 }
 
+func isLMStudioProvider(providerCfg config.ProviderConfig) bool {
+	return providerCfg.Type == catwalk.Type("lmstudio")
+}
+
+func mergedExtraBody(options map[string]any) map[string]any {
+	extraBody := make(map[string]any)
+	if existing, ok := options["extra_body"].(map[string]any); ok {
+		maps.Copy(extraBody, existing)
+	}
+	return extraBody
+}
+
+func applyLMStudioThinkingOption(model Model, providerCfg config.ProviderConfig, options map[string]any) {
+	if !isLMStudioProvider(providerCfg) || !model.CatwalkCfg.CanReason || len(model.CatwalkCfg.ReasoningLevels) > 0 {
+		return
+	}
+	extraBody := mergedExtraBody(options)
+	extraBody["enable_thinking"] = model.ModelCfg.Think
+	options["extra_body"] = extraBody
+}
+
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
@@ -597,6 +618,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// Known custom providers (litellm, ollama, omlx) are
 		// openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
+			applyLMStudioThinkingOption(model, providerCfg, mergedOptions)
 			parsed, err := openaicompat.ParseOptions(mergedOptions)
 			if err == nil {
 				options[openaicompat.Name] = parsed

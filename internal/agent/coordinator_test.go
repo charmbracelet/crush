@@ -554,3 +554,28 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "enabled", thinking["type"])
 }
+
+func TestGetProviderOptionsLMStudioThinking(t *testing.T) {
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ID:        "qwythos-9b",
+			CanReason: true,
+		},
+		ModelCfg: config.SelectedModel{
+			Provider: "tailnet-lmstudio",
+			Think:    true,
+		},
+	}
+	providerCfg := config.ProviderConfig{
+		ID:   "tailnet-lmstudio",
+		Type: catwalk.Type("lmstudio"),
+	}
+
+	opts := getProviderOptions(model, providerCfg)
+
+	raw, ok := opts[openaicompat.Name]
+	require.True(t, ok)
+	parsed, ok := raw.(*openaicompat.ProviderOptions)
+	require.True(t, ok)
+	require.Equal(t, true, parsed.ExtraBody["enable_thinking"])
+}

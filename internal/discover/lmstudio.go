@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"charm.land/catwalk/pkg/catwalk"
 )
@@ -25,6 +26,8 @@ type lmstudioModelEntry struct {
 	Key              string             `json:"key"`
 	DisplayName      string             `json:"display_name"`
 	MaxContextLength int64              `json:"max_context_length"`
+	Architecture     string             `json:"architecture"`
+	Type             string             `json:"type"`
 	LoadedInstances  []lmstudioInstance `json:"loaded_instances"`
 }
 
@@ -87,9 +90,30 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 			models[i].Name = meta.DisplayName
 		}
 
+		if lmstudioSupportsEnableThinking(meta) {
+			models[i].CanReason = true
+		}
+
 		// TODO: populate vision/tool-use flags when catwalk.Model
 		// gains dedicated fields for them.
 	}
 
 	return models, nil
+}
+
+func lmstudioSupportsEnableThinking(meta lmstudioModelEntry) bool {
+	if meta.Type != "" && meta.Type != "llm" {
+		return false
+	}
+	architecture := strings.ToLower(meta.Architecture)
+	switch architecture {
+	case "qwen3", "qwen35":
+		return true
+	}
+	id := strings.ToLower(meta.Key + " " + meta.DisplayName)
+	return strings.Contains(id, "qwq") ||
+		strings.Contains(id, "qwythos") ||
+		strings.Contains(id, "qwen3") ||
+		strings.Contains(id, "qwen-3") ||
+		strings.Contains(id, "reasoning")
 }

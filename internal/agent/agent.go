@@ -70,9 +70,8 @@ The previous provider request exceeded the selected model's context window. Focu
 
 Rules:
 - Be concise and action-oriented.
-- Use structured tool calls only. Never print XML, pseudo-code, or literal <tool_call> tags.
-- Prefer bounded shell commands for host, storage, cache, process, and runtime checks.
-- Use file/search tools for repository inspection when they are available.
+- When tools are available, call them through the provided tool interface instead of writing tool-call markup as normal text.
+- Choose the tool that directly verifies the requested fact. Shell is appropriate for host, storage, cache, process, and runtime checks; file/search tools are appropriate for repository inspection.
 - If you cannot fit or execute the task with the compact context, say exactly what context or model limit blocked it.`
 
 //go:embed templates/title.md

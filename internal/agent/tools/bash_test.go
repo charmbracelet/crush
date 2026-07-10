@@ -197,10 +197,10 @@ func TestBashToolPolicy_HasNoSourceLevelCommandBlacklist(t *testing.T) {
 
 func TestToolDescriptionsClarifyHostFactsAndURLFetch(t *testing.T) {
 	bash := bashDescription(&config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model")
-	require.Contains(t, bash, "host/runtime facts")
-	require.Contains(t, bash, "bounded shell commands")
-	require.Contains(t, bash, "measured system facts")
-	require.Contains(t, bash, "not evidence of size")
+	require.Contains(t, bash, "directly verifies the requested fact")
+	require.Contains(t, bash, "host/runtime measurements")
+	require.Contains(t, bash, "human-readable tables")
+	require.Contains(t, bash, "If command output already contains the evidence")
 
 	fetch := fetchDescription()
 	require.Contains(t, fetch, "HTTP(S) URL")

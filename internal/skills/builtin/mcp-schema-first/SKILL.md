@@ -37,6 +37,7 @@ Do not use filesystem MCP as a broad discovery engine from `/`. For broad host i
 - Use for exact paths, small directory listings, and structured file operations.
 - Prefer native `view`/`grep`/`glob`/`ls` for repository work when available.
 - Prefer bounded Bash for whole-host searches, cache size checks, process inspection, and other system facts.
+- Treat filesystem MCP listings as shape evidence only. Use measured shell output for sizes, free space, process state, service state, and command success.
 - Read before edit. Use absolute paths when the server requires them.
 - Confirm allowed directories before writing outside the current project.
 - Do not use filesystem MCP to bypass project trust, hook policy, or user scope.

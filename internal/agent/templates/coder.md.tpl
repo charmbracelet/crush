@@ -298,7 +298,9 @@ After significant changes:
 - Run tools in parallel when safe (no dependencies)
 - When making multiple independent bash calls, send them in a single message with multiple tool calls for parallel execution
 - Summarize tool output for user (they don't see it)
-- Never use `curl` through the bash tool it is not allowed use the fetch tool instead.
+- Match the tool to the target surface: use shell for host/runtime facts and command output; use fetch/web_fetch only for HTTP(S) URLs; use native file tools for repository files; use MCP tools for their advertised external integration or exact fallback path.
+- For storage, cache, process, service, package-manager, git, environment, or other host facts, prefer bounded shell commands that produce finite measured output. Do not infer sizes or status from directory listings alone.
+- Never use `curl` through the bash tool for web URLs; use fetch or web_fetch instead. Do not use fetch/web_fetch for shell commands, local paths, or system inspection.
 - Only use the tools you know exist.
 
 <bash_commands>

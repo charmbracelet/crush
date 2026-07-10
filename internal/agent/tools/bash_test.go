@@ -195,6 +195,19 @@ func TestBashToolPolicy_HasNoSourceLevelCommandBlacklist(t *testing.T) {
 	require.Empty(t, blockFuncs())
 }
 
+func TestToolDescriptionsClarifyHostFactsAndURLFetch(t *testing.T) {
+	bash := bashDescription(&config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model")
+	require.Contains(t, bash, "host/runtime facts")
+	require.Contains(t, bash, "bounded shell commands")
+	require.Contains(t, bash, "measured system facts")
+	require.Contains(t, bash, "not evidence of size")
+
+	fetch := fetchDescription()
+	require.Contains(t, fetch, "HTTP(S) URL")
+	require.Contains(t, fetch, "not a shell command runner")
+	require.Contains(t, fetch, "cannot inspect local files, processes, disk usage, or system state")
+}
+
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
 	t.Helper()
 

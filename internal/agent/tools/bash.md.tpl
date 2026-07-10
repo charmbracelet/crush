@@ -21,6 +21,7 @@ Common shell builtins and core utils are available on Windows.
 - Command required, working_dir optional (defaults to current directory)
 - For repository file discovery and content search, prefer the native Grep/Glob/View/LS/Agent tools
 - For host/runtime facts such as disk usage, cache sizes, process state, server state, git output, package-manager output, or finite system snapshots, use bounded shell commands with specific paths plus timeout/head/maxdepth when useful
+- When the user asks for measured system facts, return command-backed measurements. Directory trees, globs, and MCP listings can identify candidates, but they are not evidence of size, free space, running state, or completion by themselves
 - Do not run broad unbounded filesystem walks; narrow the path or use native tools when the target is inside the repository
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 - Each command runs in independent shell (no state persistence between calls)

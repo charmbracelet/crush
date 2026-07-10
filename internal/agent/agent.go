@@ -58,9 +58,22 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	defaultContextRetryHistoryMessages = 6
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
+
+const defaultContextRetrySystemPrompt = `You are Crush, a pragmatic coding agent in compact recovery mode.
+
+The previous provider request exceeded the selected model's context window. Focus only on the user's latest request and the small amount of recent history provided.
+
+Rules:
+- Be concise and action-oriented.
+- Use structured tool calls only. Never print XML, pseudo-code, or literal <tool_call> tags.
+- Prefer bounded shell commands for host, storage, cache, process, and runtime checks.
+- Use file/search tools for repository inspection when they are available.
+- If you cannot fit or execute the task with the compact context, say exactly what context or model limit blocked it.`
 
 //go:embed templates/title.md
 var titlePrompt []byte
@@ -733,22 +746,26 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
-	var instructions strings.Builder
+	if call.contextRetry {
+		systemPrompt = contextRetrySystemPrompt()
+	} else {
+		var instructions strings.Builder
 
-	for _, server := range mcp.GetStates() {
-		if server.State != mcp.StateConnected {
-			continue
+		for _, server := range mcp.GetStates() {
+			if server.State != mcp.StateConnected {
+				continue
+			}
+			if s := server.Client.InitializeResult().Instructions; s != "" {
+				instructions.WriteString(s)
+				instructions.WriteString("\n\n")
+			}
 		}
-		if s := server.Client.InitializeResult().Instructions; s != "" {
-			instructions.WriteString(s)
-			instructions.WriteString("\n\n")
-		}
-	}
 
-	if s := instructions.String(); s != "" {
-		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+		if s := instructions.String(); s != "" {
+			systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+		}
+		systemPrompt = mergeSystemPromptPrefix(a.systemPromptPrefix.Get(), systemPrompt)
 	}
-	systemPrompt = mergeSystemPromptPrefix(a.systemPromptPrefix.Get(), systemPrompt)
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -774,6 +791,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	if call.retryUserMessageID != "" {
 		msgs = removeMessageByID(msgs, call.retryUserMessageID)
+	}
+	if call.contextRetry {
+		msgs = contextRetryMessages(msgs)
 	}
 
 	admitted, err := a.admitUserPrompt(ctx, call)
@@ -1815,6 +1835,55 @@ func contextRetryTools(agentTools []fantasy.AgentTool) []fantasy.AgentTool {
 		}
 	}
 	return filtered
+}
+
+func contextRetrySystemPrompt() string {
+	if path := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_SYSTEM_PROMPT_FILE")); path != "" {
+		if data, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(data)) != "" {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	if prompt := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_SYSTEM_PROMPT")); prompt != "" {
+		return prompt
+	}
+	return defaultContextRetrySystemPrompt
+}
+
+func contextRetryMessages(msgs []message.Message) []message.Message {
+	filtered := make([]message.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if isContextOverflowMessage(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+
+	limit := defaultContextRetryHistoryMessages
+	if raw := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_HISTORY_MESSAGES")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	if limit <= 0 || len(filtered) <= limit {
+		return filtered
+	}
+	return append([]message.Message(nil), filtered[len(filtered)-limit:]...)
+}
+
+func isContextOverflowMessage(msg message.Message) bool {
+	if msg.Role != message.Assistant || msg.FinishReason() != message.FinishReasonError {
+		return false
+	}
+	var parts []string
+	parts = append(parts, msg.Content().String(), msg.ReasoningContent().String())
+	if finish := msg.FinishPart(); finish != nil {
+		parts = append(parts, finish.Message, finish.Details)
+	}
+	text := strings.ToLower(strings.Join(parts, "\n"))
+	return strings.Contains(text, "exceed_context_size") ||
+		strings.Contains(text, "exceeds the available context size") ||
+		strings.Contains(text, "context size") ||
+		strings.Contains(text, "context window")
 }
 
 func (a *sessionAgent) shouldAutoReviewMaxTokens(reason message.FinishReason) bool {

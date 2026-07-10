@@ -16,14 +16,15 @@ import (
 )
 
 type autoReviewStreamModel struct {
-	text         string
-	err          error
-	finishReason fantasy.FinishReason
-	failFirst    bool
-	onStream     func(callNumber int64)
-	streamCalls  atomic.Int64
-	mu           sync.Mutex
-	toolNames    [][]string
+	text          string
+	err           error
+	finishReason  fantasy.FinishReason
+	failFirst     bool
+	onStream      func(callNumber int64)
+	streamCalls   atomic.Int64
+	mu            sync.Mutex
+	toolNames     [][]string
+	systemPrompts []string
 }
 
 func (m *autoReviewStreamModel) Provider() string { return "fake" }
@@ -42,8 +43,10 @@ func (m *autoReviewStreamModel) Stream(ctx context.Context, call fantasy.Call) (
 	for _, tool := range call.Tools {
 		names = append(names, tool.GetName())
 	}
+	systemPrompt := systemPromptFromCall(call)
 	m.mu.Lock()
 	m.toolNames = append(m.toolNames, names)
+	m.systemPrompts = append(m.systemPrompts, systemPrompt)
 	m.mu.Unlock()
 	if m.onStream != nil {
 		m.onStream(callNumber)
@@ -77,6 +80,28 @@ func (m *autoReviewStreamModel) toolNamesForCall(index int) []string {
 		return nil
 	}
 	return append([]string(nil), m.toolNames[index]...)
+}
+
+func (m *autoReviewStreamModel) systemPromptForCall(index int) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if index < 0 || index >= len(m.systemPrompts) {
+		return ""
+	}
+	return m.systemPrompts[index]
+}
+
+func systemPromptFromCall(call fantasy.Call) string {
+	if len(call.Prompt) == 0 || call.Prompt[0].Role != fantasy.MessageRoleSystem {
+		return ""
+	}
+	if len(call.Prompt[0].Content) == 0 {
+		return ""
+	}
+	if textPart, ok := fantasy.AsContentType[fantasy.TextPart](call.Prompt[0].Content[0]); ok {
+		return textPart.Text
+	}
+	return ""
 }
 
 func (m *autoReviewStreamModel) GenerateObject(ctx context.Context, call fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
@@ -246,6 +271,8 @@ func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
 	}
 	review := &autoReviewStreamModel{text: "review should not run"}
 	sa := newAutoReviewTestAgent(env, primary, review)
+	sa.systemPromptPrefix.Set("long provider prefix")
+	sa.systemPrompt.Set("long base prompt")
 	sa.SetTools([]fantasy.AgentTool{
 		&fakeTool{name: tools.BashToolName},
 		&fakeTool{name: tools.ViewToolName},
@@ -265,6 +292,11 @@ func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
 	require.Equal(t, int64(0), review.streamCalls.Load(), "context overflow must not trigger auto-review")
 	require.ElementsMatch(t, []string{tools.BashToolName, tools.ViewToolName, tools.WriteToolName, tools.ReadMCPResourceToolName}, primary.toolNamesForCall(0))
 	require.ElementsMatch(t, []string{tools.BashToolName, tools.ViewToolName}, primary.toolNamesForCall(1))
+	require.Contains(t, primary.systemPromptForCall(0), "long provider prefix")
+	require.Contains(t, primary.systemPromptForCall(0), "long base prompt")
+	require.Contains(t, primary.systemPromptForCall(1), "compact recovery mode")
+	require.NotContains(t, primary.systemPromptForCall(1), "long provider prefix")
+	require.NotContains(t, primary.systemPromptForCall(1), "long base prompt")
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)

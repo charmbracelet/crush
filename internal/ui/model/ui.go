@@ -131,7 +131,7 @@ type (
 	// cancelTimerExpiredMsg is sent when the cancel timer expires.
 	cancelTimerExpiredMsg struct{}
 	// statusTickMsg is sent on each timer interval to refresh the status
-	// bar's elapsed-time and token-speed display.
+	// bar's elapsed-time.
 	statusTickMsg struct{}
 	// userCommandsLoadedMsg is sent when user commands are loaded.
 	userCommandsLoadedMsg struct {
@@ -3411,18 +3411,6 @@ func (m *UI) isAgentBusy() bool {
 	}
 	return m.com.Workspace.AgentIsReady() &&
 		m.com.Workspace.AgentIsBusy()
-}
-
-// estimateMessageTokens returns a rough token count for the text and
-// reasoning content of an assistant message. This is used for the
-// tokens-per-second indicator in the status bar while streaming, before
-// the provider reports actual usage.
-func estimateMessageTokens(msg *message.Message) int {
-	if msg.Role != message.Assistant {
-		return 0
-	}
-	charCount := len(msg.Content().Text) + len(msg.ReasoningContent().Thinking)
-	return int(float64(charCount) * tokensPerChar)
 }
 
 // hasSession returns true if there is an active session with a valid ID.

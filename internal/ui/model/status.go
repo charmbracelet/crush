@@ -21,17 +21,6 @@ const DefaultStatusTTL = 5 * time.Second
 // statusTickInterval is how often the timer in the status bar refreshes.
 const statusTickInterval = 100 * time.Millisecond
 
-// tokenSpeedInterval is how often the tokens-per-second value is
-// recomputed. The tick still fires at statusTickInterval for the elapsed
-// timer, but the speed display only changes this often so it stays
-// readable.
-const tokenSpeedInterval = 800 * time.Millisecond
-
-// tokensPerChar is the rough heuristic used to estimate token counts from
-// raw text length during streaming (before the provider reports actual
-// usage).
-const tokensPerChar = 1.0 / 4.0
-
 // Status is the status bar and help model.
 type Status struct {
 	com      *common.Common

@@ -136,7 +136,7 @@ func CharmtonePantera() Styles {
 		Background(charmtone.Pepper)
 	s.TextSelection = s.TextSelection.
 		Foreground(charmtone.Salt).
-		Background(charmtone.Char)
+		Background(charmtone.Salmon)
 	if s.Markdown.H1.StylePrimitive.BackgroundColor != nil {
 		s.Markdown.H1.StylePrimitive.BackgroundColor = nil
 	}

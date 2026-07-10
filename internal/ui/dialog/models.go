@@ -417,7 +417,7 @@ func (m *Models) selectedModelsView(width int) string {
 			m.selectedModelSegment(right, colWidth),
 		)
 	}
-	return lipgloss.NewStyle().Padding(1, 1).Render(lipgloss.JoinVertical(
+	return lipgloss.NewStyle().Padding(1, 1, 0, 1).Render(lipgloss.JoinVertical(
 		lipgloss.Left,
 		row(ModelTypeLarge, ModelTypeSmall),
 		row(ModelTypeSummary, ModelTypeReview),

@@ -40,7 +40,7 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 // is set with -ldflags for shareable binaries.
 var (
 	EmbeddedLMStudioBaseURL = ""
-	EmbeddedLMStudioAPIKey  = "$TAILNET_QWEN_API_KEY"
+	EmbeddedLMStudioAPIKey  = "$LM_STUDIO_API_KEY"
 	// EmbeddedConfigJSON optionally injects default JSON config before user
 	// and workspace config files are loaded. Later config files still win.
 	EmbeddedConfigJSON = ""
@@ -48,7 +48,7 @@ var (
 
 const (
 	embeddedLMStudioProviderID   = "tailnet-lmstudio"
-	embeddedLMStudioProviderName = "Tailnet LM Studio"
+	embeddedLMStudioProviderName = "LM Studio"
 )
 
 // Load loads the configuration from the default paths and returns a
@@ -639,33 +639,6 @@ func (c *Config) addEmbeddedLMStudioProvider() {
 		APIKey:             EmbeddedLMStudioAPIKey,
 		Type:               catwalk.Type("lmstudio"),
 		AutoDiscoverModels: &discoverModels,
-		Models: []catwalk.Model{
-			{
-				Name:                   "Qwen3.5 4B",
-				ID:                     "qwen3.5-4b-claude-4.6-opus-reasoning-distilled-v2",
-				ContextWindow:          65536,
-				DefaultMaxTokens:       8192,
-				CanReason:              true,
-				ReasoningLevels:        []string{"low", "medium", "high"},
-				DefaultReasoningEffort: "high",
-				SupportsImages:         true,
-			},
-			{
-				Name:                   "Qwen3.5 9B",
-				ID:                     "qwen3.5-9b",
-				ContextWindow:          262144,
-				DefaultMaxTokens:       8192,
-				CanReason:              true,
-				ReasoningLevels:        []string{"low", "medium", "high"},
-				DefaultReasoningEffort: "medium",
-			},
-			{
-				Name:             "Qwen2.5 3B Instruct",
-				ID:               "qwen2.5-3b-instruct",
-				ContextWindow:    32768,
-				DefaultMaxTokens: 4096,
-			},
-		},
 	})
 }
 

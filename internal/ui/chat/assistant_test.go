@@ -96,6 +96,22 @@ func TestAssistantMessageItemTailWindowBoundary(t *testing.T) {
 		"a source with N+1 logical lines must trip the tail-window step")
 }
 
+func TestAssistantMessageItemStripsRawANSIBackgrounds(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	msg := thinkingMessage("ansi-bg", "\x1b[44mthinking\x1b[0m", "\x1b[44mtask\x1b[0m")
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+
+	task := item.renderMarkdown(msg.Content().Text, 80)
+	thinking := item.renderThinking(msg.ReasoningContent().Thinking, 80)
+
+	require.NotContains(t, task, "\x1b[44m")
+	require.NotContains(t, thinking, "\x1b[44m")
+	require.Contains(t, ansi.Strip(task), "task")
+	require.Contains(t, ansi.Strip(thinking), "thinking")
+}
+
 // buildLines returns a string of n logical lines (n-1 newlines). Each
 // line is a unique short token so callers can distinguish head from
 // tail in rendered output if they need to.

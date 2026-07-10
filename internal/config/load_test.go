@@ -87,6 +87,29 @@ func TestConfig_LoadFromConfigPaths_InvalidEmbeddedConfig(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid embedded JSON config")
 }
 
+func TestConfig_AddEmbeddedLMStudioProviderUsesDiscoveryOnly(t *testing.T) {
+	previousBaseURL := EmbeddedLMStudioBaseURL
+	previousAPIKey := EmbeddedLMStudioAPIKey
+	EmbeddedLMStudioBaseURL = "https://lmstudio.example/v1"
+	EmbeddedLMStudioAPIKey = "$LM_STUDIO_API_KEY"
+	t.Cleanup(func() {
+		EmbeddedLMStudioBaseURL = previousBaseURL
+		EmbeddedLMStudioAPIKey = previousAPIKey
+	})
+
+	cfg := &Config{}
+	cfg.setDefaults(t.TempDir(), "")
+	cfg.addEmbeddedLMStudioProvider()
+
+	provider, ok := cfg.Providers.Get(embeddedLMStudioProviderID)
+	require.True(t, ok)
+	require.Equal(t, "LM Studio", provider.Name)
+	require.Equal(t, "$LM_STUDIO_API_KEY", provider.APIKey)
+	require.NotNil(t, provider.AutoDiscoverModels)
+	require.True(t, *provider.AutoDiscoverModels)
+	require.Empty(t, provider.Models)
+}
+
 func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	// Force GlobalConfig and GlobalConfigData to point at locations we
 	// control so they can be present in the result without polluting

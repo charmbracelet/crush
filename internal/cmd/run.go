@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/format"
+	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -262,6 +263,11 @@ func runNonInteractive(
 		read:      make(map[string]int),
 	}
 
+	// Start herdr integration when running inside a herdr pane.
+	hc := herdr.Init()
+	hc.SetSessionID(sess.ID)
+	defer hc.Close()
+
 	defer func() {
 		if progress && stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
@@ -279,6 +285,11 @@ func runNonInteractive(
 			if !ok {
 				stopSpinner()
 				return nil
+			}
+
+			// Forward events to herdr if running inside a herdr pane.
+			if hev := herdr.Translate(ev); hev != nil {
+				hc.HandleEvent(hev)
 			}
 
 			done, err := stream.handle(ev, stopSpinner)

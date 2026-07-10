@@ -220,7 +220,7 @@ func (d *DockerMCPToolRenderContext) makeHeader(sty *styles.Styles, tool string,
 		icon = sty.Tool.IconPending.Render()
 	}
 	prefix := fmt.Sprintf("%s %s ", icon, d.formatToolName(sty, tool))
-	return prefix + toolParamList(sty, params, width-lipgloss.Width(prefix))
+	return prefix + toolParamList(sty, params, width-lipgloss.Width(prefix), opts)
 }
 
 func (d *DockerMCPToolRenderContext) formatToolName(sty *styles.Styles, tool string) string {
@@ -274,7 +274,7 @@ func (d *DockerMCPToolRenderContext) makeCompactHeader(sty *styles.Styles, tool 
 	}
 
 	name := fmt.Sprintf("Docker MCP: %s", action)
-	return toolHeader(sty, ToolStatusSuccess, name, width, true, params...)
+	return toolHeader(sty, ToolStatusSuccess, name, width, &ToolRenderOpts{Compact: true}, params...)
 }
 
 // IsDockerMCPTool returns true if the tool name is a Docker MCP tool.

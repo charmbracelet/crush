@@ -71,10 +71,12 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 	return w.app.Sessions.ParseAgentToolSessionID(sessionID)
 }
 
-// SetCurrentSession is a no-op in single-client local mode. The
-// presence concept only matters when multiple clients can share a
-// workspace via the HTTP server.
+// SetCurrentSession reports the active session to herdr so the pane
+// can persist a resumable reference. Multi-client presence tracking
+// is irrelevant in single-client local mode, but herdr still needs
+// to know which session is live to support agent resume.
 func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	w.app.ReportCurrentSession(sessionID)
 	return nil
 }
 
@@ -112,15 +114,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	var persist shell.PersistFunc
 	if sessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			_, err := w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
-				Role: message.User,
-				Parts: []message.ContentPart{message.ShellCommand{
-					Command:  cmd,
-					Output:   output,
-					ExitCode: exitCode,
-				}},
-			})
-			return err
+			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode)
 		}
 	}
 
@@ -426,13 +420,13 @@ func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
 
 	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, w.store); err != nil {
 		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
-		delete(w.store.Config().MCP, config.DockerMCPName)
+		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
 	if err := w.store.PersistDockerMCPConfig(mcpConfig); err != nil {
 		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
-		delete(w.store.Config().MCP, config.DockerMCPName)
+		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
 	}
 

@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -253,15 +252,7 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 	var persist shell.PersistFunc
 	if req.SessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			_, err := ws.Messages.Create(ctx, req.SessionID, message.CreateMessageParams{
-				Role: message.User,
-				Parts: []message.ContentPart{message.ShellCommand{
-					Command:  cmd,
-					Output:   output,
-					ExitCode: exitCode,
-				}},
-			})
-			return err
+			return shell.PersistOutput(ctx, ws.Messages, req.SessionID, cmd, output, exitCode)
 		}
 	}
 

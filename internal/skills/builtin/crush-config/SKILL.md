@@ -130,7 +130,7 @@ reviewed.
 }
 ```
 
-- `type` (required): `openai`, `openai-compat`, or `anthropic`
+- `type` (required): `openai`, `openai-compat`, `anthropic`, or a local provider type (`llamacpp`, `omlx`, `lmstudio`, `litellm`, `ollama`)
 - `api_key`, `base_url`, `api_endpoint`, and `extra_headers` are shell-expanded (see [Shell Expansion](#shell-expansion)).
 - `extra_body` is a JSON passthrough and is **not** expanded.
 - Additional fields: `disable`, `system_prompt_prefix`, `extra_headers`, `extra_body`, `provider_options`.

@@ -130,6 +130,9 @@ type shellStreamMsg struct {
 type (
 	// cancelTimerExpiredMsg is sent when the cancel timer expires.
 	cancelTimerExpiredMsg struct{}
+	// statusTickMsg is sent on each timer interval to refresh the status
+	// bar's elapsed-time and token-speed display.
+	statusTickMsg struct{}
 	// userCommandsLoadedMsg is sent when user commands are loaded.
 	userCommandsLoadedMsg struct {
 		Commands []commands.CustomCommand
@@ -628,6 +631,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
+		m.status.StopTimer()
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
@@ -767,6 +771,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.todoIsSpinning && !m.isAgentBusy() {
 			m.todoIsSpinning = false
 		}
+		// Manage the status bar timer: start it when the agent begins
+		// working, keep it ticking, and stop it when the agent goes idle.
+		if m.isAgentBusy() {
+			if !m.status.IsTimerActive() {
+				m.status.StartTimer()
+				m.updateLayoutAndSize()
+				cmds = append(cmds, statusTickCmd())
+			}
+		} else if m.status.IsTimerActive() {
+			m.status.StopTimer()
+			m.updateLayoutAndSize()
+		}
 		// there is a number of things that could change the pills here so we want to re-render
 		m.renderPills()
 	case pubsub.Event[history.File]:
@@ -805,6 +821,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handlePermissionNotification(msg.Payload)
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
+	case statusTickMsg:
+		if m.isAgentBusy() {
+			cmds = append(cmds, statusTickCmd())
+		} else if m.status.IsTimerActive() {
+			m.status.StopTimer()
+			m.updateLayoutAndSize()
+		}
 	case tea.TerminalVersionMsg:
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
@@ -2531,8 +2554,11 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++                            // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
+			cur.X++ // Adjust for app margins
+			cur.Y += m.layout.editor.Min.Y + 1
+			if m.status.IsTimerActive() {
+				cur.Y++ // Offset for timer line above textarea
+			}
 			return cur
 		}
 	}
@@ -2908,8 +2934,12 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// The help height
 	helpHeight := 1
-	// The editor height: textarea height + margin for attachments and bottom spacing.
+	// The editor height: textarea height + margin for attachments, bottom
+	// spacing, and the timer line (when the agent is actively working).
 	editorHeight := m.textarea.Height() + editorHeightMargin
+	if m.status != nil && m.status.IsTimerActive() {
+		editorHeight++
+	}
 	// The sidebar width
 	sidebarWidth := 30
 	// The header height
@@ -3353,9 +3383,13 @@ func (m *UI) completionsPosition() image.Point {
 			Y: m.layout.editor.Min.Y,
 		}
 	}
+	y := m.layout.editor.Min.Y + cur.Y
+	if m.status.IsTimerActive() {
+		y++ // Offset for timer line above textarea
+	}
 	return image.Point{
 		X: cur.X + m.layout.editor.Min.X,
-		Y: m.layout.editor.Min.Y + cur.Y,
+		Y: y,
 	}
 }
 
@@ -3377,6 +3411,18 @@ func (m *UI) isAgentBusy() bool {
 	}
 	return m.com.Workspace.AgentIsReady() &&
 		m.com.Workspace.AgentIsBusy()
+}
+
+// estimateMessageTokens returns a rough token count for the text and
+// reasoning content of an assistant message. This is used for the
+// tokens-per-second indicator in the status bar while streaming, before
+// the provider reports actual usage.
+func estimateMessageTokens(msg *message.Message) int {
+	if msg.Role != message.Assistant {
+		return 0
+	}
+	charCount := len(msg.Content().Text) + len(msg.ReasoningContent().Thinking)
+	return int(float64(charCount) * tokensPerChar)
 }
 
 // hasSession returns true if there is an active session with a valid ID.
@@ -3419,11 +3465,14 @@ func (m *UI) renderEditorView(width int) string {
 	if len(m.attachments.List()) > 0 {
 		attachmentsView = m.attachments.Render(width)
 	}
-	return strings.Join([]string{
+	parts := []string{
 		attachmentsView,
-		m.textarea.View(),
-		"", // margin at bottom of editor
-	}, "\n")
+	}
+	if timerLine := m.status.RenderTimerLine(); timerLine != "" {
+		parts = append(parts, timerLine)
+	}
+	parts = append(parts, m.textarea.View(), "") // margin at bottom of editor
+	return strings.Join(parts, "\n")
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
@@ -3531,6 +3580,11 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		}
 		return nil
 	})
+
+	// Start the status bar timer for this request.
+	m.status.StartTimer()
+	m.updateLayoutAndSize()
+	cmds = append(cmds, statusTickCmd())
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID

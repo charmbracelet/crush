@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -16,6 +18,20 @@ import (
 // DefaultStatusTTL is the default time-to-live for status messages.
 const DefaultStatusTTL = 5 * time.Second
 
+// statusTickInterval is how often the timer in the status bar refreshes.
+const statusTickInterval = 100 * time.Millisecond
+
+// tokenSpeedInterval is how often the tokens-per-second value is
+// recomputed. The tick still fires at statusTickInterval for the elapsed
+// timer, but the speed display only changes this often so it stays
+// readable.
+const tokenSpeedInterval = 800 * time.Millisecond
+
+// tokensPerChar is the rough heuristic used to estimate token counts from
+// raw text length during streaming (before the provider reports actual
+// usage).
+const tokensPerChar = 1.0 / 4.0
+
 // Status is the status bar and help model.
 type Status struct {
 	com      *common.Common
@@ -23,6 +39,10 @@ type Status struct {
 	help     help.Model
 	helpKm   help.KeyMap
 	msg      util.InfoMsg
+
+	// Timer fields — track how long the current request has been running.
+	timerActive bool
+	startTime   time.Time
 }
 
 // NewStatus creates a new status bar and help model.
@@ -43,6 +63,35 @@ func (s *Status) SetInfoMsg(msg util.InfoMsg) {
 // ClearInfoMsg clears the status info message.
 func (s *Status) ClearInfoMsg() {
 	s.msg = util.InfoMsg{}
+}
+
+// StartTimer begins tracking elapsed time for the current request. It is
+// safe to call when the timer is already running — the start time is only
+// set once per run.
+func (s *Status) StartTimer() {
+	if s.timerActive {
+		return
+	}
+	s.timerActive = true
+	s.startTime = time.Now()
+}
+
+// StopTimer stops the timer.
+func (s *Status) StopTimer() {
+	s.timerActive = false
+}
+
+// IsTimerActive returns whether the request timer is currently running.
+func (s *Status) IsTimerActive() bool {
+	return s.timerActive
+}
+
+// Elapsed returns the elapsed time since the timer started.
+func (s *Status) Elapsed() time.Duration {
+	if !s.timerActive {
+		return 0
+	}
+	return time.Since(s.startTime)
 }
 
 // SetWidth sets the width of the status bar and help view.
@@ -114,10 +163,32 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	uv.NewStyledString(ind+info).Draw(scr, area)
 }
 
+// RenderTimerLine returns a styled string showing the elapsed time and
+// token generation speed, suitable for display above the text editor.
+// Returns an empty string when the timer is not active.
+func (s *Status) RenderTimerLine() string {
+	if !s.timerActive {
+		return ""
+	}
+	elapsed := s.Elapsed()
+	minutes := int(elapsed.Minutes())
+	seconds := int(elapsed.Seconds()) % 60
+	timerStr := fmt.Sprintf("%s %d:%02d", styles.SpinnerIcon, minutes, seconds)
+	return s.com.Styles.Status.Timer.Render(timerStr)
+}
+
 // clearInfoMsgCmd returns a command that clears the info message after the
 // given TTL.
 func clearInfoMsgCmd(ttl time.Duration) tea.Cmd {
 	return tea.Tick(ttl, func(time.Time) tea.Msg {
 		return util.ClearStatusMsg{}
+	})
+}
+
+// statusTickCmd returns a command that fires a statusTickMsg after the
+// configured tick interval.
+func statusTickCmd() tea.Cmd {
+	return tea.Tick(statusTickInterval, func(time.Time) tea.Msg {
+		return statusTickMsg{}
 	})
 }

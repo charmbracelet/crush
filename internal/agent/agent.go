@@ -900,6 +900,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
+		Headers:          sessionHeaders(call.SessionID),
 		ProviderOptions:  call.ProviderOptions,
 		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,
@@ -1466,6 +1467,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
+		Headers:         sessionHeaders(sessionID),
 		ProviderOptions: summaryProviderOpts,
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
@@ -1787,6 +1789,19 @@ func userPromptToAIMessage(prompt string, attachments []message.Attachment) fant
 	return fantasy.Message{Role: fantasy.MessageRoleUser, Content: parts}
 }
 
+// sessionHeaders returns the HTTP headers we use for cache affinity on
+// every LLM request for a given session.
+//
+// We use the session hash is used instead of the raw UUID so the header
+// value is deterministic and opaque.
+func sessionHeaders(sessionID string) map[string]string {
+	hash := session.HashID(sessionID)
+	return map[string]string{
+		"x-session-id":       hash,
+		"x-session-affinity": hash,
+	}
+}
+
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {
 	parts := []message.ContentPart{message.TextContent{Text: call.Prompt}}
 	var attachmentParts []message.ContentPart
@@ -2035,7 +2050,8 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	}
 
 	streamCall := fantasy.AgentStreamCall{
-		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
+		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
+		Headers: sessionHeaders(sessionID),
 	}
 
 	type modelAttempt struct {

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -210,4 +211,29 @@ func TestNewClientWorkspace_SeedsSkillsCache(t *testing.T) {
 	got := skills.GetLatestStates()
 	require.Len(t, got, 1)
 	require.Equal(t, "seeded", got[0].Name)
+}
+
+// TestTranslateEvent_UpdateAvailable verifies that an incoming
+// proto.UpdateAvailable event is converted back into the
+// app.UpdateAvailableMsg that the TUI expects, so client/server mode
+// shows the same update notification as local mode.
+func TestTranslateEvent_UpdateAvailable(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	ev := pubsub.Event[proto.UpdateAvailable]{
+		Type: pubsub.UpdatedEvent,
+		Payload: proto.UpdateAvailable{
+			CurrentVersion: "1.0.0",
+			LatestVersion:  "1.1.0",
+			IsDevelopment:  true,
+		},
+	}
+
+	out := w.translateEvent(ev)
+	got, ok := out.(app.UpdateAvailableMsg)
+	require.True(t, ok, "expected app.UpdateAvailableMsg, got %T", out)
+	require.Equal(t, "1.0.0", got.CurrentVersion)
+	require.Equal(t, "1.1.0", got.LatestVersion)
+	require.True(t, got.IsDevelopment)
 }

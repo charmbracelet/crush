@@ -20,6 +20,8 @@ const (
 	titleContentHeight = 1
 	// inputContentHeight is the height of the input content line.
 	inputContentHeight = 1
+	// mouseScrollLines is the number of lines to scroll on mouse wheel events.
+	mouseScrollLines = 3
 )
 
 // CloseKey is the default key binding to close dialogs.

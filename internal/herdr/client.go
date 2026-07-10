@@ -123,7 +123,8 @@ func newFromEnv() *Client {
 	socketPath := os.Getenv("HERDR_SOCKET_PATH")
 	paneID := os.Getenv("HERDR_PANE_ID")
 	if socketPath == "" || paneID == "" {
-		slog.Debug("Herdr integration disabled: incomplete environment",
+		slog.Debug(
+			"Herdr integration disabled: incomplete environment",
 			"has_socket", socketPath != "",
 			"has_pane_id", paneID != "",
 		)

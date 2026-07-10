@@ -43,6 +43,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/itchyny/gojq v0.12.19
+	github.com/joestump-agent/a2tea v0.0.0-20260710173942-49cf767209e1
 	github.com/joho/godotenv v1.5.1
 	github.com/jordanella/go-ansi-paintbrush v0.0.0-20240728195301-b7ad996ecf3d
 	github.com/lucasb-eyer/go-colorful v1.4.0
@@ -109,6 +110,7 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20260223140439-63879b0b8dab // indirect
+	github.com/charmbracelet/harmonica v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
@@ -181,6 +183,7 @@ require (
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tmc/a2ui v0.0.0-20260605070129-b42a8925e473 // indirect
 	github.com/u-root/u-root v0.14.1-0.20250807200646-5e7721023dc7 // indirect
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect

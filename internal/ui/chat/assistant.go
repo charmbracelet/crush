@@ -429,7 +429,15 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	if a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
 	}
-	out := a.renderMarkdown(a.message.Content().Text, width)
+	text := a.message.Content().Text
+	var out string
+	if contentHasA2UI(text) {
+		// The reply carries an A2UI document — route it through a2tea instead
+		// of rendering the raw JSON as a markdown code block.
+		out = a.renderContentWithA2UI(text, width)
+	} else {
+		out = a.renderMarkdown(text, width)
+	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out
 }

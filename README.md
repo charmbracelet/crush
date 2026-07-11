@@ -18,6 +18,7 @@
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
+- **UI-Fluent:** models can speak [A2UI](https://a2ui.org) and Crush will draw it — cards, lists, and buttons right in the chat
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
 - **Industrial Grade:** built on the Charm ecosystem, powering 25k+ applications, from leading open source projects to business-critical infrastructure
 
@@ -227,6 +228,39 @@ Is there a provider you’d like to see in Crush? Is there an existing model tha
 Crush’s default model listing is managed in [Catwalk](https://github.com/charmbracelet/catwalk), a community-supported, open source repository of Crush-compatible models, and you’re welcome to contribute.
 
 <a href="https://github.com/charmbracelet/catwalk"><img width="174" height="174" alt="Catwalk Badge" src="https://github.com/user-attachments/assets/95b49515-fe82-4409-b10d-5beb0873787d" /></a>
+
+## A2UI
+
+Sometimes prose isn’t the best answer. When an assistant reply contains an
+[A2UI](https://a2ui.org) message — structured JSON describing UI, wrapped in
+`<a2ui-json>` tags — Crush renders it as an actual element in the chat instead
+of dumping raw JSON:
+
+```text
+<a2ui-json>{"version":"v0.9","updateComponents":{...}}</a2ui-json>
+
+        …becomes…
+
+╭──────────────────────────────╮
+│ Build passed                 │
+│ 142 tests, 0 failures.       │
+│ ──────────────────────────── │
+│ [ Details ]  [ Re-run ]      │
+╰──────────────────────────────╯
+```
+
+Parsing and rendering are handled by
+[a2tea](https://github.com/joestump-agent/a2tea), which speaks the real A2UI
+v0.9 protocol. The core catalog draws with proper styling: text with heading
+variants, bordered cards, columns, rows, lists, dividers, and buttons, plus
+read-only visuals for input components. Chrome is monochrome on purpose, so
+your theme stays yours.
+
+> [!NOTE]
+> Prose around a surface still renders as Markdown, and a block that fails to
+> parse shows an alert rather than silently disappearing. Interactivity
+> (clicking those buttons and sending the result back to the model) is on the
+> roadmap — today surfaces are display-only in the chat.
 
 ## Configuration
 

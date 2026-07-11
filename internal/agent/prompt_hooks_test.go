@@ -21,6 +21,25 @@ type capturingStreamModel struct {
 	prompts [][]fantasy.Message
 }
 
+func TestCapabilityAwareHookContext(t *testing.T) {
+	t.Parallel()
+
+	t.Run("keeps available MCP reference unchanged", func(t *testing.T) {
+		contextText := "Use mcp_context7_resolve-library-id before editing."
+		require.Equal(t, contextText, capabilityAwareHookContext(contextText, []string{"mcp_context7_resolve-library-id"}))
+	})
+
+	t.Run("warns and forbids shell fallback for unavailable MCP", func(t *testing.T) {
+		got := capabilityAwareHookContext(
+			"Use mcp_sequential-thinking_sequentialthinking before editing.",
+			[]string{"bash", "view"},
+		)
+		require.Contains(t, got, "Referenced tools are unavailable")
+		require.Contains(t, got, "mcp_sequential-thinking_sequentialthinking")
+		require.Contains(t, got, "Do not invoke these names through Bash")
+	})
+}
+
 func (m *capturingStreamModel) Provider() string { return "fake" }
 func (m *capturingStreamModel) Model() string    { return "fake-model" }
 

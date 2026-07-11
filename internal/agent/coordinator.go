@@ -109,6 +109,12 @@ type Coordinator interface {
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
 
+// SkillLoadMarker records deterministic skill activation performed outside
+// the model-facing View tool, such as a user-invoked skill command.
+type SkillLoadMarker interface {
+	MarkSkillLoaded(name string)
+}
+
 type coordinator struct {
 	cfg            *config.ConfigStore
 	sessions       session.Service
@@ -135,6 +141,11 @@ type coordinator struct {
 	skillTracker *skills.Tracker
 
 	readyWg errgroup.Group
+}
+
+func (c *coordinator) MarkSkillLoaded(name string) {
+	c.skillTracker.MarkLoaded(name)
+	slog.Info("Activated skill", "skill", name, "source", "runtime")
 }
 
 type CoordinatorOption func(*coordinator)

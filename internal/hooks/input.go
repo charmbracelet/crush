@@ -27,6 +27,9 @@ type Payload struct {
 	ToolName  string          `json:"tool_name,omitempty"`
 	ToolInput json.RawMessage `json:"tool_input,omitempty"`
 	Prompt    string          `json:"prompt,omitempty"`
+	// AvailableTools is populated for prompt hooks after agent and MCP
+	// filtering so hook logic can avoid requiring unavailable capabilities.
+	AvailableTools []string `json:"available_tools,omitempty"`
 	// Attachments contains attachment paths rather than contents so
 	// hooks can make routing decisions without receiving file bytes.
 	Attachments []string        `json:"attachments,omitempty"`

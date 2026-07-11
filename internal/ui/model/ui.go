@@ -1835,9 +1835,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if msg.Args != nil {
 			content = substituteArgs(content, msg.Args)
 		}
-		// If this is a skill command, format it using the skill's FormatInvocation method
+		// Skill catalog entries contain metadata only. Read the effective skill
+		// body before dispatch so invocation never depends on model activation.
 		if msg.Skill != nil {
-			content = msg.Skill.FormatInvocation()
+			cmds = append(cmds, m.invokeSkill(msg.Skill, ""))
+			m.dialog.CloseFrontDialog()
+			break
 		}
 		cmds = append(cmds, m.sendMessage(content))
 		m.dialog.CloseFrontDialog()
@@ -3623,6 +3626,32 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 			Content:  content,
 		}
 	}
+}
+
+// invokeSkill resolves the effective skill body and sends it as loaded
+// instructions. Catalog entries intentionally contain metadata only.
+func (m *UI) invokeSkill(skill *skills.Skill, suffix string) tea.Cmd {
+	return func() tea.Msg {
+		content, result, err := m.com.Workspace.ReadSkill(context.Background(), skill.SkillFilePath)
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return sendMessageMsg{Content: formatLoadedSkillInvocation(skill, content, result, suffix)}
+	}
+}
+
+func formatLoadedSkillInvocation(skill *skills.Skill, content []byte, result skills.SkillReadResult, suffix string) string {
+	loaded := &skills.Skill{
+		Name:          cmp.Or(result.Name, skill.Name),
+		Description:   cmp.Or(result.Description, skill.Description),
+		SkillFilePath: skill.SkillFilePath,
+		Instructions:  string(content),
+	}
+	prompt := loaded.FormatInvocation()
+	if suffix != "" {
+		prompt += "\n\n" + suffix
+	}
+	return prompt
 }
 
 func agentModeLabel(agentID string) string {

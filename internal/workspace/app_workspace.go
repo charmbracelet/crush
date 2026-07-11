@@ -504,7 +504,13 @@ func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, err
 
 func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
 	mgr := w.app.Skills
-	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
+	content, result, err := skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
+	if err == nil {
+		if marker, ok := w.app.AgentCoordinator.(agent.SkillLoadMarker); ok {
+			marker.MarkSkillLoaded(result.Name)
+		}
+	}
+	return content, result, err
 }
 
 // -- MCP operations --

@@ -17,8 +17,7 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush supports `PreToolUse` and `UserPromptSubmit` hooks
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -176,7 +175,7 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+Here are the events you can hook into:
 
 ### PreToolUse
 
@@ -199,6 +198,19 @@ agent spawn sub-agents" still works.
 
 Hooks are keyed by event name. Only `command` is required, and you can omit
 `matcher` to match all tools.
+
+### UserPromptSubmit
+
+This hook fires after the user submits a prompt and before the prompt reaches
+the model. It can deny or rewrite the prompt and inject additional context.
+Its JSON payload includes `prompt`, attachment paths in `attachments`, and the
+final filtered tool names in `available_tools`. Hook-generated context should
+only require capabilities present in `available_tools`.
+
+If injected context references an unavailable `mcp_*` tool, Crush adds a
+capability warning for the model. The warning prevents the model from trying
+to invoke that MCP name through the shell, but hook authors should still use
+`available_tools` to provide an appropriate fallback.
 
 ## Building Hooks
 
@@ -260,6 +272,9 @@ Standard input provides the full context as JSON:
   "cwd": "/home/user/project", // Working directory
   "tool_name": "bash", // The tool being called
   "tool_input": { "command": "rm -rf /" }, // The tool's input
+  "prompt": "fix the login flow", // UserPromptSubmit only
+  "attachments": ["screenshot.png"], // UserPromptSubmit only
+  "available_tools": ["bash", "view"], // UserPromptSubmit only
 }
 ```
 

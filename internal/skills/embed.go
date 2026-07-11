@@ -69,7 +69,7 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 			return nil
 		}
 
-		slog.Debug("Successfully loaded builtin skill", "name", skill.Name, "path", skill.SkillFilePath)
+		slog.Debug("Successfully discovered builtin skill", "name", skill.Name, "path", skill.SkillFilePath)
 		discovered = append(discovered, skill)
 		states = append(states, &SkillState{Name: skill.Name, Path: skill.SkillFilePath, State: StateNormal})
 		return nil

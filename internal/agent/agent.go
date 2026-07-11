@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,6 +91,7 @@ var autoReviewPrompt []byte
 var (
 	thinkTagRegex       = regexp.MustCompile(`(?s)<think>.*?</think>`)
 	orphanThinkTagRegex = regexp.MustCompile(`</?think>`)
+	mcpToolRefRegex     = regexp.MustCompile(`\bmcp_[A-Za-z0-9_-]+\b`)
 )
 
 type SessionAgentCall struct {
@@ -2031,9 +2033,11 @@ func (a *sessionAgent) admitUserPrompt(ctx context.Context, call SessionAgentCal
 	for _, attachment := range call.Attachments {
 		attachmentPaths = append(attachmentPaths, attachment.FilePath)
 	}
+	availableTools := agentToolNames(a.tools.Copy())
 	promptResult, hookErr := a.userPromptHooks.RunPayload(ctx, hooks.EventUserPromptSubmit, call.SessionID, "prompt", "", hooks.Payload{
-		Prompt:      call.Prompt,
-		Attachments: attachmentPaths,
+		Prompt:         call.Prompt,
+		Attachments:    attachmentPaths,
+		AvailableTools: availableTools,
 	})
 	if hookErr != nil {
 		slog.Warn("UserPromptSubmit hook execution error, continuing with original prompt", "error", hookErr)
@@ -2051,9 +2055,38 @@ func (a *sessionAgent) admitUserPrompt(ctx context.Context, call SessionAgentCal
 		admitted.modelPrompt = promptResult.UpdatedPrompt
 	}
 	if promptResult.Context != "" {
-		admitted.modelPrompt = promptWithHookContext(promptResult.Context, admitted.modelPrompt)
+		contextText := capabilityAwareHookContext(promptResult.Context, availableTools)
+		admitted.modelPrompt = promptWithHookContext(contextText, admitted.modelPrompt)
 	}
 	return admitted, nil
+}
+
+func agentToolNames(tools []fantasy.AgentTool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Info().Name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+func capabilityAwareHookContext(contextText string, availableTools []string) string {
+	available := make(map[string]struct{}, len(availableTools))
+	for _, name := range availableTools {
+		available[name] = struct{}{}
+	}
+	var missing []string
+	for _, name := range mcpToolRefRegex.FindAllString(contextText, -1) {
+		if _, ok := available[name]; ok || slices.Contains(missing, name) {
+			continue
+		}
+		missing = append(missing, name)
+	}
+	if len(missing) == 0 {
+		return contextText
+	}
+	slices.Sort(missing)
+	return contextText + "\n\n<capability_warning>Referenced tools are unavailable in this agent turn: " + strings.Join(missing, ", ") + ". Do not invoke these names through Bash or another tool. Use an available capability or perform the reasoning internally.</capability_warning>"
 }
 
 func promptWithHookContext(contextText, prompt string) string {

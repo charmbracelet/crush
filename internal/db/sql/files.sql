@@ -29,10 +29,12 @@ INSERT INTO files (
     path,
     content,
     version,
+    message_id,
+    is_new,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
 RETURNING *;
 
@@ -55,8 +57,6 @@ INNER JOIN (
 WHERE f.session_id = ?
 ORDER BY f.path;
 
--- name: ListNewFiles :many
-SELECT *
-FROM files
-WHERE is_new = 1
-ORDER BY version DESC, created_at DESC;
+-- name: DeleteFileVersionsByID :exec
+DELETE FROM files
+WHERE id IN (sqlc.slice('ids'));

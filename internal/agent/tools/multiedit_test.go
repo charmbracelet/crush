@@ -44,11 +44,15 @@ type mockHistoryService struct {
 	*pubsub.Broker[history.File]
 }
 
-func (m *mockHistoryService) Create(ctx context.Context, sessionID, path, content string) (history.File, error) {
+func (m *mockHistoryService) Create(ctx context.Context, sessionID, path, content string, messageID ...string) (history.File, error) {
 	return history.File{Path: path, Content: content}, nil
 }
 
-func (m *mockHistoryService) CreateVersion(ctx context.Context, sessionID, path, content string) (history.File, error) {
+func (m *mockHistoryService) CreateNew(ctx context.Context, sessionID, path, content string, messageID ...string) (history.File, error) {
+	return history.File{Path: path, Content: content, IsNew: true}, nil
+}
+
+func (m *mockHistoryService) CreateVersion(ctx context.Context, sessionID, path, content string, messageID ...string) (history.File, error) {
 	return history.File{}, nil
 }
 
@@ -73,6 +77,18 @@ func (m *mockHistoryService) Delete(ctx context.Context, id string) error {
 }
 
 func (m *mockHistoryService) DeleteSessionFiles(ctx context.Context, sessionID string) error {
+	return nil
+}
+
+func (m *mockHistoryService) GetFileVersionBeforeCheckpoint(ctx context.Context, path, sessionID string, checkpointCreatedAt int64) (history.File, error) {
+	return history.File{}, nil
+}
+
+func (m *mockHistoryService) ListDistinctPathsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockHistoryService) DeleteFileVersionsAfterCheckpoint(ctx context.Context, sessionID string, checkpointCreatedAt int64) error {
 	return nil
 }
 

@@ -169,15 +169,16 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	// File can't be in the history so we create a new file history
-	_, err = edit.files.Create(edit.ctx, sessionID, filePath, "")
+	// File can't be in the history so we create a new file history. Mark it
+	// is_new (CreateNew) so a revert deletes the agent-created file.
+	_, err = edit.files.CreateNew(edit.ctx, sessionID, filePath, "", GetMessageFromContext(edit.ctx))
 	if err != nil {
 		// Log error but don't fail the operation
 		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 	}
 
 	// Add the new content to the file history
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, content)
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, content, GetMessageFromContext(edit.ctx))
 	if err != nil {
 		// Log error but don't fail the operation
 		slog.Error("Error creating file history version", "error", err)
@@ -305,7 +306,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	// Check if file exists in history
 	file, err := edit.files.GetByPathAndSession(edit.ctx, filePath, sessionID)
 	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent)
+		file, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent, GetMessageFromContext(edit.ctx))
 		if err != nil {
 			// Log error but don't fail the operation
 			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
@@ -313,13 +314,13 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	}
 	if file.Content != oldContent {
 		// User manually changed the content; store an intermediate version
-		_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent)
+		_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent, GetMessageFromContext(edit.ctx))
 		if err != nil {
 			slog.Error("Error creating file history version", "error", err)
 		}
 	}
 	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent)
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent, GetMessageFromContext(edit.ctx))
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}
@@ -446,7 +447,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	// Check if file exists in history
 	file, err := edit.files.GetByPathAndSession(edit.ctx, filePath, sessionID)
 	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent)
+		file, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent, GetMessageFromContext(edit.ctx))
 		if err != nil {
 			// Log error but don't fail the operation
 			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
@@ -454,13 +455,13 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	}
 	if file.Content != oldContent {
 		// User manually changed the content; store an intermediate version
-		_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent)
+		_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent, GetMessageFromContext(edit.ctx))
 		if err != nil {
 			slog.Debug("Error creating file history version", "error", err)
 		}
 	}
 	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent)
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent, GetMessageFromContext(edit.ctx))
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}

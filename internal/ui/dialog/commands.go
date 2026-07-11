@@ -437,6 +437,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Only show compact command if there's an active session
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "revert", "Revert to Checkpoint", "", ActionOpenDialog{DialogID: RevertPickerID}).WithAliases("revert to"))
 	}
 
 	// Add reasoning toggle for models that support it

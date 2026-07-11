@@ -370,6 +370,18 @@ func (w *ClientWorkspace) ListSessionHistory(ctx context.Context, sessionID stri
 	return protoToFiles(files), nil
 }
 
+func (w *ClientWorkspace) AgentRevertToMessage(ctx context.Context, sessionID, messageID string, restoreCode, restoreConversation bool) (AgentRevertResult, error) {
+	result, err := w.client.RevertToMessage(ctx, w.workspaceID(), sessionID, messageID, restoreCode, restoreConversation)
+	if err != nil {
+		return AgentRevertResult{}, err
+	}
+	return AgentRevertResult{
+		MessagesDeleted: result.MessagesDeleted,
+		FilesRestored:   result.FilesRestored,
+		FilesDeleted:    result.FilesDeleted,
+	}, nil
+}
+
 // -- LSP --
 
 func (w *ClientWorkspace) LSPStart(ctx context.Context, path string) {

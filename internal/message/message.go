@@ -65,6 +65,15 @@ type Service interface {
 	// message known to the service. Intended for shutdown and
 	// session-switch paths.
 	FlushAll(ctx context.Context) error
+
+	// ListMessagesFromCheckpoint returns the checkpoint message and every
+	// message inserted after it, ordered by insertion (rowid) so the cut is
+	// exact even when created_at timestamps collide at second precision.
+	ListMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) ([]Message, error)
+
+	// DeleteMessagesFromCheckpoint deletes the checkpoint message and every
+	// message inserted after it (by rowid), publishing DeletedEvent for each.
+	DeleteMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) error
 }
 
 // pendingState holds the in-memory coalescing buffer for a single
@@ -496,6 +505,35 @@ func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 		}
 	}
 	return messages, nil
+}
+
+func (s *service) ListMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) ([]Message, error) {
+	dbMessages, err := s.q.ListMessagesFromCheckpoint(ctx, db.ListMessagesFromCheckpointParams{
+		SessionID:    sessionID,
+		CheckpointID: checkpointID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
+func (s *service) DeleteMessagesFromCheckpoint(ctx context.Context, sessionID, checkpointID string) error {
+	// Atomic, all-or-nothing delete (a single statement) so a mid-truncation
+	// failure can't leave the conversation partially cut. The revert flow
+	// reloads the full message list afterward, so per-row DeletedEvents aren't
+	// needed here.
+	return s.q.DeleteMessagesFromCheckpoint(ctx, db.DeleteMessagesFromCheckpointParams{
+		SessionID:    sessionID,
+		CheckpointID: checkpointID,
+	})
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {

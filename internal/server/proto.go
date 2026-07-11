@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/revert"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 )
@@ -851,6 +852,54 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWrit
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceAgentSessionRevert reverts a session to a checkpoint.
+//
+//	@Summary		Revert agent session
+//	@Tags			agent
+//	@Accept			json
+//	@Produce		json
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Param			mid	path	string	true	"Checkpoint Message ID"
+//	@Param			body	body	object	true	"Revert options"
+//	@Success		200	{object}	backend.RevertResult
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/sessions/{sid}/revert/{mid} [post]
+func (c *controllerV1) handlePostWorkspaceAgentSessionRevert(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	mid := r.PathValue("mid")
+
+	var body struct {
+		RestoreCode         bool `json:"restore_code"`
+		RestoreConversation bool `json:"restore_conversation"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, http.StatusBadRequest, "failed to decode request body")
+		return
+	}
+
+	result, err := c.backend.RevertToMessage(r.Context(), id, sid, mid, body.RestoreCode, body.RestoreConversation)
+	if err != nil {
+		switch {
+		case errors.Is(err, revert.ErrSessionBusy), errors.Is(err, revert.ErrRevertPastSummary):
+			jsonError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, revert.ErrMessageNotFound):
+			jsonError(w, http.StatusNotFound, err.Error())
+		default:
+			c.handleError(w, r, err)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		c.handleError(w, r, fmt.Errorf("failed to encode response: %w", err))
+	}
 }
 
 // handleGetWorkspaceAgentSessionPromptQueued returns whether a queued prompt exists.

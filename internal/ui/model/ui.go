@@ -171,6 +171,22 @@ type (
 	creditsUpdatedMsg struct {
 		credits int
 	}
+	// revertDoneMsg is sent after a revert operation completes. msgs is the
+	// reloaded message list, fetched off the Update loop in executeRevert so
+	// the handler performs no IO. sessionID binds the result to the session the
+	// revert started on, so switching sessions mid-revert can't apply it to the
+	// wrong session.
+	revertDoneMsg struct {
+		sessionID string
+		result    workspace.AgentRevertResult
+		msgs      []message.Message
+	}
+	// revertPickerLoadedMsg carries the user messages loaded off the Update
+	// loop for the revert picker, bound to the session they came from.
+	revertPickerLoadedMsg struct {
+		sessionID string
+		messages  []message.Message
+	}
 )
 
 // UI represents the main user interface model.
@@ -265,6 +281,10 @@ type UI struct {
 
 	// lsp
 	lspStates map[string]workspace.LSPClientInfo
+
+	// pendingRevertText holds the message content to insert into the
+	// textarea after a revert completes.
+	pendingRevertText string
 
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
@@ -1053,6 +1073,75 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case creditsUpdatedMsg:
 		m.hyperCredits = &msg.credits
+	case revertDoneMsg:
+		// Messages were reloaded off the Update loop in executeRevert, so no
+		// IO happens here (internal/ui/AGENTS.md: never do IO in Update).
+		// Ignore the result if the user switched sessions mid-revert — it
+		// belongs to the session the revert started on, not the active one.
+		if !m.hasSession() || msg.sessionID != m.session.ID {
+			break
+		}
+		if cmd := m.setSessionMessages(msg.msgs); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		// If a revert was triggered from the dialog, put the original
+		// message text back into the input so the user can edit and
+		// re-send it.
+		if m.pendingRevertText != "" {
+			prevHeight := m.textarea.Height()
+			m.textarea.SetValue(m.pendingRevertText)
+			m.textarea.MoveToEnd()
+			m.pendingRevertText = ""
+			m.focus = uiFocusEditor
+			cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+			cmds = append(cmds, m.textarea.Focus())
+			m.chat.Blur()
+		}
+		// Build a summary.
+		parts := []string{}
+		if msg.result.MessagesDeleted > 0 {
+			parts = append(parts, fmt.Sprintf("removed %d messages", msg.result.MessagesDeleted))
+		}
+		if len(msg.result.FilesRestored) > 0 {
+			parts = append(parts, fmt.Sprintf("restored %d files", len(msg.result.FilesRestored)))
+		}
+		if len(msg.result.FilesDeleted) > 0 {
+			parts = append(parts, fmt.Sprintf("deleted %d files", len(msg.result.FilesDeleted)))
+		}
+		if len(parts) > 0 {
+			m.status.SetInfoMsg(util.NewInfoMsg("Reverted: " + strings.Join(parts, ", ")))
+			cmds = append(cmds, clearInfoMsgCmd(DefaultStatusTTL))
+		}
+	case revertPickerLoadedMsg:
+		// Messages were loaded off the Update loop; build and open the picker
+		// here (no IO). Ignore if the user switched sessions while loading.
+		if !m.hasSession() || msg.sessionID != m.session.ID {
+			break
+		}
+		// Only messages after the last summary are revertable — you can't
+		// revert past a summary. Find its position so we can skip it and
+		// everything before it.
+		summaryIdx := -1
+		if m.session.SummaryMessageID != "" {
+			for i, mm := range msg.messages {
+				if mm.ID == m.session.SummaryMessageID {
+					summaryIdx = i
+					break
+				}
+			}
+		}
+		// Filter to user messages, newest-first (ListMessages is oldest-first).
+		var userMessages []message.Message
+		for i := len(msg.messages) - 1; i > summaryIdx; i-- {
+			if msg.messages[i].Role == message.User {
+				userMessages = append(userMessages, msg.messages[i])
+			}
+		}
+		if len(userMessages) == 0 {
+			cmds = append(cmds, util.ReportWarn("No user messages to revert to"))
+			break
+		}
+		m.dialog.OpenDialog(dialog.NewRevertPicker(m.com, userMessages))
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -1766,6 +1855,22 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
+	case dialog.ActionRevertToMessage:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+		if !m.hasSession() {
+			break
+		}
+		m.dialog.CloseDialog(dialog.RevertID)
+		m.pendingRevertText = msg.MessageContent
+		cmds = append(cmds, m.executeRevert(msg.MessageID, msg.RestoreCode, msg.RestoreConversation))
+	case dialog.ActionSelectRevertMessage:
+		// User picked a message from the revert picker — open the
+		// revert scope dialog next.
+		m.dialog.CloseDialog(dialog.RevertPickerID)
+		m.dialog.OpenDialog(dialog.NewRevert(m.com, msg.MessageID, msg.MessageContent))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}
@@ -2033,6 +2138,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
 			return true
+		}
+		// Revert works from both editor and chat focus.
+		if key.Matches(msg, m.keyMap.Chat.Revert) {
+			if m.hasSession() && !m.isAgentBusy() {
+				switch sel := m.chat.SelectedItem().(type) {
+				case *chat.UserMessageItem:
+					m.dialog.OpenDialog(dialog.NewRevert(m.com, sel.ID(), sel.Content()))
+				case *chat.AssistantMessageItem:
+					cmds = append(cmds, util.ReportWarn("Revert to a user message, not an LLM response"))
+				default:
+					cmds = append(cmds, m.openRevertPickerDialog())
+				}
+				return true
+			}
 		}
 		return false
 	}
@@ -3723,6 +3842,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.RevertPickerID:
+		if cmd := m.openRevertPickerDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
@@ -3741,6 +3864,32 @@ func (m *UI) openQuitDialog() tea.Cmd {
 	quitDialog := dialog.NewQuit(m.com)
 	m.dialog.OpenDialog(quitDialog)
 	return nil
+}
+
+// openRevertPickerDialog opens the revert message picker dialog.
+func (m *UI) openRevertPickerDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.RevertPickerID) {
+		m.dialog.BringToFront(dialog.RevertPickerID)
+		return nil
+	}
+
+	if !m.hasSession() {
+		return util.ReportWarn("No active session")
+	}
+	if m.isAgentBusy() {
+		return util.ReportWarn("Agent is busy, please wait before reverting")
+	}
+
+	// Load messages off the Update loop (an HTTP roundtrip in client mode);
+	// the picker is built when revertPickerLoadedMsg comes back.
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return revertPickerLoadedMsg{sessionID: sessionID, messages: msgs}
+	}
 }
 
 // openModelsDialog opens the models dialog.
@@ -3962,6 +4111,31 @@ func (m *UI) newSession() tea.Cmd {
 		m.loadPromptHistory(),
 		m.reportCurrentSession(""),
 	)
+}
+
+// executeRevert runs the revert operation via the workspace and returns
+// a revertDoneMsg so the Update loop can reload messages.
+func (m *UI) executeRevert(messageID string, restoreCode, restoreConversation bool) tea.Cmd {
+	// Bind the session at command-creation time so a session switch while the
+	// revert is in flight can't retarget it or apply the result elsewhere.
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		ctx := context.Background()
+		result, err := m.com.Workspace.AgentRevertToMessage(
+			ctx, sessionID, messageID,
+			restoreCode, restoreConversation,
+		)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		// Reload messages here (still off the Update loop) so the
+		// revertDoneMsg handler does no IO.
+		msgs, err := m.com.Workspace.ListMessages(ctx, sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return revertDoneMsg{sessionID: sessionID, result: result, msgs: msgs}
+	}
 }
 
 // checkBangModeAfterPaste engages bang mode when pasted text starts with

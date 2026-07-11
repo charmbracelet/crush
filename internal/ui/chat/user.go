@@ -159,6 +159,11 @@ func (m *UserMessageItem) ID() string {
 	return m.message.ID
 }
 
+// Content returns the raw text content of the user message.
+func (m *UserMessageItem) Content() string {
+	return m.message.Content().Text
+}
+
 // renderAttachments renders attachments.
 func (m *UserMessageItem) renderAttachments(width int) string {
 	var attachments []message.Attachment

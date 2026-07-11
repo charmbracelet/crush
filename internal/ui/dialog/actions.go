@@ -96,6 +96,21 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionRevertToMessage is a message to revert the session to a prior
+	// checkpoint. RestoreCode and RestoreConversation control which parts
+	// of the session are rewound.
+	ActionRevertToMessage struct {
+		MessageID           string
+		MessageContent      string
+		RestoreCode         bool
+		RestoreConversation bool
+	}
+	// ActionSelectRevertMessage is returned by the revert picker when the
+	// user selects a message. The UI should open the Revert dialog next.
+	ActionSelectRevertMessage struct {
+		MessageID      string
+		MessageContent string
+	}
 )
 
 // Messages for API key input dialog.

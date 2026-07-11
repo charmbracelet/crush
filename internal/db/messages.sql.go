@@ -73,6 +73,29 @@ func (q *Queries) DeleteMessage(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteMessagesFromCheckpoint = `-- name: DeleteMessagesFromCheckpoint :exec
+DELETE FROM messages
+WHERE id IN (
+    SELECT m.id
+    FROM messages m
+    WHERE m.session_id = ?1
+      AND m.rowid >= (
+          SELECT cp.rowid FROM messages cp
+          WHERE cp.id = ?2 AND cp.session_id = ?1
+      )
+)
+`
+
+type DeleteMessagesFromCheckpointParams struct {
+	SessionID    string `json:"session_id"`
+	CheckpointID string `json:"checkpoint_id"`
+}
+
+func (q *Queries) DeleteMessagesFromCheckpoint(ctx context.Context, arg DeleteMessagesFromCheckpointParams) error {
+	_, err := q.exec(ctx, q.deleteMessagesFromCheckpointStmt, deleteMessagesFromCheckpoint, arg.SessionID, arg.CheckpointID)
+	return err
+}
+
 const deleteSessionMessages = `-- name: DeleteSessionMessages :exec
 DELETE FROM messages
 WHERE session_id = ?
@@ -157,6 +180,58 @@ ORDER BY created_at ASC
 
 func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := q.query(ctx, q.listMessagesBySessionStmt, listMessagesBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesFromCheckpoint = `-- name: ListMessagesFromCheckpoint :many
+SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at, m.finished_at, m.provider, m.is_summary_message
+FROM messages m
+WHERE m.session_id = ?1
+  AND m.rowid >= (
+      SELECT cp.rowid FROM messages cp
+      WHERE cp.id = ?2 AND cp.session_id = ?1
+  )
+ORDER BY m.rowid ASC
+`
+
+type ListMessagesFromCheckpointParams struct {
+	SessionID    string `json:"session_id"`
+	CheckpointID string `json:"checkpoint_id"`
+}
+
+// Messages at or after the checkpoint, ordered by insertion (rowid) so the cut
+// is exact even when created_at timestamps collide at second precision.
+func (q *Queries) ListMessagesFromCheckpoint(ctx context.Context, arg ListMessagesFromCheckpointParams) ([]Message, error) {
+	rows, err := q.query(ctx, q.listMessagesFromCheckpointStmt, listMessagesFromCheckpoint, arg.SessionID, arg.CheckpointID)
 	if err != nil {
 		return nil, err
 	}

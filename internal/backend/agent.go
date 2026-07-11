@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/revert"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
@@ -173,6 +174,38 @@ func (b *Backend) CancelSession(workspaceID, sessionID string) error {
 		ws.AgentCoordinator.Cancel(sessionID)
 	}
 	return nil
+}
+
+// RevertResult describes the outcome of a revert operation.
+type RevertResult struct {
+	MessagesDeleted int      `json:"messages_deleted"`
+	FilesRestored   []string `json:"files_restored"`
+	FilesDeleted    []string `json:"files_deleted"`
+}
+
+// RevertToMessage reverts a session to the state before the given message.
+func (b *Backend) RevertToMessage(ctx context.Context, workspaceID, sessionID, messageID string, restoreCode, restoreConversation bool) (RevertResult, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return RevertResult{}, err
+	}
+	isBusy := false
+	if ws.AgentCoordinator != nil {
+		isBusy = ws.AgentCoordinator.IsSessionBusy(sessionID)
+	}
+	svc := revert.NewService(ws.History, ws.Messages, ws.Sessions)
+	result, err := svc.RevertToMessage(ctx, sessionID, messageID, isBusy, revert.Options{
+		RestoreCode:         restoreCode,
+		RestoreConversation: restoreConversation,
+	})
+	if err != nil {
+		return RevertResult{}, err
+	}
+	return RevertResult{
+		MessagesDeleted: result.MessagesDeleted,
+		FilesRestored:   result.FilesRestored,
+		FilesDeleted:    result.FilesDeleted,
+	}, nil
 }
 
 // SummarizeSession triggers a session summarization.

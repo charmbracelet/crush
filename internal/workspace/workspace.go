@@ -120,6 +120,9 @@ type Workspace interface {
 	// History
 	ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error)
 
+	// Revert
+	AgentRevertToMessage(ctx context.Context, sessionID, messageID string, restoreCode, restoreConversation bool) (AgentRevertResult, error)
+
 	// LSP
 	LSPStart(ctx context.Context, path string)
 	LSPStopAll(ctx context.Context)
@@ -160,6 +163,13 @@ type Workspace interface {
 	// Events
 	Subscribe(program *tea.Program)
 	Shutdown()
+}
+
+// AgentRevertResult describes the outcome of a revert operation.
+type AgentRevertResult struct {
+	MessagesDeleted int      `json:"messages_deleted"`
+	FilesRestored   []string `json:"files_restored"`
+	FilesDeleted    []string `json:"files_deleted"`
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

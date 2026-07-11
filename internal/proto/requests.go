@@ -135,3 +135,26 @@ type MCPGetPromptRequest struct {
 type MCPGetPromptResponse struct {
 	Prompt string `json:"prompt"`
 }
+
+// SideQuestionExchange is one prior question/answer pair from the same
+// ephemeral side conversation.
+type SideQuestionExchange struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+// SideQuestionRequest asks an ephemeral side question about a session.
+type SideQuestionRequest struct {
+	SessionID string                 `json:"session_id"`
+	Question  string                 `json:"question"`
+	Exchanges []SideQuestionExchange `json:"exchanges,omitempty"`
+}
+
+// SideQuestionResponse is the answer to a side question.
+type SideQuestionResponse struct {
+	Answer           string `json:"answer"`
+	Model            string `json:"model"`
+	Provider         string `json:"provider"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+}

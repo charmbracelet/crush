@@ -219,6 +219,30 @@ func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) err
 	return w.app.AgentCoordinator.Summarize(ctx, sessionID)
 }
 
+func (w *AppWorkspace) SideQuestion(ctx context.Context, sessionID, question string, exchanges []proto.SideQuestionExchange) (*proto.SideQuestionResponse, error) {
+	if w.app.AgentCoordinator == nil {
+		return nil, errors.New("agent coordinator not initialized")
+	}
+	agentExchanges := make([]agent.SideQuestionExchange, 0, len(exchanges))
+	for _, ex := range exchanges {
+		agentExchanges = append(agentExchanges, agent.SideQuestionExchange{
+			Question: ex.Question,
+			Answer:   ex.Answer,
+		})
+	}
+	result, err := w.app.AgentCoordinator.SideQuestion(ctx, sessionID, question, agentExchanges)
+	if err != nil {
+		return nil, err
+	}
+	return &proto.SideQuestionResponse{
+		Answer:           result.Answer,
+		Model:            result.Model,
+		Provider:         result.Provider,
+		PromptTokens:     result.PromptTokens,
+		CompletionTokens: result.CompletionTokens,
+	}, nil
+}
+
 func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.app.UpdateAgentModel(ctx)
 }

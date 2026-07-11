@@ -104,3 +104,57 @@ func TestConfigProviderKeyRequestMalformedPayload(t *testing.T) {
 		})
 	}
 }
+
+func TestSideQuestionRequestRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	src := proto.SideQuestionRequest{
+		SessionID: "s1",
+		Question:  "what files changed?",
+		Exchanges: []proto.SideQuestionExchange{
+			{Question: "prior?", Answer: "yes"},
+		},
+	}
+	b, err := json.Marshal(src)
+	require.NoError(t, err)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(b, &raw))
+	require.Equal(t, "s1", raw["session_id"])
+	require.Equal(t, "what files changed?", raw["question"])
+	require.Contains(t, raw, "exchanges")
+
+	var got proto.SideQuestionRequest
+	require.NoError(t, json.Unmarshal(b, &got))
+	require.Equal(t, src, got)
+}
+
+func TestSideQuestionRequestOmitsEmptyExchanges(t *testing.T) {
+	t.Parallel()
+
+	src := proto.SideQuestionRequest{
+		SessionID: "s1",
+		Question:  "hi",
+	}
+	b, err := json.Marshal(src)
+	require.NoError(t, err)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(b, &raw))
+	_, hasExchanges := raw["exchanges"]
+	require.False(t, hasExchanges)
+
+	var got proto.SideQuestionResponse
+	b, err = json.Marshal(proto.SideQuestionResponse{
+		Answer:           "ok",
+		Model:            "m",
+		Provider:         "p",
+		PromptTokens:     1,
+		CompletionTokens: 2,
+	})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(b, &got))
+	require.Equal(t, "ok", got.Answer)
+	require.Equal(t, int64(1), got.PromptTokens)
+	require.Equal(t, int64(2), got.CompletionTokens)
+}

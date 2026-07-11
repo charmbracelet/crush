@@ -488,6 +488,27 @@ func (c *Client) GetAgentSessionInfo(ctx context.Context, id string, sessionID s
 	return &info, nil
 }
 
+// SideQuestion asks an ephemeral side question about a session.
+func (c *Client) SideQuestion(ctx context.Context, id, sessionID string, req proto.SideQuestionRequest) (*proto.SideQuestionResponse, error) {
+	req.SessionID = sessionID
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/btw", id, sessionID), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to ask side question: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		if msg := decodeErrorMessage(rsp.Body); msg != "" {
+			return nil, fmt.Errorf("failed to ask side question: status code %d: %s", rsp.StatusCode, msg)
+		}
+		return nil, fmt.Errorf("failed to ask side question: status code %d", rsp.StatusCode)
+	}
+	var resp proto.SideQuestionResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("failed to decode side question response: %w", err)
+	}
+	return &resp, nil
+}
+
 // AgentSummarizeSession requests a session summarization.
 func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/summarize", id, sessionID), nil, nil, nil)

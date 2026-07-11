@@ -59,6 +59,10 @@ func (c *blockingCoordinator) Model() agent.Model                               
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
 
+func (c *blockingCoordinator) SideQuestion(context.Context, string, string, []agent.SideQuestionExchange) (agent.SideQuestionResult, error) {
+	return agent.SideQuestionResult{}, nil
+}
+
 // insertAgentWorkspace installs a synthetic workspace with the given
 // coordinator (or none) and a workspace run context, mirroring the
 // fields CreateWorkspace initializes.

@@ -93,6 +93,7 @@ type Workspace interface {
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
 	AgentSummarize(ctx context.Context, sessionID string) error
+	SideQuestion(ctx context.Context, sessionID, question string, exchanges []proto.SideQuestionExchange) (*proto.SideQuestionResponse, error)
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel

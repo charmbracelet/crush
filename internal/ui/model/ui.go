@@ -3864,11 +3864,29 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openRevertPickerDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.BtwID:
+		if cmd := m.openBtwDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
 	}
 	return tea.Batch(cmds...)
+}
+
+// openBtwDialog opens the ephemeral side-question dialog.
+func (m *UI) openBtwDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.BtwID) {
+		m.dialog.BringToFront(dialog.BtwID)
+		return nil
+	}
+	if !m.hasSession() {
+		return util.ReportWarn("No active session")
+	}
+	btwDialog := dialog.NewBtw(m.com, m.session.ID)
+	m.dialog.OpenDialog(btwDialog)
+	return nil
 }
 
 // openQuitDialog opens the quit confirmation dialog.
@@ -3994,7 +4012,9 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 // rename mode immediately.
 func (m *UI) openSessionsDialogWithMode(startInRenameMode bool) tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SessionsID) {
-		// Bring to front
+		// Bring to front.
+		// TODO: if startInRenameMode is true, this silently ignores it.
+		// We should close and reopen the dialog in rename mode instead.
 		m.dialog.BringToFront(dialog.SessionsID)
 		return nil
 	}

@@ -222,6 +222,10 @@ func (c *scriptedCoordinator) Model() agent.Model                            { r
 func (c *scriptedCoordinator) UpdateModels(context.Context) error            { return nil }
 func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string) {}
 
+func (c *scriptedCoordinator) SideQuestion(context.Context, string, string, []agent.SideQuestionExchange) (agent.SideQuestionResult, error) {
+	return agent.SideQuestionResult{}, nil
+}
+
 // agentE2EHarness extends the SSE harness with a scripted coordinator
 // wired into the workspace's embedded app.App, so POST /agent drives a
 // real backend.SendMessage dispatch whose emitted user/assistant

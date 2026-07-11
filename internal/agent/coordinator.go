@@ -102,6 +102,7 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
+	SideQuestion(ctx context.Context, sessionID, question string, exchanges []SideQuestionExchange) (SideQuestionResult, error)
 }
 
 type coordinator struct {
@@ -1186,6 +1187,29 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 		return
 	}
 	c.currentAgent.GenerateTitle(ctx, sessionID, prompt)
+}
+
+// SideQuestion answers an ephemeral side question using the current agent.
+func (c *coordinator) SideQuestion(ctx context.Context, sessionID, question string, exchanges []SideQuestionExchange) (SideQuestionResult, error) {
+	if c.currentAgent == nil {
+		return SideQuestionResult{}, fmt.Errorf("agent not initialized")
+	}
+	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+	if !ok {
+		return SideQuestionResult{}, errModelProviderNotConfigured
+	}
+
+	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
+		slog.Error("Failed to refresh OAuth2 token before side question. Proceeding with existing token.", "error", err)
+	}
+
+	var result SideQuestionResult
+	err := c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
+		var runErr error
+		result, runErr = c.currentAgent.SideQuestion(ctx, sessionID, question, exchanges)
+		return runErr
+	})
+	return result, err
 }
 
 // refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.

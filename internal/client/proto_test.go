@@ -176,3 +176,57 @@ func marshalSSEPayload(t *testing.T) []byte {
 	require.NoError(t, err)
 	return payload
 }
+
+func TestSideQuestionSuccess(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath string
+	var gotBody proto.SideQuestionRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		_ = json.NewEncoder(w).Encode(proto.SideQuestionResponse{
+			Answer:           "from context",
+			Model:            "small",
+			Provider:         "mock",
+			PromptTokens:     10,
+			CompletionTokens: 5,
+		})
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	resp, err := c.SideQuestion(context.Background(), "ws1", "s1", proto.SideQuestionRequest{
+		Question: "which files?",
+		Exchanges: []proto.SideQuestionExchange{
+			{Question: "q0", Answer: "a0"},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.MethodPost, gotMethod)
+	require.Equal(t, "/v1/workspaces/ws1/sessions/s1/btw", gotPath)
+	require.Equal(t, "s1", gotBody.SessionID)
+	require.Equal(t, "which files?", gotBody.Question)
+	require.Len(t, gotBody.Exchanges, 1)
+	require.Equal(t, "from context", resp.Answer)
+	require.Equal(t, "small", resp.Model)
+	require.Equal(t, int64(10), resp.PromptTokens)
+}
+
+func TestSideQuestionDecodesErrorBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(proto.Error{Message: "side question is empty"})
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	_, err := c.SideQuestion(context.Background(), "ws1", "s1", proto.SideQuestionRequest{Question: "  "})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 400")
+	require.Contains(t, err.Error(), "side question is empty")
+}

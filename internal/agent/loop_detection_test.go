@@ -55,14 +55,24 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		}
 	})
 
-	t.Run("fewer steps than window", func(t *testing.T) {
+	t.Run("fewer steps than window below threshold", func(t *testing.T) {
 		steps := make([]fantasy.StepResult, 5)
 		for i := range steps {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
 		}
 		result := hasRepeatedToolCalls(steps, 10, 5)
 		if result {
-			t.Error("expected false when fewer steps than window size")
+			t.Error("expected false when repeats do not exceed threshold")
+		}
+	})
+
+	t.Run("loop detected before window fills", func(t *testing.T) {
+		steps := make([]fantasy.StepResult, 4)
+		for i := range steps {
+			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
+		}
+		if !hasRepeatedToolCalls(steps, 10, 3) {
+			t.Error("expected early detection once repeats exceed threshold")
 		}
 	})
 

@@ -1010,6 +1010,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
+	var loopDetected bool
 	finalFinishReason := message.FinishReasonUnknown
 	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
@@ -1257,12 +1258,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 				if (remaining <= threshold) && !a.disableAutoSummarize {
 					shouldSummarize = true
+					slog.Info("Auto-summary threshold reached", "session_id", call.SessionID, "tokens", tokens, "context_window", cw, "remaining", remaining, "threshold", threshold)
 					return true
 				}
 				return false
 			},
 			func(steps []fantasy.StepResult) bool {
-				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
+				if hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
+					loopDetected = true
+					slog.Warn("Repeated tool-call loop detected", "session_id", call.SessionID, "steps", len(steps), "max_repeats", loopDetectionMaxRepeats)
+					return true
+				}
+				return false
 			},
 		},
 	})
@@ -1435,6 +1442,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
+		}
+	} else if loopDetected && a.autoReviewEnabled {
+		a.activeRequests.Del(call.SessionID)
+		cancel()
+		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn was stopped after repeating the same tool call without making progress. Identify the failed assumption and recommend a different grounded approach.", false); reviewErr != nil {
+			slog.Error("Failed to auto-review repeated tool-call loop", "error", reviewErr)
 		}
 	} else if a.shouldAutoReviewMaxTokens(finalFinishReason) {
 		a.activeRequests.Del(call.SessionID)

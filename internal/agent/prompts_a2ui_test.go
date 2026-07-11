@@ -81,6 +81,7 @@ func TestA2UIPromptCatalogRenders(t *testing.T) {
 
 	for name, comps := range catalog {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			msgs := []a2ui.ServerMessage{{
 				Version:          a2ui.Version,
 				UpdateComponents: &a2ui.UpdateComponents{SurfaceID: "s", Components: comps},

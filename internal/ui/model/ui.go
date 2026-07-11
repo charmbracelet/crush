@@ -1659,6 +1659,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRenameSession:
+		if cmd := m.openSessionsDialogWithMode(true); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3982,6 +3987,12 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 // it brings it to the front. Otherwise, it will list all the sessions and open
 // the dialog.
 func (m *UI) openSessionsDialog() tea.Cmd {
+	return m.openSessionsDialogWithMode(false)
+}
+
+// openSessionsDialogWithMode opens the sessions dialog, optionally entering
+// rename mode immediately.
+func (m *UI) openSessionsDialogWithMode(startInRenameMode bool) tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SessionsID) {
 		// Bring to front
 		m.dialog.BringToFront(dialog.SessionsID)
@@ -3993,7 +4004,7 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		selectedSessionID = m.session.ID
 	}
 
-	dialog, err := dialog.NewSessions(m.com, selectedSessionID)
+	dialog, err := dialog.NewSessions(m.com, selectedSessionID, startInRenameMode)
 	if err != nil {
 		return util.ReportError(err)
 	}

@@ -92,6 +92,8 @@ type (
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
 	}
+	// ActionRenameSession is a message to rename the current session.
+	ActionRenameSession struct{}
 	// ActionEnableDockerMCP is a message to enable Docker MCP.
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.

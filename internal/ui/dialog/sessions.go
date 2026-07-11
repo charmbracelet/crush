@@ -38,6 +38,7 @@ type Session struct {
 	sessions           []session.Session
 
 	sessionsMode sessionsMode
+	startInRenameMode bool // If true, enter rename mode immediately on open
 
 	keyMap struct {
 		Select        key.Binding
@@ -57,8 +58,9 @@ type Session struct {
 var _ Dialog = (*Session)(nil)
 
 // NewSessions creates a new Session dialog.
-func NewSessions(com *common.Common, selectedSessionID string) (*Session, error) {
+func NewSessions(com *common.Common, selectedSessionID string, startInRenameMode bool) (*Session, error) {
 	s := new(Session)
+	s.startInRenameMode = startInRenameMode
 	s.sessionsMode = sessionsModeNormal
 	s.com = com
 	sessions, err := com.Workspace.ListSessions(context.TODO())
@@ -129,6 +131,12 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 		key.WithHelp("n", "cancel"),
 	)
 	s.keyMap.Close = CloseKey
+
+	// Enter rename mode immediately if requested.
+	if s.startInRenameMode {
+		s.sessionsMode = sessionsModeUpdating
+		s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
+	}
 
 	return s, nil
 }

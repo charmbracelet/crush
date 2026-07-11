@@ -1,9 +1,18 @@
+> **⚠️ Experimental fork — not official Charm Crush.**
+>
+> This is a personal, **vibe-coded** fork of [charmbracelet/crush](https://github.com/charmbracelet/crush). Expect rough edges, incomplete polish, and changes that may break or diverge from upstream without notice. Prefer the [upstream project](https://github.com/charmbracelet/crush) for production use.
+>
+> **What this fork adds over OG Crush:**
+> - **ChatGPT OAuth** — `crush login openai` (device code) for ChatGPT Plus/Pro via Codex; no API key required
+> - **xAI SuperGrok OAuth** — `crush login xai` (device code) for SuperGrok subscription auth
+> - **Revert to message** — `/revert` with a message picker to roll the workspace and session back to an earlier point
+
 # Crush
 
 <p align="center">
     <a href="https://stuff.charm.sh/crush/charm-crush.png"><img width="450" alt="Charm Crush Logo" src="https://github.com/user-attachments/assets/cf8ca3ce-8b02-43f0-9d0f-5a331488da4b" /></a><br />
     <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
-    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/actions/workflows/build.yml/badge.svg" alt="Build Status"></a>
+    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://img.shields.io/github/actions/workflows/build.yml/badge.svg" alt="Build Status"></a>
 </p>
 
 <p align="center">Your new coding bestie, now available in your favourite terminal.<br />Your tools, your code, and your workflows, wired into your LLM of choice.</p>
@@ -194,7 +203,8 @@ That said, you can also set environment variables for preferred providers:
 | --------------------------- | -------------------------------------------------- |
 | `HYPER_API_KEY`             | [Charm Hyper][hyper]                               |
 | `ANTHROPIC_API_KEY`         | Anthropic                                          |
-| `OPENAI_API_KEY`            | OpenAI                                             |
+| `OPENAI_API_KEY`            | OpenAI (or `crush login openai` for ChatGPT OAuth) |
+| `XAI_API_KEY`               | xAI (or `crush login xai` for SuperGrok OAuth)     |
 | `VERCEL_API_KEY`            | Vercel AI Gateway                                  |
 | `GEMINI_API_KEY`            | Google Gemini                                      |
 | `ZAI_API_KEY`               | Z.ai                                               |

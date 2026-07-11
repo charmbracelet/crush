@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	openaioauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/invopop/jsonschema"
 )
 
@@ -176,6 +177,20 @@ func (c *ProviderConfig) ToProvider() catwalk.Provider {
 
 func (c *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
+}
+
+// SetupOpenAIOAuth applies headers derived from a ChatGPT OAuth access token
+// (e.g. ChatGPT-Account-ID from JWT claims) when present.
+func (c *ProviderConfig) SetupOpenAIOAuth() {
+	if c.OAuthToken == nil || c.OAuthToken.AccessToken == "" {
+		return
+	}
+	if accountID := openaioauth.ChatGPTAccountID(c.OAuthToken.AccessToken); accountID != "" {
+		if c.ExtraHeaders == nil {
+			c.ExtraHeaders = make(map[string]string)
+		}
+		c.ExtraHeaders["ChatGPT-Account-ID"] = accountID
+	}
 }
 
 type MCPType string

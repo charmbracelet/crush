@@ -1892,11 +1892,18 @@ func substituteArgs(content string, args map[string]string) string {
 // refresh fails, the selection resumes with ReAuthenticate set so the
 // OAuth dialog opens.
 func (m *UI) refreshHyperAndRetrySelect(msg dialog.ActionSelectModel) tea.Cmd {
+	return m.refreshOAuthAndRetrySelect(msg, "hyper")
+}
+
+// refreshOAuthAndRetrySelect silently refreshes an OAuth token for providerID
+// then re-runs model selection. On failure, selection resumes with
+// ReAuthenticate so the OAuth dialog opens.
+func (m *UI) refreshOAuthAndRetrySelect(msg dialog.ActionSelectModel, providerID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := m.com.Workspace.RefreshOAuthToken(ctx, config.ScopeGlobal, "hyper"); err != nil {
-			slog.Warn("Hyper OAuth refresh failed, requesting re-auth", "error", err)
+		if err := m.com.Workspace.RefreshOAuthToken(ctx, config.ScopeGlobal, providerID); err != nil {
+			slog.Warn("OAuth refresh failed, requesting re-auth", "provider", providerID, "error", err)
 			msg.ReAuthenticate = true
 		}
 		return hyperRefreshDoneMsg{action: msg}
@@ -1970,13 +1977,15 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		isOnboarding = m.state == uiOnboarding
 	)
 
-	// For Hyper, if the stored OAuth token is expired, try a silent
-	// refresh before deciding whether the provider is configured. Keeps
-	// users from hitting a 401 on their first message after the
-	// short-lived access token ages out.
-	if !msg.ReAuthenticate && providerID == "hyper" {
-		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil && pc.OAuthToken.IsExpired() {
-			return m.refreshHyperAndRetrySelect(msg)
+	// If the stored OAuth token is expired, try a silent refresh before
+	// deciding whether the provider is configured. Keeps users from hitting
+	// a 401 on their first message after a short-lived access token ages out.
+	if !msg.ReAuthenticate {
+		switch providerID {
+		case "hyper", string(catwalk.InferenceProviderOpenAI), string(catwalk.InferenceProviderXAI):
+			if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil && pc.OAuthToken.IsExpired() {
+				return m.refreshOAuthAndRetrySelect(msg, providerID)
+			}
 		}
 	}
 
@@ -2059,6 +2068,10 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+	case catwalk.InferenceProviderOpenAI:
+		dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+	case catwalk.InferenceProviderXAI:
+		dlg, cmd = dialog.NewOAuthXAI(m.com, isOnboarding, provider, model, modelType)
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}

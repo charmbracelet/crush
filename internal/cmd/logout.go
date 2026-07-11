@@ -27,19 +27,29 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Crush from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: hyper, copilot.`,
+Available platforms are: hyper, copilot, openai, xai.`,
 	Example: `
 # Sign out from Charm Hyper
 crush logout hyper
 
 # Sign out from GitHub Copilot
 crush logout copilot
+
+# Sign out from OpenAI (ChatGPT)
+crush logout openai
+
+# Sign out from xAI
+crush logout xai
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
 		"copilot",
 		"github",
 		"github-copilot",
+		"openai",
+		"chatgpt",
+		"xai",
+		"grok",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -84,6 +94,10 @@ crush logout copilot
 			return logoutHyper(c, ws.ID)
 		case "copilot", "github", "github-copilot":
 			return logoutCopilot(c, ws.ID)
+		case "openai", "chatgpt":
+			return logoutOpenAI(c, ws.ID)
+		case "xai", "grok":
+			return logoutXAI(c, ws.ID)
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
@@ -115,6 +129,35 @@ func logoutCopilot(c *client.Client, wsID string) error {
 	}
 
 	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of GitHub Copilot."))
+	return nil
+}
+
+func logoutOpenAI(c *client.Client, wsID string) error {
+	ctx := getLogoutContext()
+
+	if err := cmp.Or(
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.api_key"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.openai.extra_headers.ChatGPT-Account-ID"),
+	); err != nil {
+		return err
+	}
+
+	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of OpenAI (ChatGPT)."))
+	return nil
+}
+
+func logoutXAI(c *client.Client, wsID string) error {
+	ctx := getLogoutContext()
+
+	if err := cmp.Or(
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.api_key"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.xai.oauth"),
+	); err != nil {
+		return err
+	}
+
+	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of xAI."))
 	return nil
 }
 

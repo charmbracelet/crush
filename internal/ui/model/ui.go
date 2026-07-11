@@ -2994,6 +2994,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					k.Chat.FocusChat,
 				},
+				[]key.Binding{
+					k.Chat.Home,
+					k.Chat.End,
+				},
 			)
 		case uiFocusMain:
 			binds = append(

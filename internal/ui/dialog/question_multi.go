@@ -29,7 +29,6 @@ type MultiChoice struct {
 // NewMultiChoice creates a new inline multi-choice component.
 func NewMultiChoice(sty *styles.Styles, req question.Question) *MultiChoice {
 	cl := newChoiceList(sty, req)
-	cl.styleFillInAsSelected = true
 	return &MultiChoice{
 		choiceList: cl,
 		selected:   make(map[int]bool),
@@ -43,7 +42,12 @@ func NewMultiChoice(sty *styles.Styles, req question.Question) *MultiChoice {
 func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	// Note editor takes priority when active.
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() { d.closeNote(d.noteKey()) })
+		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() {
+			// Leaving the note editor drops hover mode so arrow keys
+			// move relative to the noted item, not a hovered choice.
+			d.mouseActive = false
+			d.closeNote(d.noteKey())
+		})
 		if handled {
 			return false, cmd
 		}
@@ -87,6 +91,8 @@ func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.answer(d.respond())
 		return true, nil
 	case key.Matches(msg, d.keyToggle):
+		// In hover mode, toggle the item under the mouse.
+		d.adoptHover()
 		if d.isFillIn() {
 			if !d.fillIn.Focused() {
 				d.fillIn.Focus()
@@ -101,6 +107,7 @@ func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			delete(d.selected, d.cursorIdx)
 		}
 	case key.Matches(msg, d.keyNote) && !d.fillIn.Focused():
+		d.adoptHover()
 		return false, d.openNote(d.noteKey())
 	}
 	if d.handleNavKey(msg) {

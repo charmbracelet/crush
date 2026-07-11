@@ -37,7 +37,12 @@ func NewSingleChoice(sty *styles.Styles, req question.Question) *SingleChoice {
 func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	// Note editor takes priority when active.
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() { d.closeNote(d.noteKey()) })
+		cmd, handled := d.handleNoteKey(msg, d.keyClose, func() {
+			// Leaving the note editor drops hover mode so arrow keys
+			// move relative to the noted item, not a hovered choice.
+			d.mouseActive = false
+			d.closeNote(d.noteKey())
+		})
 		if handled {
 			return false, cmd
 		}
@@ -71,9 +76,19 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.answer(question.Answer{QuestionID: d.Request.ID})
 		return true, nil
 	case key.Matches(msg, d.keyEnter):
+		// In hover mode, act on the item under the mouse. Landing on
+		// the fill-in focuses it (mirroring a click) instead of
+		// submitting an empty answer.
+		if d.mouseActive {
+			d.adoptHover()
+			if d.isFillIn() {
+				return false, d.fillIn.Focus()
+			}
+		}
 		d.answer(d.respond())
 		return true, nil
 	case key.Matches(msg, d.keyNote) && !d.fillIn.Focused():
+		d.adoptHover()
 		return false, d.openNote(d.noteKey())
 	}
 	if d.handleNavKey(msg) {
@@ -183,8 +198,12 @@ func (d *SingleChoice) HandleMouseClick(x, y int) (bool, bool) {
 // Draw renders the single-choice question directly to screen.
 // Returns the cursor position relative to area, or nil.
 func (d *SingleChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+	// The fill-in prompt goes pink when the fill-in is the selected
+	// item, mirroring how a selected choice's label is styled. This
+	// lets the pink prompt carry the selection so the gutter bar
+	// doesn't have to stay lit for it.
 	fillPrefix := d.Styles.Editor.QuestionBody.Render("> ")
-	if d.isFillIn() && strings.TrimSpace(d.fillIn.Value()) != "" {
+	if d.isFillIn() {
 		fillPrefix = d.Styles.Editor.QuestionSelected.Render("> ")
 	}
 
@@ -197,7 +216,12 @@ func (d *SingleChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			isSelected = d.lastResponse.SelectedIDs[0] == ch.ID
 		}
 		style := unselectedHeader
-		if active || (isSelected && d.mouseActive) {
+		// In hover mode the committed choice stays pink so the user
+		// can see their selection while the bar tracks the mouse.
+		// While the fill-in is focused, though, the fill-in is the
+		// active answer, so suppress the choice pink to avoid the
+		// selection appearing to jump onto a choice mid-edit.
+		if active || (isSelected && d.mouseActive && !d.fillIn.Focused()) {
 			style = selectedStyle
 		}
 		barWidth := 2 // "┃ " or "  ", applied by buildLines

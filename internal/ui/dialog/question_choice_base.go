@@ -58,11 +58,6 @@ type choiceList struct {
 	fillInTop    int           // first fill-in row index, or -1
 	fillInBottom int           // last fill-in row index, or -1
 
-	// styleFillInAsSelected controls whether non-empty fill-in text
-	// gets the selected (pink) style. True for single-choice where
-	// the fill-in IS the answer; false for multi-choice.
-	styleFillInAsSelected bool
-
 	keyUp    key.Binding
 	keyDown  key.Binding
 	keyClose key.Binding
@@ -112,11 +107,11 @@ func (c *choiceList) isFillIn() bool {
 func (c *choiceList) moveUp() {
 	c.wheelActive = false
 	if c.mouseActive {
-		if c.hoveredChoice >= 0 {
-			c.cursorIdx = c.hoveredChoice
-		} else {
-			c.cursorIdx = 0
-		}
+		// Adopt the hovered item as the anchor so the first arrow
+		// press moves one step above it (hoveredChoice-1). When no
+		// choice is hovered, hoveredChoice is -1, so anchor at 0 and
+		// wrap to the last item.
+		c.cursorIdx = max(c.hoveredChoice, 0)
 	}
 	c.mouseActive = false
 	c.fillIn.Blur()
@@ -134,11 +129,10 @@ func (c *choiceList) moveUp() {
 func (c *choiceList) moveDown() {
 	c.wheelActive = false
 	if c.mouseActive {
-		if c.hoveredChoice >= 0 {
-			c.cursorIdx = c.hoveredChoice - 1 // will become hoveredChoice after increment
-		} else {
-			c.cursorIdx = -1 // will become 0 after increment
-		}
+		// Adopt the hovered item as the anchor so the first arrow
+		// press moves one step below it (hoveredChoice+1). When no
+		// choice is hovered, hoveredChoice is -1, which advances to 0.
+		c.cursorIdx = c.hoveredChoice
 	}
 	c.mouseActive = false
 	c.fillIn.Blur()
@@ -151,6 +145,18 @@ func (c *choiceList) moveDown() {
 	}
 }
 
+// adoptHover moves the cursor onto the hovered item and leaves
+// hover mode. Call it before a non-directional keyboard action that
+// operates on the current cursor (select, toggle, note) so the key
+// acts on the item under the mouse rather than a stale cursor.
+// Arrow keys handle the hover handoff themselves via moveUp/moveDown.
+func (c *choiceList) adoptHover() {
+	if c.mouseActive && c.hoveredChoice >= 0 {
+		c.cursorIdx = c.hoveredChoice
+	}
+	c.mouseActive = false
+}
+
 // handleFillInKey processes keys when the fill-in textarea is
 // focused. Returns (cmd, handled). When handled is true the
 // caller should not process the key further.
@@ -160,6 +166,10 @@ func (c *choiceList) handleFillInKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		c.fillIn.Blur()
 		return nil, true
 	case key.Matches(msg, c.navUp):
+		// Arrows move relative to the fill-in the user is editing,
+		// not a choice the mouse happens to hover, so drop hover mode
+		// before navigating.
+		c.mouseActive = false
 		c.moveUp()
 		if c.isFillIn() {
 			c.fillIn.Focus()
@@ -167,6 +177,7 @@ func (c *choiceList) handleFillInKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case key.Matches(msg, c.navDown):
+		c.mouseActive = false
 		c.moveDown()
 		if c.isFillIn() {
 			c.fillIn.Focus()
@@ -174,7 +185,10 @@ func (c *choiceList) handleFillInKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	default:
+		// Typing is keyboard input, so leave hover mode: the fill-in
+		// regains its gutter bar and any hovered choice releases it.
 		c.wheelActive = false
+		c.mouseActive = false
 		var cmd tea.Cmd
 		c.fillIn, cmd = c.fillIn.Update(msg)
 		return cmd, true
@@ -340,20 +354,20 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 		lines = append(lines, contentLine{text: "", choiceIdx: i})
 	}
 
-	// Fill-in: live textarea when focused, otherwise placeholder.
-	// Show active gutter only when focused or has content.
-	hasFillInText := strings.TrimSpace(c.fillIn.Value()) != ""
-	fillActive := c.isFillIn() && (c.fillIn.Focused() || hasFillInText)
-	fillPrefix := c.Styles.Editor.QuestionBody.Render("> ")
-	if c.styleFillInAsSelected && hasFillInText {
-		fillPrefix = c.Styles.Editor.QuestionSelected.Render("> ")
-	}
+	// Fill-in: bar and prompt mirror a choice row. The prompt style
+	// is supplied by the component via fillInPrefix (pink when the
+	// fill-in is the selected item). The bar follows the active/hover
+	// state, like choices, rather than staying lit whenever the
+	// fill-in merely holds text.
+	fillInIdx := len(c.Request.Choices)
+	fillActive := c.isFillIn() && !c.mouseActive
+	fillHovered := c.mouseActive && c.hoveredChoice == fillInIdx
 	fillBar := barInactive
-	if fillActive {
+	if fillActive || fillHovered {
 		fillBar = barActive
 	}
 	linesBeforeFillIn := len(lines)
-	c.drawFillIn(&lines, innerWidth, fillBar, barInactive, fillPrefix, c.isFillIn(), false)
+	c.drawFillIn(&lines, innerWidth, fillBar, barInactive, fillInPrefix, c.isFillIn(), false)
 
 	// Record fill-in row range for wheel-scroll bounds checking.
 	c.fillInTop = -1
@@ -367,7 +381,6 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 
 	// Tag fill-in rows with the fill-in item index so clicks can
 	// navigate to it.
-	fillInIdx := len(c.Request.Choices)
 	for i := linesBeforeFillIn; i < len(lines); i++ {
 		lines[i].choiceIdx = fillInIdx
 	}
@@ -421,7 +434,12 @@ func (c *choiceList) setFocused(focused bool) {
 }
 
 // setHover updates the hover position and resolves which choice
-// is under the cursor using the compositor.
+// is under the cursor using the compositor. Hover feedback stays
+// live even while a textarea (fill-in or note) is focused so the
+// user can still see what the mouse is pointing at; the effects
+// that would disrupt editing are suppressed elsewhere (keyboard
+// nav ignores hover while editing, and the committed selection is
+// not re-styled).
 func (c *choiceList) setHover(x, y int) {
 	c.hoverX = x
 	c.hoverY = y

@@ -379,10 +379,7 @@ func (m *LMStudioSetup) Cursor() *tea.Cursor {
 		return nil
 	}
 
-	t := m.com.Styles
-	dialogStyle := t.Dialog.View
-	cur.X += dialogStyle.GetBorderLeftSize() + dialogStyle.GetPaddingLeft() + dialogStyle.GetMarginLeft()
-	cur.Y += dialogStyle.GetBorderTopSize() + dialogStyle.GetPaddingTop() + dialogStyle.GetMarginTop()
+	cur = InputCursor(m.com.Styles, cur)
 	cur.Y += lipgloss.Height(m.introView()) + 1
 	if m.activeField == lmStudioAPIKeyField {
 		cur.Y += lipgloss.Height(m.fieldView("Base URL", m.baseURLInput))

@@ -18,6 +18,8 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	openaioauth "github.com/charmbracelet/crush/internal/oauth/openai"
+	xaioauth "github.com/charmbracelet/crush/internal/oauth/xai"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/singleflight"
@@ -472,6 +474,8 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 			switch providerID {
 			case string(catwalk.InferenceProviderCopilot):
 				providerConfig.SetupGitHubCopilot()
+			case string(catwalk.InferenceProviderOpenAI):
+				providerConfig.SetupOpenAIOAuth()
 			}
 		}
 	}
@@ -596,8 +600,11 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	providerConfig.OAuthToken = refreshedToken
 	providerConfig.APIKey = refreshedToken.AccessToken
-	if providerID == string(catwalk.InferenceProviderCopilot) {
+	switch providerID {
+	case string(catwalk.InferenceProviderCopilot):
 		providerConfig.SetupGitHubCopilot()
+	case string(catwalk.InferenceProviderOpenAI):
+		providerConfig.SetupOpenAIOAuth()
 	}
 	cfg.Providers.Set(providerID, providerConfig)
 
@@ -642,6 +649,10 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken str
 		return copilot.RefreshToken(ctx, refreshToken)
 	case hyperp.Name:
 		return hyper.ExchangeToken(ctx, refreshToken)
+	case string(catwalk.InferenceProviderOpenAI):
+		return openaioauth.RefreshToken(ctx, refreshToken)
+	case string(catwalk.InferenceProviderXAI):
+		return xaioauth.RefreshToken(ctx, refreshToken)
 	default:
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
@@ -662,8 +673,11 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) error {
 	providerConfig.OAuthToken = token
 	providerConfig.APIKey = token.AccessToken
-	if providerID == string(catwalk.InferenceProviderCopilot) {
+	switch providerID {
+	case string(catwalk.InferenceProviderCopilot):
 		providerConfig.SetupGitHubCopilot()
+	case string(catwalk.InferenceProviderOpenAI):
+		providerConfig.SetupOpenAIOAuth()
 	}
 	s.Config().Providers.Set(providerID, providerConfig)
 	return nil

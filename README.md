@@ -194,7 +194,8 @@ That said, you can also set environment variables for preferred providers:
 | --------------------------- | -------------------------------------------------- |
 | `HYPER_API_KEY`             | [Charm Hyper][hyper]                               |
 | `ANTHROPIC_API_KEY`         | Anthropic                                          |
-| `OPENAI_API_KEY`            | OpenAI                                             |
+| `OPENAI_API_KEY`            | OpenAI (or `crush login openai` for ChatGPT OAuth) |
+| `XAI_API_KEY`               | xAI (or `crush login xai` for SuperGrok OAuth)     |
 | `VERCEL_API_KEY`            | Vercel AI Gateway                                  |
 | `GEMINI_API_KEY`            | Google Gemini                                      |
 | `ZAI_API_KEY`               | Z.ai                                               |

@@ -219,6 +219,13 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	m.sidebarScrollable = totalLines > height
 	m.sidebarMaxOffsetVal = max(0, totalLines-height)
 
+	// If the sidebar is focused but no longer scrollable (e.g. after a
+	// resize), return focus to the chat.
+	if m.focus == uiFocusSidebar && !m.sidebarScrollable {
+		m.focus = uiFocusMain
+		m.chat.Focus()
+	}
+
 	// Clamp sidebarOffset.
 	maxOffset := m.sidebarMaxOffsetVal
 	if m.sidebarOffset > maxOffset {

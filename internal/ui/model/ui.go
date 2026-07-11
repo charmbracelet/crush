@@ -1420,7 +1420,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	switch {
 	case m.state != uiChat:
 		return nil
-	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar):
+	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.sidebarScrollable:
 		m.focus = uiFocusSidebar
 		m.textarea.Blur()
 		m.chat.Blur()
@@ -2459,7 +2459,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.textarea.Focus())
 				m.chat.Blur()
 			case key.Matches(msg, m.keyMap.Chat.FocusSidebar):
-				if m.state == uiChat && !m.isCompact && m.hasSession() {
+				if m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebarScrollable {
 					m.focus = uiFocusSidebar
 					m.chat.Blur()
 				}
@@ -2993,6 +2993,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.HalfPageDown,
 					k.Chat.Home,
 					k.Chat.End,
+					k.Chat.FocusSidebar,
 				},
 				[]key.Binding{
 					k.Chat.Copy,

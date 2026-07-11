@@ -261,20 +261,18 @@ func (d *Btw) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s := d.com.Styles
 	frameW := s.Dialog.View.GetHorizontalFrameSize()
 	width := min(btwMaxWidth, max(btwMinWidth, area.Dx()-4-frameW))
+	titleWidth := max(0, width-s.Dialog.Title.GetHorizontalFrameSize())
 
-	title := common.DialogTitle(s, "btw", width, s.Dialog.TitleGradFromColor, s.Dialog.TitleGradToColor)
+	title := common.DialogTitle(s, "btw", titleWidth, s.Dialog.TitleGradFromColor, s.Dialog.TitleGradToColor)
 	header := s.Dialog.Title.Render(title)
 
 	var body string
 	var cur *tea.Cursor
 	switch d.state {
 	case btwStateInput:
-		d.question.SetWidth(max(10, width-2))
-		body = d.question.View()
+		d.question.SetWidth(max(10, width-s.Dialog.InputPrompt.GetHorizontalFrameSize()-1))
+		body = s.Dialog.InputPrompt.Render(d.question.View())
 		cur = InputCursor(s, d.question.Cursor())
-		if cur != nil {
-			cur.Y += lipgloss.Height(header) + 1
-		}
 	case btwStateLoading:
 		body = d.spinner.View() + " Thinking..."
 	case btwStateAnswer:
@@ -284,14 +282,24 @@ func (d *Btw) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	helpText := d.helpLine()
 	helpView := s.Dialog.HelpView.Width(width).Render(helpText)
 
-	view := lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"",
-		body,
-		"",
-		helpView,
-	)
+	var view string
+	if d.state == btwStateInput {
+		view = lipgloss.JoinVertical(
+			lipgloss.Left,
+			header,
+			body,
+			helpView,
+		)
+	} else {
+		view = lipgloss.JoinVertical(
+			lipgloss.Left,
+			header,
+			"",
+			body,
+			"",
+			helpView,
+		)
+	}
 	dialogView := s.Dialog.View.Width(width + frameW).Render(view)
 	DrawCenterCursor(scr, area, dialogView, cur)
 	return cur

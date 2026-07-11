@@ -437,13 +437,10 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Only show compact command if there's an active session
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
-<<<<<<< HEAD
 		commands = append(commands, NewCommandItem(c.com.Styles, "rename_session", "Rename Session", "", ActionRenameSession{}))
-=======
 		commands = append(commands, NewCommandItem(c.com.Styles, "btw", "Btw — ask a side question", "", ActionOpenDialog{DialogID: BtwID}).
 			WithAliases("sidequestion", "ask", "question").
 			WithDescription("Ask about this session without touching its history"))
->>>>>>> aa6564d9 (feat: add ephemeral btw side questions)
 		commands = append(commands, NewCommandItem(c.com.Styles, "revert", "Revert to Checkpoint", "", ActionOpenDialog{DialogID: RevertPickerID}).WithAliases("revert to"))
 	}
 

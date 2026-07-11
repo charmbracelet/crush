@@ -38,6 +38,12 @@ func (f *Filter) Filter(_ tea.Model, msg tea.Msg) tea.Msg {
 	case tea.MouseWheelMsg:
 		mouse := typed.Mouse()
 		dx, dy := wheelDeltas(mouse)
+		if oppositeSign(f.wheelDX, dx) {
+			f.wheelDX = 0
+		}
+		if oppositeSign(f.wheelDY, dy) {
+			f.wheelDY = 0
+		}
 		f.wheelDX += dx
 		f.wheelDY += dy
 		if !f.allow(&f.lastWheel) {
@@ -95,4 +101,8 @@ func wheelDeltas(mouse tea.Mouse) (float64, float64) {
 	default:
 		return 0, 0
 	}
+}
+
+func oppositeSign(a, b float64) bool {
+	return (a < 0 && b > 0) || (a > 0 && b < 0)
 }

@@ -62,14 +62,17 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	// Regular bash command.
-	cmd := strings.ReplaceAll(params.Command, "\n", " ")
+	cmd := params.Command
+	if !opts.ExpandedContent {
+		cmd = strings.ReplaceAll(cmd, "\n", " ")
+	}
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	toolParams := []string{cmd}
 	if params.RunInBackground {
 		toolParams = append(toolParams, "background", "true")
 	}
 
-	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

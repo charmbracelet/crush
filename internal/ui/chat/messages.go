@@ -367,6 +367,16 @@ func cappedMessageWidth(availableWidth int) int {
 func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult) []MessageItem {
 	switch msg.Role {
 	case message.User:
+		// Reconstruct shell command items from ShellCommand parts.
+		var items []MessageItem
+		for _, part := range msg.Parts {
+			if sc, ok := part.(message.ShellCommand); ok {
+				items = append(items, NewShellItem(sty, sc.Command, sc.Output, sc.ExitCode))
+			}
+		}
+		if len(items) > 0 {
+			return items
+		}
 		r := attachments.NewRenderer(
 			sty.Attachments.Normal,
 			sty.Attachments.Deleting,

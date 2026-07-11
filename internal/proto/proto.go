@@ -40,6 +40,16 @@ type ConfigChanged struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
+// UpdateAvailable is published when a newer Crush release is detected
+// on the server side. It mirrors app.UpdateAvailableMsg across the SSE
+// boundary so client/server mode TUI clients see the same notification
+// as local-mode clients.
+type UpdateAvailable struct {
+	CurrentVersion string `json:"current_version"`
+	LatestVersion  string `json:"latest_version"`
+	IsDevelopment  bool   `json:"is_development"`
+}
+
 // CurrentSession is the request body for the per-client
 // current-session endpoint. An empty SessionID clears the entry.
 type CurrentSession struct {
@@ -133,6 +143,19 @@ type AgentMessage struct {
 	RunID       string       `json:"run_id,omitempty"`
 	Prompt      string       `json:"prompt"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+// ShellCommandRequest represents a request to run a shell command directly.
+type ShellCommandRequest struct {
+	SessionID string `json:"session_id"`
+	Command   string `json:"command"`
+	TermWidth int    `json:"term_width,omitempty"`
+}
+
+// ShellCommandResponse represents the result of a direct shell command.
+type ShellCommandResponse struct {
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
 }
 
 // AgentSession represents a session with its busy status.

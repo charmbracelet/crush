@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -45,7 +46,7 @@ func newTestUI() *UI {
 	u := &UI{
 		com:      com,
 		status:   NewStatus(com, nil),
-		chat:     NewChat(com),
+		chat:     NewChat(com, config.ScrollbarDefault),
 		textarea: ta,
 		state:    uiChat,
 		focus:    uiFocusEditor,

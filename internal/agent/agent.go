@@ -12,9 +12,11 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -44,6 +46,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -138,6 +141,7 @@ type SessionAgent interface {
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
+	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
 
 type Model struct {
@@ -681,11 +685,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	var wg sync.WaitGroup
-	// Generate title if first message.
-	if len(msgs) == 0 {
+	// Generate title from the first real (non-shell) user prompt.
+	if !hasUserTextMessage(msgs) {
 		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
 		wg.Go(func() {
-			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
+			a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
 		})
 	}
 	defer wg.Wait()
@@ -778,6 +782,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
+	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {
@@ -787,6 +792,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
+		Headers:          sessionHeaders(call.SessionID),
 		ProviderOptions:  call.ProviderOptions,
 		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,
@@ -921,10 +927,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
+			if wasSanitized {
+				sanitizedToolCalls[tc.ToolCallID] = true
+			}
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
 				Name:             tc.ToolName,
-				Input:            tc.Input,
+				Input:            input,
 				ProviderExecuted: false,
 				Finished:         true,
 			}
@@ -935,6 +945,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			toolResult := a.convertToToolResult(result)
+			if sanitizedToolCalls[result.ToolCallID] {
+				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
+				toolResult.IsError = true
+			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
 			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
@@ -946,6 +960,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return createMsgErr
 		},
 		OnStepFinish: func(stepResult fantasy.StepResult) error {
+			for _, w := range stepResult.Warnings {
+				slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
+			}
 			finishReason := message.FinishReasonUnknown
 			switch stepResult.FinishReason {
 			case fantasy.FinishReasonLength:
@@ -977,6 +994,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
+			extractHyperCredits(stepResult.ProviderMetadata)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -1326,6 +1344,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
+		Headers:         sessionHeaders(sessionID),
 		ProviderOptions: opts,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
@@ -1385,6 +1404,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			}
 			openrouterCost = &newCost
 		}
+		extractHyperCredits(step.ProviderMetadata)
 	}
 
 	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
@@ -1430,6 +1450,19 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 		vercel.Name: &anthropic.ProviderCacheControlOptions{
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
 		},
+	}
+}
+
+// sessionHeaders returns the HTTP headers we use for cache affinity on
+// every LLM request for a given session.
+//
+// We use the session hash is used instead of the raw UUID so the header
+// value is deterministic and opaque.
+func sessionHeaders(sessionID string) map[string]string {
+	hash := session.HashID(sessionID)
+	return map[string]string{
+		"x-session-id":       hash,
+		"x-session-affinity": hash,
 	}
 }
 
@@ -1631,8 +1664,24 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return msgs, nil
 }
 
-// generateTitle generates a session titled based on the initial prompt.
-func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string) {
+// hasUserTextMessage reports whether any user message in msgs contains
+// text content (as opposed to only shell commands or other non-text parts).
+func hasUserTextMessage(msgs []message.Message) bool {
+	for _, msg := range msgs {
+		if msg.Role != message.User {
+			continue
+		}
+		for _, part := range msg.Parts {
+			if tc, ok := part.(message.TextContent); ok && tc.Text != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// GenerateTitle generates a session title based on the initial prompt.
+func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
 		return
 	}
@@ -1664,7 +1713,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	streamCall := fantasy.AgentStreamCall{
-		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
+		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
+		Headers: sessionHeaders(sessionID),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages
 			if systemPromptPrefix != "" {
@@ -1722,7 +1772,17 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	title = orphanThinkTagRegex.ReplaceAllString(title, "")
 
 	title = strings.TrimSpace(title)
-	title = cmp.Or(title, DefaultSessionName)
+	if title == "" {
+		// LLM returned empty content. Use the prompt itself as a
+		// fallback title, truncated to 50 chars, before resorting to
+		// the generic default.
+		fallback := strings.ReplaceAll(userPrompt, "\n", " ")
+		fallback = strings.TrimSpace(fallback)
+		if len(fallback) > 50 {
+			fallback = ansi.Truncate(fallback, 50, "…")
+		}
+		title = cmp.Or(fallback, DefaultSessionName)
+	}
 
 	// Calculate usage and cost.
 	var openrouterCost *float64
@@ -1735,6 +1795,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 			}
 			openrouterCost = &newCost
 		}
+		extractHyperCredits(step.ProviderMetadata)
 	}
 
 	modelConfig := model.CatwalkCfg
@@ -1777,6 +1838,25 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 		return nil
 	}
 	return &opts.Usage.Cost
+}
+
+// extractHyperCredits reads usage.remaining.hypercredits from OpenAI
+// provider metadata and stores it for the next FetchCredits call.
+func extractHyperCredits(metadata fantasy.ProviderMetadata) {
+	openaiMeta, ok := metadata[openai.Name]
+	if !ok {
+		return
+	}
+	pm, ok := openaiMeta.(*openai.ProviderMetadata)
+	if !ok {
+		return
+	}
+	var remaining struct {
+		Hypercredits float64 `json:"hypercredits"`
+	}
+	if pm.ExtraField("remaining", &remaining) && remaining.Hypercredits > 0 {
+		hyper.SetBalance(int(math.Round(remaining.Hypercredits)))
+	}
 }
 
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
@@ -2036,6 +2116,8 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 		return messages
 	}
 
+	supportsImages := largeModel.CatwalkCfg.SupportsImages
+
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
 
 	for _, msg := range messages {
@@ -2055,6 +2137,21 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 			}
 
 			if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
+				if !supportsImages {
+					// Model cannot process images. Replace with a text
+					// placeholder and skip creating a synthetic user
+					// message with FilePart, which would brick the
+					// session on text-only models.
+					textParts = append(textParts, fantasy.ToolResultPart{
+						ToolCallID: toolResult.ToolCallID,
+						Output: fantasy.ToolResultOutputContentText{
+							Text: "[Image/media content not supported by this model]",
+						},
+						ProviderOptions: toolResult.ProviderOptions,
+					})
+					continue
+				}
+
 				decoded, err := base64.StdEncoding.DecodeString(media.Data)
 				if err != nil {
 					slog.Warn("Failed to decode media data", "error", err)
@@ -2126,4 +2223,21 @@ func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []a
 		fields = append(fields, "message", err.Message)
 	}
 	return fields
+}
+
+// sanitizeToolInput validates tool call JSON from the provider.
+// Malformed input is replaced with an empty object to prevent
+// stuck conversations from truncated or malformed model output.
+// The second return value indicates whether sanitization occurred.
+func sanitizeToolInput(toolName, toolCallID, input string) (string, bool) {
+	if !json.Valid([]byte(input)) {
+		slog.Warn(
+			"Malformed tool call JSON from provider, replacing with empty object",
+			"tool", toolName,
+			"id", toolCallID,
+			"input_len", len(input),
+		)
+		return "{}", true
+	}
+	return input, false
 }

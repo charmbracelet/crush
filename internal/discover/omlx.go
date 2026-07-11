@@ -13,7 +13,7 @@ func init() {
 }
 
 // omlxModelsStatusResponse mirrors the response from oMLX's
-// GET /v1/models/status endpoint, which returns model metadata
+// GET /models/status endpoint, which returns model metadata
 // including max_context_window and max_tokens.
 type omlxModelsStatusResponse struct {
 	Models []omlxModelStatus `json:"models"`
@@ -26,13 +26,16 @@ type omlxModelStatus struct {
 	MaxTokens        *int64 `json:"max_tokens"`
 }
 
-// omlxEnricher fetches model metadata from oMLX's /v1/models/status
+// omlxEnricher fetches model metadata from oMLX's /models/status
 // endpoint and populates context window and max tokens on discovered
 // models.
 type omlxEnricher struct{}
 
 func (e *omlxEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
-	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/v1/models/status", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
+	// oMLX serves /models/status under the OpenAI-compatible /v1
+	// namespace, so the path is relative to the configured base URL
+	// (which already includes /v1) rather than the server root.
+	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/models/status", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
 	if err != nil {
 		return models, nil
 	}

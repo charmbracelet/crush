@@ -12,8 +12,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -37,6 +39,10 @@ type ClientWorkspace struct {
 	mu     sync.RWMutex
 	ws     proto.Workspace
 	skills *skills.Manager
+
+	// herdrClient reports agent state to herdr when running inside
+	// a herdr-managed pane. Nil when not in a herdr environment.
+	herdrClient *herdr.Client
 }
 
 // NewClientWorkspace creates a new ClientWorkspace that proxies all
@@ -54,9 +60,10 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	states := protoToSkillStates(ws.Skills)
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	return &ClientWorkspace{
-		client: c,
-		ws:     ws,
-		skills: mgr,
+		client:      c,
+		ws:          ws,
+		skills:      mgr,
+		herdrClient: herdr.Init(),
 	}
 }
 
@@ -147,6 +154,7 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 // are propagated to the caller; the TUI logs and ignores them since
 // the presence record is a hint, not correctness-critical state.
 func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	w.herdrClient.SetSessionID(sessionID)
 	return w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID)
 }
 
@@ -184,6 +192,10 @@ func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string
 	// so passing an empty RunID is correct here: it skips the
 	// correlator stamping path without functional consequences.
 	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", prompt, attachments...)
+}
+
+func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, _ func(string), _ bool) (proto.ShellCommandResponse, error) {
+	return w.client.RunShellCommand(ctx, w.workspaceID(), sessionID, command, termWidth)
 }
 
 func (w *ClientWorkspace) AgentCancel(sessionID string) {
@@ -630,6 +642,11 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 // are translated into domain types and forwarded to send.
 func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 	for ev := range evc {
+		// Forward events to herdr if running inside a herdr pane.
+		if hev := herdr.Translate(ev); hev != nil {
+			w.herdrClient.HandleEvent(hev)
+		}
+
 		if _, ok := ev.(pubsub.Event[proto.ConfigChanged]); ok {
 			w.refreshWorkspace()
 			continue
@@ -642,6 +659,7 @@ func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 }
 
 func (w *ClientWorkspace) Shutdown() {
+	w.herdrClient.Close()
 	_ = w.client.DeleteWorkspace(context.Background(), w.workspaceID())
 }
 
@@ -755,6 +773,12 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		return pubsub.Event[skills.Event]{
 			Type:    e.Type,
 			Payload: skills.Event{States: states},
+		}
+	case pubsub.Event[proto.UpdateAvailable]:
+		return app.UpdateAvailableMsg{
+			CurrentVersion: e.Payload.CurrentVersion,
+			LatestVersion:  e.Payload.LatestVersion,
+			IsDevelopment:  e.Payload.IsDevelopment,
 		}
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
@@ -877,6 +901,12 @@ func protoToMessage(m proto.Message) message.Message {
 			msg.Parts = append(msg.Parts, message.ImageURLContent{URL: v.URL, Detail: v.Detail})
 		case proto.BinaryContent:
 			msg.Parts = append(msg.Parts, message.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
+		case proto.ShellCommand:
+			msg.Parts = append(msg.Parts, message.ShellCommand{
+				Command:  v.Command,
+				Output:   v.Output,
+				ExitCode: v.ExitCode,
+			})
 		}
 	}
 

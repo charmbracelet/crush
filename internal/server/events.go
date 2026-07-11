@@ -114,6 +114,15 @@ func wrapEvent(ev any) *pubsub.Payload {
 		})
 	case pubsub.Event[proto.ConfigChanged]:
 		return envelope(pubsub.PayloadTypeConfigChanged, e)
+	case app.UpdateAvailableMsg:
+		return envelope(pubsub.PayloadTypeUpdateAvailable, pubsub.Event[proto.UpdateAvailable]{
+			Type: pubsub.UpdatedEvent,
+			Payload: proto.UpdateAvailable{
+				CurrentVersion: e.CurrentVersion,
+				LatestVersion:  e.LatestVersion,
+				IsDevelopment:  e.IsDevelopment,
+			},
+		})
 	case pubsub.Event[skills.Event]:
 		return envelope(pubsub.PayloadTypeSkillsEvent, pubsub.Event[proto.SkillsEvent]{
 			Type:    e.Type,
@@ -269,6 +278,12 @@ func messageToProto(m message.Message) proto.Message {
 			msg.Parts = append(msg.Parts, proto.ImageURLContent{URL: v.URL, Detail: v.Detail})
 		case message.BinaryContent:
 			msg.Parts = append(msg.Parts, proto.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
+		case message.ShellCommand:
+			msg.Parts = append(msg.Parts, proto.ShellCommand{
+				Command:  v.Command,
+				Output:   v.Output,
+				ExitCode: v.ExitCode,
+			})
 		}
 	}
 

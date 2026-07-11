@@ -254,7 +254,6 @@ func (f *ModelsList) VisibleItems() []list.Item {
 
 // Render renders the filterable list.
 func (f *ModelsList) Render() string {
-	f.SetItems(f.VisibleItems()...)
 	return f.List.Render()
 }
 

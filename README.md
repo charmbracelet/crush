@@ -173,27 +173,39 @@ go install github.com/charmbracelet/crush@latest
 
 ## Getting Started
 
-The quickest way to get started is to grab an API key for your preferred
-provider such as Anthropic, OpenAI, Groq, OpenRouter, or Vercel AI Gateway and just start
-Crush. You'll be prompted to enter your API key.
+The quickest way to get started is to choose a [Hyper][hyper] model from model
+picker. Follow the steps to authenticate and you'll be good to go.
 
-That said, you can also set environment variables for preferred providers.
+[Hyper], from Charm, is the official Crush provider. It’s subscription-based,
+with a free tier, and optimized for Crush. It’s privacy focused, with zero data
+retention (ZDR) is and designed to comply with GDPR. [More on Hyper][hyper].
+
+<p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
+
+## API Keys
+
+You can also use Crush with many other providers such as Anthopic, OpenAI,
+Gemini, OpenRouter and so on. Press <kbd>ctrl+l</kbd> to open the model picker,
+choose the provider of your choice, and paste your API key.
+
+That said, you can also set environment variables for preferred providers:
 
 | Environment Variable        | Provider                                           |
 | --------------------------- | -------------------------------------------------- |
-| `HYPER_API_KEY`             | Charm Hyper                                        |
+| `HYPER_API_KEY`             | [Charm Hyper][hyper]                               |
 | `ANTHROPIC_API_KEY`         | Anthropic                                          |
 | `OPENAI_API_KEY`            | OpenAI                                             |
 | `VERCEL_API_KEY`            | Vercel AI Gateway                                  |
 | `GEMINI_API_KEY`            | Google Gemini                                      |
-| `SYNTHETIC_API_KEY`         | Synthetic                                          |
 | `ZAI_API_KEY`               | Z.ai                                               |
 | `MINIMAX_API_KEY`           | MiniMax                                            |
+| `SYNTHETIC_API_KEY`         | Synthetic                                          |
 | `HF_TOKEN`                  | Hugging Face Inference                             |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
 | `ALIBABA_SINGAPORE_API_KEY` | Alibaba (Singapore)                                |
+| `ALIBABA_US_API_KEY`        | Alibaba (United States)                            |
 | `GROQ_API_KEY`              | Groq                                               |
 | `AVIAN_API_KEY`             | Avian                                              |
 | `OPENCODE_API_KEY`          | OpenCode Zen & Go                                  |
@@ -207,16 +219,13 @@ That said, you can also set environment variables for preferred providers.
 | `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
+| `MOONSHOT_API_KEY`          | Moonshot                                           |
 
-### Subscriptions
+[hyper]: https://hyper.charm.land
 
-If you prefer subscription-based usage, here are some plans that work well in
-Crush:
-
-- [Synthetic](https://synthetic.new/pricing)
-- [GLM Coding Plan](https://z.ai/subscribe)
-- [Kimi Code](https://www.kimi.com/membership/pricing)
-- [MiniMax Coding Plan](https://platform.minimax.io/subscribe/coding-plan)
+Also note that Crush can support nearly any provider, including
+[Local Models](#local-models). For more info see
+[Custom Providers](#custom-providers) below.
 
 ### By the Way
 
@@ -771,8 +780,9 @@ To add specific models to the configuration, configure as such:
 ### Local Models
 
 Crush can auto-discovers models from local providers. Add a custom provider
-with `type` set to `omlx`, `lmstudio`, `litellm`, or `ollama` and leave out
-the models list. Crush will populate the model list automatically.
+with `type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama`
+and leave out the models list. Crush will populate the model list
+automatically.
 
 ```json
 {
@@ -786,12 +796,26 @@ the models list. Crush will populate the model list automatically.
 }
 ```
 
+For llama.cpp (`llama-server`), point at the server's base URL:
+
+```json
+{
+  "providers": {
+    "llamacpp": {
+      "name": "llama.cpp",
+      "base_url": "http://localhost:2222",
+      "type": "llamacpp"
+    }
+  }
+}
+```
+
 #### Manual Model Configuration
 
 You can still list models explicitly. User-defined models always take
 precedence over discovered ones, and any fields you set won't be overwritten
 by auto-discovery. Auto discovery will run if the model list is empty for any
-`openai-compat` provider or if you pass `"auto_discovery": true` it will merge
+`openai-compat` provider or if you pass `"discover_models": true` it will merge
  the found models with your hand configured ones.
 
 ```json
@@ -809,7 +833,7 @@ by auto-discovery. Auto discovery will run if the model list is empty for any
           "default_max_tokens": 20000
         }
       ],
-      "auto_discovery": true
+      "discover_models": true
     }
   }
 }

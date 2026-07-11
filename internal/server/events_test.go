@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -179,4 +180,30 @@ func TestRunCompleteToProto_Error(t *testing.T) {
 	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
 	require.Equal(t, "context canceled", decoded.Payload.Error)
 	require.True(t, decoded.Payload.Cancelled)
+}
+
+// TestUpdateAvailableMsgToProto_RoundTrip verifies that an
+// app.UpdateAvailableMsg — published directly (not wrapped in
+// pubsub.Event) by app.checkForUpdates — survives the SSE envelope
+// conversion. Without this, client/server mode silently drops update
+// notifications because wrapEvent hits its default branch.
+func TestUpdateAvailableMsgToProto_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	src := app.UpdateAvailableMsg{
+		CurrentVersion: "1.0.0",
+		LatestVersion:  "1.1.0",
+		IsDevelopment:  false,
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypeUpdateAvailable, env.Type)
+
+	var decoded pubsub.Event[proto.UpdateAvailable]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, pubsub.UpdatedEvent, decoded.Type)
+	require.Equal(t, "1.0.0", decoded.Payload.CurrentVersion)
+	require.Equal(t, "1.1.0", decoded.Payload.LatestVersion)
+	require.False(t, decoded.Payload.IsDevelopment)
 }

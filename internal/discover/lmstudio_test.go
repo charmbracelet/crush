@@ -19,24 +19,28 @@ func TestLmstudioEnricher(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "/api/v1/models", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(lmstudioModelsResponse{
-				Data: []lmstudioModelEntry{
+			// Raw JSON matching LM Studio's real /api/v1/models wire
+			// format: array under "models", not "data".
+			_, _ = w.Write([]byte(`{
+				"models": [
 					{
-						Key:              "qwen2.5-7b-instruct",
-						DisplayName:      "Qwen 2.5 7B Instruct",
-						MaxContextLength: 32768,
+						"key": "qwen2.5-7b-instruct",
+						"display_name": "Qwen 2.5 7B Instruct",
+						"max_context_length": 32768
 					},
 					{
-						Key:              "llama-3.1-8b",
-						DisplayName:      "Llama 3.1 8B",
-						MaxContextLength: 131072,
-					},
-				},
-			})
+						"key": "llama-3.1-8b",
+						"display_name": "Llama 3.1 8B",
+						"max_context_length": 131072
+					}
+				]
+			}`))
 		}))
 		defer srv.Close()
 
-		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL}
+		// Base URL includes /v1 (as Crush configures it); the enricher
+		// strips it so the native endpoint resolves at the server root.
+		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL + "/v1"}
 		models := []catwalk.Model{
 			{ID: "qwen2.5-7b-instruct", Name: "qwen2.5-7b-instruct"},
 			{ID: "llama-3.1-8b", Name: "llama-3.1-8b"},
@@ -60,7 +64,7 @@ func TestLmstudioEnricher(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(lmstudioModelsResponse{
-				Data: []lmstudioModelEntry{
+				Models: []lmstudioModelEntry{
 					{
 						Key:              "m1",
 						MaxContextLength: 131072,
@@ -87,7 +91,7 @@ func TestLmstudioEnricher(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(lmstudioModelsResponse{
-				Data: []lmstudioModelEntry{
+				Models: []lmstudioModelEntry{
 					{
 						Key:              "m1",
 						DisplayName:      "Should Not Override",
@@ -132,7 +136,7 @@ func TestLmstudioEnricher(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(lmstudioModelsResponse{
-				Data: []lmstudioModelEntry{
+				Models: []lmstudioModelEntry{
 					{Key: "m1", DisplayName: "API Name"},
 				},
 			})

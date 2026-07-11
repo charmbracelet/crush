@@ -55,6 +55,28 @@ type quickStyleOpts struct {
 	success           color.Color
 	successMoreSubtle color.Color
 	successMostSubtle color.Color
+
+	// ANSI 16-color palette. These remap the basic terminal colors that
+	// programs emit (e.g. bang-mode shell output) onto legible, on-brand
+	// colors instead of leaving them to the user's terminal defaults.
+	// Normal intensity.
+	ansiBlack   color.Color
+	ansiRed     color.Color
+	ansiGreen   color.Color
+	ansiYellow  color.Color
+	ansiBlue    color.Color
+	ansiMagenta color.Color
+	ansiCyan    color.Color
+	ansiWhite   color.Color
+	// Bright intensity.
+	ansiBrightBlack   color.Color
+	ansiBrightRed     color.Color
+	ansiBrightGreen   color.Color
+	ansiBrightYellow  color.Color
+	ansiBrightBlue    color.Color
+	ansiBrightMagenta color.Color
+	ansiBrightCyan    color.Color
+	ansiBrightWhite   color.Color
 }
 
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
@@ -75,7 +97,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Populate color fields
 	s.WorkingGradFromColor = o.primary
 	s.WorkingGradToColor = o.secondary
-	s.WorkingLabelColor = o.fgBase
+	s.WorkingLabelColor = o.fgMostSubtle
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{
@@ -578,7 +600,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.Charm = base.Foreground(o.secondary)
 	s.Header.Diagonals = base.Foreground(o.primary)
 	s.Header.Percentage = muted
-	s.Header.Hypercredit = base.Foreground(charmtone.Dolly)
+	s.Header.HypercreditIcon = base.Foreground(o.secondary)
 	s.Header.Keystroke = muted
 	s.Header.KeystrokeTip = subtle
 	s.Header.WorkingDir = muted
@@ -695,10 +717,14 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Editor
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
 	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
-	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" ! ")
+	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" Y ")
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" ! ")
+	s.Editor.PromptBangIconBlurred = s.Editor.PromptBangIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
+	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsFocused.Foreground(o.fgMoreSubtle)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
@@ -769,7 +795,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.ModelInfo.EstimatedUsagePrefix = s.ModelInfo.TokenPercentage
 	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
-	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(charmtone.Dolly)
+	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(o.secondary)
 	s.ModelInfo.HypercreditText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 
 	// ResourceGroup
@@ -803,6 +829,30 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted
+
+	// ANSI 16-color palette (indices 0-7 normal, 8-15 bright). Used to
+	// remap raw terminal color codes in command output onto legible
+	// colors. See [Styles.ANSI].
+	s.ANSI = [16]color.Color{
+		o.ansiBlack, o.ansiRed, o.ansiGreen, o.ansiYellow,
+		o.ansiBlue, o.ansiMagenta, o.ansiCyan, o.ansiWhite,
+		o.ansiBrightBlack, o.ansiBrightRed, o.ansiBrightGreen, o.ansiBrightYellow,
+		o.ansiBrightBlue, o.ansiBrightMagenta, o.ansiBrightCyan, o.ansiBrightWhite,
+	}
+
+	// Shell (bang mode) item styles.
+	s.Messages.ShellBarFocused = lipgloss.NewStyle().PaddingLeft(1).
+		BorderStyle(messageFocussedBorder).BorderLeft(true).
+		BorderForeground(o.primary)
+	s.Messages.ShellBarBlurred = lipgloss.NewStyle().PaddingLeft(1).BorderLeft(true).
+		BorderForeground(o.bgMostVisible).BorderStyle(lipgloss.NormalBorder())
+	s.Messages.ShellPrompt = base.Foreground(o.primary).Bold(true)
+	s.Messages.ShellPromptBlurred = base.Foreground(o.fgMoreSubtle)
+	s.Messages.ShellCommand = base.Foreground(o.fgBase)
+	s.Messages.ShellOutput = lipgloss.NewStyle().Foreground(o.fgSubtle)
+	s.Messages.ShellExitCode = lipgloss.NewStyle().Foreground(o.destructive)
+	s.Messages.ShellTruncation = muted
+
 	s.Messages.SectionHeader = base.PaddingLeft(2)
 	s.Messages.AssistantInfoIcon = subtle
 	s.Messages.AssistantInfoModel = muted

@@ -100,6 +100,12 @@ type Settings struct {
 	GradColorA  color.Color
 	GradColorB  color.Color
 	CycleColors bool
+
+	// NoScramble disables the scrambled rune animation. The cycling
+	// character region is removed entirely so only the label and its
+	// animated ellipsis are visible. Useful for non-LLM contexts where
+	// scrambled glyphs imply "thinking" rather than "running".
+	NoScramble bool
 }
 
 // Default settings.
@@ -145,8 +151,18 @@ func New(opts Settings) *Anim {
 	} else {
 		a.id = fmt.Sprintf("%d", nextID())
 	}
-	a.cyclingCharWidth = opts.Size
+	if opts.NoScramble {
+		a.cyclingCharWidth = 0
+	} else {
+		a.cyclingCharWidth = opts.Size
+	}
 	a.labelColor = opts.LabelColor
+
+	// NoScramble means no cycling chars and no birth animation. Mark as
+	// initialized immediately so the label renders without a fade-in.
+	if opts.NoScramble {
+		a.initialized.Store(true)
+	}
 
 	// Check cache first
 	cacheKey := settingsHash(opts)
@@ -164,10 +180,14 @@ func New(opts Settings) *Anim {
 		// Generate new values and cache them
 		a.labelWidth = lipgloss.Width(opts.Label)
 
-		// Total width of anim, in cells.
-		a.width = opts.Size
+		// Total width of anim, in cells. When NoScramble is set there
+		// are no cycling chars so the label gap is unnecessary.
+		a.width = a.cyclingCharWidth
 		if opts.Label != "" {
-			a.width += labelGapWidth + lipgloss.Width(opts.Label)
+			if a.cyclingCharWidth > 0 {
+				a.width += labelGapWidth
+			}
+			a.width += lipgloss.Width(opts.Label)
 		}
 
 		// Render the label
@@ -282,10 +302,13 @@ func New(opts Settings) *Anim {
 func (a *Anim) SetLabel(newLabel string) {
 	a.labelWidth = lipgloss.Width(newLabel)
 
-	// Update total width
+	// Update total width. Skip the label gap when there are no cycling chars.
 	a.width = a.cyclingCharWidth
 	if newLabel != "" {
-		a.width += labelGapWidth + a.labelWidth
+		if a.cyclingCharWidth > 0 {
+			a.width += labelGapWidth
+		}
+		a.width += a.labelWidth
 	}
 
 	// Re-render the label
@@ -379,12 +402,16 @@ func (a *Anim) Render() string {
 		case i < a.cyclingCharWidth:
 			// Render a cycling character.
 			b.WriteString(a.cyclingFrames[step][i])
-		case i == a.cyclingCharWidth:
-			// Render label gap.
+		case i == a.cyclingCharWidth && a.cyclingCharWidth > 0:
+			// Render label gap (only when there are cycling chars).
 			b.WriteString(labelGap)
-		case i > a.cyclingCharWidth:
-			// Label.
-			if labelChar, ok := a.label.Get(i - a.cyclingCharWidth - labelGapWidth); ok {
+		default:
+			// Label. Offset past cycling chars and gap (if any).
+			offset := a.cyclingCharWidth
+			if a.cyclingCharWidth > 0 {
+				offset += labelGapWidth
+			}
+			if labelChar, ok := a.label.Get(i - offset); ok {
 				b.WriteString(labelChar)
 			}
 		}

@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
+	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,6 +46,7 @@ func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
+func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
@@ -519,4 +521,34 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
 		})
 	}
+}
+
+func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ID:              "glm-5.2",
+			CanReason:       true,
+			ReasoningLevels: []string{"high", "max"},
+		},
+		ModelCfg: config.SelectedModel{
+			Provider: "zai",
+		},
+	}
+	providerCfg := config.ProviderConfig{
+		ID:   string(catwalk.InferenceProviderZAI),
+		Type: openaicompat.Name,
+	}
+
+	opts := getProviderOptions(model, providerCfg)
+
+	raw, ok := opts[openaicompat.Name]
+	require.True(t, ok)
+	parsed, ok := raw.(*openaicompat.ProviderOptions)
+	require.True(t, ok)
+	require.NotNil(t, parsed.ReasoningEffort)
+	assert.Equal(t, "high", string(*parsed.ReasoningEffort))
+
+	thinking, ok := parsed.ExtraBody["thinking"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "enabled", thinking["type"])
 }

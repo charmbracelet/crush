@@ -3627,26 +3627,18 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 
 func agentModeLabel(agentID string) string {
 	switch agentID {
-	case config.AgentPlan:
-		return "Plan"
-	case config.AgentTask:
-		return "Task"
-	case config.AgentReview:
+	case config.AgentPlan, config.AgentReview:
 		return "Review"
 	default:
-		return "Chat"
+		return "Task"
 	}
 }
 
 func agentModeFromCommand(content string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(content)) {
-	case "/chat", "/normal", "/build", "/coder":
+	case "/chat", "/normal", "/build", "/coder", "/task":
 		return config.AgentCoder, true
-	case "/plan":
-		return config.AgentPlan, true
-	case "/task":
-		return config.AgentTask, true
-	case "/review":
+	case "/plan", "/review":
 		return config.AgentReview, true
 	default:
 		return "", false
@@ -3656,10 +3648,6 @@ func agentModeFromCommand(content string) (string, bool) {
 func nextAgentMode(current string) string {
 	switch current {
 	case config.AgentCoder, "":
-		return config.AgentPlan
-	case config.AgentPlan:
-		return config.AgentTask
-	case config.AgentTask:
 		return config.AgentReview
 	default:
 		return config.AgentCoder

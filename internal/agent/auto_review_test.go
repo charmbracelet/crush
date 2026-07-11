@@ -317,3 +317,14 @@ func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
 	require.Len(t, assistants, 1, "failed pre-retry assistant should be removed")
 	require.Equal(t, "checked storage", assistants[0].Content().String())
 }
+
+func TestTitleMaxTokensNeverReturnsZero(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, int64(40), titleMaxTokens(Model{CatwalkCfg: catwalk.Model{CanReason: true}}))
+	require.Equal(t, int64(512), titleMaxTokens(Model{CatwalkCfg: catwalk.Model{
+		CanReason:        true,
+		DefaultMaxTokens: 512,
+	}}))
+	require.Equal(t, int64(40), titleMaxTokens(Model{}))
+}

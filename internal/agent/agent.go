@@ -62,6 +62,7 @@ const (
 
 	defaultContextRetryHistoryMessages   = 6
 	defaultContextRetryProjectCharacters = 6_000
+	defaultTitleMaxTokens                = int64(40)
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -2358,10 +2359,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	var model Model
 	var success bool
 	for _, attempt := range attempts {
-		tok := int64(40)
-		if attempt.model.CatwalkCfg.CanReason {
-			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
-		}
+		tok := titleMaxTokens(attempt.model)
 		agent := newAgent(attempt.model.Model, attempt.prefix, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
@@ -2443,6 +2441,13 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 	titleSaved = true
+}
+
+func titleMaxTokens(model Model) int64 {
+	if model.CatwalkCfg.CanReason && model.CatwalkCfg.DefaultMaxTokens > 0 {
+		return model.CatwalkCfg.DefaultMaxTokens
+	}
+	return defaultTitleMaxTokens
 }
 
 func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float64 {

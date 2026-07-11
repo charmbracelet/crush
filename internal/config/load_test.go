@@ -770,6 +770,17 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 	assert.Equal(t, allToolNames(), coderAgent.AllowedTools)
+	assert.Contains(t, coderAgent.AllowedTools, "bash")
+	assert.Contains(t, coderAgent.AllowedTools, "edit")
+	assert.Contains(t, coderAgent.AllowedTools, "write")
+	assert.Nil(t, coderAgent.AllowedMCP, "interactive Task mode must allow configured MCP servers")
+
+	reviewAgent, ok := cfg.Agents[AgentReview]
+	require.True(t, ok)
+	assert.NotContains(t, reviewAgent.AllowedTools, "bash")
+	assert.NotContains(t, reviewAgent.AllowedTools, "edit")
+	assert.NotContains(t, reviewAgent.AllowedTools, "write")
+	assert.Empty(t, reviewAgent.AllowedMCP)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)

@@ -25,3 +25,12 @@ func TestAdjacentModelTypeCyclesAllSlots(t *testing.T) {
 	require.Equal(t, config.SelectedModelTypeLarge, adjacentModelType(config.SelectedModelTypeReview, 1))
 	require.Equal(t, config.SelectedModelTypeReview, adjacentModelType(config.SelectedModelTypeLarge, -1))
 }
+
+func TestInteractiveModesMapTaskToWritableCoder(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, []modeDefinition{
+		{ID: config.AgentCoder, Title: "Task"},
+		{ID: config.AgentReview, Title: "Review"},
+	}, modeDefinitions)
+}

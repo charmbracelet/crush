@@ -26,9 +26,7 @@ type modeDefinition struct {
 }
 
 var modeDefinitions = []modeDefinition{
-	{ID: config.AgentCoder, Title: "Chat"},
-	{ID: config.AgentPlan, Title: "Plan"},
-	{ID: config.AgentTask, Title: "Task"},
+	{ID: config.AgentCoder, Title: "Task"},
 	{ID: config.AgentReview, Title: "Review"},
 }
 

@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -69,8 +70,9 @@ func (s *Status) SetHideHelp(hideHelp bool) {
 
 // Draw draws the status bar onto the screen.
 func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
+	mode := statusModeLabel(s.com.Workspace.AgentMode())
 	if !s.hideHelp {
-		helpView := s.com.Styles.Status.Help.Render(s.help.View(s.helpKm))
+		helpView := s.com.Styles.Status.Help.Render(mode + " | " + s.help.View(s.helpKm))
 		uv.NewStyledString(helpView).Draw(scr, area)
 	}
 
@@ -103,7 +105,7 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	indWidth := lipgloss.Width(ind)
 	msgPad := msgStyle.GetPaddingLeft() + msgStyle.GetPaddingRight()
 	avail := max(0, area.Dx()-indWidth-msgPad)
-	msg := strings.Join(strings.Split(s.msg.Msg, "\n"), " ")
+	msg := mode + " | " + strings.Join(strings.Split(s.msg.Msg, "\n"), " ")
 	msg = ansi.Truncate(msg, avail, "…")
 	if w := lipgloss.Width(msg); w < avail {
 		msg += strings.Repeat(" ", avail-w)
@@ -112,6 +114,13 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, area)
+}
+
+func statusModeLabel(agentID string) string {
+	if agentID == config.AgentPlan || agentID == config.AgentReview {
+		return "MODE: REVIEW READ ONLY"
+	}
+	return "MODE: TASK"
 }
 
 // clearInfoMsgCmd returns a command that clears the info message after the

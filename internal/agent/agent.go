@@ -1346,7 +1346,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
-		ProviderOptions: disableThinkingOptions(opts),
+		ProviderOptions: disableThinkingOptions(opts, largeModel.CatwalkCfg.CanReason),
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
@@ -1441,7 +1441,11 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 // reasoning/thinking for models that support it. This ensures that small
 // background requests (like summarization) do not fail when using local
 // Llama.cpp servers or other thinking-capable models.
-func disableThinkingOptions(opts fantasy.ProviderOptions) fantasy.ProviderOptions {
+func disableThinkingOptions(opts fantasy.ProviderOptions, canReason bool) fantasy.ProviderOptions {
+	if !canReason {
+		return opts
+	}
+
 	summaryOpts := make(fantasy.ProviderOptions, len(opts)+2)
 	for k, v := range opts {
 		summaryOpts[k] = v
@@ -1790,7 +1794,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		if attempt.model.CatwalkCfg.CanReason {
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
-		streamCall.ProviderOptions = disableThinkingOptions(nil)
+		streamCall.ProviderOptions = disableThinkingOptions(nil, attempt.model.CatwalkCfg.CanReason)
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {

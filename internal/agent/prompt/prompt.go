@@ -2,8 +2,10 @@ package prompt
 
 import (
 	"cmp"
+
 	"context"
 	"fmt"
+	a2ui "github.com/tmc/a2ui"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -42,6 +44,7 @@ type PromptDat struct {
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
 	A2UI               bool
+	A2UIVersion        string
 }
 
 type ContextFile struct {
@@ -70,9 +73,11 @@ func WithWorkingDir(workingDir string) Option {
 }
 
 // WithA2UI enables the template's A2UI section, which tells the model it may
-// emit <a2ui-json> surfaces. Only hosts that actually render A2UI (the chat
-// TUI, via a2tea) should set this — everywhere else the blocks would surface
-// as raw text.
+// emit <a2ui-json> surfaces. Crush's chat TUI renders those blocks via a2tea;
+// consumers that only ever see plain text (scripted crush run, headless serve
+// clients) receive them as raw markup, so deployments that need plain-text
+// output can turn the section off with options.disable_a2ui — the coordinator
+// applies that setting.
 func WithA2UI() Option {
 	return func(p *Prompt) {
 		p.a2ui = true
@@ -227,6 +232,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		Date:          p.now().Format("1/2/2006"),
 		AvailSkillXML: availSkillXML,
 		A2UI:          p.a2ui,
+		A2UIVersion:   a2ui.Version,
 	}
 	if isGit {
 		var err error

@@ -531,6 +531,11 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "disable_a2ui": {
+          "type": "boolean",
+          "description": "Disable the A2UI prompt section that invites the model to emit renderable \u003ca2ui-json\u003e UI surfaces in chat",
+          "default": false
         }
       },
       "additionalProperties": false,

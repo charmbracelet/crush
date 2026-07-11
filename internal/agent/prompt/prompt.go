@@ -2,10 +2,8 @@ package prompt
 
 import (
 	"cmp"
-
 	"context"
 	"fmt"
-	a2ui "github.com/tmc/a2ui"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,6 +11,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	a2ui "github.com/tmc/a2ui"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"

@@ -271,8 +271,9 @@ func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
 	}
 	review := &autoReviewStreamModel{text: "review should not run"}
 	sa := newAutoReviewTestAgent(env, primary, review)
-	sa.systemPromptPrefix.Set("long provider prefix")
+	sa.largePromptPrefix.Set("long provider prefix")
 	sa.systemPrompt.Set("long base prompt")
+	sa.recoveryContext.Set("Current working directory: C:/work/project\n\n## C:/work/project/AGENTS.md\nKeep project context during recovery.")
 	sa.SetTools([]fantasy.AgentTool{
 		&fakeTool{name: tools.BashToolName},
 		&fakeTool{name: tools.ViewToolName},
@@ -295,6 +296,8 @@ func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
 	require.Contains(t, primary.systemPromptForCall(0), "long provider prefix")
 	require.Contains(t, primary.systemPromptForCall(0), "long base prompt")
 	require.Contains(t, primary.systemPromptForCall(1), "compact recovery mode")
+	require.Contains(t, primary.systemPromptForCall(1), "Current working directory: C:/work/project")
+	require.Contains(t, primary.systemPromptForCall(1), "Keep project context during recovery.")
 	require.NotContains(t, primary.systemPromptForCall(1), "long provider prefix")
 	require.NotContains(t, primary.systemPromptForCall(1), "long base prompt")
 

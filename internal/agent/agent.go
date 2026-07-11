@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -59,7 +60,8 @@ const (
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
 
-	defaultContextRetryHistoryMessages = 6
+	defaultContextRetryHistoryMessages   = 6
+	defaultContextRetryProjectCharacters = 6_000
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -157,9 +159,11 @@ type SessionAgentCall struct {
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
-	SetModels(large Model, small Model, summary Model, review Model, summaryProviderOptions fantasy.ProviderOptions, reviewProviderOptions fantasy.ProviderOptions)
+	SetModels(models SessionAgentModels)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
+	SetRecoveryContext(recoveryContext string)
+	SetMemoryOptions(recorderEnabled, recallEnabled bool)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -178,6 +182,20 @@ type Model struct {
 	CatwalkCfg catwalk.Model
 	ModelCfg   config.SelectedModel
 	FlatRate   bool
+}
+
+type SessionAgentModels struct {
+	Large                     Model
+	Small                     Model
+	Summary                   Model
+	Review                    Model
+	SmallProviderOpts         fantasy.ProviderOptions
+	SummaryProviderOpts       fantasy.ProviderOptions
+	ReviewProviderOpts        fantasy.ProviderOptions
+	LargeSystemPromptPrefix   string
+	SmallSystemPromptPrefix   string
+	SummarySystemPromptPrefix string
+	ReviewSystemPromptPrefix  string
 }
 
 type providerOptionsValue struct {
@@ -217,22 +235,34 @@ type sessionAgent struct {
 	smallModel          *csync.Value[Model]
 	summaryModel        *csync.Value[Model]
 	reviewModel         *csync.Value[Model]
+	smallProviderOpts   *providerOptionsValue
 	summaryProviderOpts *providerOptionsValue
 	reviewProviderOpts  *providerOptionsValue
-	systemPromptPrefix  *csync.Value[string]
+	largePromptPrefix   *csync.Value[string]
+	smallPromptPrefix   *csync.Value[string]
+	summaryPromptPrefix *csync.Value[string]
+	reviewPromptPrefix  *csync.Value[string]
 	systemPrompt        *csync.Value[string]
+	recoveryContext     *csync.Value[string]
 	tools               *csync.Slice[fantasy.AgentTool]
 
-	isSubAgent           bool
-	sessions             session.Service
-	messages             message.Service
-	disableAutoSummarize bool
-	autoReviewEnabled    bool
-	isYolo               bool
-	notify               pubsub.Publisher[notify.Notification]
-	runComplete          pubsub.Publisher[notify.RunComplete]
-	userPromptHooks      *hooks.Runner
-	stopHooks            *hooks.Runner
+	isSubAgent                     bool
+	sessions                       session.Service
+	messages                       message.Service
+	disableAutoSummarize           bool
+	autoReviewEnabled              bool
+	isYolo                         bool
+	notify                         pubsub.Publisher[notify.Notification]
+	runComplete                    pubsub.Publisher[notify.RunComplete]
+	userPromptHooks                *hooks.Runner
+	stopHooks                      *hooks.Runner
+	memoryStore                    *memory.Store
+	memoryProject                  memory.Project
+	memoryRecorder                 atomic.Bool
+	memoryRecall                   atomic.Bool
+	memoryDisableOnExternalContext bool
+	memoryJobs                     *csync.Map[string, *memoryJob]
+	memoryWG                       sync.WaitGroup
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -276,64 +306,106 @@ type sessionAgent struct {
 }
 
 type SessionAgentOptions struct {
-	LargeModel           Model
-	SmallModel           Model
-	SummaryModel         Model
-	ReviewModel          Model
-	SummaryProviderOpts  fantasy.ProviderOptions
-	ReviewProviderOpts   fantasy.ProviderOptions
-	SystemPromptPrefix   string
-	SystemPrompt         string
-	IsSubAgent           bool
-	DisableAutoSummarize bool
-	AutoReviewEnabled    bool
-	IsYolo               bool
-	Sessions             session.Service
-	Messages             message.Service
-	Tools                []fantasy.AgentTool
-	Notify               pubsub.Publisher[notify.Notification]
-	RunComplete          pubsub.Publisher[notify.RunComplete]
-	UserPromptHooks      *hooks.Runner
-	StopHooks            *hooks.Runner
+	Models                         SessionAgentModels
+	LargeModel                     Model
+	SmallModel                     Model
+	SummaryModel                   Model
+	ReviewModel                    Model
+	SummaryProviderOpts            fantasy.ProviderOptions
+	ReviewProviderOpts             fantasy.ProviderOptions
+	SystemPromptPrefix             string
+	SystemPrompt                   string
+	RecoveryContext                string
+	IsSubAgent                     bool
+	DisableAutoSummarize           bool
+	AutoReviewEnabled              bool
+	IsYolo                         bool
+	Sessions                       session.Service
+	Messages                       message.Service
+	Tools                          []fantasy.AgentTool
+	Notify                         pubsub.Publisher[notify.Notification]
+	RunComplete                    pubsub.Publisher[notify.RunComplete]
+	UserPromptHooks                *hooks.Runner
+	StopHooks                      *hooks.Runner
+	Memory                         *memory.Store
+	MemoryProject                  memory.Project
+	MemoryRecorder                 bool
+	MemoryRecall                   bool
+	MemoryDisableOnExternalContext bool
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
-	summaryModel := opts.SummaryModel
+	models := opts.Models
+	if models.Large.Model == nil {
+		models.Large = opts.LargeModel
+	}
+	if models.Small.Model == nil {
+		models.Small = opts.SmallModel
+	}
+	if models.Summary.Model == nil {
+		models.Summary = opts.SummaryModel
+	}
+	if models.Review.Model == nil {
+		models.Review = opts.ReviewModel
+	}
+	if models.SummaryProviderOpts == nil {
+		models.SummaryProviderOpts = opts.SummaryProviderOpts
+	}
+	if models.ReviewProviderOpts == nil {
+		models.ReviewProviderOpts = opts.ReviewProviderOpts
+	}
+	if models.LargeSystemPromptPrefix == "" {
+		models.LargeSystemPromptPrefix = opts.SystemPromptPrefix
+	}
+
+	summaryModel := models.Summary
 	if summaryModel.Model == nil {
-		summaryModel = opts.LargeModel
+		summaryModel = models.Large
 	}
-	reviewModel := opts.ReviewModel
+	reviewModel := models.Review
 	if reviewModel.Model == nil {
-		reviewModel = opts.LargeModel
+		reviewModel = models.Large
 	}
-	return &sessionAgent{
-		largeModel:           csync.NewValue(opts.LargeModel),
-		smallModel:           csync.NewValue(opts.SmallModel),
-		summaryModel:         csync.NewValue(summaryModel),
-		reviewModel:          csync.NewValue(reviewModel),
-		summaryProviderOpts:  newProviderOptionsValue(opts.SummaryProviderOpts),
-		reviewProviderOpts:   newProviderOptionsValue(opts.ReviewProviderOpts),
-		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
-		systemPrompt:         csync.NewValue(opts.SystemPrompt),
-		isSubAgent:           opts.IsSubAgent,
-		sessions:             opts.Sessions,
-		messages:             opts.Messages,
-		disableAutoSummarize: opts.DisableAutoSummarize,
-		autoReviewEnabled:    opts.AutoReviewEnabled,
-		tools:                csync.NewSliceFrom(opts.Tools),
-		isYolo:               opts.IsYolo,
-		notify:               opts.Notify,
-		runComplete:          opts.RunComplete,
-		userPromptHooks:      opts.UserPromptHooks,
-		stopHooks:            opts.StopHooks,
-		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:       csync.NewMap[string, context.CancelFunc](),
-		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:         csync.NewMap[string, int](),
-		cancelMark:           csync.NewMap[string, uint64](),
+	result := &sessionAgent{
+		largeModel:                     csync.NewValue(models.Large),
+		smallModel:                     csync.NewValue(models.Small),
+		summaryModel:                   csync.NewValue(summaryModel),
+		reviewModel:                    csync.NewValue(reviewModel),
+		smallProviderOpts:              newProviderOptionsValue(models.SmallProviderOpts),
+		summaryProviderOpts:            newProviderOptionsValue(models.SummaryProviderOpts),
+		reviewProviderOpts:             newProviderOptionsValue(models.ReviewProviderOpts),
+		largePromptPrefix:              csync.NewValue(models.LargeSystemPromptPrefix),
+		smallPromptPrefix:              csync.NewValue(models.SmallSystemPromptPrefix),
+		summaryPromptPrefix:            csync.NewValue(models.SummarySystemPromptPrefix),
+		reviewPromptPrefix:             csync.NewValue(models.ReviewSystemPromptPrefix),
+		systemPrompt:                   csync.NewValue(opts.SystemPrompt),
+		recoveryContext:                csync.NewValue(opts.RecoveryContext),
+		isSubAgent:                     opts.IsSubAgent,
+		sessions:                       opts.Sessions,
+		messages:                       opts.Messages,
+		disableAutoSummarize:           opts.DisableAutoSummarize,
+		autoReviewEnabled:              opts.AutoReviewEnabled,
+		tools:                          csync.NewSliceFrom(opts.Tools),
+		isYolo:                         opts.IsYolo,
+		notify:                         opts.Notify,
+		runComplete:                    opts.RunComplete,
+		userPromptHooks:                opts.UserPromptHooks,
+		stopHooks:                      opts.StopHooks,
+		memoryStore:                    opts.Memory,
+		memoryProject:                  opts.MemoryProject,
+		memoryDisableOnExternalContext: opts.MemoryDisableOnExternalContext,
+		memoryJobs:                     csync.NewMap[string, *memoryJob](),
+		messageQueue:                   csync.NewMap[string, []SessionAgentCall](),
+		activeRequests:                 csync.NewMap[string, context.CancelFunc](),
+		dispatchMu:                     csync.NewMap[string, *sync.Mutex](),
+		acceptedRuns:                   csync.NewMap[string, int](),
+		cancelMark:                     csync.NewMap[string, uint64](),
 	}
+	result.memoryRecorder.Store(opts.MemoryRecorder)
+	result.memoryRecall.Store(opts.MemoryRecall)
+	return result
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
@@ -642,6 +714,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err := ValidateCall(call); err != nil {
 		return nil, err
 	}
+	a.cancelMemoryJob(call.SessionID)
 
 	// genCtx/cancel are the run context and its cancel func. For the
 	// accepted (fire-and-forget) dispatch path they are created under
@@ -746,7 +819,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	if call.contextRetry {
-		systemPrompt = contextRetrySystemPrompt()
+		systemPrompt = contextRetrySystemPrompt(a.recoveryContext.Get())
 	} else {
 		var instructions strings.Builder
 
@@ -763,7 +836,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if s := instructions.String(); s != "" {
 			systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 		}
-		systemPrompt = mergeSystemPromptPrefix(a.systemPromptPrefix.Get(), systemPrompt)
+		systemPrompt = mergeSystemPromptPrefix(a.largePromptPrefix.Get(), systemPrompt)
 	}
 
 	if len(agentTools) > 0 {
@@ -803,13 +876,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	outboundPrompt := admitted.modelPrompt
 
 	var wg sync.WaitGroup
-	// Generate title from the first real (non-shell) user prompt.
-	if !call.skipUserMessage && !hasUserTextMessage(msgs) {
-		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
-		wg.Go(func() {
-			a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
-		})
-	}
+	shouldGenerateTitle := !call.skipUserMessage && !hasUserTextMessage(msgs)
 	defer wg.Wait()
 
 	// Add the admitted user message to the session.
@@ -836,6 +903,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 		defer cancel()
 		defer a.activeRequests.Del(call.SessionID)
+	}
+	if !call.contextRetry {
+		outboundPrompt = a.recallMemories(genCtx, call.SessionID, outboundPrompt)
+	}
+	// Memory selection uses the small model first. Start title generation
+	// afterward so both side calls never compete for the same local model.
+	if shouldGenerateTitle {
+		titleCtx := ctx
+		wg.Go(func() {
+			a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
+		})
 	}
 	// skipRunComplete is set just before the queued-recursion path so
 	// the outer Run doesn't publish a RunComplete that would race
@@ -1100,6 +1178,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if sanitizedToolCalls[result.ToolCallID] {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
+			}
+			if !toolResult.IsError {
+				if markErr := a.markMemoryExternalContext(ctx, call.SessionID, result.ToolName); markErr != nil {
+					slog.Warn("Failed to mark session memory as externally sourced", "session_id", call.SessionID, "tool", result.ToolName, "error", markErr)
+				}
 			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
@@ -1431,6 +1514,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			a.cancelMark.Del(call.SessionID)
 		}
 		mu.Unlock()
+		a.scheduleMemoryRecording(ctx, call.SessionID)
 		return result, err
 	}
 	// There are queued messages, restart the loop. Suppress the outer
@@ -1488,7 +1572,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	// Copy mutable fields under lock to avoid races with SetModels.
 	summaryModel := a.summaryModel.Get()
 	summaryProviderOpts := a.summaryProviderOpts.Get()
-	summarySystemPrompt := mergeSystemPromptPrefix(a.systemPromptPrefix.Get(), string(summaryPrompt))
+	summarySystemPrompt := mergeSystemPromptPrefix(a.summaryPromptPrefix.Get(), string(summaryPrompt))
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -1627,7 +1711,7 @@ func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason 
 
 	reviewModel := a.reviewModel.Get()
 	reviewProviderOpts := a.reviewProviderOpts.Get()
-	reviewSystemPrompt := mergeSystemPromptPrefix(a.systemPromptPrefix.Get(), string(autoReviewPrompt))
+	reviewSystemPrompt := mergeSystemPromptPrefix(a.reviewPromptPrefix.Get(), string(autoReviewPrompt))
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -1836,16 +1920,21 @@ func contextRetryTools(agentTools []fantasy.AgentTool) []fantasy.AgentTool {
 	return filtered
 }
 
-func contextRetrySystemPrompt() string {
+func contextRetrySystemPrompt(recoveryContext string) string {
+	basePrompt := defaultContextRetrySystemPrompt
 	if path := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_SYSTEM_PROMPT_FILE")); path != "" {
 		if data, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(data)) != "" {
-			return strings.TrimSpace(string(data))
+			basePrompt = strings.TrimSpace(string(data))
 		}
 	}
 	if prompt := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_SYSTEM_PROMPT")); prompt != "" {
-		return prompt
+		basePrompt = prompt
 	}
-	return defaultContextRetrySystemPrompt
+	recoveryContext = strings.TrimSpace(recoveryContext)
+	if recoveryContext == "" {
+		return basePrompt
+	}
+	return basePrompt + "\n\n<critical-project-context>\n" + recoveryContext + "\n</critical-project-context>"
 }
 
 func contextRetryMessages(msgs []message.Message) []message.Message {
@@ -2238,10 +2327,9 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 
 	smallModel := a.smallModel.Get()
 	largeModel := a.largeModel.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
 
-	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
-		systemPrompt := mergeSystemPromptPrefix(systemPromptPrefix, string(p)+"\n /no_think")
+	newAgent := func(m fantasy.LanguageModel, prefix string, p []byte, tok int64) fantasy.Agent {
+		systemPrompt := mergeSystemPromptPrefix(prefix, string(p)+"\n /no_think")
 		return fantasy.NewAgent(
 			m,
 			fantasy.WithSystemPrompt(systemPrompt),
@@ -2256,12 +2344,13 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	}
 
 	type modelAttempt struct {
-		name  string
-		model Model
+		name   string
+		model  Model
+		prefix string
 	}
 	attempts := []modelAttempt{
-		{"small", smallModel},
-		{"large", largeModel},
+		{"small", smallModel, a.smallPromptPrefix.Get()},
+		{"large", largeModel, a.largePromptPrefix.Get()},
 	}
 
 	var resp *fantasy.AgentResult
@@ -2273,7 +2362,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		if attempt.model.CatwalkCfg.CanReason {
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
-		agent := newAgent(attempt.model.Model, titlePrompt, tok)
+		agent := newAgent(attempt.model.Model, attempt.prefix, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model
@@ -2438,6 +2527,7 @@ func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
+	a.cancelMemoryJob(sessionID)
 	// Serialize against the dispatch handoff in Run so the accepted ->
 	// (cancel-on-entry | queued | active) transition is atomic against
 	// this cancel. Every cancel observes at least one of: an active
@@ -2495,7 +2585,9 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 }
 
 func (a *sessionAgent) CancelAll() {
+	a.cancelAllMemoryJobs()
 	if !a.IsBusy() {
+		a.waitForMemoryJobs(5 * time.Second)
 		return
 	}
 	for key := range a.activeRequests.Seq2() {
@@ -2506,11 +2598,13 @@ func (a *sessionAgent) CancelAll() {
 	for a.IsBusy() {
 		select {
 		case <-timeout:
+			a.waitForMemoryJobs(5 * time.Second)
 			return
 		default:
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
+	a.waitForMemoryJobs(5 * time.Second)
 }
 
 func (a *sessionAgent) IsBusy() bool {
@@ -2549,19 +2643,24 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 	return prompts
 }
 
-func (a *sessionAgent) SetModels(large Model, small Model, summary Model, review Model, summaryProviderOptions fantasy.ProviderOptions, reviewProviderOptions fantasy.ProviderOptions) {
-	if summary.Model == nil {
-		summary = large
+func (a *sessionAgent) SetModels(models SessionAgentModels) {
+	if models.Summary.Model == nil {
+		models.Summary = models.Large
 	}
-	if review.Model == nil {
-		review = large
+	if models.Review.Model == nil {
+		models.Review = models.Large
 	}
-	a.largeModel.Set(large)
-	a.smallModel.Set(small)
-	a.summaryModel.Set(summary)
-	a.reviewModel.Set(review)
-	a.summaryProviderOpts.Set(summaryProviderOptions)
-	a.reviewProviderOpts.Set(reviewProviderOptions)
+	a.largeModel.Set(models.Large)
+	a.smallModel.Set(models.Small)
+	a.summaryModel.Set(models.Summary)
+	a.reviewModel.Set(models.Review)
+	a.smallProviderOpts.Set(models.SmallProviderOpts)
+	a.summaryProviderOpts.Set(models.SummaryProviderOpts)
+	a.reviewProviderOpts.Set(models.ReviewProviderOpts)
+	a.largePromptPrefix.Set(models.LargeSystemPromptPrefix)
+	a.smallPromptPrefix.Set(models.SmallSystemPromptPrefix)
+	a.summaryPromptPrefix.Set(models.SummarySystemPromptPrefix)
+	a.reviewPromptPrefix.Set(models.ReviewSystemPromptPrefix)
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
@@ -2570,6 +2669,18 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+func (a *sessionAgent) SetRecoveryContext(recoveryContext string) {
+	a.recoveryContext.Set(recoveryContext)
+}
+
+func (a *sessionAgent) SetMemoryOptions(recorderEnabled, recallEnabled bool) {
+	a.memoryRecorder.Store(recorderEnabled)
+	a.memoryRecall.Store(recallEnabled)
+	if !recorderEnabled {
+		a.cancelAllMemoryJobs()
+	}
 }
 
 func mergeSystemPromptPrefix(prefix, system string) string {

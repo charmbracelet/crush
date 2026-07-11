@@ -227,6 +227,9 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			if !ok {
 				break
 			}
+			if isLMStudioSetupModelItem(modelItem) {
+				return ActionOpenLMStudioSetup{}
+			}
 
 			isEdit := key.Matches(msg, m.keyMap.Edit)
 
@@ -314,9 +317,11 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 	selectedModelsView := ""
+	activeRouteView := ""
 	if !m.isOnboarding {
 		selectedModelsView = m.selectedModelsView(innerWidth)
-		heightOffset += lipgloss.Height(selectedModelsView)
+		activeRouteView = m.activeRouteView(innerWidth)
+		heightOffset += lipgloss.Height(selectedModelsView) + lipgloss.Height(activeRouteView)
 	}
 
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
@@ -328,13 +333,14 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listTotalHeight := m.list.TotalHeight()
 
 	rc := NewRenderContext(t, width)
-	rc.Title = "Switch Model"
+	rc.Title = "Model Slots"
 	rc.TitleInfo = m.modelTypeRadioView()
 
 	if m.isOnboarding {
 		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
 		rc.AddPart(titleText)
 	}
+	rc.AddPart(activeRouteView)
 	rc.AddPart(selectedModelsView)
 
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
@@ -351,7 +357,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	cur := m.Cursor()
 	if !m.isOnboarding && cur != nil {
-		cur.Y += lipgloss.Height(selectedModelsView)
+		cur.Y += lipgloss.Height(activeRouteView) + lipgloss.Height(selectedModelsView)
 	}
 
 	if m.isOnboarding {
@@ -366,6 +372,30 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		DrawCenterCursor(scr, area, view, cur)
 	}
 	return cur
+}
+
+func (m *Models) activeRouteView(width int) string {
+	cfg := m.com.Config()
+	agentID := m.com.Workspace.AgentMode()
+	agent, ok := cfg.Agents[agentID]
+	if !ok {
+		return ""
+	}
+	modelName := "unset"
+	if selected, exists := cfg.Models[agent.Model]; exists && selected.Model != "" {
+		modelName = m.selectedModelName(selected)
+	}
+	label := fmt.Sprintf("Active: %s -> %s -> %s", modeTitle(agentID), modelTypeLabel(agent.Model), modelName)
+	return m.com.Styles.Dialog.SecondaryText.Padding(0, 1).Render(ansi.Truncate(label, max(0, width-2), "..."))
+}
+
+func modeTitle(agentID string) string {
+	for _, mode := range modeDefinitions {
+		if mode.ID == agentID {
+			return mode.Title
+		}
+	}
+	return "Chat"
 }
 
 // ShortHelp returns the short help view.
@@ -490,6 +520,11 @@ func (m *Models) setProviderItems() error {
 	// itemsMap contains the keys of added model items.
 	itemsMap := make(map[string]*ModelItem)
 	groups := []ModelGroup{}
+	if _, ok := cfg.Providers.Get(config.LMStudioProviderID); !ok {
+		setupGroup := NewModelGroup(t, "Local Providers", false)
+		setupGroup.AppendItems(newLMStudioSetupModelItem(t))
+		groups = append(groups, setupGroup)
+	}
 	for id, p := range cfg.Providers.Seq2() {
 		if p.Disable {
 			continue
@@ -611,6 +646,7 @@ func (m *Models) setProviderItems() error {
 	if selectedItemID != "" {
 		m.list.ScrollToSelected()
 	} else {
+		m.list.SelectFirst()
 		m.list.ScrollToTop()
 	}
 

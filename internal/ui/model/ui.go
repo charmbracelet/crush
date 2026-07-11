@@ -38,6 +38,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -170,6 +171,16 @@ type (
 	// fetched from the API.
 	creditsUpdatedMsg struct {
 		credits int
+	}
+	// memoryLoadedMsg refreshes the optional local memory management dialog.
+	memoryLoadedMsg struct {
+		snapshot workspace.MemorySnapshot
+		err      error
+	}
+	// memoryChangedMsg reports completion of a memory mutation before refresh.
+	memoryChangedMsg struct {
+		notice string
+		err    error
 	}
 )
 
@@ -698,6 +709,22 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ok {
 			commands.SetMCPPrompts(m.mcpPrompts)
 		}
+	case memoryLoadedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		m.dialog.CloseDialog(dialog.MemoryID)
+		m.dialog.OpenDialog(dialog.NewMemory(m.com, msg.snapshot))
+	case memoryChangedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		if msg.notice != "" {
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg(msg.notice)))
+		}
+		cmds = append(cmds, m.loadMemorySnapshot())
 
 	case promptHistoryLoadedMsg:
 		m.promptHistory.messages = msg.messages
@@ -823,7 +850,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
-			m.keyMap.Models.SetHelp("ctrl+m", "models")
+			m.keyMap.Modes.SetHelp("ctrl+m", "modes")
 			m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
 		}
 	case copyChatHighlightMsg:
@@ -1542,6 +1569,38 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionOpenLMStudioSetup:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.ModelsID)
+		if cmd := m.openLMStudioSetupDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionOpenMemoryRemember:
+		arguments := []commands.Argument{
+			{ID: "name", Title: "Name", Description: "Short memory name", Required: true},
+			{ID: "content", Title: "Memory", Description: "What should future sessions know?", Required: true},
+			{ID: "scope", Title: "Scope", Description: "global or project (default: global)"},
+		}
+		m.dialog.OpenDialog(dialog.NewArguments(
+			m.com,
+			"Remember",
+			"Save an explicit memory. Project memories are recalled only in this repository.",
+			arguments,
+			dialog.ActionMemoryRemember{},
+		))
+	case dialog.ActionMemoryRemember:
+		m.dialog.CloseDialog(dialog.ArgumentsID)
+		cmds = append(cmds, m.rememberMemory(msg.Args))
+	case dialog.ActionMemorySetStatus:
+		cmds = append(cmds, m.setMemoryStatus(msg.ID, msg.Status))
+	case dialog.ActionMemorySetPinned:
+		cmds = append(cmds, m.setMemoryPinned(msg.ID, msg.Pinned))
+	case dialog.ActionMemorySetFeature:
+		cmds = append(cmds, m.setMemoryFeature(msg.Feature, msg.Enabled))
+	case dialog.ActionMemorySetSessionRecording:
+		cmds = append(cmds, m.setMemorySessionRecording(msg.SessionID, msg.Enabled))
+	case dialog.ActionMemoryMaintain:
+		cmds = append(cmds, m.maintainMemory())
 
 	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
@@ -1556,6 +1615,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.setAgentMode(msg.AgentID))
 		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.ModesID)
+	case dialog.ActionActivateAgentMode:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before switching modes..."))
+			break
+		}
+		cmds = append(cmds, m.activateAgentMode(msg.AgentID, msg.ModelType))
+		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.ModesID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -1677,6 +1745,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionConfigureLMStudio:
+		if cmd := m.configureLMStudio(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
@@ -2018,6 +2090,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return true
 		case key.Matches(msg, m.keyMap.Models):
 			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Modes):
+			if cmd := m.openModesDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return true
@@ -2655,6 +2732,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds,
 			tab,
 			commands,
+			k.Modes,
 			k.Models,
 		)
 
@@ -2684,6 +2762,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		binds = append(
 			binds,
 			commands,
+			k.Modes,
 			k.Models,
 			k.Editor.Newline,
 		)
@@ -2741,6 +2820,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			mainBinds,
 			tab,
 			commands,
+			k.Modes,
 			k.Models,
 			k.Sessions,
 			k.ToggleYolo,
@@ -2803,6 +2883,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				binds,
 				[]key.Binding{
 					commands,
+					k.Modes,
 					k.Models,
 					k.Sessions,
 					k.ToggleYolo,
@@ -3553,13 +3634,13 @@ func agentModeLabel(agentID string) string {
 	case config.AgentReview:
 		return "Review"
 	default:
-		return "Build"
+		return "Chat"
 	}
 }
 
 func agentModeFromCommand(content string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(content)) {
-	case "/build", "/coder":
+	case "/chat", "/normal", "/build", "/coder":
 		return config.AgentCoder, true
 	case "/plan":
 		return config.AgentPlan, true
@@ -3591,6 +3672,32 @@ func (m *UI) setAgentMode(agentID string) tea.Cmd {
 			return util.ReportError(err)()
 		}
 		return util.NewInfoMsg("Agent mode set to " + agentModeLabel(agentID))
+	}
+}
+
+func (m *UI) activateAgentMode(agentID string, modelType config.SelectedModelType) tea.Cmd {
+	return func() tea.Msg {
+		key := fmt.Sprintf("mode_models.%s", agentID)
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, key, modelType); err != nil {
+			return util.ReportError(err)()
+		}
+		if err := m.com.Workspace.SetAgentMode(context.Background(), agentID); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg(fmt.Sprintf("%s mode active with %s", agentModeLabel(agentID), modeModelTypeLabel(modelType)))
+	}
+}
+
+func modeModelTypeLabel(modelType config.SelectedModelType) string {
+	switch modelType {
+	case config.SelectedModelTypeSmall:
+		return "Small Task"
+	case config.SelectedModelTypeSummary:
+		return "Summary"
+	case config.SelectedModelTypeReview:
+		return "Review"
+	default:
+		return "Large Task"
 	}
 }
 
@@ -3803,6 +3910,18 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openModelsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.LMStudioSetupID:
+		if cmd := m.openLMStudioSetupDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.MemoryID:
+		if cmd := m.openMemoryDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ModesID:
+		if cmd := m.openModesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.CommandsID:
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3863,6 +3982,198 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(modelsDialog)
 
+	return nil
+}
+
+func (m *UI) openLMStudioSetupDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.LMStudioSetupID) {
+		m.dialog.BringToFront(dialog.LMStudioSetupID)
+		return nil
+	}
+
+	lmStudioDialog, cmd := dialog.NewLMStudioSetup(m.com, m.state == uiOnboarding)
+	m.dialog.OpenDialog(lmStudioDialog)
+	return cmd
+}
+
+func (m *UI) configureLMStudio(msg dialog.ActionConfigureLMStudio) tea.Cmd {
+	m.dialog.CloseDialog(dialog.LMStudioSetupID)
+
+	provider := msg.Provider
+	if provider.ID == "" {
+		provider.ID = config.LMStudioProviderID
+	}
+	if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("providers.%s", provider.ID), provider); err != nil {
+		return util.ReportError(fmt.Errorf("failed to save LM Studio provider: %w", err))
+	}
+
+	return m.handleSelectModel(dialog.ActionSelectModel{
+		Provider:  provider.ToProvider(),
+		Model:     msg.Model,
+		ModelType: config.SelectedModelTypeLarge,
+	})
+}
+
+func (m *UI) memoryWorkspace() (workspace.MemoryWorkspace, error) {
+	memoryWorkspace, ok := m.com.Workspace.(workspace.MemoryWorkspace)
+	if !ok {
+		return nil, errors.New("memory management is unavailable in this workspace")
+	}
+	return memoryWorkspace, nil
+}
+
+func (m *UI) loadMemorySnapshot() tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		snapshot, loadErr := memoryWorkspace.MemorySnapshot(ctx, sessionID)
+		return memoryLoadedMsg{snapshot: snapshot, err: loadErr}
+	}
+}
+
+func (m *UI) openMemoryDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MemoryID) {
+		m.dialog.BringToFront(dialog.MemoryID)
+	}
+	return m.loadMemorySnapshot()
+}
+
+func (m *UI) rememberMemory(args map[string]string) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	name := strings.TrimSpace(args["name"])
+	content := strings.TrimSpace(args["content"])
+	if name == "" || content == "" {
+		return util.ReportError(errors.New("memory name and content are required"))
+	}
+
+	scope := memory.ScopeGlobal
+	kind := memory.KindUser
+	switch strings.ToLower(strings.TrimSpace(args["scope"])) {
+	case "", string(memory.ScopeGlobal):
+	case string(memory.ScopeProject):
+		scope = memory.ScopeProject
+		kind = memory.KindProject
+	default:
+		return util.ReportError(errors.New("memory scope must be global or project"))
+	}
+
+	input := workspace.MemoryRememberInput{
+		Scope:       scope,
+		Kind:        kind,
+		Name:        name,
+		Description: name,
+		Content:     content,
+		Pinned:      true,
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_, rememberErr := memoryWorkspace.MemoryRemember(ctx, input)
+		return memoryChangedMsg{notice: "Memory saved", err: rememberErr}
+	}
+}
+
+func (m *UI) setMemoryStatus(id string, status memory.Status) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		setErr := memoryWorkspace.MemorySetStatus(ctx, id, status)
+		return memoryChangedMsg{notice: "Memory marked " + string(status), err: setErr}
+	}
+}
+
+func (m *UI) setMemoryPinned(id string, pinned bool) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		setErr := memoryWorkspace.MemorySetPinned(ctx, id, pinned)
+		notice := "Memory unpinned"
+		if pinned {
+			notice = "Memory pinned"
+		}
+		return memoryChangedMsg{notice: notice, err: setErr}
+	}
+}
+
+func (m *UI) setMemoryFeature(feature workspace.MemoryFeature, enabled bool) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		setErr := memoryWorkspace.MemorySetFeature(ctx, feature, enabled)
+		state := "disabled"
+		if enabled {
+			state = "enabled"
+		}
+		return memoryChangedMsg{notice: fmt.Sprintf("Memory %s %s", feature, state), err: setErr}
+	}
+}
+
+func (m *UI) setMemorySessionRecording(sessionID string, enabled bool) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		setErr := memoryWorkspace.MemorySetSessionRecording(ctx, sessionID, enabled)
+		state := "excluded"
+		if enabled {
+			state = "eligible"
+		}
+		return memoryChangedMsg{notice: "This session is now " + state + " for memory recording", err: setErr}
+	}
+}
+
+func (m *UI) maintainMemory() tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, maintainErr := memoryWorkspace.MemoryMaintain(ctx)
+		notice := fmt.Sprintf(
+			"Memory maintenance complete: %d records and %d retrievals pruned",
+			result.RecordsPurged,
+			result.RetrievalsPurged,
+		)
+		return memoryChangedMsg{notice: notice, err: maintainErr}
+	}
+}
+
+// openModesDialog opens the agent mode picker dialog.
+func (m *UI) openModesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ModesID) {
+		m.dialog.BringToFront(dialog.ModesID)
+		return nil
+	}
+
+	m.dialog.OpenDialog(dialog.NewModes(m.com))
 	return nil
 }
 

@@ -96,6 +96,63 @@ func (p *Prompt) Build(ctx context.Context, provider, model string, store *confi
 	return sb.String(), nil
 }
 
+// BuildRecoveryContext returns the bounded project state that must survive a
+// context-overflow retry. It intentionally excludes the normal prompt,
+// provider prefix, skills catalog, git history, and MCP instructions.
+func (p *Prompt) BuildRecoveryContext(store *config.ConfigStore, maxCharacters int) string {
+	if maxCharacters <= 0 {
+		return ""
+	}
+	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
+	platform := cmp.Or(p.platform, runtime.GOOS)
+	cfg := store.Config()
+	if cfg == nil || cfg.Options == nil {
+		return renderRecoveryContext(workingDir, platform, nil, maxCharacters)
+	}
+
+	paths := make([]string, 0, len(cfg.Options.ContextPaths)+len(cfg.Options.GlobalContextPaths))
+	paths = append(paths, cfg.Options.ContextPaths...)
+	paths = append(paths, cfg.Options.GlobalContextPaths...)
+	files := make([]ContextFile, 0, len(paths))
+	seen := make(map[string]bool)
+	for _, path := range paths {
+		expanded := expandPath(path, store)
+		for _, file := range processContextPath(expanded, store) {
+			key := strings.ToLower(filepath.Clean(file.Path))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			files = append(files, file)
+		}
+	}
+	return renderRecoveryContext(workingDir, platform, files, maxCharacters)
+}
+
+func renderRecoveryContext(workingDir, platform string, files []ContextFile, maxCharacters int) string {
+	var builder strings.Builder
+	builder.WriteString("Current working directory: ")
+	builder.WriteString(filepath.ToSlash(workingDir))
+	builder.WriteString("\nHost platform: ")
+	builder.WriteString(platform)
+	builder.WriteString("\nTreat the following bounded context-file excerpts as project instructions.\n")
+	for _, file := range files {
+		builder.WriteString("\n## ")
+		builder.WriteString(filepath.ToSlash(file.Path))
+		builder.WriteString("\n")
+		builder.WriteString(strings.TrimSpace(file.Content))
+		builder.WriteString("\n")
+	}
+
+	runes := []rune(strings.TrimSpace(builder.String()))
+	if len(runes) <= maxCharacters {
+		return string(runes)
+	}
+	marker := []rune("\n[project context truncated]")
+	keep := max(0, maxCharacters-len(marker))
+	return strings.TrimSpace(string(runes[:keep])) + string(marker)
+}
+
 func processFile(filePath string) *ContextFile {
 	content, err := os.ReadFile(filePath)
 	if err != nil {

@@ -75,13 +75,14 @@ func (m *capturingStreamModel) allPromptText() string {
 	return fantasyMessagesText(m.prompts...)
 }
 
-func (m *capturingStreamModel) lastPrompt() []fantasy.Message {
+func (m *capturingStreamModel) promptsSnapshot() [][]fantasy.Message {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.prompts) == 0 {
-		return nil
+	result := make([][]fantasy.Message, len(m.prompts))
+	for i, prompt := range m.prompts {
+		result[i] = cloneFantasyMessages(prompt)
 	}
-	return cloneFantasyMessages(m.prompts[len(m.prompts)-1])
+	return result
 }
 
 func newUserPromptRunner(t *testing.T, cmd string) *hooks.Runner {
@@ -218,7 +219,7 @@ func TestRun_UserPromptSubmitDenyBlocksFoldedQueuedPromptBeforePersistence(t *te
 func TestRun_SystemPromptPrefixMergesIntoSingleSystemMessage(t *testing.T) {
 	t.Parallel()
 	sa, env, model := newPromptHookTestAgent(t, nil)
-	sa.systemPromptPrefix.Set("provider prefix")
+	sa.largePromptPrefix.Set("provider prefix")
 
 	sess, err := env.sessions.Create(t.Context(), "session")
 	require.NoError(t, err)
@@ -227,7 +228,13 @@ func TestRun_SystemPromptPrefixMergesIntoSingleSystemMessage(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	prompt := model.lastPrompt()
+	var prompt []fantasy.Message
+	for _, candidate := range model.promptsSnapshot() {
+		if strings.Contains(fantasyMessagesText(candidate), "provider prefix") {
+			prompt = candidate
+			break
+		}
+	}
 	require.NotEmpty(t, prompt)
 	require.Equal(t, fantasy.MessageRoleSystem, prompt[0].Role)
 

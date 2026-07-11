@@ -46,11 +46,6 @@ var (
 	EmbeddedConfigJSON = ""
 )
 
-const (
-	embeddedLMStudioProviderID   = "tailnet-lmstudio"
-	embeddedLMStudioProviderName = "LM Studio"
-)
-
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -539,6 +534,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
 	}
+	if c.Options.Memory == nil {
+		c.Options.Memory = &MemoryOptions{}
+	}
+	setMemoryDefaults(c.Options.Memory)
 	if len(c.Options.GlobalContextPaths) == 0 {
 		crushConfigDir := filepath.Dir(GlobalConfig())
 		c.Options.GlobalContextPaths = []string{
@@ -628,13 +627,13 @@ func (c *Config) addEmbeddedLMStudioProvider() {
 	if EmbeddedLMStudioBaseURL == "" {
 		return
 	}
-	if _, ok := c.Providers.Get(embeddedLMStudioProviderID); ok {
+	if _, ok := c.Providers.Get(LMStudioProviderID); ok {
 		return
 	}
 	discoverModels := true
-	c.Providers.Set(embeddedLMStudioProviderID, ProviderConfig{
-		ID:                 embeddedLMStudioProviderID,
-		Name:               embeddedLMStudioProviderName,
+	c.Providers.Set(LMStudioProviderID, ProviderConfig{
+		ID:                 LMStudioProviderID,
+		Name:               LMStudioProviderName,
 		BaseURL:            EmbeddedLMStudioBaseURL,
 		APIKey:             EmbeddedLMStudioAPIKey,
 		Type:               catwalk.Type("lmstudio"),
@@ -1078,6 +1077,55 @@ func GlobalConfig() string {
 		return filepath.Join(crushGlobal, fmt.Sprintf("%s.json", appName))
 	}
 	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
+}
+
+// GlobalMemoryDir returns the default cross-project memory directory.
+func GlobalMemoryDir() string {
+	return filepath.Join(filepath.Dir(GlobalConfig()), "memory")
+}
+
+func setMemoryDefaults(options *MemoryOptions) {
+	if options.Enabled == nil {
+		enabled := true
+		options.Enabled = &enabled
+	}
+	if options.RecorderEnabled == nil {
+		enabled := true
+		options.RecorderEnabled = &enabled
+	}
+	if options.RecallEnabled == nil {
+		enabled := true
+		options.RecallEnabled = &enabled
+	}
+	if options.AutoApproveConfidence < 0.60 || options.AutoApproveConfidence > 1 {
+		options.AutoApproveConfidence = 0.88
+	}
+	if options.MaxRecall < 1 || options.MaxRecall > 10 {
+		options.MaxRecall = 5
+	}
+	if options.MaxIndexEntries < 10 || options.MaxIndexEntries > 200 {
+		options.MaxIndexEntries = 80
+	}
+	if options.MaxBackups < 1 || options.MaxBackups > 20 {
+		options.MaxBackups = 5
+	}
+
+	if override := strings.TrimSpace(os.Getenv("CRUSH_MEMORY_DIR")); override != "" {
+		options.Directory = filepath.Clean(home.Long(os.ExpandEnv(override)))
+		return
+	}
+	base := filepath.Dir(GlobalConfig())
+	if options.Directory == "" || filepath.IsAbs(options.Directory) {
+		options.Directory = GlobalMemoryDir()
+		return
+	}
+	candidate := filepath.Clean(filepath.Join(base, options.Directory))
+	relative, err := filepath.Rel(base, candidate)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		options.Directory = GlobalMemoryDir()
+		return
+	}
+	options.Directory = candidate
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the

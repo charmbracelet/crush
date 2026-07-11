@@ -19,6 +19,8 @@ func TestAgentModeFromCommandIsExact(t *testing.T) {
 		{input: " /plan ", want: config.AgentPlan, ok: true},
 		{input: "/build", want: config.AgentCoder, ok: true},
 		{input: "/coder", want: config.AgentCoder, ok: true},
+		{input: "/chat", want: config.AgentCoder, ok: true},
+		{input: "/normal", want: config.AgentCoder, ok: true},
 		{input: "/task", want: config.AgentTask, ok: true},
 		{input: "/review", want: config.AgentReview, ok: true},
 		{input: "plan", ok: false},
@@ -35,7 +37,7 @@ func TestAgentModeFromCommandIsExact(t *testing.T) {
 	}
 }
 
-func TestNextAgentModeCyclesBuildPlanTaskReview(t *testing.T) {
+func TestNextAgentModeCyclesChatPlanTaskReview(t *testing.T) {
 	t.Parallel()
 
 	require.Equal(t, config.AgentPlan, nextAgentMode(config.AgentCoder))

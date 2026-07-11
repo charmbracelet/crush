@@ -376,6 +376,9 @@ func TestE2E_TwoClientsReceiveSameMessage(t *testing.T) {
 	// the temp data directory.
 	wsDataDir := ws.Cfg.Config().Options.DataDirectory
 	backend.SetWorkspaceShutdownFnForTest(ws, func() {
+		if ws.Memory != nil {
+			_ = ws.Memory.Close()
+		}
 		_ = db.Release(wsDataDir)
 	})
 

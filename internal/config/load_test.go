@@ -41,6 +41,18 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestConfig_LoadFromBytesRestoresModeModels(t *testing.T) {
+	loadedConfig, err := loadFromBytes([][]byte{
+		[]byte(`{"mode_models":{"coder":"small"}}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, SelectedModelTypeSmall, loadedConfig.ModeModels[AgentCoder])
+
+	loadedConfig.Options = &Options{}
+	loadedConfig.SetupAgents()
+	require.Equal(t, SelectedModelTypeSmall, loadedConfig.Agents[AgentCoder].Model)
+}
+
 func TestConfig_LoadFromConfigPaths_EmbeddedConfig(t *testing.T) {
 	previous := EmbeddedConfigJSON
 	EmbeddedConfigJSON = `{
@@ -101,7 +113,7 @@ func TestConfig_AddEmbeddedLMStudioProviderUsesDiscoveryOnly(t *testing.T) {
 	cfg.setDefaults(t.TempDir(), "")
 	cfg.addEmbeddedLMStudioProvider()
 
-	provider, ok := cfg.Providers.Get(embeddedLMStudioProviderID)
+	provider, ok := cfg.Providers.Get(LMStudioProviderID)
 	require.True(t, ok)
 	require.Equal(t, "LM Studio", provider.Name)
 	require.Equal(t, "$LM_STUDIO_API_KEY", provider.APIKey)
@@ -766,6 +778,39 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	planAgent, ok := cfg.Agents[AgentPlan]
 	require.True(t, ok)
 	assert.Equal(t, []string{"lsp_diagnostics", "lsp_references", "fetch", "web_fetch", "web_search", "glob", "grep", "ls", "sourcegraph", "todos", "view"}, planAgent.AllowedTools)
+}
+
+func TestConfig_setupAgentsUsesPersistedModeModels(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{},
+		ModeModels: map[string]SelectedModelType{
+			AgentCoder:  SelectedModelTypeSmall,
+			AgentPlan:   SelectedModelTypeSummary,
+			AgentTask:   SelectedModelTypeReview,
+			AgentReview: SelectedModelTypeLarge,
+		},
+	}
+
+	cfg.SetupAgents()
+
+	require.Equal(t, SelectedModelTypeSmall, cfg.Agents[AgentCoder].Model)
+	require.Equal(t, SelectedModelTypeSummary, cfg.Agents[AgentPlan].Model)
+	require.Equal(t, SelectedModelTypeReview, cfg.Agents[AgentTask].Model)
+	require.Equal(t, SelectedModelTypeLarge, cfg.Agents[AgentReview].Model)
+	require.NotEmpty(t, cfg.Agents[AgentPlan].AllowedTools)
+}
+
+func TestConfig_setupAgentsRejectsInvalidModelAssignment(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{},
+		ModeModels: map[string]SelectedModelType{
+			AgentPlan: SelectedModelType("unknown"),
+		},
+	}
+
+	cfg.SetupAgents()
+
+	require.Equal(t, SelectedModelTypeLarge, cfg.Agents[AgentPlan].Model)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {

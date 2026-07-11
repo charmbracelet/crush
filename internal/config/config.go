@@ -59,6 +59,11 @@ const (
 )
 
 const (
+	LMStudioProviderID   = "tailnet-lmstudio"
+	LMStudioProviderName = "LM Studio"
+)
+
+const (
 	AgentCoder  string = "coder"
 	AgentPlan   string = "plan"
 	AgentTask   string = "task"
@@ -192,16 +197,17 @@ const (
 )
 
 type MCPConfig struct {
-	Command       string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
-	Env           map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the MCP server"`
-	Args          []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the MCP server command"`
-	Type          MCPType           `json:"type" jsonschema:"required,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
-	URL           string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
-	Disabled      bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
-	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
-	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
-	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
-	ToolTimeout   int               `json:"tool_timeout,omitempty" jsonschema:"description=Timeout in seconds for individual MCP tool calls,default=60,example=20,example=60,example=120"`
+	Command        string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
+	Env            map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the MCP server"`
+	Args           []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the MCP server command"`
+	Type           MCPType           `json:"type" jsonschema:"required,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
+	URL            string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
+	Disabled       bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
+	DisabledTools  []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
+	EnabledTools   []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
+	Timeout        int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
+	ToolTimeout    int               `json:"tool_timeout,omitempty" jsonschema:"description=Timeout in seconds for individual MCP tool calls,default=60,example=20,example=60,example=120"`
+	PollutesMemory *bool             `json:"pollutes_memory,omitempty" jsonschema:"description=Whether successful tool output can disable passive memory recording when the external-context guard is enabled,default=true"`
 
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
@@ -288,13 +294,14 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
-	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/crush/CRUSH.md,default=~/.config/AGENTS.md"`
-	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
-	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
-	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
-	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	ContextPaths         []string       `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	GlobalContextPaths   []string       `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/crush/CRUSH.md,default=~/.config/AGENTS.md"`
+	SkillsPaths          []string       `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
+	TUI                  *TUIOptions    `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
+	Memory               *MemoryOptions `json:"memory,omitempty" jsonschema:"description=Cross-session memory options"`
+	Debug                bool           `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
+	DebugLSP             bool           `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
+	DisableAutoSummarize bool           `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
 	// DataDirectory is where Crush keeps per-project state such as
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used
@@ -311,6 +318,18 @@ type Options struct {
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
 	NotificationStyle         string       `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+}
+
+type MemoryOptions struct {
+	Enabled                  *bool   `json:"enabled,omitempty" jsonschema:"description=Enable the cross-session memory subsystem,default=true"`
+	RecorderEnabled          *bool   `json:"recorder_enabled,omitempty" jsonschema:"description=Extract durable observations after completed turns,default=true"`
+	RecallEnabled            *bool   `json:"recall_enabled,omitempty" jsonschema:"description=Recall relevant memories for new turns,default=true"`
+	Directory                string  `json:"directory,omitempty" jsonschema:"description=Memory directory relative to the global Crush config directory,default=memory"`
+	AutoApproveConfidence    float64 `json:"auto_approve_confidence,omitempty" jsonschema:"description=Confidence required to activate an automatically extracted memory,minimum=0.6,maximum=1,default=0.88"`
+	MaxRecall                int     `json:"max_recall,omitempty" jsonschema:"description=Maximum detailed memories injected per turn,minimum=1,maximum=10,default=5"`
+	MaxIndexEntries          int     `json:"max_index_entries,omitempty" jsonschema:"description=Maximum memory descriptions considered per turn,minimum=10,maximum=200,default=80"`
+	MaxBackups               int     `json:"max_backups,omitempty" jsonschema:"description=Maximum automatic memory database backups retained,minimum=1,maximum=20,default=5"`
+	DisableOnExternalContext bool    `json:"disable_on_external_context,omitempty" jsonschema:"description=Mark sessions ineligible for passive recording after externally sourced tool output,default=false"`
 }
 
 type MCPs map[string]MCPConfig
@@ -623,6 +642,9 @@ type Config struct {
 	// Recently used models stored in the data directory config.
 	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"-"`
 
+	// Model slot assigned to each interactive agent mode.
+	ModeModels map[string]SelectedModelType `json:"mode_models,omitempty" jsonschema:"description=Model slot assigned to each interactive mode"`
+
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
 
@@ -656,12 +678,17 @@ func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.Models = maps.Clone(c.Models)
 	nc.RecentModels = maps.Clone(c.RecentModels)
+	nc.ModeModels = maps.Clone(c.ModeModels)
 	nc.MCP = maps.Clone(c.MCP)
 	if c.Options != nil {
 		opts := *c.Options
 		if c.Options.TUI != nil {
 			tui := *c.Options.TUI
 			opts.TUI = &tui
+		}
+		if c.Options.Memory != nil {
+			memory := *c.Options.Memory
+			opts.Memory = &memory
 		}
 		nc.Options = &opts
 	}
@@ -866,7 +893,23 @@ func (c *Config) SetupAgents() {
 			AllowedMCP:   map[string][]string{},
 		},
 	}
+
+	for id, agent := range agents {
+		if modelType, ok := c.ModeModels[id]; ok && isSelectedModelType(modelType) {
+			agent.Model = modelType
+			agents[id] = agent
+		}
+	}
 	c.Agents = agents
+}
+
+func isSelectedModelType(modelType SelectedModelType) bool {
+	switch modelType {
+	case SelectedModelTypeLarge, SelectedModelTypeSmall, SelectedModelTypeSummary, SelectedModelTypeReview:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {

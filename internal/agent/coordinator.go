@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -103,23 +105,29 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	SetMemoryOptions(recorderEnabled, recallEnabled bool) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
 
 type coordinator struct {
-	cfg         *config.ConfigStore
-	sessions    session.Service
-	messages    message.Service
-	permissions permission.Service
-	history     history.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
+	cfg            *config.ConfigStore
+	sessions       session.Service
+	messages       message.Service
+	permissions    permission.Service
+	history        history.Service
+	filetracker    filetracker.Service
+	lspManager     *lsp.Manager
+	notify         pubsub.Publisher[notify.Notification]
+	runComplete    pubsub.Publisher[notify.RunComplete]
+	memory         *memory.Store
+	project        memory.Project
+	memoryRecorder bool
+	memoryRecall   bool
 
-	currentAgent   SessionAgent
-	currentAgentID string
-	agents         map[string]SessionAgent
+	currentAgent    SessionAgent
+	currentAgentID  string
+	agents          map[string]SessionAgent
+	agentModelTypes map[string]config.SelectedModelType
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -127,6 +135,17 @@ type coordinator struct {
 	skillTracker *skills.Tracker
 
 	readyWg errgroup.Group
+}
+
+type CoordinatorOption func(*coordinator)
+
+func WithMemory(store *memory.Store, project memory.Project, recorderEnabled, recallEnabled bool) CoordinatorOption {
+	return func(coordinator *coordinator) {
+		coordinator.memory = store
+		coordinator.project = project
+		coordinator.memoryRecorder = recorderEnabled
+		coordinator.memoryRecall = recallEnabled
+	}
 }
 
 func NewCoordinator(
@@ -141,6 +160,7 @@ func NewCoordinator(
 	notify pubsub.Publisher[notify.Notification],
 	runComplete pubsub.Publisher[notify.RunComplete],
 	skillsMgr *skills.Manager,
+	opts ...CoordinatorOption,
 ) (Coordinator, error) {
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
@@ -156,19 +176,23 @@ func NewCoordinator(
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          cfg,
-		sessions:     sessions,
-		messages:     messages,
-		permissions:  permissions,
-		history:      history,
-		filetracker:  filetracker,
-		lspManager:   lspManager,
-		notify:       notify,
-		runComplete:  runComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
+		cfg:             cfg,
+		sessions:        sessions,
+		messages:        messages,
+		permissions:     permissions,
+		history:         history,
+		filetracker:     filetracker,
+		lspManager:      lspManager,
+		notify:          notify,
+		runComplete:     runComplete,
+		agents:          make(map[string]SessionAgent),
+		agentModelTypes: make(map[string]config.SelectedModelType),
+		allSkills:       allSkills,
+		activeSkills:    activeSkills,
+		skillTracker:    skillTracker,
+	}
+	for _, opt := range opts {
+		opt(c)
 	}
 
 	if _, ok := cfg.Config().Agents[config.AgentCoder]; !ok {
@@ -184,14 +208,23 @@ func (c *coordinator) SetMainAgent(ctx context.Context, agentID string) error {
 	if c.currentAgent != nil && c.currentAgent.IsBusy() {
 		return errAgentSwitchWhileBusy
 	}
-	if agent, ok := c.agents[agentID]; ok {
-		c.currentAgent = agent
-		c.currentAgentID = agentID
-		return nil
+	if c.agents == nil {
+		c.agents = make(map[string]SessionAgent)
+	}
+	if c.agentModelTypes == nil {
+		c.agentModelTypes = make(map[string]config.SelectedModelType)
 	}
 	agentCfg, ok := c.cfg.Config().Agents[agentID]
 	if !ok || agentCfg.ID == "" {
 		return fmt.Errorf("%w: %s", errAgentNotConfigured, agentID)
+	}
+	selectedModel := c.cfg.Config().Models[agentCfg.Model]
+	if agent, ok := c.agents[agentID]; ok &&
+		c.agentModelTypes[agentID] == agentCfg.Model &&
+		reflect.DeepEqual(agent.Model().ModelCfg, selectedModel) {
+		c.currentAgent = agent
+		c.currentAgentID = agentID
+		return nil
 	}
 	systemPrompt, err := c.promptForAgent(agentID)
 	if err != nil {
@@ -202,6 +235,7 @@ func (c *coordinator) SetMainAgent(ctx context.Context, agentID string) error {
 		return err
 	}
 	c.agents[agentID] = agent
+	c.agentModelTypes[agentID] = agentCfg.Model
 	c.currentAgent = agent
 	c.currentAgentID = agentID
 	return nil
@@ -649,6 +683,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	if !ok {
 		return nil, errModelProviderNotConfigured
 	}
+	smallProviderCfg, ok := c.cfg.Config().Providers.Get(models.Small.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
 	summaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Summary.ModelCfg.Provider)
 	if !ok {
 		return nil, errModelProviderNotConfigured
@@ -657,26 +695,42 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	if !ok {
 		return nil, errModelProviderNotConfigured
 	}
+	memoryAllowed := !isSubAgent && agent.ID != config.AgentReview
+	disableMemoryOnExternalContext := false
+	if memoryOptions := c.cfg.Config().Options.Memory; memoryOptions != nil {
+		disableMemoryOnExternalContext = memoryOptions.DisableOnExternalContext
+	}
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           models.Primary,
-		SmallModel:           models.Small,
-		SummaryModel:         models.Summary,
-		ReviewModel:          models.Review,
-		SummaryProviderOpts:  getProviderOptions(models.Summary, summaryProviderCfg),
-		ReviewProviderOpts:   getProviderOptions(models.Review, reviewProviderCfg),
-		SystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
-		SystemPrompt:         "",
-		IsSubAgent:           isSubAgent,
-		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
-		AutoReviewEnabled:    agent.ID != config.AgentReview && !isSubAgent,
-		IsYolo:               c.permissions.SkipRequests(),
-		Sessions:             c.sessions,
-		Messages:             c.messages,
-		Tools:                nil,
-		Notify:               c.notify,
-		RunComplete:          c.runComplete,
-		UserPromptHooks:      c.buildHookRunner(hooks.EventUserPromptSubmit, isSubAgent),
-		StopHooks:            c.buildHookRunner(hooks.EventStop, isSubAgent),
+		Models: SessionAgentModels{
+			Large:                     models.Primary,
+			Small:                     models.Small,
+			Summary:                   models.Summary,
+			Review:                    models.Review,
+			SmallProviderOpts:         getProviderOptions(models.Small, smallProviderCfg),
+			SummaryProviderOpts:       getProviderOptions(models.Summary, summaryProviderCfg),
+			ReviewProviderOpts:        getProviderOptions(models.Review, reviewProviderCfg),
+			LargeSystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
+			SmallSystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
+			SummarySystemPromptPrefix: summaryProviderCfg.SystemPromptPrefix,
+			ReviewSystemPromptPrefix:  reviewProviderCfg.SystemPromptPrefix,
+		},
+		SystemPrompt:                   "",
+		IsSubAgent:                     isSubAgent,
+		DisableAutoSummarize:           c.cfg.Config().Options.DisableAutoSummarize,
+		AutoReviewEnabled:              agent.ID != config.AgentReview && !isSubAgent,
+		IsYolo:                         c.permissions.SkipRequests(),
+		Sessions:                       c.sessions,
+		Messages:                       c.messages,
+		Tools:                          nil,
+		Notify:                         c.notify,
+		RunComplete:                    c.runComplete,
+		UserPromptHooks:                c.buildHookRunner(hooks.EventUserPromptSubmit, isSubAgent),
+		StopHooks:                      c.buildHookRunner(hooks.EventStop, isSubAgent),
+		Memory:                         c.memory,
+		MemoryProject:                  c.project,
+		MemoryRecorder:                 c.memoryRecorder && memoryAllowed,
+		MemoryRecall:                   c.memoryRecall && memoryAllowed,
+		MemoryDisableOnExternalContext: disableMemoryOnExternalContext,
 	})
 
 	c.readyWg.Go(func() error {
@@ -685,6 +739,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 			return err
 		}
 		result.SetSystemPrompt(systemPrompt)
+		result.SetRecoveryContext(prompt.BuildRecoveryContext(c.cfg, defaultContextRetryProjectCharacters))
 		return nil
 	})
 
@@ -1228,6 +1283,14 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	largeProviderCfg, ok := c.cfg.Config().Providers.Get(models.Primary.ModelCfg.Provider)
+	if !ok {
+		return errModelProviderNotConfigured
+	}
+	smallProviderCfg, ok := c.cfg.Config().Providers.Get(models.Small.ModelCfg.Provider)
+	if !ok {
+		return errModelProviderNotConfigured
+	}
 	summaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Summary.ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
@@ -1236,20 +1299,37 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	if !ok {
 		return errModelProviderNotConfigured
 	}
-	c.currentAgent.SetModels(
-		models.Primary,
-		models.Small,
-		models.Summary,
-		models.Review,
-		getProviderOptions(models.Summary, summaryProviderCfg),
-		getProviderOptions(models.Review, reviewProviderCfg),
-	)
+	c.currentAgent.SetModels(SessionAgentModels{
+		Large:                     models.Primary,
+		Small:                     models.Small,
+		Summary:                   models.Summary,
+		Review:                    models.Review,
+		SmallProviderOpts:         getProviderOptions(models.Small, smallProviderCfg),
+		SummaryProviderOpts:       getProviderOptions(models.Summary, summaryProviderCfg),
+		ReviewProviderOpts:        getProviderOptions(models.Review, reviewProviderCfg),
+		LargeSystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SmallSystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
+		SummarySystemPromptPrefix: summaryProviderCfg.SystemPromptPrefix,
+		ReviewSystemPromptPrefix:  reviewProviderCfg.SystemPromptPrefix,
+	})
 
 	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}
 	c.currentAgent.SetTools(tools)
+	return nil
+}
+
+func (c *coordinator) SetMemoryOptions(recorderEnabled, recallEnabled bool) error {
+	if c.IsBusy() {
+		return ErrSessionBusy
+	}
+	c.memoryRecorder = recorderEnabled
+	c.memoryRecall = recallEnabled
+	for _, sessionAgent := range c.agents {
+		sessionAgent.SetMemoryOptions(recorderEnabled, recallEnabled)
+	}
 	return nil
 }
 

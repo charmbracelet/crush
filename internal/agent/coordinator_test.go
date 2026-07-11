@@ -32,10 +32,12 @@ func (m *mockSessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
 
 func (m *mockSessionAgent) Model() Model        { return m.model }
 func (m *mockSessionAgent) SummaryModel() Model { return m.model }
-func (m *mockSessionAgent) SetModels(large Model, small Model, summary Model, review Model, summaryProviderOptions fantasy.ProviderOptions, reviewProviderOptions fantasy.ProviderOptions) {
+func (m *mockSessionAgent) SetModels(models SessionAgentModels) {
 }
-func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)  {}
-func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string) {}
+func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)        {}
+func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string)       {}
+func (m *mockSessionAgent) SetRecoveryContext(recoveryContext string) {}
+func (m *mockSessionAgent) SetMemoryOptions(bool, bool)               {}
 func (m *mockSessionAgent) Cancel(sessionID string) {
 	m.cancelled = append(m.cancelled, sessionID)
 }

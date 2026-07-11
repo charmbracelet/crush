@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -431,11 +432,12 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
-		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
-		NewCommandItem(c.com.Styles, "mode_build", "Build Mode", "", ActionSetAgentMode{AgentID: config.AgentCoder}).WithAliases("build", "/build", "coder"),
-		NewCommandItem(c.com.Styles, "mode_plan", "Plan Mode", "", ActionSetAgentMode{AgentID: config.AgentPlan}).WithAliases("plan", "/plan"),
-		NewCommandItem(c.com.Styles, "mode_task", "Task Mode", "", ActionSetAgentMode{AgentID: config.AgentTask}).WithAliases("task", "/task"),
-		NewCommandItem(c.com.Styles, "mode_review", "Review Mode", "", ActionSetAgentMode{AgentID: config.AgentReview}).WithAliases("review", "/review"),
+		NewCommandItem(c.com.Styles, "switch_model", "Model Slots", "ctrl+l", ActionOpenDialog{ModelsID}).WithAliases("switch model", "configure model slots", "models"),
+		NewCommandItem(c.com.Styles, "choose_mode", "Choose Mode", "alt+m", ActionOpenDialog{ModesID}).WithAliases("chat", "/chat", "normal", "build", "/build", "coder", "plan", "/plan", "task", "/task", "review", "/review"),
+		NewCommandItem(c.com.Styles, "configure_lmstudio", "Configure LM Studio", "", ActionOpenLMStudioSetup{}).WithAliases("lm studio", "lmstudio", "local model"),
+	}
+	if _, ok := c.com.Workspace.(workspace.MemoryWorkspace); ok {
+		commands = append(commands, NewCommandItem(c.com.Styles, "memory", "Memory", "", ActionOpenDialog{MemoryID}).WithAliases("memories", "remember", "recall"))
 	}
 
 	// Only show compact command if there's an active session

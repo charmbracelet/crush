@@ -37,6 +37,11 @@ type scrollbarHideMsg struct {
 	seq int // sequence number to ignore stale messages
 }
 
+// sidebarScrollbarHideMsg is sent to hide the sidebar scrollbar after timeout.
+type sidebarScrollbarHideMsg struct {
+	seq int
+}
+
 // scrollbarHideCmd returns a command that sends a scrollbarHideMsg after the timeout.
 func scrollbarHideCmd(seq int) tea.Cmd {
 	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {

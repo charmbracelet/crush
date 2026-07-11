@@ -4,12 +4,12 @@ import (
 	"cmp"
 	"fmt"
 	"image"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/ultraviolet/layout"
 )
 
 // modelInfo renders the current model information including reasoning
@@ -126,8 +126,15 @@ func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skil
 	return maxFiles, maxLSPs, maxMCPs, maxSkills
 }
 
-// sidebar renders the chat sidebar containing session title, working
-// directory, model info, file list, LSP status, and MCP status.
+// sidebarMaxOffset returns the maximum sidebar scroll offset based on
+// the last drawn content height. The value is computed during drawSidebar.
+func (m *UI) sidebarMaxOffset() int {
+	return m.sidebarMaxOffsetVal
+}
+
+// drawSidebar renders the chat sidebar with virtual scrolling and an
+// auto-hiding scrollbar. While the sidebar is focused, the scrollbar stays
+// visible.
 func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	if m.session == nil {
 		return
@@ -162,12 +169,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		blocks...,
 	)
 
-	var remainingHeightArea image.Rectangle
-	layout.Vertical(
-		layout.Len(lipgloss.Height(sidebarHeader)),
-		layout.Fill(1),
-	).Split(m.layout.sidebar).Assign(new(image.Rectangle), &remainingHeightArea)
-	remainingHeight := remainingHeightArea.Dy() - 6
+	// Give a very large available height so all items are rendered.
+	const maxAvailableHeight = 100000
 	filesCount := 0
 	for _, f := range m.sessionFiles {
 		if f.Additions == 0 && f.Deletions == 0 {
@@ -187,29 +190,70 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	skillsCount := len(m.skillStatusItems())
 
-	maxFiles, maxLSPs, maxMCPs, maxSkills := getDynamicHeightLimits(remainingHeight, filesCount, lspsCount, mcpsCount, skillsCount)
+	maxFiles, maxLSPs, maxMCPs, maxSkills := getDynamicHeightLimits(maxAvailableHeight, filesCount, lspsCount, mcpsCount, skillsCount)
 
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
 	skillsSection := m.skillsInfo(width, maxSkills, true)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), width, maxFiles, true)
 
+	// Build the full sidebar content.
+	fullContent := lipgloss.JoinVertical(
+		lipgloss.Left,
+		sidebarHeader,
+		filesSection,
+		"",
+		lspSection,
+		"",
+		mcpSection,
+		"",
+		skillsSection,
+	)
+
+	// Split into lines for virtual scrolling.
+	lines := strings.Split(fullContent, "\n")
+	// Update scrollable flag and store max offset.
+	totalLines := len(lines)
+	m.sidebarScrollable = totalLines > height
+	m.sidebarMaxOffsetVal = max(0, totalLines-height)
+
+	// Clamp sidebarOffset.
+	maxOffset := m.sidebarMaxOffsetVal
+	if m.sidebarOffset > maxOffset {
+		m.sidebarOffset = maxOffset
+	}
+
+	// Slice visible lines.
+	end := min(m.sidebarOffset+height, totalLines)
+	visibleLines := lines[m.sidebarOffset:end]
+	visibleStr := strings.Join(visibleLines, "\n")
+
+	// Determine scrollbar visibility: always visible when focused, otherwise
+	// auto-hide.
+	scrollbarVisible := totalLines > height && (m.sidebarScrollbarVisible || m.focus == uiFocusSidebar)
+
+	// Draw content.
+	contentWidth := width
+	if scrollbarVisible {
+		contentWidth = width - 1
+	}
+
 	uv.NewStyledString(
 		lipgloss.NewStyle().
-			MaxWidth(width).
+			MaxWidth(contentWidth).
 			MaxHeight(height).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					sidebarHeader,
-					filesSection,
-					"",
-					lspSection,
-					"",
-					mcpSection,
-					"",
-					skillsSection,
-				),
-			),
+			Render(visibleStr),
 	).Draw(scr, area)
+
+	// Draw scrollbar if visible.
+	if scrollbarVisible {
+		scrollbar := common.Scrollbar(m.com.Styles, height, totalLines, height, m.sidebarOffset)
+		if scrollbar != "" {
+			scrollbarArea := image.Rectangle{
+				Min: image.Point{X: area.Max.X - 1, Y: area.Min.Y},
+				Max: area.Max,
+			}
+			uv.NewStyledString(scrollbar).Draw(scr, scrollbarArea)
+		}
+	}
 }

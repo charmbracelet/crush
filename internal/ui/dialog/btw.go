@@ -65,6 +65,8 @@ type Btw struct {
 	completionTokens int64
 	pendingQuestion  string
 	viewportDirty    bool
+	rendered         string
+	renderedWidth    int
 
 	keyMap struct {
 		Confirm,
@@ -299,21 +301,14 @@ func (d *Btw) renderAnswer(width int) string {
 	s := d.com.Styles
 	contentWidth := max(10, width-1)
 
-	var content string
-	if d.errText != "" {
-		content = s.Dialog.SecondaryText.Width(contentWidth).Render(d.errText)
-	} else {
-		r := common.MarkdownRenderer(s, contentWidth)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		rendered, err := r.Render(d.answer)
-		mu.Unlock()
-		if err != nil {
-			content = d.answer
-		} else {
-			content = strings.TrimSpace(rendered)
-		}
+	// Draw runs every frame; only re-render markdown when the answer or
+	// the available width changed.
+	if d.viewportDirty || d.renderedWidth != contentWidth {
+		d.rendered = d.renderContent(contentWidth)
+		d.renderedWidth = contentWidth
+		d.viewportDirty = true
 	}
+	content := d.rendered
 
 	contentHeight := lipgloss.Height(content)
 	availableHeight := min(btwMaxViewportHeight, max(3, contentHeight))
@@ -323,9 +318,6 @@ func (d *Btw) renderAnswer(width int) string {
 		viewportWidth = contentWidth - 1
 	}
 
-	if d.viewport.Width() != viewportWidth || d.viewportDirty {
-		d.viewportDirty = true
-	}
 	d.viewport.SetWidth(viewportWidth)
 	d.viewport.SetHeight(availableHeight)
 	if d.viewportDirty {
@@ -339,6 +331,22 @@ func (d *Btw) renderAnswer(width int) string {
 		view = lipgloss.JoinHorizontal(lipgloss.Top, view, sb)
 	}
 	return view
+}
+
+func (d *Btw) renderContent(contentWidth int) string {
+	s := d.com.Styles
+	if d.errText != "" {
+		return s.Dialog.SecondaryText.Width(contentWidth).Render(d.errText)
+	}
+	r := common.MarkdownRenderer(s, contentWidth)
+	mu := common.LockMarkdownRenderer(r)
+	mu.Lock()
+	rendered, err := r.Render(d.answer)
+	mu.Unlock()
+	if err != nil {
+		return d.answer
+	}
+	return strings.TrimSpace(rendered)
 }
 
 func (d *Btw) helpLine() string {

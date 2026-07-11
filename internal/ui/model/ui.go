@@ -705,6 +705,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			commands.SetCustomCommands(m.customCommands)
 		}
 
+	case dialog.SideQuestionResultMsg:
+		// Deliver directly to the btw dialog: another dialog (e.g. a
+		// permission request from the busy agent) may have stacked on top
+		// of it while the answer was in flight, and the overlay's default
+		// routing only reaches the front dialog.
+		if dia := m.dialog.Dialog(dialog.BtwID); dia != nil {
+			dia.HandleMsg(msg)
+		}
+
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
 	case mcpPromptsLoadedMsg:

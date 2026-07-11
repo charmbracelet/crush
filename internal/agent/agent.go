@@ -1224,7 +1224,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 			}
 			finalFinishReason = finishReason
-			currentAssistant.AddFinish(finishReason, "", "")
+			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
+			currentAssistant.AddFinishWithUsage(
+				finishReason,
+				"",
+				"",
+				usage.InputTokens+usage.CacheReadTokens,
+				usage.OutputTokens,
+				estimated,
+			)
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
 
@@ -1232,7 +1240,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if getSessionErr != nil {
 				return getSessionErr
 			}
-			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			extractHyperCredits(stepResult.ProviderMetadata)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
@@ -1266,7 +1273,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return false
 			},
 			func(steps []fantasy.StepResult) bool {
-				if hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
+				if hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) ||
+					hasRepeatedFailureClass(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
 					loopDetected = true
 					slog.Warn("Repeated tool-call loop detected", "session_id", call.SessionID, "steps", len(steps), "max_repeats", loopDetectionMaxRepeats)
 					return true

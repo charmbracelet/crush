@@ -23,17 +23,23 @@ type lmstudioModelsResponse struct {
 
 // lmstudioModelEntry is a single entry from /api/v1/models.
 type lmstudioModelEntry struct {
-	Key              string             `json:"key"`
-	DisplayName      string             `json:"display_name"`
-	MaxContextLength int64              `json:"max_context_length"`
-	Architecture     string             `json:"architecture"`
-	Type             string             `json:"type"`
-	LoadedInstances  []lmstudioInstance `json:"loaded_instances"`
+	Key              string               `json:"key"`
+	DisplayName      string               `json:"display_name"`
+	MaxContextLength int64                `json:"max_context_length"`
+	Architecture     string               `json:"architecture"`
+	Type             string               `json:"type"`
+	Capabilities     lmstudioCapabilities `json:"capabilities"`
+	LoadedInstances  []lmstudioInstance   `json:"loaded_instances"`
+}
+
+type lmstudioCapabilities struct {
+	Vision bool `json:"vision"`
 }
 
 // lmstudioInstance is a currently loaded model instance with its
 // runtime config.
 type lmstudioInstance struct {
+	ID     string                 `json:"id"`
 	Config lmstudioInstanceConfig `json:"config"`
 }
 
@@ -67,6 +73,11 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 	metaByKey := make(map[string]lmstudioModelEntry, len(modelsResp.Models))
 	for _, m := range modelsResp.Models {
 		metaByKey[m.Key] = m
+		for _, instance := range m.LoadedInstances {
+			if instance.ID != "" {
+				metaByKey[instance.ID] = m
+			}
+		}
 	}
 
 	for i := range models {
@@ -93,9 +104,7 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 		if lmstudioSupportsEnableThinking(meta) {
 			models[i].CanReason = true
 		}
-
-		// TODO: populate vision/tool-use flags when catwalk.Model
-		// gains dedicated fields for them.
+		models[i].SupportsImages = meta.Capabilities.Vision
 	}
 
 	return models, nil

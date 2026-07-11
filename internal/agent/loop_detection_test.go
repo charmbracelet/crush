@@ -152,6 +152,19 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 	})
 }
 
+func TestHasRepeatedFailureClass(t *testing.T) {
+	t.Parallel()
+
+	steps := []fantasy.StepResult{
+		makeToolStep("bash", `{"command":"npm view package-a"}`, "npm error code E404\nnpm error 404 Not Found"),
+		makeToolStep("bash", `{"command":"npm view package-b"}`, "npm error code E404\nnpm error 404 Not Found"),
+		makeToolStep("bash", `{"command":"npm view package-c"}`, "npm error code E404\nnpm error 404 Not Found"),
+	}
+	if !hasRepeatedFailureClass(steps, 10, 3) {
+		t.Fatal("expected repeated package-not-found failures to stop the loop")
+	}
+}
+
 func TestGetToolInteractionSignature(t *testing.T) {
 	t.Run("empty content returns empty string", func(t *testing.T) {
 		sig := getToolInteractionSignature(fantasy.ResponseContent{})

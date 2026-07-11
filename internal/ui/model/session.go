@@ -28,6 +28,15 @@ type loadSessionMsg struct {
 	readFiles []string
 }
 
+type sessionUsageLoadedMsg struct {
+	sessionID        string
+	promptTokens     int64
+	completionTokens int64
+	cost             float64
+	estimated        bool
+	err              error
+}
+
 // lspFilePaths returns deduplicated file paths from both modified and read
 // files for starting LSP servers.
 func (msg loadSessionMsg) lspFilePaths() []string {
@@ -93,6 +102,20 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 		}
 	}
 	return tea.Batch(load, m.reportCurrentSession(sessionID))
+}
+
+func (m *UI) refreshSessionUsage(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		current, err := m.com.Workspace.GetSession(context.Background(), sessionID)
+		return sessionUsageLoadedMsg{
+			sessionID:        sessionID,
+			promptTokens:     current.PromptTokens,
+			completionTokens: current.CompletionTokens,
+			cost:             current.Cost,
+			estimated:        current.EstimatedUsage,
+			err:              err,
+		}
+	}
 }
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that

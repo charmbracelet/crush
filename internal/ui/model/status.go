@@ -79,7 +79,7 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	mode := statusModeLabel(s.com.Workspace.AgentMode())
 	s.setHelpWidth(mode)
 	if !s.hideHelp {
-		helpView := s.com.Styles.Status.Help.Render(mode + " | " + s.help.View(s.helpKm))
+		helpView := s.com.Styles.Status.Help.Render(helpWithModePrefix(mode, s.help.View(s.helpKm)))
 		uv.NewStyledString(helpView).Draw(scr, area)
 	}
 
@@ -121,6 +121,15 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, area)
+}
+
+func helpWithModePrefix(mode, helpView string) string {
+	prefix := mode + " | "
+	lines := strings.Split(helpView, "\n")
+	for i := 1; i < len(lines); i++ {
+		lines[i] = strings.Repeat(" ", lipgloss.Width(prefix)) + lines[i]
+	}
+	return prefix + strings.Join(lines, "\n")
 }
 
 func statusModeLabel(agentID string) string {

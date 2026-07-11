@@ -18,6 +18,24 @@ On Windows, settings written by the TUI normally live at
 project-local `.crush/` directory. Use the `crush_info` tool to report active
 and candidate paths before searching manually.
 
+## Safe Editing Workflow
+
+Treat `crush.json` as structured data, even when it is minified onto one line.
+
+1. Use `crush_info` to identify the active file and inspect that exact path.
+2. Parse the complete file as JSON before editing. An empty result from a
+   line-based offset means the requested line does not exist; it does not mean
+   a one-line file is empty.
+3. Preserve unknown fields and all unrelated configuration entries.
+4. Make a backup, apply a structured object mutation, serialize once, and parse
+   the result again before replacing the active file.
+5. Re-read through `crush_info` and distinguish configured entries from clients
+   that actually initialized successfully.
+
+Never concatenate JSON fragments, rewrite the whole file from a partial
+terminal view, use an LSP diagnostic as MCP validation, or accept uncertainty
+that the file is empty over direct parsed evidence.
+
 ## Basic Structure
 
 ```json

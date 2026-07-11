@@ -673,6 +673,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
 
+	case sessionUsageLoadedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		if m.session != nil && m.session.ID == msg.sessionID {
+			m.session.PromptTokens = msg.promptTokens
+			m.session.CompletionTokens = msg.completionTokens
+			m.session.Cost = msg.cost
+			m.session.EstimatedUsage = msg.estimated
+		}
+
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
 		var paths []string
@@ -1387,6 +1399,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	if isEndTurn {
+		cmds = append(cmds, m.refreshSessionUsage(msg.SessionID))
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)

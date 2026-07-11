@@ -55,3 +55,10 @@ func TestStatusModeLabelMakesReadOnlyModeExplicit(t *testing.T) {
 	require.Equal(t, "MODE: REVIEW READ ONLY", statusModeLabel(config.AgentReview))
 	require.Equal(t, "MODE: REVIEW READ ONLY", statusModeLabel(config.AgentPlan))
 }
+
+func TestHelpWithModePrefixAlignsEveryLine(t *testing.T) {
+	t.Parallel()
+
+	got := helpWithModePrefix("MODE: TASK", "tab  focus chat\nctrl+p  commands")
+	require.Equal(t, "MODE: TASK | tab  focus chat\n             ctrl+p  commands", got)
+}

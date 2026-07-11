@@ -298,6 +298,11 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, fmt.Errorf("failed to update models: %w", err)
 	}
 
+	prompt, explicitlyLoaded := injectExplicitSkillInvocations(prompt, c.activeSkills)
+	for _, name := range explicitlyLoaded {
+		c.MarkSkillLoaded(name)
+	}
+
 	model := c.currentAgent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -396,6 +401,49 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		MarkRunCompletePublished(ctx)
 	}
 	return result, originalErr
+}
+
+func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Skill) (string, []string) {
+	if strings.Contains(userPrompt, "<loaded_skill>") {
+		return userPrompt, nil
+	}
+
+	lowerPrompt := strings.ToLower(userPrompt)
+	activationVerbs := []string{"load", "use", "follow", "invoke", "apply"}
+	var loaded []*skills.Skill
+	for _, skill := range activeSkills {
+		if skill == nil || skill.Name == "" || skill.Instructions == "" || skill.DisableModelInvocation {
+			continue
+		}
+		nameAt := strings.Index(lowerPrompt, strings.ToLower(skill.Name))
+		if nameAt < 0 {
+			continue
+		}
+		windowStart := max(0, nameAt-120)
+		windowEnd := min(len(lowerPrompt), nameAt+len(skill.Name)+120)
+		window := lowerPrompt[windowStart:windowEnd]
+		if !slices.ContainsFunc(activationVerbs, func(verb string) bool {
+			return strings.Contains(window, verb)
+		}) {
+			continue
+		}
+		loaded = append(loaded, skill)
+		if len(loaded) == 4 {
+			break
+		}
+	}
+	if len(loaded) == 0 {
+		return userPrompt, nil
+	}
+
+	parts := make([]string, 0, len(loaded)+1)
+	names := make([]string, 0, len(loaded))
+	for _, skill := range loaded {
+		parts = append(parts, skill.FormatInvocation())
+		names = append(names, skill.Name)
+	}
+	parts = append(parts, userPrompt)
+	return strings.Join(parts, "\n\n"), names
 }
 
 // effectiveReasoningEffort returns the reasoning effort to apply for provider calls.

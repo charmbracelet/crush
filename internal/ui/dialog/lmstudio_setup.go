@@ -79,14 +79,14 @@ func NewLMStudioSetup(com *common.Common, isOnboarding bool) (*LMStudioSetup, te
 
 	m.baseURLInput = textinput.New()
 	m.baseURLInput.SetVirtualCursor(false)
-	m.baseURLInput.Placeholder = "http://127.0.0.1:1234/v1"
+	m.baseURLInput.Placeholder = " http://127.0.0.1:1234/v1"
 	m.baseURLInput.SetStyles(com.Styles.TextInput)
 	m.baseURLInput.SetWidth(max(0, innerWidth-1))
 	m.baseURLInput.Focus()
 
 	m.apiKeyInput = textinput.New()
 	m.apiKeyInput.SetVirtualCursor(false)
-	m.apiKeyInput.Placeholder = "API key (optional)"
+	m.apiKeyInput.Placeholder = " API key (optional)"
 	m.apiKeyInput.SetStyles(com.Styles.TextInput)
 	m.apiKeyInput.SetWidth(max(0, innerWidth-1))
 	m.apiKeyInput.Blur()
@@ -321,6 +321,7 @@ func (m *LMStudioSetup) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Configure LM Studio"
+	rc.Gap = 1
 	rc.AddPart(m.introView())
 	rc.AddPart(m.fieldView("Base URL", m.baseURLInput))
 	rc.AddPart(m.fieldView("API Key", m.apiKeyInput))
@@ -380,9 +381,9 @@ func (m *LMStudioSetup) Cursor() *tea.Cursor {
 	}
 
 	cur = InputCursor(m.com.Styles, cur)
-	cur.Y += lipgloss.Height(m.introView()) + 1
+	cur.Y += lipgloss.Height(m.introView()) + 2
 	if m.activeField == lmStudioAPIKeyField {
-		cur.Y += lipgloss.Height(m.fieldView("Base URL", m.baseURLInput))
+		cur.Y += lipgloss.Height(m.fieldView("Base URL", m.baseURLInput)) + 1
 	}
 	return cur
 }

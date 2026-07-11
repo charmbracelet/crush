@@ -122,10 +122,13 @@ type ToolResult struct {
 func (ToolResult) isPart() {}
 
 type Finish struct {
-	Reason  FinishReason `json:"reason"`
-	Time    int64        `json:"time"`
-	Message string       `json:"message,omitempty"`
-	Details string       `json:"details,omitempty"`
+	Reason          FinishReason `json:"reason"`
+	Time            int64        `json:"time"`
+	Message         string       `json:"message,omitempty"`
+	Details         string       `json:"details,omitempty"`
+	InputTokens     int64        `json:"input_tokens,omitempty"`
+	OutputTokens    int64        `json:"output_tokens,omitempty"`
+	EstimatedTokens bool         `json:"estimated_tokens,omitempty"`
 }
 
 func (Finish) isPart() {}
@@ -454,6 +457,10 @@ func (m *Message) Clone() Message {
 }
 
 func (m *Message) AddFinish(reason FinishReason, message, details string) {
+	m.AddFinishWithUsage(reason, message, details, 0, 0, false)
+}
+
+func (m *Message) AddFinishWithUsage(reason FinishReason, message, details string, inputTokens, outputTokens int64, estimated bool) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -461,7 +468,15 @@ func (m *Message) AddFinish(reason FinishReason, message, details string) {
 			break
 		}
 	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix(), Message: message, Details: details})
+	m.Parts = append(m.Parts, Finish{
+		Reason:          reason,
+		Time:            time.Now().Unix(),
+		Message:         message,
+		Details:         details,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		EstimatedTokens: estimated,
+	})
 }
 
 func (m *Message) AddImageURL(url, detail string) {

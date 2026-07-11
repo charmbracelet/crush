@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"strings"
 
 	"charm.land/fantasy"
 )
@@ -37,6 +38,45 @@ func hasRepeatedToolCalls(steps []fantasy.StepResult, windowSize, maxRepeats int
 	}
 
 	return false
+}
+
+// hasRepeatedFailureClass catches strategy loops whose inputs differ while the
+// underlying tool failure remains the same.
+func hasRepeatedFailureClass(steps []fantasy.StepResult, windowSize, maxRepeats int) bool {
+	if len(steps) == 0 || windowSize <= 0 || maxRepeats < 1 {
+		return false
+	}
+	start := max(0, len(steps)-windowSize)
+	counts := make(map[string]int)
+	for _, step := range steps[start:] {
+		for _, result := range step.Content.ToolResults() {
+			class := failureClass(toolResultOutputString(result.Result))
+			if class == "" {
+				continue
+			}
+			counts[class]++
+			if counts[class] >= maxRepeats {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func failureClass(output string) string {
+	s := strings.ToLower(output)
+	switch {
+	case strings.Contains(s, "npm error code e404") || strings.Contains(s, "404 not found"):
+		return "package-not-found"
+	case strings.Contains(s, "executable file not found") || strings.Contains(s, "is not recognized as an internal or external command"):
+		return "executable-not-found"
+	case strings.Contains(s, "syntaxerror:") && strings.Contains(s, "json"):
+		return "invalid-json"
+	case strings.Contains(s, "context deadline exceeded") || strings.Contains(s, "timed out"):
+		return "timeout"
+	default:
+		return ""
+	}
 }
 
 // getToolInteractionSignature computes a hash signature for the tool

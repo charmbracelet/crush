@@ -19,12 +19,25 @@ Do not use filesystem MCP as a broad discovery engine from `/`. For broad host i
 
 ## MCP Workflow
 
-1. List active MCP servers and tools when the tool shape is not already in context.
-2. Read server instructions from initialization output when available.
-3. Inspect tool names, required parameters, optional parameters, and approval behavior.
-4. Prefer MCP resources for read-only structured data when a resource exists.
-5. Authenticate only when the server advertises an auth flow or the user explicitly asks.
-6. Do not guess parameter names. If the schema is unavailable, say so and use a safer native or shell path.
+1. Run `crush_info` first and inventory configured, initialized, and failed
+   servers separately. A connected HTTP server is not an npm package that must
+   be installed again.
+2. List active MCP servers and tools when the tool shape is not already in context.
+3. Read server instructions from initialization output when available.
+4. Inspect tool names, required parameters, optional parameters, and approval behavior.
+5. Prefer MCP resources for read-only structured data when a resource exists.
+6. Authenticate only when the server advertises an auth flow or the user explicitly asks.
+7. Verify the exact package or URL against official documentation or the
+   package registry. Do not infer package names from MCP display names.
+8. Do not guess parameter names. If the schema is unavailable, say so and use a safer native or shell path.
+
+In `crush.json`, the transport key is `type`; valid values are `stdio`, `sse`,
+and `http`. Parse before and after a structured edit, preserve unrelated
+entries, and never use `lsp_diagnostics` as MCP validation. Reload clients and
+report "configured" separately from "initialized".
+
+After three failures with the same error class, stop changing package names.
+Re-check the premise, official server identity, transport, and host requirements.
 
 ## Native Web And Code Search
 

@@ -37,6 +37,9 @@ Thumbs.db
 # Binary output directory
 /bin/
 /dist/
+!/dist/
+/dist/*
+!/dist/README.md
 
 # Local environment variables
 .env

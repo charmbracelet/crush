@@ -23,40 +23,12 @@ func TestRequestDeviceCodeAndPoll(t *testing.T) {
 			"token_endpoint":                "https://auth.x.ai/oauth/token",
 		})
 	})
-	// We rewrite discovery endpoints below via a custom server host that
-	// still ends with .x.ai — for tests we temporarily relax trust by
-	// using the real path pattern on httptest and injecting hosts.
-	// Instead, serve everything on one httptest and override discoveryURL
-	// + trust by returning endpoints on the test server after patching
-	// requireTrusted via discovery that uses x.ai hosts rewritten through
-	// a reverse approach: use httptest and set discovery to return absolute
-	// paths on the same host by temporarily allowing via discoveryURL and
-	// a test-only host check.
-
-	// Simpler: host the discovery doc and intercept with rewritten vars.
-	// We patch discoveryURL and use endpoints that pass trust by pointing
-	// hostnames to auth.x.ai while routing via httptest Transport? Too heavy.
-	// Use unexported-friendly approach: set discoveryURL to test server and
-	// monkey-patch requireTrusted by using endpoints with host x.ai that
-	// we never actually call — instead rewrite httpClient Transport.
-
+	// Discovery returns trusted auth.x.ai endpoints; a rewriteTransport maps
+	// auth.x.ai/x.ai hosts to the httptest server so requireTrusted checks
+	// still pass while requests are routed locally.
 	srv := httptest.NewTLSServer(mux)
 	t.Cleanup(srv.Close)
 
-	// Replace with a server that uses hostname we can trust after fixing
-	// requireTrusted to accept the test server URL scheme http from
-	// httptest — change test to use a full flow with package vars and a
-	// temporary override of discovery that returns srv.URL endpoints,
-	// and override requireTrusted by testing at a higher level with
-	// httpClient only.
-
-	// Re-implement mux with absolute srv URLs and temporarily replace
-	// requireTrustedXAIEndpoint by testing only functions that don't need
-	// it after discovery is injected.
-
-	// Final approach: override discoveryURL and make requireTrusted accept
-	// the test server by using host "auth.x.ai" in discovery while routing
-	// requests through a custom RoundTripper that maps auth.x.ai -> srv.
 	transport := rewriteTransport{base: srv.Client().Transport, target: srv.URL}
 	oldClient := httpClient
 	oldDiscovery := discoveryURL
@@ -70,11 +42,11 @@ func TestRequestDeviceCodeAndPoll(t *testing.T) {
 	mux.HandleFunc("/oauth/device/code", func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"device_code":       "dev-1",
-			"user_code":         "ABCD-1234",
-			"verification_uri":  "https://x.ai/device",
-			"expires_in":        120,
-			"interval":          1,
+			"device_code":      "dev-1",
+			"user_code":        "ABCD-1234",
+			"verification_uri": "https://x.ai/device",
+			"expires_in":       120,
+			"interval":         1,
 		})
 	})
 	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {

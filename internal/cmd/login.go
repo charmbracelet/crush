@@ -273,7 +273,9 @@ func loginOpenAI(c *client.Client, wsID string, force bool) error {
 	}
 
 	if accountID := openaioauth.ChatGPTAccountID(token.AccessToken); accountID != "" {
-		_ = c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.openai.extra_headers.ChatGPT-Account-ID", accountID)
+		if err := c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.openai.extra_headers.ChatGPT-Account-ID", accountID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save ChatGPT account ID: %v\n", err)
+		}
 	}
 
 	fmt.Println()

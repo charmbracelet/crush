@@ -23,7 +23,7 @@ func NewOAuthXAI(
 }
 
 type OAuthXAI struct {
-	deviceCode  *xaioauth.DeviceCode
+	deviceCode *xaioauth.DeviceCode
 	cancelFunc func()
 }
 

@@ -76,6 +76,11 @@ func Run(ctx context.Context, opts Options) error {
 		msgSession: make(map[int64]string),
 	}
 
+	// Discard updates that arrived while the bridge was down BEFORE
+	// announcing startup, so nothing sent after boot can be swallowed
+	// and stale messages are never executed as prompts.
+	offset := b.drainBacklog(ctx)
+
 	if err := b.waitForAgent(ctx); err != nil {
 		return err
 	}
@@ -102,7 +107,7 @@ func Run(ctx context.Context, opts Options) error {
 	}()
 
 	// Update pump runs in this goroutine.
-	b.updatePump(ctx)
+	b.updatePump(ctx, offset)
 
 	// Best-effort shutdown notice.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -193,6 +198,9 @@ func isTopLevelSession(s proto.Session) bool {
 	return true
 }
 
+// refreshTitles updates the title cache. It deliberately does NOT touch
+// b.sessions: that slice mirrors exactly what /sessions last displayed,
+// so /use indices always match what the user saw.
 func (b *bridge) refreshTitles(sessions []proto.Session) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -202,7 +210,6 @@ func (b *bridge) refreshTitles(sessions []proto.Session) {
 		}
 		b.titles[s.ID] = s.Title
 	}
-	b.sessions = sessions
 }
 
 func (b *bridge) knownSession(id string) bool {
@@ -210,6 +217,22 @@ func (b *bridge) knownSession(id string) bool {
 	defer b.mu.Unlock()
 	_, ok := b.titles[id]
 	return ok
+}
+
+// learnSession fetches an unknown session so permission requests that
+// race ahead of their session's created event are not dropped.
+func (b *bridge) learnSession(ctx context.Context, id string) bool {
+	if id == "" {
+		return false
+	}
+	s, err := b.opts.Client.GetSession(ctx, b.opts.Workspace.ID, id)
+	if err != nil || s == nil || !isTopLevelSession(*s) {
+		return false
+	}
+	b.mu.Lock()
+	b.titles[s.ID] = s.Title
+	b.mu.Unlock()
+	return true
 }
 
 func (b *bridge) sessionTitle(id string) string {
@@ -299,19 +322,33 @@ func (b *bridge) sendPlain(ctx context.Context, sessionID, text string) (Message
 
 func (b *bridge) sendHTML(ctx context.Context, sessionID, text string, kb *InlineKeyboardMarkup) (Message, error) {
 	prefix := b.tagPrefix(sessionID)
-	// HTML messages are assumed pre-sized by callers for permission
-	// summaries; still guard with chunking in plain mode if oversized.
 	full := prefix + text
-	if utf16Len(full) > 3900 {
-		// Fall back to plain chunked delivery without keyboard.
-		return b.sendPlain(ctx, sessionID, stripRoughHTML(full))
+	if utf16Len(full) <= 3900 {
+		msg, err := b.tg.sendMessage(ctx, b.opts.ChatID, full, &sendOpts{HTML: true, Keyboard: kb})
+		if err != nil {
+			return Message{}, err
+		}
+		b.recordOutbound(msg.MessageID, sessionID)
+		return msg, nil
 	}
-	msg, err := b.tg.sendMessage(ctx, b.opts.ChatID, full, &sendOpts{HTML: true, Keyboard: kb})
-	if err != nil {
-		return Message{}, err
+	// Oversized (HTML escaping can inflate diffs well past the cap):
+	// fall back to plain chunked delivery, keeping the keyboard on the
+	// final chunk so permission requests stay actionable.
+	chunks := formatChunks(Chunk(stripRoughHTML(full), 3900))
+	var last Message
+	for i, c := range chunks {
+		var opts *sendOpts
+		if i == len(chunks)-1 && kb != nil {
+			opts = &sendOpts{Keyboard: kb}
+		}
+		msg, err := b.tg.sendMessage(ctx, b.opts.ChatID, c, opts)
+		if err != nil {
+			return Message{}, err
+		}
+		last = msg
+		b.recordOutbound(msg.MessageID, sessionID)
 	}
-	b.recordOutbound(msg.MessageID, sessionID)
-	return msg, nil
+	return last, nil
 }
 
 func stripRoughHTML(s string) string {
@@ -328,8 +365,21 @@ func stripRoughHTML(s string) string {
 
 // --- update pump (Telegram → crush) ---
 
-func (b *bridge) updatePump(ctx context.Context) {
-	var offset int64
+// drainBacklog discards updates queued while the bridge was not
+// running and returns the getUpdates offset to start polling from.
+// getUpdates with offset -1 returns only the newest pending update;
+// polling from its ID+1 confirms (drops) it and everything older.
+func (b *bridge) drainBacklog(ctx context.Context) int64 {
+	updates, err := b.tg.getUpdates(ctx, -1, 0)
+	if err != nil || len(updates) == 0 {
+		return 0
+	}
+	last := updates[len(updates)-1].UpdateID
+	slog.Info("Skipped Telegram update backlog", "through_update_id", last)
+	return last + 1
+}
+
+func (b *bridge) updatePump(ctx context.Context, offset int64) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -499,6 +549,10 @@ func (b *bridge) cmdUse(ctx context.Context, args []string) {
 	b.mu.Lock()
 	sessions := b.sessions
 	b.mu.Unlock()
+	if len(sessions) == 0 {
+		_, _ = b.sendPlain(ctx, b.activeSession(), "run /sessions first")
+		return
+	}
 	if n > len(sessions) {
 		_, _ = b.sendPlain(ctx, b.activeSession(), "index out of range; run /sessions first")
 		return
@@ -595,6 +649,11 @@ func (b *bridge) handleCallback(ctx context.Context, cq *CallbackQuery) {
 	if cq.Message != nil {
 		chatID = cq.Message.Chat.ID
 	}
+	// Old keyboards (>48h) arrive without the original message; fall
+	// back to the sender, which equals the chat ID in a private chat.
+	if chatID == 0 {
+		chatID = cq.From.ID
+	}
 	if chatID != b.opts.ChatID {
 		slog.Info("Rejected callback from unauthorized chat", "chat_id", chatID)
 		_ = b.tg.answerCallbackQuery(ctx, cq.ID, "")
@@ -611,20 +670,20 @@ func (b *bridge) handleCallback(ctx context.Context, cq *CallbackQuery) {
 
 	var action proto.PermissionAction
 	var toast string
-	var suffix string
+	var status string
 	switch actionStr {
 	case "allow":
 		action = proto.PermissionAllow
 		toast = "allowed"
-		suffix = "\n\n✅ allowed"
+		status = "✅ allowed"
 	case "allow_session":
 		action = proto.PermissionAllowForSession
 		toast = "allowed for session"
-		suffix = "\n\n✅ allowed for session"
+		status = "✅ allowed for session"
 	case "deny":
 		action = proto.PermissionDeny
 		toast = "denied"
-		suffix = "\n\n🚫 denied"
+		status = "🚫 denied"
 	default:
 		_ = b.tg.answerCallbackQuery(ctx, cq.ID, "unknown action")
 		return
@@ -660,10 +719,7 @@ func (b *bridge) handleCallback(ctx context.Context, cq *CallbackQuery) {
 
 	// Rebuild the original summary and append the decision. We re-render
 	// rather than keeping the original text so we don't need to store it.
-	newText := PermissionSummary(pending.req) + suffix
-	// Prefix session tag if needed (editMessageText has no auto-tag).
-	prefix := b.tagPrefix(pending.req.SessionID)
-	_ = b.tg.editMessageText(ctx, b.opts.ChatID, pending.msgID, prefix+newText, true)
+	b.editPermMessage(ctx, pending.msgID, pending.req, status)
 	_ = b.tg.answerCallbackQuery(ctx, cq.ID, toast)
 }
 
@@ -691,9 +747,12 @@ func (b *bridge) eventPump(ctx context.Context) {
 			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
-		if b.reconnectNotify {
+		b.mu.Lock()
+		wasDown := b.reconnectNotify
+		b.reconnectNotify = false
+		b.mu.Unlock()
+		if wasDown {
 			_, _ = b.sendPlain(ctx, b.activeSession(), "🟢 reconnected to server")
-			b.reconnectNotify = false
 		}
 		backoff = time.Second
 		b.resyncAfterReconnect(ctx)
@@ -716,10 +775,13 @@ func (b *bridge) eventPump(ctx context.Context) {
 }
 
 func (b *bridge) notifyReconnect(ctx context.Context) {
-	if b.reconnectNotify {
+	b.mu.Lock()
+	already := b.reconnectNotify
+	b.reconnectNotify = true
+	b.mu.Unlock()
+	if already {
 		return
 	}
-	b.reconnectNotify = true
 	_, _ = b.sendPlain(ctx, b.activeSession(), "⚠️ lost server connection, reconnecting…")
 }
 
@@ -748,7 +810,7 @@ func (b *bridge) handleEvent(ctx context.Context, ev any) {
 		if e.Type != pubsub.CreatedEvent {
 			return
 		}
-		if !b.knownSession(e.Payload.SessionID) {
+		if !b.knownSession(e.Payload.SessionID) && !b.learnSession(ctx, e.Payload.SessionID) {
 			return
 		}
 		b.showPermissionKeyboard(ctx, e.Payload)
@@ -789,6 +851,13 @@ func (b *bridge) showPermissionKeyboard(ctx context.Context, req proto.Permissio
 }
 
 func (b *bridge) resolvePermByToolCall(ctx context.Context, n proto.PermissionNotification) {
+	// The permission service publishes a notification with neither flag
+	// set as a "request created" hint, on a different broker than the
+	// request event — it can arrive after the keyboard is shown. Only
+	// actual resolutions may expire a pending keyboard.
+	if !n.Granted && !n.Denied {
+		return
+	}
 	b.mu.Lock()
 	var foundID string
 	var found pendingPerm
@@ -806,15 +875,28 @@ func (b *bridge) resolvePermByToolCall(ctx context.Context, n proto.PermissionNo
 	if foundID == "" {
 		return
 	}
-	status := "↩️ already handled elsewhere"
-	if n.Granted {
-		status = "✅ allowed"
-	} else if n.Denied {
+	status := "✅ allowed"
+	if n.Denied {
 		status = "🚫 denied"
 	}
-	newText := PermissionSummary(found.req) + "\n\n" + status
-	prefix := b.tagPrefix(found.req.SessionID)
-	_ = b.tg.editMessageText(ctx, b.opts.ChatID, found.msgID, prefix+newText, true)
+	b.editPermMessage(ctx, found.msgID, found.req, status)
+}
+
+// editPermMessage rewrites a permission message with its final status,
+// falling back to plain text when the HTML rendering is oversized or
+// rejected by Telegram.
+func (b *bridge) editPermMessage(ctx context.Context, msgID int64, req proto.PermissionRequest, status string) {
+	text := b.tagPrefix(req.SessionID) + PermissionSummary(req) + "\n\n" + status
+	if utf16Len(text) <= 3900 {
+		if err := b.tg.editMessageText(ctx, b.opts.ChatID, msgID, text, true); err == nil {
+			return
+		}
+	}
+	plain := stripRoughHTML(text)
+	if utf16Len(plain) > 3900 {
+		plain = TruncateMiddle(plain, 1900)
+	}
+	_ = b.tg.editMessageText(ctx, b.opts.ChatID, msgID, plain, false)
 }
 
 func (b *bridge) handleRunComplete(ctx context.Context, rc proto.RunComplete) {

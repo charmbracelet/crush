@@ -65,13 +65,15 @@ func (a *api) call(ctx context.Context, method string, payload, result any) erro
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if err != nil {
-			return fmt.Errorf("telegram %s: build request: %w", method, err)
+			return a.redact(method, err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 
 		rsp, err := a.client.Do(req)
 		if err != nil {
-			return fmt.Errorf("telegram %s: %w", method, err)
+			// Transport errors are *url.Error values whose text embeds
+			// the request URL, token included — redact before wrapping.
+			return a.redact(method, err)
 		}
 		raw, readErr := io.ReadAll(rsp.Body)
 		rsp.Body.Close()
@@ -99,6 +101,17 @@ func (a *api) call(ctx context.Context, method string, payload, result any) erro
 		return nil
 	}
 	return fmt.Errorf("telegram %s: exhausted retries", method)
+}
+
+// redact strips the bot token from an error's text so it never leaks
+// into logs or user-facing messages. The %w chain is intentionally
+// dropped: callers only log or display these errors.
+func (a *api) redact(method string, err error) error {
+	msg := err.Error()
+	if a.token != "" {
+		msg = strings.ReplaceAll(msg, a.token, "[redacted]")
+	}
+	return fmt.Errorf("telegram %s: %s", method, msg)
 }
 
 // User is a Telegram user.

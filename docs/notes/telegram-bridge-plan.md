@@ -15,7 +15,7 @@ consistent with the patterns in `internal/cmd/run.go`.
 
 ## 1. Architecture overview
 
-Crush already has a client/server split (gated by env `CRUSH_CLIENT_SERVER=1`):
+Crush has a client/server split (default on; set `CRUSH_CLIENT_SERVER=0` for legacy local mode):
 `crush server` exposes workspaces/sessions/agent/permissions over HTTP on a
 unix socket, and the TUI / `crush run` are just clients. The bridge is
 **another client process** — zero changes to the server, TUI, or agent.
@@ -718,7 +718,7 @@ Commit each milestone separately with the given message.
   as binary parts — `internal/proto/message.go:529-539`).
   Commit: `feat(telegram): photo attachments`
 - **M8** — `docs/notes/telegram-bridge.md`: BotFather setup, getting the chat
-  ID, env vars, `CRUSH_CLIENT_SERVER=1` requirement for TUI co-watching,
+  ID, env vars, TUI co-watching (client/server is default),
   security notes (§9). Commit: `docs: telegram bridge setup guide`
 - **M9 (optional, future)** — forum-topics mode: in a supergroup with topics
   enabled, map one topic per session (`createForumTopic`; carry
@@ -737,7 +737,8 @@ export CRUSH_TELEGRAM_CHAT_ID=7654321
 cd ~/some/project
 crush telegram          # auto-spawns the server if needed
 # in Telegram: /status, then a prompt, watch permission keyboard appear.
-# Optionally run the TUI against the same server: CRUSH_CLIENT_SERVER=1 crush
+# TUI in the same project attaches to the same server by default:
+# crush
 ```
 
 ---
@@ -769,6 +770,9 @@ crush telegram          # auto-spawns the server if needed
 - [ ] `SubscribeEvents` channel close ≠ error — it's the disconnect signal;
       loop and resubscribe.
 - [ ] `GrantPermission` returning `false` = already resolved, not an error.
+- [ ] `PermissionNotification` with `Granted=false, Denied=false` is a
+      "request created" hint (published on a different broker, may arrive
+      after the request event) — never treat it as a resolution.
 - [ ] No permission-cancel event exists — expire keyboards on RunComplete.
 - [ ] `proto.Session.IsBusy` is zero on SSE events; only trust REST reads.
 - [ ] Prompts sent while busy are queued server-side — surface that to the user.

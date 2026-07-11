@@ -178,3 +178,17 @@ func TestSendMessageOpts(t *testing.T) {
 	require.NotNil(t, body["reply_markup"])
 	require.NotNil(t, body["link_preview_options"])
 }
+
+// Transport errors wrap *url.Error, whose text contains the request URL
+// including the token; redaction must keep it out of logs.
+func TestTransportErrorRedactsToken(t *testing.T) {
+	t.Parallel()
+	const token = "123456:SECRET-abcdef"
+	a := newAPI(token, "http://127.0.0.1:1")
+	a.client.Timeout = 500 * time.Millisecond
+
+	_, err := a.getMe(context.Background())
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), token)
+	require.NotContains(t, err.Error(), "SECRET")
+}

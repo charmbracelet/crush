@@ -90,6 +90,18 @@ func (f *crushFake) start(t *testing.T) *httptest.Server {
 		f.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(s)
 	})
+	mux.HandleFunc("GET "+prefix+"/sessions/{sid}", func(w http.ResponseWriter, r *http.Request) {
+		sid := r.PathValue("sid")
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, s := range f.sessions {
+			if s.ID == sid {
+				_ = json.NewEncoder(w).Encode(s)
+				return
+			}
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	})
 	mux.HandleFunc("GET "+prefix+"/agent/sessions/{sid}", func(w http.ResponseWriter, r *http.Request) {
 		sid := r.PathValue("sid")
 		f.mu.Lock()
@@ -950,4 +962,184 @@ switched:
 	}
 	require.Equal(t, "plain to active", plain.Prompt)
 	require.Equal(t, "sess-active", plain.SessionID)
+}
+
+// The permission service publishes a PermissionNotification with neither
+// flag set as a "request created" hint; it must not expire the keyboard.
+func TestBridgeIgnoresRequestedNotification(t *testing.T) {
+	t.Parallel()
+	const chatID int64 = 42
+	cf, tg, cancel := startBridge(t, chatID)
+	defer cancel()
+
+	req := proto.PermissionRequest{
+		ID:         "cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee",
+		SessionID:  "sess-active",
+		ToolCallID: "tc-hint",
+		ToolName:   "bash",
+		Params:     proto.BashPermissionsParams{Command: "echo hi"},
+	}
+	cf.pushEvent(t, pubsub.PayloadTypePermissionRequest, pubsub.Event[proto.PermissionRequest]{
+		Type:    pubsub.CreatedEvent,
+		Payload: req,
+	})
+	waitKeyboard(t, tg)
+
+	// The created-hint notification: both flags false.
+	cf.pushEvent(t, pubsub.PayloadTypePermissionNotification, pubsub.Event[proto.PermissionNotification]{
+		Type:    pubsub.CreatedEvent,
+		Payload: proto.PermissionNotification{ToolCallID: "tc-hint"},
+	})
+	time.Sleep(300 * time.Millisecond)
+
+	tg.mu.Lock()
+	edits := len(tg.edits)
+	tg.mu.Unlock()
+	require.Zero(t, edits, "created-hint notification must not edit the keyboard")
+
+	// The keyboard must still be actionable.
+	tg.pushUpdate(Update{
+		UpdateID: 2,
+		CallbackQuery: &CallbackQuery{
+			ID:      "cb-hint",
+			From:    User{ID: chatID},
+			Message: &Message{MessageID: 2, Chat: Chat{ID: chatID}},
+			Data:    "perm:" + req.ID + ":allow",
+		},
+	})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		cf.mu.Lock()
+		n := len(cf.grantPosts)
+		cf.mu.Unlock()
+		if n > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected grant after callback; pending keyboard was lost")
+}
+
+// Escaped HTML can exceed Telegram's size cap; the fallback must keep
+// the approval keyboard attached (on the final plain chunk).
+func TestBridgeOversizedPermissionKeepsKeyboard(t *testing.T) {
+	t.Parallel()
+	const chatID int64 = 42
+	cf, tg, cancel := startBridge(t, chatID)
+	defer cancel()
+
+	req := proto.PermissionRequest{
+		ID:         "dddddddd-bbbb-cccc-dddd-eeeeeeeeeeee",
+		SessionID:  "sess-active",
+		ToolCallID: "tc-big",
+		ToolName:   "bash",
+		// 1200 '<' truncate to 1000 and escape to ~4000 chars — over the cap.
+		Params: proto.BashPermissionsParams{Command: strings.Repeat("<", 1200)},
+	}
+	cf.pushEvent(t, pubsub.PayloadTypePermissionRequest, pubsub.Event[proto.PermissionRequest]{
+		Type:    pubsub.CreatedEvent,
+		Payload: req,
+	})
+
+	kbBody := waitKeyboard(t, tg)
+	require.Nil(t, kbBody["parse_mode"], "oversized fallback must be plain text")
+
+	// And the keyboard must resolve normally.
+	tg.pushUpdate(Update{
+		UpdateID: 2,
+		CallbackQuery: &CallbackQuery{
+			ID:      "cb-big",
+			From:    User{ID: chatID},
+			Message: &Message{MessageID: 2, Chat: Chat{ID: chatID}},
+			Data:    "perm:" + req.ID + ":deny",
+		},
+	})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		cf.mu.Lock()
+		n := len(cf.grantPosts)
+		cf.mu.Unlock()
+		if n > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected grant after callback on oversized keyboard")
+}
+
+// /use must index into exactly the list /sessions displayed — never a
+// list the user has not seen.
+func TestBridgeUseRequiresSessionsList(t *testing.T) {
+	t.Parallel()
+	const chatID int64 = 42
+	cf, tg, cancel := startBridge(t, chatID)
+	defer cancel()
+
+	tg.pushUpdate(Update{
+		UpdateID: 1,
+		Message:  &Message{MessageID: 100, Chat: Chat{ID: chatID}, Text: "/use 1"},
+	})
+	texts := tg.waitSent(t, 2, 3*time.Second)
+	require.Contains(t, texts[len(texts)-1], "run /sessions first")
+
+	tg.pushUpdate(Update{
+		UpdateID: 2,
+		Message:  &Message{MessageID: 101, Chat: Chat{ID: chatID}, Text: "/sessions"},
+	})
+	tg.waitSent(t, 3, 3*time.Second)
+
+	// Displayed order is UpdatedAt desc: 1=active, 2=other.
+	tg.pushUpdate(Update{
+		UpdateID: 3,
+		Message:  &Message{MessageID: 102, Chat: Chat{ID: chatID}, Text: "/use 2"},
+	})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, tx := range tg.sentTexts() {
+			if strings.Contains(tx, "active session: other") {
+				goto prompt
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected switch to session 'other'")
+
+prompt:
+	tg.pushUpdate(Update{
+		UpdateID: 4,
+		Message:  &Message{MessageID: 103, Chat: Chat{ID: chatID}, Text: "go"},
+	})
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		cf.mu.Lock()
+		if len(cf.agentPosts) > 0 {
+			post := cf.agentPosts[len(cf.agentPosts)-1]
+			cf.mu.Unlock()
+			require.Equal(t, "sess-other", post.SessionID)
+			return
+		}
+		cf.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected prompt POST to sess-other")
+}
+
+// waitKeyboard waits for a sent message carrying an inline keyboard and
+// returns its request body.
+func waitKeyboard(t *testing.T, tg *tgFake) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		tg.mu.Lock()
+		for _, s := range tg.sent {
+			if s.body["reply_markup"] != nil {
+				tg.mu.Unlock()
+				return s.body
+			}
+		}
+		tg.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected a keyboard message")
+	return nil
 }

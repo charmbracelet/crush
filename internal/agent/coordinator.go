@@ -174,7 +174,13 @@ func NewCoordinator(
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	// A2UI is on unless the user disables it; see prompt.WithA2UI for the
+	// host-capability trade-off.
+	promptOpts := []prompt.Option{prompt.WithWorkingDir(c.cfg.WorkingDir())}
+	if !cfg.Config().Options.DisableA2UI {
+		promptOpts = append(promptOpts, prompt.WithA2UI())
+	}
+	prompt, err := coderPrompt(promptOpts...)
 	if err != nil {
 		return nil, err
 	}

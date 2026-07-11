@@ -36,15 +36,27 @@ client-server mode).
 
 ### Co-watch with the TUI
 
+By default the interactive TUI also uses client/server mode, so starting
+it in the same project attaches to the same server the bridge uses:
+
 ```sh
 # terminal 1
 crush telegram
 
-# terminal 2 — attach the TUI to the same server
-CRUSH_CLIENT_SERVER=1 crush
+# terminal 2 — same project directory
+crush
 ```
 
-Permissions approved in either place resolve for both.
+Open the same session the bridge is on (`/sessions` / `/use` in Telegram,
+or the session picker in the TUI). Permissions approved in either place
+resolve for both.
+
+To force the legacy in-process TUI (no live sync with the bridge):
+
+```sh
+CRUSH_CLIENT_SERVER=0 crush
+```
+
 
 ## Commands (in Telegram)
 

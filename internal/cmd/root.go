@@ -210,11 +210,26 @@ func supportsProgressBar() bool {
 	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "iterm2", "rio")
 }
 
-// useClientServer returns true when the client/server architecture is
-// enabled via the CRUSH_CLIENT_SERVER environment variable.
+// useClientServer reports whether the client/server architecture should
+// be used for the interactive TUI and crush run.
+//
+// Default is on so multiple clients (TUI, telegram, run) share one
+// server and stay live-synced on the same session. Set
+// CRUSH_CLIENT_SERVER=0 (or "false") to force the legacy in-process
+// local workspace. Explicit CRUSH_CLIENT_SERVER=1 keeps the previous
+// opt-in behavior for scripts that already set it.
 func useClientServer() bool {
-	v, _ := strconv.ParseBool(os.Getenv("CRUSH_CLIENT_SERVER"))
-	return v
+	v, ok := os.LookupEnv("CRUSH_CLIENT_SERVER")
+	if !ok || strings.TrimSpace(v) == "" {
+		return true
+	}
+	enabled, err := strconv.ParseBool(v)
+	if err != nil {
+		// Unparseable values keep the default (on) so a typo does not
+		// silently drop users into unsynced local mode.
+		return true
+	}
+	return enabled
 }
 
 // setupWorkspaceWithProgressBar wraps setupWorkspace with an optional
@@ -234,10 +249,10 @@ func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, fun
 	return ws, cleanup, err
 }
 
-// setupWorkspace returns a Workspace and cleanup function. When
-// CRUSH_CLIENT_SERVER=1, it connects to a server process and returns a
-// ClientWorkspace. Otherwise it creates an in-process app.App and
-// returns an AppWorkspace.
+// setupWorkspace returns a Workspace and cleanup function. By default
+// it connects to a server process (auto-started if needed) and returns
+// a ClientWorkspace so concurrent clients share live session state.
+// Set CRUSH_CLIENT_SERVER=0 to use the legacy in-process AppWorkspace.
 func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	if useClientServer() {
 		return setupClientServerWorkspace(cmd)

@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
@@ -354,7 +355,7 @@ func (a *sessionAgent) selectMemoryIDs(ctx context.Context, query string, manife
 	defer selectorCancel()
 	result, err := selector.Generate(selectorCtx, fantasy.AgentCall{
 		Prompt:          fmt.Sprintf("Maximum selections: %d\n\nUser request:\n%s\n\nManifest:\n%s", maxRecall-len(selected), query, manifestJSON),
-		ProviderOptions: a.smallProviderOpts.Get(),
+		ProviderOptions: withoutThinking(a.smallProviderOpts.Get()),
 		Temperature:     &zero,
 		MaxOutputTokens: &maxOutput,
 	})
@@ -374,6 +375,29 @@ func (a *sessionAgent) selectMemoryIDs(ctx context.Context, query string, manife
 		}
 	}
 	return selected, false
+}
+
+func withoutThinking(options fantasy.ProviderOptions) fantasy.ProviderOptions {
+	result := cloneProviderOptions(options)
+	if result == nil {
+		return nil
+	}
+	providerOptions, ok := result[openaicompat.Name].(*openaicompat.ProviderOptions)
+	if !ok {
+		return result
+	}
+	extraBody := providerOptions.ExtraBody
+	clonedBody := make(map[string]any, len(extraBody))
+	for key, value := range extraBody {
+		clonedBody[key] = value
+	}
+	if _, configured := clonedBody["enable_thinking"]; configured {
+		clonedBody["enable_thinking"] = false
+	}
+	clonedOptions := *providerOptions
+	clonedOptions.ExtraBody = clonedBody
+	result[openaicompat.Name] = &clonedOptions
+	return result
 }
 
 func memoryTranscript(messages []message.Message, cursor memory.Cursor) ([]memoryTranscriptEntry, memory.Cursor) {

@@ -790,7 +790,7 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
-		"crush_info",
+		"recode_info",
 		"crush_logs",
 		"job_output",
 		"job_list",

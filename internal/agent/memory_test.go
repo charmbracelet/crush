@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/memory"
@@ -191,6 +193,26 @@ func TestDecodeMemoryJSONStripsReasoningTags(t *testing.T) {
 	err := decodeMemoryJSON("<think>private reasoning</think>\n```json\n{\"selected_ids\":[\"abc\"]}\n```", &selection)
 	require.NoError(t, err)
 	require.Equal(t, []string{"abc"}, selection.SelectedIDs)
+}
+
+func TestWithoutThinkingPreservesOptionsAndDisablesConfiguredThinking(t *testing.T) {
+	t.Parallel()
+
+	original := fantasy.ProviderOptions{
+		openaicompat.Name: &openaicompat.ProviderOptions{
+			ExtraBody: map[string]any{
+				"enable_thinking": true,
+				"custom":          "value",
+			},
+		},
+	}
+
+	result := withoutThinking(original)
+	resultOptions := result[openaicompat.Name].(*openaicompat.ProviderOptions)
+	require.Equal(t, false, resultOptions.ExtraBody["enable_thinking"])
+	require.Equal(t, "value", resultOptions.ExtraBody["custom"])
+	originalOptions := original[openaicompat.Name].(*openaicompat.ProviderOptions)
+	require.Equal(t, true, originalOptions.ExtraBody["enable_thinking"], "must not mutate shared provider options")
 }
 
 func TestScheduledMemoryRecorderRunsOnlyWhenSessionIsIdle(t *testing.T) {

@@ -12,6 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestUnsafeCrushConfigTextEdit(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.EditToolName, Input: `{"file_path":"C:\\Users\\me\\AppData\\Local\\crush\\crush.json"}`}))
+	require.True(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.MultiEditToolName, Input: `{"file_path":".crush.json"}`}))
+	require.False(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.EditToolName, Input: `{"file_path":"main.go"}`}))
+}
+
 // fakeTool records the context it was invoked with so tests can assert on
 // values stamped onto it by the hookedTool decorator.
 type fakeTool struct {

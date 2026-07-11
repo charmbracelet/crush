@@ -1,4 +1,4 @@
-Get Crush's current runtime state: active model, provider, LSP/MCP status, skills, hooks, permissions, and disabled tools. No parameters needed.
+Get re.code's current runtime state: active model, provider, LSP/MCP status, skills, hooks, permissions, and disabled tools. No parameters needed.
 
 <usage>
 - Shows active model and provider, LSP/MCP server status, skills,

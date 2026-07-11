@@ -11,7 +11,7 @@ import (
 
 const (
 	loopDetectionWindowSize = 10
-	loopDetectionMaxRepeats = 3
+	loopDetectionMaxRepeats = 2
 )
 
 // hasRepeatedToolCalls checks whether the agent is stuck in a loop by looking
@@ -49,11 +49,13 @@ func hasRepeatedFailureClass(steps []fantasy.StepResult, windowSize, maxRepeats 
 	start := max(0, len(steps)-windowSize)
 	counts := make(map[string]int)
 	for _, step := range steps[start:] {
+		seenThisStep := make(map[string]bool)
 		for _, result := range step.Content.ToolResults() {
 			class := failureClass(toolResultOutputString(result.Result))
-			if class == "" {
+			if class == "" || seenThisStep[class] {
 				continue
 			}
+			seenThisStep[class] = true
 			counts[class]++
 			if counts[class] >= maxRepeats {
 				return true

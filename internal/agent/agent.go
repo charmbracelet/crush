@@ -115,6 +115,18 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+	// TransientContext is model-visible context that must not be persisted as
+	// a user message. Skill bodies and internal guidance use this channel.
+	TransientContext string
+	// toolProtocolRetry prevents repeated retries when a model prints a tool
+	// envelope as text instead of using the provider's native tool-call field.
+	toolProtocolRetry bool
+	// recoveryAttempted bounds Review -> Task recovery to one handoff per
+	// admitted user intent.
+	recoveryAttempted bool
+	// idleContinuationCount bounds automatic continuation when a model
+	// announces its next action but ends the turn without calling a tool.
+	idleContinuationCount int
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -877,6 +889,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	call = admitted.call
 	outboundPrompt := admitted.modelPrompt
+	if call.TransientContext != "" {
+		outboundPrompt = call.TransientContext + "\n\n" + outboundPrompt
+	}
 
 	var wg sync.WaitGroup
 	shouldGenerateTitle := !call.skipUserMessage && !hasUserTextMessage(msgs)
@@ -1065,7 +1080,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				if _, createErr := a.createUserMessage(callContext, admittedQueued.call); createErr != nil {
 					return callContext, prepared, createErr
 				}
-				prepared.Messages = append(prepared.Messages, userPromptToAIMessage(admittedQueued.modelPrompt, admittedQueued.call.Attachments))
+				queuedPrompt := admittedQueued.modelPrompt
+				if admittedQueued.call.TransientContext != "" {
+					queuedPrompt = admittedQueued.call.TransientContext + "\n\n" + queuedPrompt
+				}
+				prepared.Messages = append(prepared.Messages, userPromptToAIMessage(queuedPrompt, admittedQueued.call.Attachments))
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
@@ -1440,23 +1459,32 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID); summarizeErr != nil {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = []SessionAgentCall{}
+		}
+		call.Prompt = fmt.Sprintf("Continue the interrupted task using the summary. Preserve the user's intent: %s", call.Prompt)
+		call.Accepted = a.BeginAccepted(call.SessionID)
+		call.skipUserMessage = true
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{call}, existing...))
+		if summarizeErr := a.summarize(genCtx, call.SessionID, false); summarizeErr != nil {
 			return nil, summarizeErr
 		}
-		// If the agent wasn't done...
-		if len(currentAssistant.ToolCalls()) > 0 {
-			existing, ok := a.messageQueue.Get(call.SessionID)
-			if !ok {
-				existing = []SessionAgentCall{}
-			}
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			existing = append(existing, call)
-			a.messageQueue.Set(call.SessionID, existing)
-		}
-	} else if loopDetected && a.autoReviewEnabled {
+	} else if loopDetected && a.autoReviewEnabled && !call.recoveryAttempted {
 		a.activeRequests.Del(call.SessionID)
 		cancel()
-		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn was stopped after repeating the same tool call without making progress. Identify the failed assumption and recommend a different grounded approach.", false); reviewErr != nil {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.Prompt = recoveryPrompt(call.Prompt, "The previous strategy repeatedly produced the same failure class. Use the automatic review, choose a materially different grounded approach, and do not retry disproven commands. If the failure concerns an external package, command, API, model, version, or server identity, use native web_search or official documentation before another shell attempt.")
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		retry.recoveryAttempted = true
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn was stopped after repeated failures without progress. Identify the failed assumption and a materially different grounded approach.", true); reviewErr != nil {
 			slog.Error("Failed to auto-review repeated tool-call loop", "error", reviewErr)
 		}
 	} else if a.shouldAutoReviewMaxTokens(finalFinishReason) {
@@ -1464,6 +1492,43 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		cancel()
 		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn stopped because it reached the maximum output token limit.", false); reviewErr != nil {
 			slog.Error("Failed to auto-review max-token turn", "error", reviewErr)
+		}
+	} else if currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && !call.toolProtocolRetry && printedToolEnvelope(currentAssistant.Content().String()) {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.Prompt = recoveryPrompt(call.Prompt, "Your previous response printed a tool-call JSON envelope as text, so nothing executed. Reassess the plan, then invoke registered tools through the native tool-call mechanism. Do not print tool-call JSON or repeat disproven package names.")
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		retry.toolProtocolRetry = true
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+		slog.Warn("Printed tool envelope detected; scheduling one protocol retry", "session_id", call.SessionID)
+	} else if currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && announcedPendingAction(currentAssistant.Content().String()) {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		if call.idleContinuationCount < 2 {
+			retry.Prompt = recoveryPrompt(call.Prompt, "You announced a next action but ended the turn without executing it. Execute that action now using the appropriate registered tool. Do not narrate another future action.")
+			retry.idleContinuationCount++
+			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+			slog.Warn("Incomplete announced action detected; scheduling continuation", "session_id", call.SessionID, "attempt", retry.idleContinuationCount)
+		} else if a.autoReviewEnabled && !call.recoveryAttempted {
+			retry.Prompt = recoveryPrompt(call.Prompt, "The model repeatedly announced actions without executing them. Use the automatic review to choose a concrete tool-first recovery and continue without narration-only turns.")
+			retry.recoveryAttempted = true
+			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+			a.activeRequests.Del(call.SessionID)
+			cancel()
+			if reviewErr := a.autoReview(ctx, call.SessionID, "The Task agent repeatedly announced a next action but ended without invoking a tool. Identify one concrete tool-first recovery.", true); reviewErr != nil {
+				slog.Error("Failed to auto-review incomplete action loop", "error", reviewErr)
+			}
 		}
 	}
 
@@ -1589,6 +1654,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
+	return a.summarize(ctx, sessionID, true)
+}
+
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, resumeLastIntent bool) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
@@ -1609,6 +1678,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 	if len(msgs) == 0 {
 		// Nothing to summarize.
 		return nil
+	}
+	lastIntent := ""
+	if resumeLastIntent {
+		lastIntent = lastUserIntent(msgs)
 	}
 
 	aiMsgs, _ := a.preparePrompt(msgs, summaryModel.CatwalkCfg.SupportsImages)
@@ -1719,13 +1792,92 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
 
 	// Process any messages that were queued while summarizing.
 	queuedMessages, ok := a.messageQueue.Get(sessionID)
-	if !ok || len(queuedMessages) == 0 {
+	if !ok {
+		queuedMessages = nil
+	}
+	if lastIntent != "" {
+		continuation := SessionAgentCall{
+			SessionID:       sessionID,
+			Prompt:          fmt.Sprintf("Continue the task from the summary. Preserve the user's latest intent: %s", lastIntent),
+			Accepted:        a.BeginAccepted(sessionID),
+			skipUserMessage: true,
+		}
+		queuedMessages = append([]SessionAgentCall{continuation}, queuedMessages...)
+		a.messageQueue.Set(sessionID, queuedMessages)
+	}
+	if len(queuedMessages) == 0 {
 		return nil
 	}
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
+}
+
+func lastUserIntent(msgs []message.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i]
+		if msg.Role != message.User || msg.IsSummaryMessage {
+			continue
+		}
+		if text := strings.TrimSpace(msg.Content().String()); text != "" && !isAcknowledgement(text) {
+			return text
+		}
+	}
+	return ""
+}
+
+func recoveryPrompt(intent, instruction string) string {
+	intent = strings.TrimSpace(intent)
+	if intent == "" || isAcknowledgement(intent) {
+		intent = "the unresolved user goal described in the session context"
+	}
+	return fmt.Sprintf("[Automatic recovery] Continue %s.\n\n%s", intent, instruction)
+}
+
+func isAcknowledgement(text string) bool {
+	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(text)), " .,!?")
+	switch normalized {
+	case "ok", "okay", "yes", "yep", "go on", "continue", "proceed", "do it", "carry on":
+		return true
+	default:
+		return false
+	}
+}
+
+func printedToolEnvelope(text string) bool {
+	text = strings.TrimSpace(text)
+	start := strings.IndexByte(text, '{')
+	end := strings.LastIndexByte(text, '}')
+	if start < 0 || end <= start {
+		return false
+	}
+	var envelope map[string]any
+	if json.Unmarshal([]byte(text[start:end+1]), &envelope) != nil {
+		return false
+	}
+	toolName, _ := envelope["tool_name"].(string)
+	if strings.TrimSpace(toolName) == "" {
+		return false
+	}
+	_, hasCommand := envelope["command"]
+	_, hasInput := envelope["input"]
+	_, hasArguments := envelope["arguments"]
+	return hasCommand || hasInput || hasArguments
+}
+
+func announcedPendingAction(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	markers := []string{
+		"i'll ", "i will ", "i need to ", "i should ", "let me ",
+		"next, i'll ", "next i will ", "i'm going to ",
+	}
+	return slices.ContainsFunc(markers, func(marker string) bool {
+		return strings.Contains(text, marker)
+	})
 }
 
 func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason string, drainQueued bool) error {
@@ -2914,7 +3066,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 // buildSummaryPrompt constructs the prompt text for session summarization.
 func buildSummaryPrompt(todos []session.Todo) string {
 	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
+	sb.WriteString("Provide a detailed summary of our conversation above. Separate verified facts, failed attempts, unresolved assumptions, and exact next actions. Never present a failed command, guessed package name, malformed configuration, or unexecuted printed tool envelope as a recommended next step. Preserve the user's goal, but require the resuming assistant to re-check disproven assumptions before acting.")
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {

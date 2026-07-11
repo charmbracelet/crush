@@ -58,6 +58,9 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID := tools.GetSessionFromContext(ctx)
+	if unsafeCrushConfigTextEdit(call) {
+		return fantasy.NewTextErrorResponse("Textual edit/multiedit is blocked for crush.json because it can corrupt minified structured configuration. Use view for reading, then use a JSON parser to parse, mutate, serialize, validate, and atomically replace the complete file while preserving unrelated fields."), nil
+	}
 	var result hooks.AggregateResult
 	if h.preRunner != nil {
 		var err error
@@ -93,7 +96,7 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 	}
 
 	if call.Name == AgentToolName && !h.ledger.hasGrounding(sessionID) {
-		return fantasy.NewTextErrorResponse("Sub-agent call blocked until the root agent grounds the task. First inspect the current workspace/target with ls, view, grep, the shell tool, crush_info, or an MCP filesystem/GitHub/docs tool, then call agent with the verified path and objective."), nil
+		return fantasy.NewTextErrorResponse("Sub-agent call blocked until the root agent grounds the task. First inspect the current workspace/target with ls, view, grep, the shell tool, recode_info, or an MCP filesystem/GitHub/docs tool, then call agent with the verified path and objective."), nil
 	}
 
 	if previous, ok := h.ledger.previousFailure(sessionID, call.Name, call.Input); ok {
@@ -167,6 +170,21 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 
 	resp.Metadata = mergeHookMetadata(resp.Metadata, result)
 	return resp, nil
+}
+
+func unsafeCrushConfigTextEdit(call fantasy.ToolCall) bool {
+	if call.Name != tools.EditToolName && call.Name != tools.MultiEditToolName {
+		return false
+	}
+	var input struct {
+		FilePath string `json:"file_path"`
+	}
+	if json.Unmarshal([]byte(call.Input), &input) != nil {
+		return false
+	}
+	name := strings.ToLower(strings.ReplaceAll(input.FilePath, "\\", "/"))
+	base := name[strings.LastIndex(name, "/")+1:]
+	return base == "crush.json" || base == ".crush.json"
 }
 
 func postHookFeedback(result hooks.AggregateResult, eventName string) string {

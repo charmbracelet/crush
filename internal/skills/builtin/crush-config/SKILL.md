@@ -15,26 +15,56 @@ Crush uses JSON configuration files with the following priority (highest to lowe
 On Windows, settings written by the TUI normally live at
 `%LOCALAPPDATA%/crush/crush.json`. An additional global layer may exist at
 `%USERPROFILE%/.config/crush/crush.json`. These are not the same as a
-project-local `.crush/` directory. Use the `crush_info` tool to report active
+project-local `.crush/` directory. Use the `recode_info` tool to report active
 and candidate paths before searching manually.
 
 ## Safe Editing Workflow
 
 Treat `crush.json` as structured data, even when it is minified onto one line.
 
-1. Use `crush_info` to identify the active file and inspect that exact path.
+1. Use `recode_info` to identify the active file and inspect that exact path.
+   Paths marked `missing` under `config_locations` are diagnostics, not files
+   to inspect or create. Only `loaded` paths currently affect the session.
 2. Parse the complete file as JSON before editing. An empty result from a
    line-based offset means the requested line does not exist; it does not mean
    a one-line file is empty.
 3. Preserve unknown fields and all unrelated configuration entries.
 4. Make a backup, apply a structured object mutation, serialize once, and parse
    the result again before replacing the active file.
-5. Re-read through `crush_info` and distinguish configured entries from clients
+5. Re-read through `recode_info` and distinguish configured entries from clients
    that actually initialized successfully.
+
+Once `recode_info` reports a loaded config path, keep that path as the source
+of truth for the task. Do not broaden into home-directory scans or copy a config
+from another environment unless the loaded file is genuinely unavailable and
+the user explicitly asks for recovery.
 
 Never concatenate JSON fragments, rewrite the whole file from a partial
 terminal view, use an LSP diagnostic as MCP validation, or accept uncertainty
 that the file is empty over direct parsed evidence.
+
+On Windows, use native `view` for exact reads. If structured shell processing
+is required, invoke PowerShell explicitly and protect its script from the
+embedded shell, for example:
+
+```sh
+powershell.exe -NoProfile -Command '$raw = Get-Content -Raw -LiteralPath "C:\path\crush.json"; $null = $raw | ConvertFrom-Json'
+```
+
+Do not call PowerShell cmdlets as bare commands and do not use textual
+`edit`/`multiedit` insertion against a minified one-line configuration.
+
+## Global and Project Scope
+
+- Global providers, model slots, credentials, and MCP servers normally belong
+  in the loaded global data config.
+- Project initialization creates project data/memory state and context files;
+  it does not require a workspace configuration file.
+- `.crush/crush.json` is an optional workspace override. Create or modify it
+  only when the user explicitly requests project-specific behavior.
+- A request to configure the installation or all MCP servers targets the
+  loaded global config. Do not search missing project/global candidates for
+  preferences after the active file has been identified.
 
 ## Basic Structure
 

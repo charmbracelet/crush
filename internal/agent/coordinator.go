@@ -298,7 +298,9 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, fmt.Errorf("failed to update models: %w", err)
 	}
 
-	prompt, explicitlyLoaded := injectExplicitSkillInvocations(prompt, c.activeSkills)
+	originalPrompt := prompt
+	expandedPrompt, explicitlyLoaded := injectExplicitSkillInvocations(prompt, c.activeSkills)
+	transientContext := skillTransientContext(originalPrompt, expandedPrompt, explicitlyLoaded)
 	for _, name := range explicitlyLoaded {
 		c.MarkSkillLoaded(name)
 	}
@@ -361,7 +363,8 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			RunID:            runID,
-			Prompt:           prompt,
+			Prompt:           originalPrompt,
+			TransientContext: transientContext,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  mergedOptions,
@@ -403,6 +406,13 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	return result, originalErr
 }
 
+func skillTransientContext(originalPrompt, expandedPrompt string, loaded []string) string {
+	if len(loaded) == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(expandedPrompt, "\n\n"+originalPrompt)
+}
+
 func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Skill) (string, []string) {
 	if strings.Contains(userPrompt, "<loaded_skill>") {
 		return userPrompt, nil
@@ -416,15 +426,16 @@ func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Sk
 			continue
 		}
 		nameAt := strings.Index(lowerPrompt, strings.ToLower(skill.Name))
-		if nameAt < 0 {
-			continue
+		explicit := false
+		if nameAt >= 0 {
+			windowStart := max(0, nameAt-120)
+			windowEnd := min(len(lowerPrompt), nameAt+len(skill.Name)+120)
+			window := lowerPrompt[windowStart:windowEnd]
+			explicit = slices.ContainsFunc(activationVerbs, func(verb string) bool {
+				return strings.Contains(window, verb)
+			})
 		}
-		windowStart := max(0, nameAt-120)
-		windowEnd := min(len(lowerPrompt), nameAt+len(skill.Name)+120)
-		window := lowerPrompt[windowStart:windowEnd]
-		if !slices.ContainsFunc(activationVerbs, func(verb string) bool {
-			return strings.Contains(window, verb)
-		}) {
+		if !explicit && !taskRequiresBuiltinSkill(lowerPrompt, skill.Name) {
 			continue
 		}
 		loaded = append(loaded, skill)
@@ -444,6 +455,27 @@ func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Sk
 	}
 	parts = append(parts, userPrompt)
 	return strings.Join(parts, "\n\n"), names
+}
+
+func taskRequiresBuiltinSkill(prompt, skillName string) bool {
+	hasAny := func(terms ...string) bool {
+		return slices.ContainsFunc(terms, func(term string) bool {
+			return strings.Contains(prompt, term)
+		})
+	}
+	switch skillName {
+	case "crush-config":
+		return hasAny("crush.json", "configure crush", "provider", "model slot", "permission", " mcp", "mcp ", "mcps")
+	case "mcp-schema-first":
+		return hasAny(" mcp", "mcp ", "mcps", "model context protocol")
+	case "execution-routing":
+		return len(prompt) > 80 && hasAny(
+			"audit", "investigate", "root cause", "multiple files", "across the repo",
+			"refactor", "migration", "implement", "fix them all", "autonomous",
+		)
+	default:
+		return false
+	}
 }
 
 // effectiveReasoningEffort returns the reasoning effort to apply for provider calls.

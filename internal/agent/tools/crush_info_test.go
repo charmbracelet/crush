@@ -42,8 +42,10 @@ func TestCrushInfo_ConfigFiles(t *testing.T) {
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[config_files]")
 	require.Contains(t, output, "[config_locations]")
-	require.Contains(t, output, "global = "+config.GlobalConfig())
+	require.Contains(t, output, "loaded = /home/user/.config/crush/crush.json")
+	require.Contains(t, output, "global_legacy = "+config.GlobalConfig())
 	require.Contains(t, output, "global_data = "+config.GlobalConfigData())
+	require.Contains(t, output, "Diagnostic search locations only")
 	require.Contains(t, output, "/home/user/.config/crush/crush.json")
 	require.Contains(t, output, "/project/.crush/crush.json")
 }

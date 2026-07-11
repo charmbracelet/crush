@@ -165,6 +165,26 @@ func TestHasRepeatedFailureClass(t *testing.T) {
 	}
 }
 
+func TestHasRepeatedFailureClassCountsParallelStepOnce(t *testing.T) {
+	t.Parallel()
+
+	step := makeStep(
+		[]fantasy.ToolCallContent{
+			{ToolCallID: "a", ToolName: "bash", Input: `{"command":"a"}`},
+			{ToolCallID: "b", ToolName: "bash", Input: `{"command":"b"}`},
+			{ToolCallID: "c", ToolName: "bash", Input: `{"command":"c"}`},
+		},
+		[]fantasy.ToolResultContent{
+			{ToolCallID: "a", ToolName: "bash", Result: fantasy.ToolResultOutputContentText{Text: "npm error code E404"}},
+			{ToolCallID: "b", ToolName: "bash", Result: fantasy.ToolResultOutputContentText{Text: "npm error code E404"}},
+			{ToolCallID: "c", ToolName: "bash", Result: fantasy.ToolResultOutputContentText{Text: "npm error code E404"}},
+		},
+	)
+	if hasRepeatedFailureClass([]fantasy.StepResult{step}, 10, 3) {
+		t.Fatal("parallel failures in one model step must count as one attempt")
+	}
+}
+
 func TestGetToolInteractionSignature(t *testing.T) {
 	t.Run("empty content returns empty string", func(t *testing.T) {
 		sig := getToolInteractionSignature(fantasy.ResponseContent{})

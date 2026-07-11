@@ -401,7 +401,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 // TestCreateSession_ResolutionFailureUpdatesState pins the user-visible
 // half of the regression fix: when any of command/args/env/headers/url
 // fails to resolve, createSession must publish StateError to the state
-// map so crush_info and the TUI's MCP status card can render a real
+// map so recode_info and the TUI's MCP status card can render a real
 // error instead of the MCP silently sitting in "starting" or being
 // spawned with an empty credential.
 //

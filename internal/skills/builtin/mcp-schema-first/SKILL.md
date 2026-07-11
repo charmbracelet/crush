@@ -9,7 +9,7 @@ Use MCP tools deliberately. MCP is a capability layer, not the default way to in
 
 ## Tool Selection Order
 
-1. Use native Crush tools for local repository inspection when they fit: `view`, `grep`, `glob`, `ls`, `lsp_diagnostics`, `lsp_references`, and `crush_info`.
+1. Use native re.code tools for local repository inspection when they fit: `view`, `grep`, `glob`, `ls`, `lsp_diagnostics`, `lsp_references`, and `recode_info`.
 2. Use Bash for host/runtime facts, package manager commands, git commands, process/service checks, disk usage, and bounded command output.
 3. Use native `web_search`/`web_fetch` for current web facts and explicit URL follow-up.
 4. Use specialized MCP servers when the task needs that integration: Context7 for official docs, GitHub Grep for public code search, Playwright for browser state, memory for durable facts.
@@ -19,7 +19,7 @@ Do not use filesystem MCP as a broad discovery engine from `/`. For broad host i
 
 ## MCP Workflow
 
-1. Run `crush_info` first and inventory configured, initialized, and failed
+1. Run `recode_info` first and inventory configured, initialized, and failed
    servers separately. A connected HTTP server is not an npm package that must
    be installed again.
 2. List active MCP servers and tools when the tool shape is not already in context.
@@ -28,7 +28,9 @@ Do not use filesystem MCP as a broad discovery engine from `/`. For broad host i
 5. Prefer MCP resources for read-only structured data when a resource exists.
 6. Authenticate only when the server advertises an auth flow or the user explicitly asks.
 7. Verify the exact package or URL against official documentation or the
-   package registry. Do not infer package names from MCP display names.
+   package registry. Do not infer package names from MCP display names. If the
+   first exact lookup fails, use native `web_search` immediately; do not guess
+   another package name from memory.
 8. Do not guess parameter names. If the schema is unavailable, say so and use a safer native or shell path.
 
 In `crush.json`, the transport key is `type`; valid values are `stdio`, `sse`,
@@ -36,8 +38,25 @@ and `http`. Parse before and after a structured edit, preserve unrelated
 entries, and never use `lsp_diagnostics` as MCP validation. Reload clients and
 report "configured" separately from "initialized".
 
-After three failures with the same error class, stop changing package names.
-Re-check the premise, official server identity, transport, and host requirements.
+After two failures with the same error class, stop changing package names.
+Re-check the premise with native web search, the official server identity,
+transport, and host requirements before running another install command.
+
+## Safe Command Reference
+
+| Goal | Preferred action |
+| --- | --- |
+| Current directory | `pwd` |
+| Active re.code config and MCP state | `recode_info` |
+| Exact local file contents | native `view` with the loaded absolute path |
+| Verify a known npm package exists | `npm view <verified-package> version` |
+| Find an unknown/current package name | native `web_search`, then official docs or registry |
+| Validate JSON portably when Node exists | `node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); console.log('valid')" "<path>"` |
+
+Do not use invented commands such as `npx search-*`. Do not use `npx` as a
+package search engine. On Windows, do not append GNU filters such as `head`
+unless their availability was verified; use bounded native tool output or a
+portable runtime instead.
 
 ## Native Web And Code Search
 

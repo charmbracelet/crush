@@ -9,7 +9,7 @@ import (
 // Build-time parameters set via -ldflags.
 
 var (
-	Version = "v0.85.19 (re:configured)"
+	Version = "v0.85.25 (re:configured)"
 	Commit  = "unknown"
 	// BuildID is a unique identifier for this build. For release builds it
 	// equals Commit; for development builds (go run / go build without

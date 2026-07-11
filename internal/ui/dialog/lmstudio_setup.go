@@ -78,14 +78,14 @@ func NewLMStudioSetup(com *common.Common, isOnboarding bool) (*LMStudioSetup, te
 	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize() - 2
 
 	m.baseURLInput = textinput.New()
-	m.baseURLInput.SetVirtualCursor(false)
+	m.baseURLInput.SetVirtualCursor(true)
 	m.baseURLInput.Placeholder = " http://127.0.0.1:1234/v1"
 	m.baseURLInput.SetStyles(com.Styles.TextInput)
 	m.baseURLInput.SetWidth(max(0, innerWidth-1))
 	m.baseURLInput.Focus()
 
 	m.apiKeyInput = textinput.New()
-	m.apiKeyInput.SetVirtualCursor(false)
+	m.apiKeyInput.SetVirtualCursor(true)
 	m.apiKeyInput.Placeholder = " API key (optional)"
 	m.apiKeyInput.SetStyles(com.Styles.TextInput)
 	m.apiKeyInput.SetWidth(max(0, innerWidth-1))
@@ -366,26 +366,9 @@ func (m *LMStudioSetup) fieldView(label string, input textinput.Model) string {
 
 // Cursor returns the cursor position relative to the dialog.
 func (m *LMStudioSetup) Cursor() *tea.Cursor {
-	if m.state == LMStudioSetupStateVerifying {
-		return nil
-	}
-
-	var cur *tea.Cursor
-	if m.activeField == lmStudioAPIKeyField {
-		cur = m.apiKeyInput.Cursor()
-	} else {
-		cur = m.baseURLInput.Cursor()
-	}
-	if cur == nil {
-		return nil
-	}
-
-	cur = InputCursor(m.com.Styles, cur)
-	cur.Y += lipgloss.Height(m.introView()) + 2
-	if m.activeField == lmStudioAPIKeyField {
-		cur.Y += lipgloss.Height(m.fieldView("Base URL", m.baseURLInput)) + 1
-	}
-	return cur
+	// The inputs render their own cursor so it stays aligned with terminal
+	// cells when the user changes font size or DPI scaling.
+	return nil
 }
 
 // ShortHelp implements help.KeyMap.

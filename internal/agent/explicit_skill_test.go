@@ -36,3 +36,39 @@ func TestInjectExplicitSkillInvocationsDoesNotInferFromNameAlone(t *testing.T) {
 	require.Equal(t, prompt, got)
 	require.Empty(t, loaded)
 }
+
+func TestInjectExplicitSkillInvocationsRoutesMCPTasks(t *testing.T) {
+	t.Parallel()
+
+	available := []*skills.Skill{
+		{Name: "crush-config", Instructions: "Preserve and validate crush.json."},
+		{Name: "mcp-schema-first", Instructions: "Inspect configured MCPs first."},
+		{Name: "unrelated", Instructions: "Not relevant."},
+	}
+	got, loaded := injectExplicitSkillInvocations("Fix the broken MCP configurations on Windows.", available)
+	require.Equal(t, []string{"crush-config", "mcp-schema-first"}, loaded)
+	require.Contains(t, got, "Preserve and validate crush.json.")
+	require.Contains(t, got, "Inspect configured MCPs first.")
+}
+
+func TestInjectExplicitSkillInvocationsRoutesHeavyTasks(t *testing.T) {
+	t.Parallel()
+
+	available := []*skills.Skill{
+		{Name: "execution-routing", Instructions: "Ground, research, delegate, and verify."},
+		{Name: "unrelated", Instructions: "Not relevant."},
+	}
+	prompt := "Investigate the root cause across the repo, fix the multiple failing paths, and verify the implementation autonomously."
+
+	got, loaded := injectExplicitSkillInvocations(prompt, available)
+	require.Equal(t, []string{"execution-routing"}, loaded)
+	require.Contains(t, got, "Ground, research, delegate, and verify.")
+}
+
+func TestSkillTransientContextExcludesUserPrompt(t *testing.T) {
+	t.Parallel()
+
+	context := skillTransientContext("fix MCP", "<loaded_skill>instructions</loaded_skill>\n\nfix MCP", []string{"mcp-schema-first"})
+	require.Equal(t, "<loaded_skill>instructions</loaded_skill>", context)
+	require.NotContains(t, context, "fix MCP")
+}

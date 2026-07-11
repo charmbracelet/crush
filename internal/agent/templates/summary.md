@@ -2,6 +2,12 @@ You are summarizing a conversation to preserve context for continuing work later
 
 **Critical**: This summary will be the ONLY context available when the conversation resumes. Assume all previous messages will be lost. Be thorough.
 
+Distinguish verified results from claims and attempted work. Record failed
+commands, malformed edits, guessed package names, and printed-but-unexecuted
+tool envelopes under failures; never promote them into the continuation plan.
+Preserve the user's intent, but instruct the next agent to reassess disproven
+assumptions before taking action.
+
 **Required sections**:
 
 ## Current State

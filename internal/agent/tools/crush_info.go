@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -14,7 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
-const CrushInfoToolName = "crush_info"
+const CrushInfoToolName = "recode_info"
 
 //go:embed crush_info.md
 var crushInfoDescription string
@@ -60,17 +61,26 @@ func writeConfigFiles(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("[config_files]\n")
 	paths := cfg.LoadedPaths()
 	for _, p := range paths {
-		b.WriteString(p + "\n")
+		fmt.Fprintf(b, "loaded = %s\n", p)
 	}
 	b.WriteString("\n")
 
 	b.WriteString("[config_locations]\n")
-	fmt.Fprintf(b, "global = %s\n", config.GlobalConfig())
-	fmt.Fprintf(b, "global_data = %s\n", config.GlobalConfigData())
+	b.WriteString("note = Diagnostic search locations only. Use loaded files above; do not inspect or create missing candidates unless the user requests that scope.\n")
+	writeConfigLocation(b, "global_legacy", config.GlobalConfig())
+	writeConfigLocation(b, "global_data", config.GlobalConfigData())
 	for _, path := range config.ProjectConfigs(cfg.WorkingDir()) {
-		fmt.Fprintf(b, "candidate = %s\n", path)
+		writeConfigLocation(b, "project_candidate", path)
 	}
 	b.WriteString("\n")
+}
+
+func writeConfigLocation(b *strings.Builder, scope, path string) {
+	status := "missing"
+	if _, err := os.Stat(path); err == nil {
+		status = "exists"
+	}
+	fmt.Fprintf(b, "%s = %s (%s)\n", scope, path, status)
 }
 
 func writeConfigStaleness(b *strings.Builder, cfg *config.ConfigStore) {

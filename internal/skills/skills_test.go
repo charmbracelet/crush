@@ -446,6 +446,15 @@ func TestDiscoverBuiltin(t *testing.T) {
 		}
 	}
 	require.True(t, foundHooks, "crush-hooks builtin skill not found")
+
+	foundExecutionRouting := false
+	for _, skill := range discovered {
+		if skill.Name == "execution-routing" {
+			foundExecutionRouting = true
+			break
+		}
+	}
+	require.True(t, foundExecutionRouting, "execution-routing builtin skill not found")
 }
 
 func TestDeduplicate(t *testing.T) {

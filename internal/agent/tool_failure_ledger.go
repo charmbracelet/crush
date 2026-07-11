@@ -126,7 +126,7 @@ func repeatFailureMessage(f toolFailure) string {
 
 func isGroundingTool(toolName string) bool {
 	switch toolName {
-	case "bash", "view", "grep", "glob", "ls", "crush_info":
+	case "bash", "view", "grep", "glob", "ls", "recode_info":
 		return true
 	}
 	return strings.HasPrefix(toolName, "mcp_filesystem_") ||

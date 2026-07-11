@@ -232,10 +232,10 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	// auto-hide.
 	scrollbarVisible := totalLines > height && (m.sidebarScrollbarVisible || m.focus == uiFocusSidebar)
 
-	// Draw content.
-	contentWidth := width
-	if scrollbarVisible {
-		contentWidth = width - 1
+	// Always reserve 1 column for the scrollbar.
+	contentWidth := width - 1
+	if contentWidth < 1 {
+		contentWidth = 1
 	}
 
 	uv.NewStyledString(
@@ -245,7 +245,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 			Render(visibleStr),
 	).Draw(scr, area)
 
-	// Draw scrollbar if visible.
+	// Draw scrollbar in the reserved column.
 	if scrollbarVisible {
 		scrollbar := common.Scrollbar(m.com.Styles, height, totalLines, height, m.sidebarOffset)
 		if scrollbar != "" {

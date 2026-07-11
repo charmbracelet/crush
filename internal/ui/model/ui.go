@@ -3181,7 +3181,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		}
 	}
 	// The sidebar width
-	sidebarWidth := 30
+	sidebarWidth := 32
 	// The header height
 	const landingHeaderHeight = 4
 

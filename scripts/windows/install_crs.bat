@@ -14,6 +14,7 @@ goto parse_args
 
 :after_args
 set "SOURCE_EXE=%~dp0re_code.exe"
+if not exist "%SOURCE_EXE%" set "SOURCE_EXE=%~dp0re_code-windows-amd64.exe"
 if not exist "%SOURCE_EXE%" set "SOURCE_EXE=%~dp0..\..\dist\re_code.exe"
 
 if not exist "%SOURCE_EXE%" (

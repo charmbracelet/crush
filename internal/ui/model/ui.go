@@ -1010,6 +1010,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
+			// When sidebar is focused, route wheel events to sidebar scrolling.
+			if m.focus == uiFocusSidebar {
+				lines := int(msg.DeltaY)
+				if lines != 0 {
+					m.sidebarOffset = max(0, min(m.sidebarOffset+lines, m.sidebarMaxOffset()))
+					m.sidebarScrollbarSeq++
+					m.sidebarScrollbarVisible = true
+				}
+				break
+			}
 			if msg.DeltaX != 0 {
 				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
 			}

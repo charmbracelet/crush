@@ -1,5 +1,6 @@
 ---
 name: crush-config
+user-invocable: true
 description: Use when the user needs help configuring Crush — working with crush.json, setting up providers, configuring LSPs, adding MCP servers, managing skills or permissions, or changing Crush behavior.
 ---
 
@@ -10,6 +11,12 @@ Crush uses JSON configuration files with the following priority (highest to lowe
 1. `.crush.json` (project-local, hidden)
 2. `crush.json` (project-local)
 3. `$XDG_CONFIG_HOME/crush/crush.json` or `$HOME/.config/crush/crush.json` (global)
+
+On Windows, settings written by the TUI normally live at
+`%LOCALAPPDATA%/crush/crush.json`. An additional global layer may exist at
+`%USERPROFILE%/.config/crush/crush.json`. These are not the same as a
+project-local `.crush/` directory. Use the `crush_info` tool to report active
+and candidate paths before searching manually.
 
 ## Basic Structure
 

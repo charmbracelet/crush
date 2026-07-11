@@ -24,6 +24,7 @@ type Status struct {
 	help     help.Model
 	helpKm   help.KeyMap
 	msg      util.InfoMsg
+	width    int
 }
 
 // NewStatus creates a new status bar and help model.
@@ -48,9 +49,14 @@ func (s *Status) ClearInfoMsg() {
 
 // SetWidth sets the width of the status bar and help view.
 func (s *Status) SetWidth(width int) {
+	s.width = width
+}
+
+func (s *Status) setHelpWidth(mode string) {
 	helpStyle := s.com.Styles.Status.Help
 	horizontalPadding := helpStyle.GetPaddingLeft() + helpStyle.GetPaddingRight()
-	s.help.SetWidth(width - horizontalPadding)
+	prefixWidth := lipgloss.Width(mode + " | ")
+	s.help.SetWidth(max(0, s.width-horizontalPadding-prefixWidth))
 }
 
 // ShowingAll returns whether the full help view is shown.
@@ -71,6 +77,7 @@ func (s *Status) SetHideHelp(hideHelp bool) {
 // Draw draws the status bar onto the screen.
 func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	mode := statusModeLabel(s.com.Workspace.AgentMode())
+	s.setHelpWidth(mode)
 	if !s.hideHelp {
 		helpView := s.com.Styles.Status.Help.Render(mode + " | " + s.help.View(s.helpKm))
 		uv.NewStyledString(helpView).Draw(scr, area)

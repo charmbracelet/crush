@@ -302,6 +302,7 @@ func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) boo
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Resource:    perm.Resource,
 		},
 		Action: proto.PermissionAllow,
 	})
@@ -319,6 +320,7 @@ func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRe
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Resource:    perm.Resource,
 		},
 		Action: proto.PermissionAllowForSession,
 	})
@@ -336,6 +338,7 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Resource:    perm.Resource,
 		},
 		Action: proto.PermissionDeny,
 	})

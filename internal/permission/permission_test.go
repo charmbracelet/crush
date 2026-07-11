@@ -223,14 +223,14 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		wg.Wait()
 		assert.True(t, result1, "First request should be granted")
 
-		// Second identical request should be automatically approved due to persistent permission
+		// A different request in the same session should also be approved.
 		req2 := CreatePermissionRequest{
 			SessionID:   "session1",
-			ToolName:    "file_tool",
-			Description: "Read file again",
-			Action:      "read",
-			Params:      map[string]string{"file": "test.txt"},
-			Path:        "/tmp/test.txt",
+			ToolName:    "shell_tool",
+			Description: "Inspect another path",
+			Action:      "execute",
+			Params:      map[string]string{"command": "inspect"},
+			Path:        "/other/project",
 		}
 		result2, err := service.Request(t.Context(), req2)
 		require.NoError(t, err)

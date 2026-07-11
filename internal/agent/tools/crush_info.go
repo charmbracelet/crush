@@ -63,6 +63,14 @@ func writeConfigFiles(b *strings.Builder, cfg *config.ConfigStore) {
 		b.WriteString(p + "\n")
 	}
 	b.WriteString("\n")
+
+	b.WriteString("[config_locations]\n")
+	fmt.Fprintf(b, "global = %s\n", config.GlobalConfig())
+	fmt.Fprintf(b, "global_data = %s\n", config.GlobalConfigData())
+	for _, path := range config.ProjectConfigs(cfg.WorkingDir()) {
+		fmt.Fprintf(b, "candidate = %s\n", path)
+	}
+	b.WriteString("\n")
 }
 
 func writeConfigStaleness(b *strings.Builder, cfg *config.ConfigStore) {

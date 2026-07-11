@@ -187,6 +187,7 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
 			Action:    permission.Action,
 			Resource:  permission.Resource,
 		}, true)
+		s.AutoApproveSession(permission.SessionID)
 	})
 }
 

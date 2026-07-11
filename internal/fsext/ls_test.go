@@ -46,6 +46,20 @@ func TestListDirectory(t *testing.T) {
 		require.True(t, truncated)
 		require.Len(t, files, 2)
 	})
+	t.Run("include ignored", func(t *testing.T) {
+		files, truncated, err := ListDirectoryWithIgnored(tmp, nil, -1, -1, true)
+		require.NoError(t, err)
+		require.False(t, truncated)
+		require.ElementsMatch(t, []string{
+			".gitignore",
+			".hidden",
+			"build.log",
+			"regular.txt",
+			"subdir",
+			"subdir/.another",
+			"subdir/file.go",
+		}, relPaths(t, files, tmp))
+	})
 }
 
 func relPaths(tb testing.TB, in []string, base string) []string {

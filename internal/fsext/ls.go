@@ -269,6 +269,12 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, is
 
 // ListDirectory lists files and directories in the specified path.
 func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
+	return ListDirectoryWithIgnored(initialPath, ignorePatterns, depth, limit, false)
+}
+
+// ListDirectoryWithIgnored lists files and optionally bypasses ignore rules.
+// Explicit ignore patterns still apply when ignored entries are included.
+func ListDirectoryWithIgnored(initialPath string, ignorePatterns []string, depth, limit int, includeIgnored bool) ([]string, bool, error) {
 	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
 
@@ -287,7 +293,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 		}
 
 		isDir := d.IsDir()
-		if dl.shouldIgnore(path, ignorePatterns, isDir) {
+		if shouldIgnoreExplicit(path, ignorePatterns) || !includeIgnored && dl.shouldIgnore(path, nil, isDir) {
 			if isDir {
 				return filepath.SkipDir
 			}
@@ -313,4 +319,14 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 
 	matches, truncated := truncate(slices.Collect(found.Seq()), limit)
 	return matches, truncated || errors.Is(err, filepath.SkipAll), nil
+}
+
+func shouldIgnoreExplicit(path string, patterns []string) bool {
+	base := filepath.Base(path)
+	for _, pattern := range patterns {
+		if matched, err := filepath.Match(pattern, base); err == nil && matched {
+			return true
+		}
+	}
+	return false
 }

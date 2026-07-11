@@ -2,7 +2,7 @@
 
 Prebuilt Windows and Linux binaries are published on the GitHub Releases page:
 
-https://github.com/retakt/crush-re.configured/releases
+https://github.com/reitaard/crush-re.configured/releases
 
 The binaries are release assets rather than Git objects because each build is
 larger than GitHub's 100 MB per-file repository limit.

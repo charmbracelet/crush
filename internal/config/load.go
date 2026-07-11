@@ -41,9 +41,24 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 var (
 	EmbeddedLMStudioBaseURL = ""
 	EmbeddedLMStudioAPIKey  = "$LM_STUDIO_API_KEY"
-	// EmbeddedConfigJSON optionally injects default JSON config before user
-	// and workspace config files are loaded. Later config files still win.
-	EmbeddedConfigJSON = ""
+	// EmbeddedConfigJSON injects portable defaults before user and workspace
+	// config files are loaded. Later config files can override or disable them.
+	EmbeddedConfigJSON = `{
+		"mcp": {
+			"context7": {
+				"type": "http",
+				"url": "https://mcp.context7.com/mcp"
+			},
+			"exa": {
+				"type": "http",
+				"url": "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa"
+			},
+			"gh_grep": {
+				"type": "http",
+				"url": "https://mcp.grep.app"
+			}
+		}
+	}`
 )
 
 // Load loads the configuration from the default paths and returns a

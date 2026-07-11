@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -873,7 +874,7 @@ func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
 	// Build unique set of normalized paths
 	seen := make(map[string]struct{})
 	for _, p := range paths {
-		if p == "" {
+		if p == "" || strings.HasPrefix(p, "<") && strings.HasSuffix(p, ">") {
 			continue
 		}
 		// Normalize path

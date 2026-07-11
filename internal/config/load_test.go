@@ -89,6 +89,31 @@ func TestConfig_LoadFromConfigPaths_EmbeddedConfig(t *testing.T) {
 	require.Equal(t, "allow", cfg.Permissions.Rules[0].Effect)
 }
 
+func TestConfig_DefaultEmbeddedConfigProvidesPortableMCPs(t *testing.T) {
+	cfg, loaded, err := loadFromConfigPaths(nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"<embedded>"}, loaded)
+
+	require.Equal(t, "https://mcp.context7.com/mcp", cfg.MCP["context7"].URL)
+	require.Equal(t, "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa", cfg.MCP["exa"].URL)
+	require.Equal(t, "https://mcp.grep.app", cfg.MCP["gh_grep"].URL)
+}
+
+func TestConfig_UserConfigOverridesEmbeddedMCP(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+		"mcp": {
+			"context7": { "disabled": true }
+		}
+	}`), 0o600))
+
+	cfg, _, err := loadFromConfigPaths([]string{path})
+	require.NoError(t, err)
+	require.True(t, cfg.MCP["context7"].Disabled)
+	require.Equal(t, "https://mcp.context7.com/mcp", cfg.MCP["context7"].URL)
+}
+
 func TestConfig_LoadFromConfigPaths_InvalidEmbeddedConfig(t *testing.T) {
 	previous := EmbeddedConfigJSON
 	EmbeddedConfigJSON = `{`

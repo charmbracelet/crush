@@ -420,6 +420,16 @@ func TestSetConfigField_AutoReloads(t *testing.T) {
 	require.False(t, staleness.Dirty, "Expected staleness to be clean after auto-reload")
 }
 
+func TestCaptureStalenessSnapshotIgnoresEmbeddedConfigMarker(t *testing.T) {
+	t.Parallel()
+
+	store := &ConfigStore{}
+	store.CaptureStalenessSnapshot([]string{"<embedded>"})
+
+	require.Empty(t, store.trackedConfigPaths)
+	require.False(t, store.ConfigStaleness().Dirty)
+}
+
 // TestRemoveConfigField_AutoReloads verifies that RemoveConfigField automatically
 // reloads config into memory after writing.
 func TestRemoveConfigField_AutoReloads(t *testing.T) {

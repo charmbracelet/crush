@@ -4,8 +4,10 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/fantasy"
@@ -282,6 +284,8 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 	// Write configured but not running MCP servers
 	c := cfg.Config()
 	if len(c.MCP) > 0 {
+		writeMCPConfig(b, c.MCP)
+
 		runtimeNames := make(map[string]bool)
 		for name := range states {
 			runtimeNames[name] = true
@@ -313,6 +317,112 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 			b.WriteString("\n")
 		}
 	}
+}
+
+func writeMCPConfig(b *strings.Builder, mcps map[string]config.MCPConfig) {
+	type configuredEntry struct {
+		name string
+		cfg  config.MCPConfig
+	}
+	var entries []configuredEntry
+	for name, cfg := range mcps {
+		entries = append(entries, configuredEntry{name: name, cfg: cfg})
+	}
+	slices.SortFunc(entries, func(a, b configuredEntry) int { return strings.Compare(a.name, b.name) })
+
+	b.WriteString("[mcp_config]\n")
+	b.WriteString("note = Current configured MCP shape. Values are redacted; use this before opening crush.json.\n")
+	for _, e := range entries {
+		parts := []string{"type=" + string(e.cfg.Type)}
+		if e.cfg.Command != "" {
+			parts = append(parts, "command="+e.cfg.Command)
+		}
+		if len(e.cfg.Args) > 0 {
+			parts = append(parts, "args="+quoteList(redactArgs(e.cfg.Args)))
+		}
+		if e.cfg.URL != "" {
+			parts = append(parts, "url="+summarizeURL(e.cfg.URL))
+		}
+		if len(e.cfg.Env) > 0 {
+			parts = append(parts, "env_keys="+sortedMapKeys(e.cfg.Env))
+		}
+		if len(e.cfg.Headers) > 0 {
+			parts = append(parts, "header_keys="+sortedMapKeys(e.cfg.Headers))
+		}
+		if len(e.cfg.EnabledTools) > 0 {
+			parts = append(parts, "enabled_tools="+quoteList(e.cfg.EnabledTools))
+		}
+		if len(e.cfg.DisabledTools) > 0 {
+			parts = append(parts, "disabled_tools="+quoteList(e.cfg.DisabledTools))
+		}
+		if e.cfg.Timeout > 0 {
+			parts = append(parts, fmt.Sprintf("timeout=%ds", e.cfg.Timeout))
+		}
+		if e.cfg.ToolTimeout > 0 {
+			parts = append(parts, fmt.Sprintf("tool_timeout=%ds", e.cfg.ToolTimeout))
+		}
+		if e.cfg.Disabled {
+			parts = append(parts, "disabled=true")
+		}
+		fmt.Fprintf(b, "%s = %s\n", e.name, strings.Join(parts, " "))
+	}
+	b.WriteString("\n")
+}
+
+func quoteList(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, strconv.Quote(value))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+func redactArgs(values []string) []string {
+	redacted := slices.Clone(values)
+	for i, value := range redacted {
+		lower := strings.ToLower(value)
+		if strings.Contains(lower, "token") ||
+			strings.Contains(lower, "secret") ||
+			strings.Contains(lower, "password") ||
+			strings.Contains(lower, "apikey") ||
+			strings.Contains(lower, "api-key") ||
+			strings.Contains(lower, "auth") {
+			if strings.Contains(value, "=") {
+				redacted[i] = value[:strings.Index(value, "=")+1] + "<redacted>"
+			}
+			if i+1 < len(redacted) && !strings.HasPrefix(redacted[i+1], "$") {
+				redacted[i+1] = "<redacted>"
+			}
+		}
+	}
+	return redacted
+}
+
+func sortedMapKeys(values map[string]string) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return quoteList(keys)
+}
+
+func summarizeURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "<set>"
+	}
+	parts := parsed.Scheme + "://" + parsed.Host + parsed.Path
+	query := parsed.Query()
+	if len(query) == 0 {
+		return parts
+	}
+	keys := make([]string, 0, len(query))
+	for key := range query {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return parts + "?keys=" + quoteList(keys)
 }
 
 func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*skills.Skill, tracker *skills.Tracker, cfg *config.ConfigStore) {

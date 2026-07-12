@@ -159,6 +159,48 @@ func TestCrushInfo_MCPStates(t *testing.T) {
 	require.Less(t, filesystemIdx, githubIdx, "filesystem should appear before github")
 }
 
+func TestCrushInfo_MCPConfigSummary(t *testing.T) {
+	t.Parallel()
+
+	states := map[string]mcp.ClientInfo{
+		"github": {
+			Name:  "github",
+			State: mcp.StateError,
+			Error: errors.New("calling initialize: EOF"),
+		},
+	}
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		MCP: map[string]config.MCPConfig{
+			"exa": {
+				Type: config.MCPHttp,
+				URL:  "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa",
+				Headers: map[string]string{
+					"x-api-key": "real-secret",
+				},
+			},
+			"github": {
+				Type:    config.MCPStdio,
+				Command: "npx",
+				Args:    []string{"-y", "@modelcontextprotocol/github", "--token", "ghp_secret"},
+				Env: map[string]string{
+					"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_secret",
+				},
+			},
+		},
+	})
+
+	var b strings.Builder
+	writeMCP(&b, states, cfg)
+	output := b.String()
+	require.Contains(t, output, "[mcp_config]")
+	require.Contains(t, output, `github = type=stdio command=npx args=["-y", "@modelcontextprotocol/github", "--token", "<redacted>"] env_keys=["GITHUB_PERSONAL_ACCESS_TOKEN"]`)
+	require.Contains(t, output, `exa = type=http url=https://mcp.exa.ai/mcp?keys=["tools"] header_keys=["x-api-key"]`)
+	require.NotContains(t, output, "real-secret")
+	require.NotContains(t, output, "ghp_secret")
+}
+
 func TestCrushInfo_YoloMode(t *testing.T) {
 	t.Parallel()
 

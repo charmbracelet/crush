@@ -1,8 +1,9 @@
 Get re.code's current runtime state: active model, provider, LSP/MCP status, skills, hooks, permissions, and disabled tools. No parameters needed.
 
 <usage>
-- Shows active model and provider, LSP/MCP server status, skills,
-  hooks, permissions mode, disabled tools, and key options
+- Shows active model and provider, LSP/MCP server status, redacted MCP
+  configuration shape, skills, hooks, permissions mode, disabled tools, and
+  key options
 - Use when diagnosing why something isn't working (missing diagnostics,
   provider errors, MCP disconnections)
 - No parameters needed — always returns the full current state
@@ -10,6 +11,8 @@ Get re.code's current runtime state: active model, provider, LSP/MCP status, ski
 
 <tips>
 - Check [lsp] and [mcp] sections for service health
+- Check [mcp_config] before opening crush.json when diagnosing MCP command,
+  transport, or environment wiring
 - Check [providers] to see which providers are enabled and available
 - Check [skills] to see which skills are available and whether they have been
   loaded this session

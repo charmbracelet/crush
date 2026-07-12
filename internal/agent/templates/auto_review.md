@@ -11,6 +11,9 @@ Prioritize:
 2. Whether the user request is still safe to continue.
 3. The smallest verification or recovery step that should happen next.
 
+End with exactly one `Next tool: <registered-tool-name>` line when a specific
+existing tool should run first. Otherwise end with `Next tool: none`.
+
 When failures involve an external package, command, API, model, version, or
 server identity, recommend native web search or official documentation before
 another shell attempt. When failures involve re.code configuration, require

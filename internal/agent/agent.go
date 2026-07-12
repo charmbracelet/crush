@@ -124,6 +124,13 @@ type SessionAgentCall struct {
 	// recoveryAttempted bounds Review -> Task recovery to one handoff per
 	// admitted user intent.
 	recoveryAttempted bool
+	// originalIntent is the immutable user goal for internal continuations.
+	// Recovery instructions must never replace or wrap it.
+	originalIntent string
+	// recoveryGuidance is transient orchestration context produced by a
+	// deterministic guard or the read-only review sidecar. It is sent to the
+	// model without being persisted as another user message.
+	recoveryGuidance string
 	// idleContinuationCount bounds automatic continuation when a model
 	// announces its next action but ends the turn without calling a tool.
 	idleContinuationCount int
@@ -891,7 +898,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 	call = admitted.call
+	if strings.TrimSpace(call.originalIntent) == "" {
+		call.originalIntent = strings.TrimSpace(call.Prompt)
+	}
 	outboundPrompt := admitted.modelPrompt
+	if call.recoveryGuidance != "" {
+		outboundPrompt = recoveryContext(call.originalIntent, call.recoveryGuidance) + "\n\nContinue the original user intent now."
+		msgs = recoveryMessages(msgs)
+	}
 	if call.TransientContext != "" {
 		outboundPrompt = call.TransientContext + "\n\n" + outboundPrompt
 	}
@@ -1474,7 +1488,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if !ok {
 			existing = []SessionAgentCall{}
 		}
-		call.Prompt = fmt.Sprintf("Continue the interrupted task using the summary. Preserve the user's intent: %s", call.Prompt)
+		call.originalIntent = originalIntent(call)
+		call.Prompt = call.originalIntent
+		call.recoveryGuidance = "Continue from the new summary. Reassess failed assumptions and preserve verified results."
 		call.Accepted = a.BeginAccepted(call.SessionID)
 		call.skipUserMessage = true
 		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{call}, existing...))
@@ -1489,7 +1505,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			existing = nil
 		}
 		retry := call
-		retry.Prompt = recoveryPrompt(call.Prompt, "The previous strategy repeatedly produced the same failure class. Use the automatic review, choose a materially different grounded approach, and do not retry disproven commands. If the failure concerns an external package, command, API, model, version, or server identity, use native web_search or official documentation before another shell attempt.")
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.recoveryGuidance = "The previous strategy repeatedly produced the same failure class. Use the automatic review, choose a materially different grounded approach, and do not retry disproven commands. If the failure concerns an external package, command, API, model, version, or server identity, use native web_search or official documentation before another shell attempt."
 		retry.Attachments = nil
 		retry.Accepted = nil
 		retry.skipUserMessage = true
@@ -1513,7 +1531,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			existing = nil
 		}
 		retry := call
-		retry.Prompt = recoveryPrompt(call.Prompt, "Your previous response printed a tool-call JSON envelope as text, so nothing executed. Reassess the plan, then invoke registered tools through the native tool-call mechanism. Do not print tool-call JSON or repeat disproven package names.")
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.recoveryGuidance = "Your previous response printed a tool-call JSON envelope as text, so nothing executed. Reassess the plan, then invoke registered tools through the native tool-call mechanism. Do not print tool-call JSON or repeat disproven package names."
 		retry.Attachments = nil
 		retry.Accepted = nil
 		retry.skipUserMessage = true
@@ -1526,16 +1546,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			existing = nil
 		}
 		retry := call
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
 		retry.Attachments = nil
 		retry.Accepted = nil
 		retry.skipUserMessage = true
 		if call.idleContinuationCount < 2 {
-			retry.Prompt = recoveryPrompt(call.Prompt, "You announced a next action but ended the turn without executing it. Execute that action now using the appropriate registered tool. Do not narrate another future action.")
+			retry.recoveryGuidance = "You announced a next action but ended the turn without executing it. Execute that action now using the appropriate registered tool. Do not narrate another future action."
 			retry.idleContinuationCount++
 			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
 			slog.Warn("Incomplete announced action detected; scheduling continuation", "session_id", call.SessionID, "attempt", retry.idleContinuationCount)
 		} else if a.autoReviewEnabled && !call.recoveryAttempted {
-			retry.Prompt = recoveryPrompt(call.Prompt, "The model repeatedly announced actions without executing them. Use the automatic review to choose a concrete tool-first recovery and continue without narration-only turns.")
+			retry.recoveryGuidance = "The model repeatedly announced actions without executing them. Use the automatic review to choose a concrete tool-first recovery and continue without narration-only turns."
 			retry.recoveryAttempted = true
 			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
 			a.activeRequests.Del(call.SessionID)
@@ -1811,10 +1833,12 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, resumeLa
 	}
 	if lastIntent != "" {
 		continuation := SessionAgentCall{
-			SessionID:       sessionID,
-			Prompt:          fmt.Sprintf("Continue the task from the summary. Preserve the user's latest intent: %s", lastIntent),
-			Accepted:        a.BeginAccepted(sessionID),
-			skipUserMessage: true,
+			SessionID:        sessionID,
+			Prompt:           lastIntent,
+			originalIntent:   lastIntent,
+			recoveryGuidance: "Continue from the new summary. Preserve verified results and execute the smallest remaining step toward the original goal.",
+			Accepted:         a.BeginAccepted(sessionID),
+			skipUserMessage:  true,
 		}
 		queuedMessages = append([]SessionAgentCall{continuation}, queuedMessages...)
 		a.messageQueue.Set(sessionID, queuedMessages)
@@ -1842,11 +1866,29 @@ func lastUserIntent(msgs []message.Message) string {
 }
 
 func recoveryPrompt(intent, instruction string) string {
+	return recoveryContext(intent, instruction)
+}
+
+func originalIntent(call SessionAgentCall) string {
+	intent := strings.TrimSpace(call.originalIntent)
+	if intent == "" {
+		intent = strings.TrimSpace(call.Prompt)
+	}
+	if intent == "" || isAcknowledgement(intent) {
+		return "the unresolved user goal described in the session context"
+	}
+	return intent
+}
+
+func recoveryContext(intent, guidance string) string {
 	intent = strings.TrimSpace(intent)
 	if intent == "" || isAcknowledgement(intent) {
 		intent = "the unresolved user goal described in the session context"
 	}
-	return fmt.Sprintf("[Automatic recovery] Continue %s.\n\n%s", intent, instruction)
+	guidance = strings.TrimSpace(guidance)
+	return "<recovery_state>\n<original_user_intent>" + intent + "</original_user_intent>\n" +
+		"<next_step_guidance>" + guidance + "</next_step_guidance>\n" +
+		"Treat verified tool results as authoritative. Do not repeat a failed command without changing its assumptions.\n</recovery_state>"
 }
 
 func applyRequiredFirstTool(prepared *fantasy.PrepareStepResult, toolName string, stepNumber int) {
@@ -2017,9 +2059,48 @@ func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason 
 		return nil
 	}
 	firstQueuedMessage := queuedMessages[0]
+	if isRecoveryCall(firstQueuedMessage) {
+		guidance := strings.TrimSpace(reviewMessage.Content().String())
+		if guidance != "" {
+			firstQueuedMessage.recoveryGuidance = guidance
+		}
+		if firstQueuedMessage.requiredFirstTool == "" {
+			if toolName := recoveryToolFromReview(guidance); a.hasTool(toolName) {
+				firstQueuedMessage.requiredFirstTool = toolName
+			}
+		}
+	}
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
+}
+
+func isRecoveryCall(call SessionAgentCall) bool {
+	return call.recoveryAttempted || call.toolProtocolRetry || call.idleContinuationCount > 0 || call.recoveryGuidance != ""
+}
+
+func recoveryToolFromReview(review string) string {
+	for line := range strings.SplitSeq(review, "\n") {
+		label, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok || !strings.EqualFold(strings.TrimSpace(label), "Next tool") {
+			continue
+		}
+		toolName := strings.Trim(strings.TrimSpace(value), "`.* ")
+		if strings.EqualFold(toolName, "none") {
+			return ""
+		}
+		return toolName
+	}
+	return ""
+}
+
+func (a *sessionAgent) hasTool(name string) bool {
+	if name == "" {
+		return false
+	}
+	return slices.ContainsFunc(a.tools.Copy(), func(tool fantasy.AgentTool) bool {
+		return tool.Info().Name == name
+	})
 }
 
 func (a *sessionAgent) shouldAutoReviewError(err error, model Model) (string, bool) {
@@ -2155,6 +2236,25 @@ func contextRetryMessages(msgs []message.Message) []message.Message {
 		return filtered
 	}
 	return append([]message.Message(nil), filtered[len(filtered)-limit:]...)
+}
+
+func recoveryMessages(msgs []message.Message) []message.Message {
+	filtered := make([]message.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if isAutoReviewSidecarMessage(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	const limit = 10
+	if len(filtered) <= limit {
+		return filtered
+	}
+	return append([]message.Message(nil), filtered[len(filtered)-limit:]...)
+}
+
+func isAutoReviewSidecarMessage(msg message.Message) bool {
+	return msg.Role == message.Assistant && strings.HasPrefix(strings.TrimSpace(msg.Content().String()), "Auto-review sidecar:")
 }
 
 func isContextOverflowMessage(msg message.Message) bool {
@@ -2358,6 +2458,9 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	knownToolCallIDs := make(map[string]struct{})
 	knownToolResultIDs := make(map[string]struct{})
 	for _, m := range msgs {
+		if isAutoReviewSidecarMessage(m) {
+			continue
+		}
 		switch m.Role {
 		case message.Assistant:
 			for _, tc := range m.ToolCalls() {
@@ -2372,6 +2475,9 @@ If not, please feel free to ignore. Again do not mention this message to the use
 
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
+			continue
+		}
+		if isAutoReviewSidecarMessage(m) {
 			continue
 		}
 		// Assistant message without content or tool calls (cancelled before it returned anything).

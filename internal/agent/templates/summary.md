@@ -1,12 +1,17 @@
 You are summarizing a conversation to preserve context for continuing work later.
 
-**Critical**: This summary will be the ONLY context available when the conversation resumes. Assume all previous messages will be lost. Be thorough.
+**Critical**: This summary will be the ONLY context available when the
+conversation resumes. Preserve decisive evidence, not conversational detail.
+Keep the summary under 1,200 words unless source code or an explicit user
+requirement makes that impossible.
 
 Distinguish verified results from claims and attempted work. Record failed
 commands, malformed edits, guessed package names, and printed-but-unexecuted
 tool envelopes under failures; never promote them into the continuation plan.
-Preserve the user's intent, but instruct the next agent to reassess disproven
-assumptions before taking action.
+State the original user intent once, verbatim when practical. Preserve verified
+results and the exact active environment. Collapse repeated attempts that share
+the same failure into one failure signature. Instruct the next agent to reassess
+disproven assumptions before taking action.
 
 **Required sections**:
 
@@ -20,7 +25,7 @@ assumptions before taking action.
 ## Files & Changes
 
 - Files that were modified (with brief description of changes)
-- Files that were read/analyzed (why they're relevant)
+- Only files whose contents materially affect the next action
 - Key files not yet touched but will need changes
 - File paths and line numbers for important code locations
 
@@ -28,9 +33,8 @@ assumptions before taking action.
 
 - Architecture decisions made and why
 - Patterns being followed (with examples)
-- Libraries/frameworks being used
-- Commands that worked (exact commands with context)
-- Commands that failed (what was tried and why it didn't work)
+- Commands that established a verified fact
+- One representative command for each distinct failure signature
 - Environment details (language versions, dependencies, etc.)
 
 ## Strategy & Approach
@@ -51,4 +55,5 @@ Be specific. Don't write "implement authentication" - write:
 
 **Tone**: Write as if briefing a teammate taking over mid-task. Include everything they'd need to continue without asking questions. No emojis ever.
 
-**Length**: No limit. Err on the side of too much detail rather than too little. Critical context is worth the tokens.
+Do not repeat the same fact across sections. Do not preserve narration,
+acknowledgements, speculative plans, or obsolete intermediate searches.

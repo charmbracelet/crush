@@ -1040,8 +1040,14 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
-	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
+	apiKey, err := c.cfg.Resolve(providerCfg.APIKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolving api_key for provider %q: %w", providerCfg.ID, err)
+	}
+	baseURL, err := c.cfg.Resolve(providerCfg.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("resolving base_url for provider %q: %w", providerCfg.ID, err)
+	}
 
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):

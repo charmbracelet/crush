@@ -7,9 +7,12 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	mcp "github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/ultraviolet/layout"
 )
 
 // modelInfo renders the current model information including reasoning
@@ -57,84 +60,15 @@ func (m *UI) modelInfo(width int) string {
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
 }
 
-// getDynamicHeightLimits will give us the num of items to show in each section based on the height
-// some items are more important than others.
-func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skillCount int) (maxFiles, maxLSPs, maxMCPs, maxSkills int) {
-	const (
-		minItemsPerSection = 2
-		// Keep these high so dynamic layout uses available sidebar space
-		// instead of hitting small hard limits.
-		defaultMaxFilesShown    = 1000
-		defaultMaxLSPsShown     = 1000
-		defaultMaxMCPsShown     = 1000
-		defaultMaxSkillsShown   = 1000
-		minAvailableHeightLimit = 10
-	)
-
-	if availableHeight < minAvailableHeightLimit {
-		return minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection
-	}
-
-	maxFiles = minItemsPerSection
-	maxLSPs = minItemsPerSection
-	maxMCPs = minItemsPerSection
-	maxSkills = minItemsPerSection
-
-	remainingHeight := max(0, availableHeight-(minItemsPerSection*4))
-
-	sectionValues := []*int{&maxFiles, &maxLSPs, &maxMCPs, &maxSkills}
-	sectionCaps := []int{defaultMaxFilesShown, defaultMaxLSPsShown, defaultMaxMCPsShown, defaultMaxSkillsShown}
-	sectionNeeds := []int{max(0, fileCount-maxFiles), max(0, lspCount-maxLSPs), max(0, mcpCount-maxMCPs), max(0, skillCount-maxSkills)}
-
-	for remainingHeight > 0 {
-		allocated := false
-		for i, section := range sectionValues {
-			if remainingHeight == 0 {
-				break
-			}
-			if sectionNeeds[i] == 0 || *section >= sectionCaps[i] {
-				continue
-			}
-			*section = *section + 1
-			sectionNeeds[i]--
-			remainingHeight--
-			allocated = true
-		}
-		if !allocated {
-			break
-		}
-	}
-
-	for remainingHeight > 0 {
-		allocated := false
-		for i, section := range sectionValues {
-			if remainingHeight == 0 {
-				break
-			}
-			if *section >= sectionCaps[i] {
-				continue
-			}
-			*section = *section + 1
-			remainingHeight--
-			allocated = true
-		}
-		if !allocated {
-			break
-		}
-	}
-
-	return maxFiles, maxLSPs, maxMCPs, maxSkills
-}
-
 // sidebarMaxOffset returns the maximum sidebar scroll offset based on
 // the last drawn content height. The value is computed during drawSidebar.
 func (m *UI) sidebarMaxOffset() int {
 	return m.sidebarMaxOffsetVal
 }
 
-// drawSidebar renders the chat sidebar with virtual scrolling and an
-// auto-hiding scrollbar. While the sidebar is focused, the scrollbar stays
-// visible.
+// drawSidebar renders the chat sidebar with a fixed header and a
+// virtual-scrolling content area with an auto-hiding scrollbar. While the
+// sidebar is focused, the scrollbar stays visible.
 func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	if m.session == nil {
 		return
@@ -171,38 +105,24 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		blocks...,
 	)
 
-	// Give a very large available height so all items are rendered.
-	const maxAvailableHeight = 100000
-	filesCount := 0
-	for _, f := range m.sessionFiles {
-		if f.Additions == 0 && f.Deletions == 0 {
-			continue
-		}
-		filesCount++
-	}
+	// Split the sidebar into a fixed header and a scrollable content area.
+	var headerRect, contentRect image.Rectangle
+	layout.Vertical(
+		layout.Len(lipgloss.Height(sidebarHeader)),
+		layout.Fill(1),
+	).Split(area).Assign(&headerRect, &contentRect)
 
-	lspsCount := len(m.lspStates)
+	contentHeight := contentRect.Dy()
 
-	mcpsCount := 0
-	for _, mcpCfg := range m.com.Config().MCP.Sorted() {
-		if _, ok := m.mcpStates[mcpCfg.Name]; ok {
-			mcpsCount++
-		}
-	}
+	// Render all items without truncation; virtual scrolling handles overflow.
+	lspSection := m.lspInfo(contentWidth, len(m.lspStates), true)
+	mcpSection := m.mcpInfo(contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
+	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
+	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
 
-	skillsCount := len(m.skillStatusItems())
-
-	maxFiles, maxLSPs, maxMCPs, maxSkills := getDynamicHeightLimits(maxAvailableHeight, filesCount, lspsCount, mcpsCount, skillsCount)
-
-	lspSection := m.lspInfo(contentWidth, maxLSPs, true)
-	mcpSection := m.mcpInfo(contentWidth, maxMCPs, true)
-	skillsSection := m.skillsInfo(contentWidth, maxSkills, true)
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, maxFiles, true)
-
-	// Build the full sidebar content.
-	fullContent := lipgloss.JoinVertical(
+	// Build the scrollable content.
+	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		sidebarHeader,
 		filesSection,
 		"",
 		lspSection,
@@ -213,11 +133,10 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	)
 
 	// Split into lines for virtual scrolling.
-	lines := strings.Split(fullContent, "\n")
-	// Update scrollable flag and store max offset.
+	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
-	m.sidebarScrollable = totalLines > height
-	m.sidebarMaxOffsetVal = max(0, totalLines-height)
+	m.sidebarScrollable = totalLines > contentHeight
+	m.sidebarMaxOffsetVal = max(0, totalLines-contentHeight)
 
 	// If the sidebar is focused but no longer scrollable (e.g. after a
 	// resize), return focus to the chat.
@@ -233,30 +152,63 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	// Slice visible lines.
-	end := min(m.sidebarOffset+height, totalLines)
+	end := min(m.sidebarOffset+contentHeight, totalLines)
 	visibleLines := lines[m.sidebarOffset:end]
 	visibleStr := strings.Join(visibleLines, "\n")
 
 	// Determine scrollbar visibility: always visible when focused, otherwise
 	// auto-hide.
-	scrollbarVisible := totalLines > height && (m.sidebarScrollbarVisible || m.focus == uiFocusSidebar)
+	scrollbarVisible := totalLines > contentHeight && (m.sidebarScrollbarVisible || m.focus == uiFocusSidebar)
 
+	// Draw the fixed header.
 	uv.NewStyledString(
 		lipgloss.NewStyle().
 			MaxWidth(contentWidth).
-			MaxHeight(height).
+			MaxHeight(lipgloss.Height(sidebarHeader)).
+			Render(sidebarHeader),
+	).Draw(scr, headerRect)
+
+	// Draw the visible content in the scrollable area.
+	uv.NewStyledString(
+		lipgloss.NewStyle().
+			MaxWidth(contentWidth).
+			MaxHeight(contentHeight).
 			Render(visibleStr),
-	).Draw(scr, area)
+	).Draw(scr, contentRect)
 
 	// Draw scrollbar in the reserved column.
 	if scrollbarVisible {
-		scrollbar := common.Scrollbar(m.com.Styles, height, totalLines, height, m.sidebarOffset)
+		scrollbar := common.Scrollbar(m.com.Styles, contentHeight, totalLines, contentHeight, m.sidebarOffset)
 		if scrollbar != "" {
 			scrollbarArea := image.Rectangle{
-				Min: image.Point{X: area.Max.X - 1, Y: area.Min.Y},
-				Max: area.Max,
+				Min: image.Point{X: area.Max.X - 1, Y: contentRect.Min.Y},
+				Max: image.Point{X: area.Max.X, Y: area.Max.Y},
 			}
 			uv.NewStyledString(scrollbar).Draw(scr, scrollbarArea)
 		}
 	}
+}
+
+// fileChangeCount returns the number of session files with non-zero additions
+// or deletions.
+func fileChangeCount(files []SessionFile) int {
+	count := 0
+	for _, f := range files {
+		if f.Additions == 0 && f.Deletions == 0 {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// mcpCount returns the number of MCP servers that have a state entry.
+func mcpCount(mcpCfgs []config.MCP, states map[string]mcp.ClientInfo) int {
+	count := 0
+	for _, cfg := range mcpCfgs {
+		if _, ok := states[cfg.Name]; ok {
+			count++
+		}
+	}
+	return count
 }

@@ -76,6 +76,10 @@ func NewEditTool(
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
 
+			if fsext.ShouldExcludeFile(workingDir, params.FilePath) {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is ignored by .gitignore or .crushignore: %s", params.FilePath)), nil
+			}
+
 			var response fantasy.ToolResponse
 			var err error
 

@@ -65,6 +65,10 @@ func NewWriteTool(
 
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
+			if fsext.ShouldExcludeFile(workingDir, filePath) {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is ignored by .gitignore or .crushignore: %s", filePath)), nil
+			}
+
 			fileInfo, err := os.Stat(filePath)
 			if err == nil {
 				if fileInfo.IsDir() {

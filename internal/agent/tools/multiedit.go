@@ -78,6 +78,10 @@ func NewMultiEditTool(
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
 
+			if fsext.ShouldExcludeFile(workingDir, params.FilePath) {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is ignored by .gitignore or .crushignore: %s", params.FilePath)), nil
+			}
+
 			// Validate all edits before applying any
 			if err := validateEdits(params.Edits); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil

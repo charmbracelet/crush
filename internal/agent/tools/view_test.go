@@ -270,6 +270,21 @@ func runViewTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 	return resp
 }
 
+func TestViewToolRespectsCrushignore(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, ".crushignore"), []byte("_*.md\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "_secret.md"), []byte("do not read"), 0o644))
+
+	tool := newViewToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runViewTool(t, tool, ctx, ViewParams{FilePath: "_secret.md"})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "ignored")
+}
+
 var _ filetracker.Service = mockFileTracker{}
 
 func TestReadBuiltinFile(t *testing.T) {

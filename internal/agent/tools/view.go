@@ -19,6 +19,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -126,6 +127,10 @@ func NewViewTool(
 			relPath, err := filepath.Rel(absWorkingDir, absFilePath)
 			isOutsideWorkDir := err != nil || strings.HasPrefix(relPath, "..")
 			isSkillFile := isInSkillsPath(absFilePath, skillsPaths)
+
+			if !isSkillFile && fsext.ShouldExcludeFile(workingDir, absFilePath) {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is ignored by .gitignore or .crushignore: %s", filePath)), nil
+			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {

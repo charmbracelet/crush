@@ -101,6 +101,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
 			}
+			if runtime.GOOS == "windows" && hasBarePowerShellCmdlet(params.Command) {
+				return fantasy.NewTextErrorResponse("PowerShell cmdlets cannot run directly in re.code's portable shell. Prefer native view/edit/write tools. If PowerShell is required, invoke powershell.exe -NoProfile -Command and wrap the complete PowerShell script in outer single quotes."), nil
+			}
 
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
@@ -283,6 +286,23 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
 	)
+}
+
+func hasBarePowerShellCmdlet(command string) bool {
+	lower := strings.ToLower(command)
+	if strings.Contains(lower, "powershell.exe") || strings.Contains(lower, "pwsh.exe") || strings.Contains(lower, "pwsh ") {
+		return false
+	}
+	for _, cmdlet := range []string{
+		"get-content", "set-content", "select-object", "where-object",
+		"foreach-object", "convertfrom-json", "convertto-json", "get-command",
+		"get-childitem", "copy-item", "move-item", "remove-item", "new-item",
+	} {
+		if strings.Contains(lower, cmdlet) {
+			return true
+		}
+	}
+	return false
 }
 
 // formatOutput formats the output of a completed command with error handling

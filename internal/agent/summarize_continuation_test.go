@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
@@ -47,4 +48,19 @@ func TestAnnouncedPendingAction(t *testing.T) {
 	require.True(t, announcedPendingAction("The file is minified, so I'll insert the MCP section next:"))
 	require.True(t, announcedPendingAction("I need to inspect the active configuration."))
 	require.False(t, announcedPendingAction("Configured and verified all MCP clients."))
+}
+
+func TestApplyRequiredFirstToolOnlyAffectsFirstStep(t *testing.T) {
+	t.Parallel()
+
+	first := fantasy.PrepareStepResult{}
+	applyRequiredFirstTool(&first, "web_search", 0)
+	require.NotNil(t, first.ToolChoice)
+	require.Equal(t, fantasy.SpecificToolChoice("web_search"), *first.ToolChoice)
+	require.Equal(t, []string{"web_search"}, first.ActiveTools)
+
+	later := fantasy.PrepareStepResult{}
+	applyRequiredFirstTool(&later, "web_search", 1)
+	require.Nil(t, later.ToolChoice)
+	require.Empty(t, later.ActiveTools)
 }

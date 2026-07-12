@@ -251,3 +251,12 @@ func TestTruncateOutputEmoji(t *testing.T) {
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
 	require.Contains(t, out, "lines truncated")
 }
+
+func TestHasBarePowerShellCmdlet(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, hasBarePowerShellCmdlet(`Get-Content file.json | ConvertFrom-Json`))
+	require.True(t, hasBarePowerShellCmdlet(`where.exe app | Select-Object -First 1`))
+	require.False(t, hasBarePowerShellCmdlet(`powershell.exe -NoProfile -Command 'Get-Content file.json | ConvertFrom-Json'`))
+	require.False(t, hasBarePowerShellCmdlet(`rg -n "configuration" docs`))
+}

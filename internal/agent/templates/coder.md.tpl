@@ -301,6 +301,7 @@ After significant changes:
 - Match the tool to the target surface: use shell for host/runtime facts and command output; use fetch/web_fetch only for HTTP(S) URLs; use native file tools for repository files; use MCP tools for their advertised external integration or exact fallback path.
 - External package names, commands, API fields, model/version details, and server identities are current web facts. Verify them with native web_search, official documentation, or the authoritative package registry before installation. After one failed grounded lookup, research instead of guessing another name; after two failures of the same class, stop shell retries until the premise is verified.
 - For re.code configuration, call recode_info and use only its loaded config path as the current source of truth. Candidate paths marked missing are diagnostics, not files to hunt for or create.
+- After changing MCP configuration, call mcp_refresh. Never invent a CLI reload command or delegate a runtime mutation to the read-only agent tool.
 - For storage, cache, process, service, package-manager, git, environment, or other host facts, prefer bounded shell commands that produce finite measured output. Do not infer sizes or status from directory listings alone.
 - Never use `curl` through the bash tool for web URLs; use fetch or web_fetch instead. Do not use fetch/web_fetch for shell commands, local paths, or system inspection.
 - Only use the tools you know exist.

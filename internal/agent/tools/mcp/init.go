@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -228,6 +229,53 @@ func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore)
 	}
 
 	return initClient(ctx, cfg, name, m, cfg.Resolver())
+}
+
+// Refresh reloads configuration from disk and restarts one or all MCP clients.
+// Removed clients are closed and cleared; configured clients are initialized
+// from the newly loaded configuration.
+func Refresh(ctx context.Context, cfg *config.ConfigStore, name string) (map[string]error, error) {
+	if err := cfg.ReloadFromDisk(ctx); err != nil {
+		return nil, fmt.Errorf("reload configuration: %w", err)
+	}
+
+	targetSet := make(map[string]bool)
+	if name != "" {
+		if _, configured := cfg.Config().MCP[name]; !configured {
+			if _, known := states.Get(name); !known {
+				return nil, fmt.Errorf("mcp '%s' not found in configuration", name)
+			}
+		}
+		targetSet[name] = true
+	} else {
+		for configuredName := range cfg.Config().MCP {
+			targetSet[configuredName] = true
+		}
+		for knownName := range states.Seq2() {
+			targetSet[knownName] = true
+		}
+	}
+
+	targets := make([]string, 0, len(targetSet))
+	for target := range targetSet {
+		targets = append(targets, target)
+	}
+	slices.Sort(targets)
+
+	results := make(map[string]error, len(targets))
+	for _, target := range targets {
+		if err := DisableSingle(cfg, target); err != nil {
+			results[target] = err
+			continue
+		}
+		if _, configured := cfg.Config().MCP[target]; !configured {
+			states.Del(target)
+			results[target] = nil
+			continue
+		}
+		results[target] = InitializeSingle(ctx, target, cfg)
+	}
+	return results, nil
 }
 
 // initClient initializes a single MCP client with the given configuration.

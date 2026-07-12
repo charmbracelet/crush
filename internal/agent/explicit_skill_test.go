@@ -47,8 +47,10 @@ func TestInjectExplicitSkillInvocationsRoutesMCPTasks(t *testing.T) {
 	}
 	got, loaded := injectExplicitSkillInvocations("Fix the broken MCP configurations on Windows.", available)
 	require.Equal(t, []string{"crush-config", "mcp-schema-first"}, loaded)
-	require.Contains(t, got, "Preserve and validate crush.json.")
-	require.Contains(t, got, "Inspect configured MCPs first.")
+	require.Contains(t, got, "Inspect crush_info before editing configuration.")
+	require.Contains(t, got, "After a change, call mcp_refresh")
+	require.NotContains(t, got, "Preserve and validate crush.json.")
+	require.NotContains(t, got, "Inspect configured MCPs first.")
 }
 
 func TestInjectExplicitSkillInvocationsRoutesHeavyTasks(t *testing.T) {
@@ -62,7 +64,8 @@ func TestInjectExplicitSkillInvocationsRoutesHeavyTasks(t *testing.T) {
 
 	got, loaded := injectExplicitSkillInvocations(prompt, available)
 	require.Equal(t, []string{"execution-routing"}, loaded)
-	require.Contains(t, got, "Ground, research, delegate, and verify.")
+	require.Contains(t, got, "Keep ownership of the user task.")
+	require.NotContains(t, got, "Ground, research, delegate, and verify.")
 }
 
 func TestSkillTransientContextExcludesUserPrompt(t *testing.T) {

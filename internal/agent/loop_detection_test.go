@@ -185,6 +185,33 @@ func TestHasRepeatedFailureClassCountsParallelStepOnce(t *testing.T) {
 	}
 }
 
+func TestRepeatedExternalFailureClassRequiresResearchAfterTwoSteps(t *testing.T) {
+	t.Parallel()
+
+	steps := []fantasy.StepResult{
+		makeToolStep("bash", `{"command":"npm view guessed-a"}`, "npm error code E404"),
+		makeToolStep("bash", `{"command":"npm view guessed-b"}`, "npm error code E404"),
+	}
+	if !hasRepeatedExternalFailureClass(steps, 10, 2) {
+		t.Fatal("expected two external lookup failures to require research")
+	}
+	if hasRepeatedExternalFailureClass(steps[:1], 10, 2) {
+		t.Fatal("one external lookup failure must not trigger forced research")
+	}
+}
+
+func TestRepeatedExternalSchemaFailureRequiresResearch(t *testing.T) {
+	t.Parallel()
+
+	steps := []fantasy.StepResult{
+		makeToolStep("mcp_refresh", `{"name":"filesystem"}`, "filesystem: error: unsupported mcp type"),
+		makeToolStep("mcp_refresh", `{"name":"memory"}`, "memory: error: unsupported mcp type"),
+	}
+	if !hasRepeatedExternalFailureClass(steps, 10, 2) {
+		t.Fatal("expected repeated MCP schema failures to require research")
+	}
+}
+
 func TestGetToolInteractionSignature(t *testing.T) {
 	t.Run("empty content returns empty string", func(t *testing.T) {
 		sig := getToolInteractionSignature(fantasy.ResponseContent{})

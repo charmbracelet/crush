@@ -581,3 +581,19 @@ func TestGetProviderOptionsLMStudioThinking(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, true, parsed.ExtraBody["enable_thinking"])
 }
+
+func TestSubAgentOutputFallsBackToToolEvidence(t *testing.T) {
+	t.Parallel()
+
+	result := &fantasy.AgentResult{Steps: []fantasy.StepResult{{
+		Response: fantasy.Response{Content: fantasy.ResponseContent{
+			fantasy.ToolCallContent{ToolCallID: "call-1", ToolName: "web_search", Input: `{"query":"official MCP reload command"}`},
+			fantasy.ToolResultContent{ToolCallID: "call-1", ToolName: "web_search", Result: fantasy.ToolResultOutputContentText{Text: "No supported reload CLI command is documented."}},
+		}},
+	}}}
+
+	output := subAgentOutput(result)
+	require.Contains(t, output, "evidence, not as a completed action")
+	require.Contains(t, output, "web_search")
+	require.Contains(t, output, "No supported reload CLI command")
+}

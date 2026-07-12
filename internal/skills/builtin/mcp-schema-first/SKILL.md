@@ -32,6 +32,9 @@ Do not use filesystem MCP as a broad discovery engine from `/`. For broad host i
    first exact lookup fails, use native `web_search` immediately; do not guess
    another package name from memory.
 8. Do not guess parameter names. If the schema is unavailable, say so and use a safer native or shell path.
+9. After a validated configuration change, call `mcp_refresh` for one named
+   server or all servers. Do not invent a re.code or Crush shell command to
+   reload MCP clients.
 
 In `crush.json`, the transport key is `type`; valid values are `stdio`, `sse`,
 and `http`. Parse before and after a structured edit, preserve unrelated

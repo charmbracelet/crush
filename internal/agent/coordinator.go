@@ -420,7 +420,11 @@ func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Sk
 
 	lowerPrompt := strings.ToLower(userPrompt)
 	activationVerbs := []string{"load", "use", "follow", "invoke", "apply"}
-	var loaded []*skills.Skill
+	type selectedSkill struct {
+		skill    *skills.Skill
+		explicit bool
+	}
+	var loaded []selectedSkill
 	for _, skill := range activeSkills {
 		if skill == nil || skill.Name == "" || skill.Instructions == "" || skill.DisableModelInvocation {
 			continue
@@ -438,7 +442,7 @@ func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Sk
 		if !explicit && !taskRequiresBuiltinSkill(lowerPrompt, skill.Name) {
 			continue
 		}
-		loaded = append(loaded, skill)
+		loaded = append(loaded, selectedSkill{skill: skill, explicit: explicit})
 		if len(loaded) == 4 {
 			break
 		}
@@ -449,12 +453,31 @@ func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Sk
 
 	parts := make([]string, 0, len(loaded)+1)
 	names := make([]string, 0, len(loaded))
-	for _, skill := range loaded {
-		parts = append(parts, skill.FormatInvocation())
-		names = append(names, skill.Name)
+	for _, selected := range loaded {
+		if selected.explicit {
+			parts = append(parts, selected.skill.FormatInvocation())
+		} else {
+			parts = append(parts, inferredSkillContext(selected.skill.Name))
+		}
+		names = append(names, selected.skill.Name)
 	}
 	parts = append(parts, userPrompt)
 	return strings.Join(parts, "\n\n"), names
+}
+
+func inferredSkillContext(name string) string {
+	var instructions string
+	switch name {
+	case "crush-config":
+		instructions = "Inspect crush_info before editing configuration. Use the active config path it reports. Preserve unrelated providers, models, permissions, and MCP entries. Parse and write valid JSON through structured tools; never reconstruct a minified config from memory."
+	case "mcp-schema-first":
+		instructions = "Inspect current MCP status and configuration before installing anything. Reuse working servers. Verify package names from authoritative sources after one failed lookup. MCP entries use type (stdio, http, or sse); legacy transport is accepted by re.code. After a change, call mcp_refresh and act on its exact result."
+	case "execution-routing":
+		instructions = "Keep ownership of the user task. Delegate only bounded read-only research, integrate the evidence yourself, and continue until the intent is satisfied or a concrete blocker requires user input. Do not repeat a failed command without changing strategy."
+	default:
+		return ""
+	}
+	return "<loaded_skill>\n<name>" + name + "</name>\n<instructions>" + instructions + "</instructions>\n</loaded_skill>"
 }
 
 func taskRequiresBuiltinSkill(prompt, skillName string) bool {
@@ -882,6 +905,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewMCPRefreshTool(c.cfg),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobListTool(),
@@ -1624,7 +1648,45 @@ func subAgentOutput(result *fantasy.AgentResult) string {
 	if result == nil {
 		return ""
 	}
-	return result.Response.Content.Text()
+	if text := strings.TrimSpace(result.Response.Content.Text()); text != "" {
+		return text
+	}
+
+	var evidence []string
+	for _, step := range result.Steps {
+		calls := make(map[string]fantasy.ToolCallContent)
+		for _, call := range step.Content.ToolCalls() {
+			calls[call.ToolCallID] = call
+		}
+		for _, toolResult := range step.Content.ToolResults() {
+			call := calls[toolResult.ToolCallID]
+			name := toolResult.ToolName
+			if name == "" {
+				name = call.ToolName
+			}
+			input := truncateSubAgentEvidence(call.Input, 300)
+			output := truncateSubAgentEvidence(toolResultOutputString(toolResult.Result), 600)
+			if output == "" {
+				output = "(no output)"
+			}
+			evidence = append(evidence, fmt.Sprintf("- %s input=%s result=%s", name, input, output))
+		}
+	}
+	if len(evidence) == 0 {
+		return ""
+	}
+	if len(evidence) > 8 {
+		evidence = evidence[len(evidence)-8:]
+	}
+	return "Sub-agent ended without a final prose response. Treat the following as evidence, not as a completed action:\n" + strings.Join(evidence, "\n")
+}
+
+func truncateSubAgentEvidence(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }
 
 // updateParentSessionCost accumulates the cost from a child session to its parent session.

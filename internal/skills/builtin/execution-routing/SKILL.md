@@ -35,6 +35,7 @@ and escalate only when evidence justifies it.
 | Public repository symbol search | Sourcegraph or GitHub Grep when available |
 | Multi-file independent research | `agent` after grounding |
 | re.code configuration/runtime truth | `recode_info` |
+| Apply changed MCP configuration | `mcp_refresh` |
 
 ## Sub-Agent Contract
 

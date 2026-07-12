@@ -586,6 +586,16 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
 	}
+	for name, mcpConfig := range c.MCP {
+		if mcpConfig.Type == "" {
+			mcpConfig.Type = mcpConfig.LegacyTransport
+		}
+		if mcpConfig.Type == "" && mcpConfig.Command != "" {
+			mcpConfig.Type = MCPStdio
+		}
+		mcpConfig.LegacyTransport = ""
+		c.MCP[name] = mcpConfig
+	}
 	if c.LSP == nil {
 		c.LSP = make(map[string]LSPConfig)
 	}

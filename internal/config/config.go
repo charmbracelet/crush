@@ -197,17 +197,18 @@ const (
 )
 
 type MCPConfig struct {
-	Command        string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
-	Env            map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the MCP server"`
-	Args           []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the MCP server command"`
-	Type           MCPType           `json:"type" jsonschema:"required,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
-	URL            string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
-	Disabled       bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
-	DisabledTools  []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
-	EnabledTools   []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
-	Timeout        int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
-	ToolTimeout    int               `json:"tool_timeout,omitempty" jsonschema:"description=Timeout in seconds for individual MCP tool calls,default=60,example=20,example=60,example=120"`
-	PollutesMemory *bool             `json:"pollutes_memory,omitempty" jsonschema:"description=Whether successful tool output can disable passive memory recording when the external-context guard is enabled,default=true"`
+	Command         string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
+	Env             map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the MCP server"`
+	Args            []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the MCP server command"`
+	Type            MCPType           `json:"type" jsonschema:"required,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
+	LegacyTransport MCPType           `json:"transport,omitempty" jsonschema:"-"`
+	URL             string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
+	Disabled        bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
+	DisabledTools   []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
+	EnabledTools    []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
+	Timeout         int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
+	ToolTimeout     int               `json:"tool_timeout,omitempty" jsonschema:"description=Timeout in seconds for individual MCP tool calls,default=60,example=20,example=60,example=120"`
+	PollutesMemory  *bool             `json:"pollutes_memory,omitempty" jsonschema:"description=Whether successful tool output can disable passive memory recording when the external-context guard is enabled,default=true"`
 
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
@@ -791,6 +792,7 @@ func allToolNames() []string {
 		"agent",
 		"bash",
 		"recode_info",
+		"mcp_refresh",
 		"crush_logs",
 		"job_output",
 		"job_list",

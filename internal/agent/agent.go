@@ -127,6 +127,9 @@ type SessionAgentCall struct {
 	// idleContinuationCount bounds automatic continuation when a model
 	// announces its next action but ends the turn without calling a tool.
 	idleContinuationCount int
+	// requiredFirstTool forces one grounded recovery action before the model
+	// can resume autonomous tool selection.
+	requiredFirstTool string
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -1028,6 +1031,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
 	var loopDetected bool
+	var externalResearchRequired bool
 	finalFinishReason := message.FinishReasonUnknown
 	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
@@ -1055,6 +1059,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			// Use latest tools (updated by SetTools when MCP tools change).
 			prepared.Tools = a.tools.Copy()
+			applyRequiredFirstTool(&prepared, call.requiredFirstTool, options.StepNumber)
 			if call.contextRetry {
 				prepared.Tools = contextRetryTools(prepared.Tools)
 			}
@@ -1292,6 +1297,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return false
 			},
 			func(steps []fantasy.StepResult) bool {
+				if hasRepeatedExternalFailureClass(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
+					externalResearchRequired = true
+					loopDetected = true
+					slog.Warn("Repeated external lookup failure detected", "session_id", call.SessionID, "steps", len(steps), "max_repeats", loopDetectionMaxRepeats)
+					return true
+				}
 				if hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) ||
 					hasRepeatedFailureClass(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
 					loopDetected = true
@@ -1483,6 +1494,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		retry.Accepted = nil
 		retry.skipUserMessage = true
 		retry.recoveryAttempted = true
+		if externalResearchRequired {
+			retry.requiredFirstTool = tools.WebSearchToolName
+		}
 		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
 		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn was stopped after repeated failures without progress. Identify the failed assumption and a materially different grounded approach.", true); reviewErr != nil {
 			slog.Error("Failed to auto-review repeated tool-call loop", "error", reviewErr)
@@ -1833,6 +1847,15 @@ func recoveryPrompt(intent, instruction string) string {
 		intent = "the unresolved user goal described in the session context"
 	}
 	return fmt.Sprintf("[Automatic recovery] Continue %s.\n\n%s", intent, instruction)
+}
+
+func applyRequiredFirstTool(prepared *fantasy.PrepareStepResult, toolName string, stepNumber int) {
+	if prepared == nil || toolName == "" || stepNumber != 0 {
+		return
+	}
+	choice := fantasy.SpecificToolChoice(toolName)
+	prepared.ToolChoice = &choice
+	prepared.ActiveTools = []string{toolName}
 }
 
 func isAcknowledgement(text string) bool {

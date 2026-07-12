@@ -114,6 +114,19 @@ func TestConfig_UserConfigOverridesEmbeddedMCP(t *testing.T) {
 	require.Equal(t, "https://mcp.context7.com/mcp", cfg.MCP["context7"].URL)
 }
 
+func TestConfig_NormalizesLegacyMCPTransport(t *testing.T) {
+	loadedConfig, err := loadFromBytes([][]byte{
+		[]byte(`{"mcp":{"legacy":{"command":"npx","transport":"stdio"},"implicit":{"command":"server"},"explicit":{"type":"http","transport":"stdio","url":"https://example.com/mcp"}}}`),
+	})
+	require.NoError(t, err)
+
+	loadedConfig.setDefaults(t.TempDir(), "")
+	require.Equal(t, MCPStdio, loadedConfig.MCP["legacy"].Type)
+	require.Equal(t, MCPStdio, loadedConfig.MCP["implicit"].Type)
+	require.Equal(t, MCPHttp, loadedConfig.MCP["explicit"].Type)
+	require.Empty(t, loadedConfig.MCP["legacy"].LegacyTransport)
+}
+
 func TestConfig_LoadFromConfigPaths_InvalidEmbeddedConfig(t *testing.T) {
 	previous := EmbeddedConfigJSON
 	EmbeddedConfigJSON = `{`
@@ -864,7 +877,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "recode_info", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "web_fetch", "web_search", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "recode_info", "mcp_refresh", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "web_fetch", "web_search", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -889,7 +902,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "recode_info", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "recode_info", "mcp_refresh", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)

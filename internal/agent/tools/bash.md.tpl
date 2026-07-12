@@ -6,6 +6,7 @@ It uses the mvdan/sh interpreter with portable shell syntax on all platforms, in
 On Windows, always convert displayed backslash paths before calling this tool:
 use "ls C:/foo/bar" and never pass "C:\foo\bar" to the shell.
 Prefer portable commands and built-in file/search tools over OS-specific shell features. Only use cmd.exe, PowerShell, WSL, or Unix-only commands when the user or environment explicitly requires them.
+On Windows, bare PowerShell cmdlets are rejected. Never write `Get-Content ... | ConvertFrom-Json` directly. Prefer native tools, or invoke `powershell.exe -NoProfile -Command 'Get-Content ... | ConvertFrom-Json'` with the entire script inside outer single quotes.
 Common shell builtins and core utils are available on Windows.
 </cross_platform>
 

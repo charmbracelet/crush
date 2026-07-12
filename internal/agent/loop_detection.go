@@ -65,6 +65,32 @@ func hasRepeatedFailureClass(steps []fantasy.StepResult, windowSize, maxRepeats 
 	return false
 }
 
+func hasRepeatedExternalFailureClass(steps []fantasy.StepResult, windowSize, maxRepeats int) bool {
+	if len(steps) == 0 || windowSize <= 0 || maxRepeats < 1 {
+		return false
+	}
+	start := max(0, len(steps)-windowSize)
+	count := 0
+	for _, step := range steps[start:] {
+		seenThisStep := false
+		for _, result := range step.Content.ToolResults() {
+			class := failureClass(toolResultOutputString(result.Result))
+			if class != "package-not-found" && class != "executable-not-found" && class != "unsupported-schema" {
+				continue
+			}
+			seenThisStep = true
+			break
+		}
+		if seenThisStep {
+			count++
+			if count >= maxRepeats {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func failureClass(output string) string {
 	s := strings.ToLower(output)
 	switch {
@@ -74,6 +100,8 @@ func failureClass(output string) string {
 		return "executable-not-found"
 	case strings.Contains(s, "syntaxerror:") && strings.Contains(s, "json"):
 		return "invalid-json"
+	case strings.Contains(s, "unsupported mcp type") || strings.Contains(s, "unsupported transport") || strings.Contains(s, "unknown field"):
+		return "unsupported-schema"
 	case strings.Contains(s, "context deadline exceeded") || strings.Contains(s, "timed out"):
 		return "timeout"
 	default:

@@ -2616,9 +2616,16 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds = append(binds, cancelBinding)
 		}
 
-		if m.focus == uiFocusEditor {
+		switch m.focus {
+		case uiFocusEditor:
 			tab.SetHelp("tab", "focus chat")
-		} else {
+		case uiFocusMain:
+			if m.isCompact {
+				tab.SetHelp("tab", "focus editor")
+			} else {
+				tab.SetHelp("tab", "focus sidebar")
+			}
+		case uiFocusSidebar:
 			tab.SetHelp("tab", "focus editor")
 		}
 
@@ -2647,6 +2654,15 @@ func (m *UI) ShortHelp() []key.Binding {
 			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
 			}
+		case uiFocusSidebar:
+			esc := k.Editor.Escape
+			esc.SetHelp("esc", "back to editor")
+			k.Chat.UpDown.SetHelp("↑/↓", "scroll")
+			binds = append(
+				binds,
+				k.Chat.UpDown,
+				esc,
+			)
 		}
 	default:
 		// TODO: other states
@@ -2702,9 +2718,16 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 		mainBinds := []key.Binding{}
 		tab := k.Tab
-		if m.focus == uiFocusEditor {
+		switch m.focus {
+		case uiFocusEditor:
 			tab.SetHelp("tab", "focus chat")
-		} else {
+		case uiFocusMain:
+			if m.isCompact {
+				tab.SetHelp("tab", "focus editor")
+			} else {
+				tab.SetHelp("tab", "focus sidebar")
+			}
+		case uiFocusSidebar:
 			tab.SetHelp("tab", "focus editor")
 		}
 

@@ -3389,7 +3389,7 @@ func (m *UI) isCurrentSessionBusy() bool {
 	if m.bangCancel != nil {
 		return true
 	}
-	if !m.hasSession() {
+	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
 		return false
 	}
 	return m.com.Workspace.AgentIsReady() &&

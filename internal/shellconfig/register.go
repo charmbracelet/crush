@@ -46,13 +46,30 @@ func (f *fragmentBuilder) set(key string, value any) {
 	f.m[key] = value
 }
 
-func (f *fragmentBuilder) setNested(parent, key string, value any) {
+// nestedMap returns the map at f.m[parent][key], creating both levels if
+// needed. The returned map can be mutated directly by callers.
+func (f *fragmentBuilder) nestedMap(parent, key string) map[string]any {
 	p, ok := f.m[parent].(map[string]any)
 	if !ok {
 		p = make(map[string]any)
 		f.m[parent] = p
 	}
-	p[key] = value
+	inner, ok := p[key].(map[string]any)
+	if !ok {
+		inner = make(map[string]any)
+		p[key] = inner
+	}
+	return inner
+}
+
+// rootMap returns the map at f.m[key], creating it if needed.
+func (f *fragmentBuilder) rootMap(key string) map[string]any {
+	m, ok := f.m[key].(map[string]any)
+	if !ok {
+		m = make(map[string]any)
+		f.m[key] = m
+	}
+	return m
 }
 
 // append marshals the fragment to JSON and adds it to the builder.

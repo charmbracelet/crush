@@ -28,7 +28,7 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 
 	id := args[1]
 	f := newFragmentBuilder()
-	f.setNested("providers", id, map[string]any{})
+	p := f.nestedMap("providers", id)
 
 	i := 2
 	for i < len(args) {
@@ -38,51 +38,50 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			f.setNested("providers", id, mergeInto(f.m["providers"].(map[string]any), "name", v))
+			p["name"] = v
 		case "--type":
 			v, err := flagStr(args, &i, "type")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			f.setNested("providers", id, mergeInto(f.m["providers"].(map[string]any), "type", v))
+			p["type"] = v
 		case "--api-key":
 			v, err := flagStr(args, &i, "api-key")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			f.setNested("providers", id, mergeInto(f.m["providers"].(map[string]any), "api_key", v))
+			p["api_key"] = v
 		case "--base-url":
 			v, err := flagStr(args, &i, "base-url")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			f.setNested("providers", id, mergeInto(f.m["providers"].(map[string]any), "base_url", v))
+			p["base_url"] = v
 		case "--disable":
 			v, err := flagBool(args, &i, "disable")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			f.setNested("providers", id, mergeInto(f.m["providers"].(map[string]any), "disable", v))
+			p["disable"] = v
 		case "--flat-rate":
 			v, err := flagBool(args, &i, "flat-rate")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			f.setNested("providers", id, mergeInto(f.m["providers"].(map[string]any), "flat_rate", v))
+			p["flat_rate"] = v
 		case "--system-prompt-prefix":
 			v, err := flagStr(args, &i, "system-prompt-prefix")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			f.setNested("providers", id, mergeInto(f.m["providers"].(map[string]any), "system_prompt_prefix", v))
+			p["system_prompt_prefix"] = v
 		case "--extra-header":
 			k, v, err := flagKeyValue(args, &i, "extra-header")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			p := f.m["providers"].(map[string]any)
-			eh, ok := p["extra_headers"].(map[string]any)
-			if !ok {
+			eh, _ := p["extra_headers"].(map[string]any)
+			if eh == nil {
 				eh = make(map[string]any)
 				p["extra_headers"] = eh
 			}

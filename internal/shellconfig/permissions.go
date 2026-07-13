@@ -17,6 +17,7 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 		return nil
 	}
 	f := newFragmentBuilder()
+	perms := f.rootMap("permissions")
 
 	i := 1
 	for i < len(args) {
@@ -26,23 +27,11 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			f.m["permissions"] = mergeAllowedTools(f.m, v)
+			perms["allowed_tools"] = appendArr(perms, "allowed_tools", v)
 		default:
 			return usage(stderr, fmt.Sprintf("permissions: unknown flag %s", args[i]))
 		}
 	}
 
 	return f.append(b)
-}
-
-// mergeAllowedTools returns a permissions object with the tool appended to
-// the allowed_tools array.
-func mergeAllowedTools(existing any, tool string) map[string]any {
-	m, ok := existing.(map[string]any)
-	if !ok {
-		m = make(map[string]any)
-	}
-	arr, _ := m["allowed_tools"].([]any)
-	m["allowed_tools"] = append(arr, tool)
-	return m
 }

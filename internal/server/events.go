@@ -318,3 +318,64 @@ func messagesToProto(msgs []message.Message) []proto.Message {
 	}
 	return out
 }
+
+func protoToMessage(m proto.Message) message.Message {
+	msg := message.Message{
+		ID:        m.ID,
+		SessionID: m.SessionID,
+		Role:      message.MessageRole(m.Role),
+		Model:     m.Model,
+		Provider:  m.Provider,
+		CreatedAt: m.CreatedAt,
+		UpdatedAt: m.UpdatedAt,
+	}
+
+	for _, p := range m.Parts {
+		switch v := p.(type) {
+		case proto.TextContent:
+			msg.Parts = append(msg.Parts, message.TextContent{Text: v.Text})
+		case proto.ReasoningContent:
+			msg.Parts = append(msg.Parts, message.ReasoningContent{
+				Thinking:   v.Thinking,
+				Signature:  v.Signature,
+				StartedAt:  v.StartedAt,
+				FinishedAt: v.FinishedAt,
+			})
+		case proto.ToolCall:
+			msg.Parts = append(msg.Parts, message.ToolCall{
+				ID:       v.ID,
+				Name:     v.Name,
+				Input:    v.Input,
+				Finished: v.Finished,
+			})
+		case proto.ToolResult:
+			msg.Parts = append(msg.Parts, message.ToolResult{
+				ToolCallID: v.ToolCallID,
+				Name:       v.Name,
+				Content:    v.Content,
+				IsError:    v.IsError,
+			})
+		case proto.Finish:
+			msg.Parts = append(msg.Parts, message.Finish{
+				Reason:  message.FinishReason(v.Reason),
+				Time:    v.Time,
+				Message: v.Message,
+				Details: v.Details,
+			})
+		case proto.ImageURLContent:
+			msg.Parts = append(msg.Parts, message.ImageURLContent{URL: v.URL, Detail: v.Detail})
+		case proto.BinaryContent:
+			msg.Parts = append(msg.Parts, message.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
+		}
+	}
+
+	return msg
+}
+
+func protoToMessages(msgs []proto.Message) []message.Message {
+	out := make([]message.Message, len(msgs))
+	for i, m := range msgs {
+		out[i] = protoToMessage(m)
+	}
+	return out
+}

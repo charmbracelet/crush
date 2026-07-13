@@ -738,6 +738,85 @@ func (c *Client) ListAllUserMessages(ctx context.Context, id string) ([]proto.Me
 	return msgs, nil
 }
 
+// DeleteMessagesAfter deletes messages in a session from the given message ID onward.
+func (c *Client) DeleteMessagesAfter(ctx context.Context, id string, sessionID string, messageID string) error {
+	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/messages/%s", id, sessionID, messageID), nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete messages after: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to delete messages after: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// RestoreMessages re-inserts previously deleted messages into a session.
+func (c *Client) RestoreMessages(ctx context.Context, id string, messages []message.Message) error {
+	protoMsgs := make([]proto.Message, len(messages))
+	for i, m := range messages {
+		pm := proto.Message{
+			ID:        m.ID,
+			SessionID: m.SessionID,
+			Role:      proto.MessageRole(m.Role),
+			Model:     m.Model,
+			Provider:  m.Provider,
+			CreatedAt: m.CreatedAt,
+			UpdatedAt: m.UpdatedAt,
+		}
+		for _, p := range m.Parts {
+			switch v := p.(type) {
+			case message.TextContent:
+				pm.Parts = append(pm.Parts, proto.TextContent{Text: v.Text})
+			case message.ReasoningContent:
+				pm.Parts = append(pm.Parts, proto.ReasoningContent{
+					Thinking:   v.Thinking,
+					Signature:  v.Signature,
+					StartedAt:  v.StartedAt,
+					FinishedAt: v.FinishedAt,
+				})
+			case message.ToolCall:
+				pm.Parts = append(pm.Parts, proto.ToolCall{
+					ID:       v.ID,
+					Name:     v.Name,
+					Input:    v.Input,
+					Finished: v.Finished,
+				})
+			case message.ToolResult:
+				pm.Parts = append(pm.Parts, proto.ToolResult{
+					ToolCallID: v.ToolCallID,
+					Name:       v.Name,
+					Content:    v.Content,
+					IsError:    v.IsError,
+				})
+			case message.Finish:
+				pm.Parts = append(pm.Parts, proto.Finish{
+					Reason:  proto.FinishReason(v.Reason),
+					Time:    v.Time,
+					Message: v.Message,
+					Details: v.Details,
+				})
+			case message.ImageURLContent:
+				pm.Parts = append(pm.Parts, proto.ImageURLContent{URL: v.URL, Detail: v.Detail})
+			case message.BinaryContent:
+				pm.Parts = append(pm.Parts, proto.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
+			}
+		}
+		protoMsgs[i] = pm
+	}
+
+	req := proto.RestoreMessagesRequest{Messages: protoMsgs}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/messages/restore", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to restore messages: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to restore messages: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // CancelAgentSession cancels an ongoing agent operation for a session.
 func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/cancel", id, sessionID), nil, nil, nil)

@@ -3715,7 +3715,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		// or transport error. Run failures and cancellation surface
 		// through SSE-derived events, not this return value.
 		err := m.com.Workspace.AgentRun(context.Background(), sessionID, content, attachments...)
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("%v", err),

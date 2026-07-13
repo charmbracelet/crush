@@ -15,6 +15,27 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+func TestPublishChannelMessagePreservesMetadata(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := SubscribeEvents(ctx)
+	publishChannelMessage("signal", json.RawMessage(`{"content":"hello","meta":{"sender":"123"}}`))
+
+	select {
+	case event := <-events:
+		if event.Payload.Name != "signal" {
+			t.Fatalf("name = %q, want signal", event.Payload.Name)
+		}
+		if event.Payload.ChannelMeta["sender"] != "123" {
+			t.Fatalf("meta = %v", event.Payload.ChannelMeta)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for channel event")
+	}
+}
+
 func TestParseChannelParams(t *testing.T) {
 	t.Parallel()
 

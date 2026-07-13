@@ -252,7 +252,7 @@ func runNonInteractive(
 	// loop would exit on whichever RunComplete arrived first for
 	// the same session and drop the queued prompt's output.
 	runID := uuid.New().String()
-	if err := c.SendMessage(ctx, ws.ID, sess.ID, runID, prompt); err != nil {
+	if err := c.SendMessage(ctx, ws.ID, sess.ID, runID, "", prompt); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 

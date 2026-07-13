@@ -94,6 +94,9 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	}
 	ctx = agent.WithRunCompleteMarker(ctx)
 
+	if msg.Channel != "" {
+		ctx = agent.WithChannel(ctx, msg.Channel)
+	}
 	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
 	if err == nil || errors.Is(err, context.Canceled) {
 		return

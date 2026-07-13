@@ -132,6 +132,15 @@ func (w *ClientWorkspace) SaveSession(ctx context.Context, sess session.Session)
 	return protoToSession(*saved), nil
 }
 
+func (w *ClientWorkspace) SetSessionChannel(ctx context.Context, sessionID, channel string) (session.Session, error) {
+	sess, err := w.GetSession(ctx, sessionID)
+	if err != nil {
+		return session.Session{}, err
+	}
+	sess.Channel = channel
+	return w.SaveSession(ctx, sess)
+}
+
 func (w *ClientWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
 	return w.client.DeleteSession(ctx, w.workspaceID(), sessionID)
 }
@@ -197,7 +206,11 @@ func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string
 	// completion detection (it observes message events directly),
 	// so passing an empty RunID is correct here: it skips the
 	// correlator stamping path without functional consequences.
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", prompt, attachments...)
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", prompt, attachments...)
+}
+
+func (w *ClientWorkspace) AgentRunChannel(ctx context.Context, channel, sessionID, prompt string, attachments ...message.Attachment) error {
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", channel, prompt, attachments...)
 }
 
 func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, _ func(string), _ bool) (proto.ShellCommandResponse, error) {
@@ -811,6 +824,7 @@ func protoToSession(s proto.Session) session.Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            protoToTodos(s.Todos),
+		Channel:          s.Channel,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
@@ -932,6 +946,7 @@ func sessionToProto(s session.Session) proto.Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            todosToProto(s.Todos),
+		Channel:          s.Channel,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}

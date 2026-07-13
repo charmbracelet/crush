@@ -42,10 +42,6 @@ func newFragmentBuilder() *fragmentBuilder {
 	return &fragmentBuilder{m: make(map[string]any)}
 }
 
-func (f *fragmentBuilder) set(key string, value any) {
-	f.m[key] = value
-}
-
 // nestedMap returns the map at f.m[parent][key], creating both levels if
 // needed. The returned map can be mutated directly by callers.
 func (f *fragmentBuilder) nestedMap(parent, key string) map[string]any {
@@ -162,12 +158,6 @@ func usage(stderr io.Writer, msg string) error {
 func appendArr(m map[string]any, key, value string) []any {
 	arr, _ := m[key].([]any)
 	return append(arr, value)
-}
-
-// mergeInto returns the parent map with key set to value.
-func mergeInto(parent map[string]any, key string, value any) map[string]any {
-	parent[key] = value
-	return parent
 }
 
 // Compiler note: ctx, stdin, stdout params are used by some handlers and

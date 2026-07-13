@@ -74,6 +74,8 @@ func TestContentHasUnclosedA2UI(t *testing.T) {
 	require.False(t, contentHasUnclosedA2UI("plain prose"))
 	// Unclosed tag inside a fenced block is not a truncation.
 	require.False(t, contentHasUnclosedA2UI("```json\n<a2ui-json>{bad\n```"))
+	// Complete surface followed by a second truncated block.
+	require.True(t, contentHasUnclosedA2UI(a2uiSurface+"\n\n<a2ui-json>{\"version\":\"v0"))
 }
 
 func TestRenderTruncatedA2UI(t *testing.T) {

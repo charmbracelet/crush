@@ -59,17 +59,14 @@ func contentHasA2UI(content string) bool {
 	return a2tea.Contains(stripFencedCode(content))
 }
 
-// hasUnclosedA2UITag reports whether content contains an opening
-// <a2ui-json> tag whose matching </a2ui-json> close never arrives — a
-// truncated block (#5). Only meaningful for finished messages; while
-// streaming the close tag simply hasn't arrived yet.
+// hasUnclosedA2UITag reports whether content has more opening
+// <a2ui-json> tags than closing </a2ui-json> tags — a truncated block
+// (#5). This catches both a single unclosed block and the rarer case of
+// a complete surface followed by a second truncated block. Only
+// meaningful for finished messages; while streaming the close tag
+// simply hasn't arrived yet.
 func hasUnclosedA2UITag(content string) bool {
-	openIdx := strings.Index(content, "<a2ui-json>")
-	if openIdx < 0 {
-		return false
-	}
-	afterOpen := content[openIdx+len("<a2ui-json>"):]
-	return !strings.Contains(afterOpen, "</a2ui-json>")
+	return strings.Count(content, "<a2ui-json>") > strings.Count(content, "</a2ui-json>")
 }
 
 // contentHasUnclosedA2UI is the gate-level check (fences stripped) for

@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -53,6 +54,9 @@ func (c *blockingCoordinator) IsBusy() bool                                     
 func (c *blockingCoordinator) IsSessionBusy(string) bool                         { return false }
 func (c *blockingCoordinator) QueuedPrompts(string) int                          { return 0 }
 func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
+func (c *blockingCoordinator) SetObserver(agent.RunObserver)                     {}
+func (c *blockingCoordinator) SetACPConnector(*tools.ACPConnector)               {}
+func (c *blockingCoordinator) SetOnTitleChange(func(string, string))             {}
 func (c *blockingCoordinator) ClearQueue(string)                                 {}
 func (c *blockingCoordinator) Summarize(context.Context, string) error           { return nil }
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }

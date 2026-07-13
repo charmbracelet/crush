@@ -3,6 +3,17 @@
   "$id": "https://github.com/charmbracelet/crush/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
+    "ACPConfig": {
+      "properties": {
+        "zed_control": {
+          "type": "boolean",
+          "description": "Route file and terminal operations through the ACP client instead of executing them locally",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Attribution": {
       "properties": {
         "trailer_style": {
@@ -531,6 +542,10 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "acp": {
+          "$ref": "#/$defs/ACPConfig",
+          "description": "Agent Client Protocol integration options"
         }
       },
       "additionalProperties": false,

@@ -45,7 +45,12 @@ Embed a single inline `<a2ui-json>{...}</a2ui-json>` block in your response. Ins
       {
         "component": "Button",
         "id": "btn-ok",
-        "label": "Acknowledge"
+        "child": "btn-ok-label"
+      },
+      {
+        "component": "Text",
+        "id": "btn-ok-label",
+        "text": "Acknowledge"
       }
     ]
   }
@@ -65,7 +70,7 @@ These components render beautifully with full styling and layout:
 - `Row`: Lays out children horizontally. Expects a `children` array of IDs.
 - `List`: Lays out children as a list. Expects a `children` array of IDs.
 - `Divider`: A horizontal rule.
-- `Button`: Focusable button. Uses `label` (string). Pressing Enter emits a click event to the host.
+- `Button`: Focusable button. Its label comes from a single `child` ID pointing at a `Text` component (there is no `label` field). Pressing Enter emits a click event to the host.
 
 ### Input Components (Read-Only Visuals)
 

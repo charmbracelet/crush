@@ -96,6 +96,24 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionMCPReconnect reconnects (restarts) a single MCP server by name.
+	// This re-resolves env vars (including OAuth/OIDC token refresh commands)
+	// and is the mechanism for refreshing expired credentials.
+	ActionMCPReconnect struct {
+		ServerName string
+	}
+	// ActionMCPRefreshTools refreshes the tool list for a single MCP server.
+	ActionMCPRefreshTools struct {
+		ServerName string
+	}
+	// ActionMCPRefreshPrompts refreshes the prompt list for a single MCP server.
+	ActionMCPRefreshPrompts struct {
+		ServerName string
+	}
+	// ActionMCPRefreshResources refreshes the resource list for a single MCP server.
+	ActionMCPRefreshResources struct {
+		ServerName string
+	}
 )
 
 // Messages for API key input dialog.

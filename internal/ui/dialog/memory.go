@@ -20,8 +20,8 @@ import (
 
 const (
 	MemoryID              = "memory"
-	memoryDialogMaxWidth  = 88
-	memoryDialogMaxHeight = 24
+	memoryDialogMaxWidth  = 104
+	memoryDialogMaxHeight = 30
 )
 
 var memoryViewStatuses = []memory.Status{memory.StatusActive, memory.StatusPending, ""}
@@ -182,7 +182,7 @@ func (m *Memory) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	summary := m.summary()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() + t.Dialog.View.GetVerticalFrameSize() +
-		3
+		8
 	available := max(3, height-heightOffset)
 	listHeight := min(9, max(3, available/2))
 	m.list.SetSize(innerWidth, listHeight)
@@ -190,6 +190,7 @@ func (m *Memory) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.list.ScrollToSelected()
 
 	rc := NewRenderContext(t, width)
+	rc.Gap = 1
 	rc.Title = "Memory"
 	rc.TitleInfo = t.Dialog.ListItem.InfoBlurred.Render(" " + m.featureSummary())
 	rc.AddPart(t.Dialog.Arguments.Description.Render(summary))
@@ -204,6 +205,9 @@ func (m *Memory) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 func (m *Memory) ShortHelp() []key.Binding {
+	if m.confirmForget {
+		return []key.Binding{m.keyMap.Confirm, m.keyMap.Cancel}
+	}
 	bindings := []key.Binding{
 		m.keyMap.NextStatus,
 		m.keyMap.Remember,

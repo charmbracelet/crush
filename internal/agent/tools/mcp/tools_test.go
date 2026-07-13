@@ -137,3 +137,26 @@ func TestFilterTools(t *testing.T) {
 		require.Len(t, result, 0)
 	})
 }
+
+func TestAnalyzeToolFiltersReportsUsableAndUnmatchedNames(t *testing.T) {
+	t.Parallel()
+
+	tools := []*Tool{{Name: "searchGitHub"}}
+	info := analyzeToolFilters(config.MCPConfig{DisabledTools: []string{"gh_grep"}}, tools)
+
+	require.Equal(t, []string{"searchGitHub"}, info.Advertised)
+	require.Equal(t, []string{"searchGitHub"}, info.Usable)
+	require.Equal(t, []string{"gh_grep"}, info.UnmatchedDisabled)
+	require.Empty(t, info.UnmatchedEnabled)
+}
+
+func TestAnalyzeToolFiltersReportsZeroUsableTools(t *testing.T) {
+	t.Parallel()
+
+	tools := []*Tool{{Name: "only_tool"}}
+	info := analyzeToolFilters(config.MCPConfig{DisabledTools: []string{"only_tool"}}, tools)
+
+	require.Equal(t, []string{"only_tool"}, info.Advertised)
+	require.Empty(t, info.Usable)
+	require.Empty(t, info.UnmatchedDisabled)
+}

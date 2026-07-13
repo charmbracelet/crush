@@ -130,8 +130,8 @@ What this means in practice:
 
 ## Configuration
 
-Hooks can be added to your `crush.json` (or `.crush.json`) at both the global
-and project-level, with project level hooks taking precedence.
+Hooks can be added to global `crush.json` or project-root
+`crush.project.json`, with project-level hooks taking precedence.
 
 ```jsonc
 {

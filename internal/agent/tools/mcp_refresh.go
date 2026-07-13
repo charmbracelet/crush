@@ -18,7 +18,8 @@ const MCPRefreshToolName = "mcp_refresh"
 var mcpRefreshDescription string
 
 type MCPRefreshParams struct {
-	Name string `json:"name,omitempty" description:"Optional configured MCP server name. Omit to refresh all MCP servers."`
+	Name string `json:"name,omitempty" description:"Exact configured MCP server name to reload and verify."`
+	All  bool   `json:"all,omitempty" description:"Set true only to reconcile all configured MCP servers instead of one named server."`
 }
 
 type mcpRefreshFunc func(context.Context, *config.ConfigStore, string) (map[string]error, error)
@@ -32,9 +33,25 @@ func newMCPRefreshTool(cfg *config.ConfigStore, refresh mcpRefreshFunc) fantasy.
 		MCPRefreshToolName,
 		mcpRefreshDescription,
 		func(ctx context.Context, params MCPRefreshParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			results, err := refresh(ctx, cfg, strings.TrimSpace(params.Name))
+			name := strings.TrimSpace(params.Name)
+			if name == "" && !params.All {
+				return fantasy.NewTextErrorResponse("name is required; pass the exact configured MCP server name, or set all=true for an explicit full reconciliation"), nil
+			}
+			if name != "" && params.All {
+				return fantasy.NewTextErrorResponse("name and all=true are mutually exclusive"), nil
+			}
+			target := name
+			if params.All {
+				target = ""
+			}
+			results, err := refresh(ctx, cfg, target)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			if name != "" {
+				if _, ok := results[name]; !ok {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("mcp %q was not returned by refresh; it is not configured or initialized", name)), nil
+				}
 			}
 			names := make([]string, 0, len(results))
 			for name := range results {
@@ -65,6 +82,15 @@ func newMCPRefreshTool(cfg *config.ConfigStore, refresh mcpRefreshFunc) fantasy.
 			text := strings.TrimSpace(output.String())
 			if strings.Contains(text, ": error:") {
 				return fantasy.NewTextErrorResponse(text), nil
+			}
+			if name != "" {
+				state, ok := mcp.GetState(name)
+				if !ok {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("mcp %q produced no runtime state after refresh", name)), nil
+				}
+				if state.State != mcp.StateConnected {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("mcp %q is %s, not connected", name, state.State)), nil
+				}
 			}
 			return fantasy.NewTextResponse(text), nil
 		},

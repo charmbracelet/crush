@@ -1,10 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -75,12 +77,14 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 
 	cfg.setDefaults(workingDir, dataDir)
+	canonicalPath := CanonicalConfigPath()
+	projectPath := projectConfigPath(workingDir)
 
 	store := &ConfigStore{
 		config:         cfg,
 		workingDir:     workingDir,
-		globalDataPath: GlobalConfigData(),
-		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+		globalDataPath: canonicalPath,
+		workspacePath:  projectPath,
 		loadedPaths:    loadedPaths,
 	}
 
@@ -88,24 +92,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		cfg.Options.Debug = true
 	}
 
-	// Load workspace config last so it has highest priority.
-	if wsData, err := os.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
-		if !json.Valid(wsData) {
-			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
-		}
-		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
-		if mergeErr == nil {
-			// Preserve defaults that setDefaults already applied.
-			dataDir := cfg.Options.DataDirectory
-			*cfg = *merged
-			cfg.setDefaults(workingDir, dataDir)
-			store.config = cfg
-			store.loadedPaths = append(store.loadedPaths, store.workspacePath)
-		}
-	}
-
-	// Validate hooks after all config merging is complete so workspace
-	// hooks also get their matcher regexes compiled.
+	// Validate hooks after the single global-plus-project merge has completed.
 	if err := cfg.ValidateHooks(); err != nil {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
@@ -192,7 +179,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.SetupAgents()
 
 	// Capture initial staleness snapshot
-	store.captureStalenessSnapshot(loadedPaths)
+	store.captureStalenessSnapshot(store.loadedPaths)
 
 	return store, nil
 }
@@ -912,31 +899,16 @@ func (cfg *Config) resolveSelectedModel(selected SelectedModel, configured bool,
 	return resolved, false
 }
 
-// lookupConfigs searches config files starting at cwd and walking up
-// through the current project. The upward walk stops at the git
-// working tree root when one can be detected, otherwise at cwd itself,
-// so an unrelated crush.json placed above the project is never picked
-// up. Global user-level config locations are always included
-// regardless of the boundary.
+// lookupConfigs returns one canonical global file followed by one explicitly
+// named project file. No other directories or legacy filenames are searched.
 func lookupConfigs(cwd string) []string {
-	// prepend default config paths
-	configPaths := []string{
-		GlobalConfig(),
-		GlobalConfigData(),
-	}
+	return []string{CanonicalConfigPath(), projectConfigPath(cwd)}
+}
 
-	configNames := []string{appName + ".json", "." + appName + ".json"}
+const projectConfigFileName = "crush.project.json"
 
-	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
-	if err != nil {
-		// returns at least default configs
-		return configPaths
-	}
-
-	// reverse order so last config has more priority
-	slices.Reverse(foundConfigs)
-
-	return append(configPaths, foundConfigs...)
+func projectConfigPath(cwd string) string {
+	return filepath.Join(projectBoundary(cwd), projectConfigFileName)
 }
 
 func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
@@ -947,6 +919,9 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		data := []byte(EmbeddedConfigJSON)
 		if !json.Valid(data) {
 			return nil, nil, fmt.Errorf("invalid embedded JSON config")
+		}
+		if err := validateConfigShape(data, "<embedded>"); err != nil {
+			return nil, nil, err
 		}
 		configs = append(configs, data)
 		loaded = append(loaded, "<embedded>")
@@ -965,6 +940,9 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		}
 		if !json.Valid(data) {
 			return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
+		}
+		if err := validateConfigShape(data, path); err != nil {
+			return nil, nil, err
 		}
 		configs = append(configs, data)
 		loaded = append(loaded, path)
@@ -986,11 +964,60 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateConfigShape(data, "merged configuration"); err != nil {
+		return nil, err
+	}
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
 	return &config, nil
+}
+
+func validateConfigShape(data []byte, source string) error {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("invalid configuration in %s: %w", source, err)
+	}
+	allowed := map[string]bool{
+		"$schema": true, "models": true, "recent_models": true,
+		"mode_models": true, "providers": true, "mcp": true, "lsp": true,
+		"options": true, "permissions": true, "tools": true, "hooks": true,
+	}
+	unknown := make([]string, 0)
+	for field := range root {
+		if !allowed[field] {
+			unknown = append(unknown, field)
+		}
+	}
+	if len(unknown) > 0 {
+		slices.Sort(unknown)
+		if unknown[0] == "mcpServers" {
+			return fmt.Errorf("unknown configuration field %q in %s; Crush MCP servers must use the top-level %q field", unknown[0], source, "mcp")
+		}
+		return fmt.Errorf("unknown configuration field %q in %s", unknown[0], source)
+	}
+
+	rawMCP, ok := root["mcp"]
+	if !ok || string(rawMCP) == "null" {
+		return nil
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(rawMCP, &entries); err != nil {
+		return fmt.Errorf("invalid MCP configuration in %s: %w", source, err)
+	}
+	for name, raw := range entries {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		var mcpConfig MCPConfig
+		if err := decoder.Decode(&mcpConfig); err != nil {
+			return fmt.Errorf("invalid MCP configuration %q in %s: %w", name, source, err)
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			return fmt.Errorf("invalid MCP configuration %q in %s: trailing JSON data", name, source)
+		}
+	}
+	return nil
 }
 
 func hasAWSCredentials(env env.Env) bool {
@@ -1034,66 +1061,39 @@ func hasAWSCredentials(env env.Env) bool {
 }
 
 // migrateDisableNotifications migrates the deprecated disable_notifications
-// field to notification_style. It checks both the user config (~/.config) and
-// data config (~/.local) files. If disable_notifications is true, it sets
-// notification_style to "disabled" in the data file. Regardless of value, it
-// removes disable_notifications from any file that contains it.
+// field in the canonical configuration.
 func migrateDisableNotifications() {
-	globalConfig := GlobalConfig()
-	dataConfig := GlobalConfigData()
-
-	var wasDisabled bool
-	filesToClean := []string{}
-
-	for _, path := range []string{globalConfig, dataConfig} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		if gjson.Get(string(data), "options.disable_notifications").Exists() {
-			filesToClean = append(filesToClean, path)
-			if gjson.Get(string(data), "options.disable_notifications").Bool() {
-				wasDisabled = true
-			}
-		}
-	}
-
-	if len(filesToClean) == 0 {
+	path := CanonicalConfigPath()
+	data, err := os.ReadFile(path)
+	if err != nil || !gjson.Get(string(data), "options.disable_notifications").Exists() {
 		return
 	}
 
-	// If notifications were disabled, persist the equivalent notification_style.
-	if wasDisabled {
-		data, err := os.ReadFile(dataConfig)
-		if err == nil {
-			if !gjson.Get(string(data), "options.notification_style").Exists() {
-				updated, err := sjson.Set(string(data), "options.notification_style", "disabled")
-				if err == nil {
-					if err := atomicWriteFile(dataConfig, []byte(updated), 0o600); err != nil {
-						slog.Warn("Failed to migrate disable_notifications to notification_style", "error", err)
-					} else {
-						slog.Info("Migrated disable_notifications: true to notification_style: disabled")
-					}
-				}
-			}
+	updated := string(data)
+	if gjson.Get(updated, "options.disable_notifications").Bool() &&
+		!gjson.Get(updated, "options.notification_style").Exists() {
+		updated, err = sjson.Set(updated, "options.notification_style", "disabled")
+		if err != nil {
+			return
 		}
 	}
+	updated, err = sjson.Delete(updated, "options.disable_notifications")
+	if err != nil {
+		return
+	}
+	if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
+		slog.Warn("Failed to write migrated config", "path", path, "error", err)
+	}
+}
 
-	// Remove disable_notifications from all files that contain it.
-	for _, path := range filesToClean {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		updated, err := sjson.Delete(string(data), "options.disable_notifications")
-		if err != nil {
-			slog.Warn("Failed to remove deprecated disable_notifications field", "path", path, "error", err)
-			continue
-		}
-		if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
-			slog.Warn("Failed to write migrated config", "path", path, "error", err)
-		}
+// CanonicalConfigPath returns the only crush.json read and written by Crush.
+// An explicit CRUSH_GLOBAL_CONFIG directory wins; otherwise the platform data
+// configuration is authoritative.
+func CanonicalConfigPath() string {
+	if os.Getenv("CRUSH_GLOBAL_CONFIG") != "" {
+		return GlobalConfig()
 	}
+	return GlobalConfigData()
 }
 
 // GlobalConfig returns the global configuration file path for the application.
@@ -1207,7 +1207,7 @@ func GlobalConfigData() string {
 // writes, and provider resolution behave identically to project
 // workspaces.
 func GlobalWorkspaceDir() string {
-	return filepath.Dir(GlobalConfigData())
+	return filepath.Dir(CanonicalConfigPath())
 }
 
 func assignIfNil[T any](ptr **T, val T) {

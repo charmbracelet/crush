@@ -134,9 +134,15 @@ type SessionAgentCall struct {
 	// idleContinuationCount bounds automatic continuation when a model
 	// announces its next action but ends the turn without calling a tool.
 	idleContinuationCount int
+	// mcpCompletionCheck bounds the deterministic MCP success-evidence gate
+	// to one continuation per admitted user intent.
+	mcpCompletionCheck bool
 	// requiredFirstTool forces one grounded recovery action before the model
 	// can resume autonomous tool selection.
 	requiredFirstTool string
+	// finalizeOnly asks for one bounded, tool-free report after a deterministic
+	// guard has exhausted a lookup path. It must never schedule more recovery.
+	finalizeOnly bool
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -840,26 +846,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	agentTools := a.tools.Copy()
 	if call.contextRetry {
 		agentTools = contextRetryTools(agentTools)
+	} else if call.finalizeOnly {
+		agentTools = nil
 	}
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	if call.contextRetry {
 		systemPrompt = contextRetrySystemPrompt(a.recoveryContext.Get())
+	} else if call.finalizeOnly {
+		systemPrompt = "Give a concise final status using only verified session evidence. Do not call tools, propose another lookup, or claim unverified success. State what succeeded, what failed, and the exact blocker or user input needed."
 	} else {
-		var instructions strings.Builder
-
-		for _, server := range mcp.GetStates() {
-			if server.State != mcp.StateConnected {
-				continue
-			}
-			if s := server.Client.InitializeResult().Instructions; s != "" {
-				instructions.WriteString(s)
-				instructions.WriteString("\n\n")
-			}
-		}
-
-		if s := instructions.String(); s != "" {
-			systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+		if inventory := connectedMCPInventory(mcp.GetStates()); inventory != "" {
+			systemPrompt += "\n\n<mcp-inventory>\n" + inventory + "\n</mcp-inventory>"
 		}
 		systemPrompt = mergeSystemPromptPrefix(a.largePromptPrefix.Get(), systemPrompt)
 	}
@@ -939,7 +937,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		defer cancel()
 		defer a.activeRequests.Del(call.SessionID)
 	}
-	if !call.contextRetry {
+	genCtx = tools.WithMCPSourceEvidence(genCtx, originalIntent(call))
+	if !call.contextRetry && !call.finalizeOnly {
 		outboundPrompt = a.recallMemories(genCtx, call.SessionID, outboundPrompt)
 	}
 	// Memory selection uses the small model first. Start title generation
@@ -1046,6 +1045,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	var shouldSummarize bool
 	var loopDetected bool
 	var externalResearchRequired bool
+	var resourceLookupExhausted bool
 	finalFinishReason := message.FinishReasonUnknown
 	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
@@ -1073,6 +1073,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			// Use latest tools (updated by SetTools when MCP tools change).
 			prepared.Tools = a.tools.Copy()
+			if call.finalizeOnly {
+				prepared.Tools = nil
+			}
 			applyRequiredFirstTool(&prepared, call.requiredFirstTool, options.StepNumber)
 			if call.contextRetry {
 				prepared.Tools = contextRetryTools(prepared.Tools)
@@ -1311,6 +1314,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return false
 			},
 			func(steps []fantasy.StepResult) bool {
+				if hasRepeatedResourceNotFound(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
+					resourceLookupExhausted = true
+					loopDetected = true
+					slog.Warn("Repeated missing-resource lookup detected", "session_id", call.SessionID, "steps", len(steps), "max_repeats", loopDetectionMaxRepeats)
+					return true
+				}
 				if hasRepeatedExternalFailureClass(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
 					externalResearchRequired = true
 					loopDetected = true
@@ -1482,21 +1491,39 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
-	if shouldSummarize {
+	if hasMCPAddBlockingFailure(result.Steps) {
+		slog.Warn("Stopping after blocking MCP configuration failure", "session_id", call.SessionID)
+	} else if resourceLookupExhausted && !call.finalizeOnly {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.recoveryGuidance = "Two distinct lookups ended with the same missing-resource result. Do not search again. Give a concise final status from verified session evidence: what succeeded, which assumed resource names failed, and whether any exact user input is needed."
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		retry.requiredFirstTool = ""
+		retry.recoveryAttempted = true
+		retry.finalizeOnly = true
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+		slog.Warn("Repeated missing-resource lookup stopped; scheduling tool-free final status", "session_id", call.SessionID)
+	} else if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		existing, ok := a.messageQueue.Get(call.SessionID)
 		if !ok {
 			existing = []SessionAgentCall{}
 		}
-		call.originalIntent = originalIntent(call)
-		call.Prompt = call.originalIntent
-		call.recoveryGuidance = "Continue from the new summary. Reassess failed assumptions and preserve verified results."
+		call = prepareSummaryContinuation(call)
 		call.Accepted = a.BeginAccepted(call.SessionID)
-		call.skipUserMessage = true
 		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{call}, existing...))
 		if summarizeErr := a.summarize(genCtx, call.SessionID, false); summarizeErr != nil {
 			return nil, summarizeErr
 		}
+	} else if loopDetected && hasMCPAddValidationFailure(result.Steps) {
+		slog.Warn("Stopping after repeated deterministic MCP configuration failure", "session_id", call.SessionID)
 	} else if loopDetected && a.autoReviewEnabled && !call.recoveryAttempted {
 		a.activeRequests.Del(call.SessionID)
 		cancel()
@@ -1519,13 +1546,28 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn was stopped after repeated failures without progress. Identify the failed assumption and a materially different grounded approach.", true); reviewErr != nil {
 			slog.Error("Failed to auto-review repeated tool-call loop", "error", reviewErr)
 		}
+	} else if !call.finalizeOnly && currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && needsMCPCompletionEvidence(call, result.Steps, currentAssistant.Content().String()) {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.recoveryGuidance = "The MCP completion check rejected the previous success claim because no successful named MCP result showed the user-requested server connected. Preserve the user's original request as the only objective. Inspect current state with recode_info, then call mcp_add for that exact server only if it is missing or invalid. Do not add or change any server the user did not request."
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		retry.mcpCompletionCheck = true
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+		slog.Warn("MCP success claim lacked named runtime evidence; scheduling one correction", "session_id", call.SessionID)
 	} else if a.shouldAutoReviewMaxTokens(finalFinishReason) {
 		a.activeRequests.Del(call.SessionID)
 		cancel()
 		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn stopped because it reached the maximum output token limit.", false); reviewErr != nil {
 			slog.Error("Failed to auto-review max-token turn", "error", reviewErr)
 		}
-	} else if currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && !call.toolProtocolRetry && printedToolEnvelope(currentAssistant.Content().String()) {
+	} else if !call.finalizeOnly && currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && !call.toolProtocolRetry && printedToolEnvelope(currentAssistant.Content().String()) {
 		existing, ok := a.messageQueue.Get(call.SessionID)
 		if !ok {
 			existing = nil
@@ -1540,7 +1582,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		retry.toolProtocolRetry = true
 		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
 		slog.Warn("Printed tool envelope detected; scheduling one protocol retry", "session_id", call.SessionID)
-	} else if currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && announcedPendingAction(currentAssistant.Content().String()) {
+	} else if !call.finalizeOnly && currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && announcedPendingAction(currentAssistant.Content().String()) {
 		existing, ok := a.messageQueue.Get(call.SessionID)
 		if !ok {
 			existing = nil
@@ -1551,7 +1593,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		retry.Attachments = nil
 		retry.Accepted = nil
 		retry.skipUserMessage = true
-		if call.idleContinuationCount < 2 {
+		if shouldContinueAnnouncedAction(call.idleContinuationCount) {
 			retry.recoveryGuidance = "You announced a next action but ended the turn without executing it. Execute that action now using the appropriate registered tool. Do not narrate another future action."
 			retry.idleContinuationCount++
 			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
@@ -1687,6 +1729,34 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+func connectedMCPInventory(states map[string]mcp.ClientInfo) string {
+	names := make([]string, 0, len(states))
+	for name, server := range states {
+		if server.State == mcp.StateConnected {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	slices.Sort(names)
+
+	var inventory strings.Builder
+	inventory.WriteString("Connected MCP servers remain available through mcp_tool_search and mcp_tool_call. Search before calling; do not guess tool names.\n")
+	for _, name := range names {
+		server := states[name]
+		fmt.Fprintf(&inventory, "- %s: %d tools", name, server.Counts.Tools)
+		if server.Counts.Prompts > 0 {
+			fmt.Fprintf(&inventory, ", %d prompts", server.Counts.Prompts)
+		}
+		if server.Counts.Resources > 0 {
+			fmt.Fprintf(&inventory, ", %d resources", server.Counts.Resources)
+		}
+		inventory.WriteByte('\n')
+	}
+	return strings.TrimSpace(inventory.String())
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
@@ -1831,15 +1901,14 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, resumeLa
 	if !ok {
 		queuedMessages = nil
 	}
-	if lastIntent != "" {
-		continuation := SessionAgentCall{
+	if shouldCreateSummaryContinuation(lastIntent, queuedMessages) {
+		continuation := prepareSummaryContinuation(SessionAgentCall{
 			SessionID:        sessionID,
 			Prompt:           lastIntent,
 			originalIntent:   lastIntent,
 			recoveryGuidance: "Continue from the new summary. Preserve verified results and execute the smallest remaining step toward the original goal.",
-			Accepted:         a.BeginAccepted(sessionID),
-			skipUserMessage:  true,
-		}
+		})
+		continuation.Accepted = a.BeginAccepted(sessionID)
 		queuedMessages = append([]SessionAgentCall{continuation}, queuedMessages...)
 		a.messageQueue.Set(sessionID, queuedMessages)
 	}
@@ -1850,6 +1919,10 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, resumeLa
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
+}
+
+func shouldCreateSummaryContinuation(lastIntent string, queued []SessionAgentCall) bool {
+	return strings.TrimSpace(lastIntent) != "" && len(queued) == 0
 }
 
 func lastUserIntent(msgs []message.Message) string {
@@ -1891,11 +1964,49 @@ func recoveryContext(intent, guidance string) string {
 		"Treat verified tool results as authoritative. Do not repeat a failed command without changing its assumptions.\n</recovery_state>"
 }
 
+const maxIdleContinuations = 1
+
+func shouldContinueAnnouncedAction(count int) bool {
+	return count < maxIdleContinuations
+}
+
+func summaryContinuationGuidance(existing string) string {
+	const continuation = "Continue from the new summary. Preserve verified results, failed-path evidence, and the smallest remaining step toward the original goal."
+	existing = strings.TrimSpace(existing)
+	if existing == "" {
+		return continuation
+	}
+	return existing + "\n" + continuation
+}
+
+func prepareSummaryContinuation(call SessionAgentCall) SessionAgentCall {
+	call.originalIntent = originalIntent(call)
+	call.Prompt = call.originalIntent
+	call.recoveryGuidance = summaryContinuationGuidance(call.recoveryGuidance)
+	call.TransientContext = ""
+	call.Attachments = nil
+	call.Accepted = nil
+	call.skipUserMessage = true
+	if call.requiredFirstTool == "" && needsRuntimeConfigRecheck(call.originalIntent) {
+		call.requiredFirstTool = tools.CrushInfoToolName
+	}
+	return call
+}
+
+func needsRuntimeConfigRecheck(intent string) bool {
+	lower := strings.ToLower(intent)
+	if strings.Contains(lower, "mcp") {
+		return true
+	}
+	return strings.Contains(lower, "config") &&
+		(strings.Contains(lower, "crush") || strings.Contains(lower, "re.code"))
+}
+
 func applyRequiredFirstTool(prepared *fantasy.PrepareStepResult, toolName string, stepNumber int) {
 	if prepared == nil || toolName == "" || stepNumber != 0 {
 		return
 	}
-	choice := fantasy.SpecificToolChoice(toolName)
+	choice := fantasy.ToolChoiceRequired
 	prepared.ToolChoice = &choice
 	prepared.ActiveTools = []string{toolName}
 }
@@ -1972,61 +2083,23 @@ func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason 
 	a.activeRequests.Set(sessionID, cancel)
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
-	defer func() {
-		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
-			slog.Error("Failed to flush pending message updates after auto review", "error", flushErr)
-		}
-	}()
-
 	agent := fantasy.NewAgent(
 		reviewModel.Model,
 		fantasy.WithSystemPrompt(reviewSystemPrompt),
 		fantasy.WithUserAgent(userAgent),
 	)
-	reviewMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
-		Role:     message.Assistant,
-		Model:    reviewModel.ModelCfg.Model,
-		Provider: reviewModel.ModelCfg.Provider,
-	})
-	if err != nil {
-		return err
-	}
+	var reviewText strings.Builder
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          buildAutoReviewPrompt(reason),
 		Messages:        aiMsgs,
 		ProviderOptions: reviewProviderOpts,
-		OnReasoningDelta: func(id string, text string) error {
-			reviewMessage.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, reviewMessage)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
-				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
-					reviewMessage.AppendReasoningSignature(signature.Signature)
-				}
-			}
-			reviewMessage.FinishThinking()
-			return a.messages.Update(genCtx, reviewMessage)
-		},
 		OnTextDelta: func(id, text string) error {
-			reviewMessage.AppendContent(text)
-			return a.messages.Update(genCtx, reviewMessage)
+			reviewText.WriteString(text)
+			return nil
 		},
 	})
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return a.messages.Delete(ctx, reviewMessage.ID)
-		}
-		reviewMessage.AddFinish(message.FinishReasonError, "Review Error", err.Error())
-		if updateErr := a.messages.Update(ctx, reviewMessage); updateErr != nil {
-			return updateErr
-		}
-		return err
-	}
-
-	reviewMessage.AddFinish(message.FinishReasonEndTurn, "", "")
-	if err := a.messages.Update(genCtx, reviewMessage); err != nil {
 		return err
 	}
 
@@ -2060,9 +2133,9 @@ func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason 
 	}
 	firstQueuedMessage := queuedMessages[0]
 	if isRecoveryCall(firstQueuedMessage) {
-		guidance := strings.TrimSpace(reviewMessage.Content().String())
+		guidance := strings.TrimSpace(reviewText.String())
 		if guidance != "" {
-			firstQueuedMessage.recoveryGuidance = guidance
+			firstQueuedMessage.recoveryGuidance = recoveryGuidanceFromReview(guidance)
 		}
 		if firstQueuedMessage.requiredFirstTool == "" {
 			if toolName := recoveryToolFromReview(guidance); a.hasTool(toolName) {
@@ -2076,7 +2149,7 @@ func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason 
 }
 
 func isRecoveryCall(call SessionAgentCall) bool {
-	return call.recoveryAttempted || call.toolProtocolRetry || call.idleContinuationCount > 0 || call.recoveryGuidance != ""
+	return call.recoveryAttempted || call.toolProtocolRetry || call.idleContinuationCount > 0 || call.mcpCompletionCheck || call.finalizeOnly || call.recoveryGuidance != ""
 }
 
 func recoveryToolFromReview(review string) string {
@@ -2090,6 +2163,28 @@ func recoveryToolFromReview(review string) string {
 			return ""
 		}
 		return toolName
+	}
+	return ""
+}
+
+func recoveryGuidanceFromReview(review string) string {
+	nextStep := reviewField(review, "Next step")
+	nextTool := recoveryToolFromReview(review)
+	if nextStep == "" {
+		return "The internal review found no grounded correction. Stop and report the last decisive error without retrying it."
+	}
+	if nextTool == "" {
+		return "Internal recovery finding: " + nextStep + ". Do not restate the review or retry unchanged input."
+	}
+	return fmt.Sprintf("Internal recovery finding: %s. Invoke %s now with materially corrected input; do not restate the review.", nextStep, nextTool)
+}
+
+func reviewField(review, field string) string {
+	for line := range strings.SplitSeq(review, "\n") {
+		label, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && strings.EqualFold(strings.TrimSpace(label), field) {
+			return strings.TrimSpace(value)
+		}
 	}
 	return ""
 }
@@ -2655,14 +2750,13 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		if !titleSaved {
 			fallbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			if err := a.sessions.Rename(fallbackCtx, sessionID, DefaultSessionName); err != nil {
+			if err := a.sessions.Rename(fallbackCtx, sessionID, fallbackSessionTitle(userPrompt)); err != nil {
 				slog.Error("Failed to save fallback session title", "error", err)
 			}
 		}
 	}()
 
 	smallModel := a.smallModel.Get()
-	largeModel := a.largeModel.Get()
 
 	newAgent := func(m fantasy.LanguageModel, prefix string, p []byte, tok int64) fantasy.Agent {
 		systemPrompt := mergeSystemPromptPrefix(prefix, string(p)+"\n /no_think")
@@ -2686,7 +2780,6 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	}
 	attempts := []modelAttempt{
 		{"small", smallModel, a.smallPromptPrefix.Get()},
-		{"large", largeModel, a.largePromptPrefix.Get()},
 	}
 
 	var resp *fantasy.AgentResult
@@ -2704,13 +2797,14 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			break
 		}
 		if err != nil {
-			slog.Error("Error generating title with "+attempt.name+" model; trying next", "err", err)
+			slog.Error("Error generating title with "+attempt.name+" model; using prompt fallback", "err", err)
 		} else {
-			slog.Error("Title generation hit token limit with " + attempt.name + " model; trying next")
+			slog.Error("Title generation hit token limit with " + attempt.name + " model; using prompt fallback")
 		}
 	}
 	if !success {
-		// The deferred fallback will save the default session name.
+		// The deferred fallback derives a stable title without loading the large
+		// model while it is serving the user's main request.
 		return
 	}
 
@@ -2727,12 +2821,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		// LLM returned empty content. Use the prompt itself as a
 		// fallback title, truncated to 50 chars, before resorting to
 		// the generic default.
-		fallback := strings.ReplaceAll(userPrompt, "\n", " ")
-		fallback = strings.TrimSpace(fallback)
-		if len(fallback) > 50 {
-			fallback = ansi.Truncate(fallback, 50, "…")
-		}
-		title = cmp.Or(fallback, DefaultSessionName)
+		title = fallbackSessionTitle(userPrompt)
 	}
 
 	// Calculate usage and cost.
@@ -2776,6 +2865,14 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 	titleSaved = true
+}
+
+func fallbackSessionTitle(userPrompt string) string {
+	title := strings.TrimSpace(strings.ReplaceAll(userPrompt, "\n", " "))
+	if len(title) > 50 {
+		title = ansi.Truncate(title, 50, "…")
+	}
+	return cmp.Or(title, DefaultSessionName)
 }
 
 func titleMaxTokens(model Model) int64 {
@@ -3195,7 +3292,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 // buildSummaryPrompt constructs the prompt text for session summarization.
 func buildSummaryPrompt(todos []session.Todo) string {
 	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above. Separate verified facts, failed attempts, unresolved assumptions, and exact next actions. Never present a failed command, guessed package name, malformed configuration, or unexecuted printed tool envelope as a recommended next step. Preserve the user's goal, but require the resuming assistant to re-check disproven assumptions before acting.")
+	sb.WriteString("Create a compact continuation checkpoint under 450 words. Keep only the original goal, decisive verified facts, distinct failed paths, critical paths or identifiers, and the single smallest next action. Never promote a failed command, guessed package name, malformed configuration, or unexecuted printed tool envelope into the plan. Omit narration, repeated facts, generic architecture, and completed intermediate searches.")
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {

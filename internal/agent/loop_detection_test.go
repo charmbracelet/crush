@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/stretchr/testify/require"
 )
 
 // makeStep creates a StepResult with the given tool calls and results in its Content.
@@ -56,23 +57,23 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 	})
 
 	t.Run("fewer steps than window below threshold", func(t *testing.T) {
-		steps := make([]fantasy.StepResult, 5)
+		steps := make([]fantasy.StepResult, 4)
 		for i := range steps {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
 		}
 		result := hasRepeatedToolCalls(steps, 10, 5)
 		if result {
-			t.Error("expected false when repeats do not exceed threshold")
+			t.Error("expected false when repeats remain below threshold")
 		}
 	})
 
 	t.Run("loop detected before window fills", func(t *testing.T) {
-		steps := make([]fantasy.StepResult, 4)
+		steps := make([]fantasy.StepResult, 3)
 		for i := range steps {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
 		}
 		if !hasRepeatedToolCalls(steps, 10, 3) {
-			t.Error("expected early detection once repeats exceed threshold")
+			t.Error("expected early detection once repeats reach threshold")
 		}
 	})
 
@@ -87,8 +88,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		}
 	})
 
-	t.Run("exact repeat at threshold not detected", func(t *testing.T) {
-		// maxRepeats=5 means > 5 is needed, so exactly 5 should return false
+	t.Run("exact repeat at threshold detected", func(t *testing.T) {
 		steps := make([]fantasy.StepResult, 10)
 		for i := range 5 {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
@@ -97,13 +97,13 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 			steps[i] = makeToolStep("tool", fmt.Sprintf(`{"i":%d}`, i), fmt.Sprintf("result-%d", i))
 		}
 		result := hasRepeatedToolCalls(steps, 10, 5)
-		if result {
-			t.Error("expected false when count equals maxRepeats (threshold is >)")
+		if !result {
+			t.Error("expected true when count equals maxRepeats")
 		}
 	})
 
 	t.Run("loop detected", func(t *testing.T) {
-		// 6 identical steps in a window of 10 with maxRepeats=5 → detected
+		// 6 identical steps in a window of 10 with maxRepeats=5 are detected.
 		steps := make([]fantasy.StepResult, 10)
 		for i := range 6 {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
@@ -113,7 +113,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		}
 		result := hasRepeatedToolCalls(steps, 10, 5)
 		if !result {
-			t.Error("expected true when same signature appears more than maxRepeats times")
+			t.Error("expected true when same signature reaches maxRepeats")
 		}
 	})
 
@@ -136,7 +136,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 	})
 
 	t.Run("multiple different patterns alternating", func(t *testing.T) {
-		// Two patterns alternating: each appears 5 times — not above threshold
+		// Two patterns alternating: each appears 5 times and reaches the threshold.
 		steps := make([]fantasy.StepResult, 10)
 		for i := range steps {
 			if i%2 == 0 {
@@ -146,8 +146,8 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 			}
 		}
 		result := hasRepeatedToolCalls(steps, 10, 5)
-		if result {
-			t.Error("expected false: two patterns each appearing 5 times (not > 5)")
+		if !result {
+			t.Error("expected true: both patterns reach the repeat threshold")
 		}
 	})
 }
@@ -200,6 +200,25 @@ func TestRepeatedExternalFailureClassRequiresResearchAfterTwoSteps(t *testing.T)
 	}
 }
 
+func TestGeneric404IsMissingResourceNotPackage(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "package-not-found", failureClass("npm error code E404"))
+	require.Equal(t, "resource-not-found", failureClass("GET https://api.example.test/repos/guessed: 404 Not Found"))
+}
+
+func TestRepeatedResourceNotFoundFinalizesAfterTwoSteps(t *testing.T) {
+	t.Parallel()
+
+	steps := []fantasy.StepResult{
+		makeToolStep("remote_read", `{"resource":"guessed-a"}`, "GET https://api.example.test/guessed-a: 404 Not Found"),
+		makeToolStep("remote_read", `{"resource":"guessed-b"}`, "GET https://api.example.test/guessed-b: status code: 404"),
+	}
+	require.True(t, hasRepeatedResourceNotFound(steps, 10, 2))
+	require.False(t, hasRepeatedResourceNotFound(steps[:1], 10, 2))
+	require.False(t, hasRepeatedExternalFailureClass(steps, 10, 2), "generic missing resources must not force package research")
+}
+
 func TestRepeatedExternalSchemaFailureRequiresResearch(t *testing.T) {
 	t.Parallel()
 
@@ -210,6 +229,33 @@ func TestRepeatedExternalSchemaFailureRequiresResearch(t *testing.T) {
 	if !hasRepeatedExternalFailureClass(steps, 10, 2) {
 		t.Fatal("expected repeated MCP schema failures to require research")
 	}
+}
+
+func TestMCPAddValidationFailureStopsWithoutModelReview(t *testing.T) {
+	t.Parallel()
+
+	steps := []fantasy.StepResult{
+		makeToolStep("mcp_add", `{"name":"browser","stdio":{"command":"npx","url":"package"}}`, `browser: invalid_config; configuration_changed=false; unknown field "url"`),
+	}
+	require.True(t, hasMCPAddValidationFailure(steps))
+	require.False(t, hasMCPAddValidationFailure([]fantasy.StepResult{
+		makeToolStep("mcp_refresh", `{"name":"browser"}`, "browser: connected"),
+	}))
+}
+
+func TestMCPAddBlockingFailureStopsWithoutSummaryOrContinuation(t *testing.T) {
+	t.Parallel()
+
+	steps := []fantasy.StepResult{
+		makeToolStep("mcp_add", `{"name":"browser"}`, `browser: start_failed; configuration_changed=false; rollback=restored; error=dependency missing`),
+	}
+	require.True(t, hasMCPAddBlockingFailure(steps))
+	require.False(t, hasMCPAddBlockingFailure([]fantasy.StepResult{
+		makeToolStep("mcp_add", `{"name":"browser"}`, `browser: invalid_config; configuration_changed=false`),
+	}))
+	require.False(t, hasMCPAddBlockingFailure([]fantasy.StepResult{
+		makeToolStep("mcp_refresh", `{"name":"browser"}`, "browser: start_failed"),
+	}))
 }
 
 func TestGetToolInteractionSignature(t *testing.T) {

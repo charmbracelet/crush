@@ -31,12 +31,12 @@ func TestConfigStore_ConfigPath_WorkspaceReturnsPath(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{
-		workspacePath: "/some/workspace/.crush/crush.json",
+		workspacePath: "/some/workspace/crush.project.json",
 	}
 
 	path, err := store.configPath(ScopeWorkspace)
 	require.NoError(t, err)
-	require.Equal(t, "/some/workspace/.crush/crush.json", path)
+	require.Equal(t, "/some/workspace/crush.project.json", path)
 }
 
 func TestConfigStore_ConfigPath_WorkspaceErrorsWhenEmpty(t *testing.T) {
@@ -449,6 +449,7 @@ func TestRemoveConfigField_AutoReloads(t *testing.T) {
 	// Set globalDataPath and capture snapshot
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
 
 	// Verify the field exists initially (indirectly - store loaded successfully)
 	require.True(t, store.config.Options.Debug)

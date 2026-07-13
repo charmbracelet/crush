@@ -16,7 +16,7 @@ func TestUnsafeCrushConfigTextEdit(t *testing.T) {
 	t.Parallel()
 
 	require.True(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.EditToolName, Input: `{"file_path":"C:\\Users\\me\\AppData\\Local\\crush\\crush.json"}`}))
-	require.True(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.MultiEditToolName, Input: `{"file_path":".crush.json"}`}))
+	require.True(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.MultiEditToolName, Input: `{"file_path":"crush.project.json"}`}))
 	require.False(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.EditToolName, Input: `{"file_path":"main.go"}`}))
 }
 

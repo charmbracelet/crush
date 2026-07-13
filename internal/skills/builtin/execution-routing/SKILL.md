@@ -34,8 +34,9 @@ and escalate only when evidence justifies it.
 | Current external fact | `web_search`, then `web_fetch` for the chosen source |
 | Public repository symbol search | Sourcegraph or GitHub Grep when available |
 | Multi-file independent research | `agent` after grounding |
-| re.code configuration/runtime truth | `recode_info` |
-| Apply changed MCP configuration | `mcp_refresh` |
+| re.code configuration/runtime truth and canonical write target | `recode_info` |
+| Configure, start, and verify one MCP server | `mcp_add` |
+| Reconcile all existing MCP servers | `mcp_refresh` |
 
 ## Sub-Agent Contract
 
@@ -47,9 +48,9 @@ files or configuration.
 
 ## Failure Escalation
 
-- First failure: read the complete error and correct the evidenced assumption.
+- First failure: return the complete error to the current run and correct the evidenced assumption once.
 - External identity lookup failure: research immediately instead of guessing.
-- Second failure of the same class: stop shell retries, use a different
-  evidence source, and request automatic review when available.
+- Second failure of the same class: stop that path and use review only when the
+  remaining diagnosis is genuinely ambiguous.
 - Never repeat a disproven command with cosmetic argument changes.
 - A narrated next step is not progress. Invoke the tool in the same turn.

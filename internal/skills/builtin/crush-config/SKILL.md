@@ -6,25 +6,23 @@ description: Use when the user needs help configuring Crush — working with cru
 
 # Crush Configuration
 
-Crush uses JSON configuration files with the following priority (highest to lowest):
+Crush uses two clearly named JSON configuration scopes (highest priority first):
 
-1. `.crush.json` (project-local, hidden)
-2. `crush.json` (project-local)
-3. `$XDG_CONFIG_HOME/crush/crush.json` or `$HOME/.config/crush/crush.json` (global)
+1. `crush.project.json` at the project root (optional project override)
+2. The canonical global `crush.json`
 
-On Windows, settings written by the TUI normally live at
-`%LOCALAPPDATA%/crush/crush.json`. An additional global layer may exist at
-`%USERPROFILE%/.config/crush/crush.json`. These are not the same as a
-project-local `.crush/` directory. Use the `recode_info` tool to report active
-and candidate paths before searching manually.
+On Windows, the canonical global file normally lives at
+`%LOCALAPPDATA%/crush/crush.json`. `CRUSH_GLOBAL_CONFIG` may select a different
+global directory. Use `recode_info` to obtain runtime-owned paths; do not choose
+a path from filesystem conventions.
 
 ## Safe Editing Workflow
 
 Treat `crush.json` as structured data, even when it is minified onto one line.
 
-1. Use `recode_info` to identify the active file and inspect that exact path.
-   Paths marked `missing` under `config_locations` are diagnostics, not files
-   to inspect or create. Only `loaded` paths currently affect the session.
+1. For MCP changes, use `mcp_add`; do not edit JSON directly. For other
+   settings, use `recode_info` and mutate only `[config_files].write_target`
+   unless the user explicitly requests project scope.
 2. Parse the complete file as JSON before editing. An empty result from a
    line-based offset means the requested line does not exist; it does not mean
    a one-line file is empty.
@@ -34,10 +32,10 @@ Treat `crush.json` as structured data, even when it is minified onto one line.
 5. Re-read through `recode_info` and distinguish configured entries from clients
    that actually initialized successfully.
 
-Once `recode_info` reports a loaded config path, keep that path as the source
-of truth for the task. Do not broaden into home-directory scans or copy a config
-from another environment unless the loaded file is genuinely unavailable and
-the user explicitly asks for recovery.
+Once `recode_info` reports `write_target`, keep that path as the mutation target
+for the task. Do not broaden into home-directory scans or copy a config from
+another environment unless the target is genuinely unavailable and the user
+explicitly asks for recovery.
 
 Never concatenate JSON fragments, rewrite the whole file from a partial
 terminal view, use an LSP diagnostic as MCP validation, or accept uncertainty
@@ -60,7 +58,7 @@ Do not call PowerShell cmdlets as bare commands and do not use textual
   in the loaded global data config.
 - Project initialization creates project data/memory state and context files;
   it does not require a workspace configuration file.
-- `.crush/crush.json` is an optional workspace override. Create or modify it
+- Project-root `crush.project.json` is an optional project override. Create or modify it
   only when the user explicitly requests project-specific behavior.
 - A request to configure the installation or all MCP servers targets the
   loaded global config. Do not search missing project/global candidates for
@@ -131,7 +129,8 @@ var isn't set. Applies to MCP `headers` and provider `extra_headers`.
 
 ### Security note
 
-`crush.json` is trusted code. Any `$(...)` in it runs at load time
+Global `crush.json` and project `crush.project.json` are trusted code. Any
+`$(...)` in either runs at load time
 with the invoking user's shell privileges, before the UI appears.
 Don't launch Crush in a directory whose `crush.json` you haven't
 reviewed.
@@ -140,7 +139,13 @@ reviewed.
 
 - Add a custom provider: add an entry under `providers` with `type`, `base_url`, `api_key`, and `models`.
 - Disable a builtin or local skill: add the skill name to `options.disabled_skills`.
-- Add an MCP server: add an entry under `mcp` with `type` and either `command` (stdio) or `url` (http/sse).
+- Add an MCP server: fetch its official documentation or primary registry page,
+  fetch that exact search result (or a URL supplied by the user), reject login
+  and error pages as evidence, then call `mcp_add` with that `source_url`, the
+  verified server name, and exactly one transport object (`stdio`, `http`, or
+  `sse`).
+- Treat the configured server key as its exact identity. A code-search or
+  similarly named integration does not satisfy a request for another server.
 
 ## Model Selection
 

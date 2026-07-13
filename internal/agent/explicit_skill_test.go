@@ -13,13 +13,13 @@ func TestInjectExplicitSkillInvocations(t *testing.T) {
 
 	available := []*skills.Skill{
 		{Name: "crush-config", Instructions: "Inspect and preserve the config."},
-		{Name: "mcp-schema-first", Instructions: "Validate the MCP schema first."},
+		{Name: "mcp-setup", Instructions: "Validate the MCP schema first."},
 		{Name: "unrelated", Instructions: "Do something else."},
 	}
-	prompt := "First load and follow the crush-config and mcp-schema-first skills before editing."
+	prompt := "First load and follow the crush-config and mcp-setup skills before editing."
 
 	got, loaded := injectExplicitSkillInvocations(prompt, available)
-	require.Equal(t, []string{"crush-config", "mcp-schema-first"}, loaded)
+	require.Equal(t, []string{"crush-config", "mcp-setup"}, loaded)
 	require.Contains(t, got, "Inspect and preserve the config.")
 	require.Contains(t, got, "Validate the MCP schema first.")
 	require.NotContains(t, got, "Do something else.")
@@ -42,13 +42,14 @@ func TestInjectExplicitSkillInvocationsRoutesMCPTasks(t *testing.T) {
 
 	available := []*skills.Skill{
 		{Name: "crush-config", Instructions: "Preserve and validate crush.json."},
-		{Name: "mcp-schema-first", Instructions: "Inspect configured MCPs first."},
+		{Name: "mcp-setup", Instructions: "Inspect configured MCPs first."},
 		{Name: "unrelated", Instructions: "Not relevant."},
 	}
 	got, loaded := injectExplicitSkillInvocations("Fix the broken MCP configurations on Windows.", available)
-	require.Equal(t, []string{"crush-config", "mcp-schema-first"}, loaded)
-	require.Contains(t, got, "Inspect crush_info before editing configuration.")
-	require.Contains(t, got, "After a change, call mcp_refresh")
+	require.Equal(t, []string{"crush-config", "mcp-setup"}, loaded)
+	require.Contains(t, got, "Inspect recode_info before changing configuration.")
+	require.Contains(t, got, "call mcp_add")
+	require.Contains(t, got, "Never substitute a related server.")
 	require.NotContains(t, got, "Preserve and validate crush.json.")
 	require.NotContains(t, got, "Inspect configured MCPs first.")
 }
@@ -71,7 +72,7 @@ func TestInjectExplicitSkillInvocationsRoutesHeavyTasks(t *testing.T) {
 func TestSkillTransientContextExcludesUserPrompt(t *testing.T) {
 	t.Parallel()
 
-	context := skillTransientContext("fix MCP", "<loaded_skill>instructions</loaded_skill>\n\nfix MCP", []string{"mcp-schema-first"})
+	context := skillTransientContext("fix MCP", "<loaded_skill>instructions</loaded_skill>\n\nfix MCP", []string{"mcp-setup"})
 	require.Equal(t, "<loaded_skill>instructions</loaded_skill>", context)
 	require.NotContains(t, context, "fix MCP")
 }

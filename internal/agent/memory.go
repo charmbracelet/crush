@@ -204,7 +204,7 @@ func (a *sessionAgent) recordMemories(ctx context.Context, sessionID string) err
 	)
 	result, err := recorder.Generate(ctx, fantasy.AgentCall{
 		Prompt:          prompt,
-		ProviderOptions: a.summaryProviderOpts.Get(),
+		ProviderOptions: withoutThinking(a.summaryProviderOpts.Get()),
 		Temperature:     &zero,
 		MaxOutputTokens: &maxOutput,
 	})
@@ -268,6 +268,7 @@ func (a *sessionAgent) memoryToolPollutes(toolName string) bool {
 		agenttools.DownloadToolName,
 		agenttools.FetchToolName,
 		agenttools.ListMCPResourcesToolName,
+		agenttools.MCPToolCallToolName,
 		agenttools.ReadMCPResourceToolName,
 		agenttools.SourcegraphToolName,
 		agenttools.WebFetchToolName,

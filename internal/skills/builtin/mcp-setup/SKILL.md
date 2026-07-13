@@ -1,9 +1,9 @@
 ---
-name: mcp-schema-first
-description: Use when configuring, calling, debugging, or reasoning about MCP tools, MCP resources, filesystem MCP, browser MCP, GitHub MCP, docs MCP, or any external tool server.
+name: mcp-setup
+description: Use when installing, configuring, validating, repairing, calling, or debugging any MCP server, tool, or resource.
 ---
 
-# MCP Schema First
+# MCP Setup and Repair
 
 Use MCP tools deliberately. MCP is a capability layer, not the default way to inspect local files.
 
@@ -20,30 +20,47 @@ Do not use filesystem MCP as a broad discovery engine from `/`. For broad host i
 ## MCP Workflow
 
 1. Run `recode_info` first and inventory configured, initialized, and failed
-   servers separately. A connected HTTP server is not an npm package that must
-   be installed again.
+   servers separately. Its `[mcp]` and `[mcp_config]` sections are the
+   authoritative runtime and saved-configuration view. Do not reopen or parse
+   `crush.json` for an MCP task after those sections are available. A connected
+   HTTP server is not an npm package that must be installed again.
 2. List active MCP servers and tools when the tool shape is not already in context.
 3. Read server instructions from initialization output when available.
 4. Inspect tool names, required parameters, optional parameters, and approval behavior.
 5. Prefer MCP resources for read-only structured data when a resource exists.
 6. Authenticate only when the server advertises an auth flow or the user explicitly asks.
-7. Verify the exact package or URL against official documentation or the
-   package registry. Do not infer package names from MCP display names. If the
-   first exact lookup fails, use native `web_search` immediately; do not guess
-   another package name from memory.
+7. Prefer verifying an unfamiliar package or URL against official
+   documentation or its package registry. Documentation lookup supports the
+   decision but is not a prerequisite for proposing an exact configuration to
+   the user. Do not infer package names from MCP display names.
 8. Do not guess parameter names. If the schema is unavailable, say so and use a safer native or shell path.
-9. After a validated configuration change, call `mcp_refresh` for one named
-   server or all servers. Do not invent a re.code or Crush shell command to
-   reload MCP clients.
+9. Call `mcp_add` only when the exact user-requested server is missing or its
+   saved configuration is invalid. Set exactly one of `stdio`, `http`, or
+   `sse`; their fields cannot be mixed. Pass `source_url` when useful, but do
+   not block installation because a documentation site cannot be fetched.
+   Treat dependency or credential errors as exact blockers. Server names are
+   exact; never substitute a related integration. If correcting a saved
+   configuration, set `replace=true`. Use `mcp_refresh` for an already
+   configured server or explicit bulk reconciliation. A failed `mcp_add`
+   candidate is rolled back and ends the turn; do not continue to another
+   server.
 
-In `crush.json`, the transport key is `type`; valid values are `stdio`, `sse`,
-and `http`. Parse before and after a structured edit, preserve unrelated
-entries, and never use `lsp_diagnostics` as MCP validation. Reload clients and
-report "configured" separately from "initialized".
+Do not delegate MCP configuration discovery to a sub-agent. The delegated
+agent has the same runtime state and tool-schema cost; use the structured
+`recode_info` -> primary source -> `mcp_add` path directly.
 
-After two failures with the same error class, stop changing package names.
-Re-check the premise with native web search, the official server identity,
-transport, and host requirements before running another install command.
+In MCP configuration, the transport key is `type`; valid values are `stdio`,
+`sse`, and `http`. Never use `lsp_diagnostics` as MCP validation. Report
+"configured" separately from "connected".
+
+- `stdio` uses `command`, `args`, and optional `env`; it must not contain `url`
+  or HTTP headers.
+- `http` and `sse` use `url` and optional headers; they must not contain
+  `command`, `args`, or process `env`.
+
+After the first package-identity failure, verify the official server identity,
+transport, and host requirements before one corrected install attempt. If that
+attempt fails with the same error class, stop changing package names.
 
 ## Safe Command Reference
 

@@ -119,7 +119,7 @@ func HasInitialDataConfig(store *ConfigStore) bool {
 	if store == nil {
 		return false
 	}
-	cfgPath := GlobalConfigData()
+	cfgPath := CanonicalConfigPath()
 	if _, err := os.Stat(cfgPath); err != nil {
 		return false
 	}

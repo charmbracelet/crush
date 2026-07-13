@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
@@ -97,13 +98,62 @@ func TestAnnouncedPendingAction(t *testing.T) {
 	require.False(t, announcedPendingAction("Configured and verified all MCP clients."))
 }
 
+func TestAnnouncedActionGetsOneContinuation(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, shouldContinueAnnouncedAction(0))
+	require.False(t, shouldContinueAnnouncedAction(1))
+}
+
+func TestSummaryContinuationPreservesRecoveryGuidance(t *testing.T) {
+	t.Parallel()
+
+	got := summaryContinuationGuidance("The package name was disproven; verify the official identity.")
+	require.Contains(t, got, "package name was disproven")
+	require.Contains(t, got, "failed-path evidence")
+}
+
+func TestSummaryContinuationDoesNotReplayTransientSkillContext(t *testing.T) {
+	t.Parallel()
+
+	call := SessionAgentCall{
+		Prompt:           "install browser MCP",
+		originalIntent:   "install browser MCP",
+		TransientContext: "<loaded_skill>internal routing instructions</loaded_skill>",
+		Attachments:      []message.Attachment{{FilePath: "old-context.txt"}},
+	}
+	call = prepareSummaryContinuation(call)
+
+	require.Empty(t, call.TransientContext)
+	require.Empty(t, call.Attachments)
+	require.Equal(t, "install browser MCP", call.Prompt)
+	require.Equal(t, tools.CrushInfoToolName, call.requiredFirstTool)
+}
+
+func TestSummaryContinuationRechecksOnlyRuntimeConfigTasks(t *testing.T) {
+	t.Parallel()
+
+	configCall := prepareSummaryContinuation(SessionAgentCall{Prompt: "repair Crush config"})
+	codeCall := prepareSummaryContinuation(SessionAgentCall{Prompt: "fix the parser"})
+
+	require.Equal(t, tools.CrushInfoToolName, configCall.requiredFirstTool)
+	require.Empty(t, codeCall.requiredFirstTool)
+}
+
+func TestSummaryDoesNotDuplicateQueuedContinuation(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, shouldCreateSummaryContinuation("install MCP", nil))
+	require.False(t, shouldCreateSummaryContinuation("install MCP", []SessionAgentCall{{skipUserMessage: true}}))
+}
+
 func TestApplyRequiredFirstToolOnlyAffectsFirstStep(t *testing.T) {
 	t.Parallel()
 
 	first := fantasy.PrepareStepResult{}
 	applyRequiredFirstTool(&first, "web_search", 0)
 	require.NotNil(t, first.ToolChoice)
-	require.Equal(t, fantasy.SpecificToolChoice("web_search"), *first.ToolChoice)
+	require.Equal(t, fantasy.ToolChoiceRequired, *first.ToolChoice)
 	require.Equal(t, []string{"web_search"}, first.ActiveTools)
 
 	later := fantasy.PrepareStepResult{}

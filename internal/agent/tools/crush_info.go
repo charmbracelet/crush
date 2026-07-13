@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"net/url"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,34 +60,22 @@ func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills 
 
 func writeConfigFiles(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("[config_files]\n")
+	fmt.Fprintf(b, "write_target = %s\n", cfg.WritableConfigPath())
+	if projectPath := cfg.ProjectConfigPath(); projectPath != "" {
+		fmt.Fprintf(b, "project_target = %s\n", projectPath)
+	}
+	b.WriteString("instruction = Use write_target by default. Use project_target only for an explicitly project-specific override. Loaded files are merge evidence, not alternative targets. For MCP work, use the structured runtime and saved-configuration sections below instead of reopening a loaded config file.\n")
 	paths := cfg.LoadedPaths()
 	for _, p := range paths {
 		fmt.Fprintf(b, "loaded = %s\n", p)
 	}
 	b.WriteString("\n")
-
-	b.WriteString("[config_locations]\n")
-	b.WriteString("note = Diagnostic search locations only. Use loaded files above; do not inspect or create missing candidates unless the user requests that scope.\n")
-	writeConfigLocation(b, "global_legacy", config.GlobalConfig())
-	writeConfigLocation(b, "global_data", config.GlobalConfigData())
-	for _, path := range config.ProjectConfigs(cfg.WorkingDir()) {
-		writeConfigLocation(b, "project_candidate", path)
-	}
-	b.WriteString("\n")
-}
-
-func writeConfigLocation(b *strings.Builder, scope, path string) {
-	status := "missing"
-	if _, err := os.Stat(path); err == nil {
-		status = "exists"
-	}
-	fmt.Fprintf(b, "%s = %s (%s)\n", scope, path, status)
 }
 
 func writeConfigStaleness(b *strings.Builder, cfg *config.ConfigStore) {
 	staleness := cfg.ConfigStaleness()
 
-	b.WriteString("[config]\n")
+	b.WriteString("[config_state]\n")
 	fmt.Fprintf(b, "dirty = %v\n", staleness.Dirty)
 
 	if len(staleness.Changed) > 0 {

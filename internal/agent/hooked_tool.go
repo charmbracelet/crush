@@ -184,7 +184,7 @@ func unsafeCrushConfigTextEdit(call fantasy.ToolCall) bool {
 	}
 	name := strings.ToLower(strings.ReplaceAll(input.FilePath, "\\", "/"))
 	base := name[strings.LastIndex(name, "/")+1:]
-	return base == "crush.json" || base == ".crush.json"
+	return base == "crush.json" || base == "crush.project.json"
 }
 
 func postHookFeedback(result hooks.AggregateResult, eventName string) string {

@@ -29,12 +29,35 @@ type ToolResult struct {
 }
 
 var allTools = csync.NewMap[string, []*Tool]()
+var allToolFilters = csync.NewMap[string, ToolFilterInfo]()
+
+// ToolFilterInfo describes how configured MCP tool filters affected the
+// server's advertised tools.
+type ToolFilterInfo struct {
+	Advertised        []string
+	Usable            []string
+	UnmatchedDisabled []string
+	UnmatchedEnabled  []string
+}
 
 const defaultToolTimeout = 60 * time.Second
 
 // Tools returns all available MCP tools.
 func Tools() iter.Seq2[string, []*Tool] {
 	return allTools.Seq2()
+}
+
+// GetToolFilterInfo returns the latest runtime tool-filter result for an MCP.
+func GetToolFilterInfo(name string) (ToolFilterInfo, bool) {
+	info, ok := allToolFilters.Get(name)
+	if !ok {
+		return ToolFilterInfo{}, false
+	}
+	info.Advertised = slices.Clone(info.Advertised)
+	info.Usable = slices.Clone(info.Usable)
+	info.UnmatchedDisabled = slices.Clone(info.UnmatchedDisabled)
+	info.UnmatchedEnabled = slices.Clone(info.UnmatchedEnabled)
+	return info, true
 }
 
 // RunTool runs an MCP tool with the given input parameters.
@@ -188,6 +211,8 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 
 func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
 	mcpCfg, ok := cfg.Config().MCP[name]
+	info := analyzeToolFilters(mcpCfg, tools)
+	allToolFilters.Set(name, info)
 	if ok {
 		tools = filterTools(mcpCfg, tools)
 	}
@@ -197,6 +222,37 @@ func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
 	}
 	allTools.Set(name, tools)
 	return len(tools)
+}
+
+func analyzeToolFilters(mcpCfg config.MCPConfig, tools []*Tool) ToolFilterInfo {
+	info := ToolFilterInfo{
+		Advertised: make([]string, 0, len(tools)),
+	}
+	for _, tool := range tools {
+		info.Advertised = append(info.Advertised, tool.Name)
+	}
+	slices.Sort(info.Advertised)
+
+	for _, name := range mcpCfg.DisabledTools {
+		if !slices.Contains(info.Advertised, name) {
+			info.UnmatchedDisabled = append(info.UnmatchedDisabled, name)
+		}
+	}
+	for _, name := range mcpCfg.EnabledTools {
+		if !slices.Contains(info.Advertised, name) {
+			info.UnmatchedEnabled = append(info.UnmatchedEnabled, name)
+		}
+	}
+	slices.Sort(info.UnmatchedDisabled)
+	slices.Sort(info.UnmatchedEnabled)
+
+	filtered := filterTools(mcpCfg, tools)
+	info.Usable = make([]string, 0, len(filtered))
+	for _, tool := range filtered {
+		info.Usable = append(info.Usable, tool.Name)
+	}
+	slices.Sort(info.Usable)
+	return info
 }
 
 // filterTools filters tools based on enabled_tools (allow list) and

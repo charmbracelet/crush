@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 )
 
 const (
@@ -16,7 +17,8 @@ const (
 
 // hasRepeatedToolCalls checks whether the agent is stuck in a loop by looking
 // at recent steps. It examines the last windowSize steps and returns true if
-// any tool-call signature appears more than maxRepeats times.
+// any tool-call signature appears maxRepeats times. With the default of two,
+// the model gets the original attempt and one same-run correction.
 func hasRepeatedToolCalls(steps []fantasy.StepResult, windowSize, maxRepeats int) bool {
 	if len(steps) == 0 || windowSize <= 0 || maxRepeats < 1 {
 		return false
@@ -32,7 +34,7 @@ func hasRepeatedToolCalls(steps []fantasy.StepResult, windowSize, maxRepeats int
 			continue
 		}
 		counts[sig]++
-		if counts[sig] > maxRepeats {
+		if counts[sig] >= maxRepeats {
 			return true
 		}
 	}
@@ -91,11 +93,84 @@ func hasRepeatedExternalFailureClass(steps []fantasy.StepResult, windowSize, max
 	return false
 }
 
+func hasRepeatedResourceNotFound(steps []fantasy.StepResult, windowSize, maxRepeats int) bool {
+	if len(steps) == 0 || windowSize <= 0 || maxRepeats < 1 {
+		return false
+	}
+	start := max(0, len(steps)-windowSize)
+	count := 0
+	for _, step := range steps[start:] {
+		seenThisStep := false
+		for _, result := range step.Content.ToolResults() {
+			if failureClass(toolResultOutputString(result.Result)) == "resource-not-found" {
+				seenThisStep = true
+				break
+			}
+		}
+		if seenThisStep {
+			count++
+			if count >= maxRepeats {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasMCPAddValidationFailure reports whether a repeated-call loop already has
+// a deterministic mcp_add input error. Another model review cannot make that
+// failed call useful; the turn should stop and leave the exact error visible.
+func hasMCPAddValidationFailure(steps []fantasy.StepResult) bool {
+	return hasMCPAddResultMatching(steps, func(output string) bool {
+		return strings.Contains(output, "invalid_config") ||
+			strings.Contains(output, "invalid parameters") ||
+			strings.Contains(output, "repeated failed tool call blocked")
+	})
+}
+
+// hasMCPAddBlockingFailure reports a terminal mcp_add result. The tool has
+// already rolled back a failed candidate, so summarization or another model
+// continuation would only obscure the exact blocker the user must resolve.
+func hasMCPAddBlockingFailure(steps []fantasy.StepResult) bool {
+	return hasMCPAddResultMatching(steps, func(output string) bool {
+		return strings.Contains(output, "start_failed") ||
+			strings.Contains(output, "config_write_failed") ||
+			strings.Contains(output, "denied permission")
+	})
+}
+
+func hasMCPAddResultMatching(steps []fantasy.StepResult, matches func(string) bool) bool {
+	for _, step := range steps {
+		callIDs := make(map[string]bool)
+		for _, call := range step.Content.ToolCalls() {
+			if call.ToolName == tools.MCPAddToolName {
+				callIDs[call.ToolCallID] = true
+			}
+		}
+		for _, result := range step.Content.ToolResults() {
+			if !callIDs[result.ToolCallID] {
+				continue
+			}
+			output := strings.ToLower(toolResultOutputString(result.Result))
+			if matches(output) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func failureClass(output string) string {
 	s := strings.ToLower(output)
 	switch {
-	case strings.Contains(s, "npm error code e404") || strings.Contains(s, "404 not found"):
+	case strings.Contains(s, "npm error code e404") ||
+		(strings.Contains(s, "npm error 404") && strings.Contains(s, "package")):
 		return "package-not-found"
+	case strings.Contains(s, "404 not found") ||
+		strings.Contains(s, "status code: 404") ||
+		strings.Contains(s, "status code 404") ||
+		strings.Contains(s, "returned 404"):
+		return "resource-not-found"
 	case strings.Contains(s, "executable file not found") || strings.Contains(s, "is not recognized as an internal or external command"):
 		return "executable-not-found"
 	case strings.Contains(s, "syntaxerror:") && strings.Contains(s, "json"):

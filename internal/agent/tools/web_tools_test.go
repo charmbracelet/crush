@@ -113,7 +113,7 @@ func TestWebFetchDeniedDoesNotCallNetwork(t *testing.T) {
 func TestWebFetchLargeContentWritesToScratchDir(t *testing.T) {
 	workingDir := t.TempDir()
 	scratchDir := t.TempDir()
-	body := strings.Repeat("a", LargeContentThreshold+1)
+	body := "MCP server installation configuration command args\n" + strings.Repeat("a", LargeContentThreshold+1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(body))
@@ -123,9 +123,15 @@ func TestWebFetchLargeContentWritesToScratchDir(t *testing.T) {
 	perms := &recordingWebPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest](), granted: true}
 	tool := NewWebFetchTool(perms, workingDir, scratchDir, server.Client())
 
-	resp := runWebTool(t, tool, WebFetchToolName, WebFetchParams{URL: server.URL})
+	ctx := WithMCPSourceEvidence(webToolContext(), "install MCP")
+	recordMCPSearchResults(ctx, []SearchResult{{Link: server.URL}})
+	input, err := json.Marshal(WebFetchParams{URL: server.URL})
+	require.NoError(t, err)
+	resp, err := tool.Run(ctx, fantasy.ToolCall{Name: WebFetchToolName, Input: string(input)})
+	require.NoError(t, err)
 
 	require.False(t, resp.IsError)
+	require.True(t, hasMCPSourceEvidence(ctx, server.URL))
 	require.Contains(t, resp.Content, "Content saved to:")
 	prefix := "Content saved to: "
 	start := strings.Index(resp.Content, prefix)
@@ -141,4 +147,34 @@ func TestWebFetchLargeContentWritesToScratchDir(t *testing.T) {
 	rootPages, err := filepath.Glob(filepath.Join(workingDir, "page-*.md"))
 	require.NoError(t, err)
 	require.Empty(t, rootPages)
+}
+
+func TestMCPSourceEvidenceRejectsGuessedURL(t *testing.T) {
+	t.Parallel()
+	ctx := WithMCPSourceEvidence(t.Context(), "install MCP")
+	reason := recordMCPSourceEvidence(ctx, "https://guessed.example/mcp", "MCP installation configuration command args")
+
+	require.Contains(t, reason, "not supplied by the user or returned by web_search")
+	require.False(t, hasMCPSourceEvidence(ctx, "https://guessed.example/mcp"))
+}
+
+func TestMCPSourceEvidenceRejectsLoginInterstitial(t *testing.T) {
+	t.Parallel()
+	ctx := WithMCPSourceEvidence(t.Context(), "install MCP")
+	serverURL := "https://example.com/mcp"
+	recordMCPSearchResults(ctx, []SearchResult{{Link: serverURL}})
+	reason := recordMCPSourceEvidence(ctx, serverURL, "# Sign in to GitHub\n{{ message }}\n### Uh oh!\nThere was an error while loading")
+
+	require.Contains(t, reason, "login")
+	require.False(t, hasMCPSourceEvidence(ctx, serverURL))
+}
+
+func TestMCPSourceEvidenceAcceptsUserProvidedURL(t *testing.T) {
+	t.Parallel()
+	serverURL := "https://example.com/mcp"
+	ctx := WithMCPSourceEvidence(t.Context(), "Install this MCP: "+serverURL)
+	reason := recordMCPSourceEvidence(ctx, serverURL+"/", "MCP server installation configuration command args")
+
+	require.Empty(t, reason)
+	require.True(t, hasMCPSourceEvidence(ctx, serverURL))
 }

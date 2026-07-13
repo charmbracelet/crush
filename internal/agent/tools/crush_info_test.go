@@ -37,17 +37,18 @@ func TestCrushInfo_ConfigFiles(t *testing.T) {
 	cfg := config.NewTestStore(
 		&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()},
 		"/home/user/.config/crush/crush.json",
-		"/project/.crush/crush.json",
+		"/project/crush.project.json",
 	)
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[config_files]")
-	require.Contains(t, output, "[config_locations]")
+	require.Contains(t, output, "write_target = "+config.GlobalConfigData())
 	require.Contains(t, output, "loaded = /home/user/.config/crush/crush.json")
-	require.Contains(t, output, "global_legacy = "+config.GlobalConfig())
-	require.Contains(t, output, "global_data = "+config.GlobalConfigData())
-	require.Contains(t, output, "Diagnostic search locations only")
+	require.Contains(t, output, "project_target = /project/crush.project.json")
+	require.Contains(t, output, "Loaded files are merge evidence")
+	require.Contains(t, output, "For MCP work, use the structured runtime and saved-configuration sections")
+	require.NotContains(t, output, "[config_locations]")
 	require.Contains(t, output, "/home/user/.config/crush/crush.json")
-	require.Contains(t, output, "/project/.crush/crush.json")
+	require.Contains(t, output, "/project/crush.project.json")
 }
 
 func TestCrushInfo_Models(t *testing.T) {
@@ -369,7 +370,7 @@ func TestCrushInfo_ConfigStaleness_Clean(t *testing.T) {
 	store.CaptureStalenessSnapshot([]string{configPath})
 
 	output := buildCrushInfo(store, nil, nil, nil, nil)
-	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "[config_state]")
 	require.Contains(t, output, "dirty = false")
 	require.NotContains(t, output, "changed_paths")
 	require.NotContains(t, output, "missing_paths")
@@ -394,7 +395,7 @@ func TestCrushInfo_ConfigStaleness_Dirty(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": true}`), 0o600))
 
 	output := buildCrushInfo(store, nil, nil, nil, nil)
-	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "[config_state]")
 	require.Contains(t, output, "dirty = true")
 	require.Contains(t, output, "changed_paths")
 	require.Contains(t, output, configPath)
@@ -418,7 +419,7 @@ func TestCrushInfo_ConfigStaleness_MissingPath(t *testing.T) {
 	require.NoError(t, os.Remove(configPath))
 
 	output := buildCrushInfo(store, nil, nil, nil, nil)
-	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "[config_state]")
 	require.Contains(t, output, "dirty = true")
 	require.Contains(t, output, "missing_paths")
 	require.Contains(t, output, configPath)

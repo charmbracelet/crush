@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,16 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAutoReviewPromptIsBoundedAndReadOnly(t *testing.T) {
+	t.Parallel()
+
+	prompt := string(autoReviewPrompt)
+	require.Contains(t, prompt, "read-only diagnostic")
+	require.Contains(t, prompt, "Next tool:")
+	require.Contains(t, prompt, "do not use tools")
+	require.Equal(t, 1, strings.Count(prompt, "Auto-review sidecar:"))
+}
 
 type autoReviewStreamModel struct {
 	text          string
@@ -155,7 +166,7 @@ func newAutoReviewTestAgent(env fakeEnv, primary, review fantasy.LanguageModel) 
 	}).(*sessionAgent)
 }
 
-func TestAutoReviewFailureCreatesReviewAndDrainsQueuedPrompt(t *testing.T) {
+func TestAutoReviewFailureUsesHiddenReviewAndDrainsQueuedPrompt(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	primary := &autoReviewStreamModel{
@@ -180,7 +191,7 @@ func TestAutoReviewFailureCreatesReviewAndDrainsQueuedPrompt(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.Equal(t, int64(2), primary.streamCalls.Load(), "failed turn should be followed by queued prompt")
-	require.Equal(t, int64(1), review.streamCalls.Load(), "failed turn should create one auto-review message")
+	require.Equal(t, int64(1), review.streamCalls.Load(), "failed turn should run one hidden auto-review")
 	require.Equal(t, 0, sa.QueuedPrompts(sess.ID))
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
@@ -207,7 +218,7 @@ func TestAutoReviewFailureCreatesReviewAndDrainsQueuedPrompt(t *testing.T) {
 	}
 	require.Equal(t, []string{"first prompt", "queued prompt"}, userPrompts)
 	require.Equal(t, 1, errorTurns)
-	require.Equal(t, 1, reviewTurns)
+	require.Equal(t, 0, reviewTurns)
 	require.Equal(t, 1, successfulTurns)
 }
 
@@ -230,7 +241,7 @@ func TestAutoReviewMaxTokensDoesNotLoop(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, int64(1), primary.streamCalls.Load(), "max-token auto-review must not re-enter the primary model")
-	require.Equal(t, int64(1), review.streamCalls.Load(), "max-token turn should create one auto-review message")
+	require.Equal(t, int64(1), review.streamCalls.Load(), "max-token turn should run one hidden auto-review")
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
@@ -253,7 +264,19 @@ func TestAutoReviewMaxTokensDoesNotLoop(t *testing.T) {
 	}
 	require.Equal(t, []string{"first prompt"}, userPrompts)
 	require.Equal(t, 1, maxTokenTurns)
-	require.Equal(t, 1, reviewTurns)
+	require.Equal(t, 0, reviewTurns)
+}
+
+func TestRecoveryGuidanceFromReviewKeepsOnlyAction(t *testing.T) {
+	t.Parallel()
+
+	review := "Auto-review sidecar:\nCause: stale input\nEvidence: validation rejected url\nNext step: use the transport-specific stdio object\nNext tool: mcp_add"
+	guidance := recoveryGuidanceFromReview(review)
+
+	require.Contains(t, guidance, "use the transport-specific stdio object")
+	require.Contains(t, guidance, "Invoke mcp_add now")
+	require.NotContains(t, guidance, "Cause:")
+	require.NotContains(t, guidance, "Evidence:")
 }
 
 func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
@@ -327,4 +350,12 @@ func TestTitleMaxTokensNeverReturnsZero(t *testing.T) {
 		DefaultMaxTokens: 512,
 	}}))
 	require.Equal(t, int64(40), titleMaxTokens(Model{}))
+}
+
+func TestFallbackSessionTitleUsesPromptWithoutModel(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "Install the official weather MCP", fallbackSessionTitle("  Install the official weather MCP\n"))
+	require.Equal(t, DefaultSessionName, fallbackSessionTitle(" \n "))
+	require.LessOrEqual(t, len([]rune(fallbackSessionTitle(strings.Repeat("a", 80)))), 51)
 }

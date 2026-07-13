@@ -77,6 +77,7 @@ func NewWebFetchTool(permissions permission.Service, workingDir, scratchDir stri
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 			}
+			evidenceWarning := recordMCPSourceEvidence(ctx, params.URL, content)
 
 			hasLargeContent := len(content) > LargeContentThreshold
 			var result strings.Builder
@@ -105,6 +106,9 @@ func NewWebFetchTool(permissions permission.Service, workingDir, scratchDir stri
 			} else {
 				fmt.Fprintf(&result, "Fetched content from %s:\n\n", params.URL)
 				result.WriteString(content)
+			}
+			if evidenceWarning != "" && mcpSourceEvidenceRequired(ctx) {
+				fmt.Fprintf(&result, "\n\nMCP source verification rejected this page: %s. Use web_search, then fetch a primary source returned by that search.", evidenceWarning)
 			}
 
 			return fantasy.NewTextResponse(result.String()), nil

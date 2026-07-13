@@ -469,9 +469,9 @@ func inferredSkillContext(name string) string {
 	var instructions string
 	switch name {
 	case "crush-config":
-		instructions = "Inspect crush_info before editing configuration. Use the active config path it reports. Preserve unrelated providers, models, permissions, and MCP entries. Parse and write valid JSON through structured tools; never reconstruct a minified config from memory."
-	case "mcp-schema-first":
-		instructions = "Inspect current MCP status and configuration before installing anything. Reuse working servers. Verify package names from authoritative sources after one failed lookup. MCP entries use type (stdio, http, or sse); legacy transport is accepted by re.code. After a change, call mcp_refresh and act on its exact result."
+		instructions = "Inspect recode_info before changing configuration. Preserve unrelated providers, models, permissions, and MCP entries. For MCP changes use mcp_add instead of editing JSON."
+	case "mcp-setup":
+		instructions = "Inspect current MCP status with recode_info before installing anything. Never substitute a related server. Prefer official documentation or a primary registry when the server identity is unclear, but do not block an exact configuration because a documentation host cannot be fetched. Then call mcp_add with exactly one transport object; source_url is optional approval context. Use replace=true only when correcting a saved config. A failed mcp_add is rolled back and ends the turn."
 	case "execution-routing":
 		instructions = "Keep ownership of the user task. Delegate only bounded read-only research, integrate the evidence yourself, and continue until the intent is satisfied or a concrete blocker requires user input. Do not repeat a failed command without changing strategy."
 	default:
@@ -489,7 +489,7 @@ func taskRequiresBuiltinSkill(prompt, skillName string) bool {
 	switch skillName {
 	case "crush-config":
 		return hasAny("crush.json", "configure crush", "provider", "model slot", "permission", " mcp", "mcp ", "mcps")
-	case "mcp-schema-first":
+	case "mcp-setup":
 		return hasAny(" mcp", "mcp ", "mcps", "model context protocol")
 	case "execution-routing":
 		return len(prompt) > 80 && hasAny(
@@ -905,6 +905,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewMCPAddTool(c.cfg, c.permissions),
 		tools.NewMCPRefreshTool(c.cfg),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
@@ -937,6 +938,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
 			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
 		)
+		if agent.AllowedMCP == nil || len(agent.AllowedMCP) > 0 {
+			allTools = append(
+				allTools,
+				tools.NewMCPToolSearchTool(c.permissions, c.cfg, c.cfg.WorkingDir(), agent.AllowedMCP),
+				tools.NewMCPToolCallTool(c.permissions, c.cfg, c.cfg.WorkingDir(), agent.AllowedMCP),
+			)
+		}
 	}
 
 	var filteredTools []fantasy.AgentTool
@@ -946,29 +954,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
-		if agent.AllowedMCP == nil {
-			// No MCP restrictions
-			filteredTools = append(filteredTools, tool)
-			continue
-		}
-		if len(agent.AllowedMCP) == 0 {
-			// No MCPs allowed
-			slog.Debug("No MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
-			break
-		}
-
-		for mcp, tools := range agent.AllowedMCP {
-			if mcp != tool.MCP() {
-				continue
-			}
-			if len(tools) == 0 || slices.Contains(tools, tool.MCPToolName()) {
-				filteredTools = append(filteredTools, tool)
-				break
-			}
-			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
-		}
-	}
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})

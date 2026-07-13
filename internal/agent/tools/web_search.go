@@ -80,6 +80,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to search: " + err.Error()), nil
 			}
+			recordMCPSearchResults(ctx, results)
 
 			return fantasy.NewTextResponse(formatSearchResults(results)), nil
 		},

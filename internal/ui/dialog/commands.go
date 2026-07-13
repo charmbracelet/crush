@@ -190,11 +190,13 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 				return nil
 			}
 			return ActionClose{}
-		case key.Matches(msg, c.keyMap.Back):
-			if c.inSubMenu() {
-				c.popMenu()
-				return nil
-			}
+		case key.Matches(msg, c.keyMap.Back) && c.inSubMenu():
+			// Backspace pops out of a sub-menu, but only while in one. At the
+			// top level it must fall through to the input so it can edit the
+			// type-ahead filter (otherwise the case swallows it and backspace
+			// does nothing).
+			c.popMenu()
+			return nil
 		case key.Matches(msg, c.keyMap.Previous):
 			c.list.Focus()
 			if c.list.IsSelectedFirst() {

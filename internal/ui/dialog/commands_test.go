@@ -216,6 +216,26 @@ func TestCommands_PopRestoresFullParentList(t *testing.T) {
 	require.Len(t, c.list.FilteredItems(), 2, "popping should restore the full parent list")
 }
 
+func TestCommands_BackspaceEditsTopLevelFilter(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCommands(t)
+
+	// Type into the top-level type-ahead filter.
+	c.HandleMsg(keyMsg('m'))
+	c.HandleMsg(keyMsg('c'))
+	c.HandleMsg(keyMsg('p'))
+	require.Equal(t, "mcp", c.input.Value())
+	require.False(t, c.inSubMenu())
+
+	// Backspace at the top level must edit the filter, not be swallowed by the
+	// Back (pop-sub-menu) key binding. Regression guard for the case matching
+	// backspace unconditionally.
+	c.HandleMsg(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	require.False(t, c.inSubMenu())
+	require.Equal(t, "mc", c.input.Value(), "backspace should delete a char from the top-level filter")
+}
+
 func setupMenuHierarchy(t *testing.T) *Commands {
 	t.Helper()
 	c := newTestCommands(t)

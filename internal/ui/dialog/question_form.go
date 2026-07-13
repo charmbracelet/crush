@@ -387,7 +387,7 @@ func (f *QuestionForm) DrawCollapsed(scr uv.Screen, area uv.Rectangle) {
 		}
 		if f.isConfirmTab() && f.confirmComp != nil {
 			plainText = f.confirmComp.Title
-			confirmRendered = f.Styles.Editor.QuestionConfirm.Render(f.confirmComp.Title)
+			confirmRendered = f.Styles.Editor.QuestionUnselected.Render(f.confirmComp.Title)
 		} else if f.activeIdx < len(f.questions) {
 			plainText = f.getQuestionText(f.activeIdx)
 		}

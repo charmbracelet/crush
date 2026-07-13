@@ -30,6 +30,8 @@ type ConfirmComponent struct {
 
 	keyLeft  key.Binding
 	keyRight key.Binding
+	keyYes   key.Binding
+	keyNo    key.Binding
 	keyEnter key.Binding
 	keyClose key.Binding
 	keyUp    key.Binding
@@ -63,6 +65,8 @@ func NewConfirmComponent(sty *styles.Styles, title, description string, labels [
 		confirmYes:       true,
 		keyLeft:          key.NewBinding(key.WithKeys("left"), key.WithHelp("←/→", "switch")),
 		keyRight:         key.NewBinding(key.WithKeys("right"), key.WithHelp("←/→", "switch")),
+		keyYes:           key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yes")),
+		keyNo:            key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "no")),
 		keyEnter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
 		keyClose:         CloseKey,
 		keyUp:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑", "scroll")),
@@ -85,6 +89,12 @@ func (c *ConfirmComponent) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, nil
 	case key.Matches(msg, c.keyLeft), key.Matches(msg, c.keyRight):
 		c.confirmYes = !c.confirmYes
+		return false, nil
+	case key.Matches(msg, c.keyYes):
+		c.confirmYes = true
+		return false, nil
+	case key.Matches(msg, c.keyNo):
+		c.confirmYes = false
 		return false, nil
 	case key.Matches(msg, c.keyEnter):
 		if c.confirmYes {
@@ -114,7 +124,7 @@ func (c *ConfirmComponent) Response() question.Answer {
 
 // ShortHelp returns key bindings for the status bar.
 func (c *ConfirmComponent) ShortHelp() []key.Binding {
-	return []key.Binding{c.keyUp, c.keyLeft, c.keyEnter, c.keyClose}
+	return []key.Binding{c.keyUp, c.keyLeft, c.keyYes, c.keyNo, c.keyEnter, c.keyClose}
 }
 
 // unansweredCount returns how many questions have no meaningful answer.
@@ -183,7 +193,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Title.
 	titleWrapped := ansi.Wrap(c.Title, area.Dx()-iconWidth, "")
 	for _, l := range strings.Split(titleWrapped, "\n") {
-		lines = append(lines, line{text: iconPrompt + c.Styles.Editor.QuestionConfirm.Render(l)})
+		lines = append(lines, line{text: iconPrompt + c.Styles.Editor.QuestionUnselected.Render(l)})
 	}
 	lines = append(lines, line{}) // blank
 
@@ -208,7 +218,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	// Answer summary bullets.
-	bulletStyle := c.Styles.Editor.QuestionBody
+	bulletStyle := c.Styles.Editor.QuestionUnselected
 	for i, label := range c.QuestionLabels {
 		summary := c.answerSummary(i)
 		bullet := bulletStyle.Render("• " + label + ": " + summary)
@@ -235,8 +245,8 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	totalLines := len(lines)
 	confirmButtonOpts := []common.ButtonOpts{
-		{Text: "Yup!", Selected: c.confirmYes, Padding: 3, UnderlineIndex: -1},
-		{Text: "Not yet", Selected: !c.confirmYes, Padding: 3, UnderlineIndex: -1},
+		{Text: "Yup!", Selected: c.confirmYes, Padding: 3, UnderlineIndex: 0},
+		{Text: "Not yet", Selected: !c.confirmYes, Padding: 3, UnderlineIndex: 0},
 	}
 	overflow := viewport > 0 && totalLines > viewport
 

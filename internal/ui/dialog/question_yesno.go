@@ -42,7 +42,7 @@ func NewYesNo(sty *styles.Styles, req question.Question) *YesNo {
 		questionEditor: newQuestionEditor(sty),
 		Request:        req,
 		selectedNo:     true, // Default to "No" for safety.
-		keyLeftRight:   key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "switch")),
+		keyLeftRight:   key.NewBinding(key.WithKeys("left", "right", "h", "l"), key.WithHelp("←/→", "switch")),
 		keyEnter:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
 		keyYes:         key.NewBinding(key.WithKeys("y", "Y"), key.WithHelp("y", "yes")),
 		keyNo:          key.NewBinding(key.WithKeys("n", "N"), key.WithHelp("n", "no")),
@@ -188,8 +188,8 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Draw buttons. Build compositor first so hover uses current geometry.
 	buttonOptsList := []common.ButtonOpts{
-		{Text: "Yes", Selected: !d.selectedNo, Padding: 3, UnderlineIndex: -1},
-		{Text: "No", Selected: d.selectedNo, Padding: 3, UnderlineIndex: -1},
+		{Text: "Yes", Selected: !d.selectedNo, Padding: 3, UnderlineIndex: 0},
+		{Text: "No", Selected: d.selectedNo, Padding: 3, UnderlineIndex: 0},
 	}
 	d.compositor = common.ButtonHitCompositor(d.Styles, buttonOptsList, " ", area.Min.X, y)
 	hoveredBtn := common.HitButtonIndex(d.compositor, d.hoverX, d.hoverY)
@@ -223,11 +223,11 @@ func (d *YesNo) HandleMouseClick(x, y int) (bool, bool) {
 	case 0: // Yes
 		d.selectedNo = false
 		d.answer(d.respond(true))
-		return false, true
+		return true, true
 	case 1: // No
 		d.selectedNo = true
 		d.answer(d.respond(false))
-		return false, true
+		return true, true
 	}
 	return false, false
 }

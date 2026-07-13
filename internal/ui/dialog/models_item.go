@@ -79,10 +79,12 @@ func (m *ModelItem) Finished() bool {
 
 // SelectedModel returns this model item as a [config.SelectedModel] instance.
 func (m *ModelItem) SelectedModel() config.SelectedModel {
+	think := m.prov.Type == catwalk.Type("lmstudio") && m.model.CanReason && len(m.model.ReasoningLevels) == 0
 	return config.SelectedModel{
 		Model:           m.model.ID,
 		Provider:        string(m.prov.ID),
 		ReasoningEffort: m.model.DefaultReasoningEffort,
+		Think:           think,
 		MaxTokens:       m.model.DefaultMaxTokens,
 	}
 }

@@ -40,5 +40,17 @@ func WriteText(text string) {
 // ErrEmpty when no matching data is present and ErrUnsupported on platforms
 // without clipboard support.
 func Read(f Format) ([]byte, error) {
-	return read(f)
+	data, err := read(f)
+	if f != FormatImage || (err == nil && len(data) > 0) {
+		return data, err
+	}
+
+	bridgeData, bridgeErr := readBridgeImage()
+	if bridgeErr == nil {
+		return bridgeData, nil
+	}
+	if errors.Is(bridgeErr, errBridgeDisabled) {
+		return data, err
+	}
+	return nil, bridgeErr
 }

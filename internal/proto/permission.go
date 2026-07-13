@@ -13,6 +13,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Resource    string `json:"resource,omitempty"`
 }
 
 // PermissionNotification represents a notification about a permission change.
@@ -32,6 +33,7 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Resource    string `json:"resource,omitempty"`
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface. This is needed
@@ -88,6 +90,12 @@ func unmarshalToolParams(toolName string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return params, nil
+	case TmuxToolName:
+		var params TmuxPermissionsParams
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, err
+		}
+		return params, nil
 	case DownloadToolName:
 		var params DownloadPermissionsParams
 		if err := json.Unmarshal(raw, &params); err != nil {
@@ -120,6 +128,18 @@ func unmarshalToolParams(toolName string, raw json.RawMessage) (any, error) {
 		return params, nil
 	case AgenticFetchToolName:
 		var params AgenticFetchPermissionsParams
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, err
+		}
+		return params, nil
+	case WebFetchToolName:
+		var params WebFetchPermissionsParams
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, err
+		}
+		return params, nil
+	case WebSearchToolName:
+		var params WebSearchPermissionsParams
 		if err := json.Unmarshal(raw, &params); err != nil {
 			return nil, err
 		}

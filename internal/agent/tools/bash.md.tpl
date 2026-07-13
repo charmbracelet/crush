@@ -1,26 +1,33 @@
 Execute shell commands; long-running commands automatically move to background and return a shell ID.
 
 <cross_platform>
-Uses mvdan/sh interpreter (Bash-compatible on all platforms including Windows).
-Use forward slashes for paths: "ls C:/foo/bar" not "ls C:\foo\bar".
-Common shell builtins and core utils available on Windows.
+This tool is named `bash` for compatibility, but it is Crush's cross-platform shell tool, not a guarantee that GNU Bash, WSL, cmd.exe, or PowerShell is available.
+It uses the mvdan/sh interpreter with portable shell syntax on all platforms, including Windows.
+On Windows, always convert displayed backslash paths before calling this tool:
+use "ls C:/foo/bar" and never pass "C:\foo\bar" to the shell.
+Prefer portable commands and built-in file/search tools over OS-specific shell features. Only use cmd.exe, PowerShell, WSL, or Unix-only commands when the user or environment explicitly requires them.
+On Windows, bare PowerShell cmdlets are rejected. Never write `Get-Content ... | ConvertFrom-Json` directly. Prefer native tools, or invoke `powershell.exe -NoProfile -Command 'Get-Content ... | ConvertFrom-Json'` with the entire script inside outer single quotes.
+Common shell builtins and core utils are available on Windows.
 </cross_platform>
 
 <execution_steps>
 1. Directory Verification: If creating directories/files, use LS tool to verify parent exists
-2. Security Check: Banned commands ({{ .BannedCommands }}) return error - explain to user. Safe read-only commands execute without prompts
+2. Policy Check: Safe read-only commands execute directly. Other commands use the configured permission mode and PreToolUse hooks
 3. Command Execution: Execute with proper quoting, capture output
-4. Auto-Background: Commands exceeding 1 minute (default, configurable via `auto_background_after`) automatically move to background and return shell ID
+4. Auto-Background: Commands exceeding 60 seconds (default, configurable via `auto_background_after`) automatically move to background and return a shell ID
 5. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters
 6. Return Result: Include errors, metadata with <cwd></cwd> tags
 </execution_steps>
 
 <usage_notes>
 - Command required, working_dir optional (defaults to current directory)
-- IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep'. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls'
+- Choose the tool that directly verifies the requested fact. Native file tools are useful for repository inspection and exact reads; shell commands are useful for host/runtime measurements, CLI output, process state, package managers, logs, and human-readable tables
+- If command output already contains the evidence the user asked for, use it. Do not repeat the same command while claiming it did not answer the question
+- Keep system-wide work bounded with specific paths, finite modes, timeout/head/maxdepth, or a narrower target when useful
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 - Each command runs in independent shell (no state persistence between calls)
 - Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)
+- For log readers and other commands that may follow indefinitely, prefer the command's finite/non-follow mode when available. Otherwise set run_in_background=true and inspect snapshots with job_output
 {{- if .RgAvailable }}
 - Ripgrep (`rg`) is available; prefer it over `grep` for faster, more intuitive searching
 {{- end }}

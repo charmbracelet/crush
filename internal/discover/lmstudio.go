@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"charm.land/catwalk/pkg/catwalk"
 )
@@ -22,15 +23,23 @@ type lmstudioModelsResponse struct {
 
 // lmstudioModelEntry is a single entry from /api/v1/models.
 type lmstudioModelEntry struct {
-	Key              string             `json:"key"`
-	DisplayName      string             `json:"display_name"`
-	MaxContextLength int64              `json:"max_context_length"`
-	LoadedInstances  []lmstudioInstance `json:"loaded_instances"`
+	Key              string               `json:"key"`
+	DisplayName      string               `json:"display_name"`
+	MaxContextLength int64                `json:"max_context_length"`
+	Architecture     string               `json:"architecture"`
+	Type             string               `json:"type"`
+	Capabilities     lmstudioCapabilities `json:"capabilities"`
+	LoadedInstances  []lmstudioInstance   `json:"loaded_instances"`
+}
+
+type lmstudioCapabilities struct {
+	Vision bool `json:"vision"`
 }
 
 // lmstudioInstance is a currently loaded model instance with its
 // runtime config.
 type lmstudioInstance struct {
+	ID     string                 `json:"id"`
 	Config lmstudioInstanceConfig `json:"config"`
 }
 
@@ -64,6 +73,11 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 	metaByKey := make(map[string]lmstudioModelEntry, len(modelsResp.Models))
 	for _, m := range modelsResp.Models {
 		metaByKey[m.Key] = m
+		for _, instance := range m.LoadedInstances {
+			if instance.ID != "" {
+				metaByKey[instance.ID] = m
+			}
+		}
 	}
 
 	for i := range models {
@@ -87,9 +101,28 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 			models[i].Name = meta.DisplayName
 		}
 
-		// TODO: populate vision/tool-use flags when catwalk.Model
-		// gains dedicated fields for them.
+		if lmstudioSupportsEnableThinking(meta) {
+			models[i].CanReason = true
+		}
+		models[i].SupportsImages = meta.Capabilities.Vision
 	}
 
 	return models, nil
+}
+
+func lmstudioSupportsEnableThinking(meta lmstudioModelEntry) bool {
+	if meta.Type != "" && meta.Type != "llm" {
+		return false
+	}
+	architecture := strings.ToLower(meta.Architecture)
+	switch architecture {
+	case "qwen3", "qwen35":
+		return true
+	}
+	id := strings.ToLower(meta.Key + " " + meta.DisplayName)
+	return strings.Contains(id, "qwq") ||
+		strings.Contains(id, "qwythos") ||
+		strings.Contains(id, "qwen3") ||
+		strings.Contains(id, "qwen-3") ||
+		strings.Contains(id, "reasoning")
 }

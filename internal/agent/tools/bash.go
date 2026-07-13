@@ -64,7 +64,6 @@ var bashDescriptionTpl = template.Must(
 )
 
 type bashDescriptionData struct {
-	BannedCommands  string
 	MaxOutputLength int
 	Attribution     config.Attribution
 	ModelID         string
@@ -72,84 +71,9 @@ type bashDescriptionData struct {
 	GhAvailable     bool
 }
 
-var bannedCommands = []string{
-	// Network/Download tools
-	"alias",
-	"aria2c",
-	"axel",
-	"chrome",
-	"curl",
-	"curlie",
-	"firefox",
-	"http-prompt",
-	"httpie",
-	"links",
-	"lynx",
-	"nc",
-	"safari",
-	"scp",
-	"ssh",
-	"telnet",
-	"w3m",
-	"wget",
-	"xh",
-
-	// System administration
-	"doas",
-	"su",
-	"sudo",
-
-	// Package managers
-	"apk",
-	"apt",
-	"apt-cache",
-	"apt-get",
-	"dnf",
-	"dpkg",
-	"emerge",
-	"home-manager",
-	"makepkg",
-	"opkg",
-	"pacman",
-	"paru",
-	"pkg",
-	"pkg_add",
-	"pkg_delete",
-	"portage",
-	"rpm",
-	"yay",
-	"yum",
-	"zypper",
-
-	// System modification
-	"at",
-	"batch",
-	"chkconfig",
-	"crontab",
-	"fdisk",
-	"mkfs",
-	"mount",
-	"parted",
-	"service",
-	"systemctl",
-	"umount",
-
-	// Network configuration
-	"firewall-cmd",
-	"ifconfig",
-	"ip",
-	"iptables",
-	"netstat",
-	"pfctl",
-	"route",
-	"ufw",
-}
-
 func bashDescription(attribution *config.Attribution, modelID string) string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
-		BannedCommands:  bannedCommandsStr,
 		MaxOutputLength: MaxOutputLength,
 		Attribution:     *attribution,
 		ModelID:         modelID,
@@ -163,35 +87,10 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 }
 
 func blockFuncs() []shell.BlockFunc {
-	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
-
-		// System package managers
-		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
-		shell.ArgumentsBlocker("apt", []string{"install"}, nil),
-		shell.ArgumentsBlocker("apt-get", []string{"install"}, nil),
-		shell.ArgumentsBlocker("dnf", []string{"install"}, nil),
-		shell.ArgumentsBlocker("pacman", nil, []string{"-S"}),
-		shell.ArgumentsBlocker("pkg", []string{"install"}, nil),
-		shell.ArgumentsBlocker("yum", []string{"install"}, nil),
-		shell.ArgumentsBlocker("zypper", []string{"install"}, nil),
-
-		// Language-specific package managers
-		shell.ArgumentsBlocker("brew", []string{"install"}, nil),
-		shell.ArgumentsBlocker("cargo", []string{"install"}, nil),
-		shell.ArgumentsBlocker("gem", []string{"install"}, nil),
-		shell.ArgumentsBlocker("go", []string{"install"}, nil),
-		shell.ArgumentsBlocker("npm", []string{"install"}, []string{"--global"}),
-		shell.ArgumentsBlocker("npm", []string{"install"}, []string{"-g"}),
-		shell.ArgumentsBlocker("pip", []string{"install"}, []string{"--user"}),
-		shell.ArgumentsBlocker("pip3", []string{"install"}, []string{"--user"}),
-		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"--global"}),
-		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"-g"}),
-		shell.ArgumentsBlocker("yarn", []string{"global", "add"}, nil),
-
-		// `go test -exec` can run arbitrary commands
-		shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
-	}
+	// Permission prompts and user-configured PreToolUse hooks own command
+	// policy. Source-level bans cannot be intentionally bypassed and block
+	// legitimate administration even when YOLO mode is enabled.
+	return nil
 }
 
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
@@ -201,6 +100,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
+			}
+			if runtime.GOOS == "windows" && hasBarePowerShellCmdlet(params.Command) {
+				return fantasy.NewTextErrorResponse("PowerShell cmdlets cannot run directly in re.code's portable shell. Prefer native view/edit/write tools. If PowerShell is required, invoke powershell.exe -NoProfile -Command and wrap the complete PowerShell script in outer single quotes."), nil
 			}
 
 			// Determine working directory
@@ -384,6 +286,23 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
 	)
+}
+
+func hasBarePowerShellCmdlet(command string) bool {
+	lower := strings.ToLower(command)
+	if strings.Contains(lower, "powershell.exe") || strings.Contains(lower, "pwsh.exe") || strings.Contains(lower, "pwsh ") {
+		return false
+	}
+	for _, cmdlet := range []string{
+		"get-content", "set-content", "select-object", "where-object",
+		"foreach-object", "convertfrom-json", "convertto-json", "get-command",
+		"get-childitem", "copy-item", "move-item", "remove-item", "new-item",
+	} {
+		if strings.Contains(lower, cmdlet) {
+			return true
+		}
+	}
+	return false
 }
 
 // formatOutput formats the output of a completed command with error handling

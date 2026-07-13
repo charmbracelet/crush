@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -44,6 +45,8 @@ func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) 
 }
 
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
+	require.Equal(t, 60, DefaultAutoBackgroundAfter)
+
 	workingDir := t.TempDir()
 	tool := newBashToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
@@ -168,6 +171,43 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 	require.Contains(t, resp.Content, "User denied permission")
 }
 
+func TestBashTool_ExplicitLongCommandReturnsAsBackgroundJob(t *testing.T) {
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	start := time.Now()
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description:         "explicit long command",
+		Command:             "sleep 30",
+		AutoBackgroundAfter: 1,
+	})
+	require.Less(t, time.Since(start), 3*time.Second)
+
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.True(t, meta.Background)
+	require.NotEmpty(t, meta.ShellID)
+	require.NoError(t, shell.GetBackgroundShellManager().Kill(meta.ShellID))
+}
+
+func TestBashToolPolicy_HasNoSourceLevelCommandBlacklist(t *testing.T) {
+	require.Empty(t, blockFuncs())
+}
+
+func TestToolDescriptionsClarifyHostFactsAndURLFetch(t *testing.T) {
+	bash := bashDescription(&config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model")
+	require.Contains(t, bash, "directly verifies the requested fact")
+	require.Contains(t, bash, "host/runtime measurements")
+	require.Contains(t, bash, "human-readable tables")
+	require.Contains(t, bash, "If command output already contains the evidence")
+
+	fetch := fetchDescription()
+	require.Contains(t, fetch, "HTTP(S) URL")
+	require.Contains(t, fetch, "not a shell command runner")
+	require.Contains(t, fetch, "cannot inspect local files, processes, disk usage, or system state")
+}
+
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
 	t.Helper()
 
@@ -210,4 +250,13 @@ func TestTruncateOutputEmoji(t *testing.T) {
 	out := TruncateOutput(content)
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
 	require.Contains(t, out, "lines truncated")
+}
+
+func TestHasBarePowerShellCmdlet(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, hasBarePowerShellCmdlet(`Get-Content file.json | ConvertFrom-Json`))
+	require.True(t, hasBarePowerShellCmdlet(`where.exe app | Select-Object -First 1`))
+	require.False(t, hasBarePowerShellCmdlet(`powershell.exe -NoProfile -Command 'Get-Content file.json | ConvertFrom-Json'`))
+	require.False(t, hasBarePowerShellCmdlet(`rg -n "configuration" docs`))
 }

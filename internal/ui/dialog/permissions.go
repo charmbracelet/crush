@@ -463,10 +463,25 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		if params, ok := p.permission.Params.(tools.BashPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
 		}
+	case tools.TmuxToolName:
+		if params, ok := p.permission.Params.(tools.TmuxPermissionsParams); ok {
+			lines = append(lines, p.renderKeyValue("Action", params.Action, contentWidth))
+			if params.Session != "" {
+				lines = append(lines, p.renderKeyValue("Session", params.Session, contentWidth))
+			}
+		}
 	case tools.DownloadToolName:
 		if params, ok := p.permission.Params.(tools.DownloadPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
+		}
+	case tools.WebFetchToolName:
+		if params, ok := p.permission.Params.(tools.WebFetchPermissionsParams); ok {
+			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
+		}
+	case tools.WebSearchToolName:
+		if params, ok := p.permission.Params.(tools.WebSearchPermissionsParams); ok {
+			lines = append(lines, p.renderKeyValue("Query", params.Query, contentWidth))
 		}
 	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ViewToolName:
 		var filePath string
@@ -530,6 +545,8 @@ func (p *Permissions) renderContent(width int) string {
 	switch p.permission.ToolName {
 	case tools.BashToolName:
 		return p.renderBashContent(width)
+	case tools.TmuxToolName:
+		return p.renderTmuxContent(width)
 	case tools.EditToolName:
 		return p.renderEditContent(width)
 	case tools.WriteToolName:
@@ -542,6 +559,10 @@ func (p *Permissions) renderContent(width int) string {
 		return p.renderFetchContent(width)
 	case tools.AgenticFetchToolName:
 		return p.renderAgenticFetchContent(width)
+	case tools.WebFetchToolName:
+		return p.renderWebFetchContent(width)
+	case tools.WebSearchToolName:
+		return p.renderWebSearchContent(width)
 	case tools.ViewToolName:
 		return p.renderViewContent(width)
 	case tools.LSToolName:
@@ -558,6 +579,31 @@ func (p *Permissions) renderBashContent(width int) string {
 	}
 
 	return p.renderContentPanel(params.Command, width)
+}
+
+func (p *Permissions) renderTmuxContent(width int) string {
+	params, ok := p.permission.Params.(tools.TmuxPermissionsParams)
+	if !ok {
+		return ""
+	}
+
+	var lines []string
+	if params.Command != "" {
+		lines = append(lines, "Command: "+params.Command)
+	}
+	if params.Input != "" {
+		lines = append(lines, "Input: "+params.Input)
+	}
+	if params.WorkingDir != "" {
+		lines = append(lines, "Working directory: "+fsext.PrettyPath(params.WorkingDir))
+	}
+	if params.Description != "" {
+		lines = append(lines, "Description: "+params.Description)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "Session: "+params.Session)
+	}
+	return p.renderContentPanel(strings.Join(lines, "\n"), width)
 }
 
 func (p *Permissions) renderEditContent(contentWidth int) string {
@@ -649,6 +695,26 @@ func (p *Permissions) renderAgenticFetchContent(width int) string {
 		content = fmt.Sprintf("Prompt: %s", params.Prompt)
 	}
 
+	return p.renderContentPanel(content, width)
+}
+
+func (p *Permissions) renderWebFetchContent(width int) string {
+	params, ok := p.permission.Params.(tools.WebFetchPermissionsParams)
+	if !ok {
+		return ""
+	}
+	return p.renderContentPanel(params.URL, width)
+}
+
+func (p *Permissions) renderWebSearchContent(width int) string {
+	params, ok := p.permission.Params.(tools.WebSearchPermissionsParams)
+	if !ok {
+		return ""
+	}
+	content := fmt.Sprintf("Query: %s", params.Query)
+	if params.MaxResults > 0 {
+		content += fmt.Sprintf("\nMax results: %d", params.MaxResults)
+	}
 	return p.renderContentPanel(content, width)
 }
 

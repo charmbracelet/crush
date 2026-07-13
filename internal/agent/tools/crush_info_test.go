@@ -37,12 +37,18 @@ func TestCrushInfo_ConfigFiles(t *testing.T) {
 	cfg := config.NewTestStore(
 		&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()},
 		"/home/user/.config/crush/crush.json",
-		"/project/.crush/crush.json",
+		"/project/crush.project.json",
 	)
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[config_files]")
+	require.Contains(t, output, "write_target = "+config.GlobalConfigData())
+	require.Contains(t, output, "loaded = /home/user/.config/crush/crush.json")
+	require.Contains(t, output, "project_target = /project/crush.project.json")
+	require.Contains(t, output, "Loaded files are merge evidence")
+	require.Contains(t, output, "For MCP work, use the structured runtime and saved-configuration sections")
+	require.NotContains(t, output, "[config_locations]")
 	require.Contains(t, output, "/home/user/.config/crush/crush.json")
-	require.Contains(t, output, "/project/.crush/crush.json")
+	require.Contains(t, output, "/project/crush.project.json")
 }
 
 func TestCrushInfo_Models(t *testing.T) {
@@ -50,8 +56,10 @@ func TestCrushInfo_Models(t *testing.T) {
 
 	cfg := config.NewTestStore(&config.Config{
 		Models: map[config.SelectedModelType]config.SelectedModel{
-			config.SelectedModelTypeLarge: {Model: "claude-sonnet-4-20250514", Provider: "anthropic"},
-			config.SelectedModelTypeSmall: {Model: "claude-haiku-3-20250307", Provider: "anthropic"},
+			config.SelectedModelTypeLarge:   {Model: "claude-sonnet-4-20250514", Provider: "anthropic"},
+			config.SelectedModelTypeSmall:   {Model: "claude-haiku-3-20250307", Provider: "anthropic"},
+			config.SelectedModelTypeSummary: {Model: "qwen3-9b", Provider: "lmstudio"},
+			config.SelectedModelTypeReview:  {Model: "qwen3-9b", Provider: "lmstudio"},
 		},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
@@ -59,6 +67,8 @@ func TestCrushInfo_Models(t *testing.T) {
 	require.Contains(t, output, "[model]")
 	require.Contains(t, output, "large = claude-sonnet-4-20250514 (anthropic)")
 	require.Contains(t, output, "small = claude-haiku-3-20250307 (anthropic)")
+	require.Contains(t, output, "summary = qwen3-9b (lmstudio)")
+	require.Contains(t, output, "review = qwen3-9b (lmstudio)")
 }
 
 func TestCrushInfo_Providers(t *testing.T) {
@@ -148,6 +158,48 @@ func TestCrushInfo_MCPStates(t *testing.T) {
 	filesystemIdx := strings.Index(output, "filesystem")
 	githubIdx := strings.Index(output, "github")
 	require.Less(t, filesystemIdx, githubIdx, "filesystem should appear before github")
+}
+
+func TestCrushInfo_MCPConfigSummary(t *testing.T) {
+	t.Parallel()
+
+	states := map[string]mcp.ClientInfo{
+		"github": {
+			Name:  "github",
+			State: mcp.StateError,
+			Error: errors.New("calling initialize: EOF"),
+		},
+	}
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		MCP: map[string]config.MCPConfig{
+			"exa": {
+				Type: config.MCPHttp,
+				URL:  "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa",
+				Headers: map[string]string{
+					"x-api-key": "real-secret",
+				},
+			},
+			"github": {
+				Type:    config.MCPStdio,
+				Command: "npx",
+				Args:    []string{"-y", "@modelcontextprotocol/github", "--token", "ghp_secret"},
+				Env: map[string]string{
+					"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_secret",
+				},
+			},
+		},
+	})
+
+	var b strings.Builder
+	writeMCP(&b, states, cfg)
+	output := b.String()
+	require.Contains(t, output, "[mcp_config]")
+	require.Contains(t, output, `github = type=stdio command=npx args=["-y", "@modelcontextprotocol/github", "--token", "<redacted>"] env_keys=["GITHUB_PERSONAL_ACCESS_TOKEN"]`)
+	require.Contains(t, output, `exa = type=http url=https://mcp.exa.ai/mcp?keys=["tools"] header_keys=["x-api-key"]`)
+	require.NotContains(t, output, "real-secret")
+	require.NotContains(t, output, "ghp_secret")
 }
 
 func TestCrushInfo_YoloMode(t *testing.T) {
@@ -318,7 +370,7 @@ func TestCrushInfo_ConfigStaleness_Clean(t *testing.T) {
 	store.CaptureStalenessSnapshot([]string{configPath})
 
 	output := buildCrushInfo(store, nil, nil, nil, nil)
-	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "[config_state]")
 	require.Contains(t, output, "dirty = false")
 	require.NotContains(t, output, "changed_paths")
 	require.NotContains(t, output, "missing_paths")
@@ -343,7 +395,7 @@ func TestCrushInfo_ConfigStaleness_Dirty(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": true}`), 0o600))
 
 	output := buildCrushInfo(store, nil, nil, nil, nil)
-	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "[config_state]")
 	require.Contains(t, output, "dirty = true")
 	require.Contains(t, output, "changed_paths")
 	require.Contains(t, output, configPath)
@@ -367,7 +419,7 @@ func TestCrushInfo_ConfigStaleness_MissingPath(t *testing.T) {
 	require.NoError(t, os.Remove(configPath))
 
 	output := buildCrushInfo(store, nil, nil, nil, nil)
-	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "[config_state]")
 	require.Contains(t, output, "dirty = true")
 	require.Contains(t, output, "missing_paths")
 	require.Contains(t, output, configPath)

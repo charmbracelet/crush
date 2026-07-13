@@ -411,6 +411,22 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 	return nil
 }
 
+// SetAgentMode switches the primary agent mode on the server.
+func (c *Client) SetAgentMode(ctx context.Context, id, agentID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/mode", id), nil, jsonBody(proto.AgentModeRequest{AgentID: agentID}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set agent mode: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		if msg := decodeErrorMessage(rsp.Body); msg != "" {
+			return fmt.Errorf("failed to set agent mode: status code %d: %s", rsp.StatusCode, msg)
+		}
+		return fmt.Errorf("failed to set agent mode: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // SendMessage sends a message to the agent for a workspace.
 //
 // When runID is non-empty it is echoed back on the resulting

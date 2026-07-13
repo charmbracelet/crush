@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -15,9 +16,8 @@ import (
 var dirsCmd = &cobra.Command{
 	Use:   "dirs",
 	Short: "Show config and data directories",
-	Long: `Show where Crush stores its configuration and data,
-including any project-level config files discovered
-from the current directory up to the project root.`,
+	Long: `Show the canonical global configuration directory and the
+single project-level configuration directory.`,
 	Example: `
 # Show all directories
 crush dirs
@@ -35,20 +35,15 @@ crush dirs
 }
 
 func collectDirs(cmd *cobra.Command) []string {
-	var dirs []string
-
-	dirs = append(dirs, filepath.Dir(config.GlobalConfig()))
-	dirs = append(dirs, filepath.Dir(config.GlobalConfigData()))
-
 	cwd, err := ResolveCwd(cmd)
 	if err != nil {
-		return dirs
+		return []string{filepath.Dir(config.CanonicalConfigPath())}
 	}
 
+	var dirs []string
 	for _, p := range config.ProjectConfigs(cwd) {
 		d := filepath.Dir(p)
-		// Skip global paths, already shown.
-		if d == filepath.Dir(config.GlobalConfig()) || d == filepath.Dir(config.GlobalConfigData()) {
+		if slices.Contains(dirs, d) {
 			continue
 		}
 		dirs = append(dirs, d)
@@ -84,7 +79,7 @@ func dirLabel(i int) string {
 	case 0:
 		return "Config"
 	case 1:
-		return "Data"
+		return "Project"
 	default:
 		return "Project"
 	}

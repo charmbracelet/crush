@@ -36,6 +36,8 @@ func (c *errorCoordinator) RunAccepted(ctx context.Context, accept *agent.Accept
 	return nil, c.err
 }
 
+func (c *errorCoordinator) SetMainAgent(context.Context, string) error        { return nil }
+func (c *errorCoordinator) CurrentAgentID() string                            { return "coder" }
 func (c *errorCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
 func (c *errorCoordinator) Cancel(string)                                     {}
 func (c *errorCoordinator) CancelAll()                                        {}
@@ -47,6 +49,7 @@ func (c *errorCoordinator) ClearQueue(string)                                 {}
 func (c *errorCoordinator) Summarize(context.Context, string) error           { return nil }
 func (c *errorCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *errorCoordinator) UpdateModels(context.Context) error                { return nil }
+func (c *errorCoordinator) SetMemoryOptions(bool, bool) error                 { return nil }
 func (c *errorCoordinator) GenerateTitle(context.Context, string, string)     {}
 
 // insertRunCompleteWorkspace installs a workspace backed by a real

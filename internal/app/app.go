@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -54,11 +55,13 @@ type UpdateAvailableMsg struct {
 }
 
 type App struct {
-	Sessions    session.Service
-	Messages    message.Service
-	History     history.Service
-	Permissions permission.Service
-	FileTracker filetracker.Service
+	Sessions      session.Service
+	Messages      message.Service
+	History       history.Service
+	Permissions   permission.Service
+	FileTracker   filetracker.Service
+	Memory        *memory.Store
+	MemoryProject memory.Project
 
 	AgentCoordinator agent.Coordinator
 
@@ -102,15 +105,19 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	cfg := store.Config()
 	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
+	var permissionRules []permission.Rule
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
+	}
+	if cfg.Permissions != nil && len(cfg.Permissions.Rules) > 0 {
+		permissionRules = permissionRulesFromConfig(cfg.Permissions.Rules)
 	}
 
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools, permissionRules),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
@@ -124,6 +131,31 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+	}
+	if memoryConfig := cfg.Options.Memory; memoryConfig != nil {
+		project := memory.ResolveProject(ctx, store.WorkingDir())
+		memoryStore, memoryErr := memory.Open(ctx, memory.Options{
+			Directory:             memoryConfig.Directory,
+			AutoApproveConfidence: memoryConfig.AutoApproveConfidence,
+			MaxRecall:             memoryConfig.MaxRecall,
+			MaxIndexEntries:       memoryConfig.MaxIndexEntries,
+			MaxBackups:            memoryConfig.MaxBackups,
+		})
+		if memoryErr != nil {
+			slog.Warn("Cross-session memory is unavailable", "error", memoryErr)
+		} else {
+			app.Memory = memoryStore
+			app.MemoryProject = project
+			if enabled, _, _ := memoryRuntimeOptions(cfg); enabled {
+				if syncErr := memoryStore.SyncFromDisk(ctx, project); syncErr != nil {
+					slog.Warn("Memory projection reconciliation had errors", "error", syncErr)
+				}
+				if _, _, maintenanceErr := memoryStore.MaybeMaintain(ctx, project, 0); maintenanceErr != nil {
+					slog.Warn("Memory maintenance failed", "error", maintenanceErr)
+				}
+			}
+			app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error { return memoryStore.Close() })
+		}
 	}
 
 	app.setupEvents()
@@ -178,6 +210,19 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	go app.LSPManager.TrackConfigured()
 
 	return app, nil
+}
+
+func permissionRulesFromConfig(rules []config.PermissionRule) []permission.Rule {
+	out := make([]permission.Rule, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, permission.Rule{
+			Tool:     rule.Tool,
+			Action:   rule.Action,
+			Resource: rule.Resource,
+			Effect:   permission.RuleEffect(rule.Effect),
+		})
+	}
+	return out
 }
 
 // Config returns the pure-data configuration.
@@ -612,6 +657,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
+	_, recorderEnabled, recallEnabled := memoryRuntimeOptions(app.config.Config())
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
 		app.config,
@@ -624,12 +670,29 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.agentNotifications,
 		app.runCompletions,
 		app.Skills,
+		agent.WithMemory(
+			app.Memory,
+			app.MemoryProject,
+			recorderEnabled,
+			recallEnabled,
+		),
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
 	return nil
+}
+
+func memoryRuntimeOptions(cfg *config.Config) (enabled, recorderEnabled, recallEnabled bool) {
+	if cfg == nil || cfg.Options == nil || cfg.Options.Memory == nil {
+		return false, false, false
+	}
+	options := cfg.Options.Memory
+	enabled = options.Enabled != nil && *options.Enabled
+	recorderEnabled = enabled && options.RecorderEnabled != nil && *options.RecorderEnabled
+	recallEnabled = enabled && options.RecallEnabled != nil && *options.RecallEnabled
+	return enabled, recorderEnabled, recallEnabled
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.

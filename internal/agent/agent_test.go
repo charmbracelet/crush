@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1012,4 +1014,39 @@ func TestProviderRetryLogFields(t *testing.T) {
 			"status_code", 503,
 		}, fields)
 	})
+}
+
+func TestAutoReviewTriggerGuards(t *testing.T) {
+	agent := &sessionAgent{autoReviewEnabled: true}
+
+	reason, ok := agent.shouldAutoReviewError(errors.New("boom"), Model{})
+	require.True(t, ok)
+	require.Contains(t, reason, "boom")
+
+	_, ok = agent.shouldAutoReviewError(context.Canceled, Model{})
+	require.False(t, ok)
+
+	disabled := &sessionAgent{}
+	_, ok = disabled.shouldAutoReviewError(errors.New("boom"), Model{})
+	require.False(t, ok)
+
+	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 401, Message: "login"}, Model{})
+	require.False(t, ok)
+
+	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 402, Message: "credits"}, Model{})
+	require.False(t, ok)
+
+	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{Message: "The requested model is not supported."}, Model{})
+	require.False(t, ok)
+
+	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 400, Message: "request exceeds the available context size"}, Model{})
+	require.False(t, ok)
+
+	reason, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 500, Message: "upstream failed"}, Model{})
+	require.True(t, ok)
+	require.Contains(t, reason, "upstream failed")
+
+	require.True(t, agent.shouldAutoReviewMaxTokens(message.FinishReasonMaxTokens))
+	require.False(t, agent.shouldAutoReviewMaxTokens(message.FinishReasonEndTurn))
+	require.False(t, disabled.shouldAutoReviewMaxTokens(message.FinishReasonMaxTokens))
 }

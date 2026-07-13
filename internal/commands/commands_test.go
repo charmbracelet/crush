@@ -101,9 +101,7 @@ func TestFromSkillCatalog_UsesDiscoveredSymlinkedSkills(t *testing.T) {
 	link := filepath.Join(root, "linked-skill")
 	require.NoError(t, os.Symlink(targetSkillDir, link))
 
-	_, activeSkills, _ := skills.DiscoverFromConfig(skills.DiscoveryConfig{
-		SkillsPaths: []string{root},
-	})
+	activeSkills, _ := skills.DiscoverWithStates([]string{root})
 	entries := skills.Catalog(activeSkills, []string{root}, "")
 	cmds := FromSkillCatalog(entries)
 

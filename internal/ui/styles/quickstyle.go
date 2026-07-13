@@ -278,13 +278,13 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(charmtone.Zest),
 				},
 				KeywordNamespace: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(charmtone.Zest),
 				},
 				KeywordType: ansi.StylePrimitive{
-					Color: hex(charmtone.Guppy),
+					Color: hex(charmtone.Tuna),
 				},
 				Operator: ansi.StylePrimitive{
 					Color: hex(charmtone.Salmon),
@@ -299,10 +299,10 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(charmtone.Cheeky),
 				},
 				NameTag: ansi.StylePrimitive{
-					Color: hex(charmtone.Mauve),
+					Color: hex(charmtone.Salmon),
 				},
 				NameAttribute: ansi.StylePrimitive{
-					Color: hex(charmtone.Hazy),
+					Color: hex(charmtone.Zest),
 				},
 				NameClass: ansi.StylePrimitive{
 					Color:     hex(charmtone.Salt),
@@ -355,7 +355,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	}
 
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
-	plainBg := hex(o.bgLeastVisible)
+	plainBg := hex(o.bgLessVisible)
 	plainFg := hex(o.fgMoreSubtle)
 	s.QuietMarkdown = ansi.StyleConfig{
 		Document: ansi.StyleBlock{
@@ -861,7 +861,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
 
 	// Thinking section styles
-	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
+	s.Messages.ThinkingBox = subtle.Background(o.bgLessVisible)
 	s.Messages.ThinkingTruncationHint = muted
 	s.Messages.ThinkingFooterTitle = muted
 	s.Messages.ThinkingFooterDuration = subtle

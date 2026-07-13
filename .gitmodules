@@ -1,0 +1,3 @@
+[submodule "research/claude-code-from-source"]
+	path = research/claude-code-from-source
+	url = https://github.com/alejandrobalderas/claude-code-from-source.git

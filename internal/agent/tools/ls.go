@@ -18,15 +18,17 @@ import (
 )
 
 type LSParams struct {
-	Path   string   `json:"path,omitempty" description:"The path to the directory to list (defaults to current working directory)"`
-	Ignore []string `json:"ignore,omitempty" description:"List of glob patterns to ignore"`
-	Depth  int      `json:"depth,omitempty" description:"The maximum depth to traverse"`
+	Path           string   `json:"path,omitempty" description:"The path to the directory to list (defaults to current working directory)"`
+	Ignore         []string `json:"ignore,omitempty" description:"List of glob patterns to ignore"`
+	Depth          int      `json:"depth,omitempty" description:"The maximum depth to traverse"`
+	IncludeIgnored bool     `json:"include_ignored,omitempty" description:"Include hidden and ignored entries when explicitly inspecting runtime or configuration directories"`
 }
 
 type LSPermissionsParams struct {
-	Path   string   `json:"path"`
-	Ignore []string `json:"ignore"`
-	Depth  int      `json:"depth"`
+	Path           string   `json:"path"`
+	Ignore         []string `json:"ignore"`
+	Depth          int      `json:"depth"`
+	IncludeIgnored bool     `json:"include_ignored"`
 }
 
 type NodeType string
@@ -142,11 +144,13 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 
 	depth, limit := lsConfig.Limits()
 	maxFiles := cmp.Or(limit, maxLSFiles)
-	files, truncated, err := fsext.ListDirectory(
+	includeIgnored := params.IncludeIgnored || params.Path != ""
+	files, truncated, err := fsext.ListDirectoryWithIgnored(
 		searchPath,
 		params.Ignore,
 		cmp.Or(params.Depth, depth),
 		maxFiles,
+		includeIgnored,
 	)
 	if err != nil {
 		return "", LSResponseMetadata{}, fmt.Errorf("error listing directory: %w", err)

@@ -2,8 +2,10 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
@@ -69,6 +71,26 @@ func TestEnsureRawBytes(t *testing.T) {
 	}
 }
 
+func TestMCPToolTimeout(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, 60*time.Second, mcpToolTimeout(config.MCPConfig{}))
+	require.Equal(t, 60*time.Second, mcpToolTimeout(config.MCPConfig{Timeout: 120}))
+	require.Equal(t, 15*time.Second, mcpToolTimeout(config.MCPConfig{ToolTimeout: 15}))
+}
+
+func TestMaybeToolTimeoutErr(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-ctx.Done()
+
+	err := maybeToolTimeoutErr(ctx, context.DeadlineExceeded, 5*time.Second, "filesystem", "search_files")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mcp tool call filesystem/search_files timed out after 5s")
+}
+
 func TestFilterTools(t *testing.T) {
 	t.Parallel()
 
@@ -114,4 +136,27 @@ func TestFilterTools(t *testing.T) {
 		result := filterTools(config.MCPConfig{EnabledTools: []string{"non_existent"}}, tools)
 		require.Len(t, result, 0)
 	})
+}
+
+func TestAnalyzeToolFiltersReportsUsableAndUnmatchedNames(t *testing.T) {
+	t.Parallel()
+
+	tools := []*Tool{{Name: "searchGitHub"}}
+	info := analyzeToolFilters(config.MCPConfig{DisabledTools: []string{"gh_grep"}}, tools)
+
+	require.Equal(t, []string{"searchGitHub"}, info.Advertised)
+	require.Equal(t, []string{"searchGitHub"}, info.Usable)
+	require.Equal(t, []string{"gh_grep"}, info.UnmatchedDisabled)
+	require.Empty(t, info.UnmatchedEnabled)
+}
+
+func TestAnalyzeToolFiltersReportsZeroUsableTools(t *testing.T) {
+	t.Parallel()
+
+	tools := []*Tool{{Name: "only_tool"}}
+	info := analyzeToolFilters(config.MCPConfig{DisabledTools: []string{"only_tool"}}, tools)
+
+	require.Equal(t, []string{"only_tool"}, info.Advertised)
+	require.Empty(t, info.Usable)
+	require.Empty(t, info.UnmatchedDisabled)
 }

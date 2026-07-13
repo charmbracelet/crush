@@ -23,6 +23,8 @@ type blockingCoordinator struct {
 	entered  chan struct{}
 	release  chan struct{}
 	runCount atomic.Int32
+	cancels  atomic.Int32
+	busy     bool
 }
 
 func newBlockingCoordinator() *blockingCoordinator {
@@ -46,17 +48,20 @@ func (c *blockingCoordinator) RunAccepted(ctx context.Context, accept *agent.Acc
 	return nil, nil
 }
 
+func (c *blockingCoordinator) SetMainAgent(context.Context, string) error        { return nil }
+func (c *blockingCoordinator) CurrentAgentID() string                            { return "coder" }
 func (c *blockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
-func (c *blockingCoordinator) Cancel(string)                                     {}
+func (c *blockingCoordinator) Cancel(string)                                     { c.cancels.Add(1) }
 func (c *blockingCoordinator) CancelAll()                                        {}
 func (c *blockingCoordinator) IsBusy() bool                                      { return false }
-func (c *blockingCoordinator) IsSessionBusy(string) bool                         { return false }
+func (c *blockingCoordinator) IsSessionBusy(string) bool                         { return c.busy }
 func (c *blockingCoordinator) QueuedPrompts(string) int                          { return 0 }
 func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
 func (c *blockingCoordinator) ClearQueue(string)                                 {}
 func (c *blockingCoordinator) Summarize(context.Context, string) error           { return nil }
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
+func (c *blockingCoordinator) SetMemoryOptions(bool, bool) error                 { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
 
 // insertAgentWorkspace installs a synthetic workspace with the given
@@ -109,6 +114,19 @@ func TestSendMessage_SessionMissing(t *testing.T) {
 	ws := insertAgentWorkspace(t, b, newBlockingCoordinator())
 	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "", Prompt: "hi"})
 	require.ErrorIs(t, err, agent.ErrSessionMissing)
+}
+
+func TestSendMessage_ExplicitStopCancelsInsteadOfQueueing(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	coord.busy = true
+	ws := insertAgentWorkspace(t, b, coord)
+
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "stop"})
+	require.NoError(t, err)
+	require.Equal(t, int32(1), coord.cancels.Load())
+	require.Equal(t, int32(0), coord.runCount.Load())
 }
 
 func TestSendMessage_WorkspaceClosing(t *testing.T) {

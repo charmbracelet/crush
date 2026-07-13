@@ -45,6 +45,15 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
+	// A standalone stop message is a control signal, not another prompt to
+	// queue behind the active work. RunID calls are excluded because their
+	// callers require a terminal event for the newly submitted run.
+	if msg.RunID == "" && len(msg.Attachments) == 0 && agent.IsExplicitCancelPrompt(msg.Prompt) &&
+		(ws.AgentCoordinator.IsSessionBusy(msg.SessionID) || ws.AgentCoordinator.QueuedPrompts(msg.SessionID) > 0) {
+		ws.AgentCoordinator.Cancel(msg.SessionID)
+		return nil
+	}
+
 	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
 
 	ws.runMu.Lock()
@@ -132,6 +141,7 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	if ws.AgentCoordinator != nil {
 		m := ws.AgentCoordinator.Model()
 		agentInfo = proto.AgentInfo{
+			AgentID:  ws.AgentCoordinator.CurrentAgentID(),
 			Model:    m.CatwalkCfg,
 			ModelCfg: m.ModelCfg,
 			IsBusy:   ws.AgentCoordinator.IsBusy(),
@@ -149,6 +159,18 @@ func (b *Backend) InitAgent(ctx context.Context, workspaceID string) error {
 	}
 
 	return ws.InitCoderAgent(ctx)
+}
+
+// SetAgentMode switches the workspace primary agent mode.
+func (b *Backend) SetAgentMode(ctx context.Context, workspaceID, agentID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if ws.AgentCoordinator == nil {
+		return ErrAgentNotInitialized
+	}
+	return ws.AgentCoordinator.SetMainAgent(ctx, agentID)
 }
 
 // UpdateAgent reloads the agent model configuration.

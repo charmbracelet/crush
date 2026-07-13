@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -53,6 +55,8 @@ import (
 // Coordinator errors.
 var (
 	errCoderAgentNotConfigured         = errors.New("coder agent not configured")
+	errAgentNotConfigured              = errors.New("agent not configured")
+	errAgentSwitchWhileBusy            = errors.New("cannot switch agent while busy")
 	errModelProviderNotConfigured      = errors.New("model provider not configured")
 	errLargeModelNotSelected           = errors.New("large model not selected")
 	errSmallModelNotSelected           = errors.New("small model not selected")
@@ -79,8 +83,8 @@ var opencodeMessagesModels = map[string]bool{
 }
 
 type Coordinator interface {
-	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
-	// SetMainAgent(string)
+	SetMainAgent(ctx context.Context, agentID string) error
+	CurrentAgentID() string
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
@@ -101,22 +105,35 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	SetMemoryOptions(recorderEnabled, recallEnabled bool) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
 
-type coordinator struct {
-	cfg         *config.ConfigStore
-	sessions    session.Service
-	messages    message.Service
-	permissions permission.Service
-	history     history.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
+// SkillLoadMarker records deterministic skill activation performed outside
+// the model-facing View tool, such as a user-invoked skill command.
+type SkillLoadMarker interface {
+	MarkSkillLoaded(name string)
+}
 
-	currentAgent SessionAgent
-	agents       map[string]SessionAgent
+type coordinator struct {
+	cfg            *config.ConfigStore
+	sessions       session.Service
+	messages       message.Service
+	permissions    permission.Service
+	history        history.Service
+	filetracker    filetracker.Service
+	lspManager     *lsp.Manager
+	notify         pubsub.Publisher[notify.Notification]
+	runComplete    pubsub.Publisher[notify.RunComplete]
+	memory         *memory.Store
+	project        memory.Project
+	memoryRecorder bool
+	memoryRecall   bool
+
+	currentAgent    SessionAgent
+	currentAgentID  string
+	agents          map[string]SessionAgent
+	agentModelTypes map[string]config.SelectedModelType
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -124,6 +141,22 @@ type coordinator struct {
 	skillTracker *skills.Tracker
 
 	readyWg errgroup.Group
+}
+
+func (c *coordinator) MarkSkillLoaded(name string) {
+	c.skillTracker.MarkLoaded(name)
+	slog.Info("Activated skill", "skill", name, "source", "runtime")
+}
+
+type CoordinatorOption func(*coordinator)
+
+func WithMemory(store *memory.Store, project memory.Project, recorderEnabled, recallEnabled bool) CoordinatorOption {
+	return func(coordinator *coordinator) {
+		coordinator.memory = store
+		coordinator.project = project
+		coordinator.memoryRecorder = recorderEnabled
+		coordinator.memoryRecall = recallEnabled
+	}
 }
 
 func NewCoordinator(
@@ -138,6 +171,7 @@ func NewCoordinator(
 	notify pubsub.Publisher[notify.Notification],
 	runComplete pubsub.Publisher[notify.RunComplete],
 	skillsMgr *skills.Manager,
+	opts ...CoordinatorOption,
 ) (Coordinator, error) {
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
@@ -153,39 +187,90 @@ func NewCoordinator(
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          cfg,
-		sessions:     sessions,
-		messages:     messages,
-		permissions:  permissions,
-		history:      history,
-		filetracker:  filetracker,
-		lspManager:   lspManager,
-		notify:       notify,
-		runComplete:  runComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
+		cfg:             cfg,
+		sessions:        sessions,
+		messages:        messages,
+		permissions:     permissions,
+		history:         history,
+		filetracker:     filetracker,
+		lspManager:      lspManager,
+		notify:          notify,
+		runComplete:     runComplete,
+		agents:          make(map[string]SessionAgent),
+		agentModelTypes: make(map[string]config.SelectedModelType),
+		allSkills:       allSkills,
+		activeSkills:    activeSkills,
+		skillTracker:    skillTracker,
+	}
+	for _, opt := range opts {
+		opt(c)
 	}
 
-	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
-	if !ok {
+	if _, ok := cfg.Config().Agents[config.AgentCoder]; !ok {
 		return nil, errCoderAgentNotConfigured
 	}
-
-	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
-	if err != nil {
+	if err := c.SetMainAgent(ctx, config.AgentCoder); err != nil {
 		return nil, err
 	}
-
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
-	if err != nil {
-		return nil, err
-	}
-	c.currentAgent = agent
-	c.agents[config.AgentCoder] = agent
 	return c, nil
+}
+
+func (c *coordinator) SetMainAgent(ctx context.Context, agentID string) error {
+	if c.currentAgent != nil && c.currentAgent.IsBusy() {
+		return errAgentSwitchWhileBusy
+	}
+	if c.agents == nil {
+		c.agents = make(map[string]SessionAgent)
+	}
+	if c.agentModelTypes == nil {
+		c.agentModelTypes = make(map[string]config.SelectedModelType)
+	}
+	agentCfg, ok := c.cfg.Config().Agents[agentID]
+	if !ok || agentCfg.ID == "" {
+		return fmt.Errorf("%w: %s", errAgentNotConfigured, agentID)
+	}
+	selectedModel := c.cfg.Config().Models[agentCfg.Model]
+	if agent, ok := c.agents[agentID]; ok &&
+		c.agentModelTypes[agentID] == agentCfg.Model &&
+		reflect.DeepEqual(agent.Model().ModelCfg, selectedModel) {
+		c.currentAgent = agent
+		c.currentAgentID = agentID
+		return nil
+	}
+	systemPrompt, err := c.promptForAgent(agentID)
+	if err != nil {
+		return err
+	}
+	agent, err := c.buildAgent(ctx, systemPrompt, agentCfg, false)
+	if err != nil {
+		return err
+	}
+	c.agents[agentID] = agent
+	c.agentModelTypes[agentID] = agentCfg.Model
+	c.currentAgent = agent
+	c.currentAgentID = agentID
+	return nil
+}
+
+func (c *coordinator) CurrentAgentID() string {
+	if c.currentAgentID == "" {
+		return config.AgentCoder
+	}
+	return c.currentAgentID
+}
+
+func (c *coordinator) promptForAgent(agentID string) (*prompt.Prompt, error) {
+	opts := []prompt.Option{prompt.WithWorkingDir(c.cfg.WorkingDir())}
+	switch agentID {
+	case config.AgentPlan:
+		return planPrompt(opts...)
+	case config.AgentTask:
+		return taskPrompt(opts...)
+	case config.AgentReview:
+		return reviewPrompt(opts...)
+	default:
+		return coderPrompt(opts...)
+	}
 }
 
 // Run implements Coordinator.
@@ -211,6 +296,13 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// refresh models before each run
 	if err := c.UpdateModels(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update models: %w", err)
+	}
+
+	originalPrompt := prompt
+	expandedPrompt, explicitlyLoaded := injectExplicitSkillInvocations(prompt, c.activeSkills)
+	transientContext := skillTransientContext(originalPrompt, expandedPrompt, explicitlyLoaded)
+	for _, name := range explicitlyLoaded {
+		c.MarkSkillLoaded(name)
 	}
 
 	model := c.currentAgent.Model()
@@ -271,7 +363,8 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			RunID:            runID,
-			Prompt:           prompt,
+			Prompt:           originalPrompt,
+			TransientContext: transientContext,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  mergedOptions,
@@ -313,6 +406,101 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	return result, originalErr
 }
 
+func skillTransientContext(originalPrompt, expandedPrompt string, loaded []string) string {
+	if len(loaded) == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(expandedPrompt, "\n\n"+originalPrompt)
+}
+
+func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Skill) (string, []string) {
+	if strings.Contains(userPrompt, "<loaded_skill>") {
+		return userPrompt, nil
+	}
+
+	lowerPrompt := strings.ToLower(userPrompt)
+	activationVerbs := []string{"load", "use", "follow", "invoke", "apply"}
+	type selectedSkill struct {
+		skill    *skills.Skill
+		explicit bool
+	}
+	var loaded []selectedSkill
+	for _, skill := range activeSkills {
+		if skill == nil || skill.Name == "" || skill.Instructions == "" || skill.DisableModelInvocation {
+			continue
+		}
+		nameAt := strings.Index(lowerPrompt, strings.ToLower(skill.Name))
+		explicit := false
+		if nameAt >= 0 {
+			windowStart := max(0, nameAt-120)
+			windowEnd := min(len(lowerPrompt), nameAt+len(skill.Name)+120)
+			window := lowerPrompt[windowStart:windowEnd]
+			explicit = slices.ContainsFunc(activationVerbs, func(verb string) bool {
+				return strings.Contains(window, verb)
+			})
+		}
+		if !explicit && !taskRequiresBuiltinSkill(lowerPrompt, skill.Name) {
+			continue
+		}
+		loaded = append(loaded, selectedSkill{skill: skill, explicit: explicit})
+		if len(loaded) == 4 {
+			break
+		}
+	}
+	if len(loaded) == 0 {
+		return userPrompt, nil
+	}
+
+	parts := make([]string, 0, len(loaded)+1)
+	names := make([]string, 0, len(loaded))
+	for _, selected := range loaded {
+		if selected.explicit {
+			parts = append(parts, selected.skill.FormatInvocation())
+		} else {
+			parts = append(parts, inferredSkillContext(selected.skill.Name))
+		}
+		names = append(names, selected.skill.Name)
+	}
+	parts = append(parts, userPrompt)
+	return strings.Join(parts, "\n\n"), names
+}
+
+func inferredSkillContext(name string) string {
+	var instructions string
+	switch name {
+	case "crush-config":
+		instructions = "Inspect recode_info before changing configuration. Preserve unrelated providers, models, permissions, and MCP entries. For MCP changes use mcp_add instead of editing JSON."
+	case "mcp-setup":
+		instructions = "Inspect current MCP status with recode_info before installing anything. Never substitute a related server. Prefer official documentation or a primary registry when the server identity is unclear, but do not block an exact configuration because a documentation host cannot be fetched. Then call mcp_add with exactly one transport object; source_url is optional approval context. Use replace=true only when correcting a saved config. A failed mcp_add is rolled back and ends the turn."
+	case "execution-routing":
+		instructions = "Keep ownership of the user task. Delegate only bounded read-only research, integrate the evidence yourself, and continue until the intent is satisfied or a concrete blocker requires user input. Do not repeat a failed command without changing strategy."
+	default:
+		return ""
+	}
+	return "<loaded_skill>\n<name>" + name + "</name>\n<instructions>" + instructions + "</instructions>\n</loaded_skill>"
+}
+
+func taskRequiresBuiltinSkill(prompt, skillName string) bool {
+	hasAny := func(terms ...string) bool {
+		return slices.ContainsFunc(terms, func(term string) bool {
+			return strings.Contains(prompt, term)
+		})
+	}
+	switch skillName {
+	case "crush-config":
+		return hasAny("crush.json", "configure crush", "provider", "model slot", "permission", " mcp", "mcp ", "mcps")
+	case "mcp-setup":
+		return hasAny(" mcp", "mcp ", "mcps", "model context protocol")
+	case "execution-routing":
+		return len(prompt) > 80 && hasAny(
+			"audit", "investigate", "root cause", "multiple files", "across the repo",
+			"refactor", "migration", "implement", "fix them all", "autonomous",
+		)
+	default:
+		return false
+	}
+}
+
 // effectiveReasoningEffort returns the reasoning effort to apply for provider calls.
 // It prefers the user-selected effort when valid, otherwise the model default when
 // valid, and finally falls back to the first configured reasoning level.
@@ -331,6 +519,27 @@ func effectiveReasoningEffort(model Model) string {
 		return model.CatwalkCfg.ReasoningLevels[0]
 	}
 	return ""
+}
+
+func isLMStudioProvider(providerCfg config.ProviderConfig) bool {
+	return providerCfg.Type == catwalk.Type("lmstudio")
+}
+
+func mergedExtraBody(options map[string]any) map[string]any {
+	extraBody := make(map[string]any)
+	if existing, ok := options["extra_body"].(map[string]any); ok {
+		maps.Copy(extraBody, existing)
+	}
+	return extraBody
+}
+
+func applyLMStudioThinkingOption(model Model, providerCfg config.ProviderConfig, options map[string]any) {
+	if !isLMStudioProvider(providerCfg) || !model.CatwalkCfg.CanReason || len(model.CatwalkCfg.ReasoningLevels) > 0 {
+		return
+	}
+	extraBody := mergedExtraBody(options)
+	extraBody["enable_thinking"] = model.ModelCfg.Think
+	options["extra_body"] = extraBody
 }
 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
@@ -557,6 +766,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// Known custom providers (litellm, ollama, omlx) are
 		// openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
+			applyLMStudioThinkingOption(model, providerCfg, mergedOptions)
 			parsed, err := openaicompat.ParseOptions(mergedOptions)
 			if err == nil {
 				options[openaicompat.Name] = parsed
@@ -578,33 +788,72 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 }
 
 func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
-	large, small, err := c.buildAgentModels(ctx, isSubAgent)
+	models, err := c.buildAgentModels(ctx, agent.Model, isSubAgent)
 	if err != nil {
 		return nil, err
 	}
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	primaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Primary.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	smallProviderCfg, ok := c.cfg.Config().Providers.Get(models.Small.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	summaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Summary.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	reviewProviderCfg, ok := c.cfg.Config().Providers.Get(models.Review.ModelCfg.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+	memoryAllowed := !isSubAgent && agent.ID != config.AgentReview
+	disableMemoryOnExternalContext := false
+	if memoryOptions := c.cfg.Config().Options.Memory; memoryOptions != nil {
+		disableMemoryOnExternalContext = memoryOptions.DisableOnExternalContext
+	}
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           large,
-		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
-		SystemPrompt:         "",
-		IsSubAgent:           isSubAgent,
-		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
-		IsYolo:               c.permissions.SkipRequests(),
-		Sessions:             c.sessions,
-		Messages:             c.messages,
-		Tools:                nil,
-		Notify:               c.notify,
-		RunComplete:          c.runComplete,
+		Models: SessionAgentModels{
+			Large:                     models.Primary,
+			Small:                     models.Small,
+			Summary:                   models.Summary,
+			Review:                    models.Review,
+			SmallProviderOpts:         getProviderOptions(models.Small, smallProviderCfg),
+			SummaryProviderOpts:       getProviderOptions(models.Summary, summaryProviderCfg),
+			ReviewProviderOpts:        getProviderOptions(models.Review, reviewProviderCfg),
+			LargeSystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
+			SmallSystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
+			SummarySystemPromptPrefix: summaryProviderCfg.SystemPromptPrefix,
+			ReviewSystemPromptPrefix:  reviewProviderCfg.SystemPromptPrefix,
+		},
+		SystemPrompt:                   "",
+		IsSubAgent:                     isSubAgent,
+		DisableAutoSummarize:           c.cfg.Config().Options.DisableAutoSummarize,
+		AutoReviewEnabled:              agent.ID != config.AgentReview && !isSubAgent,
+		IsYolo:                         c.permissions.SkipRequests(),
+		Sessions:                       c.sessions,
+		Messages:                       c.messages,
+		Tools:                          nil,
+		Notify:                         c.notify,
+		RunComplete:                    c.runComplete,
+		UserPromptHooks:                c.buildHookRunner(hooks.EventUserPromptSubmit, isSubAgent),
+		StopHooks:                      c.buildHookRunner(hooks.EventStop, isSubAgent),
+		Memory:                         c.memory,
+		MemoryProject:                  c.project,
+		MemoryRecorder:                 c.memoryRecorder && memoryAllowed,
+		MemoryRecall:                   c.memoryRecall && memoryAllowed,
+		MemoryDisableOnExternalContext: disableMemoryOnExternalContext,
 	})
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := prompt.Build(ctx, models.Primary.Model.Provider(), models.Primary.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
 		result.SetSystemPrompt(systemPrompt)
+		result.SetRecoveryContext(prompt.BuildRecoveryContext(c.cfg, defaultContextRetryProjectCharacters))
 		return nil
 	})
 
@@ -648,23 +897,27 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
+	hookRunner := c.buildHookRunner(hooks.EventPreToolUse, isSubAgent)
+	postToolHookRunner := c.buildHookRunner(hooks.EventPostToolUse, isSubAgent)
+	postToolFailureHookRunner := c.buildHookRunner(hooks.EventPostToolUseFailure, isSubAgent)
 
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewMCPAddTool(c.cfg, c.permissions),
+		tools.NewMCPRefreshTool(c.cfg),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
+		tools.NewJobListTool(),
 		tools.NewJobKillTool(),
+		tools.NewTmuxTool(c.permissions, c.cfg.WorkingDir()),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
+		tools.NewWebFetchTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.DataDirectory, nil),
+		tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
 		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
@@ -685,6 +938,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
 			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
 		)
+		if agent.AllowedMCP == nil || len(agent.AllowedMCP) > 0 {
+			allTools = append(
+				allTools,
+				tools.NewMCPToolSearchTool(c.permissions, c.cfg, c.cfg.WorkingDir(), agent.AllowedMCP),
+				tools.NewMCPToolCallTool(c.permissions, c.cfg, c.cfg.WorkingDir(), agent.AllowedMCP),
+			)
+		}
 	}
 
 	var filteredTools []fantasy.AgentTool
@@ -694,29 +954,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
-		if agent.AllowedMCP == nil {
-			// No MCP restrictions
-			filteredTools = append(filteredTools, tool)
-			continue
-		}
-		if len(agent.AllowedMCP) == 0 {
-			// No MCPs allowed
-			slog.Debug("No MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
-			break
-		}
-
-		for mcp, tools := range agent.AllowedMCP {
-			if mcp != tool.MCP() {
-				continue
-			}
-			if len(tools) == 0 || slices.Contains(tools, tool.MCPToolName()) {
-				filteredTools = append(filteredTools, tool)
-				break
-			}
-			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
-		}
-	}
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
@@ -726,95 +963,96 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// without hook interception to avoid firing the user's hook N times
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, postToolHookRunner, postToolFailureHookRunner, isSubAgent)
 
 	return filteredTools, nil
 }
 
-// TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
-func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
-	if !ok {
-		return Model{}, Model{}, errLargeModelNotSelected
+func (c *coordinator) buildHookRunner(event string, isSubAgent bool) *hooks.Runner {
+	if isSubAgent {
+		return nil
 	}
-	smallModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeSmall]
-	if !ok {
-		return Model{}, Model{}, errSmallModelNotSelected
+	eventHooks := c.cfg.Config().Hooks[event]
+	if len(eventHooks) == 0 {
+		return nil
 	}
+	return hooks.NewRunner(eventHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+}
 
-	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errLargeModelProviderNotConfigured
-	}
+type agentModels struct {
+	Primary Model
+	Small   Model
+	Summary Model
+	Review  Model
+}
 
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
+func (c *coordinator) buildAgentModels(ctx context.Context, primaryType config.SelectedModelType, isSubAgent bool) (agentModels, error) {
+	if primaryType == "" {
+		primaryType = config.SelectedModelTypeLarge
+	}
+	primary, err := c.buildModel(ctx, primaryType, isSubAgent)
 	if err != nil {
-		return Model{}, Model{}, err
+		return agentModels{}, err
 	}
-
-	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errSmallModelProviderNotConfigured
-	}
-
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
+	small, err := c.buildModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
-		return Model{}, Model{}, err
+		return agentModels{}, err
+	}
+	summary, err := c.buildModel(ctx, config.SelectedModelTypeSummary, isSubAgent)
+	if err != nil {
+		return agentModels{}, err
+	}
+	review, err := c.buildModel(ctx, config.SelectedModelTypeReview, isSubAgent)
+	if err != nil {
+		return agentModels{}, err
+	}
+	return agentModels{
+		Primary: primary,
+		Small:   small,
+		Summary: summary,
+		Review:  review,
+	}, nil
+}
+
+func (c *coordinator) buildModel(ctx context.Context, modelType config.SelectedModelType, isSubAgent bool) (Model, error) {
+	modelCfg, ok := c.cfg.Config().Models[modelType]
+	if !ok {
+		return Model{}, fmt.Errorf("%s model not selected", modelType)
+	}
+	providerCfg, ok := c.cfg.Config().Providers.Get(modelCfg.Provider)
+	if !ok {
+		return Model{}, fmt.Errorf("%s model provider not configured", modelType)
+	}
+	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent)
+	if err != nil {
+		return Model{}, err
 	}
 
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
+	var catwalkModel *catwalk.Model
+	for _, m := range providerCfg.Models {
+		if m.ID == modelCfg.Model {
+			catwalkModel = &m
+			break
 		}
 	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
+	if catwalkModel == nil {
+		return Model{}, fmt.Errorf("%s model not found in provider config", modelType)
 	}
 
-	if largeCatwalkModel == nil {
-		return Model{}, Model{}, errLargeModelNotFound
+	modelID := modelCfg.Model
+	if modelCfg.Provider == openrouter.Name && isExactoSupported(modelID) {
+		modelID += ":exacto"
 	}
-
-	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errSmallModelNotFound
-	}
-
-	largeModelID := largeModelCfg.Model
-	smallModelID := smallModelCfg.Model
-
-	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
-		largeModelID += ":exacto"
-	}
-
-	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
-		smallModelID += ":exacto"
-	}
-
-	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
+	languageModel, err := provider.LanguageModel(ctx, modelID)
 	if err != nil {
-		return Model{}, Model{}, err
+		return Model{}, err
 	}
-	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+		Model:      languageModel,
+		CatwalkCfg: *catwalkModel,
+		ModelCfg:   modelCfg,
+		FlatRate:   providerCfg.FlatRate,
+	}, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -1136,22 +1374,62 @@ func (c *coordinator) Model() Model {
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// build the models again so we make sure we get the latest config
-	large, small, err := c.buildAgentModels(ctx, false)
+	agentID := c.CurrentAgentID()
+	agentCfg, ok := c.cfg.Config().Agents[agentID]
+	if !ok {
+		return fmt.Errorf("%w: %s", errAgentNotConfigured, agentID)
+	}
+	models, err := c.buildAgentModels(ctx, agentCfg.Model, false)
 	if err != nil {
 		return err
 	}
-	c.currentAgent.SetModels(large, small)
-
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	largeProviderCfg, ok := c.cfg.Config().Providers.Get(models.Primary.ModelCfg.Provider)
 	if !ok {
-		return errCoderAgentNotConfigured
+		return errModelProviderNotConfigured
 	}
+	smallProviderCfg, ok := c.cfg.Config().Providers.Get(models.Small.ModelCfg.Provider)
+	if !ok {
+		return errModelProviderNotConfigured
+	}
+	summaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Summary.ModelCfg.Provider)
+	if !ok {
+		return errModelProviderNotConfigured
+	}
+	reviewProviderCfg, ok := c.cfg.Config().Providers.Get(models.Review.ModelCfg.Provider)
+	if !ok {
+		return errModelProviderNotConfigured
+	}
+	c.currentAgent.SetModels(SessionAgentModels{
+		Large:                     models.Primary,
+		Small:                     models.Small,
+		Summary:                   models.Summary,
+		Review:                    models.Review,
+		SmallProviderOpts:         getProviderOptions(models.Small, smallProviderCfg),
+		SummaryProviderOpts:       getProviderOptions(models.Summary, summaryProviderCfg),
+		ReviewProviderOpts:        getProviderOptions(models.Review, reviewProviderCfg),
+		LargeSystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SmallSystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
+		SummarySystemPromptPrefix: summaryProviderCfg.SystemPromptPrefix,
+		ReviewSystemPromptPrefix:  reviewProviderCfg.SystemPromptPrefix,
+	})
 
 	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}
 	c.currentAgent.SetTools(tools)
+	return nil
+}
+
+func (c *coordinator) SetMemoryOptions(recorderEnabled, recallEnabled bool) error {
+	if c.IsBusy() {
+		return ErrSessionBusy
+	}
+	c.memoryRecorder = recorderEnabled
+	c.memoryRecall = recallEnabled
+	for _, sessionAgent := range c.agents {
+		sessionAgent.SetMemoryOptions(recorderEnabled, recallEnabled)
+	}
 	return nil
 }
 
@@ -1164,7 +1442,8 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+	summaryModel := c.currentAgent.SummaryModel()
+	providerCfg, ok := c.cfg.Config().Providers.Get(summaryModel.ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
 	}
@@ -1174,7 +1453,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	}
 
 	summarize := func() error {
-		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+		return c.currentAgent.Summarize(ctx, sessionID)
 	}
 
 	return c.runWithUnauthorizedRetry(ctx, providerCfg, summarize)
@@ -1354,7 +1633,45 @@ func subAgentOutput(result *fantasy.AgentResult) string {
 	if result == nil {
 		return ""
 	}
-	return result.Response.Content.Text()
+	if text := strings.TrimSpace(result.Response.Content.Text()); text != "" {
+		return text
+	}
+
+	var evidence []string
+	for _, step := range result.Steps {
+		calls := make(map[string]fantasy.ToolCallContent)
+		for _, call := range step.Content.ToolCalls() {
+			calls[call.ToolCallID] = call
+		}
+		for _, toolResult := range step.Content.ToolResults() {
+			call := calls[toolResult.ToolCallID]
+			name := toolResult.ToolName
+			if name == "" {
+				name = call.ToolName
+			}
+			input := truncateSubAgentEvidence(call.Input, 300)
+			output := truncateSubAgentEvidence(toolResultOutputString(toolResult.Result), 600)
+			if output == "" {
+				output = "(no output)"
+			}
+			evidence = append(evidence, fmt.Sprintf("- %s input=%s result=%s", name, input, output))
+		}
+	}
+	if len(evidence) == 0 {
+		return ""
+	}
+	if len(evidence) > 8 {
+		evidence = evidence[len(evidence)-8:]
+	}
+	return "Sub-agent ended without a final prose response. Treat the following as evidence, not as a completed action:\n" + strings.Join(evidence, "\n")
+}
+
+func truncateSubAgentEvidence(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }
 
 // updateParentSessionCost accumulates the cost from a child session to its parent session.

@@ -173,7 +173,7 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.headerView(),
 		inputStyle.Render(m.inputView()),
 		textStyle.Render("This will be written in your global configuration:"),
-		textStyle.Render(config.GlobalConfigData()),
+		textStyle.Render(config.CanonicalConfigPath()),
 		"",
 		helpStyle.Render(m.help.View(m)),
 	}, "\n")

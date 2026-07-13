@@ -223,14 +223,14 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		wg.Wait()
 		assert.True(t, result1, "First request should be granted")
 
-		// Second identical request should be automatically approved due to persistent permission
+		// A different request in the same session should also be approved.
 		req2 := CreatePermissionRequest{
 			SessionID:   "session1",
-			ToolName:    "file_tool",
-			Description: "Read file again",
-			Action:      "read",
-			Params:      map[string]string{"file": "test.txt"},
-			Path:        "/tmp/test.txt",
+			ToolName:    "shell_tool",
+			Description: "Inspect another path",
+			Action:      "execute",
+			Params:      map[string]string{"command": "inspect"},
+			Path:        "/other/project",
 		}
 		result2, err := service.Request(t.Context(), req2)
 		require.NoError(t, err)
@@ -611,5 +611,169 @@ func TestPermissionService_ResolveIdempotency(t *testing.T) {
 		case <-time.After(50 * time.Millisecond):
 			// good: no notification.
 		}
+	})
+}
+
+func TestPermissionService_RulesPrecedence(t *testing.T) {
+	t.Run("deny overrides allowed_tools and allow rules", func(t *testing.T) {
+		service := NewPermissionService("/tmp", false, []string{"web_search"}, []Rule{
+			{Tool: "web_search", Action: "search", Effect: RuleEffectAllow},
+			{Tool: "web_search", Action: "search", Resource: "*private*", Effect: RuleEffectDeny},
+		})
+		events := service.Subscribe(t.Context())
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "call-deny",
+			ToolName:   "web_search",
+			Action:     "search",
+			Path:       "/tmp",
+			Resource:   "private roadmap",
+		})
+		require.NoError(t, err)
+		assert.False(t, granted)
+
+		select {
+		case ev := <-events:
+			t.Fatalf("deny rule should not prompt, got request: %+v", ev.Payload)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+
+	t.Run("allow overrides ask", func(t *testing.T) {
+		service := NewPermissionService("/tmp", false, nil, []Rule{
+			{Tool: "web_fetch", Action: "fetch", Resource: "https://example.com/*", Effect: RuleEffectAsk},
+			{Tool: "web_fetch", Action: "fetch", Resource: "https://example.com/docs", Effect: RuleEffectAllow},
+		})
+		events := service.Subscribe(t.Context())
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "call-allow",
+			ToolName:   "web_fetch",
+			Action:     "fetch",
+			Path:       "/tmp",
+			Resource:   "https://example.com/docs",
+		})
+		require.NoError(t, err)
+		assert.True(t, granted)
+
+		select {
+		case ev := <-events:
+			t.Fatalf("allow rule should not prompt, got request: %+v", ev.Payload)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+
+	t.Run("ask prompts before allowed_tools", func(t *testing.T) {
+		service := NewPermissionService("/tmp", false, []string{"web_search"}, []Rule{
+			{Tool: "web_search", Action: "search", Effect: RuleEffectAsk},
+		})
+		events := service.Subscribe(t.Context())
+
+		var granted bool
+		var requestErr error
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			granted, requestErr = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "s1",
+				ToolCallID: "call-ask",
+				ToolName:   "web_search",
+				Action:     "search",
+				Path:       "/tmp",
+				Resource:   "go release 2026",
+			})
+		})
+
+		select {
+		case ev := <-events:
+			assert.Equal(t, "web_search", ev.Payload.ToolName)
+			assert.Equal(t, "search", ev.Payload.Action)
+			assert.Equal(t, "go release 2026", ev.Payload.Resource)
+			service.Deny(ev.Payload)
+		case <-time.After(2 * time.Second):
+			t.Fatal("ask rule did not prompt")
+		}
+		wg.Wait()
+		require.NoError(t, requestErr)
+		assert.False(t, granted)
+	})
+
+	t.Run("deny overrides hook approval", func(t *testing.T) {
+		service := NewPermissionService("/tmp", false, nil, []Rule{
+			{Tool: "bash", Action: "execute", Resource: "rm *", Effect: RuleEffectDeny},
+		})
+		ctx := WithHookApproval(t.Context(), "call-hook")
+		granted, err := service.Request(ctx, CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "call-hook",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       "/tmp",
+			Resource:   "rm *",
+		})
+		require.NoError(t, err)
+		assert.False(t, granted)
+	})
+
+	t.Run("resource can be derived from typed params", func(t *testing.T) {
+		type fetchParams struct{ URL string }
+		service := NewPermissionService("/tmp", false, nil, []Rule{
+			{Tool: "web_fetch", Action: "fetch", Resource: "https://allowed.example/*", Effect: RuleEffectAllow},
+		})
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "call-resource",
+			ToolName:   "web_fetch",
+			Action:     "fetch",
+			Path:       "/tmp",
+			Params:     fetchParams{URL: "https://allowed.example/page"},
+		})
+		require.NoError(t, err)
+		assert.True(t, granted)
+	})
+
+	t.Run("legacy allowed_tools remains fallback", func(t *testing.T) {
+		service := NewPermissionService("/tmp", false, []string{"web_search"})
+		events := service.Subscribe(t.Context())
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "call-legacy",
+			ToolName:   "web_search",
+			Action:     "search",
+			Path:       "/tmp",
+			Resource:   "go release 2026",
+		})
+		require.NoError(t, err)
+		assert.True(t, granted)
+		select {
+		case ev := <-events:
+			t.Fatalf("allowed_tools fallback should not prompt, got request: %+v", ev.Payload)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+
+	t.Run("deny overrides saved session grant", func(t *testing.T) {
+		service := NewPermissionService("/tmp", false, nil, []Rule{
+			{Tool: "web_fetch", Action: "fetch", Resource: "https://blocked.example/*", Effect: RuleEffectDeny},
+		})
+		ps := service.(*permissionService)
+		ps.sessionPermissions.Set(PermissionKey{
+			SessionID: "s1",
+			ToolName:  "web_fetch",
+			Action:    "fetch",
+			Resource:  "https://blocked.example/docs",
+		}, true)
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "call-saved-deny",
+			ToolName:   "web_fetch",
+			Action:     "fetch",
+			Path:       "/tmp",
+			Resource:   "https://blocked.example/docs",
+		})
+		require.NoError(t, err)
+		assert.False(t, granted)
 	})
 }

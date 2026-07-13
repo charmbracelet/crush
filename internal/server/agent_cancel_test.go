@@ -64,6 +64,8 @@ func (s *runCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepted
 	return s.Run(ctx, sessionID, prompt, attachments...)
 }
 
+func (s *runCoordinator) SetMainAgent(context.Context, string) error { return nil }
+func (s *runCoordinator) CurrentAgentID() string                     { return "coder" }
 func (s *runCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }
@@ -81,6 +83,7 @@ func (s *runCoordinator) Summarize(context.Context, string) error {
 }
 func (s *runCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (s *runCoordinator) UpdateModels(context.Context) error            { return nil }
+func (s *runCoordinator) SetMemoryOptions(bool, bool) error             { return nil }
 func (s *runCoordinator) GenerateTitle(context.Context, string, string) {}
 
 func (s *runCoordinator) capturedCtx() context.Context {

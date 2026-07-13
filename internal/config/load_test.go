@@ -41,7 +41,158 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
-func TestLookupConfigs_BoundedByProject(t *testing.T) {
+func TestConfig_LoadFromBytesRestoresModeModels(t *testing.T) {
+	loadedConfig, err := loadFromBytes([][]byte{
+		[]byte(`{"mode_models":{"coder":"small"}}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, SelectedModelTypeSmall, loadedConfig.ModeModels[AgentCoder])
+
+	loadedConfig.Options = &Options{}
+	loadedConfig.SetupAgents()
+	require.Equal(t, SelectedModelTypeSmall, loadedConfig.Agents[AgentCoder].Model)
+}
+
+func TestConfig_LoadRejectsUnknownTopLevelField(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadFromBytes([][]byte{[]byte(`{"mcpServers":{"playwright":{"command":"npx"}}}`)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `unknown configuration field "mcpServers"`)
+	require.Contains(t, err.Error(), `top-level "mcp" field`)
+}
+
+func TestConfig_LoadRejectsUnknownMCPField(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadFromBytes([][]byte{[]byte(`{"mcp":{"playwright":{"type":"stdio","command":"npx","unknown":true}}}`)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `invalid MCP configuration "playwright"`)
+	require.Contains(t, err.Error(), `unknown field "unknown"`)
+}
+
+func TestConfig_LoadFromPathNamesUnknownFieldSource(t *testing.T) {
+	previous := EmbeddedConfigJSON
+	EmbeddedConfigJSON = ""
+	t.Cleanup(func() { EmbeddedConfigJSON = previous })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0o600))
+
+	_, _, err := loadFromConfigPaths([]string{path})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), path)
+}
+
+func TestConfig_LoadFromConfigPaths_EmbeddedConfig(t *testing.T) {
+	previous := EmbeddedConfigJSON
+	EmbeddedConfigJSON = `{
+		"models": {
+			"large": {
+				"provider": "embedded-provider",
+				"model": "embedded-large"
+			}
+		},
+		"permissions": {
+			"rules": [
+				{ "tool": "*", "effect": "allow" }
+			]
+		}
+	}`
+	t.Cleanup(func() { EmbeddedConfigJSON = previous })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+		"models": {
+			"large": {
+				"model": "user-large"
+			}
+		}
+	}`), 0o600))
+
+	cfg, loaded, err := loadFromConfigPaths([]string{path})
+	require.NoError(t, err)
+	require.Equal(t, []string{"<embedded>", path}, loaded)
+	require.Equal(t, "embedded-provider", cfg.Models[SelectedModelTypeLarge].Provider)
+	require.Equal(t, "user-large", cfg.Models[SelectedModelTypeLarge].Model)
+	require.Len(t, cfg.Permissions.Rules, 1)
+	require.Equal(t, "allow", cfg.Permissions.Rules[0].Effect)
+}
+
+func TestConfig_DefaultEmbeddedConfigProvidesPortableMCPs(t *testing.T) {
+	cfg, loaded, err := loadFromConfigPaths(nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"<embedded>"}, loaded)
+
+	require.Equal(t, "https://mcp.context7.com/mcp", cfg.MCP["context7"].URL)
+	require.Equal(t, "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa", cfg.MCP["exa"].URL)
+	require.Equal(t, "https://mcp.grep.app", cfg.MCP["gh_grep"].URL)
+}
+
+func TestConfig_UserConfigOverridesEmbeddedMCP(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+		"mcp": {
+			"context7": { "disabled": true }
+		}
+	}`), 0o600))
+
+	cfg, _, err := loadFromConfigPaths([]string{path})
+	require.NoError(t, err)
+	require.True(t, cfg.MCP["context7"].Disabled)
+	require.Equal(t, "https://mcp.context7.com/mcp", cfg.MCP["context7"].URL)
+}
+
+func TestConfig_NormalizesLegacyMCPTransport(t *testing.T) {
+	loadedConfig, err := loadFromBytes([][]byte{
+		[]byte(`{"mcp":{"legacy":{"command":"npx","transport":"stdio"},"implicit":{"command":"server"},"explicit":{"type":"http","transport":"stdio","url":"https://example.com/mcp"}}}`),
+	})
+	require.NoError(t, err)
+
+	loadedConfig.setDefaults(t.TempDir(), "")
+	require.Equal(t, MCPStdio, loadedConfig.MCP["legacy"].Type)
+	require.Equal(t, MCPStdio, loadedConfig.MCP["implicit"].Type)
+	require.Equal(t, MCPHttp, loadedConfig.MCP["explicit"].Type)
+	require.Empty(t, loadedConfig.MCP["legacy"].LegacyTransport)
+}
+
+func TestConfig_LoadFromConfigPaths_InvalidEmbeddedConfig(t *testing.T) {
+	previous := EmbeddedConfigJSON
+	EmbeddedConfigJSON = `{`
+	t.Cleanup(func() { EmbeddedConfigJSON = previous })
+
+	_, _, err := loadFromConfigPaths(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid embedded JSON config")
+}
+
+func TestConfig_AddEmbeddedLMStudioProviderUsesDiscoveryOnly(t *testing.T) {
+	previousBaseURL := EmbeddedLMStudioBaseURL
+	previousAPIKey := EmbeddedLMStudioAPIKey
+	EmbeddedLMStudioBaseURL = "https://lmstudio.example/v1"
+	EmbeddedLMStudioAPIKey = "$LM_STUDIO_API_KEY"
+	t.Cleanup(func() {
+		EmbeddedLMStudioBaseURL = previousBaseURL
+		EmbeddedLMStudioAPIKey = previousAPIKey
+	})
+
+	cfg := &Config{}
+	cfg.setDefaults(t.TempDir(), "")
+	cfg.addEmbeddedLMStudioProvider()
+
+	provider, ok := cfg.Providers.Get(LMStudioProviderID)
+	require.True(t, ok)
+	require.Equal(t, "LM Studio", provider.Name)
+	require.Equal(t, "$LM_STUDIO_API_KEY", provider.APIKey)
+	require.NotNil(t, provider.AutoDiscoverModels)
+	require.True(t, *provider.AutoDiscoverModels)
+	require.Empty(t, provider.Models)
+}
+
+func TestLookupConfigs_UsesCanonicalGlobalAndNamedProjectConfig(t *testing.T) {
 	// Force GlobalConfig and GlobalConfigData to point at locations we
 	// control so they can be present in the result without polluting
 	// the developer's real config.
@@ -49,12 +200,12 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	t.Setenv("CRUSH_GLOBAL_CONFIG", globalDir)
 	t.Setenv("CRUSH_GLOBAL_DATA", globalDir)
 
-	t.Run("does not pick up crush.json above non-git project", func(t *testing.T) {
+	t.Run("does not pick up project config above non-git project", func(t *testing.T) {
 		parent := t.TempDir()
 
-		// crush.json above the project must not be adopted.
+		// A project config above the working project must not be adopted.
 		require.NoError(t, os.WriteFile(
-			filepath.Join(parent, "crush.json"),
+			filepath.Join(parent, projectConfigFileName),
 			[]byte(`{}`),
 			0o644,
 		))
@@ -64,11 +215,11 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 
 		got := lookupConfigs(project)
 		for _, p := range got {
-			require.NotEqual(t, filepath.Join(parent, "crush.json"), p)
+			require.NotEqual(t, filepath.Join(parent, projectConfigFileName), p)
 		}
 	})
 
-	t.Run("does not climb out of git worktree to find crush.json", func(t *testing.T) {
+	t.Run("does not climb out of git worktree", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git not available")
 		}
@@ -76,7 +227,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		parent := t.TempDir()
 
 		require.NoError(t, os.WriteFile(
-			filepath.Join(parent, "crush.json"),
+			filepath.Join(parent, projectConfigFileName),
 			[]byte(`{}`),
 			0o644,
 		))
@@ -88,18 +239,26 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.NoError(t, gitInit.Run())
 
 		got := lookupConfigs(worktree)
-		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, "crush.json"))
+		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, projectConfigFileName))
 		require.NoError(t, err)
 		for _, p := range got {
 			pEval, err := filepath.EvalSymlinks(p)
 			if err != nil {
 				continue
 			}
-			require.NotEqual(t, strayEval, pEval, "must not adopt parent crush.json")
+			require.NotEqual(t, strayEval, pEval, "must not adopt parent project config")
 		}
 	})
 
-	t.Run("picks up crush.json inside the project", func(t *testing.T) {
+	t.Run("includes the named project config target", func(t *testing.T) {
+		project := t.TempDir()
+		require.Equal(t, []string{
+			CanonicalConfigPath(),
+			filepath.Join(project, projectConfigFileName),
+		}, lookupConfigs(project))
+	})
+
+	t.Run("does not treat project crush.json as global config", func(t *testing.T) {
 		project := t.TempDir()
 		local := filepath.Join(project, "crush.json")
 		require.NoError(t, os.WriteFile(local, []byte(`{}`), 0o644))
@@ -119,18 +278,35 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, foundLocal, "expected project crush.json to be in lookup result: %v", got)
+		require.False(t, foundLocal, "project crush.json must not be in lookup result: %v", got)
 	})
 
 	t.Run("global config is always included regardless of boundary", func(t *testing.T) {
 		project := t.TempDir()
 
 		got := lookupConfigs(project)
-		// Global config and global data path are always prepended,
-		// even when no project file exists.
-		require.Contains(t, got, GlobalConfig())
-		require.Contains(t, got, GlobalConfigData())
+		require.Equal(t, []string{CanonicalConfigPath(), filepath.Join(project, projectConfigFileName)}, got)
 	})
+}
+
+func TestLoadMergesCanonicalGlobalThenNamedProjectConfig(t *testing.T) {
+	globalDir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_CONFIG", globalDir)
+	t.Setenv("CRUSH_GLOBAL_DATA", "")
+
+	workDir := t.TempDir()
+	dataDir := filepath.Join(workDir, ".crush")
+	globalPath := filepath.Join(globalDir, "crush.json")
+	projectPath := filepath.Join(workDir, projectConfigFileName)
+	require.NoError(t, os.WriteFile(globalPath, []byte(`{"options":{"debug":false}}`), 0o600))
+	require.NoError(t, os.WriteFile(projectPath, []byte(`{"options":{"debug":true}}`), 0o600))
+
+	store, err := Load(workDir, dataDir, false)
+	require.NoError(t, err)
+	require.True(t, store.Config().Options.Debug)
+	require.Equal(t, projectPath, store.ProjectConfigPath())
+	require.Contains(t, store.LoadedPaths(), globalPath)
+	require.Contains(t, store.LoadedPaths(), projectPath)
 }
 
 func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
@@ -689,10 +865,58 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 	assert.Equal(t, allToolNames(), coderAgent.AllowedTools)
+	assert.Contains(t, coderAgent.AllowedTools, "bash")
+	assert.Contains(t, coderAgent.AllowedTools, "edit")
+	assert.Contains(t, coderAgent.AllowedTools, "write")
+	assert.Nil(t, coderAgent.AllowedMCP, "interactive Task mode must allow configured MCP servers")
+
+	reviewAgent, ok := cfg.Agents[AgentReview]
+	require.True(t, ok)
+	assert.NotContains(t, reviewAgent.AllowedTools, "bash")
+	assert.NotContains(t, reviewAgent.AllowedTools, "edit")
+	assert.NotContains(t, reviewAgent.AllowedTools, "write")
+	assert.Empty(t, reviewAgent.AllowedMCP)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"web_fetch", "web_search", "glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+
+	planAgent, ok := cfg.Agents[AgentPlan]
+	require.True(t, ok)
+	assert.Equal(t, []string{"lsp_diagnostics", "lsp_references", "fetch", "web_fetch", "web_search", "glob", "grep", "ls", "sourcegraph", "todos", "view"}, planAgent.AllowedTools)
+}
+
+func TestConfig_setupAgentsUsesPersistedModeModels(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{},
+		ModeModels: map[string]SelectedModelType{
+			AgentCoder:  SelectedModelTypeSmall,
+			AgentPlan:   SelectedModelTypeSummary,
+			AgentTask:   SelectedModelTypeReview,
+			AgentReview: SelectedModelTypeLarge,
+		},
+	}
+
+	cfg.SetupAgents()
+
+	require.Equal(t, SelectedModelTypeSmall, cfg.Agents[AgentCoder].Model)
+	require.Equal(t, SelectedModelTypeSummary, cfg.Agents[AgentPlan].Model)
+	require.Equal(t, SelectedModelTypeReview, cfg.Agents[AgentTask].Model)
+	require.Equal(t, SelectedModelTypeLarge, cfg.Agents[AgentReview].Model)
+	require.NotEmpty(t, cfg.Agents[AgentPlan].AllowedTools)
+}
+
+func TestConfig_setupAgentsRejectsInvalidModelAssignment(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{},
+		ModeModels: map[string]SelectedModelType{
+			AgentPlan: SelectedModelType("unknown"),
+		},
+	}
+
+	cfg.SetupAgents()
+
+	require.Equal(t, SelectedModelTypeLarge, cfg.Agents[AgentPlan].Model)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -710,11 +934,11 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "recode_info", "mcp_add", "mcp_refresh", "mcp_tool_search", "mcp_tool_call", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "web_fetch", "web_search", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"web_fetch", "web_search", "glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -726,6 +950,8 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 				"ls",
 				"sourcegraph",
 				"view",
+				"web_fetch",
+				"web_search",
 			},
 		},
 	}
@@ -733,11 +959,36 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "recode_info", "mcp_add", "mcp_refresh", "mcp_tool_search", "mcp_tool_call", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
 	assert.Len(t, taskAgent.AllowedTools, 0)
+}
+
+func TestConfig_setupAgentsWithWebToolsDisabled(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{"web_fetch", "web_search"},
+		},
+	}
+
+	cfg.SetupAgents()
+
+	coderAgent, ok := cfg.Agents[AgentCoder]
+	require.True(t, ok)
+	assert.NotContains(t, coderAgent.AllowedTools, "web_fetch")
+	assert.NotContains(t, coderAgent.AllowedTools, "web_search")
+
+	taskAgent, ok := cfg.Agents[AgentTask]
+	require.True(t, ok)
+	assert.NotContains(t, taskAgent.AllowedTools, "web_fetch")
+	assert.NotContains(t, taskAgent.AllowedTools, "web_search")
+
+	planAgent, ok := cfg.Agents[AgentPlan]
+	require.True(t, ok)
+	assert.NotContains(t, planAgent.AllowedTools, "web_fetch")
+	assert.NotContains(t, planAgent.AllowedTools, "web_search")
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

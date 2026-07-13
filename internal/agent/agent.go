@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,8 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -57,9 +60,23 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	defaultContextRetryHistoryMessages   = 6
+	defaultContextRetryProjectCharacters = 6_000
+	defaultTitleMaxTokens                = int64(40)
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
+
+const defaultContextRetrySystemPrompt = `You are Crush, a pragmatic coding agent in compact recovery mode.
+
+The previous provider request exceeded the selected model's context window. Focus only on the user's latest request and the small amount of recent history provided.
+
+Rules:
+- Be concise and action-oriented.
+- When tools are available, call them through the provided tool interface instead of writing tool-call markup as normal text.
+- Choose the tool that directly verifies the requested fact. Shell is appropriate for host, storage, cache, process, and runtime checks; file/search tools are appropriate for repository inspection.
+- If you cannot fit or execute the task with the compact context, say exactly what context or model limit blocked it.`
 
 //go:embed templates/title.md
 var titlePrompt []byte
@@ -67,10 +84,14 @@ var titlePrompt []byte
 //go:embed templates/summary.md
 var summaryPrompt []byte
 
+//go:embed templates/auto_review.md
+var autoReviewPrompt []byte
+
 // Used to remove <think> tags from generated titles.
 var (
 	thinkTagRegex       = regexp.MustCompile(`(?s)<think>.*?</think>`)
 	orphanThinkTagRegex = regexp.MustCompile(`</?think>`)
+	mcpToolRefRegex     = regexp.MustCompile(`\bmcp_[A-Za-z0-9_-]+\b`)
 )
 
 type SessionAgentCall struct {
@@ -94,6 +115,34 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+	// TransientContext is model-visible context that must not be persisted as
+	// a user message. Skill bodies and internal guidance use this channel.
+	TransientContext string
+	// toolProtocolRetry prevents repeated retries when a model prints a tool
+	// envelope as text instead of using the provider's native tool-call field.
+	toolProtocolRetry bool
+	// recoveryAttempted bounds Review -> Task recovery to one handoff per
+	// admitted user intent.
+	recoveryAttempted bool
+	// originalIntent is the immutable user goal for internal continuations.
+	// Recovery instructions must never replace or wrap it.
+	originalIntent string
+	// recoveryGuidance is transient orchestration context produced by a
+	// deterministic guard or the read-only review sidecar. It is sent to the
+	// model without being persisted as another user message.
+	recoveryGuidance string
+	// idleContinuationCount bounds automatic continuation when a model
+	// announces its next action but ends the turn without calling a tool.
+	idleContinuationCount int
+	// mcpCompletionCheck bounds the deterministic MCP success-evidence gate
+	// to one continuation per admitted user intent.
+	mcpCompletionCheck bool
+	// requiredFirstTool forces one grounded recovery action before the model
+	// can resume autonomous tool selection.
+	requiredFirstTool string
+	// finalizeOnly asks for one bounded, tool-free report after a deterministic
+	// guard has exhausted a lookup path. It must never schedule more recovery.
+	finalizeOnly bool
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -124,14 +173,28 @@ type SessionAgentCall struct {
 	// paths treat as covered by any present mark, preserving the
 	// pre-sequence behavior.
 	acceptSeq uint64
+	// contextRetry is an internal one-shot retry path used when a
+	// provider rejects the request before generation because the prompt
+	// exceeds the model context window. The retry keeps the user's
+	// persisted prompt intact but sends a leaner tool surface.
+	contextRetry bool
+	// skipUserMessage prevents contextRetry from persisting the same
+	// user prompt twice.
+	skipUserMessage bool
+	// retryUserMessageID is removed from prepared history during
+	// contextRetry because the current prompt is supplied through
+	// AgentStreamCall.Prompt, not as history.
+	retryUserMessageID string
 }
 
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
-	SetModels(large Model, small Model)
+	SetModels(models SessionAgentModels)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
+	SetRecoveryContext(recoveryContext string)
+	SetMemoryOptions(recorderEnabled, recallEnabled bool)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -139,8 +202,9 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string, fantasy.ProviderOptions) error
+	Summarize(context.Context, string) error
 	Model() Model
+	SummaryModel() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
 
@@ -151,20 +215,85 @@ type Model struct {
 	FlatRate   bool
 }
 
-type sessionAgent struct {
-	largeModel         *csync.Value[Model]
-	smallModel         *csync.Value[Model]
-	systemPromptPrefix *csync.Value[string]
-	systemPrompt       *csync.Value[string]
-	tools              *csync.Slice[fantasy.AgentTool]
+type SessionAgentModels struct {
+	Large                     Model
+	Small                     Model
+	Summary                   Model
+	Review                    Model
+	SmallProviderOpts         fantasy.ProviderOptions
+	SummaryProviderOpts       fantasy.ProviderOptions
+	ReviewProviderOpts        fantasy.ProviderOptions
+	LargeSystemPromptPrefix   string
+	SmallSystemPromptPrefix   string
+	SummarySystemPromptPrefix string
+	ReviewSystemPromptPrefix  string
+}
 
-	isSubAgent           bool
-	sessions             session.Service
-	messages             message.Service
-	disableAutoSummarize bool
-	isYolo               bool
-	notify               pubsub.Publisher[notify.Notification]
-	runComplete          pubsub.Publisher[notify.RunComplete]
+type providerOptionsValue struct {
+	mu sync.RWMutex
+	v  fantasy.ProviderOptions
+}
+
+func newProviderOptionsValue(opts fantasy.ProviderOptions) *providerOptionsValue {
+	return &providerOptionsValue{v: cloneProviderOptions(opts)}
+}
+
+func (v *providerOptionsValue) Get() fantasy.ProviderOptions {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return cloneProviderOptions(v.v)
+}
+
+func (v *providerOptionsValue) Set(opts fantasy.ProviderOptions) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.v = cloneProviderOptions(opts)
+}
+
+func cloneProviderOptions(opts fantasy.ProviderOptions) fantasy.ProviderOptions {
+	if opts == nil {
+		return nil
+	}
+	cloned := fantasy.ProviderOptions{}
+	for key, value := range opts {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+type sessionAgent struct {
+	largeModel          *csync.Value[Model]
+	smallModel          *csync.Value[Model]
+	summaryModel        *csync.Value[Model]
+	reviewModel         *csync.Value[Model]
+	smallProviderOpts   *providerOptionsValue
+	summaryProviderOpts *providerOptionsValue
+	reviewProviderOpts  *providerOptionsValue
+	largePromptPrefix   *csync.Value[string]
+	smallPromptPrefix   *csync.Value[string]
+	summaryPromptPrefix *csync.Value[string]
+	reviewPromptPrefix  *csync.Value[string]
+	systemPrompt        *csync.Value[string]
+	recoveryContext     *csync.Value[string]
+	tools               *csync.Slice[fantasy.AgentTool]
+
+	isSubAgent                     bool
+	sessions                       session.Service
+	messages                       message.Service
+	disableAutoSummarize           bool
+	autoReviewEnabled              bool
+	isYolo                         bool
+	notify                         pubsub.Publisher[notify.Notification]
+	runComplete                    pubsub.Publisher[notify.RunComplete]
+	userPromptHooks                *hooks.Runner
+	stopHooks                      *hooks.Runner
+	memoryStore                    *memory.Store
+	memoryProject                  memory.Project
+	memoryRecorder                 atomic.Bool
+	memoryRecall                   atomic.Bool
+	memoryDisableOnExternalContext bool
+	memoryJobs                     *csync.Map[string, *memoryJob]
+	memoryWG                       sync.WaitGroup
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -208,42 +337,106 @@ type sessionAgent struct {
 }
 
 type SessionAgentOptions struct {
-	LargeModel           Model
-	SmallModel           Model
-	SystemPromptPrefix   string
-	SystemPrompt         string
-	IsSubAgent           bool
-	DisableAutoSummarize bool
-	IsYolo               bool
-	Sessions             session.Service
-	Messages             message.Service
-	Tools                []fantasy.AgentTool
-	Notify               pubsub.Publisher[notify.Notification]
-	RunComplete          pubsub.Publisher[notify.RunComplete]
+	Models                         SessionAgentModels
+	LargeModel                     Model
+	SmallModel                     Model
+	SummaryModel                   Model
+	ReviewModel                    Model
+	SummaryProviderOpts            fantasy.ProviderOptions
+	ReviewProviderOpts             fantasy.ProviderOptions
+	SystemPromptPrefix             string
+	SystemPrompt                   string
+	RecoveryContext                string
+	IsSubAgent                     bool
+	DisableAutoSummarize           bool
+	AutoReviewEnabled              bool
+	IsYolo                         bool
+	Sessions                       session.Service
+	Messages                       message.Service
+	Tools                          []fantasy.AgentTool
+	Notify                         pubsub.Publisher[notify.Notification]
+	RunComplete                    pubsub.Publisher[notify.RunComplete]
+	UserPromptHooks                *hooks.Runner
+	StopHooks                      *hooks.Runner
+	Memory                         *memory.Store
+	MemoryProject                  memory.Project
+	MemoryRecorder                 bool
+	MemoryRecall                   bool
+	MemoryDisableOnExternalContext bool
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
-	return &sessionAgent{
-		largeModel:           csync.NewValue(opts.LargeModel),
-		smallModel:           csync.NewValue(opts.SmallModel),
-		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
-		systemPrompt:         csync.NewValue(opts.SystemPrompt),
-		isSubAgent:           opts.IsSubAgent,
-		sessions:             opts.Sessions,
-		messages:             opts.Messages,
-		disableAutoSummarize: opts.DisableAutoSummarize,
-		tools:                csync.NewSliceFrom(opts.Tools),
-		isYolo:               opts.IsYolo,
-		notify:               opts.Notify,
-		runComplete:          opts.RunComplete,
-		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:       csync.NewMap[string, context.CancelFunc](),
-		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:         csync.NewMap[string, int](),
-		cancelMark:           csync.NewMap[string, uint64](),
+	models := opts.Models
+	if models.Large.Model == nil {
+		models.Large = opts.LargeModel
 	}
+	if models.Small.Model == nil {
+		models.Small = opts.SmallModel
+	}
+	if models.Summary.Model == nil {
+		models.Summary = opts.SummaryModel
+	}
+	if models.Review.Model == nil {
+		models.Review = opts.ReviewModel
+	}
+	if models.SummaryProviderOpts == nil {
+		models.SummaryProviderOpts = opts.SummaryProviderOpts
+	}
+	if models.ReviewProviderOpts == nil {
+		models.ReviewProviderOpts = opts.ReviewProviderOpts
+	}
+	if models.LargeSystemPromptPrefix == "" {
+		models.LargeSystemPromptPrefix = opts.SystemPromptPrefix
+	}
+
+	summaryModel := models.Summary
+	if summaryModel.Model == nil {
+		summaryModel = models.Large
+	}
+	reviewModel := models.Review
+	if reviewModel.Model == nil {
+		reviewModel = models.Large
+	}
+	result := &sessionAgent{
+		largeModel:                     csync.NewValue(models.Large),
+		smallModel:                     csync.NewValue(models.Small),
+		summaryModel:                   csync.NewValue(summaryModel),
+		reviewModel:                    csync.NewValue(reviewModel),
+		smallProviderOpts:              newProviderOptionsValue(models.SmallProviderOpts),
+		summaryProviderOpts:            newProviderOptionsValue(models.SummaryProviderOpts),
+		reviewProviderOpts:             newProviderOptionsValue(models.ReviewProviderOpts),
+		largePromptPrefix:              csync.NewValue(models.LargeSystemPromptPrefix),
+		smallPromptPrefix:              csync.NewValue(models.SmallSystemPromptPrefix),
+		summaryPromptPrefix:            csync.NewValue(models.SummarySystemPromptPrefix),
+		reviewPromptPrefix:             csync.NewValue(models.ReviewSystemPromptPrefix),
+		systemPrompt:                   csync.NewValue(opts.SystemPrompt),
+		recoveryContext:                csync.NewValue(opts.RecoveryContext),
+		isSubAgent:                     opts.IsSubAgent,
+		sessions:                       opts.Sessions,
+		messages:                       opts.Messages,
+		disableAutoSummarize:           opts.DisableAutoSummarize,
+		autoReviewEnabled:              opts.AutoReviewEnabled,
+		tools:                          csync.NewSliceFrom(opts.Tools),
+		isYolo:                         opts.IsYolo,
+		notify:                         opts.Notify,
+		runComplete:                    opts.RunComplete,
+		userPromptHooks:                opts.UserPromptHooks,
+		stopHooks:                      opts.StopHooks,
+		memoryStore:                    opts.Memory,
+		memoryProject:                  opts.MemoryProject,
+		memoryDisableOnExternalContext: opts.MemoryDisableOnExternalContext,
+		memoryJobs:                     csync.NewMap[string, *memoryJob](),
+		messageQueue:                   csync.NewMap[string, []SessionAgentCall](),
+		activeRequests:                 csync.NewMap[string, context.CancelFunc](),
+		dispatchMu:                     csync.NewMap[string, *sync.Mutex](),
+		acceptedRuns:                   csync.NewMap[string, int](),
+		cancelMark:                     csync.NewMap[string, uint64](),
+	}
+	result.memoryRecorder.Store(opts.MemoryRecorder)
+	result.memoryRecall.Store(opts.MemoryRecall)
+	return result
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
@@ -552,6 +745,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err := ValidateCall(call); err != nil {
 		return nil, err
 	}
+	a.cancelMemoryJob(call.SessionID)
 
 	// genCtx/cancel are the run context and its cancel func. For the
 	// accepted (fire-and-forget) dispatch path they are created under
@@ -564,6 +758,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		cancel           context.CancelFunc
 		activeRegistered bool
 		userMsgCreated   bool
+		userMsg          message.Message
 	)
 
 	if call.Accepted != nil {
@@ -597,6 +792,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				RunID:     call.RunID,
 				Cancelled: true,
 			}
+			admitted, admitErr := a.admitUserPrompt(ctx, call)
+			if admitErr != nil {
+				complete.Error = admitErr.Error()
+				a.publishRunComplete(ctx, call, complete)
+				return nil, admitErr
+			}
+			call = admitted.call
 			if err := a.persistCanceledTurn(ctx, call, false); err != nil {
 				complete.Error = err.Error()
 				a.publishRunComplete(ctx, call, complete)
@@ -642,23 +844,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
+	if call.contextRetry {
+		agentTools = contextRetryTools(agentTools)
+	} else if call.finalizeOnly {
+		agentTools = nil
+	}
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
-	promptPrefix := a.systemPromptPrefix.Get()
-	var instructions strings.Builder
-
-	for _, server := range mcp.GetStates() {
-		if server.State != mcp.StateConnected {
-			continue
+	if call.contextRetry {
+		systemPrompt = contextRetrySystemPrompt(a.recoveryContext.Get())
+	} else if call.finalizeOnly {
+		systemPrompt = "Give a concise final status using only verified session evidence. Do not call tools, propose another lookup, or claim unverified success. State what succeeded, what failed, and the exact blocker or user input needed."
+	} else {
+		if inventory := connectedMCPInventory(mcp.GetStates()); inventory != "" {
+			systemPrompt += "\n\n<mcp-inventory>\n" + inventory + "\n</mcp-inventory>"
 		}
-		if s := server.Client.InitializeResult().Instructions; s != "" {
-			instructions.WriteString(s)
-			instructions.WriteString("\n\n")
-		}
-	}
-
-	if s := instructions.String(); s != "" {
-		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+		systemPrompt = mergeSystemPromptPrefix(a.largePromptPrefix.Get(), systemPrompt)
 	}
 
 	if len(agentTools) > 0 {
@@ -683,23 +884,44 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
-
-	var wg sync.WaitGroup
-	// Generate title from the first real (non-shell) user prompt.
-	if !hasUserTextMessage(msgs) {
-		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
-		wg.Go(func() {
-			a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
-		})
+	if call.retryUserMessageID != "" {
+		msgs = removeMessageByID(msgs, call.retryUserMessageID)
 	}
-	defer wg.Wait()
+	if call.contextRetry {
+		msgs = contextRetryMessages(msgs)
+	}
 
-	// Add the user message to the session.
-	_, err = a.createUserMessage(ctx, call)
+	admitted, err := a.admitUserPrompt(ctx, call)
 	if err != nil {
 		return nil, err
 	}
-	userMsgCreated = true
+	call = admitted.call
+	if strings.TrimSpace(call.originalIntent) == "" {
+		call.originalIntent = strings.TrimSpace(call.Prompt)
+	}
+	outboundPrompt := admitted.modelPrompt
+	if call.recoveryGuidance != "" {
+		outboundPrompt = recoveryContext(call.originalIntent, call.recoveryGuidance) + "\n\nContinue the original user intent now."
+		msgs = recoveryMessages(msgs)
+	}
+	if call.TransientContext != "" {
+		outboundPrompt = call.TransientContext + "\n\n" + outboundPrompt
+	}
+
+	var wg sync.WaitGroup
+	shouldGenerateTitle := !call.skipUserMessage && !hasUserTextMessage(msgs)
+	defer wg.Wait()
+
+	// Add the admitted user message to the session.
+	if call.skipUserMessage {
+		userMsgCreated = true
+	} else {
+		userMsg, err = a.createUserMessage(ctx, call)
+		if err != nil {
+			return nil, err
+		}
+		userMsgCreated = true
+	}
 
 	// Add the session to the context.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
@@ -714,6 +936,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 		defer cancel()
 		defer a.activeRequests.Del(call.SessionID)
+	}
+	genCtx = tools.WithMCPSourceEvidence(genCtx, originalIntent(call))
+	if !call.contextRetry && !call.finalizeOnly {
+		outboundPrompt = a.recallMemories(genCtx, call.SessionID, outboundPrompt)
+	}
+	// Memory selection uses the small model first. Start title generation
+	// afterward so both side calls never compete for the same local model.
+	if shouldGenerateTitle {
+		titleCtx := ctx
+		wg.Go(func() {
+			a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
+		})
 	}
 	// skipRunComplete is set just before the queued-recursion path so
 	// the outer Run doesn't publish a RunComplete that would race
@@ -765,6 +999,33 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		} else if ctx.Err() != nil {
 			complete.Cancelled = true
 		}
+		if a.stopHooks != nil {
+			stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), 35*time.Second)
+			stopResult, hookErr := a.stopHooks.RunPayload(stopCtx, hooks.EventStop, call.SessionID, "stop", "", hooks.Payload{
+				Response:  complete.Text,
+				Error:     complete.Error,
+				Cancelled: complete.Cancelled,
+			})
+			stopCancel()
+			if hookErr != nil {
+				slog.Warn("Stop hook execution error, publishing run completion", "error", hookErr)
+			}
+			if stopResult.Context != "" {
+				if complete.Text != "" {
+					complete.Text += "\n"
+				}
+				complete.Text += stopResult.Context
+			}
+			if stopResult.Decision == hooks.DecisionDeny || stopResult.Halt {
+				reason := stopResult.Reason
+				if reason == "" {
+					reason = "run blocked by stop hook"
+				}
+				if complete.Error == "" {
+					complete.Error = reason
+				}
+			}
+		}
 		// Prefer the per-call hook when supplied so the coordinator
 		// can coalesce retries (e.g. unauthorized → re-auth → retry)
 		// into a single user-visible terminal event. The fallback
@@ -782,6 +1043,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
+	var loopDetected bool
+	var externalResearchRequired bool
+	var resourceLookupExhausted bool
+	finalFinishReason := message.FinishReasonUnknown
 	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
@@ -789,7 +1054,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		maxOutputTokens = &call.MaxOutputTokens
 	}
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		Headers:          sessionHeaders(call.SessionID),
@@ -808,6 +1073,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			// Use latest tools (updated by SetTools when MCP tools change).
 			prepared.Tools = a.tools.Copy()
+			if call.finalizeOnly {
+				prepared.Tools = nil
+			}
+			applyRequiredFirstTool(&prepared, call.requiredFirstTool, options.StepNumber)
+			if call.contextRetry {
+				prepared.Tools = contextRetryTools(prepared.Tools)
+			}
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -823,11 +1095,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
 			a.publishCanceledQueueDrops(canceledRunIDs)
 			for _, queued := range fold {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
-				if createErr != nil {
+				admittedQueued, admitErr := a.admitUserPrompt(callContext, queued)
+				if admitErr != nil {
+					return callContext, prepared, admitErr
+				}
+				if _, createErr := a.createUserMessage(callContext, admittedQueued.call); createErr != nil {
 					return callContext, prepared, createErr
 				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				queuedPrompt := admittedQueued.modelPrompt
+				if admittedQueued.call.TransientContext != "" {
+					queuedPrompt = admittedQueued.call.TransientContext + "\n\n" + queuedPrompt
+				}
+				prepared.Messages = append(prepared.Messages, userPromptToAIMessage(queuedPrompt, admittedQueued.call.Attachments))
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
@@ -846,10 +1125,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				if i > len(prepared.Messages)-3 {
 					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
 				}
-			}
-
-			if promptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
 			sessionLock.Lock()
@@ -949,6 +1224,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
 			}
+			if !toolResult.IsError {
+				if markErr := a.markMemoryExternalContext(ctx, call.SessionID, result.ToolName); markErr != nil {
+					slog.Warn("Failed to mark session memory as externally sourced", "session_id", call.SessionID, "tool", result.ToolName, "error", markErr)
+				}
+			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
 			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
@@ -984,7 +1264,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					}
 				}
 			}
-			currentAssistant.AddFinish(finishReason, "", "")
+			finalFinishReason = finishReason
+			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
+			currentAssistant.AddFinishWithUsage(
+				finishReason,
+				"",
+				"",
+				usage.InputTokens+usage.CacheReadTokens,
+				usage.OutputTokens,
+				estimated,
+			)
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
 
@@ -992,7 +1281,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if getSessionErr != nil {
 				return getSessionErr
 			}
-			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			extractHyperCredits(stepResult.ProviderMetadata)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
@@ -1020,12 +1308,31 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 				if (remaining <= threshold) && !a.disableAutoSummarize {
 					shouldSummarize = true
+					slog.Info("Auto-summary threshold reached", "session_id", call.SessionID, "tokens", tokens, "context_window", cw, "remaining", remaining, "threshold", threshold)
 					return true
 				}
 				return false
 			},
 			func(steps []fantasy.StepResult) bool {
-				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
+				if hasRepeatedResourceNotFound(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
+					resourceLookupExhausted = true
+					loopDetected = true
+					slog.Warn("Repeated missing-resource lookup detected", "session_id", call.SessionID, "steps", len(steps), "max_repeats", loopDetectionMaxRepeats)
+					return true
+				}
+				if hasRepeatedExternalFailureClass(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
+					externalResearchRequired = true
+					loopDetected = true
+					slog.Warn("Repeated external lookup failure detected", "session_id", call.SessionID, "steps", len(steps), "max_repeats", loopDetectionMaxRepeats)
+					return true
+				}
+				if hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) ||
+					hasRepeatedFailureClass(steps, loopDetectionWindowSize, loopDetectionMaxRepeats) {
+					loopDetected = true
+					slog.Warn("Repeated tool-call loop detected", "session_id", call.SessionID, "steps", len(steps), "max_repeats", loopDetectionMaxRepeats)
+					return true
+				}
+				return false
 			},
 		},
 	})
@@ -1036,6 +1343,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		isHyper := largeModel.ModelCfg.Provider == hyper.Name
 		isCancelErr := errors.Is(err, context.Canceled)
 		if currentAssistant == nil {
+			if !isCancelErr && isContextOverflowError(err) && !call.contextRetry {
+				a.activeRequests.Del(call.SessionID)
+				cancel()
+				skipRunComplete = true
+				retryCall := call
+				retryCall.contextRetry = true
+				retryCall.skipUserMessage = userMsg.ID != ""
+				retryCall.retryUserMessageID = userMsg.ID
+				return a.Run(ctx, retryCall)
+			}
 			// Cancel-before-assistant-creation window: the run was
 			// canceled after activeRequests.Set but before PrepareStep
 			// created the assistant message. Without this, the turn
@@ -1059,6 +1376,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// timeout bounds the cleanup writes.
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cleanupCancel()
+		if !isCancelErr && isContextOverflowError(err) && !call.contextRetry {
+			if deleteErr := a.messages.Delete(cleanupCtx, currentAssistant.ID); deleteErr != nil {
+				return nil, deleteErr
+			}
+			a.activeRequests.Del(call.SessionID)
+			cancel()
+			skipRunComplete = true
+			retryCall := call
+			retryCall.contextRetry = true
+			retryCall.skipUserMessage = userMsg.ID != ""
+			retryCall.retryUserMessageID = userMsg.ID
+			return a.Run(ctx, retryCall)
+		}
 		// Ensure we finish thinking on error to close the reasoning state.
 		currentAssistant.FinishThinking()
 		toolCalls := currentAssistant.ToolCalls()
@@ -1119,6 +1449,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
+		autoReviewReason, shouldAutoReview := a.shouldAutoReviewError(err, largeModel)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
@@ -1150,23 +1481,132 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if updateErr != nil {
 			return nil, updateErr
 		}
+		if shouldAutoReview {
+			a.activeRequests.Del(call.SessionID)
+			cancel()
+			if reviewErr := a.autoReview(ctx, call.SessionID, autoReviewReason, true); reviewErr != nil {
+				slog.Error("Failed to auto-review failed turn", "error", reviewErr)
+			}
+		}
 		return nil, err
 	}
 
-	if shouldSummarize {
+	if hasMCPAddBlockingFailure(result.Steps) {
+		slog.Warn("Stopping after blocking MCP configuration failure", "session_id", call.SessionID)
+	} else if resourceLookupExhausted && !call.finalizeOnly {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.recoveryGuidance = "Two distinct lookups ended with the same missing-resource result. Do not search again. Give a concise final status from verified session evidence: what succeeded, which assumed resource names failed, and whether any exact user input is needed."
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		retry.requiredFirstTool = ""
+		retry.recoveryAttempted = true
+		retry.finalizeOnly = true
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+		slog.Warn("Repeated missing-resource lookup stopped; scheduling tool-free final status", "session_id", call.SessionID)
+	} else if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = []SessionAgentCall{}
+		}
+		call = prepareSummaryContinuation(call)
+		call.Accepted = a.BeginAccepted(call.SessionID)
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{call}, existing...))
+		if summarizeErr := a.summarize(genCtx, call.SessionID, false); summarizeErr != nil {
 			return nil, summarizeErr
 		}
-		// If the agent wasn't done...
-		if len(currentAssistant.ToolCalls()) > 0 {
-			existing, ok := a.messageQueue.Get(call.SessionID)
-			if !ok {
-				existing = []SessionAgentCall{}
+	} else if loopDetected && hasMCPAddValidationFailure(result.Steps) {
+		slog.Warn("Stopping after repeated deterministic MCP configuration failure", "session_id", call.SessionID)
+	} else if loopDetected && a.autoReviewEnabled && !call.recoveryAttempted {
+		a.activeRequests.Del(call.SessionID)
+		cancel()
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.recoveryGuidance = "The previous strategy repeatedly produced the same failure class. Use the automatic review, choose a materially different grounded approach, and do not retry disproven commands. If the failure concerns an external package, command, API, model, version, or server identity, use native web_search or official documentation before another shell attempt."
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		retry.recoveryAttempted = true
+		if externalResearchRequired {
+			retry.requiredFirstTool = tools.WebSearchToolName
+		}
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn was stopped after repeated failures without progress. Identify the failed assumption and a materially different grounded approach.", true); reviewErr != nil {
+			slog.Error("Failed to auto-review repeated tool-call loop", "error", reviewErr)
+		}
+	} else if !call.finalizeOnly && currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && needsMCPCompletionEvidence(call, result.Steps, currentAssistant.Content().String()) {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.recoveryGuidance = "The MCP completion check rejected the previous success claim because no successful named MCP result showed the user-requested server connected. Preserve the user's original request as the only objective. Inspect current state with recode_info, then call mcp_add for that exact server only if it is missing or invalid. Do not add or change any server the user did not request."
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		retry.mcpCompletionCheck = true
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+		slog.Warn("MCP success claim lacked named runtime evidence; scheduling one correction", "session_id", call.SessionID)
+	} else if a.shouldAutoReviewMaxTokens(finalFinishReason) {
+		a.activeRequests.Del(call.SessionID)
+		cancel()
+		if reviewErr := a.autoReview(ctx, call.SessionID, "The previous assistant turn stopped because it reached the maximum output token limit.", false); reviewErr != nil {
+			slog.Error("Failed to auto-review max-token turn", "error", reviewErr)
+		}
+	} else if !call.finalizeOnly && currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && !call.toolProtocolRetry && printedToolEnvelope(currentAssistant.Content().String()) {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.recoveryGuidance = "Your previous response printed a tool-call JSON envelope as text, so nothing executed. Reassess the plan, then invoke registered tools through the native tool-call mechanism. Do not print tool-call JSON or repeat disproven package names."
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		retry.toolProtocolRetry = true
+		a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+		slog.Warn("Printed tool envelope detected; scheduling one protocol retry", "session_id", call.SessionID)
+	} else if !call.finalizeOnly && currentAssistant != nil && len(currentAssistant.ToolCalls()) == 0 && announcedPendingAction(currentAssistant.Content().String()) {
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = nil
+		}
+		retry := call
+		retry.originalIntent = originalIntent(call)
+		retry.Prompt = retry.originalIntent
+		retry.Attachments = nil
+		retry.Accepted = nil
+		retry.skipUserMessage = true
+		if shouldContinueAnnouncedAction(call.idleContinuationCount) {
+			retry.recoveryGuidance = "You announced a next action but ended the turn without executing it. Execute that action now using the appropriate registered tool. Do not narrate another future action."
+			retry.idleContinuationCount++
+			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+			slog.Warn("Incomplete announced action detected; scheduling continuation", "session_id", call.SessionID, "attempt", retry.idleContinuationCount)
+		} else if a.autoReviewEnabled && !call.recoveryAttempted {
+			retry.recoveryGuidance = "The model repeatedly announced actions without executing them. Use the automatic review to choose a concrete tool-first recovery and continue without narration-only turns."
+			retry.recoveryAttempted = true
+			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{retry}, existing...))
+			a.activeRequests.Del(call.SessionID)
+			cancel()
+			if reviewErr := a.autoReview(ctx, call.SessionID, "The Task agent repeatedly announced a next action but ended without invoking a tool. Identify one concrete tool-first recovery.", true); reviewErr != nil {
+				slog.Error("Failed to auto-review incomplete action loop", "error", reviewErr)
 			}
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			existing = append(existing, call)
-			a.messageQueue.Set(call.SessionID, existing)
 		}
 	}
 
@@ -1241,6 +1681,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			a.cancelMark.Del(call.SessionID)
 		}
 		mu.Unlock()
+		a.scheduleMemoryRecording(ctx, call.SessionID)
 		return result, err
 	}
 	// There are queued messages, restart the loop. Suppress the outer
@@ -1290,14 +1731,47 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
+func connectedMCPInventory(states map[string]mcp.ClientInfo) string {
+	names := make([]string, 0, len(states))
+	for name, server := range states {
+		if server.State == mcp.StateConnected {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	slices.Sort(names)
+
+	var inventory strings.Builder
+	inventory.WriteString("Connected MCP servers remain available through mcp_tool_search and mcp_tool_call. Search before calling; do not guess tool names.\n")
+	for _, name := range names {
+		server := states[name]
+		fmt.Fprintf(&inventory, "- %s: %d tools", name, server.Counts.Tools)
+		if server.Counts.Prompts > 0 {
+			fmt.Fprintf(&inventory, ", %d prompts", server.Counts.Prompts)
+		}
+		if server.Counts.Resources > 0 {
+			fmt.Fprintf(&inventory, ", %d resources", server.Counts.Resources)
+		}
+		inventory.WriteByte('\n')
+	}
+	return strings.TrimSpace(inventory.String())
+}
+
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID string) error {
+	return a.summarize(ctx, sessionID, true)
+}
+
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, resumeLastIntent bool) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
 
 	// Copy mutable fields under lock to avoid races with SetModels.
-	largeModel := a.largeModel.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
+	summaryModel := a.summaryModel.Get()
+	summaryProviderOpts := a.summaryProviderOpts.Get()
+	summarySystemPrompt := mergeSystemPromptPrefix(a.summaryPromptPrefix.Get(), string(summaryPrompt))
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -1311,8 +1785,12 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		// Nothing to summarize.
 		return nil
 	}
+	lastIntent := ""
+	if resumeLastIntent {
+		lastIntent = lastUserIntent(msgs)
+	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(msgs, summaryModel.CatwalkCfg.SupportsImages)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
@@ -1325,14 +1803,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}()
 
 	agent := fantasy.NewAgent(
-		largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		summaryModel.Model,
+		fantasy.WithSystemPrompt(summarySystemPrompt),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
-		Model:            largeModel.ModelCfg.Model,
-		Provider:         largeModel.ModelCfg.Provider,
+		Model:            summaryModel.ModelCfg.Model,
+		Provider:         summaryModel.ModelCfg.Provider,
 		IsSummaryMessage: true,
 	})
 	if err != nil {
@@ -1345,14 +1823,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
-		ProviderOptions: opts,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
+		ProviderOptions: summaryProviderOpts,
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, summaryMessage)
@@ -1407,7 +1878,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		extractHyperCredits(step.ProviderMetadata)
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	a.updateSessionUsage(summaryModel, &currentSession, resp.TotalUsage, openrouterCost, false)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
@@ -1427,13 +1898,485 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	// Process any messages that were queued while summarizing.
 	queuedMessages, ok := a.messageQueue.Get(sessionID)
-	if !ok || len(queuedMessages) == 0 {
+	if !ok {
+		queuedMessages = nil
+	}
+	if shouldCreateSummaryContinuation(lastIntent, queuedMessages) {
+		continuation := prepareSummaryContinuation(SessionAgentCall{
+			SessionID:        sessionID,
+			Prompt:           lastIntent,
+			originalIntent:   lastIntent,
+			recoveryGuidance: "Continue from the new summary. Preserve verified results and execute the smallest remaining step toward the original goal.",
+		})
+		continuation.Accepted = a.BeginAccepted(sessionID)
+		queuedMessages = append([]SessionAgentCall{continuation}, queuedMessages...)
+		a.messageQueue.Set(sessionID, queuedMessages)
+	}
+	if len(queuedMessages) == 0 {
 		return nil
 	}
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
+}
+
+func shouldCreateSummaryContinuation(lastIntent string, queued []SessionAgentCall) bool {
+	return strings.TrimSpace(lastIntent) != "" && len(queued) == 0
+}
+
+func lastUserIntent(msgs []message.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i]
+		if msg.Role != message.User || msg.IsSummaryMessage {
+			continue
+		}
+		if text := strings.TrimSpace(msg.Content().String()); text != "" && !isAcknowledgement(text) {
+			return text
+		}
+	}
+	return ""
+}
+
+func recoveryPrompt(intent, instruction string) string {
+	return recoveryContext(intent, instruction)
+}
+
+func originalIntent(call SessionAgentCall) string {
+	intent := strings.TrimSpace(call.originalIntent)
+	if intent == "" {
+		intent = strings.TrimSpace(call.Prompt)
+	}
+	if intent == "" || isAcknowledgement(intent) {
+		return "the unresolved user goal described in the session context"
+	}
+	return intent
+}
+
+func recoveryContext(intent, guidance string) string {
+	intent = strings.TrimSpace(intent)
+	if intent == "" || isAcknowledgement(intent) {
+		intent = "the unresolved user goal described in the session context"
+	}
+	guidance = strings.TrimSpace(guidance)
+	return "<recovery_state>\n<original_user_intent>" + intent + "</original_user_intent>\n" +
+		"<next_step_guidance>" + guidance + "</next_step_guidance>\n" +
+		"Treat verified tool results as authoritative. Do not repeat a failed command without changing its assumptions.\n</recovery_state>"
+}
+
+const maxIdleContinuations = 1
+
+func shouldContinueAnnouncedAction(count int) bool {
+	return count < maxIdleContinuations
+}
+
+func summaryContinuationGuidance(existing string) string {
+	const continuation = "Continue from the new summary. Preserve verified results, failed-path evidence, and the smallest remaining step toward the original goal."
+	existing = strings.TrimSpace(existing)
+	if existing == "" {
+		return continuation
+	}
+	return existing + "\n" + continuation
+}
+
+func prepareSummaryContinuation(call SessionAgentCall) SessionAgentCall {
+	call.originalIntent = originalIntent(call)
+	call.Prompt = call.originalIntent
+	call.recoveryGuidance = summaryContinuationGuidance(call.recoveryGuidance)
+	call.TransientContext = ""
+	call.Attachments = nil
+	call.Accepted = nil
+	call.skipUserMessage = true
+	if call.requiredFirstTool == "" && needsRuntimeConfigRecheck(call.originalIntent) {
+		call.requiredFirstTool = tools.CrushInfoToolName
+	}
+	return call
+}
+
+func needsRuntimeConfigRecheck(intent string) bool {
+	lower := strings.ToLower(intent)
+	if strings.Contains(lower, "mcp") {
+		return true
+	}
+	return strings.Contains(lower, "config") &&
+		(strings.Contains(lower, "crush") || strings.Contains(lower, "re.code"))
+}
+
+func applyRequiredFirstTool(prepared *fantasy.PrepareStepResult, toolName string, stepNumber int) {
+	if prepared == nil || toolName == "" || stepNumber != 0 {
+		return
+	}
+	choice := fantasy.ToolChoiceRequired
+	prepared.ToolChoice = &choice
+	prepared.ActiveTools = []string{toolName}
+}
+
+func isAcknowledgement(text string) bool {
+	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(text)), " .,!?")
+	switch normalized {
+	case "ok", "okay", "yes", "yep", "go on", "continue", "proceed", "do it", "carry on":
+		return true
+	default:
+		return false
+	}
+}
+
+func printedToolEnvelope(text string) bool {
+	text = strings.TrimSpace(text)
+	start := strings.IndexByte(text, '{')
+	end := strings.LastIndexByte(text, '}')
+	if start < 0 || end <= start {
+		return false
+	}
+	var envelope map[string]any
+	if json.Unmarshal([]byte(text[start:end+1]), &envelope) != nil {
+		return false
+	}
+	toolName, _ := envelope["tool_name"].(string)
+	if strings.TrimSpace(toolName) == "" {
+		return false
+	}
+	_, hasCommand := envelope["command"]
+	_, hasInput := envelope["input"]
+	_, hasArguments := envelope["arguments"]
+	return hasCommand || hasInput || hasArguments
+}
+
+func announcedPendingAction(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	markers := []string{
+		"i'll ", "i will ", "i need to ", "i should ", "let me ",
+		"next, i'll ", "next i will ", "i'm going to ",
+	}
+	return slices.ContainsFunc(markers, func(marker string) bool {
+		return strings.Contains(text, marker)
+	})
+}
+
+func (a *sessionAgent) autoReview(ctx context.Context, sessionID string, reason string, drainQueued bool) error {
+	if a.IsSessionBusy(sessionID) {
+		return ErrSessionBusy
+	}
+
+	reviewModel := a.reviewModel.Get()
+	reviewProviderOpts := a.reviewProviderOpts.Get()
+	reviewSystemPrompt := mergeSystemPromptPrefix(a.reviewPromptPrefix.Get(), string(autoReviewPrompt))
+
+	currentSession, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+	msgs, err := a.getSessionMessages(ctx, currentSession)
+	if err != nil {
+		return err
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	aiMsgs, _ := a.preparePrompt(msgs, reviewModel.CatwalkCfg.SupportsImages)
+
+	genCtx, cancel := context.WithCancel(ctx)
+	a.activeRequests.Set(sessionID, cancel)
+	defer a.activeRequests.Del(sessionID)
+	defer cancel()
+	agent := fantasy.NewAgent(
+		reviewModel.Model,
+		fantasy.WithSystemPrompt(reviewSystemPrompt),
+		fantasy.WithUserAgent(userAgent),
+	)
+	var reviewText strings.Builder
+
+	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
+		Prompt:          buildAutoReviewPrompt(reason),
+		Messages:        aiMsgs,
+		ProviderOptions: reviewProviderOpts,
+		OnTextDelta: func(id, text string) error {
+			reviewText.WriteString(text)
+			return nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	var openrouterCost *float64
+	for _, step := range resp.Steps {
+		stepCost := a.openrouterCost(step.ProviderMetadata)
+		if stepCost != nil {
+			newCost := *stepCost
+			if openrouterCost != nil {
+				newCost += *openrouterCost
+			}
+			openrouterCost = &newCost
+		}
+		extractHyperCredits(step.ProviderMetadata)
+	}
+
+	a.updateSessionUsage(reviewModel, &currentSession, resp.TotalUsage, openrouterCost, false)
+	if _, err := a.sessions.Save(genCtx, currentSession); err != nil {
+		return err
+	}
+
+	a.activeRequests.Del(sessionID)
+	cancel()
+
+	if !drainQueued {
+		return nil
+	}
+	queuedMessages, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedMessages) == 0 {
+		return nil
+	}
+	firstQueuedMessage := queuedMessages[0]
+	if isRecoveryCall(firstQueuedMessage) {
+		guidance := strings.TrimSpace(reviewText.String())
+		if guidance != "" {
+			firstQueuedMessage.recoveryGuidance = recoveryGuidanceFromReview(guidance)
+		}
+		if firstQueuedMessage.requiredFirstTool == "" {
+			if toolName := recoveryToolFromReview(guidance); a.hasTool(toolName) {
+				firstQueuedMessage.requiredFirstTool = toolName
+			}
+		}
+	}
+	a.messageQueue.Set(sessionID, queuedMessages[1:])
+	_, qErr := a.Run(ctx, firstQueuedMessage)
+	return qErr
+}
+
+func isRecoveryCall(call SessionAgentCall) bool {
+	return call.recoveryAttempted || call.toolProtocolRetry || call.idleContinuationCount > 0 || call.mcpCompletionCheck || call.finalizeOnly || call.recoveryGuidance != ""
+}
+
+func recoveryToolFromReview(review string) string {
+	for line := range strings.SplitSeq(review, "\n") {
+		label, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok || !strings.EqualFold(strings.TrimSpace(label), "Next tool") {
+			continue
+		}
+		toolName := strings.Trim(strings.TrimSpace(value), "`.* ")
+		if strings.EqualFold(toolName, "none") {
+			return ""
+		}
+		return toolName
+	}
+	return ""
+}
+
+func recoveryGuidanceFromReview(review string) string {
+	nextStep := reviewField(review, "Next step")
+	nextTool := recoveryToolFromReview(review)
+	if nextStep == "" {
+		return "The internal review found no grounded correction. Stop and report the last decisive error without retrying it."
+	}
+	if nextTool == "" {
+		return "Internal recovery finding: " + nextStep + ". Do not restate the review or retry unchanged input."
+	}
+	return fmt.Sprintf("Internal recovery finding: %s. Invoke %s now with materially corrected input; do not restate the review.", nextStep, nextTool)
+}
+
+func reviewField(review, field string) string {
+	for line := range strings.SplitSeq(review, "\n") {
+		label, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && strings.EqualFold(strings.TrimSpace(label), field) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func (a *sessionAgent) hasTool(name string) bool {
+	if name == "" {
+		return false
+	}
+	return slices.ContainsFunc(a.tools.Copy(), func(tool fantasy.AgentTool) bool {
+		return tool.Info().Name == name
+	})
+}
+
+func (a *sessionAgent) shouldAutoReviewError(err error, model Model) (string, bool) {
+	if !a.autoReviewEnabled || err == nil || errors.Is(err, context.Canceled) {
+		return "", false
+	}
+	if isContextOverflowError(err) {
+		return "", false
+	}
+
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) {
+		if providerErr.StatusCode == http.StatusUnauthorized || providerErr.StatusCode == http.StatusPaymentRequired {
+			return "", false
+		}
+		if model.ModelCfg.Provider == hyper.Name && (providerErr.StatusCode == http.StatusUnauthorized || providerErr.StatusCode == http.StatusPaymentRequired) {
+			return "", false
+		}
+		if providerErr.Message == "The requested model is not supported." {
+			return "", false
+		}
+		return fmt.Sprintf("The previous provider request failed: %s", cmp.Or(providerErr.Message, providerErr.Title, err.Error())), true
+	}
+
+	var fantasyErr *fantasy.Error
+	if errors.As(err, &fantasyErr) {
+		return fmt.Sprintf("The previous model request failed: %s", cmp.Or(fantasyErr.Message, fantasyErr.Title, err.Error())), true
+	}
+
+	return fmt.Sprintf("The previous assistant turn failed: %s", err.Error()), true
+}
+
+func isContextOverflowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var parts []string
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) {
+		parts = append(parts, providerErr.Title, providerErr.Message)
+	}
+	var fantasyErr *fantasy.Error
+	if errors.As(err, &fantasyErr) {
+		parts = append(parts, fantasyErr.Title, fantasyErr.Message)
+	}
+	parts = append(parts, err.Error())
+	text := strings.ToLower(strings.Join(parts, "\n"))
+	for _, marker := range []string{
+		"exceed_context_size",
+		"exceeds the available context size",
+		"exceeds context",
+		"context size",
+		"context window",
+		"maximum context",
+		"prompt is too long",
+		"too many tokens",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func contextRetryTools(agentTools []fantasy.AgentTool) []fantasy.AgentTool {
+	allowed := map[string]bool{
+		tools.BashToolName:      true,
+		tools.CrushInfoToolName: true,
+		tools.FetchToolName:     true,
+		tools.GlobToolName:      true,
+		tools.GrepToolName:      true,
+		tools.JobKillToolName:   true,
+		tools.JobListToolName:   true,
+		tools.JobOutputToolName: true,
+		tools.LSToolName:        true,
+		tools.TmuxToolName:      true,
+		tools.TodosToolName:     true,
+		tools.ViewToolName:      true,
+		tools.WebFetchToolName:  true,
+		tools.WebSearchToolName: true,
+	}
+	if raw := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_TOOLS")); raw != "" {
+		allowed = map[string]bool{}
+		for _, name := range strings.Split(raw, ",") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				allowed[name] = true
+			}
+		}
+	}
+	filtered := make([]fantasy.AgentTool, 0, len(agentTools))
+	for _, tool := range agentTools {
+		if allowed[tool.Info().Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+func contextRetrySystemPrompt(recoveryContext string) string {
+	basePrompt := defaultContextRetrySystemPrompt
+	if path := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_SYSTEM_PROMPT_FILE")); path != "" {
+		if data, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(data)) != "" {
+			basePrompt = strings.TrimSpace(string(data))
+		}
+	}
+	if prompt := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_SYSTEM_PROMPT")); prompt != "" {
+		basePrompt = prompt
+	}
+	recoveryContext = strings.TrimSpace(recoveryContext)
+	if recoveryContext == "" {
+		return basePrompt
+	}
+	return basePrompt + "\n\n<critical-project-context>\n" + recoveryContext + "\n</critical-project-context>"
+}
+
+func contextRetryMessages(msgs []message.Message) []message.Message {
+	filtered := make([]message.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if isContextOverflowMessage(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+
+	limit := defaultContextRetryHistoryMessages
+	if raw := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_HISTORY_MESSAGES")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	if limit <= 0 || len(filtered) <= limit {
+		return filtered
+	}
+	return append([]message.Message(nil), filtered[len(filtered)-limit:]...)
+}
+
+func recoveryMessages(msgs []message.Message) []message.Message {
+	filtered := make([]message.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if isAutoReviewSidecarMessage(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	const limit = 10
+	if len(filtered) <= limit {
+		return filtered
+	}
+	return append([]message.Message(nil), filtered[len(filtered)-limit:]...)
+}
+
+func isAutoReviewSidecarMessage(msg message.Message) bool {
+	return msg.Role == message.Assistant && strings.HasPrefix(strings.TrimSpace(msg.Content().String()), "Auto-review sidecar:")
+}
+
+func isContextOverflowMessage(msg message.Message) bool {
+	if msg.Role != message.Assistant || msg.FinishReason() != message.FinishReasonError {
+		return false
+	}
+	var parts []string
+	parts = append(parts, msg.Content().String(), msg.ReasoningContent().String())
+	if finish := msg.FinishPart(); finish != nil {
+		parts = append(parts, finish.Message, finish.Details)
+	}
+	text := strings.ToLower(strings.Join(parts, "\n"))
+	return strings.Contains(text, "exceed_context_size") ||
+		strings.Contains(text, "exceeds the available context size") ||
+		strings.Contains(text, "context size") ||
+		strings.Contains(text, "context window")
+}
+
+func (a *sessionAgent) shouldAutoReviewMaxTokens(reason message.FinishReason) bool {
+	return a.autoReviewEnabled && reason == message.FinishReasonMaxTokens
+}
+
+func buildAutoReviewPrompt(reason string) string {
+	if strings.TrimSpace(reason) == "" {
+		reason = "The previous assistant turn failed or stopped before completing normally."
+	}
+	return "Automatically review the previous assistant turn.\n\nReason: " + reason + "\n\nReturn a concise review with findings first, then the safest next step."
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
@@ -1451,6 +2394,100 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
 		},
 	}
+}
+
+type admittedUserPrompt struct {
+	call        SessionAgentCall
+	modelPrompt string
+}
+
+func (a *sessionAgent) admitUserPrompt(ctx context.Context, call SessionAgentCall) (admittedUserPrompt, error) {
+	admitted := admittedUserPrompt{call: call, modelPrompt: call.Prompt}
+	if a.userPromptHooks == nil {
+		return admitted, nil
+	}
+
+	var attachmentPaths []string
+	for _, attachment := range call.Attachments {
+		attachmentPaths = append(attachmentPaths, attachment.FilePath)
+	}
+	availableTools := agentToolNames(a.tools.Copy())
+	promptResult, hookErr := a.userPromptHooks.RunPayload(ctx, hooks.EventUserPromptSubmit, call.SessionID, "prompt", "", hooks.Payload{
+		Prompt:         call.Prompt,
+		Attachments:    attachmentPaths,
+		AvailableTools: availableTools,
+	})
+	if hookErr != nil {
+		slog.Warn("UserPromptSubmit hook execution error, continuing with original prompt", "error", hookErr)
+		return admitted, nil
+	}
+	if promptResult.Decision == hooks.DecisionDeny || promptResult.Halt {
+		reason := promptResult.Reason
+		if reason == "" {
+			reason = "prompt blocked by hook"
+		}
+		return admittedUserPrompt{}, fmt.Errorf("prompt blocked by hook: %s", reason)
+	}
+	if promptResult.UpdatedPrompt != "" {
+		admitted.call.Prompt = promptResult.UpdatedPrompt
+		admitted.modelPrompt = promptResult.UpdatedPrompt
+	}
+	if promptResult.Context != "" {
+		contextText := capabilityAwareHookContext(promptResult.Context, availableTools)
+		admitted.modelPrompt = promptWithHookContext(contextText, admitted.modelPrompt)
+	}
+	return admitted, nil
+}
+
+func agentToolNames(tools []fantasy.AgentTool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Info().Name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+func capabilityAwareHookContext(contextText string, availableTools []string) string {
+	available := make(map[string]struct{}, len(availableTools))
+	for _, name := range availableTools {
+		available[name] = struct{}{}
+	}
+	var missing []string
+	for _, name := range mcpToolRefRegex.FindAllString(contextText, -1) {
+		if _, ok := available[name]; ok || slices.Contains(missing, name) {
+			continue
+		}
+		missing = append(missing, name)
+	}
+	if len(missing) == 0 {
+		return contextText
+	}
+	slices.Sort(missing)
+	return contextText + "\n\n<capability_warning>Referenced tools are unavailable in this agent turn: " + strings.Join(missing, ", ") + ". Do not invoke these names through Bash or another tool. Use an available capability or perform the reasoning internally.</capability_warning>"
+}
+
+func promptWithHookContext(contextText, prompt string) string {
+	return "<hook_context>\n" + contextText + "\n</hook_context>\n\n" + prompt
+}
+
+func userPromptToAIMessage(prompt string, attachments []message.Attachment) fantasy.Message {
+	var parts []fantasy.MessagePart
+	text := strings.TrimSpace(message.PromptWithTextAttachments(prompt, attachments))
+	if text != "" {
+		parts = append(parts, fantasy.TextPart{Text: text})
+	}
+	for _, attachment := range attachments {
+		if strings.HasPrefix(attachment.MimeType, "text/") {
+			continue
+		}
+		parts = append(parts, fantasy.FilePart{
+			Filename:  attachment.FilePath,
+			Data:      attachment.Content,
+			MediaType: attachment.MimeType,
+		})
+	}
+	return fantasy.Message{Role: fantasy.MessageRoleUser, Content: parts}
 }
 
 // sessionHeaders returns the HTTP headers we use for cache affinity on
@@ -1483,6 +2520,20 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
+func removeMessageByID(msgs []message.Message, id string) []message.Message {
+	if id == "" {
+		return msgs
+	}
+	filtered := msgs[:0]
+	for _, msg := range msgs {
+		if msg.ID == id {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return filtered
+}
+
 func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
 	if !a.isSubAgent {
@@ -1502,6 +2553,9 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	knownToolCallIDs := make(map[string]struct{})
 	knownToolResultIDs := make(map[string]struct{})
 	for _, m := range msgs {
+		if isAutoReviewSidecarMessage(m) {
+			continue
+		}
 		switch m.Role {
 		case message.Assistant:
 			for _, tc := range m.ToolCalls() {
@@ -1516,6 +2570,9 @@ If not, please feel free to ignore. Again do not mention this message to the use
 
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
+			continue
+		}
+		if isAutoReviewSidecarMessage(m) {
 			continue
 		}
 		// Assistant message without content or tool calls (cancelled before it returned anything).
@@ -1693,20 +2750,19 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		if !titleSaved {
 			fallbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			if err := a.sessions.Rename(fallbackCtx, sessionID, DefaultSessionName); err != nil {
+			if err := a.sessions.Rename(fallbackCtx, sessionID, fallbackSessionTitle(userPrompt)); err != nil {
 				slog.Error("Failed to save fallback session title", "error", err)
 			}
 		}
 	}()
 
 	smallModel := a.smallModel.Get()
-	largeModel := a.largeModel.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
 
-	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
+	newAgent := func(m fantasy.LanguageModel, prefix string, p []byte, tok int64) fantasy.Agent {
+		systemPrompt := mergeSystemPromptPrefix(prefix, string(p)+"\n /no_think")
 		return fantasy.NewAgent(
 			m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
+			fantasy.WithSystemPrompt(systemPrompt),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
 		)
@@ -1715,24 +2771,15 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	streamCall := fantasy.AgentStreamCall{
 		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		Headers: sessionHeaders(sessionID),
-		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = opts.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{
-					fantasy.NewSystemMessage(systemPromptPrefix),
-				}, prepared.Messages...)
-			}
-			return callCtx, prepared, nil
-		},
 	}
 
 	type modelAttempt struct {
-		name  string
-		model Model
+		name   string
+		model  Model
+		prefix string
 	}
 	attempts := []modelAttempt{
-		{"small", smallModel},
-		{"large", largeModel},
+		{"small", smallModel, a.smallPromptPrefix.Get()},
 	}
 
 	var resp *fantasy.AgentResult
@@ -1740,11 +2787,8 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	var model Model
 	var success bool
 	for _, attempt := range attempts {
-		tok := int64(40)
-		if attempt.model.CatwalkCfg.CanReason {
-			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
-		}
-		agent := newAgent(attempt.model.Model, titlePrompt, tok)
+		tok := titleMaxTokens(attempt.model)
+		agent := newAgent(attempt.model.Model, attempt.prefix, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model
@@ -1753,13 +2797,14 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			break
 		}
 		if err != nil {
-			slog.Error("Error generating title with "+attempt.name+" model; trying next", "err", err)
+			slog.Error("Error generating title with "+attempt.name+" model; using prompt fallback", "err", err)
 		} else {
-			slog.Error("Title generation hit token limit with " + attempt.name + " model; trying next")
+			slog.Error("Title generation hit token limit with " + attempt.name + " model; using prompt fallback")
 		}
 	}
 	if !success {
-		// The deferred fallback will save the default session name.
+		// The deferred fallback derives a stable title without loading the large
+		// model while it is serving the user's main request.
 		return
 	}
 
@@ -1776,12 +2821,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		// LLM returned empty content. Use the prompt itself as a
 		// fallback title, truncated to 50 chars, before resorting to
 		// the generic default.
-		fallback := strings.ReplaceAll(userPrompt, "\n", " ")
-		fallback = strings.TrimSpace(fallback)
-		if len(fallback) > 50 {
-			fallback = ansi.Truncate(fallback, 50, "…")
-		}
-		title = cmp.Or(fallback, DefaultSessionName)
+		title = fallbackSessionTitle(userPrompt)
 	}
 
 	// Calculate usage and cost.
@@ -1825,6 +2865,21 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 	titleSaved = true
+}
+
+func fallbackSessionTitle(userPrompt string) string {
+	title := strings.TrimSpace(strings.ReplaceAll(userPrompt, "\n", " "))
+	if len(title) > 50 {
+		title = ansi.Truncate(title, 50, "…")
+	}
+	return cmp.Or(title, DefaultSessionName)
+}
+
+func titleMaxTokens(model Model) int64 {
+	if model.CatwalkCfg.CanReason && model.CatwalkCfg.DefaultMaxTokens > 0 {
+		return model.CatwalkCfg.DefaultMaxTokens
+	}
+	return defaultTitleMaxTokens
 }
 
 func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float64 {
@@ -1909,6 +2964,7 @@ func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
+	a.cancelMemoryJob(sessionID)
 	// Serialize against the dispatch handoff in Run so the accepted ->
 	// (cancel-on-entry | queued | active) transition is atomic against
 	// this cancel. Every cancel observes at least one of: an active
@@ -1925,12 +2981,6 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	// The defer in processRequest will clean up the entry.
 	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
 		slog.Debug("Request cancellation initiated", "session_id", sessionID)
-		cancel()
-	}
-
-	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
-		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
@@ -1972,7 +3022,9 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 }
 
 func (a *sessionAgent) CancelAll() {
+	a.cancelAllMemoryJobs()
 	if !a.IsBusy() {
+		a.waitForMemoryJobs(5 * time.Second)
 		return
 	}
 	for key := range a.activeRequests.Seq2() {
@@ -1983,11 +3035,13 @@ func (a *sessionAgent) CancelAll() {
 	for a.IsBusy() {
 		select {
 		case <-timeout:
+			a.waitForMemoryJobs(5 * time.Second)
 			return
 		default:
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
+	a.waitForMemoryJobs(5 * time.Second)
 }
 
 func (a *sessionAgent) IsBusy() bool {
@@ -2026,9 +3080,24 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 	return prompts
 }
 
-func (a *sessionAgent) SetModels(large Model, small Model) {
-	a.largeModel.Set(large)
-	a.smallModel.Set(small)
+func (a *sessionAgent) SetModels(models SessionAgentModels) {
+	if models.Summary.Model == nil {
+		models.Summary = models.Large
+	}
+	if models.Review.Model == nil {
+		models.Review = models.Large
+	}
+	a.largeModel.Set(models.Large)
+	a.smallModel.Set(models.Small)
+	a.summaryModel.Set(models.Summary)
+	a.reviewModel.Set(models.Review)
+	a.smallProviderOpts.Set(models.SmallProviderOpts)
+	a.summaryProviderOpts.Set(models.SummaryProviderOpts)
+	a.reviewProviderOpts.Set(models.ReviewProviderOpts)
+	a.largePromptPrefix.Set(models.LargeSystemPromptPrefix)
+	a.smallPromptPrefix.Set(models.SmallSystemPromptPrefix)
+	a.summaryPromptPrefix.Set(models.SummarySystemPromptPrefix)
+	a.reviewPromptPrefix.Set(models.ReviewSystemPromptPrefix)
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
@@ -2039,8 +3108,35 @@ func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
 }
 
+func (a *sessionAgent) SetRecoveryContext(recoveryContext string) {
+	a.recoveryContext.Set(recoveryContext)
+}
+
+func (a *sessionAgent) SetMemoryOptions(recorderEnabled, recallEnabled bool) {
+	a.memoryRecorder.Store(recorderEnabled)
+	a.memoryRecall.Store(recallEnabled)
+	if !recorderEnabled {
+		a.cancelAllMemoryJobs()
+	}
+}
+
+func mergeSystemPromptPrefix(prefix, system string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return system
+	}
+	if strings.TrimSpace(system) == "" {
+		return prefix
+	}
+	return prefix + "\n\n" + system
+}
+
 func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
+}
+
+func (a *sessionAgent) SummaryModel() Model {
+	return a.summaryModel.Get()
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
@@ -2196,7 +3292,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 // buildSummaryPrompt constructs the prompt text for session summarization.
 func buildSummaryPrompt(todos []session.Todo) string {
 	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
+	sb.WriteString("Create a compact continuation checkpoint under 450 words. Keep only the original goal, decisive verified facts, distinct failed paths, critical paths or identifiers, and the single smallest next action. Never promote a failed command, guessed package name, malformed configuration, or unexecuted printed tool envelope into the plan. Omit narration, repeated facts, generic architecture, and completed intermediate searches.")
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {

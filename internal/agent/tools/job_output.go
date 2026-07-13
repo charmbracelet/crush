@@ -10,9 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
-const (
-	JobOutputToolName = "job_output"
-)
+const JobOutputToolName = "job_output"
 
 //go:embed job_output.md
 var jobOutputDescription string
@@ -27,6 +25,10 @@ type JobOutputResponseMetadata struct {
 	Command          string `json:"command"`
 	Description      string `json:"description"`
 	Done             bool   `json:"done"`
+	Failed           bool   `json:"failed,omitempty"`
+	Canceled         bool   `json:"canceled,omitempty"`
+	ExitCode         int    `json:"exit_code,omitempty"`
+	WaitTimedOut     bool   `json:"wait_timed_out,omitempty"`
 	WorkingDirectory string `json:"working_directory"`
 }
 
@@ -45,8 +47,9 @@ func NewJobOutputTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("background shell not found: %s", params.ShellID)), nil
 			}
 
+			waitTimedOut := false
 			if params.Wait {
-				bgShell.WaitContext(ctx)
+				waitTimedOut = !bgShell.WaitContext(ctx)
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()
@@ -60,14 +63,27 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			status := "running"
+			failed := false
+			canceled := false
+			exitCode := 0
 			if done {
 				status = "completed"
 				if err != nil {
-					exitCode := shell.ExitCode(err)
-					if exitCode != 0 {
+					exitCode = shell.ExitCode(err)
+					if shell.IsInterrupt(err) {
+						status = "canceled"
+						canceled = true
+						outputParts = append(outputParts, "Job was canceled")
+					} else {
+						status = "failed"
+						failed = true
+					}
+					if exitCode != 0 && !canceled {
 						outputParts = append(outputParts, fmt.Sprintf("Exit code %d", exitCode))
 					}
 				}
+			} else if waitTimedOut {
+				outputParts = append(outputParts, "Wait requested, but the wait context ended before the background shell completed. Returned current output snapshot.")
 			}
 
 			output := strings.Join(outputParts, "\n")
@@ -78,6 +94,10 @@ func NewJobOutputTool() fantasy.AgentTool {
 				Command:          bgShell.Command,
 				Description:      bgShell.Description,
 				Done:             done,
+				Failed:           failed,
+				Canceled:         canceled,
+				ExitCode:         exitCode,
+				WaitTimedOut:     waitTimedOut,
 				WorkingDirectory: bgShell.WorkingDir,
 			}
 

@@ -229,6 +229,18 @@ func (w *ClientWorkspace) AgentModel() AgentModel {
 	}
 }
 
+func (w *ClientWorkspace) AgentMode() string {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil || info.AgentID == "" {
+		return config.AgentCoder
+	}
+	return info.AgentID
+}
+
+func (w *ClientWorkspace) SetAgentMode(ctx context.Context, agentID string) error {
+	return w.client.SetAgentMode(ctx, w.workspaceID(), agentID)
+}
+
 func (w *ClientWorkspace) AgentIsReady() bool {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {
@@ -290,6 +302,7 @@ func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) boo
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Resource:    perm.Resource,
 		},
 		Action: proto.PermissionAllow,
 	})
@@ -307,6 +320,7 @@ func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRe
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Resource:    perm.Resource,
 		},
 		Action: proto.PermissionAllowForSession,
 	})
@@ -324,6 +338,7 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Resource:    perm.Resource,
 		},
 		Action: proto.PermissionDeny,
 	})

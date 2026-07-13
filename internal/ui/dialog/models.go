@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ModelType represents the type of model to select.
@@ -23,6 +24,8 @@ type ModelType int
 const (
 	ModelTypeLarge ModelType = iota
 	ModelTypeSmall
+	ModelTypeSummary
+	ModelTypeReview
 )
 
 // String returns the string representation of the [ModelType].
@@ -32,6 +35,26 @@ func (mt ModelType) String() string {
 		return "Large Task"
 	case ModelTypeSmall:
 		return "Small Task"
+	case ModelTypeSummary:
+		return "Summary"
+	case ModelTypeReview:
+		return "Review"
+	default:
+		return "Unknown"
+	}
+}
+
+// ShortLabel returns a compact label for summary rows.
+func (mt ModelType) ShortLabel() string {
+	switch mt {
+	case ModelTypeLarge:
+		return "Large"
+	case ModelTypeSmall:
+		return "Small"
+	case ModelTypeSummary:
+		return "Summary"
+	case ModelTypeReview:
+		return "Review"
 	default:
 		return "Unknown"
 	}
@@ -44,6 +67,10 @@ func (mt ModelType) Config() config.SelectedModelType {
 		return config.SelectedModelTypeLarge
 	case ModelTypeSmall:
 		return config.SelectedModelTypeSmall
+	case ModelTypeSummary:
+		return config.SelectedModelTypeSummary
+	case ModelTypeReview:
+		return config.SelectedModelTypeReview
 	default:
 		return ""
 	}
@@ -56,6 +83,10 @@ func (mt ModelType) Placeholder() string {
 		return largeModelInputPlaceholder
 	case ModelTypeSmall:
 		return smallModelInputPlaceholder
+	case ModelTypeSummary:
+		return summaryModelInputPlaceholder
+	case ModelTypeReview:
+		return reviewModelInputPlaceholder
 	default:
 		return ""
 	}
@@ -65,6 +96,8 @@ const (
 	onboardingModelInputPlaceholder = "Find your fave"
 	largeModelInputPlaceholder      = "Choose a model for large, complex tasks"
 	smallModelInputPlaceholder      = "Choose a model for small, simple tasks"
+	summaryModelInputPlaceholder    = "Choose a model for conversation summaries"
+	reviewModelInputPlaceholder     = "Choose a model for review mode"
 )
 
 // ModelsID is the identifier for the model selection dialog.
@@ -194,6 +227,9 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			if !ok {
 				break
 			}
+			if isLMStudioSetupModelItem(modelItem) {
+				return ActionOpenLMStudioSetup{}
+			}
 
 			isEdit := key.Matches(msg, m.keyMap.Edit)
 
@@ -207,9 +243,14 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			if m.isOnboarding {
 				break
 			}
-			if m.modelType == ModelTypeLarge {
+			switch m.modelType {
+			case ModelTypeLarge:
 				m.modelType = ModelTypeSmall
-			} else {
+			case ModelTypeSmall:
+				m.modelType = ModelTypeSummary
+			case ModelTypeSummary:
+				m.modelType = ModelTypeReview
+			default:
 				m.modelType = ModelTypeLarge
 			}
 			if err := m.setProviderItems(); err != nil {
@@ -240,18 +281,29 @@ func (m *Models) modelTypeRadioView() string {
 	textStyle := t.Radio.Label
 	largeRadioStyle := t.Radio.Off
 	smallRadioStyle := t.Radio.Off
-	if m.modelType == ModelTypeLarge {
+	summaryRadioStyle := t.Radio.Off
+	reviewRadioStyle := t.Radio.Off
+	switch m.modelType {
+	case ModelTypeLarge:
 		largeRadioStyle = t.Radio.On
-	} else {
+	case ModelTypeSmall:
 		smallRadioStyle = t.Radio.On
+	case ModelTypeSummary:
+		summaryRadioStyle = t.Radio.On
+	case ModelTypeReview:
+		reviewRadioStyle = t.Radio.On
 	}
 
 	largeRadio := largeRadioStyle.Padding(0, 1).Render()
 	smallRadio := smallRadioStyle.Padding(0, 1).Render()
+	summaryRadio := summaryRadioStyle.Padding(0, 1).Render()
+	reviewRadio := reviewRadioStyle.Padding(0, 1).Render()
 
-	return fmt.Sprintf("%s%s  %s%s",
+	return fmt.Sprintf("%s%s  %s%s  %s%s  %s%s",
 		largeRadio, textStyle.Render(ModelTypeLarge.String()),
-		smallRadio, textStyle.Render(ModelTypeSmall.String()))
+		smallRadio, textStyle.Render(ModelTypeSmall.String()),
+		summaryRadio, textStyle.Render(ModelTypeSummary.String()),
+		reviewRadio, textStyle.Render(ModelTypeReview.String()))
 }
 
 // Draw implements [Dialog].
@@ -264,6 +316,13 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
+	selectedModelsView := ""
+	activeRouteView := ""
+	if !m.isOnboarding {
+		selectedModelsView = m.selectedModelsView(innerWidth)
+		activeRouteView = m.activeRouteView(innerWidth)
+		heightOffset += lipgloss.Height(selectedModelsView) + lipgloss.Height(activeRouteView)
+	}
 
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 	m.help.SetWidth(innerWidth)
@@ -274,13 +333,15 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listTotalHeight := m.list.TotalHeight()
 
 	rc := NewRenderContext(t, width)
-	rc.Title = "Switch Model"
+	rc.Title = "Model Slots"
 	rc.TitleInfo = m.modelTypeRadioView()
 
 	if m.isOnboarding {
 		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
 		rc.AddPart(titleText)
 	}
+	rc.AddPart(activeRouteView)
+	rc.AddPart(selectedModelsView)
 
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
@@ -295,6 +356,9 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = m.help.View(m)
 
 	cur := m.Cursor()
+	if !m.isOnboarding && cur != nil {
+		cur.Y += lipgloss.Height(activeRouteView) + lipgloss.Height(selectedModelsView)
+	}
 
 	if m.isOnboarding {
 		rc.Title = ""
@@ -308,6 +372,30 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		DrawCenterCursor(scr, area, view, cur)
 	}
 	return cur
+}
+
+func (m *Models) activeRouteView(width int) string {
+	cfg := m.com.Config()
+	agentID := m.com.Workspace.AgentMode()
+	agent, ok := cfg.Agents[agentID]
+	if !ok {
+		return ""
+	}
+	modelName := "unset"
+	if selected, exists := cfg.Models[agent.Model]; exists && selected.Model != "" {
+		modelName = m.selectedModelName(selected)
+	}
+	label := fmt.Sprintf("Active: %s -> %s -> %s", modeTitle(agentID), modelTypeLabel(agent.Model), modelName)
+	return m.com.Styles.Dialog.SecondaryText.Padding(0, 1).Render(ansi.Truncate(label, max(0, width-2), "..."))
+}
+
+func modeTitle(agentID string) string {
+	for _, mode := range modeDefinitions {
+		if mode.ID == agentID {
+			return mode.Title
+		}
+	}
+	return "Chat"
 }
 
 // ShortHelp returns the short help view.
@@ -349,6 +437,61 @@ func (m *Models) isSelectedConfigured() bool {
 	return isConfigured
 }
 
+func (m *Models) selectedModelsView(width int) string {
+	colWidth := max(12, width/2-1)
+	row := func(left, right ModelType) string {
+		return lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			m.selectedModelSegment(left, colWidth),
+			" ",
+			m.selectedModelSegment(right, colWidth),
+		)
+	}
+	return lipgloss.NewStyle().Padding(1, 1, 0, 1).Render(lipgloss.JoinVertical(
+		lipgloss.Left,
+		row(ModelTypeLarge, ModelTypeSmall),
+		row(ModelTypeSummary, ModelTypeReview),
+	))
+}
+
+func (m *Models) selectedModelSegment(modelType ModelType, width int) string {
+	cfg := m.com.Config()
+	selected, ok := cfg.Models[modelType.Config()]
+	modelName := "unset"
+	if ok && selected.Model != "" {
+		modelName = m.selectedModelName(selected)
+	}
+	label := fmt.Sprintf("%s: %s", modelType.ShortLabel(), modelName)
+	label = ansi.Truncate(label, max(0, width), "…")
+	style := m.com.Styles.Radio.Label
+	if modelType == m.modelType {
+		style = m.com.Styles.Dialog.TitleAccent
+	}
+	return style.Width(width).Render(label)
+}
+
+func (m *Models) selectedModelName(selected config.SelectedModel) string {
+	cfg := m.com.Config()
+	if providerConfig, ok := cfg.Providers.Get(selected.Provider); ok {
+		for _, model := range providerConfig.Models {
+			if model.ID == selected.Model {
+				return cmp.Or(model.Name, model.ID)
+			}
+		}
+	}
+	for _, provider := range m.providers {
+		if string(provider.ID) != selected.Provider {
+			continue
+		}
+		for _, model := range provider.Models {
+			if model.ID == selected.Model {
+				return cmp.Or(model.Name, model.ID)
+			}
+		}
+	}
+	return selected.Model
+}
+
 // setProviderItems sets the provider items in the list.
 func (m *Models) setProviderItems() error {
 	t := m.com.Styles
@@ -377,6 +520,11 @@ func (m *Models) setProviderItems() error {
 	// itemsMap contains the keys of added model items.
 	itemsMap := make(map[string]*ModelItem)
 	groups := []ModelGroup{}
+	if _, ok := cfg.Providers.Get(config.LMStudioProviderID); !ok {
+		setupGroup := NewModelGroup(t, "Local Providers", false)
+		setupGroup.AppendItems(newLMStudioSetupModelItem(t))
+		groups = append(groups, setupGroup)
+	}
 	for id, p := range cfg.Providers.Seq2() {
 		if p.Disable {
 			continue
@@ -498,6 +646,7 @@ func (m *Models) setProviderItems() error {
 	if selectedItemID != "" {
 		m.list.ScrollToSelected()
 	} else {
+		m.list.SelectFirst()
 		m.list.ScrollToTop()
 	}
 

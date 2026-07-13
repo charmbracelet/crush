@@ -119,7 +119,7 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 	formattedCost := t.ModelInfo.Cost.Render(fmt.Sprintf("$%.2f", cost))
 
 	formattedTokens = t.ModelInfo.TokenCount.Render(fmt.Sprintf("(%s)", formattedTokens))
-	percentageText := fmt.Sprintf("%d%%", int(percentage))
+	percentageText := fmt.Sprintf("%.1f%%", percentage)
 	if estimated {
 		percentageText = "~" + percentageText
 	}

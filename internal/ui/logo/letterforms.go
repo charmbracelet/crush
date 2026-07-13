@@ -157,6 +157,42 @@ func LetterH(stretch bool) string {
 	)
 }
 
+// LetterD renders the letter D in a stylized way. It takes an integer that
+// determines how many cells to stretch the letter. If the stretch is less than
+// 1, it defaults to no stretching.
+func LetterD(stretch bool) string {
+	if stretch {
+		return heredoc.Doc(`
+			█▀▀▄
+			█  █
+			▀▀▀▀
+		`)
+	}
+	return heredoc.Doc(`
+		█▀▄
+		█ █
+		▀▀▀
+	`)
+}
+
+// LetterO renders the letter O in a stylized way. It takes an integer that
+// determines how many cells to stretch the letter. If the stretch is less than
+// 1, it defaults to no stretching.
+func LetterO(stretch bool) string {
+	if stretch {
+		return heredoc.Doc(`
+			█▀▀█
+			█  █
+			▀▀▀▀
+		`)
+	}
+	return heredoc.Doc(`
+		█▀█
+		█ █
+		▀▀▀
+	`)
+}
+
 // LetterP renders the letter P in a stylized way. It takes an integer that
 // determines how many cells to stretch the letter. If the stretch is less than
 // 1, it defaults to no stretching.

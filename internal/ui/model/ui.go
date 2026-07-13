@@ -38,6 +38,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -170,6 +171,16 @@ type (
 	// fetched from the API.
 	creditsUpdatedMsg struct {
 		credits int
+	}
+	// memoryLoadedMsg refreshes the optional local memory management dialog.
+	memoryLoadedMsg struct {
+		snapshot workspace.MemorySnapshot
+		err      error
+	}
+	// memoryChangedMsg reports completion of a memory mutation before refresh.
+	memoryChangedMsg struct {
+		notice string
+		err    error
 	}
 )
 
@@ -662,6 +673,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
 
+	case sessionUsageLoadedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		if m.session != nil && m.session.ID == msg.sessionID {
+			m.session.PromptTokens = msg.promptTokens
+			m.session.CompletionTokens = msg.completionTokens
+			m.session.Cost = msg.cost
+			m.session.EstimatedUsage = msg.estimated
+		}
+
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
 		var paths []string
@@ -698,6 +721,22 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ok {
 			commands.SetMCPPrompts(m.mcpPrompts)
 		}
+	case memoryLoadedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		m.dialog.CloseDialog(dialog.MemoryID)
+		m.dialog.OpenDialog(dialog.NewMemory(m.com, msg.snapshot))
+	case memoryChangedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		if msg.notice != "" {
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg(msg.notice)))
+		}
+		cmds = append(cmds, m.loadMemorySnapshot())
 
 	case promptHistoryLoadedMsg:
 		m.promptHistory.messages = msg.messages
@@ -823,7 +862,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
-			m.keyMap.Models.SetHelp("ctrl+m", "models")
+			m.keyMap.Modes.SetHelp("ctrl+m", "modes")
 			m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
 		}
 	case copyChatHighlightMsg:
@@ -1360,6 +1399,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	if isEndTurn {
+		cmds = append(cmds, m.refreshSessionUsage(msg.SessionID))
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
@@ -1538,9 +1578,42 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.ImageSourceID)
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionOpenLMStudioSetup:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.ModelsID)
+		if cmd := m.openLMStudioSetupDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionOpenMemoryRemember:
+		arguments := []commands.Argument{
+			{ID: "name", Title: "Name", Description: "Short memory name", Required: true},
+			{ID: "content", Title: "Memory", Description: "What should future sessions know?", Required: true},
+			{ID: "scope", Title: "Scope", Description: "global or project (default: global)"},
+		}
+		m.dialog.OpenDialog(dialog.NewArguments(
+			m.com,
+			"Remember",
+			"Save an explicit memory. Project memories are recalled only in this repository.",
+			arguments,
+			dialog.ActionMemoryRemember{},
+		))
+	case dialog.ActionMemoryRemember:
+		m.dialog.CloseDialog(dialog.ArgumentsID)
+		cmds = append(cmds, m.rememberMemory(msg.Args))
+	case dialog.ActionMemorySetStatus:
+		cmds = append(cmds, m.setMemoryStatus(msg.ID, msg.Status))
+	case dialog.ActionMemorySetPinned:
+		cmds = append(cmds, m.setMemoryPinned(msg.ID, msg.Pinned))
+	case dialog.ActionMemorySetFeature:
+		cmds = append(cmds, m.setMemoryFeature(msg.Feature, msg.Enabled))
+	case dialog.ActionMemorySetSessionRecording:
+		cmds = append(cmds, m.setMemorySessionRecording(msg.SessionID, msg.Enabled))
+	case dialog.ActionMemoryMaintain:
+		cmds = append(cmds, m.maintainMemory())
 
 	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
@@ -1548,6 +1621,22 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.com.Workspace.PermissionSetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSetAgentMode:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before switching modes..."))
+			break
+		}
+		cmds = append(cmds, m.setAgentMode(msg.AgentID))
+		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.ModesID)
+	case dialog.ActionActivateAgentMode:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before switching modes..."))
+			break
+		}
+		cmds = append(cmds, m.activateAgentMode(msg.AgentID, msg.ModelType))
+		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.ModesID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -1671,6 +1760,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.handleSelectModel(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionConfigureLMStudio:
+		if cmd := m.configureLMStudio(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -1725,6 +1818,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			},
 		))
 
+	case dialog.ActionClipboardImageSelected:
+		cmds = append(cmds, tea.Sequence(
+			func() tea.Msg {
+				m.dialog.CloseDialog(dialog.ImageSourceID)
+				return nil
+			},
+			m.pasteImageFromClipboard,
+			func() tea.Msg {
+				fimage.ResetCache()
+				return nil
+			},
+		))
+
 	case dialog.ActionRunCustomCommand:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
@@ -1742,9 +1848,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if msg.Args != nil {
 			content = substituteArgs(content, msg.Args)
 		}
-		// If this is a skill command, format it using the skill's FormatInvocation method
+		// Skill catalog entries contain metadata only. Read the effective skill
+		// body before dispatch so invocation never depends on model activation.
 		if msg.Skill != nil {
-			content = msg.Skill.FormatInvocation()
+			cmds = append(cmds, m.invokeSkill(msg.Skill, ""))
+			m.dialog.CloseFrontDialog()
+			break
 		}
 		cmds = append(cmds, m.sendMessage(content))
 		m.dialog.CloseFrontDialog()
@@ -1898,10 +2007,24 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			// re-render of the transcript on every selection.
 			m.applyThemeForProvider(providerID)
 		}
-		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; msg.ModelType != config.SelectedModelTypeSmall && !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
 			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
+		}
+		defaultLargeModel := msg.Model
+		if largeModel, ok := cfg.Models[config.SelectedModelTypeLarge]; ok {
+			defaultLargeModel = largeModel
+		}
+		if _, ok := cfg.Models[config.SelectedModelTypeSummary]; msg.ModelType != config.SelectedModelTypeSummary && !ok {
+			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSummary, defaultLargeModel); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
+		}
+		if _, ok := cfg.Models[config.SelectedModelTypeReview]; msg.ModelType != config.SelectedModelTypeReview && !ok {
+			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeReview, defaultLargeModel); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}
 		}
@@ -1983,6 +2106,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return true
 		case key.Matches(msg, m.keyMap.Models):
 			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Modes):
+			if cmd := m.openModesDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return true
@@ -2100,7 +2228,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.currentModelSupportsImages() {
 					break
 				}
-				if cmd := m.openFilesDialog(); cmd != nil {
+				if cmd := m.openImageSourceDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 
@@ -2131,6 +2259,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				value = strings.TrimSpace(value)
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
+				}
+				if agentID, ok := agentModeFromCommand(value); ok {
+					m.randomizePlaceholders()
+					m.historyReset()
+					return tea.Batch(m.setAgentMode(agentID), m.loadPromptHistory())
 				}
 
 				if m.bangMode && value != "" {
@@ -2164,12 +2297,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Tab):
-				if m.state != uiLanding {
+				if strings.TrimSpace(m.textarea.Value()) == "" {
+					cmds = append(cmds, m.cycleAgentMode())
+				} else if m.state != uiLanding {
 					m.setState(m.state, uiFocusMain)
 					m.textarea.Blur()
 					m.chat.Focus()
 					m.chat.SetSelected(m.chat.Len() - 1)
 				}
+			case msg.Code == tea.KeyBackspace && strings.TrimSpace(m.textarea.Value()) == "" && m.com.Workspace.AgentMode() != config.AgentCoder:
+				cmds = append(cmds, m.setAgentMode(config.AgentCoder))
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
@@ -2548,7 +2685,7 @@ func (m *UI) View() tea.View {
 	}
 	v.MouseMode = tea.MouseModeCellMotion
 	v.ReportFocus = m.caps.ReportFocusEvents
-	v.WindowTitle = "crush " + home.Short(m.com.Workspace.WorkingDir())
+	v.WindowTitle = "re.code " + home.Short(m.com.Workspace.WorkingDir())
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
@@ -2598,7 +2735,11 @@ func (m *UI) ShortHelp() []key.Binding {
 		}
 
 		if m.focus == uiFocusEditor {
-			tab.SetHelp("tab", "focus chat")
+			if strings.TrimSpace(m.textarea.Value()) == "" {
+				tab.SetHelp("tab", "mode")
+			} else {
+				tab.SetHelp("tab", "focus chat")
+			}
 		} else {
 			tab.SetHelp("tab", "focus editor")
 		}
@@ -2607,6 +2748,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds,
 			tab,
 			commands,
+			k.Modes,
 			k.Models,
 		)
 
@@ -2636,6 +2778,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		binds = append(
 			binds,
 			commands,
+			k.Modes,
 			k.Models,
 			k.Editor.Newline,
 		)
@@ -2693,6 +2836,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			mainBinds,
 			tab,
 			commands,
+			k.Modes,
 			k.Models,
 			k.Sessions,
 			k.ToggleYolo,
@@ -2755,6 +2899,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				binds,
 				[]key.Binding{
 					commands,
+					k.Modes,
 					k.Models,
 					k.Sessions,
 					k.ToggleYolo,
@@ -2794,16 +2939,11 @@ func (m *UI) FullHelp() [][]key.Binding {
 }
 
 func (m *UI) currentModelSupportsImages() bool {
-	cfg := m.com.Config()
-	if cfg == nil {
+	if !m.com.Workspace.AgentIsReady() {
 		return false
 	}
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
-		return false
-	}
-	model := cfg.GetModelByType(agentCfg.Model)
-	return model != nil && model.SupportsImages
+	model := m.com.Workspace.AgentModel()
+	return model.CatwalkCfg.SupportsImages
 }
 
 // toggleCompactMode toggles compact mode between uiChat and uiChatCompact states.
@@ -3428,7 +3568,7 @@ func (m *UI) renderEditorView(width int) string {
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+	m.sidebarLogo = renderSidebarLogo(m.com.Styles, true, m.com.IsHyper(), width)
 }
 
 // applyThemeForProvider swaps the active theme to the one associated with
@@ -3501,10 +3641,107 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 	}
 }
 
+// invokeSkill resolves the effective skill body and sends it as loaded
+// instructions. Catalog entries intentionally contain metadata only.
+func (m *UI) invokeSkill(skill *skills.Skill, suffix string) tea.Cmd {
+	return func() tea.Msg {
+		content, result, err := m.com.Workspace.ReadSkill(context.Background(), skill.SkillFilePath)
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return sendMessageMsg{Content: formatLoadedSkillInvocation(skill, content, result, suffix)}
+	}
+}
+
+func formatLoadedSkillInvocation(skill *skills.Skill, content []byte, result skills.SkillReadResult, suffix string) string {
+	loaded := &skills.Skill{
+		Name:          cmp.Or(result.Name, skill.Name),
+		Description:   cmp.Or(result.Description, skill.Description),
+		SkillFilePath: skill.SkillFilePath,
+		Instructions:  string(content),
+	}
+	prompt := loaded.FormatInvocation()
+	if suffix != "" {
+		prompt += "\n\n" + suffix
+	}
+	return prompt
+}
+
+func agentModeLabel(agentID string) string {
+	switch agentID {
+	case config.AgentPlan, config.AgentReview:
+		return "Review"
+	default:
+		return "Task"
+	}
+}
+
+func agentModeFromCommand(content string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(content)) {
+	case "/chat", "/normal", "/build", "/coder", "/task":
+		return config.AgentCoder, true
+	case "/plan", "/review":
+		return config.AgentReview, true
+	default:
+		return "", false
+	}
+}
+
+func nextAgentMode(current string) string {
+	switch current {
+	case config.AgentCoder, "":
+		return config.AgentReview
+	default:
+		return config.AgentCoder
+	}
+}
+
+func (m *UI) setAgentMode(agentID string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.com.Workspace.SetAgentMode(context.Background(), agentID); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Agent mode set to " + agentModeLabel(agentID))
+	}
+}
+
+func (m *UI) activateAgentMode(agentID string, modelType config.SelectedModelType) tea.Cmd {
+	return func() tea.Msg {
+		key := fmt.Sprintf("mode_models.%s", agentID)
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, key, modelType); err != nil {
+			return util.ReportError(err)()
+		}
+		if err := m.com.Workspace.SetAgentMode(context.Background(), agentID); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg(fmt.Sprintf("%s mode active with %s", agentModeLabel(agentID), modeModelTypeLabel(modelType)))
+	}
+}
+
+func modeModelTypeLabel(modelType config.SelectedModelType) string {
+	switch modelType {
+	case config.SelectedModelTypeSmall:
+		return "Small Task"
+	case config.SelectedModelTypeSummary:
+		return "Summary"
+	case config.SelectedModelTypeReview:
+		return "Review"
+	default:
+		return "Large Task"
+	}
+}
+
+func (m *UI) cycleAgentMode() tea.Cmd {
+	return m.setAgentMode(nextAgentMode(m.com.Workspace.AgentMode()))
+}
+
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if !m.com.Workspace.AgentIsReady() {
-		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
+		return util.ReportError(fmt.Errorf("agent is not initialized"))
+	}
+	if agentID, ok := agentModeFromCommand(content); ok && len(attachments) == 0 {
+		return m.setAgentMode(agentID)
 	}
 
 	var cmds []tea.Cmd
@@ -3703,6 +3940,18 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openModelsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.LMStudioSetupID:
+		if cmd := m.openLMStudioSetupDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.MemoryID:
+		if cmd := m.openMemoryDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ModesID:
+		if cmd := m.openModesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.CommandsID:
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3713,6 +3962,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ImageSourceID:
+		if cmd := m.openImageSourceDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.FilePickerID:
@@ -3759,6 +4012,198 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(modelsDialog)
 
+	return nil
+}
+
+func (m *UI) openLMStudioSetupDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.LMStudioSetupID) {
+		m.dialog.BringToFront(dialog.LMStudioSetupID)
+		return nil
+	}
+
+	lmStudioDialog, cmd := dialog.NewLMStudioSetup(m.com, m.state == uiOnboarding)
+	m.dialog.OpenDialog(lmStudioDialog)
+	return cmd
+}
+
+func (m *UI) configureLMStudio(msg dialog.ActionConfigureLMStudio) tea.Cmd {
+	m.dialog.CloseDialog(dialog.LMStudioSetupID)
+
+	provider := msg.Provider
+	if provider.ID == "" {
+		provider.ID = config.LMStudioProviderID
+	}
+	if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("providers.%s", provider.ID), provider); err != nil {
+		return util.ReportError(fmt.Errorf("failed to save LM Studio provider: %w", err))
+	}
+
+	return m.handleSelectModel(dialog.ActionSelectModel{
+		Provider:  provider.ToProvider(),
+		Model:     msg.Model,
+		ModelType: config.SelectedModelTypeLarge,
+	})
+}
+
+func (m *UI) memoryWorkspace() (workspace.MemoryWorkspace, error) {
+	memoryWorkspace, ok := m.com.Workspace.(workspace.MemoryWorkspace)
+	if !ok {
+		return nil, errors.New("memory management is unavailable in this workspace")
+	}
+	return memoryWorkspace, nil
+}
+
+func (m *UI) loadMemorySnapshot() tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		snapshot, loadErr := memoryWorkspace.MemorySnapshot(ctx, sessionID)
+		return memoryLoadedMsg{snapshot: snapshot, err: loadErr}
+	}
+}
+
+func (m *UI) openMemoryDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MemoryID) {
+		m.dialog.BringToFront(dialog.MemoryID)
+	}
+	return m.loadMemorySnapshot()
+}
+
+func (m *UI) rememberMemory(args map[string]string) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	name := strings.TrimSpace(args["name"])
+	content := strings.TrimSpace(args["content"])
+	if name == "" || content == "" {
+		return util.ReportError(errors.New("memory name and content are required"))
+	}
+
+	scope := memory.ScopeGlobal
+	kind := memory.KindUser
+	switch strings.ToLower(strings.TrimSpace(args["scope"])) {
+	case "", string(memory.ScopeGlobal):
+	case string(memory.ScopeProject):
+		scope = memory.ScopeProject
+		kind = memory.KindProject
+	default:
+		return util.ReportError(errors.New("memory scope must be global or project"))
+	}
+
+	input := workspace.MemoryRememberInput{
+		Scope:       scope,
+		Kind:        kind,
+		Name:        name,
+		Description: name,
+		Content:     content,
+		Pinned:      true,
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_, rememberErr := memoryWorkspace.MemoryRemember(ctx, input)
+		return memoryChangedMsg{notice: "Memory saved", err: rememberErr}
+	}
+}
+
+func (m *UI) setMemoryStatus(id string, status memory.Status) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		setErr := memoryWorkspace.MemorySetStatus(ctx, id, status)
+		return memoryChangedMsg{notice: "Memory marked " + string(status), err: setErr}
+	}
+}
+
+func (m *UI) setMemoryPinned(id string, pinned bool) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		setErr := memoryWorkspace.MemorySetPinned(ctx, id, pinned)
+		notice := "Memory unpinned"
+		if pinned {
+			notice = "Memory pinned"
+		}
+		return memoryChangedMsg{notice: notice, err: setErr}
+	}
+}
+
+func (m *UI) setMemoryFeature(feature workspace.MemoryFeature, enabled bool) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		setErr := memoryWorkspace.MemorySetFeature(ctx, feature, enabled)
+		state := "disabled"
+		if enabled {
+			state = "enabled"
+		}
+		return memoryChangedMsg{notice: fmt.Sprintf("Memory %s %s", feature, state), err: setErr}
+	}
+}
+
+func (m *UI) setMemorySessionRecording(sessionID string, enabled bool) tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		setErr := memoryWorkspace.MemorySetSessionRecording(ctx, sessionID, enabled)
+		state := "excluded"
+		if enabled {
+			state = "eligible"
+		}
+		return memoryChangedMsg{notice: "This session is now " + state + " for memory recording", err: setErr}
+	}
+}
+
+func (m *UI) maintainMemory() tea.Cmd {
+	memoryWorkspace, err := m.memoryWorkspace()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, maintainErr := memoryWorkspace.MemoryMaintain(ctx)
+		notice := fmt.Sprintf(
+			"Memory maintenance complete: %d records and %d retrievals pruned",
+			result.RecordsPurged,
+			result.RetrievalsPurged,
+		)
+		return memoryChangedMsg{notice: notice, err: maintainErr}
+	}
+}
+
+// openModesDialog opens the agent mode picker dialog.
+func (m *UI) openModesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ModesID) {
+		m.dialog.BringToFront(dialog.ModesID)
+		return nil
+	}
+
+	m.dialog.OpenDialog(dialog.NewModes(m.com))
 	return nil
 }
 
@@ -3837,6 +4282,17 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(dialog)
+	return nil
+}
+
+// openImageSourceDialog opens the image source picker dialog.
+func (m *UI) openImageSourceDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ImageSourceID) {
+		m.dialog.BringToFront(dialog.ImageSourceID)
+		return nil
+	}
+
+	m.dialog.OpenDialog(dialog.NewImageSource(m.com))
 	return nil
 }
 
@@ -4336,6 +4792,18 @@ func (m *UI) disableDockerMCP() tea.Msg {
 // renderLogo renders the Crush logo with the given styles and dimensions.
 func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 	return logo.Render(t.Logo.GradCanvas, version.Version, compact, logo.Opts{
+		FieldColor:   t.Logo.FieldColor,
+		TitleColorA:  t.Logo.TitleColorA,
+		TitleColorB:  t.Logo.TitleColorB,
+		CharmColor:   t.Logo.CharmColor,
+		VersionColor: t.Logo.VersionColor,
+		Width:        width,
+		Hyper:        hyper,
+	})
+}
+
+func renderSidebarLogo(t *styles.Styles, compact, hyper bool, width int) string {
+	return logo.Render(t.Logo.GradCanvas, "", compact, logo.Opts{
 		FieldColor:   t.Logo.FieldColor,
 		TitleColorA:  t.Logo.TitleColorA,
 		TitleColorB:  t.Logo.TitleColorB,

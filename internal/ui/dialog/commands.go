@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -431,7 +432,12 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
-		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "switch_model", "Model Slots", "ctrl+l", ActionOpenDialog{ModelsID}).WithAliases("switch model", "configure model slots", "models"),
+		NewCommandItem(c.com.Styles, "choose_mode", "Choose Mode", "alt+m", ActionOpenDialog{ModesID}).WithAliases("chat", "/chat", "normal", "build", "/build", "coder", "plan", "/plan", "task", "/task", "review", "/review"),
+		NewCommandItem(c.com.Styles, "configure_lmstudio", "Configure LM Studio", "", ActionOpenLMStudioSetup{}).WithAliases("lm studio", "lmstudio", "local model"),
+	}
+	if _, ok := c.com.Workspace.(workspace.MemoryWorkspace); ok {
+		commands = append(commands, NewCommandItem(c.com.Styles, "memory", "Memory", "", ActionOpenDialog{MemoryID}).WithAliases("memories", "remember", "recall"))
 	}
 
 	// Only show compact command if there's an active session
@@ -469,12 +475,10 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.hasSession {
-		cfgPrime := c.com.Config()
-		agentCfg := cfgPrime.Agents[config.AgentCoder]
-		model := cfgPrime.GetModelByType(agentCfg.Model)
-		if model != nil && model.SupportsImages {
-			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
-				DialogID: FilePickerID,
+		model := c.com.Workspace.AgentModel()
+		if model.CatwalkCfg.SupportsImages {
+			commands = append(commands, NewCommandItem(c.com.Styles, "image_source", "Add Image", "ctrl+f", ActionOpenDialog{
+				DialogID: ImageSourceID,
 			}))
 		}
 	}

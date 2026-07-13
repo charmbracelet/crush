@@ -1,1 +1,1 @@
-List files and directories as a tree; skips hidden files and common system dirs; max {{ .MaxFiles }} files. Use glob to find files by pattern, grep to search contents.
+List files and directories as a tree; max {{ .MaxFiles }} files. An explicitly supplied path includes hidden and ignored entries so named configuration and runtime folders remain inspectable. A default workspace scan filters ignored entries to control noise. Use glob to find files by pattern, grep to search contents.

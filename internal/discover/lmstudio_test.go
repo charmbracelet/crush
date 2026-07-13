@@ -59,6 +59,75 @@ func TestLmstudioEnricher(t *testing.T) {
 		require.Equal(t, "unknown-model", result[2].Name)
 	})
 
+	t.Run("marks qwen3 architecture models as reasoning capable", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+				Models: []lmstudioModelEntry{
+					{
+						Key:          "qwythos-9b-claude-mythos-5-1m",
+						DisplayName:  "Qwythos 9B Claude Mythos 5 1M",
+						Architecture: "qwen35",
+						Type:         "llm",
+					},
+					{
+						Key:          "qwen2.5-3b-instruct",
+						DisplayName:  "Qwen2.5 3B Instruct",
+						Architecture: "qwen2",
+						Type:         "llm",
+					},
+					{
+						Key:          "text-embedding-nomic-embed-text-v1.5",
+						DisplayName:  "Nomic Embed Text v1.5",
+						Architecture: "",
+						Type:         "embedding",
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL + "/v1"}
+		models := []catwalk.Model{
+			{ID: "qwythos-9b-claude-mythos-5-1m", Name: "qwythos-9b-claude-mythos-5-1m"},
+			{ID: "qwen2.5-3b-instruct", Name: "qwen2.5-3b-instruct"},
+			{ID: "text-embedding-nomic-embed-text-v1.5", Name: "text-embedding-nomic-embed-text-v1.5"},
+		}
+
+		e := &lmstudioEnricher{}
+		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.True(t, result[0].CanReason)
+		require.False(t, result[1].CanReason)
+		require.False(t, result[2].CanReason)
+	})
+
+	t.Run("propagates native vision capability", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+				Models: []lmstudioModelEntry{
+					{Key: "vision-model", Capabilities: lmstudioCapabilities{Vision: true}},
+					{Key: "text-model", Capabilities: lmstudioCapabilities{Vision: false}},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL + "/v1"}
+		models := []catwalk.Model{
+			{ID: "vision-model", Name: "vision-model"},
+			{ID: "text-model", Name: "text-model"},
+		}
+
+		result, err := (&lmstudioEnricher{}).EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.True(t, result[0].SupportsImages)
+		require.False(t, result[1].SupportsImages)
+	})
+
 	t.Run("prefers loaded instance context length over model max", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -84,6 +153,35 @@ func TestLmstudioEnricher(t *testing.T) {
 		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.NoError(t, err)
 		require.Equal(t, int64(8192), result[0].ContextWindow)
+	})
+
+	t.Run("enriches a loaded instance alias", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+				Models: []lmstudioModelEntry{
+					{
+						Key:              "qwythos-9b-claude-mythos-5-1m",
+						DisplayName:      "Qwythos 9B Claude Mythos 5 1M",
+						MaxContextLength: 1_048_576,
+						Capabilities:     lmstudioCapabilities{Vision: true},
+						LoadedInstances: []lmstudioInstance{
+							{ID: "qwythos-9b", Config: lmstudioInstanceConfig{ContextLength: 32_768}},
+						},
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL + "/v1"}
+		models := []catwalk.Model{{ID: "qwythos-9b", Name: "qwythos-9b"}}
+		result, err := (&lmstudioEnricher{}).EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.Equal(t, int64(32_768), result[0].ContextWindow)
+		require.Equal(t, "Qwythos 9B Claude Mythos 5 1M", result[0].Name)
+		require.True(t, result[0].SupportsImages)
 	})
 
 	t.Run("preserves existing non-zero values", func(t *testing.T) {

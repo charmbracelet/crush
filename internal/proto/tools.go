@@ -25,6 +25,8 @@ type ToolResponse struct {
 
 const BashToolName = "bash"
 
+const TmuxToolName = "tmux"
+
 // BashParams represents the parameters for the bash tool.
 type BashParams struct {
 	Command string `json:"command"`
@@ -33,6 +35,8 @@ type BashParams struct {
 
 // BashPermissionsParams represents the permission parameters for the bash tool.
 type BashPermissionsParams = tools.BashPermissionsParams
+
+type TmuxPermissionsParams = tools.TmuxPermissionsParams
 
 // BashResponseMetadata represents the metadata for a bash tool response.
 type BashResponseMetadata struct {
@@ -98,6 +102,18 @@ const AgenticFetchToolName = tools.AgenticFetchToolName
 // AgenticFetchPermissionsParams represents the permission parameters for the
 // agentic_fetch tool.
 type AgenticFetchPermissionsParams = tools.AgenticFetchPermissionsParams
+
+// WebFetchToolName is the name of the web_fetch tool.
+const WebFetchToolName = tools.WebFetchToolName
+
+// WebFetchPermissionsParams represents the permission parameters for web_fetch.
+type WebFetchPermissionsParams = tools.WebFetchPermissionsParams
+
+// WebSearchToolName is the name of the web_search tool.
+const WebSearchToolName = tools.WebSearchToolName
+
+// WebSearchPermissionsParams represents the permission parameters for web_search.
+type WebSearchPermissionsParams = tools.WebSearchPermissionsParams
 
 const GlobToolName = "glob"
 

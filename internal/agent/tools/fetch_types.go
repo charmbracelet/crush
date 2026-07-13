@@ -6,7 +6,7 @@ const AgenticFetchToolName = "agentic_fetch"
 // WebFetchToolName is the name of the web_fetch tool.
 const WebFetchToolName = "web_fetch"
 
-// WebSearchToolName is the name of the web_search tool for sub-agents.
+// WebSearchToolName is the name of the web_search tool.
 const WebSearchToolName = "web_search"
 
 // LargeContentThreshold is the size threshold for saving content to a file.
@@ -29,10 +29,19 @@ type WebFetchParams struct {
 	URL string `json:"url" description:"The URL to fetch content from"`
 }
 
+type WebFetchPermissionsParams struct {
+	URL string `json:"url"`
+}
+
 // WebSearchParams defines the parameters for the web_search tool.
 type WebSearchParams struct {
 	Query      string `json:"query" description:"The search query to find information on the web"`
 	MaxResults int    `json:"max_results,omitempty" description:"Maximum number of results to return (default: 10, max: 20)"`
+}
+
+type WebSearchPermissionsParams struct {
+	Query      string `json:"query"`
+	MaxResults int    `json:"max_results,omitempty"`
 }
 
 // FetchParams defines the parameters for the simple fetch tool.

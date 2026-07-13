@@ -67,6 +67,17 @@ func (m *Tool) MCPToolName() string {
 	return m.tool.Name
 }
 
+// PollutesMemory reports whether this server's output should be treated as
+// externally sourced by the optional passive-memory guard.
+func (m *Tool) PollutesMemory() bool {
+	cfg := m.cfg.Config()
+	if cfg == nil {
+		return true
+	}
+	server, ok := cfg.MCP[m.mcpName]
+	return !ok || server.PollutesMemory == nil || *server.PollutesMemory
+}
+
 func (m *Tool) Info() fantasy.ToolInfo {
 	parameters := make(map[string]any)
 	required := make([]string, 0)

@@ -242,12 +242,12 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 > many cases you can simply ask Crush to configure itself.
 
 Crush runs great with no configuration. That said, if you do need or want to
-customize Crush, configuration can be added either local to the project itself,
-or globally, with the following priority:
+customize Crush, configuration uses one global file plus one optional,
+distinctly named project override, with the following priority:
 
-1. `.crush.json`
-2. `crush.json`
-3. `$HOME/.config/crush/crush.json`
+1. `crush.project.json` at the project root
+2. The canonical global `crush.json` (`%LOCALAPPDATA%/crush/crush.json` on
+   Windows or `$XDG_DATA_HOME/crush/crush.json` on Unix-like systems)
 
 Configuration itself is stored as a JSON object:
 
@@ -258,15 +258,12 @@ Configuration itself is stored as a JSON object:
 }
 ```
 
-As an additional note, Crush also stores ephemeral data, such as application
-state, in one additional location:
+Crush stores per-project ephemeral data, such as sessions and logs, under the
+project's `.crush/` directory. This state directory is not another configuration
+source.
 
 ```bash
-# Unix
-$HOME/.local/share/crush/crush.json
-
-# Windows
-%LOCALAPPDATA%\crush\crush.json
+./.crush/
 ```
 
 > [!TIP]

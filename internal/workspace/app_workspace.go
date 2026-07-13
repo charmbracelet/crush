@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -187,6 +188,20 @@ func (w *AppWorkspace) AgentModel() AgentModel {
 	}
 }
 
+func (w *AppWorkspace) AgentMode() string {
+	if w.app.AgentCoordinator == nil {
+		return config.AgentCoder
+	}
+	return w.app.AgentCoordinator.CurrentAgentID()
+}
+
+func (w *AppWorkspace) SetAgentMode(ctx context.Context, agentID string) error {
+	if w.app.AgentCoordinator == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	return w.app.AgentCoordinator.SetMainAgent(ctx, agentID)
+}
+
 func (w *AppWorkspace) AgentIsReady() bool {
 	return w.app.AgentCoordinator != nil
 }
@@ -228,6 +243,125 @@ func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	return w.app.GetDefaultSmallModel(providerID)
+}
+
+// -- Memory --
+
+func (w *AppWorkspace) MemorySnapshot(ctx context.Context, sessionID string) (MemorySnapshot, error) {
+	options := w.store.Config().Options.Memory
+	snapshot := MemorySnapshot{
+		Project:     w.app.MemoryProject,
+		SessionID:   sessionID,
+		SessionMode: memory.SessionRecordingEnabled,
+	}
+	if options != nil {
+		snapshot.Enabled = options.Enabled != nil && *options.Enabled
+		snapshot.RecorderEnabled = options.RecorderEnabled != nil && *options.RecorderEnabled
+		snapshot.RecallEnabled = options.RecallEnabled != nil && *options.RecallEnabled
+		snapshot.Directory = options.Directory
+	}
+	if w.app.Memory == nil {
+		return snapshot, nil
+	}
+	snapshot.Available = true
+	snapshot.Directory = w.app.Memory.Directory()
+	mode, err := w.app.Memory.SessionRecordingMode(ctx, sessionID)
+	if err != nil {
+		return MemorySnapshot{}, err
+	}
+	snapshot.SessionMode = mode
+	if err := w.app.Memory.SyncFromDisk(ctx, w.app.MemoryProject); err != nil {
+		return MemorySnapshot{}, err
+	}
+	stats, err := w.app.Memory.Stats(ctx)
+	if err != nil {
+		return MemorySnapshot{}, err
+	}
+	records, err := w.app.Memory.List(ctx, w.app.MemoryProject.ID, "", 200)
+	if err != nil {
+		return MemorySnapshot{}, err
+	}
+	snapshot.Stats = stats
+	snapshot.Records = records
+	return snapshot, nil
+}
+
+func (w *AppWorkspace) MemoryRemember(ctx context.Context, input MemoryRememberInput) (memory.Record, error) {
+	if w.app.Memory == nil {
+		return memory.Record{}, errors.New("memory store is unavailable")
+	}
+	return w.app.Memory.SaveObservation(ctx, w.app.MemoryProject, memory.Observation{
+		Scope:       input.Scope,
+		Kind:        input.Kind,
+		Name:        input.Name,
+		Description: input.Description,
+		Content:     input.Content,
+		Confidence:  1,
+		Explicit:    true,
+		Pinned:      input.Pinned,
+		SourceKind:  "manual",
+		Status:      memory.StatusActive,
+	})
+}
+
+func (w *AppWorkspace) MemorySetStatus(ctx context.Context, id string, status memory.Status) error {
+	if w.app.Memory == nil {
+		return errors.New("memory store is unavailable")
+	}
+	return w.app.Memory.SetStatus(ctx, id, status)
+}
+
+func (w *AppWorkspace) MemorySetPinned(ctx context.Context, id string, pinned bool) error {
+	if w.app.Memory == nil {
+		return errors.New("memory store is unavailable")
+	}
+	return w.app.Memory.SetPinned(ctx, id, pinned)
+}
+
+func (w *AppWorkspace) MemorySetFeature(_ context.Context, feature MemoryFeature, enabled bool) error {
+	if w.app.AgentCoordinator != nil && w.app.AgentCoordinator.IsBusy() {
+		return agent.ErrSessionBusy
+	}
+	var key string
+	switch feature {
+	case MemoryFeatureEnabled:
+		key = "options.memory.enabled"
+	case MemoryFeatureRecorder:
+		key = "options.memory.recorder_enabled"
+	case MemoryFeatureRecall:
+		key = "options.memory.recall_enabled"
+	default:
+		return fmt.Errorf("unknown memory feature %q", feature)
+	}
+	if err := w.store.SetConfigField(config.ScopeGlobal, key, enabled); err != nil {
+		return err
+	}
+	options := w.store.Config().Options.Memory
+	if options == nil || w.app.AgentCoordinator == nil {
+		return nil
+	}
+	memoryEnabled := options.Enabled != nil && *options.Enabled
+	recorderEnabled := memoryEnabled && options.RecorderEnabled != nil && *options.RecorderEnabled
+	recallEnabled := memoryEnabled && options.RecallEnabled != nil && *options.RecallEnabled
+	return w.app.AgentCoordinator.SetMemoryOptions(recorderEnabled, recallEnabled)
+}
+
+func (w *AppWorkspace) MemorySetSessionRecording(ctx context.Context, sessionID string, enabled bool) error {
+	if w.app.Memory == nil {
+		return errors.New("memory store is unavailable")
+	}
+	mode := memory.SessionRecordingDisabled
+	if enabled {
+		mode = memory.SessionRecordingEnabled
+	}
+	return w.app.Memory.SetSessionRecordingMode(ctx, sessionID, mode)
+}
+
+func (w *AppWorkspace) MemoryMaintain(ctx context.Context) (memory.MaintenanceResult, error) {
+	if w.app.Memory == nil {
+		return memory.MaintenanceResult{}, errors.New("memory store is unavailable")
+	}
+	return w.app.Memory.Maintain(ctx, w.app.MemoryProject)
 }
 
 // -- Permissions --
@@ -370,7 +504,13 @@ func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, err
 
 func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
 	mgr := w.app.Skills
-	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
+	content, result, err := skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
+	if err == nil {
+		if marker, ok := w.app.AgentCoordinator.(agent.SkillLoadMarker); ok {
+			marker.MarkSkillLoaded(result.Name)
+		}
+	}
+	return content, result, err
 }
 
 // -- MCP operations --

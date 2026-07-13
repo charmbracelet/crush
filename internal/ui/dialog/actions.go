@@ -10,6 +10,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -17,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/workspace"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -29,6 +31,9 @@ type ActionQuit = tea.QuitMsg
 type ActionOpenDialog struct {
 	DialogID string
 }
+
+// ActionOpenLMStudioSetup opens the custom LM Studio provider setup dialog.
+type ActionOpenLMStudioSetup struct{}
 
 // ActionSelectSession is a message indicating a session has been selected.
 type ActionSelectSession struct {
@@ -43,15 +48,29 @@ type ActionSelectModel struct {
 	ReAuthenticate bool
 }
 
+// ActionConfigureLMStudio is sent after the LM Studio setup dialog validates
+// and discovers at least one model.
+type ActionConfigureLMStudio struct {
+	Provider config.ProviderConfig
+	Model    config.SelectedModel
+}
+
 // Messages for commands
 type (
-	ActionNewSession              struct{}
-	ActionToggleHelp              struct{}
-	ActionToggleCompactMode       struct{}
-	ActionToggleThinking          struct{}
-	ActionTogglePills             struct{}
-	ActionExternalEditor          struct{}
-	ActionToggleYoloMode          struct{}
+	ActionNewSession        struct{}
+	ActionToggleHelp        struct{}
+	ActionToggleCompactMode struct{}
+	ActionToggleThinking    struct{}
+	ActionTogglePills       struct{}
+	ActionExternalEditor    struct{}
+	ActionToggleYoloMode    struct{}
+	ActionSetAgentMode      struct {
+		AgentID string
+	}
+	ActionActivateAgentMode struct {
+		AgentID   string
+		ModelType config.SelectedModelType
+	}
 	ActionToggleNotifications     struct{}
 	ActionSelectNotificationStyle struct {
 		Style string
@@ -95,13 +114,42 @@ type (
 	// ActionEnableDockerMCP is a message to enable Docker MCP.
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
-	ActionDisableDockerMCP struct{}
+	ActionDisableDockerMCP   struct{}
+	ActionOpenMemoryRemember struct{}
+	ActionMemoryRemember     struct {
+		Args map[string]string
+	}
+	ActionMemorySetStatus struct {
+		ID     string
+		Status memory.Status
+	}
+	ActionMemorySetPinned struct {
+		ID     string
+		Pinned bool
+	}
+	ActionMemorySetFeature struct {
+		Feature workspace.MemoryFeature
+		Enabled bool
+	}
+	ActionMemorySetSessionRecording struct {
+		SessionID string
+		Enabled   bool
+	}
+	ActionMemoryMaintain struct{}
 )
 
 // Messages for API key input dialog.
 type (
 	ActionChangeAPIKeyState struct {
 		State APIKeyInputState
+	}
+	ActionChangeLMStudioSetupState struct {
+		State LMStudioSetupState
+	}
+	ActionLMStudioSetupResult struct {
+		Provider config.ProviderConfig
+		Model    config.SelectedModel
+		Error    error
 	}
 )
 
@@ -139,6 +187,10 @@ type ActionCmd struct {
 type ActionFilePickerSelected struct {
 	Path string
 }
+
+// ActionClipboardImageSelected is a message indicating the clipboard image
+// option has been selected in the file picker dialog.
+type ActionClipboardImageSelected struct{}
 
 // Cmd returns a command that reads the file at path and sends a
 // [message.Attachement] to the program.

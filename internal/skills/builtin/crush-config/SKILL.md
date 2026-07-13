@@ -1,15 +1,68 @@
 ---
 name: crush-config
+user-invocable: true
 description: Use when the user needs help configuring Crush — working with crush.json, setting up providers, configuring LSPs, adding MCP servers, managing skills or permissions, or changing Crush behavior.
 ---
 
 # Crush Configuration
 
-Crush uses JSON configuration files with the following priority (highest to lowest):
+Crush uses two clearly named JSON configuration scopes (highest priority first):
 
-1. `.crush.json` (project-local, hidden)
-2. `crush.json` (project-local)
-3. `$XDG_CONFIG_HOME/crush/crush.json` or `$HOME/.config/crush/crush.json` (global)
+1. `crush.project.json` at the project root (optional project override)
+2. The canonical global `crush.json`
+
+On Windows, the canonical global file normally lives at
+`%LOCALAPPDATA%/crush/crush.json`. `CRUSH_GLOBAL_CONFIG` may select a different
+global directory. Use `recode_info` to obtain runtime-owned paths; do not choose
+a path from filesystem conventions.
+
+## Safe Editing Workflow
+
+Treat `crush.json` as structured data, even when it is minified onto one line.
+
+1. For MCP changes, use `mcp_add`; do not edit JSON directly. For other
+   settings, use `recode_info` and mutate only `[config_files].write_target`
+   unless the user explicitly requests project scope.
+2. Parse the complete file as JSON before editing. An empty result from a
+   line-based offset means the requested line does not exist; it does not mean
+   a one-line file is empty.
+3. Preserve unknown fields and all unrelated configuration entries.
+4. Make a backup, apply a structured object mutation, serialize once, and parse
+   the result again before replacing the active file.
+5. Re-read through `recode_info` and distinguish configured entries from clients
+   that actually initialized successfully.
+
+Once `recode_info` reports `write_target`, keep that path as the mutation target
+for the task. Do not broaden into home-directory scans or copy a config from
+another environment unless the target is genuinely unavailable and the user
+explicitly asks for recovery.
+
+Never concatenate JSON fragments, rewrite the whole file from a partial
+terminal view, use an LSP diagnostic as MCP validation, or accept uncertainty
+that the file is empty over direct parsed evidence.
+
+On Windows, use native `view` for exact reads. If structured shell processing
+is required, invoke PowerShell explicitly and protect its script from the
+embedded shell, for example:
+
+```sh
+powershell.exe -NoProfile -Command '$raw = Get-Content -Raw -LiteralPath "C:\path\crush.json"; $null = $raw | ConvertFrom-Json'
+```
+
+Do not call PowerShell cmdlets as bare commands and do not use textual
+`edit`/`multiedit` insertion against a minified one-line configuration.
+
+## Global and Project Scope
+
+- Global providers, model slots, credentials, and MCP servers normally belong
+  in the loaded global data config.
+- Project initialization creates project data/memory state and context files;
+  it does not require a workspace configuration file.
+- Project-root `crush.project.json` is an optional project override. Create or modify it
+  only when the user explicitly requests project-specific behavior.
+- A request to configure the installation or all MCP servers targets the
+  loaded global config. Do not search missing project/global candidates for
+  preferences after the active file has been identified.
 
 ## Basic Structure
 
@@ -76,7 +129,8 @@ var isn't set. Applies to MCP `headers` and provider `extra_headers`.
 
 ### Security note
 
-`crush.json` is trusted code. Any `$(...)` in it runs at load time
+Global `crush.json` and project `crush.project.json` are trusted code. Any
+`$(...)` in either runs at load time
 with the invoking user's shell privileges, before the UI appears.
 Don't launch Crush in a directory whose `crush.json` you haven't
 reviewed.
@@ -85,7 +139,13 @@ reviewed.
 
 - Add a custom provider: add an entry under `providers` with `type`, `base_url`, `api_key`, and `models`.
 - Disable a builtin or local skill: add the skill name to `options.disabled_skills`.
-- Add an MCP server: add an entry under `mcp` with `type` and either `command` (stdio) or `url` (http/sse).
+- Add an MCP server: fetch its official documentation or primary registry page,
+  fetch that exact search result (or a URL supplied by the user), reject login
+  and error pages as evidence, then call `mcp_add` with that `source_url`, the
+  verified server name, and exactly one transport object (`stdio`, `http`, or
+  `sse`).
+- Treat the configured server key as its exact identity. A code-search or
+  similarly named integration does not satisfy a request for another server.
 
 ## Model Selection
 
@@ -179,7 +239,8 @@ reviewed.
 
 - `type` (required): `stdio`, `sse`, or `http`
 - `command`, `args`, `env`, `headers`, and `url` are shell-expanded (see [Shell Expansion](#shell-expansion)).
-- Additional fields: `env`, `disabled`, `disabled_tools`, `timeout`.
+- Additional fields: `env`, `disabled`, `disabled_tools`, `enabled_tools`, `timeout`, `tool_timeout`.
+- `timeout` bounds MCP startup/ping behavior. `tool_timeout` bounds individual MCP tool calls so one stalled server or broad operation cannot pin the agent loop indefinitely.
 
 ## Options
 
@@ -244,19 +305,45 @@ Skills with `disable-model-invocation` won't appear in the model's available ski
 
 ## Hooks
 
-Hooks are user-defined shell commands that fire on agent events. Currently only `PreToolUse` is supported, which runs before a tool is executed.
+Hooks are user-defined shell commands that fire on agent events. Use the dedicated `crush-hooks` skill for full payload details and examples.
+
+Supported events:
+
+- `UserPromptSubmit`: prompt admission, rewrite, denial, and transient context before the prompt reaches the model.
+- `PreToolUse`: tool policy, permission pre-approval, and tool-input rewriting before a tool runs.
+- `PostToolUse`: successful tool-result inspection or context injection.
+- `PostToolUseFailure`: failed tool-result inspection or recovery guidance; runs instead of `PostToolUse` for failed results.
+- `Stop`: final turn validation before run completion.
 
 ```json
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "prompt",
+        "command": ".crush/hooks/prompt-policy.sh",
+        "timeout": 10
+      }
+    ],
     "PreToolUse": [
       {
-        "matcher": "^(edit|write|multiedit)$",
-        "command": ".crush/hooks/protect-files.sh"
-      },
+        "matcher": "^(bash|tmux)$",
+        "command": ".crush/hooks/shell-policy.sh",
+        "timeout": 10
+      }
+    ],
+    "PostToolUseFailure": [
       {
         "matcher": "^bash$",
-        "command": ".crush/hooks/no-haskell.sh"
+        "command": ".crush/hooks/recover-failed-bash.sh",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "stop",
+        "command": ".crush/hooks/final-check.sh",
+        "timeout": 10
       }
     ]
   }
@@ -266,102 +353,67 @@ Hooks are user-defined shell commands that fire on agent events. Currently only 
 ### Hook Properties
 
 - `command` (required): Shell command to execute. Runs via `sh -c`.
-- `matcher` (optional): Regex pattern tested against the tool name. Empty or absent means match all tools.
+- `matcher` (optional): Regex pattern tested against the tool name or lifecycle target. Empty or absent means match all hooks for that event.
 - `timeout` (optional): Timeout in seconds. Defaults to 30.
 
-### Event Name Normalization
-
-Event names are case-insensitive and accept snake_case variants: `PreToolUse`, `pretooluse`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
-
-### How Hooks Work
-
-1. When a tool is about to be called, all `PreToolUse` hooks with a matching `matcher` (or no matcher) run in parallel.
-2. Duplicate commands are deduplicated — each unique command runs at most once.
-3. The hook receives JSON on **stdin** and hook-specific **environment variables**.
-
-### Hook Input (stdin)
-
-A JSON payload is piped to the hook command:
-
-```json
-{
-  "event": "PreToolUse",
-  "session_id": "abc-123",
-  "cwd": "/path/to/project",
-  "tool_name": "bash",
-  "tool_input": {"command": "ls -la"}
-}
-```
-
-### Hook Environment Variables
-
-| Variable | Description |
-|---|---|
-| `CRUSH_EVENT` | Event name (e.g. `PreToolUse`) |
-| `CRUSH_TOOL_NAME` | Name of the tool being called |
-| `CRUSH_SESSION_ID` | Current session ID |
-| `CRUSH_CWD` | Current working directory |
-| `CRUSH_PROJECT_DIR` | Project root directory |
-| `CRUSH_TOOL_INPUT_COMMAND` | Value of `command` from tool input (if present) |
-| `CRUSH_TOOL_INPUT_FILE_PATH` | Value of `file_path` from tool input (if present) |
+Event names are case-insensitive and accept snake_case variants: `PreToolUse`, `pretooluse`, `pre_tool_use`, and `PRE_TOOL_USE` all normalize to the same event.
 
 ### Hook Output
 
-**Exit code 0** — the hook succeeded. Stdout is parsed as JSON:
-
-```json
-{"decision": "allow", "context": "optional context appended to tool result"}
-```
-
-- `decision`: `allow` to explicitly allow, `deny` to block, `none` (or omit) for no opinion.
-- `reason`: Explanation text (used when denying).
-- `context`: Extra context appended to the tool result.
-- `updated_input`: Replacement JSON for the tool input. Last non-empty value wins.
-
-**Exit code 2** — the tool call is blocked. Stderr is used as the deny reason.
-
-```bash
-echo "No Haskell allowed" >&2
-exit 2
-```
-
-**Any other exit code** — non-blocking error. The tool call proceeds as normal.
-
-### Claude Code Compatibility
-
-Crush also supports the Claude Code hook output format:
+Exit code `0` parses stdout as JSON. Exit code `2` denies or blocks the current event. Exit code `49` halts the whole turn. Other exit codes are non-blocking hook failures.
 
 ```json
 {
-  "hookSpecificOutput": {
-    "permissionDecision": "allow",
-    "permissionDecisionReason": "Auto-approved",
-    "updatedInput": {"command": "echo rewritten"}
-  }
+  "version": 1,
+  "decision": "allow",
+  "halt": false,
+  "reason": "optional reason",
+  "context": "extra model-visible context",
+  "updated_input": {"command": "rewritten command"},
+  "updated_prompt": "replacement prompt"
 }
 ```
 
-Existing Claude Code hooks should work without modification.
+- `decision`: `allow`, `deny`, or omit. `allow` pre-approves permission prompts only for `PreToolUse`.
+- `reason`: explanation shown when denying or halting.
+- `context`: extra model-visible context. Prompt-hook context is transient and is not persisted as user history.
+- `updated_input`: shallow merge patch against `tool_input`; only meaningful for `PreToolUse`.
+- `updated_prompt`: full replacement for the admitted prompt sent to the model and saved in history; only meaningful for `UserPromptSubmit`.
 
-### Decision Aggregation
-
-When multiple hooks match, their decisions are aggregated:
-
-- **Deny wins over allow** — if any hook denies, the tool call is blocked.
-- **Allow wins over none** — if no hook denies but at least one allows, the call proceeds.
-- All deny reasons are concatenated (newline-separated).
-- All context strings are concatenated (newline-separated).
-- For `updated_input`, the last non-empty value wins.
+Claude Code-style `hookSpecificOutput` is also accepted for permission decisions, `updatedInput`, and `additionalContext`.
 
 ## Tool Permissions
+
+`allowed_tools` remains the legacy auto-allow fallback. Prefer `rules` when resource-specific policy matters.
 
 ```json
 {
   "permissions": {
-    "allowed_tools": ["view", "ls", "grep", "edit"]
+    "allowed_tools": ["view", "ls", "grep"],
+    "rules": [
+      {"tool": "web_fetch", "action": "fetch", "resource": "https://docs.example.com/*", "effect": "allow"},
+      {"tool": "bash", "action": "execute", "resource": "rm *", "effect": "deny"},
+      {"tool": "tmux", "action": "start", "resource": "*", "effect": "ask"}
+    ]
   }
 }
 ```
+
+Rule fields:
+
+- `tool`: tool name such as `bash`, `tmux`, `web_search`, `web_fetch`, `edit`, or `write`.
+- `action`: tool action such as `execute`, `start`, `send`, `fetch`, `search`, `read`, or `write`.
+- `resource`: command, query, URL, or path. `*` wildcards are supported.
+- `effect`: `allow`, `ask`, or `deny`.
+
+Evaluation order:
+
+1. Yolo/skip mode grants everything.
+2. Explicit deny rules block before prompts, saved grants, hooks, or `allowed_tools`.
+3. Explicit allow rules grant.
+4. Explicit ask rules force a prompt.
+5. `allowed_tools` grants backward-compatible auto-allow.
+6. Hook allow can grant only when no explicit deny matched.
 
 ## Environment Variables
 

@@ -61,7 +61,7 @@
             "$ref": "#/$defs/SelectedModel"
           },
           "type": "object",
-          "description": "Model configurations for different model types"
+          "description": "Model configurations for different model types. Supported keys are large, small, summary, and review"
         },
         "providers": {
           "additionalProperties": {

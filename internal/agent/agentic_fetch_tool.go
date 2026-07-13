@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -147,10 +148,11 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %s", err)
 			}
 
-			_, small, err := c.buildAgentModels(ctx, true)
+			models, err := c.buildAgentModels(ctx, config.SelectedModelTypeLarge, true)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
 			}
+			small := models.Small
 
 			systemPrompt, err := promptTemplate.Build(ctx, small.Model.Provider(), small.Model.Model(), c.cfg)
 			if err != nil {
@@ -161,9 +163,17 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
+			summaryProviderCfg, ok := c.cfg.Config().Providers.Get(models.Summary.ModelCfg.Provider)
+			if !ok {
+				return fantasy.ToolResponse{}, errors.New("summary model provider not configured")
+			}
+			reviewProviderCfg, ok := c.cfg.Config().Providers.Get(models.Review.ModelCfg.Provider)
+			if !ok {
+				return fantasy.ToolResponse{}, errors.New("review model provider not configured")
+			}
 
-			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
-			webSearchTool := tools.NewWebSearchTool(client)
+			webFetchTool := tools.NewWebFetchTool(c.permissions, tmpDir, tmpDir, client)
+			webSearchTool := tools.NewWebSearchTool(c.permissions, tmpDir, client)
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
 				webSearchTool,
@@ -181,6 +191,10 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			agent := NewSessionAgent(SessionAgentOptions{
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)
 				SmallModel:           small,
+				SummaryModel:         models.Summary,
+				ReviewModel:          models.Review,
+				SummaryProviderOpts:  getProviderOptions(models.Summary, summaryProviderCfg),
+				ReviewProviderOpts:   getProviderOptions(models.Review, reviewProviderCfg),
 				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 				SystemPrompt:         systemPrompt,
 				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,

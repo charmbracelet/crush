@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -26,10 +29,35 @@ type ToolResult struct {
 }
 
 var allTools = csync.NewMap[string, []*Tool]()
+var allToolFilters = csync.NewMap[string, ToolFilterInfo]()
+
+// ToolFilterInfo describes how configured MCP tool filters affected the
+// server's advertised tools.
+type ToolFilterInfo struct {
+	Advertised        []string
+	Usable            []string
+	UnmatchedDisabled []string
+	UnmatchedEnabled  []string
+}
+
+const defaultToolTimeout = 60 * time.Second
 
 // Tools returns all available MCP tools.
 func Tools() iter.Seq2[string, []*Tool] {
 	return allTools.Seq2()
+}
+
+// GetToolFilterInfo returns the latest runtime tool-filter result for an MCP.
+func GetToolFilterInfo(name string) (ToolFilterInfo, bool) {
+	info, ok := allToolFilters.Get(name)
+	if !ok {
+		return ToolFilterInfo{}, false
+	}
+	info.Advertised = slices.Clone(info.Advertised)
+	info.Usable = slices.Clone(info.Usable)
+	info.UnmatchedDisabled = slices.Clone(info.UnmatchedDisabled)
+	info.UnmatchedEnabled = slices.Clone(info.UnmatchedEnabled)
+	return info, true
 }
 
 // RunTool runs an MCP tool with the given input parameters.
@@ -43,11 +71,20 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	if err != nil {
 		return ToolResult{}, err
 	}
-	result, err := c.CallTool(ctx, &mcp.CallToolParams{
+
+	toolTimeout := mcpToolTimeout(cfg.Config().MCP[name])
+	callCtx, cancel := context.WithTimeout(ctx, toolTimeout)
+	defer cancel()
+
+	result, err := c.CallTool(callCtx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
 	})
 	if err != nil {
+		err = maybeToolTimeoutErr(callCtx, err, toolTimeout, name, toolName)
+		if isToolTimeout(callCtx, err) {
+			markToolTimeout(name, c, err)
+		}
 		return ToolResult{}, err
 	}
 
@@ -108,6 +145,37 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	}, nil
 }
 
+func mcpToolTimeout(m config.MCPConfig) time.Duration {
+	if m.ToolTimeout <= 0 {
+		return defaultToolTimeout
+	}
+	return time.Duration(m.ToolTimeout) * time.Second
+}
+
+func maybeToolTimeoutErr(ctx context.Context, err error, timeout time.Duration, name, toolName string) error {
+	if isToolTimeout(ctx, err) {
+		return fmt.Errorf("mcp tool call %s/%s timed out after %s", name, toolName, timeout)
+	}
+	return err
+}
+
+func isToolTimeout(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.DeadlineExceeded) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) && errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
+func markToolTimeout(name string, session *ClientSession, err error) {
+	state, _ := states.Get(name)
+	if closeErr := session.Close(); closeErr != nil &&
+		!errors.Is(closeErr, context.Canceled) &&
+		!errors.Is(closeErr, io.EOF) &&
+		closeErr.Error() != "signal: killed" {
+		slog.Warn("Failed to close timed out MCP session", "name", name, "error", closeErr)
+	}
+	updateState(name, StateError, err, nil, state.Counts)
+}
+
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
 func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
@@ -143,6 +211,8 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 
 func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
 	mcpCfg, ok := cfg.Config().MCP[name]
+	info := analyzeToolFilters(mcpCfg, tools)
+	allToolFilters.Set(name, info)
 	if ok {
 		tools = filterTools(mcpCfg, tools)
 	}
@@ -152,6 +222,37 @@ func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
 	}
 	allTools.Set(name, tools)
 	return len(tools)
+}
+
+func analyzeToolFilters(mcpCfg config.MCPConfig, tools []*Tool) ToolFilterInfo {
+	info := ToolFilterInfo{
+		Advertised: make([]string, 0, len(tools)),
+	}
+	for _, tool := range tools {
+		info.Advertised = append(info.Advertised, tool.Name)
+	}
+	slices.Sort(info.Advertised)
+
+	for _, name := range mcpCfg.DisabledTools {
+		if !slices.Contains(info.Advertised, name) {
+			info.UnmatchedDisabled = append(info.UnmatchedDisabled, name)
+		}
+	}
+	for _, name := range mcpCfg.EnabledTools {
+		if !slices.Contains(info.Advertised, name) {
+			info.UnmatchedEnabled = append(info.UnmatchedEnabled, name)
+		}
+	}
+	slices.Sort(info.UnmatchedDisabled)
+	slices.Sort(info.UnmatchedEnabled)
+
+	filtered := filterTools(mcpCfg, tools)
+	info.Usable = make([]string, 0, len(filtered))
+	for _, tool := range filtered {
+		info.Usable = append(info.Usable, tool.Name)
+	}
+	slices.Sort(info.Usable)
+	return info
 }
 
 // filterTools filters tools based on enabled_tools (allow list) and

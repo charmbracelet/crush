@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
@@ -55,14 +57,20 @@ func (m *UI) initializeProject() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	initialize := func() tea.Msg {
-		initPrompt, err := m.com.Workspace.InitializePrompt()
+		content, result, err := m.com.Workspace.ReadSkill(context.Background(), "crush://skills/project-context-init/SKILL.md")
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("Failed to initialize project: %v", err),
 			}
 		}
-		return sendMessageMsg{Content: initPrompt}
+		skill := &skills.Skill{
+			Name:          result.Name,
+			Description:   result.Description,
+			SkillFilePath: "crush://skills/project-context-init/SKILL.md",
+		}
+		prompt := formatLoadedSkillInvocation(skill, content, result, "Execute this skill for the current workspace now.")
+		return sendMessageMsg{Content: prompt}
 	}
 	// Mark the project as initialized
 	cmds = append(cmds, initialize, m.markProjectInitializedCmd())

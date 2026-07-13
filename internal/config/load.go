@@ -1,10 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -35,6 +37,32 @@ import (
 
 const defaultCatwalkURL = "https://catwalk.charm.land"
 
+// EmbeddedLMStudioBaseURL optionally injects a built-in LM Studio provider
+// for portable test builds. It is intentionally empty in normal builds and
+// is set with -ldflags for shareable binaries.
+var (
+	EmbeddedLMStudioBaseURL = ""
+	EmbeddedLMStudioAPIKey  = "$LM_STUDIO_API_KEY"
+	// EmbeddedConfigJSON injects portable defaults before user and workspace
+	// config files are loaded. Later config files can override or disable them.
+	EmbeddedConfigJSON = `{
+		"mcp": {
+			"context7": {
+				"type": "http",
+				"url": "https://mcp.context7.com/mcp"
+			},
+			"exa": {
+				"type": "http",
+				"url": "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa"
+			},
+			"gh_grep": {
+				"type": "http",
+				"url": "https://mcp.grep.app"
+			}
+		}
+	}`
+)
+
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -49,12 +77,14 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 
 	cfg.setDefaults(workingDir, dataDir)
+	canonicalPath := CanonicalConfigPath()
+	projectPath := projectConfigPath(workingDir)
 
 	store := &ConfigStore{
 		config:         cfg,
 		workingDir:     workingDir,
-		globalDataPath: GlobalConfigData(),
-		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+		globalDataPath: canonicalPath,
+		workspacePath:  projectPath,
 		loadedPaths:    loadedPaths,
 	}
 
@@ -62,24 +92,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		cfg.Options.Debug = true
 	}
 
-	// Load workspace config last so it has highest priority.
-	if wsData, err := os.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
-		if !json.Valid(wsData) {
-			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
-		}
-		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
-		if mergeErr == nil {
-			// Preserve defaults that setDefaults already applied.
-			dataDir := cfg.Options.DataDirectory
-			*cfg = *merged
-			cfg.setDefaults(workingDir, dataDir)
-			store.config = cfg
-			store.loadedPaths = append(store.loadedPaths, store.workspacePath)
-		}
-	}
-
-	// Validate hooks after all config merging is complete so workspace
-	// hooks also get their matcher regexes compiled.
+	// Validate hooks after the single global-plus-project merge has completed.
 	if err := cfg.ValidateHooks(); err != nil {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
@@ -131,6 +144,8 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 	cfg.Models[SelectedModelTypeLarge] = resolved.Large
 	cfg.Models[SelectedModelTypeSmall] = resolved.Small
+	cfg.Models[SelectedModelTypeSummary] = resolved.Summary
+	cfg.Models[SelectedModelTypeReview] = resolved.Review
 
 	// Persist any fallback corrections while we still hold writeMu.
 	if resolved.LargeFallback {
@@ -147,10 +162,24 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 			return nil, fmt.Errorf("failed to update preferred small model: %w", err)
 		}
 	}
+	if resolved.SummaryFallback {
+		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+			return store.updatePreferredModelFields(c, SelectedModelTypeSummary, resolved.Summary)
+		}); err != nil {
+			return nil, fmt.Errorf("failed to update preferred summary model: %w", err)
+		}
+	}
+	if resolved.ReviewFallback {
+		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+			return store.updatePreferredModelFields(c, SelectedModelTypeReview, resolved.Review)
+		}); err != nil {
+			return nil, fmt.Errorf("failed to update preferred review model: %w", err)
+		}
+	}
 	store.SetupAgents()
 
 	// Capture initial staleness snapshot
-	store.captureStalenessSnapshot(loadedPaths)
+	store.captureStalenessSnapshot(store.loadedPaths)
 
 	return store, nil
 }
@@ -507,6 +536,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
 	}
+	if c.Options.Memory == nil {
+		c.Options.Memory = &MemoryOptions{}
+	}
+	setMemoryDefaults(c.Options.Memory)
 	if len(c.Options.GlobalContextPaths) == 0 {
 		crushConfigDir := filepath.Dir(GlobalConfig())
 		c.Options.GlobalContextPaths = []string{
@@ -530,6 +563,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
 	}
+	c.addEmbeddedLMStudioProvider()
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
 	}
@@ -538,6 +572,16 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
+	}
+	for name, mcpConfig := range c.MCP {
+		if mcpConfig.Type == "" {
+			mcpConfig.Type = mcpConfig.LegacyTransport
+		}
+		if mcpConfig.Type == "" && mcpConfig.Command != "" {
+			mcpConfig.Type = MCPStdio
+		}
+		mcpConfig.LegacyTransport = ""
+		c.MCP[name] = mcpConfig
 	}
 	if c.LSP == nil {
 		c.LSP = make(map[string]LSPConfig)
@@ -589,6 +633,24 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
+}
+
+func (c *Config) addEmbeddedLMStudioProvider() {
+	if EmbeddedLMStudioBaseURL == "" {
+		return
+	}
+	if _, ok := c.Providers.Get(LMStudioProviderID); ok {
+		return
+	}
+	discoverModels := true
+	c.Providers.Set(LMStudioProviderID, ProviderConfig{
+		ID:                 LMStudioProviderID,
+		Name:               LMStudioProviderName,
+		BaseURL:            EmbeddedLMStudioBaseURL,
+		APIKey:             EmbeddedLMStudioAPIKey,
+		Type:               catwalk.Type("lmstudio"),
+		AutoDiscoverModels: &discoverModels,
+	})
 }
 
 // powernapDefaults caches the powernap default LSP server catalog. The
@@ -731,10 +793,14 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 // resolvedModels holds the result of resolving user-configured model
 // selections against the provider catalog.
 type resolvedModels struct {
-	Large         SelectedModel
-	Small         SelectedModel
-	LargeFallback bool // true if Large was corrected to a default
-	SmallFallback bool // true if Small was corrected to a default
+	Large           SelectedModel
+	Small           SelectedModel
+	Summary         SelectedModel
+	Review          SelectedModel
+	LargeFallback   bool // true if Large was corrected to a default
+	SmallFallback   bool // true if Small was corrected to a default
+	SummaryFallback bool // true if Summary was corrected to a default
+	ReviewFallback  bool // true if Review was corrected to a default
 }
 
 // resolveSelectedModels validates the user's configured model selections
@@ -748,91 +814,13 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 	if err != nil {
 		return result, fmt.Errorf("failed to select default models: %w", err)
 	}
-	large, small := defaultLarge, defaultSmall
-
 	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
-	if largeModelConfigured {
-		if largeModelSelected.Model != "" {
-			large.Model = largeModelSelected.Model
-		}
-		if largeModelSelected.Provider != "" {
-			large.Provider = largeModelSelected.Provider
-		}
-		model := cfg.GetModel(large.Provider, large.Model)
-		if model == nil {
-			large = defaultLarge
-			result.LargeFallback = true
-		} else {
-			if largeModelSelected.MaxTokens > 0 {
-				large.MaxTokens = largeModelSelected.MaxTokens
-			} else {
-				large.MaxTokens = model.DefaultMaxTokens
-			}
-			if largeModelSelected.ReasoningEffort != "" {
-				large.ReasoningEffort = largeModelSelected.ReasoningEffort
-			} else {
-				large.ReasoningEffort = model.DefaultReasoningEffort
-			}
-			large.Think = largeModelSelected.Think
-			if largeModelSelected.Temperature != nil {
-				large.Temperature = largeModelSelected.Temperature
-			}
-			if largeModelSelected.TopP != nil {
-				large.TopP = largeModelSelected.TopP
-			}
-			if largeModelSelected.TopK != nil {
-				large.TopK = largeModelSelected.TopK
-			}
-			if largeModelSelected.FrequencyPenalty != nil {
-				large.FrequencyPenalty = largeModelSelected.FrequencyPenalty
-			}
-			if largeModelSelected.PresencePenalty != nil {
-				large.PresencePenalty = largeModelSelected.PresencePenalty
-			}
-		}
-	}
 	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
-	if smallModelConfigured {
-		if smallModelSelected.Model != "" {
-			small.Model = smallModelSelected.Model
-		}
-		if smallModelSelected.Provider != "" {
-			small.Provider = smallModelSelected.Provider
-		}
 
-		model := cfg.GetModel(small.Provider, small.Model)
-		if model == nil {
-			small = defaultSmall
-			result.SmallFallback = true
-		} else {
-			if smallModelSelected.MaxTokens > 0 {
-				small.MaxTokens = smallModelSelected.MaxTokens
-			} else {
-				small.MaxTokens = model.DefaultMaxTokens
-			}
-			if smallModelSelected.ReasoningEffort != "" {
-				small.ReasoningEffort = smallModelSelected.ReasoningEffort
-			} else {
-				small.ReasoningEffort = model.DefaultReasoningEffort
-			}
-			if smallModelSelected.Temperature != nil {
-				small.Temperature = smallModelSelected.Temperature
-			}
-			if smallModelSelected.TopP != nil {
-				small.TopP = smallModelSelected.TopP
-			}
-			if smallModelSelected.TopK != nil {
-				small.TopK = smallModelSelected.TopK
-			}
-			if smallModelSelected.FrequencyPenalty != nil {
-				small.FrequencyPenalty = smallModelSelected.FrequencyPenalty
-			}
-			if smallModelSelected.PresencePenalty != nil {
-				small.PresencePenalty = smallModelSelected.PresencePenalty
-			}
-			small.Think = smallModelSelected.Think
-		}
-	}
+	large, largeFallback := cfg.resolveSelectedModel(largeModelSelected, largeModelConfigured, defaultLarge)
+	small, smallFallback := cfg.resolveSelectedModel(smallModelSelected, smallModelConfigured, defaultSmall)
+	result.LargeFallback = largeFallback
+	result.SmallFallback = smallFallback
 
 	// When small isn't explicitly configured and the provider isn't a
 	// known built-in, use the large model as the small model. This
@@ -852,41 +840,92 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 		}
 	}
 
+	summaryModelSelected, summaryModelConfigured := cfg.Models[SelectedModelTypeSummary]
+	summary, summaryFallback := cfg.resolveSelectedModel(summaryModelSelected, summaryModelConfigured, large)
+	result.SummaryFallback = summaryFallback
+
+	reviewModelSelected, reviewModelConfigured := cfg.Models[SelectedModelTypeReview]
+	review, reviewFallback := cfg.resolveSelectedModel(reviewModelSelected, reviewModelConfigured, large)
+	result.ReviewFallback = reviewFallback
+
 	result.Large = large
 	result.Small = small
+	result.Summary = summary
+	result.Review = review
 	return result, nil
 }
 
-// lookupConfigs searches config files starting at cwd and walking up
-// through the current project. The upward walk stops at the git
-// working tree root when one can be detected, otherwise at cwd itself,
-// so an unrelated crush.json placed above the project is never picked
-// up. Global user-level config locations are always included
-// regardless of the boundary.
+func (cfg *Config) resolveSelectedModel(selected SelectedModel, configured bool, fallback SelectedModel) (SelectedModel, bool) {
+	resolved := fallback
+	if !configured {
+		return resolved, false
+	}
+	if selected.Model != "" {
+		resolved.Model = selected.Model
+	}
+	if selected.Provider != "" {
+		resolved.Provider = selected.Provider
+	}
+	model := cfg.GetModel(resolved.Provider, resolved.Model)
+	if model == nil {
+		return fallback, true
+	}
+	if selected.MaxTokens > 0 {
+		resolved.MaxTokens = selected.MaxTokens
+	} else {
+		resolved.MaxTokens = model.DefaultMaxTokens
+	}
+	if selected.ReasoningEffort != "" {
+		resolved.ReasoningEffort = selected.ReasoningEffort
+	} else {
+		resolved.ReasoningEffort = model.DefaultReasoningEffort
+	}
+	resolved.Think = selected.Think
+	if selected.Temperature != nil {
+		resolved.Temperature = selected.Temperature
+	}
+	if selected.TopP != nil {
+		resolved.TopP = selected.TopP
+	}
+	if selected.TopK != nil {
+		resolved.TopK = selected.TopK
+	}
+	if selected.FrequencyPenalty != nil {
+		resolved.FrequencyPenalty = selected.FrequencyPenalty
+	}
+	if selected.PresencePenalty != nil {
+		resolved.PresencePenalty = selected.PresencePenalty
+	}
+	return resolved, false
+}
+
+// lookupConfigs returns one canonical global file followed by one explicitly
+// named project file. No other directories or legacy filenames are searched.
 func lookupConfigs(cwd string) []string {
-	// prepend default config paths
-	configPaths := []string{
-		GlobalConfig(),
-		GlobalConfigData(),
-	}
+	return []string{CanonicalConfigPath(), projectConfigPath(cwd)}
+}
 
-	configNames := []string{appName + ".json", "." + appName + ".json"}
+const projectConfigFileName = "crush.project.json"
 
-	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
-	if err != nil {
-		// returns at least default configs
-		return configPaths
-	}
-
-	// reverse order so last config has more priority
-	slices.Reverse(foundConfigs)
-
-	return append(configPaths, foundConfigs...)
+func projectConfigPath(cwd string) string {
+	return filepath.Join(projectBoundary(cwd), projectConfigFileName)
 }
 
 func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 	var configs [][]byte
 	var loaded []string
+
+	if EmbeddedConfigJSON != "" {
+		data := []byte(EmbeddedConfigJSON)
+		if !json.Valid(data) {
+			return nil, nil, fmt.Errorf("invalid embedded JSON config")
+		}
+		if err := validateConfigShape(data, "<embedded>"); err != nil {
+			return nil, nil, err
+		}
+		configs = append(configs, data)
+		loaded = append(loaded, "<embedded>")
+	}
 
 	for _, path := range configPaths {
 		data, err := os.ReadFile(path)
@@ -901,6 +940,9 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		}
 		if !json.Valid(data) {
 			return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
+		}
+		if err := validateConfigShape(data, path); err != nil {
+			return nil, nil, err
 		}
 		configs = append(configs, data)
 		loaded = append(loaded, path)
@@ -922,11 +964,60 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateConfigShape(data, "merged configuration"); err != nil {
+		return nil, err
+	}
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
 	return &config, nil
+}
+
+func validateConfigShape(data []byte, source string) error {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("invalid configuration in %s: %w", source, err)
+	}
+	allowed := map[string]bool{
+		"$schema": true, "models": true, "recent_models": true,
+		"mode_models": true, "providers": true, "mcp": true, "lsp": true,
+		"options": true, "permissions": true, "tools": true, "hooks": true,
+	}
+	unknown := make([]string, 0)
+	for field := range root {
+		if !allowed[field] {
+			unknown = append(unknown, field)
+		}
+	}
+	if len(unknown) > 0 {
+		slices.Sort(unknown)
+		if unknown[0] == "mcpServers" {
+			return fmt.Errorf("unknown configuration field %q in %s; Crush MCP servers must use the top-level %q field", unknown[0], source, "mcp")
+		}
+		return fmt.Errorf("unknown configuration field %q in %s", unknown[0], source)
+	}
+
+	rawMCP, ok := root["mcp"]
+	if !ok || string(rawMCP) == "null" {
+		return nil
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(rawMCP, &entries); err != nil {
+		return fmt.Errorf("invalid MCP configuration in %s: %w", source, err)
+	}
+	for name, raw := range entries {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		var mcpConfig MCPConfig
+		if err := decoder.Decode(&mcpConfig); err != nil {
+			return fmt.Errorf("invalid MCP configuration %q in %s: %w", name, source, err)
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			return fmt.Errorf("invalid MCP configuration %q in %s: trailing JSON data", name, source)
+		}
+	}
+	return nil
 }
 
 func hasAWSCredentials(env env.Env) bool {
@@ -970,66 +1061,39 @@ func hasAWSCredentials(env env.Env) bool {
 }
 
 // migrateDisableNotifications migrates the deprecated disable_notifications
-// field to notification_style. It checks both the user config (~/.config) and
-// data config (~/.local) files. If disable_notifications is true, it sets
-// notification_style to "disabled" in the data file. Regardless of value, it
-// removes disable_notifications from any file that contains it.
+// field in the canonical configuration.
 func migrateDisableNotifications() {
-	globalConfig := GlobalConfig()
-	dataConfig := GlobalConfigData()
-
-	var wasDisabled bool
-	filesToClean := []string{}
-
-	for _, path := range []string{globalConfig, dataConfig} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		if gjson.Get(string(data), "options.disable_notifications").Exists() {
-			filesToClean = append(filesToClean, path)
-			if gjson.Get(string(data), "options.disable_notifications").Bool() {
-				wasDisabled = true
-			}
-		}
-	}
-
-	if len(filesToClean) == 0 {
+	path := CanonicalConfigPath()
+	data, err := os.ReadFile(path)
+	if err != nil || !gjson.Get(string(data), "options.disable_notifications").Exists() {
 		return
 	}
 
-	// If notifications were disabled, persist the equivalent notification_style.
-	if wasDisabled {
-		data, err := os.ReadFile(dataConfig)
-		if err == nil {
-			if !gjson.Get(string(data), "options.notification_style").Exists() {
-				updated, err := sjson.Set(string(data), "options.notification_style", "disabled")
-				if err == nil {
-					if err := atomicWriteFile(dataConfig, []byte(updated), 0o600); err != nil {
-						slog.Warn("Failed to migrate disable_notifications to notification_style", "error", err)
-					} else {
-						slog.Info("Migrated disable_notifications: true to notification_style: disabled")
-					}
-				}
-			}
+	updated := string(data)
+	if gjson.Get(updated, "options.disable_notifications").Bool() &&
+		!gjson.Get(updated, "options.notification_style").Exists() {
+		updated, err = sjson.Set(updated, "options.notification_style", "disabled")
+		if err != nil {
+			return
 		}
 	}
+	updated, err = sjson.Delete(updated, "options.disable_notifications")
+	if err != nil {
+		return
+	}
+	if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
+		slog.Warn("Failed to write migrated config", "path", path, "error", err)
+	}
+}
 
-	// Remove disable_notifications from all files that contain it.
-	for _, path := range filesToClean {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		updated, err := sjson.Delete(string(data), "options.disable_notifications")
-		if err != nil {
-			slog.Warn("Failed to remove deprecated disable_notifications field", "path", path, "error", err)
-			continue
-		}
-		if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
-			slog.Warn("Failed to write migrated config", "path", path, "error", err)
-		}
+// CanonicalConfigPath returns the only crush.json read and written by Crush.
+// An explicit CRUSH_GLOBAL_CONFIG directory wins; otherwise the platform data
+// configuration is authoritative.
+func CanonicalConfigPath() string {
+	if os.Getenv("CRUSH_GLOBAL_CONFIG") != "" {
+		return GlobalConfig()
 	}
+	return GlobalConfigData()
 }
 
 // GlobalConfig returns the global configuration file path for the application.
@@ -1038,6 +1102,55 @@ func GlobalConfig() string {
 		return filepath.Join(crushGlobal, fmt.Sprintf("%s.json", appName))
 	}
 	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
+}
+
+// GlobalMemoryDir returns the default cross-project memory directory.
+func GlobalMemoryDir() string {
+	return filepath.Join(filepath.Dir(GlobalConfig()), "memory")
+}
+
+func setMemoryDefaults(options *MemoryOptions) {
+	if options.Enabled == nil {
+		enabled := true
+		options.Enabled = &enabled
+	}
+	if options.RecorderEnabled == nil {
+		enabled := true
+		options.RecorderEnabled = &enabled
+	}
+	if options.RecallEnabled == nil {
+		enabled := true
+		options.RecallEnabled = &enabled
+	}
+	if options.AutoApproveConfidence < 0.60 || options.AutoApproveConfidence > 1 {
+		options.AutoApproveConfidence = 0.88
+	}
+	if options.MaxRecall < 1 || options.MaxRecall > 10 {
+		options.MaxRecall = 5
+	}
+	if options.MaxIndexEntries < 10 || options.MaxIndexEntries > 200 {
+		options.MaxIndexEntries = 80
+	}
+	if options.MaxBackups < 1 || options.MaxBackups > 20 {
+		options.MaxBackups = 5
+	}
+
+	if override := strings.TrimSpace(os.Getenv("CRUSH_MEMORY_DIR")); override != "" {
+		options.Directory = filepath.Clean(home.Long(os.ExpandEnv(override)))
+		return
+	}
+	base := filepath.Dir(GlobalConfig())
+	if options.Directory == "" || filepath.IsAbs(options.Directory) {
+		options.Directory = GlobalMemoryDir()
+		return
+	}
+	candidate := filepath.Clean(filepath.Join(base, options.Directory))
+	relative, err := filepath.Rel(base, candidate)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		options.Directory = GlobalMemoryDir()
+		return
+	}
+	options.Directory = candidate
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the
@@ -1094,7 +1207,7 @@ func GlobalConfigData() string {
 // writes, and provider resolution behave identically to project
 // workspaces.
 func GlobalWorkspaceDir() string {
-	return filepath.Dir(GlobalConfigData())
+	return filepath.Dir(CanonicalConfigPath())
 }
 
 func assignIfNil[T any](ptr **T, val T) {
@@ -1244,6 +1357,14 @@ func normalizeHookEvent(name string) string {
 	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
 	case "pretooluse":
 		return "PreToolUse"
+	case "posttooluse":
+		return "PostToolUse"
+	case "posttoolusefailure":
+		return "PostToolUseFailure"
+	case "userpromptsubmit":
+		return "UserPromptSubmit"
+	case "stop":
+		return "Stop"
 	default:
 		return name
 	}

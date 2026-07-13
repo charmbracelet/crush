@@ -177,6 +177,9 @@ func (b *Backend) ReadSkill(ctx context.Context, workspaceID, skillID string) ([
 	if err != nil {
 		return nil, proto.SkillReadResult{}, err
 	}
+	if marker, ok := ws.AgentCoordinator.(agent.SkillLoadMarker); ok {
+		marker.MarkSkillLoaded(result.Name)
+	}
 	return content, proto.SkillReadResult{
 		Name:        result.Name,
 		Description: result.Description,

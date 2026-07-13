@@ -30,10 +30,14 @@ func (m *mockSessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
 	return &AcceptedRun{sessionID: sessionID}
 }
 
-func (m *mockSessionAgent) Model() Model                        { return m.model }
-func (m *mockSessionAgent) SetModels(large, small Model)        {}
-func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)  {}
-func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string) {}
+func (m *mockSessionAgent) Model() Model        { return m.model }
+func (m *mockSessionAgent) SummaryModel() Model { return m.model }
+func (m *mockSessionAgent) SetModels(models SessionAgentModels) {
+}
+func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)        {}
+func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string)       {}
+func (m *mockSessionAgent) SetRecoveryContext(recoveryContext string) {}
+func (m *mockSessionAgent) SetMemoryOptions(bool, bool)               {}
 func (m *mockSessionAgent) Cancel(sessionID string) {
 	m.cancelled = append(m.cancelled, sessionID)
 }
@@ -43,7 +47,7 @@ func (m *mockSessionAgent) IsBusy() bool                                { return
 func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
 func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
-func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
+func (m *mockSessionAgent) Summarize(context.Context, string) error {
 	return nil
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
@@ -551,4 +555,45 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	thinking, ok := parsed.ExtraBody["thinking"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "enabled", thinking["type"])
+}
+
+func TestGetProviderOptionsLMStudioThinking(t *testing.T) {
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ID:        "qwythos-9b",
+			CanReason: true,
+		},
+		ModelCfg: config.SelectedModel{
+			Provider: "tailnet-lmstudio",
+			Think:    true,
+		},
+	}
+	providerCfg := config.ProviderConfig{
+		ID:   "tailnet-lmstudio",
+		Type: catwalk.Type("lmstudio"),
+	}
+
+	opts := getProviderOptions(model, providerCfg)
+
+	raw, ok := opts[openaicompat.Name]
+	require.True(t, ok)
+	parsed, ok := raw.(*openaicompat.ProviderOptions)
+	require.True(t, ok)
+	require.Equal(t, true, parsed.ExtraBody["enable_thinking"])
+}
+
+func TestSubAgentOutputFallsBackToToolEvidence(t *testing.T) {
+	t.Parallel()
+
+	result := &fantasy.AgentResult{Steps: []fantasy.StepResult{{
+		Response: fantasy.Response{Content: fantasy.ResponseContent{
+			fantasy.ToolCallContent{ToolCallID: "call-1", ToolName: "web_search", Input: `{"query":"official MCP reload command"}`},
+			fantasy.ToolResultContent{ToolCallID: "call-1", ToolName: "web_search", Result: fantasy.ToolResultOutputContentText{Text: "No supported reload CLI command is documented."}},
+		}},
+	}}}
+
+	output := subAgentOutput(result)
+	require.Contains(t, output, "evidence, not as a completed action")
+	require.Contains(t, output, "web_search")
+	require.Contains(t, output, "No supported reload CLI command")
 }

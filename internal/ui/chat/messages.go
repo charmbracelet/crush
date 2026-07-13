@@ -351,7 +351,34 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	}
 	provider := a.sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
 	assistant := fmt.Sprintf("%s %s %s %s", icon, modelFormatted, provider, infoMsg)
-	return common.Section(a.sty, assistant, width)
+	turnInfo := a.sty.Messages.AssistantInfoDuration.Render(formatTurnInfo(*finishData, finishTime))
+	return common.Section(a.sty, assistant, width, turnInfo)
+}
+
+func formatTurnInfo(finish message.Finish, t time.Time) string {
+	parts := make([]string, 0, 3)
+	if finish.InputTokens > 0 || finish.OutputTokens > 0 {
+		prefix := ""
+		if finish.EstimatedTokens {
+			prefix = "~"
+		}
+		parts = append(parts,
+			prefix+formatTokenCount(finish.InputTokens)+" ctx",
+			formatTokenCount(finish.OutputTokens)+" out",
+		)
+	}
+	parts = append(parts, t.Local().Format("15:04:05 · Mon, Jan 02, 2006"))
+	return strings.Join(parts, " · ")
+}
+
+func formatTokenCount(tokens int64) string {
+	if tokens < 1_000 {
+		return fmt.Sprintf("%d", tokens)
+	}
+	if tokens < 10_000 {
+		return fmt.Sprintf("%.1fk", float64(tokens)/1_000)
+	}
+	return fmt.Sprintf("%dk", tokens/1_000)
 }
 
 // cappedMessageWidth returns the maximum width for message content for readability.

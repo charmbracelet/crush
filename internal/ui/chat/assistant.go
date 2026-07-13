@@ -453,6 +453,7 @@ func (a *AssistantMessageItem) cachedError(width int) string {
 // ThinkingBox style is applied on top of the (already-windowed)
 // lines so the visual box matches what the user sees today.
 func (a *AssistantMessageItem) renderThinking(thinking string, width int) string {
+	thinking = ansi.Strip(thinking)
 	renderer := common.QuietMarkdownRenderer(a.sty, width)
 	rendered := a.streamingThinking.Render(thinking, width, renderer)
 	rendered = strings.TrimSpace(rendered)
@@ -510,6 +511,7 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 // detection has the slightest doubt — see
 // findSafeMarkdownBoundary.
 func (a *AssistantMessageItem) renderMarkdown(content string, width int) string {
+	content = ansi.Strip(content)
 	renderer := common.MarkdownRenderer(a.sty, width)
 	return a.streamingContent.Render(content, width, renderer)
 }

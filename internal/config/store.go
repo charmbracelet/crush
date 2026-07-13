@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,7 +55,7 @@ type RuntimeOverrides struct {
 
 // ConfigStore is the single entry point for all config access. It owns the
 // pure-data Config, runtime state (working directory, resolver, known
-// providers), and persistence to both global and workspace config files.
+// providers), and persistence to one canonical configuration file.
 //
 // mu serialises all config file mutations (SetConfigFields,
 // RemoveConfigField, RefreshOAuthToken) to prevent both in-process
@@ -73,8 +74,8 @@ type ConfigStore struct {
 	config             *Config
 	workingDir         string
 	resolver           VariableResolver
-	globalDataPath     string   // ~/.local/share/crush/crush.json
-	workspacePath      string   // .crush/crush.json
+	globalDataPath     string   // Canonical crush.json.
+	workspacePath      string   // Project-root crush.project.json.
 	loadedPaths        []string // config files that were successfully loaded
 	knownProviders     []catwalk.Provider
 	overrides          RuntimeOverrides
@@ -164,6 +165,32 @@ func (s *ConfigStore) LoadedPaths() []string {
 	return slices.Clone(s.loadedPaths)
 }
 
+// WritableConfigPath returns the canonical user-level configuration file used
+// by typed ConfigStore mutations. Agent-facing tools should direct writes here
+// instead of asking the model to choose among legacy and diagnostic paths.
+func (s *ConfigStore) WritableConfigPath() string {
+	if s.globalDataPath != "" {
+		return s.globalDataPath
+	}
+	return CanonicalConfigPath()
+}
+
+// ProjectConfigPath returns the optional project override path.
+func (s *ConfigStore) ProjectConfigPath() string {
+	if s.workspacePath != "" {
+		return s.workspacePath
+	}
+	for _, path := range s.loadedPaths {
+		if strings.HasSuffix(strings.ReplaceAll(path, "\\", "/"), "/"+projectConfigFileName) {
+			return path
+		}
+	}
+	if s.workingDir != "" {
+		return projectConfigPath(s.workingDir)
+	}
+	return ""
+}
+
 // lockConfig acquires both the in-process mutex and a cross-process flock
 // on the config file for the given scope. Callers that need to do I/O
 // between reading and writing (e.g. an HTTP token exchange) must use
@@ -232,13 +259,18 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 // configPath returns the file path for the given scope.
 func (s *ConfigStore) configPath(scope Scope) (string, error) {
 	switch scope {
+	case ScopeGlobal:
+		if s.globalDataPath == "" {
+			return "", fmt.Errorf("canonical config path is not configured")
+		}
+		return s.globalDataPath, nil
 	case ScopeWorkspace:
 		if s.workspacePath == "" {
 			return "", ErrNoWorkspaceConfig
 		}
 		return s.workspacePath, nil
 	default:
-		return s.globalDataPath, nil
+		return "", fmt.Errorf("unknown config scope %s", scope)
 	}
 }
 
@@ -873,7 +905,7 @@ func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
 	// Build unique set of normalized paths
 	seen := make(map[string]struct{})
 	for _, p := range paths {
-		if p == "" {
+		if p == "" || strings.HasPrefix(p, "<") && strings.HasSuffix(p, ">") {
 			continue
 		}
 		// Normalize path
@@ -932,7 +964,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// Migrate deprecated disable_notifications before reloading config.
 	migrateDisableNotifications()
 
-	configPaths := lookupConfigs(s.workingDir)
+	configPaths := []string{s.globalDataPath, s.workspacePath}
 	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
 	if err != nil {
 		return fmt.Errorf("failed to reload config: %w", err)
@@ -945,23 +977,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	}
 	cfg.setDefaults(s.workingDir, dataDir)
 
-	// Merge workspace config if present
-	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
-	if wsData, err := os.ReadFile(workspacePath); err == nil && len(wsData) > 0 {
-		if !json.Valid(wsData) {
-			return fmt.Errorf("invalid JSON in config file %s", workspacePath)
-		}
-		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
-		if mergeErr == nil {
-			dataDir := cfg.Options.DataDirectory
-			*cfg = *merged
-			cfg.setDefaults(s.workingDir, dataDir)
-			loadedPaths = append(loadedPaths, workspacePath)
-		}
-	}
-
-	// Validate hooks after all config merging is complete so matcher
-	// regexes are recompiled on the reloaded config (mirrors Load).
+	// Validate hooks after the single global-plus-project merge has reloaded.
 	if err := cfg.ValidateHooks(); err != nil {
 		return fmt.Errorf("invalid hook configuration on reload: %w", err)
 	}
@@ -995,7 +1011,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	s.resolver = resolver
 	s.knownProviders = providers
 	s.overrides = overrides
-	s.workspacePath = workspacePath
+	s.workspacePath = projectConfigPath(s.workingDir)
 
 	// Mirror startup flow: setup models and agents against NEW config.
 	var setupErr error
@@ -1008,6 +1024,8 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		} else {
 			cfg.Models[SelectedModelTypeLarge] = resolved.Large
 			cfg.Models[SelectedModelTypeSmall] = resolved.Small
+			cfg.Models[SelectedModelTypeSummary] = resolved.Summary
+			cfg.Models[SelectedModelTypeReview] = resolved.Review
 			s.SetupAgents()
 		}
 	}

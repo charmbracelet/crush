@@ -184,3 +184,51 @@ func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 		})
 	}
 }
+
+func TestPermissionRequestWebParamsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	search := proto.PermissionRequest{
+		ID:         "perm-search",
+		SessionID:  "sess-1",
+		ToolCallID: "call-search",
+		ToolName:   tools.WebSearchToolName,
+		Action:     "search",
+		Resource:   "latest go release 2026",
+		Params: tools.WebSearchPermissionsParams{
+			Query:      "latest go release 2026",
+			MaxResults: 7,
+		},
+	}
+	data, err := json.Marshal(search)
+	require.NoError(t, err)
+
+	var decodedSearch proto.PermissionRequest
+	require.NoError(t, json.Unmarshal(data, &decodedSearch))
+	require.Equal(t, "latest go release 2026", decodedSearch.Resource)
+	searchParams, ok := decodedSearch.Params.(tools.WebSearchPermissionsParams)
+	require.True(t, ok, "params must decode as tools.WebSearchPermissionsParams, got %T", decodedSearch.Params)
+	require.Equal(t, "latest go release 2026", searchParams.Query)
+	require.Equal(t, 7, searchParams.MaxResults)
+
+	fetch := proto.PermissionRequest{
+		ID:         "perm-fetch",
+		SessionID:  "sess-1",
+		ToolCallID: "call-fetch",
+		ToolName:   tools.WebFetchToolName,
+		Action:     "fetch",
+		Resource:   "https://example.com/docs",
+		Params: tools.WebFetchPermissionsParams{
+			URL: "https://example.com/docs",
+		},
+	}
+	data, err = json.Marshal(fetch)
+	require.NoError(t, err)
+
+	var decodedFetch proto.PermissionRequest
+	require.NoError(t, json.Unmarshal(data, &decodedFetch))
+	require.Equal(t, "https://example.com/docs", decodedFetch.Resource)
+	fetchParams, ok := decodedFetch.Params.(tools.WebFetchPermissionsParams)
+	require.True(t, ok, "params must decode as tools.WebFetchPermissionsParams, got %T", decodedFetch.Params)
+	require.Equal(t, "https://example.com/docs", fetchParams.URL)
+}

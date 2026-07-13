@@ -122,12 +122,14 @@ func TestClientWorkspace_PermissionGrantMapping(t *testing.T) {
 				Description: "do thing",
 				Action:      "act",
 				Path:        "/tmp/p",
+				Resource:    "workspace/file.go",
 			}
 			tc.call(ws, perm)
 
 			require.Equal(t, tc.want, got.Action)
 			require.Equal(t, "req-1", got.Permission.ID)
 			require.Equal(t, "sess-1", got.Permission.SessionID)
+			require.Equal(t, "workspace/file.go", got.Permission.Resource)
 			require.Equal(t, "tc-1", got.Permission.ToolCallID)
 			require.Equal(t, "tool", got.Permission.ToolName)
 			require.Equal(t, "act", got.Permission.Action)

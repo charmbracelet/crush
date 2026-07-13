@@ -102,7 +102,7 @@ func TestList_CallbackDrivenHighlightUnfreezeAndReFreeze(t *testing.T) {
 				message.Finish{Reason: message.FinishReasonEndTurn, Time: testFinishTime},
 			},
 		}
-		inner := NewAssistantMessageItem(&sty, msg)
+		inner := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 		require.True(t, inner.Finished(), "test fixture must be Finished()")
 		return newRenderCountingItem(inner)
 	}

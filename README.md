@@ -658,6 +658,40 @@ it creates. You can customize this behavior with the `attribution` option:
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to
   commit messages and PR descriptions
 
+### TUI Options
+
+Crush provides several options to customize the terminal UI:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "compact_mode": true,
+      "diff_mode": "split",
+      "transparent": true,
+      "reduce_animations": true,
+      "ssh_animation_mode": "reduce"
+    }
+  }
+}
+```
+
+- `compact_mode`: Enable compact TUI layout (default: `false`)
+- `diff_mode`: Diff view style - `"unified"` or `"split"` (default: `"unified"`)
+- `transparent`: Enable transparent background (default: `false`)
+- `reduce_animations`: When true, animated spinners are replaced with a static
+  "Working..." label. Can also be enabled via the `CRUSH_REDUCE_ANIMATIONS`
+  environment variable.
+- `ssh_animation_mode`: Controls animation behavior over SSH connections:
+  - `"ask"`: Prompt the user on first SSH session (default)
+  - `"reduce"`: Automatically reduce animations over SSH
+  - `"never"`: Keep animations enabled over SSH
+
+When Crush detects it is running over SSH and `ssh_animation_mode` is `"ask"`
+(the default), it will display a dialog asking whether to switch to simpler
+animations.
+
 ### Custom Providers
 
 Crush supports custom provider configurations for both OpenAI-compatible and

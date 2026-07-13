@@ -132,6 +132,8 @@ type SessionAgent interface {
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
+	SetObserver(observer RunObserver)
+	SetOnTitleChange(fn func(sessionID, title string))
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -151,6 +153,49 @@ type Model struct {
 	FlatRate   bool
 }
 
+// RunObserver receives streaming events during agent execution.
+type RunObserver interface {
+	OnToolInputStart(sessionID, toolCallID, toolName string)
+	OnTextDelta(sessionID, messageID, text string)
+	OnReasoningDelta(sessionID, messageID, text string)
+	OnToolCall(sessionID, toolCallID, toolName, input string)
+	OnToolResult(sessionID, toolCallID string, output string)
+	OnPlanUpdate(sessionID string, entries []PlanEntry)
+	OnUsageUpdate(sessionID string, usage StepUsage)
+}
+
+// PlanPriority indicates the relative importance of a plan task.
+type PlanPriority int
+
+const (
+	PlanPriorityHigh   PlanPriority = 0
+	PlanPriorityMedium PlanPriority = 1
+	PlanPriorityLow    PlanPriority = 2
+)
+
+// PlanStatus tracks a plan task's lifecycle.
+type PlanStatus int
+
+const (
+	PlanStatusPending    PlanStatus = 0
+	PlanStatusInProgress PlanStatus = 1
+	PlanStatusCompleted  PlanStatus = 2
+)
+
+// PlanEntry is a single task in the agent's execution plan.
+type PlanEntry struct {
+	Content  string       `json:"content"`
+	Priority PlanPriority `json:"priority"`
+	Status   PlanStatus   `json:"status"`
+}
+
+// StepUsage carries token and cost data for a single step.
+type StepUsage struct {
+	Used int     `json:"used"`
+	Size int     `json:"size"`
+	Cost float64 `json:"cost"`
+}
+
 type sessionAgent struct {
 	largeModel         *csync.Value[Model]
 	smallModel         *csync.Value[Model]
@@ -165,6 +210,7 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	observer             RunObserver
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -205,6 +251,9 @@ type sessionAgent struct {
 	// across the agent. Cancel uses its current value as the per-session
 	// high-water mark.
 	acceptSeqGen uint64
+
+	// onTitleChange is called when the session title is auto-generated.
+	onTitleChange func(sessionID, title string)
 }
 
 type SessionAgentOptions struct {
@@ -878,6 +927,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			currentAssistant.AppendReasoningContent(text)
+			if a.observer != nil {
+				a.observer.OnReasoningDelta(call.SessionID, currentAssistant.ID, text)
+			}
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -909,6 +961,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			currentAssistant.AppendContent(text)
+			if a.observer != nil {
+				a.observer.OnTextDelta(call.SessionID, currentAssistant.ID, text)
+			}
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolInputStart: func(id string, toolName string) error {
@@ -919,6 +974,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Finished:         false,
 			}
 			currentAssistant.AddToolCall(toolCall)
+			if a.observer != nil {
+				a.observer.OnToolInputStart(call.SessionID, id, toolName)
+			}
 			// Use parent ctx instead of genCtx to ensure the update succeeds
 			// even if the request is canceled mid-stream
 			return a.messages.Update(ctx, *currentAssistant)
@@ -939,6 +997,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Finished:         true,
 			}
 			currentAssistant.AddToolCall(toolCall)
+			if a.observer != nil {
+				a.observer.OnToolCall(call.SessionID, tc.ToolCallID, tc.ToolName, string(tc.Input))
+			}
 			// Use parent ctx instead of genCtx to ensure the update succeeds
 			// even if the request is canceled mid-stream
 			return a.messages.Update(ctx, *currentAssistant)
@@ -948,6 +1009,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if sanitizedToolCalls[result.ToolCallID] {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
+			}
+			if a.observer != nil {
+				a.observer.OnToolResult(call.SessionID, result.ToolCallID, toolResult.Content)
 			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
@@ -995,6 +1059,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			extractHyperCredits(stepResult.ProviderMetadata)
+			if a.observer != nil {
+				contextWindow := int64(largeModel.CatwalkCfg.ContextWindow)
+				cost := 0.0
+				if openrouterCost := a.openrouterCost(stepResult.ProviderMetadata); openrouterCost != nil {
+					cost = *openrouterCost
+				}
+				a.observer.OnUsageUpdate(call.SessionID, StepUsage{
+					Used: int(updatedSession.CompletionTokens + updatedSession.PromptTokens),
+					Size: int(contextWindow),
+					Cost: cost,
+				})
+			}
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -1825,6 +1901,10 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 	titleSaved = true
+
+	if a.onTitleChange != nil {
+		a.onTitleChange(sessionID, title)
+	}
 }
 
 func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float64 {
@@ -2037,6 +2117,14 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+func (a *sessionAgent) SetObserver(observer RunObserver) {
+	a.observer = observer
+}
+
+func (a *sessionAgent) SetOnTitleChange(fn func(sessionID, title string)) {
+	a.onTitleChange = fn
 }
 
 func (a *sessionAgent) Model() Model {

@@ -97,6 +97,9 @@ type Coordinator interface {
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
+	SetObserver(observer RunObserver)
+	SetACPConnector(connector *tools.ACPConnector)
+	SetOnTitleChange(fn func(sessionID, title string))
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
 	Model() Model
@@ -105,15 +108,17 @@ type Coordinator interface {
 }
 
 type coordinator struct {
-	cfg         *config.ConfigStore
-	sessions    session.Service
-	messages    message.Service
-	permissions permission.Service
-	history     history.Service
-	filetracker filetracker.Service
-	lspManager  *lsp.Manager
-	notify      pubsub.Publisher[notify.Notification]
-	runComplete pubsub.Publisher[notify.RunComplete]
+	cfg          *config.ConfigStore
+	sessions     session.Service
+	messages     message.Service
+	permissions  permission.Service
+	history      history.Service
+	filetracker  filetracker.Service
+	lspManager   *lsp.Manager
+	notify       pubsub.Publisher[notify.Notification]
+	runComplete  pubsub.Publisher[notify.RunComplete]
+	observer     RunObserver
+	acpConnector *tools.ACPConnector
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -206,6 +211,16 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
+	}
+
+	if err := c.reloadConfigIfNeeded(ctx); err != nil {
+		return nil, fmt.Errorf("failed to reload config: %w", err)
+	}
+
+	if c.acpConnector != nil {
+		if err := c.rebuildACPTools(ctx); err != nil {
+			return nil, fmt.Errorf("failed to sync ACP tools: %w", err)
+		}
 	}
 
 	// refresh models before each run
@@ -721,6 +736,25 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 
+	if c.acpConnector != nil && c.cfg.Config().Options.ACP != nil && c.cfg.Config().Options.ACP.ZedControl {
+		filteredTools = append(filteredTools,
+			tools.NewACPViewTool(c.acpConnector),
+			tools.NewACPWriteTool(c.acpConnector),
+			tools.NewACPBashTool(c.acpConnector),
+			tools.NewZedVisualNavigateTool(c.acpConnector),
+			tools.NewZedVisualPaneTool(c.acpConnector),
+			tools.NewZedVisualPanelTool(c.acpConnector),
+			tools.NewZedVisualBatchTool(c.acpConnector),
+		)
+		slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
+			return strings.Compare(a.Info().Name, b.Info().Name)
+		})
+	}
+
+	if !isSubAgent {
+		filteredTools = append(filteredTools, tools.NewUpdatePlanTool())
+	}
+
 	// Wrap tools with hook interception for the top-level agent only.
 	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
 	// without hook interception to avoid firing the user's hook N times
@@ -1134,6 +1168,30 @@ func (c *coordinator) Model() Model {
 	return c.currentAgent.Model()
 }
 
+func (c *coordinator) reloadConfigIfNeeded(ctx context.Context) error {
+	if c.cfg == nil {
+		return nil
+	}
+	stale := c.cfg.ConfigStaleness()
+	if !stale.Dirty {
+		return nil
+	}
+	return c.cfg.ReloadFromDisk(ctx)
+}
+
+func (c *coordinator) rebuildACPTools(ctx context.Context) error {
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		return errCoderAgentNotConfigured
+	}
+	tools, err := c.buildTools(ctx, agentCfg, false)
+	if err != nil {
+		return err
+	}
+	c.currentAgent.SetTools(tools)
+	return nil
+}
+
 func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// build the models again so we make sure we get the latest config
 	large, small, err := c.buildAgentModels(ctx, false)
@@ -1161,6 +1219,25 @@ func (c *coordinator) QueuedPrompts(sessionID string) int {
 
 func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 	return c.currentAgent.QueuedPromptsList(sessionID)
+}
+
+func (c *coordinator) SetObserver(observer RunObserver) {
+	c.observer = observer
+	c.currentAgent.SetObserver(observer)
+}
+
+func (c *coordinator) SetACPConnector(connector *tools.ACPConnector) {
+	c.acpConnector = connector
+	if connector == nil {
+		return
+	}
+	if err := c.rebuildACPTools(context.Background()); err != nil {
+		slog.Warn("SetACPConnector: failed to rebuild tools", "err", err)
+	}
+}
+
+func (c *coordinator) SetOnTitleChange(fn func(sessionID, title string)) {
+	c.currentAgent.SetOnTitleChange(fn)
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {

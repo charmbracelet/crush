@@ -10,6 +10,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/message"
@@ -53,6 +54,9 @@ func (s *stubCoordinator) Summarize(context.Context, string) error {
 func (s *stubCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (s *stubCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *stubCoordinator) GenerateTitle(context.Context, string, string) {}
+func (s *stubCoordinator) SetObserver(agent.RunObserver)                 {}
+func (s *stubCoordinator) SetACPConnector(*tools.ACPConnector)           {}
+func (s *stubCoordinator) SetOnTitleChange(func(string, string))         {}
 
 // stubSessions is a minimal session.Service that returns a fixed list
 // (and supports Get by ID). All other methods return zero values; the

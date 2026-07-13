@@ -12,14 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUnsafeCrushConfigTextEdit(t *testing.T) {
-	t.Parallel()
-
-	require.True(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.EditToolName, Input: `{"file_path":"C:\\Users\\me\\AppData\\Local\\crush\\crush.json"}`}))
-	require.True(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.MultiEditToolName, Input: `{"file_path":"crush.project.json"}`}))
-	require.False(t, unsafeCrushConfigTextEdit(fantasy.ToolCall{Name: tools.EditToolName, Input: `{"file_path":"main.go"}`}))
-}
-
 // fakeTool records the context it was invoked with so tests can assert on
 // values stamped onto it by the hookedTool decorator.
 type fakeTool struct {
@@ -67,7 +59,7 @@ func TestHookedTool_AllowStampsHookApproval(t *testing.T) {
 
 	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
 	runner := newRunner(t, `echo '{"decision":"allow"}'`)
-	tool := newHookedTool(inner, runner, nil, nil, nil)
+	tool := newHookedTool(inner, runner, nil, nil)
 
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-1", Name: "view"})
 	require.NoError(t, err)
@@ -91,7 +83,7 @@ func TestHookedTool_SilentDoesNotStampApproval(t *testing.T) {
 
 	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
 	runner := newRunner(t, `exit 0`) // no stdout, no decision
-	tool := newHookedTool(inner, runner, nil, nil, nil)
+	tool := newHookedTool(inner, runner, nil, nil)
 
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-2", Name: "view"})
 	require.NoError(t, err)
@@ -120,7 +112,7 @@ func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 
 	inner := &fakeTool{name: "bash"}
 	runner := newRunner(t, `echo "blocked" >&2; exit 2`)
-	tool := newHookedTool(inner, runner, nil, nil, nil)
+	tool := newHookedTool(inner, runner, nil, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-3", Name: "bash"})
 	require.NoError(t, err)
@@ -155,14 +147,10 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		}
 	})
 
-	t.Run("nil runner still wraps top-level tools for recovery ledger", func(t *testing.T) {
+	t.Run("nil runners leave tools unchanged", func(t *testing.T) {
 		t.Parallel()
 		out := wrapToolsWithHooks(inputs, nil, nil, nil, false)
-		require.Len(t, out, len(inputs))
-		for i, tool := range out {
-			_, ok := tool.(*hookedTool)
-			require.Truef(t, ok, "tool %d should be a *hookedTool", i)
-		}
+		require.Equal(t, inputs, out)
 		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, nil, nil, true))
 	})
 }
@@ -172,7 +160,7 @@ func TestHookedTool_PostToolUseAppendsContext(t *testing.T) {
 
 	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
 	postRunner := newRunner(t, `echo '{"context":"reviewed by post hook"}'`)
-	tool := newHookedTool(inner, nil, postRunner, nil, nil)
+	tool := newHookedTool(inner, nil, postRunner, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-4", Name: "view", Input: `{}`})
 	require.NoError(t, err)
@@ -186,7 +174,7 @@ func TestHookedTool_PostToolUseBlockReplacesResult(t *testing.T) {
 
 	inner := &fakeTool{name: "bash", resp: fantasy.NewTextResponse("looks fine")}
 	postRunner := newRunner(t, `echo '{"decision":"block","reason":"inspect help before retrying"}'`)
-	tool := newHookedTool(inner, nil, postRunner, nil, nil)
+	tool := newHookedTool(inner, nil, postRunner, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-5", Name: "bash", Input: `{"command":"bad --flag"}`})
 	require.NoError(t, err)
@@ -202,7 +190,7 @@ func TestHookedTool_PostToolUseFailureUsesFailureEvent(t *testing.T) {
 	inner := &fakeTool{name: "bash", resp: fantasy.NewTextErrorResponse("unknown option")}
 	postRunner := newRunner(t, `echo '{"context":"regular post hook"}'`)
 	postFailureRunner := newRunner(t, `echo '{"decision":"block","reason":"failure hook recovery"}'`)
-	tool := newHookedTool(inner, nil, postRunner, postFailureRunner, newToolFailureLedger())
+	tool := newHookedTool(inner, nil, postRunner, postFailureRunner)
 
 	resp, err := tool.Run(sessionContext("s-failure"), fantasy.ToolCall{ID: "call-6", Name: "bash", Input: `{"command":"pm2 reload app --env-file x"}`})
 	require.NoError(t, err)
@@ -210,52 +198,4 @@ func TestHookedTool_PostToolUseFailureUsesFailureEvent(t *testing.T) {
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "failure hook recovery")
 	require.NotContains(t, resp.Content, "regular post hook")
-}
-
-func TestHookedTool_BlocksRepeatedFailedInput(t *testing.T) {
-	t.Parallel()
-
-	inner := &fakeTool{name: "bash", resp: fantasy.NewTextErrorResponse("unknown option --env-file")}
-	tool := newHookedTool(inner, nil, nil, nil, newToolFailureLedger())
-	ctx := sessionContext("s-repeat")
-	call := fantasy.ToolCall{ID: "call-7", Name: "bash", Input: `{"command":"pm2 reload app --env-file /opt/.env"}`}
-
-	first, err := tool.Run(ctx, call)
-	require.NoError(t, err)
-	require.True(t, first.IsError)
-	require.Equal(t, 1, inner.calls)
-
-	second, err := tool.Run(ctx, call)
-	require.NoError(t, err)
-	require.True(t, second.IsError)
-	require.Contains(t, second.Content, "Repeated failed tool call blocked")
-	require.Equal(t, 1, inner.calls, "identical failed retry must not reach the inner tool")
-}
-
-func TestHookedTool_BlocksAgentUntilRootGrounded(t *testing.T) {
-	t.Parallel()
-
-	ledger := newToolFailureLedger()
-	ctx := sessionContext("s-ground")
-	agentInner := &fakeTool{name: AgentToolName, resp: fantasy.NewTextResponse("delegated")}
-	agentTool := newHookedTool(agentInner, nil, nil, nil, ledger)
-
-	blocked, err := agentTool.Run(ctx, fantasy.ToolCall{ID: "call-8", Name: AgentToolName, Input: `{"prompt":"fix it"}`})
-	require.NoError(t, err)
-	require.True(t, blocked.IsError)
-	require.Contains(t, blocked.Content, "Sub-agent call blocked")
-	require.Equal(t, 0, agentInner.calls)
-
-	groundInner := &fakeTool{name: "ls", resp: fantasy.NewTextResponse("package.json")}
-	groundTool := newHookedTool(groundInner, nil, nil, nil, ledger)
-	grounded, err := groundTool.Run(ctx, fantasy.ToolCall{ID: "call-9", Name: "ls", Input: `{"path":"."}`})
-	require.NoError(t, err)
-	require.False(t, grounded.IsError)
-	require.Equal(t, 1, groundInner.calls)
-
-	allowed, err := agentTool.Run(ctx, fantasy.ToolCall{ID: "call-10", Name: AgentToolName, Input: `{"prompt":"fix it"}`})
-	require.NoError(t, err)
-	require.False(t, allowed.IsError)
-	require.Contains(t, allowed.Content, "delegated")
-	require.Equal(t, 1, agentInner.calls)
 }

@@ -66,6 +66,8 @@ type KeyMap struct {
 	Modes      key.Binding
 	Suspend    key.Binding
 	Sessions   key.Binding
+	Sources    key.Binding
+	Memory     key.Binding
 	Tab        key.Binding
 	ToggleYolo key.Binding
 }
@@ -99,6 +101,14 @@ func DefaultKeyMap() KeyMap {
 		Sessions: key.NewBinding(
 			key.WithKeys("ctrl+s"),
 			key.WithHelp("ctrl+s", "sessions"),
+		),
+		Sources: key.NewBinding(
+			key.WithKeys("alt+s"),
+			key.WithHelp("alt+s", "sources"),
+		),
+		Memory: key.NewBinding(
+			key.WithKeys("alt+r"),
+			key.WithHelp("alt+r", "memory"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),

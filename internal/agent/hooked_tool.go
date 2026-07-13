@@ -14,18 +14,17 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// hookedTool wraps a fantasy.AgentTool to run hook policy and session-local
-// recovery checks before delegating to the inner tool.
+// hookedTool wraps a fantasy.AgentTool to run hook policy before and after
+// delegating to the inner tool.
 type hookedTool struct {
 	inner             fantasy.AgentTool
 	preRunner         *hooks.Runner
 	postRunner        *hooks.Runner
 	postFailureRunner *hooks.Runner
-	ledger            *toolFailureLedger
 }
 
-func newHookedTool(inner fantasy.AgentTool, preRunner, postRunner, postFailureRunner *hooks.Runner, ledger *toolFailureLedger) *hookedTool {
-	return &hookedTool{inner: inner, preRunner: preRunner, postRunner: postRunner, postFailureRunner: postFailureRunner, ledger: ledger}
+func newHookedTool(inner fantasy.AgentTool, preRunner, postRunner, postFailureRunner *hooks.Runner) *hookedTool {
+	return &hookedTool{inner: inner, preRunner: preRunner, postRunner: postRunner, postFailureRunner: postFailureRunner}
 }
 
 // wrapToolsWithHooks returns a tool slice with each entry wrapped in a
@@ -33,13 +32,12 @@ func newHookedTool(inner fantasy.AgentTool, preRunner, postRunner, postFailureRu
 // when isSubAgent is true — sub-agents never fire hooks, the top-level
 // invocation of the sub-agent tool itself is wrapped on the caller's side.
 func wrapToolsWithHooks(tools []fantasy.AgentTool, preRunner, postRunner, postFailureRunner *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
-	if isSubAgent {
+	if isSubAgent || preRunner == nil && postRunner == nil && postFailureRunner == nil {
 		return tools
 	}
-	ledger := newToolFailureLedger()
 	out := make([]fantasy.AgentTool, len(tools))
 	for i, tool := range tools {
-		out[i] = newHookedTool(tool, preRunner, postRunner, postFailureRunner, ledger)
+		out[i] = newHookedTool(tool, preRunner, postRunner, postFailureRunner)
 	}
 	return out
 }
@@ -56,11 +54,27 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 	h.inner.SetProviderOptions(opts)
 }
 
+func (h *hookedTool) ResolveDeferredTools(names []string) []fantasy.AgentTool {
+	provider, ok := h.inner.(tools.DeferredToolProvider)
+	if !ok {
+		return nil
+	}
+	return wrapToolsWithHooks(
+		provider.ResolveDeferredTools(names),
+		h.preRunner,
+		h.postRunner,
+		h.postFailureRunner,
+		false,
+	)
+}
+
+func (h *hookedTool) PollutesMemory() bool {
+	pollutingTool, ok := h.inner.(interface{ PollutesMemory() bool })
+	return ok && pollutingTool.PollutesMemory()
+}
+
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID := tools.GetSessionFromContext(ctx)
-	if unsafeCrushConfigTextEdit(call) {
-		return fantasy.NewTextErrorResponse("Textual edit/multiedit is blocked for crush.json because it can corrupt minified structured configuration. Use view for reading, then use a JSON parser to parse, mutate, serialize, validate, and atomically replace the complete file while preserving unrelated fields."), nil
-	}
 	var result hooks.AggregateResult
 	if h.preRunner != nil {
 		var err error
@@ -95,17 +109,8 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 		}
 	}
 
-	if call.Name == AgentToolName && !h.ledger.hasGrounding(sessionID) {
-		return fantasy.NewTextErrorResponse("Sub-agent call blocked until the root agent grounds the task. First inspect the current workspace/target with ls, view, grep, the shell tool, recode_info, or an MCP filesystem/GitHub/docs tool, then call agent with the verified path and objective."), nil
-	}
-
-	if previous, ok := h.ledger.previousFailure(sessionID, call.Name, call.Input); ok {
-		return fantasy.NewTextErrorResponse(repeatFailureMessage(previous)), nil
-	}
-
 	resp, err := h.inner.Run(ctx, call)
 	if err != nil {
-		h.ledger.recordFailure(sessionID, call.Name, call.Input, err.Error())
 		return resp, err
 	}
 
@@ -154,13 +159,6 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 		resp.Metadata = mergeHookMetadata(resp.Metadata, postResult)
 	}
 
-	if resp.IsError {
-		h.ledger.recordFailure(sessionID, call.Name, call.Input, resp.Content)
-	} else {
-		h.ledger.clearFailure(sessionID, call.Name, call.Input)
-		h.ledger.markGrounded(sessionID, call.Name)
-	}
-
 	if result.Context != "" {
 		if resp.Content != "" {
 			resp.Content += "\n"
@@ -170,21 +168,6 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 
 	resp.Metadata = mergeHookMetadata(resp.Metadata, result)
 	return resp, nil
-}
-
-func unsafeCrushConfigTextEdit(call fantasy.ToolCall) bool {
-	if call.Name != tools.EditToolName && call.Name != tools.MultiEditToolName {
-		return false
-	}
-	var input struct {
-		FilePath string `json:"file_path"`
-	}
-	if json.Unmarshal([]byte(call.Input), &input) != nil {
-		return false
-	}
-	name := strings.ToLower(strings.ReplaceAll(input.FilePath, "\\", "/"))
-	base := name[strings.LastIndex(name, "/")+1:]
-	return base == "crush.json" || base == "crush.project.json"
 }
 
 func postHookFeedback(result hooks.AggregateResult, eventName string) string {

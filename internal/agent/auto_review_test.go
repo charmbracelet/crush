@@ -16,16 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAutoReviewPromptIsBoundedAndReadOnly(t *testing.T) {
-	t.Parallel()
-
-	prompt := string(autoReviewPrompt)
-	require.Contains(t, prompt, "read-only diagnostic")
-	require.Contains(t, prompt, "Next tool:")
-	require.Contains(t, prompt, "do not use tools")
-	require.Equal(t, 1, strings.Count(prompt, "Auto-review sidecar:"))
-}
-
 type autoReviewStreamModel struct {
 	text          string
 	err           error
@@ -123,7 +113,7 @@ func (m *autoReviewStreamModel) StreamObject(ctx context.Context, call fantasy.O
 	return nil, errors.New("not implemented")
 }
 
-func newAutoReviewTestAgent(env fakeEnv, primary, review fantasy.LanguageModel) *sessionAgent {
+func newRecoveryTestAgent(env fakeEnv, primary fantasy.LanguageModel) *sessionAgent {
 	title := &autoReviewStreamModel{text: "title"}
 	modelConfig := catwalk.Model{
 		ContextWindow:    200000,
@@ -145,28 +135,18 @@ func newAutoReviewTestAgent(env fakeEnv, primary, review fantasy.LanguageModel) 
 			Model:    title.Model(),
 		},
 	}
-	reviewModel := Model{
-		Model:      review,
-		CatwalkCfg: modelConfig,
-		ModelCfg: config.SelectedModel{
-			Provider: review.Provider(),
-			Model:    review.Model(),
-		},
-	}
 	return NewSessionAgent(SessionAgentOptions{
-		LargeModel:        primaryModel,
-		SmallModel:        titleModel,
-		SummaryModel:      primaryModel,
-		ReviewModel:       reviewModel,
-		SystemPrompt:      "system",
-		AutoReviewEnabled: true,
-		IsYolo:            true,
-		Sessions:          env.sessions,
-		Messages:          env.messages,
+		LargeModel:   primaryModel,
+		SmallModel:   titleModel,
+		SummaryModel: primaryModel,
+		SystemPrompt: "system",
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
 	}).(*sessionAgent)
 }
 
-func TestAutoReviewFailureUsesHiddenReviewAndDrainsQueuedPrompt(t *testing.T) {
+func TestTerminalFailureDrainsQueuedPromptWithoutHiddenReview(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	primary := &autoReviewStreamModel{
@@ -175,7 +155,7 @@ func TestAutoReviewFailureUsesHiddenReviewAndDrainsQueuedPrompt(t *testing.T) {
 		failFirst: true,
 	}
 	review := &autoReviewStreamModel{text: "review done"}
-	sa := newAutoReviewTestAgent(env, primary, review)
+	sa := newRecoveryTestAgent(env, primary)
 	sess, err := env.sessions.Create(t.Context(), "session")
 	require.NoError(t, err)
 	primary.onStream = func(callNumber int64) {
@@ -191,7 +171,7 @@ func TestAutoReviewFailureUsesHiddenReviewAndDrainsQueuedPrompt(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.Equal(t, int64(2), primary.streamCalls.Load(), "failed turn should be followed by queued prompt")
-	require.Equal(t, int64(1), review.streamCalls.Load(), "failed turn should run one hidden auto-review")
+	require.Equal(t, int64(0), review.streamCalls.Load(), "failed turn must not run a hidden auto-review")
 	require.Equal(t, 0, sa.QueuedPrompts(sess.ID))
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
@@ -222,7 +202,7 @@ func TestAutoReviewFailureUsesHiddenReviewAndDrainsQueuedPrompt(t *testing.T) {
 	require.Equal(t, 1, successfulTurns)
 }
 
-func TestAutoReviewMaxTokensDoesNotLoop(t *testing.T) {
+func TestMaxTokensDoesNotStartHiddenReview(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	primary := &autoReviewStreamModel{
@@ -230,7 +210,7 @@ func TestAutoReviewMaxTokensDoesNotLoop(t *testing.T) {
 		finishReason: fantasy.FinishReasonLength,
 	}
 	review := &autoReviewStreamModel{text: "review done"}
-	sa := newAutoReviewTestAgent(env, primary, review)
+	sa := newRecoveryTestAgent(env, primary)
 	sess, err := env.sessions.Create(t.Context(), "session")
 	require.NoError(t, err)
 
@@ -240,8 +220,8 @@ func TestAutoReviewMaxTokensDoesNotLoop(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, int64(1), primary.streamCalls.Load(), "max-token auto-review must not re-enter the primary model")
-	require.Equal(t, int64(1), review.streamCalls.Load(), "max-token turn should run one hidden auto-review")
+	require.Equal(t, int64(1), primary.streamCalls.Load(), "max-token turn must not re-enter the primary model")
+	require.Equal(t, int64(0), review.streamCalls.Load(), "max-token turn must not run a hidden auto-review")
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
@@ -267,18 +247,6 @@ func TestAutoReviewMaxTokensDoesNotLoop(t *testing.T) {
 	require.Equal(t, 0, reviewTurns)
 }
 
-func TestRecoveryGuidanceFromReviewKeepsOnlyAction(t *testing.T) {
-	t.Parallel()
-
-	review := "Auto-review sidecar:\nCause: stale input\nEvidence: validation rejected url\nNext step: use the transport-specific stdio object\nNext tool: mcp_add"
-	guidance := recoveryGuidanceFromReview(review)
-
-	require.Contains(t, guidance, "use the transport-specific stdio object")
-	require.Contains(t, guidance, "Invoke mcp_add now")
-	require.NotContains(t, guidance, "Cause:")
-	require.NotContains(t, guidance, "Evidence:")
-}
-
 func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
@@ -293,7 +261,7 @@ func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
 		failFirst: true,
 	}
 	review := &autoReviewStreamModel{text: "review should not run"}
-	sa := newAutoReviewTestAgent(env, primary, review)
+	sa := newRecoveryTestAgent(env, primary)
 	sa.largePromptPrefix.Set("long provider prefix")
 	sa.systemPrompt.Set("long base prompt")
 	sa.recoveryContext.Set("Current working directory: C:/work/project\n\n## C:/work/project/AGENTS.md\nKeep project context during recovery.")

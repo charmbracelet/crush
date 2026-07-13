@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -300,7 +301,7 @@ func TestToPromptXML(t *testing.T) {
 	t.Parallel()
 
 	skills := []*Skill{
-		{Name: "pdf-processing", Description: "Extracts text from PDFs.", SkillFilePath: "/skills/pdf-processing/SKILL.md"},
+		{Name: "pdf-processing", Description: "Extracts  text\nfrom PDFs.", Instructions: "Read the entire PDF before answering.", SkillFilePath: "/skills/pdf-processing/SKILL.md"},
 		{Name: "data-analysis", Description: "Analyzes datasets & charts.", SkillFilePath: "/skills/data-analysis/SKILL.md"},
 	}
 
@@ -310,6 +311,9 @@ func TestToPromptXML(t *testing.T) {
 	require.Contains(t, xml, "<name>pdf-processing</name>")
 	require.Contains(t, xml, "<description>Extracts text from PDFs.</description>")
 	require.Contains(t, xml, "&amp;") // XML escaping
+	require.NotContains(t, xml, "<location>")
+	require.NotContains(t, xml, "<instructions>")
+	require.NotContains(t, xml, "Read the entire PDF before answering.")
 }
 
 func TestToPromptXMLDisableModelInvocation(t *testing.T) {
@@ -330,6 +334,28 @@ func TestToPromptXMLEmpty(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, ToPromptXML(nil))
 	require.Empty(t, ToPromptXML([]*Skill{}))
+	require.Empty(t, ToPromptXML([]*Skill{{
+		Name:                   "manual-only",
+		Description:            "Only load this skill when the user invokes it.",
+		DisableModelInvocation: true,
+	}}))
+}
+
+func TestToPromptXMLIncludesAllCompactMetadata(t *testing.T) {
+	t.Parallel()
+
+	available := make([]*Skill, 66)
+	for i := range available {
+		available[i] = &Skill{
+			Name:        fmt.Sprintf("skill-%d", i),
+			Description: strings.Repeat("long description ", 40),
+		}
+	}
+
+	xml := ToPromptXML(available)
+	require.Equal(t, 66, strings.Count(xml, "<skill>"))
+	require.NotContains(t, xml, "<omitted")
+	require.NotContains(t, xml, strings.Repeat("long description ", 40))
 }
 
 func TestEscape(t *testing.T) {
@@ -360,7 +386,7 @@ func TestEscape(t *testing.T) {
 	}
 }
 
-func TestToPromptXMLBuiltinType(t *testing.T) {
+func TestToPromptXMLOmitsImplementationMetadata(t *testing.T) {
 	t.Parallel()
 
 	skills := []*Skill{
@@ -368,8 +394,8 @@ func TestToPromptXMLBuiltinType(t *testing.T) {
 		{Name: "user-skill", Description: "A user skill.", SkillFilePath: "/home/user/.config/crush/skills/user-skill/SKILL.md"},
 	}
 	xml := ToPromptXML(skills)
-	require.Contains(t, xml, "<type>builtin</type>")
-	require.Equal(t, 1, strings.Count(xml, "<type>builtin</type>"))
+	require.NotContains(t, xml, "<type>")
+	require.NotContains(t, xml, "<location>")
 }
 
 func TestParseContent(t *testing.T) {

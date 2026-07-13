@@ -448,7 +448,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 
 		// Make sure the provider ID is set.
 		providerConfig.ID = id
-		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
+		providerConfig.Name = providerDisplayName(id, cmp.Or(providerConfig.Name, id))
 		// Default to OpenAI if not set.
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
@@ -527,6 +527,13 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	}
 
 	return nil
+}
+
+func providerDisplayName(id, name string) string {
+	if id == LMStudioProviderID && (name == "" || name == "LM Studio" || name == LMStudioProviderID) {
+		return LMStudioProviderName
+	}
+	return name
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

@@ -1,6 +1,3 @@
-Call one connected MCP tool previously identified by `mcp_tool_search`.
-
-Pass the exact server and native tool names from the search result. Pass an
-`arguments` object that follows the returned schema. Do not guess server names,
-tool names, or argument fields. Normal MCP permissions and transport behavior
-still apply.
+Compatibility fallback for calling one MCP tool by exact server and native tool
+name. Use only in a custom agent that cannot use deferred native tools. Search
+first, pass arguments matching the selected schema, and do not guess names.

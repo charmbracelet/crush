@@ -162,9 +162,7 @@ func newMCPAddTool(cfg *config.ConfigStore, deps mcpAddDeps) fantasy.AgentTool {
 			action := "reused"
 			if !configured || !reflect.DeepEqual(existing, normalized) {
 				if err := deps.setConfig(scope, "mcp."+name, normalized); err != nil {
-					response := fantasy.NewTextErrorResponse(fmt.Sprintf("%s: config_write_failed; configuration_changed=false; error=%v", name, err))
-					response.StopTurn = true
-					return response, nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("%s: config_write_failed; configuration_changed=false; error=%v", name, err)), nil
 				}
 				if configured {
 					action = "updated"
@@ -338,7 +336,6 @@ func rollbackMCPAddFailure(name, action string, scope config.Scope, configured b
 		}
 	}
 	response := fantasy.NewTextErrorResponse(formatMCPAddFailure(name, action, scope, present, changed, rollback, startErr))
-	response.StopTurn = true
 	return response
 }
 

@@ -301,6 +301,11 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	originalPrompt := prompt
 	expandedPrompt, explicitlyLoaded := injectExplicitSkillInvocations(prompt, c.activeSkills)
 	transientContext := skillTransientContext(originalPrompt, expandedPrompt, explicitlyLoaded)
+	goalMode := c.CurrentAgentID() == config.AgentGoal
+	goalBaseContext := transientContext
+	if goalMode {
+		transientContext = appendTransientContext(transientContext, goalModeContext(0, nil))
+	}
 	for _, name := range explicitlyLoaded {
 		c.MarkSkillLoaded(name)
 	}
@@ -375,6 +380,9 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			PresencePenalty:  presPenalty,
 			OnComplete:       onComplete,
 			Accepted:         accept,
+			originalIntent:   originalPrompt,
+			goalMode:         goalMode,
+			goalBaseContext:  goalBaseContext,
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
@@ -413,6 +421,18 @@ func skillTransientContext(originalPrompt, expandedPrompt string, loaded []strin
 	return strings.TrimSuffix(expandedPrompt, "\n\n"+originalPrompt)
 }
 
+func appendTransientContext(existing, addition string) string {
+	existing = strings.TrimSpace(existing)
+	addition = strings.TrimSpace(addition)
+	if existing == "" {
+		return addition
+	}
+	if addition == "" {
+		return existing
+	}
+	return existing + "\n\n" + addition
+}
+
 func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Skill) (string, []string) {
 	if strings.Contains(userPrompt, "<loaded_skill>") {
 		return userPrompt, nil
@@ -420,11 +440,7 @@ func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Sk
 
 	lowerPrompt := strings.ToLower(userPrompt)
 	activationVerbs := []string{"load", "use", "follow", "invoke", "apply"}
-	type selectedSkill struct {
-		skill    *skills.Skill
-		explicit bool
-	}
-	var loaded []selectedSkill
+	var loaded []*skills.Skill
 	for _, skill := range activeSkills {
 		if skill == nil || skill.Name == "" || skill.Instructions == "" || skill.DisableModelInvocation {
 			continue
@@ -439,13 +455,10 @@ func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Sk
 				return strings.Contains(window, verb)
 			})
 		}
-		if !explicit && !taskRequiresBuiltinSkill(lowerPrompt, skill.Name) {
+		if !explicit {
 			continue
 		}
-		loaded = append(loaded, selectedSkill{skill: skill, explicit: explicit})
-		if len(loaded) == 4 {
-			break
-		}
+		loaded = append(loaded, skill)
 	}
 	if len(loaded) == 0 {
 		return userPrompt, nil
@@ -453,52 +466,12 @@ func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Sk
 
 	parts := make([]string, 0, len(loaded)+1)
 	names := make([]string, 0, len(loaded))
-	for _, selected := range loaded {
-		if selected.explicit {
-			parts = append(parts, selected.skill.FormatInvocation())
-		} else {
-			parts = append(parts, inferredSkillContext(selected.skill.Name))
-		}
-		names = append(names, selected.skill.Name)
+	for _, skill := range loaded {
+		parts = append(parts, skill.FormatInvocation())
+		names = append(names, skill.Name)
 	}
 	parts = append(parts, userPrompt)
 	return strings.Join(parts, "\n\n"), names
-}
-
-func inferredSkillContext(name string) string {
-	var instructions string
-	switch name {
-	case "crush-config":
-		instructions = "Inspect recode_info before changing configuration. Preserve unrelated providers, models, permissions, and MCP entries. For MCP changes use mcp_add instead of editing JSON."
-	case "mcp-setup":
-		instructions = "Inspect current MCP status with recode_info before installing anything. Never substitute a related server. Prefer official documentation or a primary registry when the server identity is unclear, but do not block an exact configuration because a documentation host cannot be fetched. Then call mcp_add with exactly one transport object; source_url is optional approval context. Use replace=true only when correcting a saved config. A failed mcp_add is rolled back and ends the turn."
-	case "execution-routing":
-		instructions = "Keep ownership of the user task. Delegate only bounded read-only research, integrate the evidence yourself, and continue until the intent is satisfied or a concrete blocker requires user input. Do not repeat a failed command without changing strategy."
-	default:
-		return ""
-	}
-	return "<loaded_skill>\n<name>" + name + "</name>\n<instructions>" + instructions + "</instructions>\n</loaded_skill>"
-}
-
-func taskRequiresBuiltinSkill(prompt, skillName string) bool {
-	hasAny := func(terms ...string) bool {
-		return slices.ContainsFunc(terms, func(term string) bool {
-			return strings.Contains(prompt, term)
-		})
-	}
-	switch skillName {
-	case "crush-config":
-		return hasAny("crush.json", "configure crush", "provider", "model slot", "permission", " mcp", "mcp ", "mcps")
-	case "mcp-setup":
-		return hasAny(" mcp", "mcp ", "mcps", "model context protocol")
-	case "execution-routing":
-		return len(prompt) > 80 && hasAny(
-			"audit", "investigate", "root cause", "multiple files", "across the repo",
-			"refactor", "migration", "implement", "fix them all", "autonomous",
-		)
-	default:
-		return false
-	}
 }
 
 // effectiveReasoningEffort returns the reasoning effort to apply for provider calls.
@@ -805,10 +778,6 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	if !ok {
 		return nil, errModelProviderNotConfigured
 	}
-	reviewProviderCfg, ok := c.cfg.Config().Providers.Get(models.Review.ModelCfg.Provider)
-	if !ok {
-		return nil, errModelProviderNotConfigured
-	}
 	memoryAllowed := !isSubAgent && agent.ID != config.AgentReview
 	disableMemoryOnExternalContext := false
 	if memoryOptions := c.cfg.Config().Options.Memory; memoryOptions != nil {
@@ -819,19 +788,15 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 			Large:                     models.Primary,
 			Small:                     models.Small,
 			Summary:                   models.Summary,
-			Review:                    models.Review,
 			SmallProviderOpts:         getProviderOptions(models.Small, smallProviderCfg),
 			SummaryProviderOpts:       getProviderOptions(models.Summary, summaryProviderCfg),
-			ReviewProviderOpts:        getProviderOptions(models.Review, reviewProviderCfg),
 			LargeSystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
 			SmallSystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 			SummarySystemPromptPrefix: summaryProviderCfg.SystemPromptPrefix,
-			ReviewSystemPromptPrefix:  reviewProviderCfg.SystemPromptPrefix,
 		},
 		SystemPrompt:                   "",
 		IsSubAgent:                     isSubAgent,
 		DisableAutoSummarize:           c.cfg.Config().Options.DisableAutoSummarize,
-		AutoReviewEnabled:              agent.ID != config.AgentReview && !isSubAgent,
 		IsYolo:                         c.permissions.SkipRequests(),
 		Sessions:                       c.sessions,
 		Messages:                       c.messages,
@@ -905,8 +870,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewSkillTool(c.activeSkills, c.skillTracker),
+		tools.NewAddSourceTool(c.sessions, c.cfg.WorkingDir()),
+		tools.NewRemoveSourceTool(c.sessions),
+		tools.NewSourcesTool(c.sessions),
 		tools.NewMCPAddTool(c.cfg, c.permissions),
-		tools.NewMCPRefreshTool(c.cfg),
+		tools.NewMCPManageTool(c.cfg, c.permissions),
+		tools.NewGoalStatusTool(),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobListTool(),
@@ -938,13 +908,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
 			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
 		)
-		if agent.AllowedMCP == nil || len(agent.AllowedMCP) > 0 {
-			allTools = append(
-				allTools,
-				tools.NewMCPToolSearchTool(c.permissions, c.cfg, c.cfg.WorkingDir(), agent.AllowedMCP),
-				tools.NewMCPToolCallTool(c.permissions, c.cfg, c.cfg.WorkingDir(), agent.AllowedMCP),
-			)
-		}
+	}
+	if agent.AllowedMCP == nil || len(agent.AllowedMCP) > 0 {
+		// Discovery reads live runtime state on every call. Keep it available
+		// even before the first server is added so a newly connected server can
+		// be selected without rebuilding the session agent.
+		allTools = append(
+			allTools,
+			tools.NewMCPToolSearchTool(c.permissions, c.cfg, c.cfg.WorkingDir(), agent.AllowedMCP),
+			tools.NewMCPToolCallTool(c.permissions, c.cfg, c.cfg.WorkingDir(), agent.AllowedMCP),
+		)
 	}
 
 	var filteredTools []fantasy.AgentTool
@@ -983,7 +956,6 @@ type agentModels struct {
 	Primary Model
 	Small   Model
 	Summary Model
-	Review  Model
 }
 
 func (c *coordinator) buildAgentModels(ctx context.Context, primaryType config.SelectedModelType, isSubAgent bool) (agentModels, error) {
@@ -1002,15 +974,10 @@ func (c *coordinator) buildAgentModels(ctx context.Context, primaryType config.S
 	if err != nil {
 		return agentModels{}, err
 	}
-	review, err := c.buildModel(ctx, config.SelectedModelTypeReview, isSubAgent)
-	if err != nil {
-		return agentModels{}, err
-	}
 	return agentModels{
 		Primary: primary,
 		Small:   small,
 		Summary: summary,
-		Review:  review,
 	}, nil
 }
 
@@ -1395,22 +1362,15 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	if !ok {
 		return errModelProviderNotConfigured
 	}
-	reviewProviderCfg, ok := c.cfg.Config().Providers.Get(models.Review.ModelCfg.Provider)
-	if !ok {
-		return errModelProviderNotConfigured
-	}
 	c.currentAgent.SetModels(SessionAgentModels{
 		Large:                     models.Primary,
 		Small:                     models.Small,
 		Summary:                   models.Summary,
-		Review:                    models.Review,
 		SmallProviderOpts:         getProviderOptions(models.Small, smallProviderCfg),
 		SummaryProviderOpts:       getProviderOptions(models.Summary, summaryProviderCfg),
-		ReviewProviderOpts:        getProviderOptions(models.Review, reviewProviderCfg),
 		LargeSystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
 		SmallSystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 		SummarySystemPromptPrefix: summaryProviderCfg.SystemPromptPrefix,
-		ReviewSystemPromptPrefix:  reviewProviderCfg.SystemPromptPrefix,
 	})
 
 	tools, err := c.buildTools(ctx, agentCfg, false)

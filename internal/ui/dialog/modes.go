@@ -17,7 +17,7 @@ const (
 	// ModesID is the identifier for the agent mode picker dialog.
 	ModesID              = "modes"
 	modesDialogMaxWidth  = 72
-	modesDialogMaxHeight = 10
+	modesDialogMaxHeight = 11
 )
 
 type modeDefinition struct {
@@ -27,6 +27,7 @@ type modeDefinition struct {
 
 var modeDefinitions = []modeDefinition{
 	{ID: config.AgentCoder, Title: "Task"},
+	{ID: config.AgentGoal, Title: "Goal"},
 	{ID: config.AgentReview, Title: "Review"},
 }
 

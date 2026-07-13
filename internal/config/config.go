@@ -60,11 +60,12 @@ const (
 
 const (
 	LMStudioProviderID   = "tailnet-lmstudio"
-	LMStudioProviderName = "LM Studio"
+	LMStudioProviderName = "Open Provider"
 )
 
 const (
 	AgentCoder  string = "coder"
+	AgentGoal   string = "goal"
 	AgentPlan   string = "plan"
 	AgentTask   string = "task"
 	AgentReview string = "review"
@@ -792,10 +793,13 @@ func allToolNames() []string {
 		"agent",
 		"bash",
 		"recode_info",
+		"skill",
+		"add_source",
+		"remove_source",
+		"sources",
 		"mcp_add",
-		"mcp_refresh",
+		"mcp_manage",
 		"mcp_tool_search",
-		"mcp_tool_call",
 		"crush_logs",
 		"job_output",
 		"job_list",
@@ -816,6 +820,7 @@ func allToolNames() []string {
 		"ls",
 		"sourcegraph",
 		"todos",
+		"goal_status",
 		"view",
 		"write",
 		"list_mcp_resources",
@@ -832,13 +837,13 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view", "web_fetch", "web_search"}
+	readOnlyTools := []string{"glob", "grep", "ls", "skill", "sourcegraph", "sources", "view", "web_fetch", "web_search"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }
 
 func resolvePlanTools(tools []string) []string {
-	planTools := []string{"fetch", "glob", "grep", "lsp_diagnostics", "lsp_references", "ls", "sourcegraph", "todos", "view", "web_fetch", "web_search"}
+	planTools := []string{"fetch", "glob", "grep", "lsp_diagnostics", "lsp_references", "ls", "skill", "sourcegraph", "sources", "todos", "view", "web_fetch", "web_search"}
 	return filterSlice(tools, planTools, true)
 }
 
@@ -856,6 +861,11 @@ func filterSlice(data []string, mask []string, include bool) []string {
 
 func (c *Config) SetupAgents() {
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	taskTools := filterSlice(allowedTools, []string{"goal_status"}, false)
+	goalTools := slices.Clone(allowedTools)
+	if !slices.Contains(goalTools, "goal_status") {
+		goalTools = append(goalTools, "goal_status")
+	}
 
 	agents := map[string]Agent{
 		AgentCoder: {
@@ -864,7 +874,16 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with executing coding tasks.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: allowedTools,
+			AllowedTools: taskTools,
+		},
+
+		AgentGoal: {
+			ID:           AgentGoal,
+			Name:         "Goal",
+			Description:  "An agent that continues a bounded coding objective until it is complete or blocked.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: goalTools,
 		},
 
 		AgentPlan: {

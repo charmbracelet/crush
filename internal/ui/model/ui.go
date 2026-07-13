@@ -182,6 +182,12 @@ type (
 		notice string
 		err    error
 	}
+	// sourceChangedMsg reports completion of a session source mutation.
+	sourceChangedMsg struct {
+		notice  string
+		session session.Session
+		err     error
+	}
 )
 
 // UI represents the main user interface model.
@@ -285,6 +291,10 @@ type UI struct {
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
+
+	// sidebarScrollOffset is the first visible line in the details region
+	// below the fixed logo and model information.
+	sidebarScrollOffset int
 
 	// Notification state
 	notifyBackend       notification.Backend
@@ -641,6 +651,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
+		m.sidebarScrollOffset = 0
 		m.sessionFiles = msg.files
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
@@ -737,6 +748,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg(msg.notice)))
 		}
 		cmds = append(cmds, m.loadMemorySnapshot())
+	case sourceChangedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		if m.session != nil && m.session.ID == msg.session.ID {
+			m.session = &msg.session
+		}
+		if m.dialog.ContainsDialog(dialog.SourcesID) {
+			m.dialog.CloseDialog(dialog.SourcesID)
+			m.dialog.OpenDialog(dialog.NewSources(m.com, slices.Clone(msg.session.Sources)))
+		}
+		if msg.notice != "" {
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg(msg.notice)))
+		}
 
 	case promptHistoryLoadedMsg:
 		m.promptHistory.messages = msg.messages
@@ -970,6 +996,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
+			if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.layout.sidebar) {
+				lines := int(msg.DeltaY)
+				if lines != 0 {
+					m.scrollSidebar(lines)
+				}
+				break
+			}
 			if msg.DeltaX != 0 {
 				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
 			}
@@ -1614,6 +1647,31 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.setMemorySessionRecording(msg.SessionID, msg.Enabled))
 	case dialog.ActionMemoryMaintain:
 		cmds = append(cmds, m.maintainMemory())
+	case dialog.ActionOpenSourceAdd:
+		arguments := []commands.Argument{
+			{ID: "value", Title: "Source", Description: "File path, URL, or text", Required: true},
+			{ID: "kind", Title: "Kind", Description: "Optional: file, url, or text"},
+			{ID: "label", Title: "Label", Description: "Optional display name"},
+		}
+		m.dialog.OpenDialog(dialog.NewArguments(
+			m.com,
+			"Add Source",
+			"Attach a lazy reference to this session. Contents load only when viewed or resolved.",
+			arguments,
+			dialog.ActionSourceAdd{},
+		))
+	case dialog.ActionSourceAdd:
+		m.dialog.CloseDialog(dialog.ArgumentsID)
+		cmds = append(cmds, m.addSessionSource(msg.Args))
+	case dialog.ActionSourceRemove:
+		cmds = append(cmds, m.removeSessionSource(msg.ID))
+	case dialog.ActionSourceView:
+		m.dialog.CloseDialog(dialog.SourcePreviewID)
+		preview, cmd := dialog.NewSourcePreview(m.com, &m.caps, msg.Source)
+		m.dialog.OpenDialog(preview)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
@@ -2116,6 +2174,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return true
 		case key.Matches(msg, m.keyMap.Sessions):
 			if cmd := m.openSessionsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Sources):
+			if cmd := m.openSourcesDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Memory):
+			if cmd := m.openMemoryDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return true
@@ -2838,6 +2906,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			commands,
 			k.Modes,
 			k.Models,
+			k.Sources,
+			k.Memory,
 			k.Sessions,
 			k.ToggleYolo,
 		)
@@ -3669,6 +3739,8 @@ func formatLoadedSkillInvocation(skill *skills.Skill, content []byte, result ski
 
 func agentModeLabel(agentID string) string {
 	switch agentID {
+	case config.AgentGoal:
+		return "Goal"
 	case config.AgentPlan, config.AgentReview:
 		return "Review"
 	default:
@@ -3680,6 +3752,8 @@ func agentModeFromCommand(content string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(content)) {
 	case "/chat", "/normal", "/build", "/coder", "/task":
 		return config.AgentCoder, true
+	case "/goal":
+		return config.AgentGoal, true
 	case "/plan", "/review":
 		return config.AgentReview, true
 	default:
@@ -3690,6 +3764,8 @@ func agentModeFromCommand(content string) (string, bool) {
 func nextAgentMode(current string) string {
 	switch current {
 	case config.AgentCoder, "":
+		return config.AgentGoal
+	case config.AgentGoal:
 		return config.AgentReview
 	default:
 		return config.AgentCoder
@@ -3948,6 +4024,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openMemoryDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SourcesID:
+		if cmd := m.openSourcesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ModesID:
 		if cmd := m.openModesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4034,7 +4114,7 @@ func (m *UI) configureLMStudio(msg dialog.ActionConfigureLMStudio) tea.Cmd {
 		provider.ID = config.LMStudioProviderID
 	}
 	if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("providers.%s", provider.ID), provider); err != nil {
-		return util.ReportError(fmt.Errorf("failed to save LM Studio provider: %w", err))
+		return util.ReportError(fmt.Errorf("failed to save Open Provider: %w", err))
 	}
 
 	return m.handleSelectModel(dialog.ActionSelectModel{
@@ -4074,6 +4154,90 @@ func (m *UI) openMemoryDialog() tea.Cmd {
 		m.dialog.BringToFront(dialog.MemoryID)
 	}
 	return m.loadMemorySnapshot()
+}
+
+func (m *UI) openSourcesDialog() tea.Cmd {
+	if m.session == nil {
+		return util.ReportWarn("Start or open a session before managing sources.")
+	}
+	if m.dialog.ContainsDialog(dialog.SourcesID) {
+		m.dialog.BringToFront(dialog.SourcesID)
+		return nil
+	}
+	m.dialog.OpenDialog(dialog.NewSources(m.com, slices.Clone(m.session.Sources)))
+	return nil
+}
+
+func (m *UI) addSessionSource(args map[string]string) tea.Cmd {
+	if m.session == nil {
+		return util.ReportError(errors.New("no active session"))
+	}
+	source, err := session.NewSource(
+		args["value"],
+		session.SourceKind(args["kind"]),
+		args["label"],
+		m.com.Workspace.WorkingDir(),
+	)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	for _, existing := range m.session.Sources {
+		if sameSessionSource(existing, source) {
+			return util.ReportWarn("That source is already attached to this session.")
+		}
+	}
+
+	sess := *m.session
+	sess.Sources = append(slices.Clone(m.session.Sources), source)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		saved, saveErr := m.com.Workspace.SaveSession(ctx, sess)
+		return sourceChangedMsg{
+			notice:  "Source attached: " + source.Label,
+			session: saved,
+			err:     saveErr,
+		}
+	}
+}
+
+func (m *UI) removeSessionSource(id string) tea.Cmd {
+	if m.session == nil {
+		return util.ReportError(errors.New("no active session"))
+	}
+	sess := *m.session
+	sess.Sources = make([]session.Source, 0, len(m.session.Sources))
+	removedLabel := ""
+	for _, source := range m.session.Sources {
+		if source.ID == id {
+			removedLabel = source.Label
+			continue
+		}
+		sess.Sources = append(sess.Sources, source)
+	}
+	if removedLabel == "" {
+		return util.ReportWarn("Source is no longer attached to this session.")
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		saved, saveErr := m.com.Workspace.SaveSession(ctx, sess)
+		return sourceChangedMsg{
+			notice:  "Source detached: " + removedLabel,
+			session: saved,
+			err:     saveErr,
+		}
+	}
+}
+
+func sameSessionSource(left, right session.Source) bool {
+	if left.Kind != right.Kind {
+		return false
+	}
+	if left.Kind == session.SourceKindText {
+		return strings.TrimSpace(left.Content) == strings.TrimSpace(right.Content)
+	}
+	return strings.EqualFold(strings.TrimSpace(left.Location), strings.TrimSpace(right.Location))
 }
 
 func (m *UI) rememberMemory(args map[string]string) tea.Cmd {

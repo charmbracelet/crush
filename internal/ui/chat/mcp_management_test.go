@@ -14,7 +14,7 @@ func TestMCPManagementToolsUseBuiltinRenderer(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	for _, toolName := range []string{tools.MCPAddToolName, tools.MCPRefreshToolName} {
+	for _, toolName := range []string{tools.MCPAddToolName, tools.MCPManageToolName, tools.MCPRefreshToolName} {
 		toolName := toolName
 		t.Run(toolName, func(t *testing.T) {
 			t.Parallel()

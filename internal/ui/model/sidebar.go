@@ -3,12 +3,11 @@ package model
 import (
 	"cmp"
 	"fmt"
-	"image"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/ultraviolet/layout"
 )
 
 // modelInfo renders the current model information including reasoning
@@ -56,75 +55,6 @@ func (m *UI) modelInfo(width int) string {
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
 }
 
-// getDynamicHeightLimits will give us the num of items to show in each section based on the height
-// some items are more important than others.
-func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skillCount int) (maxFiles, maxLSPs, maxMCPs, maxSkills int) {
-	const (
-		minItemsPerSection = 2
-		// Keep these high so dynamic layout uses available sidebar space
-		// instead of hitting small hard limits.
-		defaultMaxFilesShown    = 1000
-		defaultMaxLSPsShown     = 1000
-		defaultMaxMCPsShown     = 1000
-		defaultMaxSkillsShown   = 1000
-		minAvailableHeightLimit = 10
-	)
-
-	if availableHeight < minAvailableHeightLimit {
-		return minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection
-	}
-
-	maxFiles = minItemsPerSection
-	maxLSPs = minItemsPerSection
-	maxMCPs = minItemsPerSection
-	maxSkills = minItemsPerSection
-
-	remainingHeight := max(0, availableHeight-(minItemsPerSection*4))
-
-	sectionValues := []*int{&maxFiles, &maxLSPs, &maxMCPs, &maxSkills}
-	sectionCaps := []int{defaultMaxFilesShown, defaultMaxLSPsShown, defaultMaxMCPsShown, defaultMaxSkillsShown}
-	sectionNeeds := []int{max(0, fileCount-maxFiles), max(0, lspCount-maxLSPs), max(0, mcpCount-maxMCPs), max(0, skillCount-maxSkills)}
-
-	for remainingHeight > 0 {
-		allocated := false
-		for i, section := range sectionValues {
-			if remainingHeight == 0 {
-				break
-			}
-			if sectionNeeds[i] == 0 || *section >= sectionCaps[i] {
-				continue
-			}
-			*section = *section + 1
-			sectionNeeds[i]--
-			remainingHeight--
-			allocated = true
-		}
-		if !allocated {
-			break
-		}
-	}
-
-	for remainingHeight > 0 {
-		allocated := false
-		for i, section := range sectionValues {
-			if remainingHeight == 0 {
-				break
-			}
-			if *section >= sectionCaps[i] {
-				continue
-			}
-			*section = *section + 1
-			remainingHeight--
-			allocated = true
-		}
-		if !allocated {
-			break
-		}
-	}
-
-	return maxFiles, maxLSPs, maxMCPs, maxSkills
-}
-
 // sidebar renders the chat sidebar containing session title, working
 // directory, model info, file list, LSP status, and MCP status.
 func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
@@ -132,10 +62,42 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		return
 	}
 
-	t := m.com.Styles
 	width := area.Dx()
-	height := area.Dy()
+	header := m.sidebarHeader(width)
+	headerHeight := min(lipgloss.Height(header), area.Dy())
+	headerArea := area
+	headerArea.Max.Y = headerArea.Min.Y + headerHeight
+	uv.NewStyledString(header).Draw(scr, headerArea)
 
+	bodyArea := area
+	bodyArea.Min.Y = headerArea.Max.Y
+	if bodyArea.Dx() <= 1 || bodyArea.Dy() <= 0 {
+		return
+	}
+
+	contentWidth := bodyArea.Dx() - 1
+	content := m.sidebarContent(contentWidth)
+	lines := strings.Split(content, "\n")
+	viewportHeight := bodyArea.Dy()
+	maxOffset := max(0, len(lines)-viewportHeight)
+	offset := min(max(m.sidebarScrollOffset, 0), maxOffset)
+	end := min(len(lines), offset+viewportHeight)
+	visible := strings.Join(lines[offset:end], "\n")
+
+	contentArea := bodyArea
+	contentArea.Min.X++
+	uv.NewStyledString(visible).Draw(scr, contentArea)
+
+	scrollbar := common.Scrollbar(m.com.Styles, viewportHeight, len(lines), viewportHeight, offset)
+	if scrollbar != "" {
+		scrollbarArea := bodyArea
+		scrollbarArea.Max.X = scrollbarArea.Min.X + 1
+		uv.NewStyledString(scrollbar).Draw(scr, scrollbarArea)
+	}
+}
+
+func (m *UI) sidebarHeader(width int) string {
+	t := m.com.Styles
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 	sidebarLogo := m.sidebarLogo
 	if sidebarLogo == "" {
@@ -149,17 +111,13 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		"",
 	}
 
-	sidebarHeader := lipgloss.JoinVertical(
+	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		blocks...,
 	)
+}
 
-	var remainingHeightArea image.Rectangle
-	layout.Vertical(
-		layout.Len(lipgloss.Height(sidebarHeader)),
-		layout.Fill(1),
-	).Split(m.layout.sidebar).Assign(new(image.Rectangle), &remainingHeightArea)
-	remainingHeight := remainingHeightArea.Dy() - 6
+func (m *UI) sidebarContent(width int) string {
 	filesCount := 0
 	for _, f := range m.sessionFiles {
 		if f.Additions == 0 && f.Deletions == 0 {
@@ -168,8 +126,6 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		filesCount++
 	}
 
-	lspsCount := len(m.lspStates)
-
 	mcpsCount := 0
 	for _, mcpCfg := range m.com.Config().MCP.Sorted() {
 		if _, ok := m.mcpStates[mcpCfg.Name]; ok {
@@ -177,31 +133,29 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		}
 	}
 
-	skillsCount := len(m.skillStatusItems())
+	return lipgloss.NewStyle().MaxWidth(width).Render(
+		lipgloss.JoinVertical(
+			lipgloss.Left,
+			m.sourcesInfo(width),
+			"",
+			m.filesInfo(m.com.Workspace.WorkingDir(), width, max(filesCount, 1), true),
+			"",
+			m.lspInfo(width, max(len(m.lspStates), 1), true),
+			"",
+			m.mcpInfo(width, max(mcpsCount, 1), true),
+			"",
+			m.skillsInfo(width, max(len(m.skillStatusItems()), 1), true),
+		),
+	)
+}
 
-	maxFiles, maxLSPs, maxMCPs, maxSkills := getDynamicHeightLimits(remainingHeight, filesCount, lspsCount, mcpsCount, skillsCount)
-
-	lspSection := m.lspInfo(width, maxLSPs, true)
-	mcpSection := m.mcpInfo(width, maxMCPs, true)
-	skillsSection := m.skillsInfo(width, maxSkills, true)
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), width, maxFiles, true)
-
-	uv.NewStyledString(
-		lipgloss.NewStyle().
-			MaxWidth(width).
-			MaxHeight(height).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					sidebarHeader,
-					filesSection,
-					"",
-					lspSection,
-					"",
-					mcpSection,
-					"",
-					skillsSection,
-				),
-			),
-	).Draw(scr, area)
+func (m *UI) scrollSidebar(lines int) {
+	if m.session == nil || m.layout.sidebar.Dx() <= 1 {
+		return
+	}
+	headerHeight := lipgloss.Height(m.sidebarHeader(m.layout.sidebar.Dx()))
+	viewportHeight := max(0, m.layout.sidebar.Dy()-headerHeight)
+	contentHeight := lipgloss.Height(m.sidebarContent(m.layout.sidebar.Dx() - 1))
+	maxOffset := max(0, contentHeight-viewportHeight)
+	m.sidebarScrollOffset = min(max(m.sidebarScrollOffset+lines, 0), maxOffset)
 }

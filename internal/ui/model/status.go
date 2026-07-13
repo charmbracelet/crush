@@ -133,6 +133,9 @@ func helpWithModePrefix(mode, helpView string) string {
 }
 
 func statusModeLabel(agentID string) string {
+	if agentID == config.AgentGoal {
+		return "MODE: GOAL"
+	}
 	if agentID == config.AgentPlan || agentID == config.AgentReview {
 		return "MODE: REVIEW READ ONLY"
 	}

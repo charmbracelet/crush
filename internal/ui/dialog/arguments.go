@@ -221,6 +221,9 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 				case ActionMemoryRemember:
 					action.Args = args
 					return action
+				case ActionSourceAdd:
+					action.Args = args
+					return action
 				}
 			}
 			a.focusInput(a.focused + 1)

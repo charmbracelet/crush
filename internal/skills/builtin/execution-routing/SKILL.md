@@ -1,56 +1,37 @@
 ---
 name: execution-routing
-description: Route substantial re.code tasks across native tools, web research, and sub-agents without repeating failed strategies.
+description: Use when a substantial re.code task requires choosing among local tools, external research, or an independent sub-agent investigation.
 ---
 
 # Execution Routing
 
-Use the smallest capable tool first, preserve the user's intent across steps,
-and escalate only when evidence justifies it.
+Preserve the user's objective and choose the smallest tool that can establish
+the next missing fact.
 
-## Decision Path
+## Evidence Order
 
-1. Ground the task before acting:
-   - `pwd` for the working directory.
-   - `recode_info` for active runtime, config, MCP, skill, and permission state.
-   - native `view`, `grep`, `glob`, and `ls` for local files.
-2. Read before editing. Use structured parsers for JSON, YAML, databases, and
-   other structured data. Verify the result on the same surface that changed.
-3. For external names, packages, APIs, versions, or server identities, use
-   native `web_search`, then an official source or authoritative registry.
-4. Delegate a heavy independent investigation to `agent` only after the root
-   agent has verified the target path and can state a precise deliverable.
-5. Keep ownership at the root: reconcile sub-agent findings, perform edits,
-   run tests, and continue until the user's intent is satisfied.
+1. Use the current request, `<env>`, project context, and already returned tool
+   results before gathering more context.
+2. Use `view`, `grep`, `glob`, `ls`, and LSP tools for repository evidence.
+3. Use the shell for bounded host, runtime, package, process, service, and git
+   facts. Treat the reported platform as authoritative and change strategy
+   after a command-not-found result.
+4. Use `recode_info` only when re.code configuration, canonical write targets,
+   permissions, or saved provider/MCP definitions are relevant.
+5. Use `web_search` and a primary source for unstable external names, package
+   identities, APIs, or versions. Do not web-search capabilities already
+   present in the live MCP catalog.
+6. Delegate only a bounded independent investigation whose result the root
+   agent can verify and integrate.
 
-## Native Tool Reference
+## Failure Handling
 
-| Need | Tool |
-| --- | --- |
-| Exact file read | `view` |
-| Text or symbol search | `grep` |
-| File discovery | `glob` or bounded `ls` |
-| Host/runtime/package facts | shell with finite output |
-| Current external fact | `web_search`, then `web_fetch` for the chosen source |
-| Public repository symbol search | Sourcegraph or GitHub Grep when available |
-| Multi-file independent research | `agent` after grounding |
-| re.code configuration/runtime truth and canonical write target | `recode_info` |
-| Configure, start, and verify one MCP server | `mcp_add` |
-| Reconcile all existing MCP servers | `mcp_refresh` |
+- Read the complete result and change the failed assumption, tool, or scope.
+- Do not repeat a disproven command or invent a tool, package, path, or reload
+  command.
+- Keep successful evidence and the original objective across continuations.
+- Report a blocker only when the next required fact depends on unavailable
+  access, credentials, files, network, or a user decision.
 
-## Sub-Agent Contract
-
-Give a sub-agent the verified absolute path, the concrete question or change,
-constraints, and expected evidence. Do not delegate a vague request such as
-"fix everything" or ask it to rediscover the entire machine. Parallelize only
-independent reads or investigations; serialize edits that can touch the same
-files or configuration.
-
-## Failure Escalation
-
-- First failure: return the complete error to the current run and correct the evidenced assumption once.
-- External identity lookup failure: research immediately instead of guessing.
-- Second failure of the same class: stop that path and use review only when the
-  remaining diagnosis is genuinely ambiguous.
-- Never repeat a disproven command with cosmetic argument changes.
-- A narrated next step is not progress. Invoke the tool in the same turn.
+After changes, verify on the same surface that was modified. A narrated next
+step is not completion.

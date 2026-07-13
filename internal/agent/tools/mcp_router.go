@@ -18,27 +18,18 @@ import (
 
 const (
 	MCPToolSearchToolName = "mcp_tool_search"
-	MCPToolCallToolName   = "mcp_tool_call"
 	defaultMCPToolMatches = 5
-	maxMCPToolMatches     = 10
 )
 
 //go:embed mcp_tool_search.md
 var mcpToolSearchDescription string
 
-//go:embed mcp_tool_call.md
-var mcpToolCallDescription string
-
 type MCPToolSearchParams struct {
-	Query  string `json:"query,omitempty" description:"Capability or task to search for, such as forecast, repository file, or browser screenshot."`
-	Server string `json:"server,omitempty" description:"Optional exact MCP server name used to restrict the search."`
-	Limit  int    `json:"limit,omitempty" description:"Maximum matches to return. Defaults to 5 and cannot exceed 10."`
-}
-
-type MCPToolCallParams struct {
-	Server    string         `json:"server" description:"Exact MCP server name returned by mcp_tool_search."`
-	Tool      string         `json:"tool" description:"Exact server-native tool name returned by mcp_tool_search."`
-	Arguments map[string]any `json:"arguments" description:"Arguments matching the input schema returned by mcp_tool_search. Use an empty object when the tool has no arguments."`
+	Query      string `json:"query,omitempty" description:"Capability to search for, or select:<exact_native_tool_name> to load one or more comma-separated native tool schemas."`
+	Server     string `json:"server,omitempty" description:"Optional exact MCP server name used to restrict a keyword search."`
+	MaxResults int    `json:"max_results,omitempty" description:"Number of ranked keyword matches to return. Defaults to 5; no fixed catalog ceiling is applied."`
+	Offset     int    `json:"offset,omitempty" description:"Zero-based match offset for reading the next result page."`
+	Limit      int    `json:"limit,omitempty" description:"Deprecated alias for max_results."`
 }
 
 type mcpToolMatch struct {
@@ -46,53 +37,68 @@ type mcpToolMatch struct {
 	score int
 }
 
+// DeferredToolProvider resolves names selected through a compact discovery
+// tool. The agent exposes resolved tools natively on the following step.
+type DeferredToolProvider interface {
+	fantasy.AgentTool
+	ResolveDeferredTools(names []string) []fantasy.AgentTool
+}
+
+type mcpToolSearchTool struct {
+	fantasy.AgentTool
+	permissions permission.Service
+	cfg         *config.ConfigStore
+	workingDir  string
+	allowed     map[string][]string
+}
+
 // NewMCPToolSearchTool creates a compact catalog over every currently usable
 // MCP tool. The catalog is rebuilt per call so servers added or refreshed
 // during a session become discoverable without rebuilding the agent.
 func NewMCPToolSearchTool(permissions permission.Service, cfg *config.ConfigStore, workingDir string, allowed map[string][]string) fantasy.AgentTool {
-	return fantasy.NewParallelAgentTool(
+	search := &mcpToolSearchTool{
+		permissions: permissions,
+		cfg:         cfg,
+		workingDir:  workingDir,
+		allowed:     allowed,
+	}
+	search.AgentTool = fantasy.NewParallelAgentTool(
 		MCPToolSearchToolName,
 		mcpToolSearchDescription,
 		func(_ context.Context, params MCPToolSearchParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			available := allowedMCPTools(GetMCPTools(permissions, cfg, workingDir), allowed)
-			return fantasy.NewTextResponse(formatMCPToolSearch(available, params)), nil
+			return fantasy.NewTextResponse(formatMCPToolSearch(search.availableTools(), params)), nil
 		},
 	)
+	return search
 }
 
-// NewMCPToolCallTool creates a single dispatcher for MCP tools discovered
-// through mcp_tool_search. The selected native tool still performs its normal
-// permission check and uses its original MCP transport.
-func NewMCPToolCallTool(permissions permission.Service, cfg *config.ConfigStore, workingDir string, allowed map[string][]string) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
-		MCPToolCallToolName,
-		mcpToolCallDescription,
-		func(ctx context.Context, params MCPToolCallParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			server := strings.TrimSpace(params.Server)
-			toolName := strings.TrimSpace(params.Tool)
-			if server == "" || toolName == "" {
-				return fantasy.NewTextErrorResponse("server and tool are required; use mcp_tool_search to obtain their exact names"), nil
-			}
+func (m *mcpToolSearchTool) availableTools() []*Tool {
+	return allowedMCPTools(GetMCPTools(m.permissions, m.cfg, m.workingDir), m.allowed)
+}
 
-			available := allowedMCPTools(GetMCPTools(permissions, cfg, workingDir), allowed)
-			for _, tool := range available {
-				if tool.MCP() != server || tool.MCPToolName() != toolName {
-					continue
-				}
-				input, err := json.Marshal(params.Arguments)
-				if err != nil {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to encode MCP arguments: %v", err)), nil
-				}
-				return tool.Run(ctx, fantasy.ToolCall{
-					ID:    call.ID,
-					Name:  tool.Name(),
-					Input: string(input),
-				})
-			}
+func (m *mcpToolSearchTool) ResolveDeferredTools(names []string) []fantasy.AgentTool {
+	wanted := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			wanted[name] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
 
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("MCP tool %q on server %q is not currently usable; run mcp_tool_search again", toolName, server)), nil
-		},
-	)
+	available := m.availableTools()
+	sort.Slice(available, func(i, j int) bool {
+		return available[i].Name() < available[j].Name()
+	})
+	resolved := make([]fantasy.AgentTool, 0, len(wanted))
+	for _, tool := range available {
+		if _, ok := wanted[strings.ToLower(tool.Name())]; ok {
+			resolved = append(resolved, tool)
+		}
+	}
+	return resolved
 }
 
 func allowedMCPTools(available []*Tool, allowed map[string][]string) []*Tool {
@@ -118,11 +124,18 @@ func allowedMCPTools(available []*Tool, allowed map[string][]string) []*Tool {
 func formatMCPToolSearch(available []*Tool, params MCPToolSearchParams) string {
 	query := strings.TrimSpace(params.Query)
 	server := strings.TrimSpace(params.Server)
-	limit := params.Limit
+	if selected := DeferredToolSelectionNames(query); len(selected) > 0 {
+		return formatSelectedMCPTools(available, selected)
+	}
+
+	limit := params.MaxResults
+	if limit <= 0 {
+		limit = params.Limit
+	}
 	if limit <= 0 {
 		limit = defaultMCPToolMatches
 	}
-	limit = min(limit, maxMCPToolMatches)
+	offset := max(params.Offset, 0)
 
 	if query == "" && server == "" {
 		return formatMCPServerInventory(available)
@@ -145,33 +158,98 @@ func formatMCPToolSearch(available []*Tool, params MCPToolSearchParams) string {
 		}
 		return matches[i].tool.Name() < matches[j].tool.Name()
 	})
-	if len(matches) > limit {
-		matches = matches[:limit]
-	}
 	if len(matches) == 0 {
-		return "No usable MCP tools matched. Search with a broader capability, omit server, or inspect the connected-server inventory with an empty query."
+		return "No usable MCP tools matched. Search with broader capability words, omit server, or inspect the connected-server inventory with an empty query."
+	}
+	totalMatches := len(matches)
+	if offset >= totalMatches {
+		return fmt.Sprintf("No matches at offset %d. total_matches: %d", offset, totalMatches)
+	}
+	end := min(offset+limit, totalMatches)
+	matches = matches[offset:end]
+
+	var output strings.Builder
+	output.WriteString("Deferred MCP tool matches:\n")
+	for _, match := range matches {
+		info := match.tool.Info()
+		fmt.Fprintf(&output, "- name: %s\n  server: %s\n  description: %s\n",
+			match.tool.Name(), match.tool.MCP(), compactMCPDescription(info.Description))
+	}
+	fmt.Fprintf(&output, "total_matches: %d\nreturned: %d\noffset: %d\n", totalMatches, len(matches), offset)
+	if end < totalMatches {
+		fmt.Fprintf(&output, "next_offset: %d\n", end)
+	}
+	fmt.Fprintf(&output, "total_deferred_tools: %d\n", len(available))
+	output.WriteString("Load a native schema with mcp_tool_search query select:<exact_name>. Multiple exact names may be comma-separated.")
+	return strings.TrimSpace(output.String())
+}
+
+// DeferredToolSelectionNames parses the exact selection syntax shared by the
+// discovery result and the per-step tool resolver.
+func DeferredToolSelectionNames(query string) []string {
+	query = strings.TrimSpace(query)
+	const prefix = "select:"
+	if len(query) < len(prefix) || !strings.EqualFold(query[:len(prefix)], prefix) {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var names []string
+	for _, raw := range strings.Split(query[len(prefix):], ",") {
+		name := strings.TrimSpace(raw)
+		key := strings.ToLower(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		names = append(names, name)
+	}
+	return names
+}
+
+func formatSelectedMCPTools(available []*Tool, selected []string) string {
+	wanted := make(map[string]struct{}, len(selected))
+	for _, name := range selected {
+		wanted[strings.ToLower(name)] = struct{}{}
+	}
+
+	var matches []*Tool
+	for _, tool := range available {
+		if _, ok := wanted[strings.ToLower(tool.Name())]; ok {
+			matches = append(matches, tool)
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Name() < matches[j].Name()
+	})
+	if len(matches) == 0 {
+		return "No exact deferred MCP tool matched. Run a keyword search and select a returned native name exactly."
 	}
 
 	var output strings.Builder
-	output.WriteString("Matching MCP tools (use exact server and tool values with mcp_tool_call):\n")
-	output.WriteString(formatMatchedMCPInstructions(matches))
-	for _, match := range matches {
-		info := match.tool.Info()
+	output.WriteString("Selected native MCP tools are available on the next model step. Call them directly by name.\n")
+	for _, tool := range matches {
+		info := tool.Info()
 		schema, _ := json.Marshal(map[string]any{
 			"type":       "object",
 			"properties": info.Parameters,
 			"required":   info.Required,
 		})
-		fmt.Fprintf(&output, "\n- server: %s\n  tool: %s\n  description: %s\n  arguments_schema: %s\n",
-			match.tool.MCP(), match.tool.MCPToolName(), compactMCPDescription(info.Description), schema)
+		fmt.Fprintf(&output, "- name: %s\n  server: %s\n  description: %s\n  input_schema: %s\n",
+			tool.Name(), tool.MCP(), compactMCPDescription(info.Description), schema)
 	}
+	output.WriteString(formatMatchedMCPInstructions(matches))
+	fmt.Fprintf(&output, "\nselected: %d\ntotal_deferred_tools: %d", len(matches), len(available))
 	return strings.TrimSpace(output.String())
 }
 
-func formatMatchedMCPInstructions(matches []mcpToolMatch) string {
+func formatMatchedMCPInstructions(matches []*Tool) string {
 	servers := make(map[string]bool)
 	for _, match := range matches {
-		servers[match.tool.MCP()] = true
+		servers[match.MCP()] = true
 	}
 	names := make([]string, 0, len(servers))
 	for name := range servers {
@@ -212,7 +290,7 @@ func formatMCPServerInventory(available []*Tool) string {
 	for _, name := range names {
 		fmt.Fprintf(&output, "- %s: %d tools\n", name, counts[name])
 	}
-	output.WriteString("Search by capability before calling a tool.")
+	output.WriteString("Search by capability before selecting a native tool.")
 	return strings.TrimSpace(output.String())
 }
 
@@ -223,12 +301,16 @@ func scoreMCPTool(tool *Tool, query string) int {
 	query = strings.ToLower(query)
 	server := strings.ToLower(tool.MCP())
 	name := strings.ToLower(tool.MCPToolName())
+	fullName := strings.ToLower(tool.Name())
 	description := strings.ToLower(tool.Info().Description)
 	score := 0
+	if query == fullName {
+		score += 200
+	}
 	if query == server || query == name {
 		score += 100
 	}
-	if strings.Contains(name, query) {
+	if strings.Contains(name, query) || strings.Contains(fullName, query) {
 		score += 30
 	}
 	if strings.Contains(description, query) {
@@ -259,7 +341,7 @@ func compactMCPDescription(description string) string {
 	if len(description) <= maxDescription {
 		return description
 	}
-	return description[:maxDescription-1] + "…"
+	return description[:maxDescription-3] + "..."
 }
 
 func compactMCPInstructions(instructions string) string {
@@ -268,5 +350,5 @@ func compactMCPInstructions(instructions string) string {
 	if len(instructions) <= maxInstructions {
 		return instructions
 	}
-	return instructions[:maxInstructions-1] + "…"
+	return instructions[:maxInstructions-3] + "..."
 }

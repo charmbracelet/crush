@@ -167,11 +167,6 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("summary model provider not configured")
 			}
-			reviewProviderCfg, ok := c.cfg.Config().Providers.Get(models.Review.ModelCfg.Provider)
-			if !ok {
-				return fantasy.ToolResponse{}, errors.New("review model provider not configured")
-			}
-
 			webFetchTool := tools.NewWebFetchTool(c.permissions, tmpDir, tmpDir, client)
 			webSearchTool := tools.NewWebSearchTool(c.permissions, tmpDir, client)
 			fetchTools := []fantasy.AgentTool{
@@ -192,9 +187,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)
 				SmallModel:           small,
 				SummaryModel:         models.Summary,
-				ReviewModel:          models.Review,
 				SummaryProviderOpts:  getProviderOptions(models.Summary, summaryProviderCfg),
-				ReviewProviderOpts:   getProviderOptions(models.Review, reviewProviderCfg),
 				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 				SystemPrompt:         systemPrompt,
 				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,

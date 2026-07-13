@@ -58,6 +58,7 @@ type Session struct {
 	SummaryMessageID string
 	Cost             float64
 	Todos            []Todo
+	Sources          []Source
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -193,6 +194,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	sourcesJSON, err := marshalSources(session.Sources)
+	if err != nil {
+		return Session{}, err
+	}
 
 	dbSession, err := s.q.UpdateSession(ctx, db.UpdateSessionParams{
 		ID:               session.ID,
@@ -207,6 +212,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 		Todos: sql.NullString{
 			String: todosJSON,
 			Valid:  todosJSON != "",
+		},
+		Sources: sql.NullString{
+			String: sourcesJSON,
+			Valid:  sourcesJSON != "",
 		},
 	})
 	if err != nil {
@@ -300,6 +309,10 @@ func (s *service) fromDBItem(item db.Session) Session {
 	if err != nil {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
+	sources, err := unmarshalSources(item.Sources.String)
+	if err != nil {
+		slog.Error("Failed to unmarshal sources", "session_id", item.ID, "error", err)
+	}
 	return Session{
 		ID:               item.ID,
 		ParentSessionID:  item.ParentSessionID.String,
@@ -310,9 +323,32 @@ func (s *service) fromDBItem(item db.Session) Session {
 		SummaryMessageID: item.SummaryMessageID.String,
 		Cost:             item.Cost,
 		Todos:            todos,
+		Sources:          sources,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}
+}
+
+func marshalSources(sources []Source) (string, error) {
+	if len(sources) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(sources)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalSources(data string) ([]Source, error) {
+	if data == "" {
+		return []Source{}, nil
+	}
+	var sources []Source
+	if err := json.Unmarshal([]byte(data), &sources); err != nil {
+		return []Source{}, err
+	}
+	return sources, nil
 }
 
 func marshalTodos(todos []Todo) (string, error) {

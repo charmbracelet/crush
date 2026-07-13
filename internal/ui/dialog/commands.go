@@ -433,15 +433,16 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Model Slots", "ctrl+l", ActionOpenDialog{ModelsID}).WithAliases("switch model", "configure model slots", "models"),
-		NewCommandItem(c.com.Styles, "choose_mode", "Choose Mode", "alt+m", ActionOpenDialog{ModesID}).WithAliases("chat", "/chat", "normal", "build", "/build", "coder", "plan", "/plan", "task", "/task", "review", "/review"),
-		NewCommandItem(c.com.Styles, "configure_lmstudio", "Configure LM Studio", "", ActionOpenLMStudioSetup{}).WithAliases("lm studio", "lmstudio", "local model"),
+		NewCommandItem(c.com.Styles, "choose_mode", "Choose Mode", "alt+m", ActionOpenDialog{ModesID}).WithAliases("chat", "/chat", "normal", "build", "/build", "coder", "goal", "/goal", "plan", "/plan", "task", "/task", "review", "/review"),
+		NewCommandItem(c.com.Styles, "configure_lmstudio", "Configure Open Provider", "", ActionOpenLMStudioSetup{}).WithAliases("open provider", "lm studio", "lmstudio", "local model"),
 	}
 	if _, ok := c.com.Workspace.(workspace.MemoryWorkspace); ok {
-		commands = append(commands, NewCommandItem(c.com.Styles, "memory", "Memory", "", ActionOpenDialog{MemoryID}).WithAliases("memories", "remember", "recall"))
+		commands = append(commands, NewCommandItem(c.com.Styles, "memory", "Memory", "alt+r", ActionOpenDialog{MemoryID}).WithAliases("memories", "remember", "recall"))
 	}
 
 	// Only show compact command if there's an active session
 	if c.hasSession {
+		commands = append(commands, NewCommandItem(c.com.Styles, "sources", "Sources", "alt+s", ActionOpenDialog{SourcesID}).WithAliases("source", "add source", "remove source", "references"))
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
 	}
 

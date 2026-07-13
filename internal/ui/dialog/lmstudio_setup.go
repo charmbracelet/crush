@@ -260,7 +260,7 @@ func (m *LMStudioSetup) verifyProvider() tea.Msg {
 	}
 
 	if len(models) == 0 {
-		return ActionLMStudioSetupResult{Error: fmt.Errorf("LM Studio returned no models")}
+		return ActionLMStudioSetupResult{Error: fmt.Errorf("Open Provider returned no models")}
 	}
 
 	provider.Models = models
@@ -320,7 +320,7 @@ func (m *LMStudioSetup) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)
-	rc.Title = "Configure LM Studio"
+	rc.Title = "Configure Open Provider"
 	rc.Gap = 1
 	rc.AddPart(m.introView())
 	rc.AddPart(m.fieldView("Base URL", m.baseURLInput))
@@ -330,7 +330,7 @@ func (m *LMStudioSetup) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	rc.Help = m.help.View(m)
 	if m.state == LMStudioSetupStateVerifying {
-		rc.Help = m.spinner.View() + " Checking LM Studio models..."
+		rc.Help = m.spinner.View() + " Checking Open Provider models..."
 	}
 
 	if m.isOnboarding {
@@ -354,7 +354,7 @@ func (m *LMStudioSetup) introView() string {
 	if m.state == LMStudioSetupStateError {
 		style = style.Foreground(charmtone.Cherry)
 	}
-	return style.Render("Paste the OpenAI-compatible LM Studio endpoint. The API key can be empty.")
+	return style.Render("Paste an OpenAI-compatible endpoint. The API key can be empty.")
 }
 
 func (m *LMStudioSetup) fieldView(label string, input textinput.Model) string {
@@ -401,6 +401,6 @@ func newLMStudioSetupModelItem(t *styles.Styles) *ModelItem {
 		Type: catwalk.Type("lmstudio"),
 	}, catwalk.Model{
 		ID:   lmStudioSetupModelID,
-		Name: "Configure LM Studio",
+		Name: "Configure Open Provider",
 	}, ModelTypeLarge, false)
 }

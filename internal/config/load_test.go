@@ -185,11 +185,19 @@ func TestConfig_AddEmbeddedLMStudioProviderUsesDiscoveryOnly(t *testing.T) {
 
 	provider, ok := cfg.Providers.Get(LMStudioProviderID)
 	require.True(t, ok)
-	require.Equal(t, "LM Studio", provider.Name)
+	require.Equal(t, "Open Provider", provider.Name)
 	require.Equal(t, "$LM_STUDIO_API_KEY", provider.APIKey)
 	require.NotNil(t, provider.AutoDiscoverModels)
 	require.True(t, *provider.AutoDiscoverModels)
 	require.Empty(t, provider.Models)
+}
+
+func TestProviderDisplayNameMigratesLegacyLMStudioLabel(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "Open Provider", providerDisplayName(LMStudioProviderID, "LM Studio"))
+	require.Equal(t, "Custom Name", providerDisplayName(LMStudioProviderID, "Custom Name"))
+	require.Equal(t, "LM Studio", providerDisplayName("another-provider", "LM Studio"))
 }
 
 func TestLookupConfigs_UsesCanonicalGlobalAndNamedProjectConfig(t *testing.T) {
@@ -864,11 +872,16 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, allToolNames(), coderAgent.AllowedTools)
+	assert.Equal(t, filterSlice(allToolNames(), []string{"goal_status"}, false), coderAgent.AllowedTools)
 	assert.Contains(t, coderAgent.AllowedTools, "bash")
 	assert.Contains(t, coderAgent.AllowedTools, "edit")
 	assert.Contains(t, coderAgent.AllowedTools, "write")
 	assert.Nil(t, coderAgent.AllowedMCP, "interactive Task mode must allow configured MCP servers")
+
+	goalAgent, ok := cfg.Agents[AgentGoal]
+	require.True(t, ok)
+	assert.Equal(t, allToolNames(), goalAgent.AllowedTools)
+	assert.Contains(t, goalAgent.AllowedTools, "goal_status")
 
 	reviewAgent, ok := cfg.Agents[AgentReview]
 	require.True(t, ok)
@@ -879,11 +892,11 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"web_fetch", "web_search", "glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"skill", "sources", "web_fetch", "web_search", "glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
 
 	planAgent, ok := cfg.Agents[AgentPlan]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_diagnostics", "lsp_references", "fetch", "web_fetch", "web_search", "glob", "grep", "ls", "sourcegraph", "todos", "view"}, planAgent.AllowedTools)
+	assert.Equal(t, []string{"skill", "sources", "lsp_diagnostics", "lsp_references", "fetch", "web_fetch", "web_search", "glob", "grep", "ls", "sourcegraph", "todos", "view"}, planAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsUsesPersistedModeModels(t *testing.T) {
@@ -934,11 +947,24 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "recode_info", "mcp_add", "mcp_refresh", "mcp_tool_search", "mcp_tool_call", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "web_fetch", "web_search", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "recode_info", "skill", "add_source", "remove_source", "sources", "mcp_add", "mcp_manage", "mcp_tool_search", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "web_fetch", "web_search", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"web_fetch", "web_search", "glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"skill", "sources", "web_fetch", "web_search", "glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+}
+
+func TestConfig_setupAgentsKeepsGoalLifecycleTool(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{"goal_status"},
+		},
+	}
+
+	cfg.SetupAgents()
+
+	assert.NotContains(t, cfg.Agents[AgentCoder].AllowedTools, "goal_status")
+	assert.Contains(t, cfg.Agents[AgentGoal].AllowedTools, "goal_status")
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -948,6 +974,8 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 				"glob",
 				"grep",
 				"ls",
+				"skill",
+				"sources",
 				"sourcegraph",
 				"view",
 				"web_fetch",
@@ -959,7 +987,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "recode_info", "mcp_add", "mcp_refresh", "mcp_tool_search", "mcp_tool_call", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "recode_info", "add_source", "remove_source", "mcp_add", "mcp_manage", "mcp_tool_search", "crush_logs", "job_output", "job_list", "job_kill", "tmux", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)

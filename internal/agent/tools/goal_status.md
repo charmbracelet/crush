@@ -1,0 +1,1 @@
+Report the terminal state of an explicit Goal mode run. Call this only when the user's objective is verified complete or progress is impossible without external input or state. Do not use it for an ordinary intermediate failure.

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"fmt"
 	"net/url"
@@ -21,7 +22,10 @@ const CrushInfoToolName = "recode_info"
 //go:embed crush_info.md
 var crushInfoDescription string
 
-type CrushInfoParams struct{}
+type CrushInfoParams struct {
+	Detail        string `json:"detail,omitempty" description:"Detail level: summary (default), mcp, skills, or full."`
+	SinceRevision string `json:"since_revision,omitempty" description:"Revision from a previous recode_info result. When unchanged, returns only changed=false."`
+}
 
 func NewCrushInfoTool(
 	cfg *config.ConfigStore,
@@ -33,10 +37,60 @@ func NewCrushInfoTool(
 	return fantasy.NewAgentTool(
 		CrushInfoToolName,
 		crushInfoDescription,
-		func(ctx context.Context, _ CrushInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			return fantasy.NewTextResponse(buildCrushInfo(cfg, lspManager, allSkills, activeSkills, skillTracker)), nil
+		func(ctx context.Context, params CrushInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			detail := strings.ToLower(strings.TrimSpace(params.Detail))
+			if detail == "" {
+				detail = "summary"
+			}
+			if !slices.Contains([]string{"summary", "mcp", "skills", "full"}, detail) {
+				return fantasy.NewTextErrorResponse("detail must be summary, mcp, skills, or full"), nil
+			}
+
+			full := buildCrushInfo(cfg, lspManager, allSkills, activeSkills, skillTracker)
+			revision := crushInfoRevision(full)
+			if strings.TrimSpace(params.SinceRevision) == revision {
+				return fantasy.NewTextResponse(fmt.Sprintf("[revision]\nid = %s\nchanged = false", revision)), nil
+			}
+
+			output := buildCrushInfoDetail(detail, full, cfg, lspManager, allSkills, activeSkills, skillTracker)
+			return fantasy.NewTextResponse(fmt.Sprintf("[revision]\nid = %s\nchanged = true\ndetail = %s\n\n%s", revision, detail, strings.TrimSpace(output))), nil
 		},
 	)
+}
+
+func crushInfoRevision(output string) string {
+	sum := sha256.Sum256([]byte(output))
+	return fmt.Sprintf("%x", sum[:6])
+}
+
+func buildCrushInfoDetail(
+	detail string,
+	full string,
+	cfg *config.ConfigStore,
+	lspManager *lsp.Manager,
+	allSkills []*skills.Skill,
+	activeSkills []*skills.Skill,
+	skillTracker *skills.Tracker,
+) string {
+	if detail == "full" {
+		return full
+	}
+
+	var b strings.Builder
+	switch detail {
+	case "mcp":
+		writeConfigFiles(&b, cfg)
+		writeConfigStaleness(&b, cfg)
+		writeMCP(&b, mcp.GetStates(), cfg)
+	case "skills":
+		writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
+	default:
+		writeConfigFiles(&b, cfg)
+		writeConfigStaleness(&b, cfg)
+		writeModels(&b, cfg)
+		writeOptions(&b, cfg)
+	}
+	return b.String()
 }
 
 func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {

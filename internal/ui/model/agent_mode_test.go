@@ -22,6 +22,7 @@ func TestAgentModeFromCommandIsExact(t *testing.T) {
 		{input: "/chat", want: config.AgentCoder, ok: true},
 		{input: "/normal", want: config.AgentCoder, ok: true},
 		{input: "/task", want: config.AgentCoder, ok: true},
+		{input: "/goal", want: config.AgentGoal, ok: true},
 		{input: "/review", want: config.AgentReview, ok: true},
 		{input: "plan", ok: false},
 		{input: "/plan this change", ok: false},
@@ -37,14 +38,15 @@ func TestAgentModeFromCommandIsExact(t *testing.T) {
 	}
 }
 
-func TestNextAgentModeCyclesTaskAndReview(t *testing.T) {
+func TestNextAgentModeCyclesTaskGoalAndReview(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, config.AgentReview, nextAgentMode(config.AgentCoder))
+	require.Equal(t, config.AgentGoal, nextAgentMode(config.AgentCoder))
 	require.Equal(t, config.AgentCoder, nextAgentMode(config.AgentPlan))
 	require.Equal(t, config.AgentCoder, nextAgentMode(config.AgentTask))
+	require.Equal(t, config.AgentReview, nextAgentMode(config.AgentGoal))
 	require.Equal(t, config.AgentCoder, nextAgentMode(config.AgentReview))
-	require.Equal(t, config.AgentReview, nextAgentMode(""))
+	require.Equal(t, config.AgentGoal, nextAgentMode(""))
 }
 
 func TestStatusModeLabelMakesReadOnlyModeExplicit(t *testing.T) {
@@ -52,6 +54,7 @@ func TestStatusModeLabelMakesReadOnlyModeExplicit(t *testing.T) {
 
 	require.Equal(t, "MODE: TASK", statusModeLabel(config.AgentCoder))
 	require.Equal(t, "MODE: TASK", statusModeLabel(config.AgentTask))
+	require.Equal(t, "MODE: GOAL", statusModeLabel(config.AgentGoal))
 	require.Equal(t, "MODE: REVIEW READ ONLY", statusModeLabel(config.AgentReview))
 	require.Equal(t, "MODE: REVIEW READ ONLY", statusModeLabel(config.AgentPlan))
 }

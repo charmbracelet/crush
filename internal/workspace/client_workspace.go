@@ -822,9 +822,25 @@ func protoToSession(s proto.Session) session.Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            protoToTodos(s.Todos),
+		Sources:          protoToSources(s.Sources),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+func protoToSources(sources []proto.Source) []session.Source {
+	out := make([]session.Source, len(sources))
+	for i, source := range sources {
+		out[i] = session.Source{
+			ID:        source.ID,
+			Kind:      session.SourceKind(source.Kind),
+			Label:     source.Label,
+			Location:  source.Location,
+			Content:   source.Content,
+			CreatedAt: source.CreatedAt,
+		}
+	}
+	return out
 }
 
 func protoToTodos(todos []proto.Todo) []session.Todo {
@@ -943,9 +959,25 @@ func sessionToProto(s session.Session) proto.Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            todosToProto(s.Todos),
+		Sources:          sourcesToProto(s.Sources),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+func sourcesToProto(sources []session.Source) []proto.Source {
+	out := make([]proto.Source, len(sources))
+	for i, source := range sources {
+		out[i] = proto.Source{
+			ID:        source.ID,
+			Kind:      string(source.Kind),
+			Label:     source.Label,
+			Location:  source.Location,
+			Content:   source.Content,
+			CreatedAt: source.CreatedAt,
+		}
+	}
+	return out
 }
 
 // protoToSkillStates reconstructs internal skill state slices from

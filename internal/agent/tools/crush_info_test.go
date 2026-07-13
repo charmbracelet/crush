@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -29,6 +30,36 @@ func TestCrushInfo_MinimalConfig(t *testing.T) {
 	require.NotContains(t, output, "[mcp]")
 	require.NotContains(t, output, "[permissions]")
 	require.NotContains(t, output, "[tools]")
+}
+
+func TestCrushInfoToolDefaultsToSummaryAndSupportsRevisionChecks(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options:   &config.Options{},
+	})
+	tool := NewCrushInfoTool(cfg, nil, nil, nil, nil)
+
+	response, err := tool.Run(t.Context(), fantasy.ToolCall{Name: CrushInfoToolName, Input: `{}`})
+	require.NoError(t, err)
+	require.False(t, response.IsError)
+	require.Contains(t, response.Content, "[revision]")
+	require.Contains(t, response.Content, "detail = summary")
+	require.Contains(t, response.Content, "[config_files]")
+	require.NotContains(t, response.Content, "[providers]")
+
+	lines := strings.Split(response.Content, "\n")
+	require.GreaterOrEqual(t, len(lines), 2)
+	revision := strings.TrimPrefix(lines[1], "id = ")
+	response, err = tool.Run(t.Context(), fantasy.ToolCall{
+		Name:  CrushInfoToolName,
+		Input: `{"since_revision":"` + revision + `"}`,
+	})
+	require.NoError(t, err)
+	require.False(t, response.IsError)
+	require.Contains(t, response.Content, "changed = false")
+	require.NotContains(t, response.Content, "[config_files]")
 }
 
 func TestCrushInfo_ConfigFiles(t *testing.T) {

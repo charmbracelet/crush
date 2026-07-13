@@ -136,6 +136,16 @@ type (
 		Enabled   bool
 	}
 	ActionMemoryMaintain struct{}
+	ActionOpenSourceAdd  struct{}
+	ActionSourceAdd      struct {
+		Args map[string]string
+	}
+	ActionSourceRemove struct {
+		ID string
+	}
+	ActionSourceView struct {
+		Source session.Source
+	}
 )
 
 // Messages for API key input dialog.

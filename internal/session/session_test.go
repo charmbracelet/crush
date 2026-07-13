@@ -79,3 +79,31 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, refetched.EstimatedUsage)
 }
+
+func TestSourcesSurviveFetchModifySave(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	sessions := NewService(db.New(conn), conn)
+
+	created, err := sessions.Create(t.Context(), "sources")
+	require.NoError(t, err)
+	created.Sources = []Source{{
+		ID:        "source-1",
+		Kind:      SourceKindURL,
+		Label:     "Reference",
+		Location:  "https://example.com/reference",
+		CreatedAt: 123,
+	}}
+
+	_, err = sessions.Save(t.Context(), created)
+	require.NoError(t, err)
+	fetched, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, created.Sources, fetched.Sources)
+}

@@ -31,6 +31,7 @@ func TestInteractiveModesMapTaskToWritableCoder(t *testing.T) {
 
 	require.Equal(t, []modeDefinition{
 		{ID: config.AgentCoder, Title: "Task"},
+		{ID: config.AgentGoal, Title: "Goal"},
 		{ID: config.AgentReview, Title: "Review"},
 	}, modeDefinitions)
 }

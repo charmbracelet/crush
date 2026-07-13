@@ -1,9 +1,7 @@
 package agent
 
 import (
-	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1016,37 +1014,26 @@ func TestProviderRetryLogFields(t *testing.T) {
 	})
 }
 
-func TestAutoReviewTriggerGuards(t *testing.T) {
-	agent := &sessionAgent{autoReviewEnabled: true}
+func TestAutoSummaryBufferUsesConfiguredWindowWithoutFixedCap(t *testing.T) {
+	t.Parallel()
 
-	reason, ok := agent.shouldAutoReviewError(errors.New("boom"), Model{})
-	require.True(t, ok)
-	require.Contains(t, reason, "boom")
+	require.Equal(t, int64(0), autoSummaryBuffer(0))
+	require.Equal(t, int64(3_000), autoSummaryBuffer(30_000))
+	require.Equal(t, int64(6_600), autoSummaryBuffer(66_000))
+	require.Equal(t, int64(13_000), autoSummaryBuffer(200_000))
+	require.Equal(t, int64(13_000), autoSummaryBuffer(1_000_000))
+}
 
-	_, ok = agent.shouldAutoReviewError(context.Canceled, Model{})
-	require.False(t, ok)
+func TestUpdateSessionTokenCountersTracksLatestContext(t *testing.T) {
+	t.Parallel()
 
-	disabled := &sessionAgent{}
-	_, ok = disabled.shouldAutoReviewError(errors.New("boom"), Model{})
-	require.False(t, ok)
+	session := session.Session{PromptTokens: 50_000, CompletionTokens: 5_000}
+	updateSessionTokenCounters(&session, fantasy.Usage{
+		InputTokens:     20_000,
+		CacheReadTokens: 2_000,
+		OutputTokens:    700,
+	})
 
-	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 401, Message: "login"}, Model{})
-	require.False(t, ok)
-
-	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 402, Message: "credits"}, Model{})
-	require.False(t, ok)
-
-	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{Message: "The requested model is not supported."}, Model{})
-	require.False(t, ok)
-
-	_, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 400, Message: "request exceeds the available context size"}, Model{})
-	require.False(t, ok)
-
-	reason, ok = agent.shouldAutoReviewError(&fantasy.ProviderError{StatusCode: 500, Message: "upstream failed"}, Model{})
-	require.True(t, ok)
-	require.Contains(t, reason, "upstream failed")
-
-	require.True(t, agent.shouldAutoReviewMaxTokens(message.FinishReasonMaxTokens))
-	require.False(t, agent.shouldAutoReviewMaxTokens(message.FinishReasonEndTurn))
-	require.False(t, disabled.shouldAutoReviewMaxTokens(message.FinishReasonMaxTokens))
+	require.Equal(t, int64(22_000), session.PromptTokens)
+	require.Equal(t, int64(700), session.CompletionTokens)
 }

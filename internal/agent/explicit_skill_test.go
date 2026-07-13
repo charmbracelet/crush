@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestInjectExplicitSkillInvocationsDoesNotInferFromNameAlone(t *testing.T) {
 	require.Empty(t, loaded)
 }
 
-func TestInjectExplicitSkillInvocationsRoutesMCPTasks(t *testing.T) {
+func TestInjectExplicitSkillInvocationsDoesNotInferMCPTasks(t *testing.T) {
 	t.Parallel()
 
 	available := []*skills.Skill{
@@ -46,15 +47,11 @@ func TestInjectExplicitSkillInvocationsRoutesMCPTasks(t *testing.T) {
 		{Name: "unrelated", Instructions: "Not relevant."},
 	}
 	got, loaded := injectExplicitSkillInvocations("Fix the broken MCP configurations on Windows.", available)
-	require.Equal(t, []string{"crush-config", "mcp-setup"}, loaded)
-	require.Contains(t, got, "Inspect recode_info before changing configuration.")
-	require.Contains(t, got, "call mcp_add")
-	require.Contains(t, got, "Never substitute a related server.")
-	require.NotContains(t, got, "Preserve and validate crush.json.")
-	require.NotContains(t, got, "Inspect configured MCPs first.")
+	require.Empty(t, loaded)
+	require.Equal(t, "Fix the broken MCP configurations on Windows.", got)
 }
 
-func TestInjectExplicitSkillInvocationsRoutesHeavyTasks(t *testing.T) {
+func TestInjectExplicitSkillInvocationsDoesNotInferHeavyTasks(t *testing.T) {
 	t.Parallel()
 
 	available := []*skills.Skill{
@@ -64,9 +61,8 @@ func TestInjectExplicitSkillInvocationsRoutesHeavyTasks(t *testing.T) {
 	prompt := "Investigate the root cause across the repo, fix the multiple failing paths, and verify the implementation autonomously."
 
 	got, loaded := injectExplicitSkillInvocations(prompt, available)
-	require.Equal(t, []string{"execution-routing"}, loaded)
-	require.Contains(t, got, "Keep ownership of the user task.")
-	require.NotContains(t, got, "Ground, research, delegate, and verify.")
+	require.Empty(t, loaded)
+	require.Equal(t, prompt, got)
 }
 
 func TestSkillTransientContextExcludesUserPrompt(t *testing.T) {
@@ -75,4 +71,49 @@ func TestSkillTransientContextExcludesUserPrompt(t *testing.T) {
 	context := skillTransientContext("fix MCP", "<loaded_skill>instructions</loaded_skill>\n\nfix MCP", []string{"mcp-setup"})
 	require.Equal(t, "<loaded_skill>instructions</loaded_skill>", context)
 	require.NotContains(t, context, "fix MCP")
+}
+
+func TestCoderPromptIsConciseAndSourceDriven(t *testing.T) {
+	t.Parallel()
+
+	content, err := os.ReadFile("templates/coder.md.tpl")
+	require.NoError(t, err)
+	prompt := string(content)
+
+	require.Less(t, len(prompt), 9_000)
+	require.Less(t, strings.Count(prompt, "\n"), 180)
+
+	for _, templateField := range []string{
+		"{{.WorkingDir}}",
+		"{{if .IsGitRepo}}",
+		"{{.Platform}}",
+		"{{.Date}}",
+		"{{if .GitStatus}}",
+		"{{.GitStatus}}",
+		"{{if gt (len .Config.LSP) 0}}",
+		"{{- if .AvailSkillXML}}",
+		"{{.AvailSkillXML}}",
+		"{{if .ContextFiles}}",
+		"{{range .ContextFiles}}",
+		"{{if .GlobalContextFiles}}",
+		"{{range .GlobalContextFiles}}",
+		"{{.Path}}",
+		"{{.Content}}",
+	} {
+		require.Contains(t, prompt, templateField)
+	}
+
+	require.Contains(t, prompt, "full instructions on demand")
+	require.NotContains(t, prompt, "MANDATORY activation flow")
+	require.NotContains(t, prompt, "before any other tool call")
+	for _, duplicatedSection := range []string{
+		"<workflow>",
+		"<decision_making>",
+		"<editing_files>",
+		"<whitespace_and_exact_matching>",
+		"<task_completion>",
+		"<error_handling>",
+	} {
+		require.NotContains(t, prompt, duplicatedSection)
+	}
 }

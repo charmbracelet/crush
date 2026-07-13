@@ -276,11 +276,18 @@ func (a *sessionAgent) memoryToolPollutes(toolName string) bool {
 		return true
 	}
 	for _, tool := range a.tools.Copy() {
-		if tool.Info().Name != toolName {
+		if tool.Info().Name == toolName {
+			pollutingTool, ok := tool.(interface{ PollutesMemory() bool })
+			return ok && pollutingTool.PollutesMemory()
+		}
+		provider, ok := tool.(agenttools.DeferredToolProvider)
+		if !ok {
 			continue
 		}
-		pollutingTool, ok := tool.(interface{ PollutesMemory() bool })
-		return ok && pollutingTool.PollutesMemory()
+		for _, deferred := range provider.ResolveDeferredTools([]string{toolName}) {
+			pollutingTool, ok := deferred.(interface{ PollutesMemory() bool })
+			return ok && pollutingTool.PollutesMemory()
+		}
 	}
 	return false
 }

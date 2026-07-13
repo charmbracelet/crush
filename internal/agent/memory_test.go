@@ -37,7 +37,6 @@ func TestRecordMemoriesUsesHiddenSummarySideCall(t *testing.T) {
 			Large:   configured,
 			Small:   configured,
 			Summary: configured,
-			Review:  configured,
 		},
 		Sessions:       env.sessions,
 		Messages:       env.messages,
@@ -92,7 +91,7 @@ func TestRecordMemoriesSkipsExcludedSession(t *testing.T) {
 		ModelCfg:   config.SelectedModel{Provider: "fake", Model: "fake-model"},
 	}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Models:         SessionAgentModels{Large: configured, Small: configured, Summary: configured, Review: configured},
+		Models:         SessionAgentModels{Large: configured, Small: configured, Summary: configured},
 		Sessions:       env.sessions,
 		Messages:       env.messages,
 		Memory:         store,
@@ -155,7 +154,7 @@ func TestRecallMemoriesSelectsDetailsWithoutPersistingInjectedPrompt(t *testing.
 		ModelCfg:   config.SelectedModel{Provider: "fake", Model: "fake-model"},
 	}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Models:        SessionAgentModels{Large: configured, Small: configured, Summary: configured, Review: configured},
+		Models:        SessionAgentModels{Large: configured, Small: configured, Summary: configured},
 		Sessions:      env.sessions,
 		Messages:      env.messages,
 		Memory:        store,
@@ -230,7 +229,7 @@ func TestScheduledMemoryRecorderRunsOnlyWhenSessionIsIdle(t *testing.T) {
 		ModelCfg:   config.SelectedModel{Provider: "fake", Model: "fake-model"},
 	}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Models:         SessionAgentModels{Large: configured, Small: configured, Summary: configured, Review: configured},
+		Models:         SessionAgentModels{Large: configured, Small: configured, Summary: configured},
 		Sessions:       env.sessions,
 		Messages:       env.messages,
 		Memory:         store,
@@ -282,7 +281,7 @@ func TestCancelMemoryJobPreemptsRecorderDebounce(t *testing.T) {
 		ModelCfg:   config.SelectedModel{Provider: "fake", Model: "fake-model"},
 	}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Models:         SessionAgentModels{Large: configured, Small: configured, Summary: configured, Review: configured},
+		Models:         SessionAgentModels{Large: configured, Small: configured, Summary: configured},
 		Sessions:       env.sessions,
 		Messages:       env.messages,
 		Memory:         store,

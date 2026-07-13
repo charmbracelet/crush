@@ -173,9 +173,25 @@ func sessionToProto(s session.Session) proto.Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            todosToProto(s.Todos),
+		Sources:          sourcesToProto(s.Sources),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+func sourcesToProto(sources []session.Source) []proto.Source {
+	out := make([]proto.Source, len(sources))
+	for i, source := range sources {
+		out[i] = proto.Source{
+			ID:        source.ID,
+			Kind:      string(source.Kind),
+			Label:     source.Label,
+			Location:  source.Location,
+			Content:   source.Content,
+			CreatedAt: source.CreatedAt,
+		}
+	}
+	return out
 }
 
 // isSessionBusy reports whether the given workspace has an in-flight

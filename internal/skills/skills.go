@@ -303,22 +303,33 @@ func ToPromptXML(skills []*Skill) string {
 
 	var sb strings.Builder
 	sb.WriteString("<available_skills>\n")
+	visible := 0
 	for _, s := range skills {
 		// Skip skills that have disable-model-invocation set
 		if s.DisableModelInvocation {
 			continue
 		}
+		visible++
 		sb.WriteString("  <skill>\n")
 		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(s.Name))
-		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(s.Description))
-		fmt.Fprintf(&sb, "    <location>%s</location>\n", escape(s.SkillFilePath))
-		if s.Builtin {
-			sb.WriteString("    <type>builtin</type>\n")
-		}
+		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(compactSkillDescription(s.Description)))
 		sb.WriteString("  </skill>\n")
+	}
+	if visible == 0 {
+		return ""
 	}
 	sb.WriteString("</available_skills>")
 	return sb.String()
+}
+
+func compactSkillDescription(description string) string {
+	const maxRunes = 320
+	compact := strings.Join(strings.Fields(description), " ")
+	runes := []rune(compact)
+	if len(runes) <= maxRunes {
+		return compact
+	}
+	return string(runes[:maxRunes-3]) + "..."
 }
 
 // FormatInvocation generates XML for a skill when invoked as a user command.

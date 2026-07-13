@@ -20,17 +20,18 @@ a path from filesystem conventions.
 
 Treat `crush.json` as structured data, even when it is minified onto one line.
 
-1. For MCP changes, use `mcp_add`; do not edit JSON directly. For other
-   settings, use `recode_info` and mutate only `[config_files].write_target`
-   unless the user explicitly requests project scope.
+1. For an existing MCP server, use `mcp_manage`. Use `mcp_add` only to create
+   or replace a server definition. For other settings, use `recode_info` and
+   mutate only `[config_files].write_target` unless the user explicitly
+   requests project scope.
 2. Parse the complete file as JSON before editing. An empty result from a
    line-based offset means the requested line does not exist; it does not mean
    a one-line file is empty.
 3. Preserve unknown fields and all unrelated configuration entries.
 4. Make a backup, apply a structured object mutation, serialize once, and parse
    the result again before replacing the active file.
-5. Re-read through `recode_info` and distinguish configured entries from clients
-   that actually initialized successfully.
+5. Verify MCP changes with `mcp_manage`; use `recode_info` with only the detail
+   required for other configuration changes.
 
 Once `recode_info` reports `write_target`, keep that path as the mutation target
 for the task. Do not broaden into home-directory scans or copy a config from

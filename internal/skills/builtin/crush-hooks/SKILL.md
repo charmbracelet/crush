@@ -1,6 +1,7 @@
 ---
 name: crush-hooks
 description: Use when the user wants to add, write, debug, or configure a Crush hook — gating or blocking tool calls, approving or rewriting tool input before execution, injecting context into tool results, or troubleshooting hook behavior in crush.json.
+user-invocable: true
 ---
 
 # Crush Hooks

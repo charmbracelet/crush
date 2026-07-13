@@ -1,6 +1,7 @@
 ---
 name: a2ui
 description: Use when the user asks you to output, speak in, or communicate using the A2UI (a2tea) format, or when you need to understand how to construct A2UI JSON components to render interactive terminal UIs for the user.
+user-invocable: true
 ---
 
 # A2UI / a2tea Communication Guide

@@ -107,8 +107,44 @@ func TestFromSkillCatalog_UsesDiscoveredSymlinkedSkills(t *testing.T) {
 	entries := skills.Catalog(activeSkills, []string{root}, "")
 	cmds := FromSkillCatalog(entries)
 
+	require.GreaterOrEqual(t, len(cmds), 1)
+	var found bool
+	for _, cmd := range cmds {
+		if cmd.ID == "user:linked-skill" {
+			found = true
+			require.Equal(t, "linked-skill", cmd.Skill.Name)
+			require.Equal(t, filepath.Join(link, skills.SkillFileName), cmd.Skill.SkillFilePath)
+		}
+	}
+	require.True(t, found, "linked-skill should be in the palette")
+}
+
+func TestFromSkillCatalog_BuiltinSkillsAreUserInvocable(t *testing.T) {
+	t.Parallel()
+
+	_, activeSkills, _ := skills.DiscoverFromConfig(skills.DiscoveryConfig{})
+	entries := skills.Catalog(activeSkills, nil, "")
+	cmds := FromSkillCatalog(entries)
+
+	names := make(map[string]bool, len(cmds))
+	for _, cmd := range cmds {
+		names[cmd.Skill.Name] = true
+	}
+	for _, expected := range []string{"crush-config", "crush-hooks", "jq", "a2ui"} {
+		require.True(t, names[expected], "%s should be user-invocable in the palette", expected)
+	}
+}
+
+func TestFromSkillCatalog_UserInvocableFilter(t *testing.T) {
+	t.Parallel()
+
+	entries := []skills.CatalogEntry{
+		{Name: "invocable", Description: "Yes.", UserInvocable: true},
+		{Name: "hidden", Description: "No.", UserInvocable: false},
+	}
+	cmds := FromSkillCatalog(entries)
+
 	require.Len(t, cmds, 1)
-	require.Equal(t, "user:linked-skill", cmds[0].ID)
-	require.Equal(t, "linked-skill", cmds[0].Skill.Name)
-	require.Equal(t, filepath.Join(link, skills.SkillFileName), cmds[0].Skill.SkillFilePath)
+	require.Equal(t, "user:invocable", cmds[0].ID)
+	require.Equal(t, "invocable", cmds[0].Skill.Name)
 }

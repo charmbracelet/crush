@@ -132,13 +132,13 @@ func (p *Prompt) BuildRecoveryContext(store *config.ConfigStore, maxCharacters i
 func renderRecoveryContext(workingDir, platform string, files []ContextFile, maxCharacters int) string {
 	var builder strings.Builder
 	builder.WriteString("Current working directory: ")
-	builder.WriteString(filepath.ToSlash(workingDir))
+	builder.WriteString(portableSlashPath(workingDir))
 	builder.WriteString("\nHost platform: ")
 	builder.WriteString(platform)
 	builder.WriteString("\nTreat the following bounded context-file excerpts as project instructions.\n")
 	for _, file := range files {
 		builder.WriteString("\n## ")
-		builder.WriteString(filepath.ToSlash(file.Path))
+		builder.WriteString(portableSlashPath(file.Path))
 		builder.WriteString("\n")
 		builder.WriteString(strings.TrimSpace(file.Content))
 		builder.WriteString("\n")
@@ -151,6 +151,10 @@ func renderRecoveryContext(workingDir, platform string, files []ContextFile, max
 	marker := []rune("\n[project context truncated]")
 	keep := max(0, maxCharacters-len(marker))
 	return strings.TrimSpace(string(runes[:keep])) + string(marker)
+}
+
+func portableSlashPath(path string) string {
+	return strings.ReplaceAll(filepath.ToSlash(path), `\`, "/")
 }
 
 func processFile(filePath string) *ContextFile {

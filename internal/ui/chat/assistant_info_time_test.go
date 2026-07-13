@@ -14,7 +14,8 @@ func TestFormatTurnInfo(t *testing.T) {
 	location := time.FixedZone("test", 7*60*60)
 	stamp := time.Date(2026, time.July, 11, 7, 55, 12, 0, location)
 	finish := message.Finish{InputTokens: 15_240, OutputTokens: 420}
-	require.Equal(t, "15k ctx · 420 out · 07:55:12 · Sat, Jul 11, 2026", formatTurnInfo(finish, stamp))
+	expected := "15k ctx · 420 out · " + stamp.Local().Format("15:04:05 · Mon, Jan 02, 2006")
+	require.Equal(t, expected, formatTurnInfo(finish, stamp))
 }
 
 func TestFormatTurnInfoMarksEstimatedUsage(t *testing.T) {

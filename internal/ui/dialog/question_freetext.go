@@ -26,25 +26,37 @@ type FreeText struct {
 	scrollOffset int  // lines scrolled past the top of the textarea viewport
 	wheelActive  bool // wheel-scroll mode: skip cursor-follow until next key press
 	keyEnter     key.Binding
+	keyNewline   key.Binding
 	keyClose     key.Binding
 
 	lastResponse question.Answer
 	lastWidth    int
 }
 
+// freeTextMinEditorHeight and freeTextMaxEditorHeight bound the
+// answer textarea. It starts at the minimum and, when the form has
+// taller sibling tabs, grows at draw time to fill the shared form
+// height, capped at the maximum.
+const (
+	freeTextMinEditorHeight = 3
+	freeTextMaxEditorHeight = 6
+)
+
 // NewFreeText creates a new free-text question component.
 func NewFreeText(sty *styles.Styles, req question.Question) *FreeText {
 	ta := newQuestionTextarea(sty, "Type your answer...", 1000)
-	ta.MinHeight = 3
-	ta.MaxHeight = 8
-	ta.SetHeight(3)
+	ta.DynamicHeight = false
+	ta.MinHeight = freeTextMinEditorHeight
+	ta.MaxHeight = freeTextMaxEditorHeight
+	ta.SetHeight(freeTextMinEditorHeight)
 
 	return &FreeText{
-		Styles:   sty,
-		Request:  req,
-		editor:   ta,
-		keyEnter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "submit")),
-		keyClose: CloseKey,
+		Styles:     sty,
+		Request:    req,
+		editor:     ta,
+		keyEnter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "submit")),
+		keyNewline: key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
+		keyClose:   CloseKey,
 	}
 }
 
@@ -65,6 +77,9 @@ func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			})
 			return true, nil
 		}
+		return false, nil
+	case key.Matches(msg, d.keyNewline):
+		d.editor.InsertRune('\n')
 		return false, nil
 	default:
 		var cmd tea.Cmd
@@ -91,7 +106,7 @@ func (d *FreeText) GetRequest() question.Question { return d.Request }
 
 // ShortHelp returns key bindings for the status bar.
 func (d *FreeText) ShortHelp() []key.Binding {
-	return []key.Binding{d.keyEnter, d.keyClose}
+	return []key.Binding{d.keyEnter, d.keyNewline, d.keyClose}
 }
 
 // Height returns the visual height at the default max width.
@@ -120,8 +135,8 @@ func (d *FreeText) Height(width int) int {
 		}
 		h++ // blank
 	}
-	h += d.editor.Height() // textarea
-	h++                    // trailing blank for bottom padding
+	h += freeTextMinEditorHeight // textarea (minimum; grows to fill at draw time)
+	h++                          // trailing blank for bottom padding
 	return h
 }
 
@@ -136,8 +151,13 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	d.lastWidth = area.Dx()
 	viewport := area.Dy()
 
-	promptPrefix := d.Styles.Editor.QuestionBody.Render("> ")
-	prefixWidth := lipgloss.Width(promptPrefix)
+	barActive := d.Styles.Editor.QuestionCursorBar.Render("┃ ")
+	const barInactive = "  "
+	bar := barInactive
+	if d.focused {
+		bar = barActive
+	}
+	prefixWidth := lipgloss.Width(bar)
 	iconPrompt := questionIconPrompt(d.Styles, d.focused)
 	iconWidth := lipgloss.Width(iconPrompt)
 
@@ -179,13 +199,16 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			lines = append(lines, ftLine{cursorX: -1}) // blank
 		}
 
+		// Grow the textarea to fill the form height, bounded by the
+		// min and max editor heights.
+		headerLines := len(lines)
+		fill := viewport - headerLines - 1 // -1 for trailing padding
+		available := min(freeTextMaxEditorHeight, max(freeTextMinEditorHeight, fill))
+		d.editor.SetHeight(available)
 		d.editor.SetWidth(contentWidth - 2 - prefixWidth)
 		tc := d.editor.Cursor()
 		for j, ln := range strings.Split(d.editor.View(), "\n") {
-			text := promptPrefix + ln
-			if j > 0 {
-				text = strings.Repeat(" ", prefixWidth) + ln
-			}
+			text := bar + ln
 			cursorX := -1
 			if tc != nil && tc.Y == j {
 				cursorRow = len(lines)

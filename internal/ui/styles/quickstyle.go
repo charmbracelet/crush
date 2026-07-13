@@ -735,7 +735,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.QuestionBody = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Editor.QuestionConfirm = lipgloss.NewStyle().Foreground(o.primary).Bold(true)
 	s.Editor.QuestionNote = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Editor.QuestionCursorBar = lipgloss.NewStyle().Foreground(o.secondary)
+	s.Editor.QuestionCursorBar = lipgloss.NewStyle().Foreground(o.primary)
 	s.Editor.QuestionRadioOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
 	s.Editor.QuestionRadioOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 	s.Editor.QuestionCheckOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)

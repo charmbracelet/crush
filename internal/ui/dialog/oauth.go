@@ -33,6 +33,7 @@ const (
 	OAuthStateInitializing OAuthState = iota
 	OAuthStateDisplay
 	OAuthStateSuccess
+	OAuthStateSaving
 	OAuthStateError
 )
 
@@ -123,7 +124,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		switch m.State {
-		case OAuthStateInitializing, OAuthStateDisplay:
+		case OAuthStateInitializing, OAuthStateDisplay, OAuthStateSaving:
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			if cmd != nil {
@@ -140,7 +141,11 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, m.keyMap.Submit):
 			switch m.State {
 			case OAuthStateSuccess:
-				return m.saveKeyAndContinue()
+				return m.confirmAndSelectModel()
+
+			case OAuthStateSaving:
+				// Save in progress; ignore submits until it finishes.
+				return nil
 
 			default:
 				cmd := m.copyCodeAndOpenURL()
@@ -150,7 +155,11 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, m.keyMap.Close):
 			switch m.State {
 			case OAuthStateSuccess:
-				return m.saveKeyAndContinue()
+				return m.confirmAndSelectModel()
+
+			case OAuthStateSaving:
+				// Save in progress; ignore submits until it finishes.
+				return nil
 
 			default:
 				return ActionClose{}
@@ -167,16 +176,50 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		return ActionCmd{m.oAuthProvider.startPolling(msg.DeviceCode, msg.ExpiresIn)}
 
 	case ActionCompleteOAuth:
-		m.State = OAuthStateSuccess
+		// The device flow finished and we have a token. Immediately
+		// persist it and fetch models in the background (this triggers a
+		// config reload that can take a few seconds), showing a spinner.
+		// The success screen is presented only once that work completes,
+		// so it truthfully means "ready to use" rather than gating the
+		// work behind a keypress.
+		m.State = OAuthStateSaving
 		m.token = msg.Token
-		return ActionCmd{m.oAuthProvider.stopPolling}
+		return ActionCmd{tea.Batch(
+			m.oAuthProvider.stopPolling,
+			m.spinner.Tick,
+			m.saveCredential(),
+		)}
 
 	case ActionOAuthErrored:
 		m.State = OAuthStateError
 		cmd := tea.Batch(m.oAuthProvider.stopPolling, util.ReportError(msg.Error))
 		return ActionCmd{cmd}
+
+	case oauthSaveDoneMsg:
+		// Credential saved and models fetched. Present the confirmation
+		// screen; the actual model selection happens when the user
+		// acknowledges it (fast, since the work is already done).
+		m.State = OAuthStateSuccess
+		return nil
+
+	case oauthSaveErrMsg:
+		// Save failed; surface the error and move to the error state so
+		// the user can dismiss and retry the flow.
+		m.State = OAuthStateError
+		return ActionCmd{util.ReportError(msg.err)}
 	}
 	return nil
+}
+
+// oauthSaveDoneMsg is emitted by the background save command once the
+// credential has been persisted and models fetched. The model-selection
+// details are read from the dialog's own fields when the user confirms.
+type oauthSaveDoneMsg struct{}
+
+// oauthSaveErrMsg is emitted by the background save command when persisting
+// the credential fails.
+type oauthSaveErrMsg struct {
+	err error
 }
 
 // View renders the device flow dialog.
@@ -202,7 +245,7 @@ func (m *OAuth) dialogContent() string {
 	)
 
 	switch m.State {
-	case OAuthStateInitializing:
+	case OAuthStateInitializing, OAuthStateSaving:
 		return m.innerDialogContent()
 
 	default:
@@ -304,6 +347,16 @@ func (m *OAuth) innerDialogContent() string {
 			Width(m.width - 2).
 			Render("Authentication successful!")
 
+	case OAuthStateSaving:
+		return lipgloss.NewStyle().
+			Margin(1, 1).
+			Width(m.width - 2).
+			Align(lipgloss.Center).
+			Render(
+				successStyle.Render(m.spinner.View()) +
+					statusTextStyle.Render(" Fetching models..."),
+			)
+
 	case OAuthStateError:
 		return lipgloss.NewStyle().
 			Margin(1).
@@ -333,6 +386,10 @@ func (m *OAuth) ShortHelp() []key.Binding {
 				key.WithHelp("enter", "finish"),
 			),
 		}
+
+	case OAuthStateSaving:
+		// No actionable keys while the save completes.
+		return nil
 
 	default:
 		return []key.Binding{
@@ -366,12 +423,29 @@ func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	)
 }
 
-func (m *OAuth) saveKeyAndContinue() Action {
-	err := m.com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(m.provider.ID), m.token)
-	if err != nil {
-		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
+// saveCredential returns a command that persists the OAuth token and
+// triggers the config reload (including model discovery) off the UI update
+// loop. It reports completion via oauthSaveDoneMsg or oauthSaveErrMsg.
+func (m *OAuth) saveCredential() tea.Cmd {
+	// Capture the fields the command needs so it does not race with
+	// dialog state.
+	var (
+		com      = m.com
+		provider = m.provider
+		token    = m.token
+	)
+	return func() tea.Msg {
+		if err := com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(provider.ID), token); err != nil {
+			return oauthSaveErrMsg{err: fmt.Errorf("failed to save API key: %w", err)}
+		}
+		return oauthSaveDoneMsg{}
 	}
+}
 
+// confirmAndSelectModel is invoked when the user acknowledges the success
+// screen. The credential is already saved, so this only resumes model
+// selection, which closes the dialog.
+func (m *OAuth) confirmAndSelectModel() Action {
 	return ActionSelectModel{
 		Provider:  m.provider,
 		Model:     m.model,

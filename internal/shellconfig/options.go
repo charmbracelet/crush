@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -27,6 +28,7 @@ func handleOptions(ctx context.Context, args []string, stdin io.Reader, stdout, 
 	if b == nil {
 		return nil
 	}
+	slog.Info("Options defined in shell config")
 	f := newFragmentBuilder()
 	if f.m["options"] == nil {
 		f.m["options"] = make(map[string]any)
@@ -149,5 +151,10 @@ func handleOptions(ctx context.Context, args []string, stdin io.Reader, stdout, 
 		}
 	}
 
-	return f.append(b)
+	if err := f.append(b); err != nil {
+		slog.Error("Failed to append options fragment", "error", err)
+		return err
+	}
+	slog.Debug("Options fragment appended")
+	return nil
 }

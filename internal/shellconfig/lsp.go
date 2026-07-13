@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -25,6 +26,7 @@ func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 	}
 
 	name := args[1]
+	slog.Info("LSP server defined in shell config", "name", name)
 	f := newFragmentBuilder()
 	if f.m["lsp"] == nil {
 		f.m["lsp"] = make(map[string]any)
@@ -108,5 +110,10 @@ func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 		}
 	}
 
-	return f.append(b)
+	if err := f.append(b); err != nil {
+		slog.Error("Failed to append LSP fragment", "name", name, "error", err)
+		return err
+	}
+	slog.Debug("LSP fragment appended", "name", name)
+	return nil
 }

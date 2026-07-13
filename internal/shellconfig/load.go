@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -19,6 +20,8 @@ import (
 // The script runs with the same shell interpreter used by the bash tool and
 // hooks, so source, $VAR, $(cmd), and other shell constructs all work.
 func LoadShellConfig(path string, src []byte) ([]byte, error) {
+	slog.Info("Loading shell config", "path", path)
+
 	builder := &shell.ConfigBuilder{}
 	ctx := shell.WithConfigBuilder(context.Background(), builder)
 
@@ -31,22 +34,29 @@ func LoadShellConfig(path string, src []byte) ([]byte, error) {
 		Env:     env,
 	})
 	if err != nil {
+		slog.Error("Shell config execution failed", "path", path, "error", err)
 		return nil, fmt.Errorf("executing shell config %s: %w", path, err)
 	}
 
+	slog.Info("Shell config executed successfully", "path", path, "fragments", len(builder.Fragments))
+
 	if len(builder.Fragments) == 0 {
+		slog.Warn("Shell config produced no config fragments", "path", path)
 		return nil, nil
 	}
 
 	merged, err := jsons.Merge(builder.Fragments)
 	if err != nil {
+		slog.Error("Failed to merge shell config fragments", "path", path, "error", err)
 		return nil, fmt.Errorf("merging shell config fragments from %s: %w", path, err)
 	}
 
 	// Validate that the merged result is a valid JSON object.
 	if !json.Valid(merged) {
+		slog.Error("Shell config produced invalid JSON", "path", path)
 		return nil, fmt.Errorf("shell config %s produced invalid JSON", path)
 	}
 
+	slog.Info("Shell config loaded successfully", "path", path, "bytes", len(merged))
 	return merged, nil
 }

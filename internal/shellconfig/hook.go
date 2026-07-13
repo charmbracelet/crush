@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -23,6 +24,7 @@ func handleHook(ctx context.Context, args []string, stdin io.Reader, stdout, std
 	}
 
 	event := args[1]
+	slog.Info("Hook defined in shell config", "event", event)
 	h := map[string]any{}
 
 	i := 2
@@ -69,5 +71,10 @@ func handleHook(ctx context.Context, args []string, stdin io.Reader, stdout, std
 	arr, _ := hooks[event].([]any)
 	hooks[event] = append(arr, h)
 
-	return f.append(b)
+	if err := f.append(b); err != nil {
+		slog.Error("Failed to append hook fragment", "event", event, "error", err)
+		return err
+	}
+	slog.Debug("Hook fragment appended", "event", event)
+	return nil
 }

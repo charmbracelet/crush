@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -25,6 +26,7 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 	}
 
 	name := args[1]
+	slog.Info("MCP server defined in shell config", "name", name)
 	f := newFragmentBuilder()
 	if f.m["mcp"] == nil {
 		f.m["mcp"] = make(map[string]any)
@@ -114,5 +116,10 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 		}
 	}
 
-	return f.append(b)
+	if err := f.append(b); err != nil {
+		slog.Error("Failed to append MCP fragment", "name", name, "error", err)
+		return err
+	}
+	slog.Debug("MCP fragment appended", "name", name)
+	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -27,6 +28,7 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 	}
 
 	id := args[1]
+	slog.Info("Provider defined in shell config", "provider", id)
 	f := newFragmentBuilder()
 	p := f.nestedMap("providers", id)
 
@@ -91,5 +93,10 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 		}
 	}
 
-	return f.append(b)
+	if err := f.append(b); err != nil {
+		slog.Error("Failed to append provider fragment", "provider", id, "error", err)
+		return err
+	}
+	slog.Debug("Provider fragment appended", "provider", id)
+	return nil
 }

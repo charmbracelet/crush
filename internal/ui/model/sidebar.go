@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"image"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -139,6 +140,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
 	height := area.Dy()
 
+	focused := m.focus == uiFocusSidebar
+
 	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 	sidebarLogo := m.sidebarLogo
@@ -189,27 +192,48 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	maxFiles, maxLSPs, maxMCPs, maxSkills := getDynamicHeightLimits(remainingHeight, filesCount, lspsCount, mcpsCount, skillsCount)
 
+	// When focused, show all items so scroll can reveal truncated content.
+	if focused {
+		maxFiles = max(maxFiles, filesCount)
+		maxLSPs = max(maxLSPs, lspsCount)
+		maxMCPs = max(maxMCPs, mcpsCount)
+		maxSkills = max(maxSkills, skillsCount)
+	}
+
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
 	skillsSection := m.skillsInfo(width, maxSkills, true)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), width, maxFiles, true)
 
+	fullContent := lipgloss.JoinVertical(
+		lipgloss.Left,
+		sidebarHeader,
+		filesSection,
+		"",
+		lspSection,
+		"",
+		mcpSection,
+		"",
+		skillsSection,
+	)
+
+	// Apply scroll offset when focused. Clamp against real content height.
+	contentLines := strings.Split(fullContent, "\n")
+	maxScroll := max(0, len(contentLines)-height)
+	m.sidebarScroll = min(m.sidebarScroll, maxScroll)
+	scroll := min(m.sidebarScroll, maxScroll)
+	if scroll > 0 && scroll < len(contentLines) {
+		contentLines = contentLines[scroll:]
+	}
+	scrolledContent := strings.Join(contentLines, "\n")
+
+	renderStyle := lipgloss.NewStyle().
+		MaxWidth(width).
+		MaxHeight(height)
+	if focused {
+		renderStyle = renderStyle.BorderLeft(true).BorderStyle(lipgloss.ThickBorder())
+	}
 	uv.NewStyledString(
-		lipgloss.NewStyle().
-			MaxWidth(width).
-			MaxHeight(height).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					sidebarHeader,
-					filesSection,
-					"",
-					lspSection,
-					"",
-					mcpSection,
-					"",
-					skillsSection,
-				),
-			),
+		renderStyle.Render(scrolledContent),
 	).Draw(scr, area)
 }

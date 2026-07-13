@@ -97,6 +97,7 @@ const (
 	uiFocusNone uiFocusState = iota
 	uiFocusEditor
 	uiFocusMain
+	uiFocusSidebar
 )
 
 type uiState uint8
@@ -297,6 +298,7 @@ type UI struct {
 	pillsAutoExpanded  bool
 	focusedPillSection pillSection
 	promptQueue        int
+	sidebarScroll      int
 	pillsView          string
 
 	// Todo spinner
@@ -1319,6 +1321,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	case m.state != uiChat:
 		return nil
 	case image.Pt(msg.X, msg.Y).In(m.layout.sidebar):
+		m.focusSidebar()
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
 		m.focus = uiFocusEditor
@@ -2302,12 +2305,26 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					}
 				}
 			}
+		case uiFocusSidebar:
+			switch {
+			case key.Matches(msg, m.keyMap.Tab), key.Matches(msg, m.keyMap.Editor.Escape):
+				m.focus = uiFocusEditor
+				cmds = append(cmds, m.textarea.Focus())
+			case key.Matches(msg, m.keyMap.Chat.Up):
+				m.sidebarScroll = max(0, m.sidebarScroll-1)
+			case key.Matches(msg, m.keyMap.Chat.Down):
+				m.sidebarScroll++
+			}
 		case uiFocusMain:
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
-				m.focus = uiFocusEditor
-				cmds = append(cmds, m.textarea.Focus())
-				m.chat.Blur()
+				if m.isCompact {
+					m.focus = uiFocusEditor
+					cmds = append(cmds, m.textarea.Focus())
+					m.chat.Blur()
+				} else {
+					m.focusSidebar()
+				}
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -3399,6 +3416,14 @@ func (m *UI) isCurrentSessionBusy() bool {
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
+}
+
+// focusSidebar moves focus to the sidebar panel, blurring the editor and chat.
+func (m *UI) focusSidebar() {
+	m.focus = uiFocusSidebar
+	m.textarea.Blur()
+	m.chat.Blur()
+	m.updateLayoutAndSize()
 }
 
 // mimeOf detects the MIME type of the given content.

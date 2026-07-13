@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 	"github.com/tidwall/gjson"
@@ -870,7 +871,7 @@ func lookupConfigs(cwd string) []string {
 		GlobalConfigData(),
 	}
 
-	configNames := []string{appName + ".json", "." + appName + ".json"}
+	configNames := []string{appName + ".json", "." + appName + ".json", appName + ".sh", "." + appName + ".sh"}
 
 	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
 	if err != nil {
@@ -888,6 +889,11 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 	var configs [][]byte
 	var loaded []string
 
+	// Track directories that have both crush.json and crush.sh to warn
+	// about potential confusion.
+	jsonDirs := make(map[string]bool)
+	shDirs := make(map[string]bool)
+
 	for _, path := range configPaths {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -899,11 +905,33 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		if len(data) == 0 {
 			continue
 		}
-		if !json.Valid(data) {
-			return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
+
+		dir := filepath.Dir(path)
+		if strings.HasSuffix(path, ".sh") {
+			shDirs[dir] = true
+			jsonBytes, err := shellconfig.LoadShellConfig(path, data)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load shell config %s: %w", path, err)
+			}
+			if len(jsonBytes) > 0 {
+				configs = append(configs, jsonBytes)
+				loaded = append(loaded, path)
+			}
+		} else {
+			jsonDirs[dir] = true
+			if !json.Valid(data) {
+				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
+			}
+			configs = append(configs, data)
+			loaded = append(loaded, path)
 		}
-		configs = append(configs, data)
-		loaded = append(loaded, path)
+	}
+
+	// Warn if both crush.json and crush.sh exist in the same directory.
+	for dir := range jsonDirs {
+		if shDirs[dir] {
+			slog.Warn("Found both crush.json and crush.sh in the same directory; merging with .sh taking precedence", "dir", dir)
+		}
 	}
 
 	cfg, err := loadFromBytes(configs)

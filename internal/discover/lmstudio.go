@@ -22,11 +22,11 @@ type lmstudioModelsResponse struct {
 
 // lmstudioModelEntry is a single entry from /api/v1/models.
 type lmstudioModelEntry struct {
-	Key              string                `json:"key"`
-	DisplayName      string                `json:"display_name"`
-	MaxContextLength int64                 `json:"max_context_length"`
-	LoadedInstances  []lmstudioInstance    `json:"loaded_instances"`
-	Capabilities     lmstudioCapabilities  `json:"capabilities"`
+	Key              string               `json:"key"`
+	DisplayName      string               `json:"display_name"`
+	MaxContextLength int64                `json:"max_context_length"`
+	LoadedInstances  []lmstudioInstance   `json:"loaded_instances"`
+	Capabilities     lmstudioCapabilities `json:"capabilities"`
 }
 
 // lmstudioCapabilities holds optional model capability flags from
@@ -95,9 +95,7 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 		}
 
 		// Vision support from capabilities.
-		if meta.Capabilities.Vision {
-			models[i].SupportsImages = true
-		}
+		models[i].SupportsImages = meta.Capabilities.Vision
 	}
 
 	return models, nil

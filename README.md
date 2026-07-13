@@ -394,6 +394,20 @@ which do expand.
       "headers": {
         "API-Key": "$(echo $API_KEY)"
       }
+    },
+    "signal": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/signal-mcp",
+        "python",
+        "signal_mcp/main.py",
+        "--user-id",
+        "+15551234567",
+        "--channel"
+      ]
     }
   }
 }
@@ -426,8 +440,18 @@ stays silent until you ask for it:
 ```bash
 # Enable one or more configured MCP servers as channels for this session.
 crush --channels server:webhook
-crush --channels server:webhook --channels server:alerts
+crush --channels server:webhook --channels server:signal
 ```
+
+#### Signal Setup
+
+A common interactive channel is [Signal MCP](https://github.com/joestump/signal-mcp), which lets Crush send and receive Signal messages through a [signal-cli](https://github.com/AsamK/signal-cli) daemon.
+
+1. **Start the daemon:** `signal-cli -a +15551234567 daemon --tcp 127.0.0.1:7583 --receive-mode on-start --no-receive-stdout`
+2. **Add to `crush.json`:** Use the example in the [MCPs](#mcps) section above.
+3. **Launch with channel:** `crush --channels server:signal`
+
+Incoming messages arrive as `<channel>` tags; use the `send_message_to_user` tool to reply.
 
 The `source` attribute is always the (trusted) server name. Payloads are
 untrusted, server-initiated input: Crush validates their structure, caps the

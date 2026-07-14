@@ -24,6 +24,7 @@ import (
 
 func init() {
 	shell.RegisterBuiltin("provider", handleProvider)
+	shell.RegisterBuiltin("provider-model", handleProviderModel)
 	shell.RegisterBuiltin("model", handleModel)
 	shell.RegisterBuiltin("mcp", handleMCP)
 	shell.RegisterBuiltin("lsp", handleLSP)

@@ -5,30 +5,37 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleProviderModel implements the `provider-model` builtin.
 //
-// Usage: provider-model --provider <id> --id <model-id>
+// Usage: provider-model <provider-id> --id <model-id>
 //
 //	[--name NAME] [--context-window N] [--default-max-tokens N]
 //	[--can-reason true|false] [--supports-images true|false]
 //	[--cost-per-1m-in F] [--cost-per-1m-out F]
 //	[--reasoning-effort low|medium|high]
 //
-// Each call appends a model to the named provider's "models" array.
-// Multiple calls for the same provider accumulate into the array via
-// the deep-merge pipeline.
+// The first positional arg is the provider ID. --id (the model ID) is
+// required. Each call appends a model to the provider's "models" array.
 func handleProviderModel(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := shell.ConfigBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
+	if len(args) < 2 {
+		return usage(stderr, "usage: provider-model <provider-id> --id <model-id> [--name NAME] [--context-window N] [--default-max-tokens N] [--can-reason true|false] [--supports-images true|false] [--cost-per-1m-in F] [--cost-per-1m-out F] [--reasoning-effort low|medium|high]")
+	}
+
+	providerID := args[1]
+	if strings.HasPrefix(providerID, "--") {
+		return usage(stderr, "provider-model: first arg must be the provider ID, not a flag")
+	}
 
 	var (
-		providerID        string
 		modelID           string
 		name              string
 		contextWindow     int64
@@ -46,15 +53,9 @@ func handleProviderModel(ctx context.Context, args []string, stdin io.Reader, st
 		hasSupportsImages bool
 	)
 
-	i := 1
+	i := 2
 	for i < len(args) {
 		switch args[i] {
-		case "--provider":
-			v, err := flagStr(args, &i, "provider")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			providerID = v
 		case "--id":
 			v, err := flagStr(args, &i, "id")
 			if err != nil {
@@ -120,9 +121,6 @@ func handleProviderModel(ctx context.Context, args []string, stdin io.Reader, st
 		}
 	}
 
-	if providerID == "" {
-		return usage(stderr, "provider-model: --provider is required")
-	}
 	if modelID == "" {
 		return usage(stderr, "provider-model: --id is required")
 	}
@@ -158,7 +156,6 @@ func handleProviderModel(ctx context.Context, args []string, stdin io.Reader, st
 	}
 
 	f := newFragmentBuilder()
-	providers := f.rootMap("providers")
 	p := f.nestedMap("providers", providerID)
 	models := p["models"]
 	if models == nil {
@@ -166,10 +163,6 @@ func handleProviderModel(ctx context.Context, args []string, stdin io.Reader, st
 	}
 	modelsArr, _ := models.([]any)
 	p["models"] = append(modelsArr, model)
-	// Ensure the providers root map references the nested map we just built.
-	// nestedMap already set f.m["providers"]["providerID"] = p, so this is
-	// just a safety no-op for the root map.
-	_ = providers
 
 	if err := f.append(b); err != nil {
 		slog.Error("Failed to append provider-model fragment", "provider", providerID, "model", modelID, "error", err)

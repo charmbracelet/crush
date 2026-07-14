@@ -5,156 +5,220 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
-// handleOptions implements the `options` builtin.
+// handleOption implements the `option` builtin.
 //
-// Usage: options [--data-directory PATH] [--context-path PATH ...]
+// Usage: option <key> <value>
 //
-//	[--global-context-path PATH ...] [--skills-path PATH ...]
-//	[--debug true|false] [--debug-lsp true|false]
-//	[--disable-auto-summarize true|false]
-//	[--disable-provider-auto-update true|false]
-//	[--disable-default-providers true|false]
-//	[--disable-metrics true|false]
-//	[--disable-notifications true|false]
-//	[--initialize-as NAME] [--notification-style STYLE]
-//	[--disabled-tools TOOL ...] [--disabled-skills SKILL ...]
-//	[--auto-lsp true|false] [--progress true|false]
-func handleOptions(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+// Sets a single option field. The key is the JSON field name (snake_case).
+// The value is parsed as a boolean, integer, float, or string depending on
+// the field. For list fields (context_paths, disabled_tools, etc.), each
+// call appends to the list.
+//
+// Examples:
+//
+//	option no-progress true
+//	option data-directory .crush
+//	option context-paths .cursorrules
+//	option disable-metrics true
+//	option debug true
+//	option auto-lsp false
+//
+// Boolean shortcuts: for boolean fields, omitting the value sets it to true.
+// Negated keys (no-progress, no-auto-lsp) set the corresponding field to false.
+func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := shell.ConfigBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
-	slog.Info("Options defined in shell config")
+	if len(args) < 2 {
+		return usage(stderr, "usage: option <key> [value]")
+	}
+
+	key := args[1]
 	f := newFragmentBuilder()
-	if f.m["options"] == nil {
-		f.m["options"] = make(map[string]any)
-	}
-	o := f.m["options"].(map[string]any)
+	o := f.rootMap("options")
 
-	i := 1
-	for i < len(args) {
-		switch args[i] {
-		case "--data-directory":
-			v, err := flagStr(args, &i, "data-directory")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["data_directory"] = v
-		case "--context-path":
-			v, err := flagStr(args, &i, "context-path")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["context_paths"] = appendArr(o, "context_paths", v)
-		case "--global-context-path":
-			v, err := flagStr(args, &i, "global-context-path")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["global_context_paths"] = appendArr(o, "global_context_paths", v)
-		case "--skills-path":
-			v, err := flagStr(args, &i, "skills-path")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["skills_paths"] = appendArr(o, "skills_paths", v)
-		case "--debug":
-			v, err := flagBool(args, &i, "debug")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["debug"] = v
-		case "--debug-lsp":
-			v, err := flagBool(args, &i, "debug-lsp")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["debug_lsp"] = v
-		case "--disable-auto-summarize":
-			v, err := flagBool(args, &i, "disable-auto-summarize")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["disable_auto_summarize"] = v
-		case "--disable-provider-auto-update":
-			v, err := flagBool(args, &i, "disable-provider-auto-update")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["disable_provider_auto_update"] = v
-		case "--disable-default-providers":
-			v, err := flagBool(args, &i, "disable-default-providers")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["disable_default_providers"] = v
-		case "--disable-metrics":
-			v, err := flagBool(args, &i, "disable-metrics")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["disable_metrics"] = v
-		case "--disable-notifications":
-			v, err := flagBool(args, &i, "disable-notifications")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["disable_notifications"] = v
-		case "--initialize-as":
-			v, err := flagStr(args, &i, "initialize-as")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["initialize_as"] = v
-		case "--notification-style":
-			v, err := flagStr(args, &i, "notification-style")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["notification_style"] = v
-		case "--disabled-tools":
-			v, err := flagStr(args, &i, "disabled-tools")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["disabled_tools"] = appendArr(o, "disabled_tools", v)
-		case "--disabled-skills":
-			v, err := flagStr(args, &i, "disabled-skills")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["disabled_skills"] = appendArr(o, "disabled_skills", v)
-		case "--auto-lsp":
-			v, err := flagBool(args, &i, "auto-lsp")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["auto_lsp"] = v
-		case "--progress":
-			v, err := flagBool(args, &i, "progress")
-			if err != nil {
-				return usage(stderr, err.Error())
-			}
-			o["progress"] = v
-		case "--no-auto-lsp":
-			o["auto_lsp"] = false
-			i++
-		case "--no-progress":
-			o["progress"] = false
-			i++
-		default:
-			return usage(stderr, fmt.Sprintf("options: unknown flag %s", args[i]))
+	// Determine the value.
+	var val string
+	if len(args) >= 3 {
+		val = args[2]
+	}
+
+	// Negated boolean keys: no-foo sets the corresponding field to false
+	if strings.HasPrefix(key, "no-") {
+		realKey := key[3:]
+		jsonKey := negatedOptionKeyMap(realKey)
+		if jsonKey == "" {
+			return usage(stderr, fmt.Sprintf("option: unknown key %q", key))
 		}
+		o[jsonKey] = false
+		slog.Info("Option set in shell config", "key", key, "value", false)
+		return f.append(b)
 	}
 
-	if err := f.append(b); err != nil {
-		slog.Error("Failed to append options fragment", "error", err)
-		return err
+	jsonKey := optionKeyMap(key)
+	if jsonKey == "" {
+		return usage(stderr, fmt.Sprintf("option: unknown key %q", key))
 	}
-	slog.Debug("Options fragment appended")
-	return nil
+
+	// List fields: append to array
+	if isListOption(jsonKey) {
+		if val == "" {
+			return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
+		}
+		o[jsonKey] = appendArr(o, jsonKey, val)
+		slog.Info("Option set in shell config", "key", key, "value", val)
+		return f.append(b)
+	}
+
+	// Boolean fields: if no value, default to true
+	if isBoolOption(jsonKey) {
+		if val == "" {
+			o[jsonKey] = true
+		} else {
+			bv, err := parseBool(val)
+			if err != nil {
+				return usage(stderr, fmt.Sprintf("option: %s expects true/false, got %q", key, val))
+			}
+			o[jsonKey] = bv
+		}
+		slog.Info("Option set in shell config", "key", key, "value", o[jsonKey])
+		return f.append(b)
+	}
+
+	// Integer fields
+	if isIntOption(jsonKey) {
+		if val == "" {
+			return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
+		}
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option: %s expects an integer, got %q", key, val))
+		}
+		o[jsonKey] = n
+		slog.Info("Option set in shell config", "key", key, "value", n)
+		return f.append(b)
+	}
+
+	// String fields
+	if val == "" {
+		return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
+	}
+	o[jsonKey] = val
+	slog.Info("Option set in shell config", "key", key, "value", val)
+	return f.append(b)
+}
+
+// negatedOptionKeyMap maps the part after "no-" to the JSON field name
+// that should be set to false. Returns empty string for unknown keys.
+func negatedOptionKeyMap(key string) string {
+	switch key {
+	case "progress":
+		return "progress"
+	case "auto-lsp":
+		return "auto_lsp"
+	case "metrics":
+		return "disable_metrics"
+	case "notifications":
+		return "disable_notifications"
+	case "auto-summarize":
+		return "disable_auto_summarize"
+	case "provider-auto-update":
+		return "disable_provider_auto_update"
+	case "default-providers":
+		return "disable_default_providers"
+	default:
+		return ""
+	}
+}
+
+// optionKeyMap maps user-facing kebab-case keys to JSON field names.
+// Returns empty string for unknown keys.
+func optionKeyMap(key string) string {
+	switch key {
+	// Boolean fields
+	case "debug":
+		return "debug"
+	case "debug-lsp":
+		return "debug_lsp"
+	case "disable-auto-summarize":
+		return "disable_auto_summarize"
+	case "disable-provider-auto-update":
+		return "disable_provider_auto_update"
+	case "disable-default-providers":
+		return "disable_default_providers"
+	case "disable-metrics":
+		return "disable_metrics"
+	case "disable-notifications":
+		return "disable_notifications"
+	case "auto-lsp":
+		return "auto_lsp"
+	case "progress":
+		return "progress"
+
+	// String fields
+	case "data-directory":
+		return "data_directory"
+	case "initialize-as":
+		return "initialize_as"
+	case "notification-style":
+		return "notification_style"
+
+	// List fields
+	case "context-paths":
+		return "context_paths"
+	case "global-context-paths":
+		return "global_context_paths"
+	case "skills-paths":
+		return "skills_paths"
+	case "disabled-tools":
+		return "disabled_tools"
+	case "disabled-skills":
+		return "disabled_skills"
+
+	default:
+		return ""
+	}
+}
+
+func isBoolOption(jsonKey string) bool {
+	switch jsonKey {
+	case "debug", "debug_lsp", "disable_auto_summarize",
+		"disable_provider_auto_update", "disable_default_providers",
+		"disable_metrics", "disable_notifications", "auto_lsp", "progress":
+		return true
+	default:
+		return false
+	}
+}
+
+func isIntOption(jsonKey string) bool {
+	return false
+}
+
+func isListOption(jsonKey string) bool {
+	switch jsonKey {
+	case "context_paths", "global_context_paths", "skills_paths",
+		"disabled_tools", "disabled_skills":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseBool(s string) (bool, error) {
+	switch s {
+	case "true", "1", "yes":
+		return true, nil
+	case "false", "0", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean %q", s)
+	}
 }

@@ -12,8 +12,7 @@ func TestProviderModel_Basic(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider-model \
-  --provider local \
+	script := `provider-model local \
   --id auto \
   --name "Auto" \
   --context-window 128000 \
@@ -43,8 +42,8 @@ func TestProviderModel_MultipleModels(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider-model --provider local --id auto --name "Auto" --context-window 128000
-provider-model --provider local --id fast --name "Fast" --context-window 64000`
+	script := `provider-model local --id auto --name "Auto" --context-window 128000
+provider-model local --id fast --name "Fast" --context-window 64000`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -74,8 +73,7 @@ func TestProviderModel_FullProviderWithModels(t *testing.T) {
   --base-url "https://api.charm.withemissary.com/v1" \
   --api-key "$HYPER_EMISSARY_API_KEY"
 
-provider-model \
-  --provider local \
+provider-model local \
   --id auto \
   --name "Auto" \
   --context-window 128000 \
@@ -116,7 +114,7 @@ provider-model \
 	require.Equal(t, "medium", model["default_reasoning_effort"])
 }
 
-func TestProviderModel_MissingProvider(t *testing.T) {
+func TestProviderModel_MissingProviderID(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -125,14 +123,14 @@ func TestProviderModel_MissingProvider(t *testing.T) {
 
 	_, err := LoadShellConfig(path, []byte(script))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "--provider is required")
+	require.Contains(t, err.Error(), "first arg must be the provider ID")
 }
 
 func TestProviderModel_MissingID(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider-model --provider local --name "Auto"`
+	script := `provider-model local --name "Auto"`
 	path := filepath.Join(dir, "crush.sh")
 
 	_, err := LoadShellConfig(path, []byte(script))
@@ -144,7 +142,7 @@ func TestProviderModel_UnknownFlag(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider-model --provider local --id auto --bogus "value"`
+	script := `provider-model local --id auto --bogus "value"`
 	path := filepath.Join(dir, "crush.sh")
 
 	_, err := LoadShellConfig(path, []byte(script))

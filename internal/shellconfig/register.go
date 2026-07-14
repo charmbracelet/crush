@@ -30,7 +30,7 @@ func init() {
 	shell.RegisterBuiltin("lsp", handleLSP)
 	shell.RegisterBuiltin("permissions", handlePermissions)
 	shell.RegisterBuiltin("hook", handleHook)
-	shell.RegisterBuiltin("options", handleOptions)
+	shell.RegisterBuiltin("option", handleOption)
 }
 
 // fragmentBuilder helps accumulate key-value pairs into a JSON object

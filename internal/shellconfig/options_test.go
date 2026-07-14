@@ -1,0 +1,104 @@
+package shellconfig
+
+import (
+	"encoding/json"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestOption_Bool(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option debug true
+option no-progress`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Equal(t, true, opts["debug"])
+	require.Equal(t, false, opts["progress"])
+}
+
+func TestOption_String(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option data-directory .crush
+option notification-style osc`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Equal(t, ".crush", opts["data_directory"])
+	require.Equal(t, "osc", opts["notification_style"])
+}
+
+func TestOption_List(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option context-paths .cursorrules
+option context-paths CRUSH.md
+option disabled-tools bash`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	paths := opts["context_paths"].([]any)
+	require.Len(t, paths, 2)
+	require.Equal(t, ".cursorrules", paths[0])
+	require.Equal(t, "CRUSH.md", paths[1])
+
+	tools := opts["disabled_tools"].([]any)
+	require.Len(t, tools, 1)
+	require.Equal(t, "bash", tools[0])
+}
+
+func TestOption_BoolShorthand(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option debug
+option no-metrics`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Equal(t, true, opts["debug"])
+	require.Equal(t, false, opts["disable_metrics"])
+}
+
+func TestOption_UnknownKey(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option bogus-key value`
+	path := filepath.Join(dir, "crush.sh")
+
+	_, err := LoadShellConfig(path, []byte(script))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown key")
+}

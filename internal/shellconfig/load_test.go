@@ -187,12 +187,14 @@ func TestLoadShellConfig_Hook(t *testing.T) {
 	require.Equal(t, "my-hook", hook["name"])
 }
 
-// TestLoadShellConfig_Options verifies the options builtin.
-func TestLoadShellConfig_Options(t *testing.T) {
+// TestLoadShellConfig_Option verifies the option builtin.
+func TestLoadShellConfig_Option(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `options --data-directory .crush --disable-metrics true --debug true`
+	script := `option data-directory .crush
+option no-metrics
+option debug`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -203,7 +205,7 @@ func TestLoadShellConfig_Options(t *testing.T) {
 
 	opts := result["options"].(map[string]any)
 	require.Equal(t, ".crush", opts["data_directory"])
-	require.Equal(t, true, opts["disable_metrics"])
+	require.Equal(t, false, opts["disable_metrics"])
 	require.Equal(t, true, opts["debug"])
 }
 
@@ -382,7 +384,8 @@ permissions --allow bash --allow view
 hook PreToolUse --command "echo running" --matcher "bash" --timeout 10
 
 # Options
-options --data-directory .crush --disable-metrics true`
+option data-directory .crush
+option no-metrics`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -428,7 +431,7 @@ options --data-directory .crush --disable-metrics true`
 	// Verify options
 	opts := result["options"].(map[string]any)
 	require.Equal(t, ".crush", opts["data_directory"])
-	require.Equal(t, true, opts["disable_metrics"])
+	require.Equal(t, false, opts["disable_metrics"])
 }
 
 // TestConfigBuilder_NoBuilderInContext verifies that builtins are no-ops

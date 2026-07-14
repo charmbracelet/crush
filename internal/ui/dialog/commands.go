@@ -622,6 +622,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Add MCP servers command — opens the MCP servers management dialog.
 	commands = append(commands, NewCommandItem(c.com.Styles, "mcp_servers", "MCP Servers", "", ActionOpenDialog{DialogID: MCPServersID}))
 
+	// Add Skills management command.
+	commands = append(commands, NewCommandItem(c.com.Styles, "skills", "Skills", "", ActionOpenDialog{DialogID: SkillsID}))
+
 	commands = append(
 		commands,
 		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}).WithAliases("exit"),

@@ -207,6 +207,29 @@ func (b *Backend) ListSkills(workspaceID string) ([]proto.SkillInfo, error) {
 	return result, nil
 }
 
+// ReloadSkills re-discovers skills from disk for a workspace.
+func (b *Backend) ReloadSkills(workspaceID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	mgr := ws.Skills
+	if mgr == nil {
+		return nil
+	}
+	discoveryCfg := skills.DiscoveryConfig{
+		WorkingDir: ws.Cfg.WorkingDir(),
+		Resolver:   ws.Cfg.Resolver().ResolveValue,
+	}
+	opts := ws.Cfg.Config().Options
+	if opts != nil {
+		discoveryCfg.SkillsPaths = opts.SkillsPaths
+		discoveryCfg.DisabledSkills = opts.DisabledSkills
+	}
+	mgr.Reload(discoveryCfg)
+	return nil
+}
+
 // EnableDockerMCP validates Docker MCP availability, stages the
 // configuration, starts the MCP client, and persists the config.
 func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error {

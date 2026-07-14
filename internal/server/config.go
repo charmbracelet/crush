@@ -317,6 +317,24 @@ func (c *controllerV1) handlePostWorkspaceSkillRead(w http.ResponseWriter, r *ht
 	jsonEncode(w, proto.ReadSkillResponse{Content: content, Result: result})
 }
 
+// handlePostWorkspaceSkillsReload triggers a skill re-discovery.
+//
+//	@Summary		Reload skills
+//	@Tags			skills
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/skills/reload [post]
+func (c *controllerV1) handlePostWorkspaceSkillsReload(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := c.backend.ReloadSkills(id); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handlePostWorkspaceMCPEnableDocker enables the Docker MCP server.
 //
 //	@Summary		Enable Docker MCP

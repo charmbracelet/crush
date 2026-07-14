@@ -389,6 +389,31 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
 }
 
+func (w *AppWorkspace) ReloadSkills() error {
+	mgr := w.app.Skills
+	if mgr == nil {
+		return nil
+	}
+	discoveryCfg := skills.DiscoveryConfig{
+		WorkingDir: w.store.WorkingDir(),
+		Resolver:   w.store.Resolver().ResolveValue,
+	}
+	opts := w.store.Config().Options
+	if opts != nil {
+		discoveryCfg.SkillsPaths = opts.SkillsPaths
+		discoveryCfg.DisabledSkills = opts.DisabledSkills
+	}
+	mgr.Reload(discoveryCfg)
+	return nil
+}
+
+func (w *AppWorkspace) GetSkillStates() []*skills.SkillState {
+	if w.app.Skills == nil {
+		return nil
+	}
+	return w.app.Skills.States()
+}
+
 // -- MCP operations --
 
 func (w *AppWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {

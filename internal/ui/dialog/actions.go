@@ -114,6 +114,12 @@ type (
 	ActionMCPRefreshResources struct {
 		ServerName string
 	}
+	// ActionSkillsReload triggers a full skill re-discovery from disk.
+	ActionSkillsReload struct{}
+	// ActionSkillToggle toggles a skill's enabled/disabled state.
+	ActionSkillToggle struct {
+		SkillName string
+	}
 )
 
 // Messages for API key input dialog.

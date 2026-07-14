@@ -252,6 +252,19 @@ func (c *Client) ReadSkill(ctx context.Context, id, skillID string) (*proto.Read
 	return &result, nil
 }
 
+// ReloadSkills triggers a skill re-discovery on the server.
+func (c *Client) ReloadSkills(ctx context.Context, id string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/skills/reload", id), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to reload skills: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to reload skills: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // MCPResourceContents holds the contents of an MCP resource.
 type MCPResourceContents struct {
 	URI      string `json:"uri"`

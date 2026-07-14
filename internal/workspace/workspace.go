@@ -157,6 +157,11 @@ type Workspace interface {
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+	// ReloadSkills re-discovers skills from disk and publishes updated
+	// states to all subscribers (sidebar, commands dialog, etc.).
+	ReloadSkills() error
+	// GetSkillStates returns the current per-skill discovery states.
+	GetSkillStates() []*skills.SkillState
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo

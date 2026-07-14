@@ -162,6 +162,19 @@ func (m *Manager) Shutdown() {
 	}
 }
 
+// Reload re-runs discovery from the given config, replaces all internal
+// skill lists and states, and publishes the new states to subscribers.
+// This is the mechanism for hot-reloading skills without restarting Crush.
+func (m *Manager) Reload(cfg DiscoveryConfig) {
+	allSkills, activeSkills, states := DiscoverFromConfig(cfg)
+	m.mu.Lock()
+	m.allSkills = allSkills
+	m.activeSkills = activeSkills
+	m.resolvedPaths = cfg.ResolvePaths()
+	m.mu.Unlock()
+	m.PublishStates(states)
+}
+
 // DiscoverFromConfig walks the embedded builtin FS and every path in
 // cfg.Options.SkillsPaths (after home / env expansion), then dedups and
 // filters by cfg.Options.DisabledSkills. It returns the three slices the

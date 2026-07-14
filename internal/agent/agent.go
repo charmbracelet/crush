@@ -1017,7 +1017,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 	}
 	if call.goalMode {
-		stopWhen = append(stopWhen, fantasy.HasToolCall(tools.GoalStatusToolName))
+		stopWhen = append(stopWhen, func(steps []fantasy.StepResult) bool {
+			_, terminal := terminalGoalStatus(steps)
+			return terminal
+		})
 	}
 
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{

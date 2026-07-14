@@ -2181,6 +2181,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return m.openQuitDialog()
 				}
 
+				if cmd, ok := m.handleSlashCommand(value); ok {
+					return cmd
+				}
+
 				if m.bangMode && value != "" {
 					m.bangMode = false
 					yolo := m.com.Workspace.PermissionSkipRequests()
@@ -4140,6 +4144,43 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 		return nil
 	}
 	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[agentCfg.Model], agentCfg.Model)
+}
+
+// handleSlashCommand processes slash commands typed in the editor. If the
+// input matches a known slash command it executes the command and returns
+// (cmd, true); otherwise it returns (nil, false) so the caller can continue
+// normal message processing.
+func (m *UI) handleSlashCommand(value string) (tea.Cmd, bool) {
+	switch value {
+	case "/clear":
+		m.randomizePlaceholders()
+		m.historyReset()
+		if m.isAgentBusy() {
+			return util.ReportWarn("Agent is busy, please wait before starting a new session..."), true
+		}
+		return m.newSession(), true
+
+	case "/compact":
+		m.randomizePlaceholders()
+		m.historyReset()
+		if m.isAgentBusy() {
+			return util.ReportWarn("Agent is busy, please wait before summarizing session..."), true
+		}
+		if !m.hasSession() {
+			return nil, true
+		}
+		sessionID := m.session.ID
+		return func() tea.Msg {
+			err := m.com.Workspace.AgentSummarize(context.Background(), sessionID)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			return nil
+		}, true
+
+	default:
+		return nil, false
+	}
 }
 
 // newSession clears the current session state and prepares for a new session.

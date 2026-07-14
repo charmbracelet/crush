@@ -60,7 +60,7 @@ func (m *UI) modelInfo(width int) string {
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the height
 // some items are more important than others.
-func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skillCount int) (maxFiles, maxLSPs, maxMCPs, maxSkills int) {
+func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skillCount, channelCount int) (maxFiles, maxLSPs, maxMCPs, maxSkills, maxChannels int) {
 	const (
 		minItemsPerSection = 2
 		// Keep these high so dynamic layout uses available sidebar space
@@ -69,23 +69,25 @@ func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skil
 		defaultMaxLSPsShown     = 1000
 		defaultMaxMCPsShown     = 1000
 		defaultMaxSkillsShown   = 1000
+		defaultMaxChannelsShown = 1000
 		minAvailableHeightLimit = 10
 	)
 
 	if availableHeight < minAvailableHeightLimit {
-		return minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection
+		return minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection
 	}
 
 	maxFiles = minItemsPerSection
 	maxLSPs = minItemsPerSection
 	maxMCPs = minItemsPerSection
 	maxSkills = minItemsPerSection
+	maxChannels = minItemsPerSection
 
-	remainingHeight := max(0, availableHeight-(minItemsPerSection*4))
+	remainingHeight := max(0, availableHeight-(minItemsPerSection*5))
 
-	sectionValues := []*int{&maxFiles, &maxLSPs, &maxMCPs, &maxSkills}
-	sectionCaps := []int{defaultMaxFilesShown, defaultMaxLSPsShown, defaultMaxMCPsShown, defaultMaxSkillsShown}
-	sectionNeeds := []int{max(0, fileCount-maxFiles), max(0, lspCount-maxLSPs), max(0, mcpCount-maxMCPs), max(0, skillCount-maxSkills)}
+	sectionValues := []*int{&maxFiles, &maxLSPs, &maxMCPs, &maxSkills, &maxChannels}
+	sectionCaps := []int{defaultMaxFilesShown, defaultMaxLSPsShown, defaultMaxMCPsShown, defaultMaxSkillsShown, defaultMaxChannelsShown}
+	sectionNeeds := []int{max(0, fileCount-maxFiles), max(0, lspCount-maxLSPs), max(0, mcpCount-maxMCPs), max(0, skillCount-maxSkills), max(0, channelCount-maxChannels)}
 
 	for remainingHeight > 0 {
 		allocated := false
@@ -124,7 +126,7 @@ func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skil
 		}
 	}
 
-	return maxFiles, maxLSPs, maxMCPs, maxSkills
+	return maxFiles, maxLSPs, maxMCPs, maxSkills, maxChannels
 }
 
 // scrollSidebarOnWheel scrolls the sidebar when a wheel event lands over it,
@@ -204,8 +206,9 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	skillsCount := len(m.skillStatusItems())
+	channelsCount := len(m.channelStatusItems())
 
-	maxFiles, maxLSPs, maxMCPs, maxSkills := getDynamicHeightLimits(remainingHeight, filesCount, lspsCount, mcpsCount, skillsCount)
+	maxFiles, maxLSPs, maxMCPs, maxSkills, maxChannels := getDynamicHeightLimits(remainingHeight, filesCount, lspsCount, mcpsCount, skillsCount, channelsCount)
 
 	// When focused, show all items so scroll can reveal truncated content.
 	if focused {
@@ -213,11 +216,13 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		maxLSPs = max(maxLSPs, lspsCount)
 		maxMCPs = max(maxMCPs, mcpsCount)
 		maxSkills = max(maxSkills, skillsCount)
+		maxChannels = max(maxChannels, channelsCount)
 	}
 
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
 	skillsSection := m.skillsInfo(width, maxSkills, true)
+	channelsSection := m.channelsInfo(width, maxChannels, true)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), width, maxFiles, true)
 
 	fullContent := lipgloss.JoinVertical(
@@ -230,6 +235,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		mcpSection,
 		"",
 		skillsSection,
+		"",
+		channelsSection,
 	)
 
 	// Apply scroll offset. Clamp against real content height.

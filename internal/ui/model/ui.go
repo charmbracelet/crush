@@ -288,8 +288,13 @@ type UI struct {
 	sidebarOffset           int  // current scroll offset in lines
 	sidebarScrollable       bool // true when sidebar content exceeds available height
 	sidebarScrollbarVisible bool
-	sidebarScrollbarSeq     int // sequence number for auto-hide timer
-	sidebarMaxOffsetVal     int // max scroll offset, recomputed in drawSidebar
+	sidebarScrollbarSeq     int    // sequence number for auto-hide timer
+	sidebarMaxOffsetVal     int    // max scroll offset, computed in updateSidebarScrollState
+	sidebarContent          string // cached rendered sidebar content
+	sidebarTotalLines       int    // total lines in sidebarContent
+	sidebarContentHeight    int    // available height for sidebar content
+	sidebarContentWidth     int    // available width for sidebar content
+	sidebarDrawLogo         string // logo to render (may differ from sidebarLogo for short heights)
 
 	// Notification state
 	notifyBackend       notification.Backend
@@ -1014,7 +1019,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == uiFocusSidebar {
 				lines := int(msg.DeltaY)
 				if lines != 0 {
-					m.sidebarOffset = max(0, min(m.sidebarOffset+lines, m.sidebarMaxOffset()))
+					m.sidebarOffset = max(0, min(m.sidebarOffset+lines, m.sidebarMaxOffsetVal))
 					m.sidebarScrollbarSeq++
 					m.sidebarScrollbarVisible = true
 					cmds = append(cmds, sidebarScrollbarHideCmd(m.sidebarScrollbarSeq))
@@ -2567,7 +2572,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.sidebarOffset = max(0, m.sidebarOffset-4)
 				m.sidebarScrollbarSeq++
 			case key.Matches(msg, m.keyMap.Chat.Down):
-				maxOffset := m.sidebarMaxOffset()
+				maxOffset := m.sidebarMaxOffsetVal
 				if m.sidebarOffset < maxOffset {
 					m.sidebarOffset = min(m.sidebarOffset+4, maxOffset)
 					m.sidebarScrollbarSeq++
@@ -2576,7 +2581,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.sidebarOffset = 0
 				m.sidebarScrollbarSeq++
 			case key.Matches(msg, m.keyMap.Chat.End):
-				m.sidebarOffset = m.sidebarMaxOffset()
+				m.sidebarOffset = m.sidebarMaxOffsetVal
 				m.sidebarScrollbarSeq++
 			case key.Matches(msg, m.keyMap.Chat.FocusChat):
 				m.focus = uiFocusMain
@@ -2627,6 +2632,10 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		// renderPills, but only when the layout actually differs;
 		// this catches the steady-state case.
 		m.renderPills()
+	}
+
+	if m.state == uiChat && m.hasSession() && !m.isCompact {
+		m.updateSidebarScrollState()
 	}
 
 	// Clear the screen first

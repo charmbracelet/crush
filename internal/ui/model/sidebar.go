@@ -60,25 +60,19 @@ func (m *UI) modelInfo(width int) string {
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
 }
 
-// sidebarMaxOffset returns the maximum sidebar scroll offset based on
-// the last drawn content height. The value is computed during drawSidebar.
-func (m *UI) sidebarMaxOffset() int {
-	return m.sidebarMaxOffsetVal
-}
-
-// drawSidebar renders the chat sidebar with a fixed logo and a
-// virtual-scrolling content area with an auto-hiding scrollbar. While the
-// sidebar is focused, the scrollbar stays visible.
-func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
-	if m.session == nil {
+// updateSidebarScrollState renders the sidebar content and computes scroll
+// state (scrollability, max offset, clamp) before drawing. This keeps all
+// state mutation in the update path rather than in the draw function.
+func (m *UI) updateSidebarScrollState() {
+	if m.session == nil || m.isCompact {
 		return
 	}
 
 	const logoHeightBreakpoint = 30
 
 	t := m.com.Styles
-	width := area.Dx()
-	height := area.Dy()
+	width := m.layout.sidebar.Dx()
+	height := m.layout.sidebar.Dy()
 
 	contentWidth := max(width-2, 1)
 
@@ -90,11 +84,12 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 			Hyper: m.com.IsHyper(),
 		}), "")
 	}
+
 	var logoRect, contentRect image.Rectangle
 	layout.Vertical(
 		layout.Len(lipgloss.Height(sidebarLogo)),
 		layout.Fill(1),
-	).Split(area).Assign(&logoRect, &contentRect)
+	).Split(m.layout.sidebar).Assign(&logoRect, &contentRect)
 
 	contentHeight := contentRect.Dy()
 
@@ -122,9 +117,12 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		skillsSection,
 	)
 
-	// Split into lines for virtual scrolling.
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
+	totalLines := strings.Count(content, "\n") + 1
+	m.sidebarContent = content
+	m.sidebarTotalLines = totalLines
+	m.sidebarContentWidth = contentWidth
+	m.sidebarContentHeight = contentHeight
+	m.sidebarDrawLogo = sidebarLogo
 	m.sidebarScrollable = totalLines > contentHeight
 	m.sidebarMaxOffsetVal = max(0, totalLines-contentHeight)
 
@@ -136,13 +134,33 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	// Clamp sidebarOffset.
-	maxOffset := m.sidebarMaxOffsetVal
-	if m.sidebarOffset > maxOffset {
-		m.sidebarOffset = maxOffset
+	if m.sidebarOffset > m.sidebarMaxOffsetVal {
+		m.sidebarOffset = m.sidebarMaxOffsetVal
 	}
+}
+
+// drawSidebar renders the chat sidebar with a fixed logo and a
+// virtual-scrolling content area with an auto-hiding scrollbar. While the
+// sidebar is focused, the scrollbar stays visible.
+func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
+	if m.session == nil {
+		return
+	}
+
+	sidebarLogo := m.sidebarDrawLogo
+	contentWidth := m.sidebarContentWidth
+	contentHeight := m.sidebarContentHeight
+	totalLines := m.sidebarTotalLines
+
+	var logoRect, contentRect image.Rectangle
+	layout.Vertical(
+		layout.Len(lipgloss.Height(sidebarLogo)),
+		layout.Fill(1),
+	).Split(area).Assign(&logoRect, &contentRect)
 
 	// Slice visible lines.
 	end := min(m.sidebarOffset+contentHeight, totalLines)
+	lines := strings.Split(m.sidebarContent, "\n")
 	visibleLines := lines[m.sidebarOffset:end]
 	visibleStr := strings.Join(visibleLines, "\n")
 

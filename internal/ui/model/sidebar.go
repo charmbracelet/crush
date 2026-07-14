@@ -144,19 +144,34 @@ func (m *UI) scrollSidebarOnWheel(msg common.CoalescedWheelMsg) bool {
 	return true
 }
 
-// sidebarScrollbarLayout decides how the sidebar splits its horizontal space
-// between content and the scrollbar column. When the content overflows the
-// viewport a 1-column gutter is reserved regardless of focus — focused draws a
-// real scrollbar, unfocused a blank spacer — so the content width (and thus the
-// alignment of elements like the logo) stays stable across focus transitions.
-func sidebarScrollbarLayout(width, contentHeight, viewportHeight int) (contentWidth int, scrollbarNeeded bool) {
-	const scrollbarWidth = 1
-	scrollbarNeeded = contentHeight > viewportHeight
-	contentWidth = width
-	if scrollbarNeeded {
-		contentWidth = max(width-scrollbarWidth, 0)
+// sidebarScrollbarWidth is the fixed 1-column gutter the sidebar reserves for
+// its scroll indicator.
+const sidebarScrollbarWidth = 1
+
+// sidebarContentWidth returns the width available for sidebar content after
+// reserving the scrollbar gutter. The gutter is reserved unconditionally (not
+// only when content overflows) so the content — including the fixed-width logo,
+// which is cached at this same width — is always rendered at its final width
+// and never clipped when the scrollbar is drawn. Keeping it focus- and
+// overflow-independent also stops the content from shifting on focus changes.
+func sidebarContentWidth(sidebarWidth int) int {
+	return max(sidebarWidth-sidebarScrollbarWidth, 0)
+}
+
+// blankSidebarColumn renders an empty gutter column height rows tall, used when
+// the sidebar reserves scrollbar space but has no scrollbar to draw.
+func blankSidebarColumn(height int) string {
+	if height <= 0 {
+		return ""
 	}
-	return contentWidth, scrollbarNeeded
+	var sb strings.Builder
+	for i := 0; i < height; i++ {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(" ")
+	}
+	return sb.String()
 }
 
 // sidebar renders the chat sidebar containing session title, working
@@ -172,13 +187,18 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
 	height := area.Dy()
 
+	// All content renders into the width left after reserving the scrollbar
+	// gutter, so the fixed-width logo (cached at this same width) and every
+	// section fit exactly and are never clipped when the gutter is drawn.
+	contentWidth := sidebarContentWidth(width)
+
 	focused := m.focus == uiFocusSidebar
 
-	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
-	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
+	title := t.Sidebar.SessionTitle.Width(contentWidth).MaxHeight(2).Render(m.session.Title)
+	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), contentWidth)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
-		sidebarLogo = logo.SmallRender(m.com.Styles, width, logo.Opts{
+		sidebarLogo = logo.SmallRender(m.com.Styles, contentWidth, logo.Opts{
 			Hyper: m.com.IsHyper(),
 		})
 	}
@@ -188,7 +208,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		"",
 		cwd,
 		"",
-		m.modelInfo(width),
+		m.modelInfo(contentWidth),
 		"",
 	}
 
@@ -234,11 +254,11 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		maxChannels = max(maxChannels, channelsCount)
 	}
 
-	lspSection := m.lspInfo(width, maxLSPs, true)
-	mcpSection := m.mcpInfo(width, maxMCPs, true)
-	skillsSection := m.skillsInfo(width, maxSkills, true)
-	channelsSection := m.channelsInfo(width, maxChannels, true)
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), width, maxFiles, true)
+	lspSection := m.lspInfo(contentWidth, maxLSPs, true)
+	mcpSection := m.mcpInfo(contentWidth, maxMCPs, true)
+	skillsSection := m.skillsInfo(contentWidth, maxSkills, true)
+	channelsSection := m.channelsInfo(contentWidth, maxChannels, true)
+	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, maxFiles, true)
 
 	fullContent := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -265,30 +285,24 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	}
 	scrolledContent := strings.Join(contentLines, "\n")
 
-	contentWidth, scrollbarNeeded := sidebarScrollbarLayout(width, contentHeight, height)
-
 	contentStyle := lipgloss.NewStyle().
 		MaxWidth(contentWidth).
 		MaxHeight(height)
 	rendered := contentStyle.Render(scrolledContent)
 
-	if scrollbarNeeded {
-		var scrollbar string
-		if focused {
-			scrollbar = common.Scrollbar(t, height, contentHeight, height, scroll)
-		} else {
-			var sb strings.Builder
-			for i := 0; i < height; i++ {
-				if i > 0 {
-					sb.WriteString("\n")
-				}
-				sb.WriteString(" ")
-			}
-			scrollbar = sb.String()
-		}
-
-		rendered = lipgloss.JoinHorizontal(lipgloss.Top, rendered, scrollbar)
+	// The gutter column is always reserved (see sidebarContentWidth). Draw a
+	// real scrollbar when the sidebar is focused and its content overflows;
+	// otherwise fill the gutter with a blank spacer so nothing shifts and the
+	// scrollbar never overlaps content. Scrollbar returns "" when the content
+	// fits, so an unfocused or non-overflowing sidebar gets the blank spacer.
+	var gutter string
+	if focused {
+		gutter = common.Scrollbar(t, height, contentHeight, height, scroll)
 	}
+	if gutter == "" {
+		gutter = blankSidebarColumn(height)
+	}
+	rendered = lipgloss.JoinHorizontal(lipgloss.Top, rendered, gutter)
 
 	uv.NewStyledString(rendered).Draw(scr, area)
 }

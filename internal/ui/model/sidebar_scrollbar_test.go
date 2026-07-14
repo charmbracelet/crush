@@ -1,41 +1,45 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// TestSidebarScrollbarLayout verifies the scrollbar gutter is reserved whenever
-// content overflows the viewport (independent of focus), keeping the content
-// width stable, and that no gutter is reserved when it fits.
-func TestSidebarScrollbarLayout(t *testing.T) {
+// TestSidebarContentWidth verifies the sidebar always reserves exactly one
+// column for the scrollbar gutter (so the cached full-width logo, rendered at
+// this same width, is never clipped) and clamps at zero for tiny widths.
+func TestSidebarContentWidth(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		width         int
-		contentHeight int
-		viewport      int
-		wantWidth     int
-		wantScrollbar bool
+		sidebarWidth int
+		want         int
 	}{
-		{"fits exactly, no gutter", 30, 10, 10, 30, false},
-		{"fits under, no gutter", 30, 5, 10, 30, false},
-		{"overflows, reserve gutter", 30, 40, 10, 29, true},
-		{"overflows by one, reserve gutter", 30, 11, 10, 29, true},
-		{"overflow with zero width clamps", 0, 40, 10, 0, true},
-		{"overflow with width one clamps to zero", 1, 40, 10, 0, true},
+		{30, 29},
+		{2, 1},
+		{1, 0},
+		{0, 0},
 	}
-
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			gotWidth, gotScrollbar := sidebarScrollbarLayout(tc.width, tc.contentHeight, tc.viewport)
-			require.Equal(t, tc.wantWidth, gotWidth, "content width")
-			require.Equal(t, tc.wantScrollbar, gotScrollbar, "scrollbar needed")
-		})
+		require.Equal(t, tc.want, sidebarContentWidth(tc.sidebarWidth),
+			"sidebarContentWidth(%d)", tc.sidebarWidth)
 	}
+}
+
+// TestBlankSidebarColumn verifies the gutter spacer is a single column, height
+// rows tall, and empty for non-positive heights.
+func TestBlankSidebarColumn(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "", blankSidebarColumn(0))
+	require.Equal(t, "", blankSidebarColumn(-3))
+	require.Equal(t, " ", blankSidebarColumn(1))
+
+	got := blankSidebarColumn(3)
+	require.Equal(t, " \n \n ", got, "3 rows of a single-space column")
+	require.Equal(t, 3, strings.Count(got, " "), "one space per row")
 }
 
 // TestShortHelpTabStability verifies that the Tab key binding description

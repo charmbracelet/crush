@@ -3517,9 +3517,12 @@ func (m *UI) renderEditorView(width int) string {
 	}, "\n")
 }
 
-// cacheSidebarLogo renders and caches the sidebar logo at the specified width.
+// cacheSidebarLogo renders and caches the sidebar logo. width is the full
+// sidebar width; the logo is rendered at the content width (i.e. minus the
+// reserved scrollbar gutter) so it matches drawSidebar and is never clipped
+// when the gutter is drawn.
 func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), sidebarContentWidth(width))
 }
 
 // applyThemeForProvider swaps the active theme to the one associated with

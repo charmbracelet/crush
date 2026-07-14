@@ -3444,6 +3444,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "custom_prompt_path": {
+                    "type": "string"
+                },
+                "custom_summary_prompt_path": {
+                    "type": "string"
+                },
                 "data_directory": {
                     "description": "DataDirectory is where Crush keeps per-project state such as\nthe SQLite database and workspace overrides. Relative paths are\nresolved against the working directory; absolute paths are used\nverbatim. After defaulting the stored value is always absolute.",
                     "type": "string"
@@ -4421,12 +4427,12 @@ const docTemplate = `{
             "enum": [
                 "normal",
                 "yolo",
-                "super_yolo"
+                "sysadmin"
             ],
             "x-enum-varnames": [
                 "WorkspacePermissionModeNormal",
                 "WorkspacePermissionModeYolo",
-                "WorkspacePermissionModeSuperYolo"
+                "WorkspacePermissionModeSysadmin"
             ]
         },
         "time.Duration": {

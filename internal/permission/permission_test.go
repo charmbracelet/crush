@@ -144,9 +144,9 @@ func TestPermissionService_SkipMode(t *testing.T) {
 		<-done
 	})
 
-	t.Run("super yolo mode auto-approves dangerous commands", func(t *testing.T) {
+	t.Run("sysadmin mode auto-approves dangerous commands", func(t *testing.T) {
 		service := NewPermissionService("/tmp", []string{})
-		service.SetPermissionMode(PermissionModeSuperYolo)
+		service.SetPermissionMode(PermissionModeSysadmin)
 
 		result, err := service.Request(t.Context(), CreatePermissionRequest{
 			SessionID:   "test-session",
@@ -157,7 +157,7 @@ func TestPermissionService_SkipMode(t *testing.T) {
 			Dangerous:   true,
 		})
 		require.NoError(t, err)
-		assert.True(t, result, "expected dangerous permission to be granted in super yolo mode")
+		assert.True(t, result, "expected dangerous permission to be granted in sysadmin mode")
 	})
 
 	t.Run("permission mode cycling", func(t *testing.T) {
@@ -167,8 +167,8 @@ func TestPermissionService_SkipMode(t *testing.T) {
 		service.SetPermissionMode(PermissionModeYolo)
 		assert.Equal(t, PermissionModeYolo, service.PermissionMode())
 
-		service.SetPermissionMode(PermissionModeSuperYolo)
-		assert.Equal(t, PermissionModeSuperYolo, service.PermissionMode())
+		service.SetPermissionMode(PermissionModeSysadmin)
+		assert.Equal(t, PermissionModeSysadmin, service.PermissionMode())
 
 		service.SetPermissionMode(PermissionModeNormal)
 		assert.Equal(t, PermissionModeNormal, service.PermissionMode())

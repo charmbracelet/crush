@@ -43,9 +43,9 @@ const (
 	// PermissionModeYolo auto-approves non-dangerous commands, prompts for
 	// dangerous ones.
 	PermissionModeYolo
-	// PermissionModeSuperYolo auto-approves everything including dangerous
+	// PermissionModeSysadmin auto-approves everything including dangerous
 	// commands.
-	PermissionModeSuperYolo
+	PermissionModeSysadmin
 )
 
 type CreatePermissionRequest struct {
@@ -206,8 +206,8 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	mode := s.mode
 	s.modeMu.RUnlock()
 
-	// Super yolo mode: auto-approve everything including dangerous commands.
-	if mode == PermissionModeSuperYolo {
+	// Sysadmin mode: auto-approve everything including dangerous commands.
+	if mode == PermissionModeSysadmin {
 		return true, nil
 	}
 	// In yolo mode, auto-approve non-dangerous commands but still prompt for

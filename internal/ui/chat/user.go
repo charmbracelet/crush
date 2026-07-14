@@ -2,9 +2,7 @@ package chat
 
 import (
 	"encoding/xml"
-	"fmt"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -142,66 +140,31 @@ func (m *UserMessageItem) renderSkillInvocation(content string, width int) strin
 	return toolOutputSkillContent(m.sty, skill.Name, skill.Description)
 }
 
-// renderChannelMessage parses a <channel source="..." ...>body</channel> element
-// and renders the body as markdown followed by a metadata line showing
-// "[sender] via [channel] at [timestamp]" in the same Section style used
-// for the assistant info line.
+// renderChannelMessage parses a <channel source="..." ...>body</channel>
+// element and renders only the body as markdown. The metadata
+// (sender, channel source, timestamp) is rendered separately by
+// ChannelInfoItem so it appears outside the message body, mirroring
+// the assistant info line.
 func (m *UserMessageItem) renderChannelMessage(raw string, width int) string {
 	var ch channelMessage
 	if err := xml.Unmarshal([]byte(raw), &ch); err != nil {
 		return m.fallbackRender(raw, width)
 	}
 
-	// Render the body content as markdown.
 	body := strings.TrimSpace(ch.Content)
-	var bodyRendered string
-	if body != "" {
-		renderer := common.MarkdownRenderer(m.sty, width)
-		mu := common.LockMarkdownRenderer(renderer)
-		mu.Lock()
-		result, err := renderer.Render(body)
-		mu.Unlock()
-		if err != nil {
-			bodyRendered = body
-		} else {
-			bodyRendered = strings.TrimSuffix(result, "\n")
-		}
+	if body == "" {
+		return ""
 	}
 
-	// Build the metadata line: [sender] via [channel] at [timestamp].
-	metaParts := make([]string, 0, 3)
-
-	sender := ch.SenderName
-	if sender == "" {
-		sender = ch.Sender
+	renderer := common.MarkdownRenderer(m.sty, width)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	result, err := renderer.Render(body)
+	mu.Unlock()
+	if err != nil {
+		return body
 	}
-	if sender != "" {
-		metaParts = append(metaParts, m.sty.Messages.ChannelInfoSender.Render(sender))
-	}
-
-	if ch.Source != "" {
-		metaParts = append(metaParts, m.sty.Messages.ChannelInfoProvider.Render(fmt.Sprintf("via %s", ch.Source)))
-	}
-
-	ts := ch.Time
-	if ts == "" && m.message.CreatedAt > 0 {
-		ts = time.Unix(m.message.CreatedAt, 0).Format(time.TimeOnly)
-	}
-	if ts != "" {
-		metaParts = append(metaParts, m.sty.Messages.ChannelInfoTimestamp.Render(fmt.Sprintf("at %s", ts)))
-	}
-
-	// With no metadata attributes at all, render the body alone rather than a
-	// lone separator line under it.
-	if len(metaParts) == 0 {
-		return bodyRendered
-	}
-
-	metaLine := common.Section(m.sty, strings.Join(metaParts, " "), width)
-	if bodyRendered == "" {
-		return metaLine
-	}
-	return bodyRendered + "\n" + metaLine
+	return strings.TrimSuffix(result, "\n")
 }
 
 // fallbackRender renders text as plain markdown when XML parsing fails.

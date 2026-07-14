@@ -861,6 +861,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
 
 	// Channel message metadata styles.
+	s.Messages.ChannelInfoIcon = subtle
 	s.Messages.ChannelInfoSender = muted
 	s.Messages.ChannelInfoProvider = subtle
 	s.Messages.ChannelInfoTimestamp = subtle

@@ -700,6 +700,27 @@ API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 }
 ```
 
+The same `openai-compat` pattern works for multi-model gateways that expose a
+custom OpenAI-compatible base URL. Point `base_url` at the gateway root (include
+`/v1` when the host serves the OpenAI API under that path), set your API key,
+and either list models or let Crush discover them. Model IDs are usually
+account-specific—confirm them with the gateway’s `/models` endpoint rather than
+copying a hard-coded ID from a public sample.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "daoxe": {
+      "type": "openai-compat",
+      "base_url": "https://daoxe.com/v1",
+      "api_key": "$DAOXE_API_KEY",
+      "discover_models": true
+    }
+  }
+}
+```
+
 #### Anthropic-Compatible APIs
 
 Custom Anthropic-compatible providers follow this format:

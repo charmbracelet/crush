@@ -253,11 +253,11 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				approvedDangerous = isDangerous
 			}
 
-			// Enforce the block list unless super yolo drops all shell-level
+			// Enforce the block list unless sysadmin mode drops all shell-level
 			// restrictions, or the user explicitly approved a dangerous
 			// command (which must not be re-blocked at exec time).
 			var blocksToUse []shell.BlockFunc
-			if permissions.PermissionMode() != permission.PermissionModeSuperYolo && !approvedDangerous {
+			if permissions.PermissionMode() != permission.PermissionModeSysadmin && !approvedDangerous {
 				blocksToUse = blockFuncs()
 			}
 			return executeBashCommand(ctx, params, execWorkingDir, blocksToUse)

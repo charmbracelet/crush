@@ -10,8 +10,8 @@ import (
 // proto wire representation.
 func PermissionModeToProto(mode permission.PermissionMode) WorkspacePermissionMode {
 	switch mode {
-	case permission.PermissionModeSuperYolo:
-		return WorkspacePermissionModeSuperYolo
+	case permission.PermissionModeSysadmin:
+		return WorkspacePermissionModeSysadmin
 	case permission.PermissionModeYolo:
 		return WorkspacePermissionModeYolo
 	default:
@@ -23,8 +23,8 @@ func PermissionModeToProto(mode permission.PermissionMode) WorkspacePermissionMo
 // internal permission.PermissionMode.
 func ProtoModeToPermission(mode WorkspacePermissionMode) permission.PermissionMode {
 	switch mode {
-	case WorkspacePermissionModeSuperYolo:
-		return permission.PermissionModeSuperYolo
+	case WorkspacePermissionModeSysadmin:
+		return permission.PermissionModeSysadmin
 	case WorkspacePermissionModeYolo:
 		return permission.PermissionModeYolo
 	default:

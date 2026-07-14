@@ -94,3 +94,93 @@ These components will render their current values, but currently do not allow th
 2. **One surface per block:** Provide all components inside the `components` array of a single `updateComponents` message.
 3. **Link correctly:** Ensure every ID in `child` or `children` corresponds to a component in your array. Dangling IDs will break the render.
 4. **Mix with Markdown:** You can put markdown text before and after the `<a2ui-json>` block.
+
+## Common Mistakes (Anti-Patterns)
+
+These are errors that models frequently make. Read carefully.
+
+### Buttons do NOT have a `text` or `label` field
+
+The A2UI spec has **no** `text`, `label`, or `name` field on `Button`. The label comes exclusively from a `child` Text component.
+
+**Wrong — the label will be empty:**
+```json
+{
+  "component": "Button",
+  "id": "btn",
+  "text": "Submit"
+}
+```
+The `"text"` key is silently ignored and the button renders with no visible label.
+
+**Wrong — `label` is not a real field either:**
+```json
+{
+  "component": "Button",
+  "id": "btn",
+  "label": "Submit"
+}
+```
+
+**Correct — use a child Text component:**
+```json
+{
+  "component": "Button",
+  "id": "btn",
+  "child": "btn-label"
+},
+{
+  "component": "Text",
+  "id": "btn-label",
+  "text": "Submit"
+}
+```
+
+### Every `child` / `children` ID must exist in the components array
+
+**Wrong — dangling reference:**
+```json
+{
+  "component": "Card",
+  "id": "root",
+  "child": "missing-id"
+}
+```
+There is no component with `id: "missing-id"` in the array, so the card renders `[a2tea: missing component "missing-id"]`.
+
+**Correct:** Always include a matching component for every referenced ID.
+
+### Do not nest components inline
+
+Components are a **flat list** (adjacency list). Do not embed component objects inside other components.
+
+**Wrong — inline nesting:**
+```json
+{
+  "component": "Card",
+  "id": "root",
+  "child": {
+    "component": "Text",
+    "text": "Hello"
+  }
+}
+```
+The `child` field is a **string ID**, not an object. Inline nesting will break the parser.
+
+**Correct:** Define each component separately and link by ID:
+```json
+{
+  "component": "Card",
+  "id": "root",
+  "child": "body"
+},
+{
+  "component": "Text",
+  "id": "body",
+  "text": "Hello"
+}
+```
+
+### Do not put code in an A2UI surface
+
+A2UI surfaces are for compact visual structures. Use standard markdown fenced code blocks (`` ``` ``) for code snippets, command output, or logs. Do not try to render code inside a `Text` component — it will not syntax-highlight.

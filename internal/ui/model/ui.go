@@ -1325,8 +1325,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.permModeCached() {
 			case permission.PermissionModeYolo:
 				m.textarea.Placeholder = "Yolo mode!"
-			case permission.PermissionModeSuperYolo:
-				m.textarea.Placeholder = "Super yolo mode!"
+			case permission.PermissionModeSysadmin:
+				m.textarea.Placeholder = "Sysadmin mode!"
 			}
 		}
 	}
@@ -1785,8 +1785,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleYoloMode:
 		m.toggleMode(permission.PermissionModeYolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionToggleSuperYoloMode:
-		m.toggleMode(permission.PermissionModeSuperYolo)
+	case dialog.ActionToggleSysadminMode:
+		m.toggleMode(permission.PermissionModeSysadmin)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
@@ -3588,8 +3588,8 @@ func (m *UI) setEditorPrompt(mode permission.PermissionMode) {
 		return
 	}
 	switch mode {
-	case permission.PermissionModeSuperYolo:
-		m.textarea.SetPromptFunc(4, m.superYoloPromptFunc)
+	case permission.PermissionModeSysadmin:
+		m.textarea.SetPromptFunc(4, m.sysadminPromptFunc)
 	case permission.PermissionModeYolo:
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 	default:
@@ -3646,21 +3646,21 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 	return t.Editor.PromptBangDotsBlurred.Render()
 }
 
-// superYoloPromptFunc returns the super yolo mode editor prompt style with red
+// sysadminPromptFunc returns the sysadmin mode editor prompt style with red
 // warning icon and red dots.
-func (m *UI) superYoloPromptFunc(info textarea.PromptInfo) string {
+func (m *UI) sysadminPromptFunc(info textarea.PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
-			return t.Editor.PromptSuperYoloIconFocused.Render()
+			return t.Editor.PromptSysadminIconFocused.Render()
 		} else {
-			return t.Editor.PromptSuperYoloIconBlurred.Render()
+			return t.Editor.PromptSysadminIconBlurred.Render()
 		}
 	}
 	if info.Focused {
-		return t.Editor.PromptSuperYoloDotsFocused.Render()
+		return t.Editor.PromptSysadminDotsFocused.Render()
 	}
-	return t.Editor.PromptSuperYoloDotsBlurred.Render()
+	return t.Editor.PromptSysadminDotsBlurred.Render()
 }
 
 // closeCompletions closes the completions popup and resets state.

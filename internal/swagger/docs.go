@@ -303,8 +303,8 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "200": {
-                        "description": "OK"
+                    "202": {
+                        "description": "Accepted"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -314,6 +314,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
                         }
@@ -616,6 +622,71 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "type": "object"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/agent/sessions/{sid}/shell": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Run shell command",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "sid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Shell command",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.ShellCommandRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.ShellCommandResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
                         }
                     },
                     "404": {
@@ -1093,6 +1164,62 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/current-session": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspaces"
+                ],
+                "summary": "Set current session for a client",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Client ID (UUID)",
+                        "name": "client_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Current session selection",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.CurrentSession"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
                         }
@@ -1873,7 +2000,10 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.PermissionGrantResponse"
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -1896,45 +2026,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/permissions/skip": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "permissions"
-                ],
-                "summary": "Get skip permissions status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/proto.PermissionSkipRequest"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            },
+        "/workspaces/{id}/permissions/mode": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -1942,7 +2034,7 @@ const docTemplate = `{
                 "tags": [
                     "permissions"
                 ],
-                "summary": "Set skip permissions",
+                "summary": "Set permission mode",
                 "parameters": [
                     {
                         "type": "string",
@@ -1952,12 +2044,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Permission skip request",
+                        "description": "Permission mode request",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/proto.PermissionSkipRequest"
+                            "$ref": "#/definitions/proto.PermissionSetModeRequest"
                         }
                     }
                 ],
@@ -2123,6 +2215,104 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "type": "object"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/questions/answer": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "questions"
+                ],
+                "summary": "Answer question batch",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Question batch answer",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.QuestionAnswer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.QuestionAnswerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/questions/cancel": {
+            "post": {
+                "tags": [
+                    "questions"
+                ],
+                "summary": "Cancel question batch",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.QuestionAnswerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
                         }
                     },
                     "404": {
@@ -2798,6 +2988,10 @@ const docTemplate = `{
                     "description": "Regex pattern tested against the tool name. Empty means match all.",
                     "type": "string"
                 },
+                "name": {
+                    "description": "Friendly display name shown in the TUI. Falls back to Command when empty.",
+                    "type": "string"
+                },
                 "timeout": {
                     "description": "Timeout in seconds. Default 30.",
                     "type": "integer"
@@ -3005,8 +3199,19 @@ const docTemplate = `{
                 "diff_mode": {
                     "type": "string"
                 },
+                "scrollbar": {
+                    "type": "string"
+                },
                 "transparent": {
                     "type": "boolean"
+                }
+            }
+        },
+        "config.ToolGlob": {
+            "type": "object",
+            "properties": {
+                "timeout": {
+                    "$ref": "#/definitions/time.Duration"
                 }
             }
         },
@@ -3032,6 +3237,9 @@ const docTemplate = `{
         "config.Tools": {
             "type": "object",
             "properties": {
+                "glob": {
+                    "$ref": "#/definitions/config.ToolGlob"
+                },
                 "grep": {
                     "$ref": "#/definitions/config.ToolGrep"
                 },
@@ -3165,7 +3373,16 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "global_context_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "initialize_as": {
+                    "type": "string"
+                },
+                "notification_style": {
                     "type": "string"
                 },
                 "progress": {
@@ -3282,6 +3499,9 @@ const docTemplate = `{
                 "prompt": {
                     "type": "string"
                 },
+                "run_id": {
+                    "type": "string"
+                },
                 "session_id": {
                     "type": "string"
                 }
@@ -3290,6 +3510,9 @@ const docTemplate = `{
         "proto.AgentSession": {
             "type": "object",
             "properties": {
+                "attached_clients": {
+                    "type": "integer"
+                },
                 "completion_tokens": {
                     "type": "integer"
                 },
@@ -3428,6 +3651,14 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
                 },
                 "value": {}
+            }
+        },
+        "proto.CurrentSession": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string"
+                }
             }
         },
         "proto.Error": {
@@ -3632,11 +3863,22 @@ const docTemplate = `{
                 }
             }
         },
+        "proto.PermissionGrantResponse": {
+            "type": "object",
+            "properties": {
+                "resolved": {
+                    "type": "boolean"
+                }
+            }
+        },
         "proto.PermissionRequest": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string"
+                },
+                "dangerous": {
+                    "type": "boolean"
                 },
                 "description": {
                     "type": "string"
@@ -3659,11 +3901,11 @@ const docTemplate = `{
                 }
             }
         },
-        "proto.PermissionSkipRequest": {
+        "proto.PermissionSetModeRequest": {
             "type": "object",
             "properties": {
-                "skip": {
-                    "type": "boolean"
+                "mode": {
+                    "$ref": "#/definitions/proto.WorkspacePermissionMode"
                 }
             }
         },
@@ -3679,6 +3921,54 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "needs_init": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "proto.QuestionAnswer": {
+            "type": "object",
+            "properties": {
+                "batch_request_id": {
+                    "type": "string"
+                },
+                "responses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/proto.QuestionResponse"
+                    }
+                }
+            }
+        },
+        "proto.QuestionAnswerResponse": {
+            "type": "object",
+            "properties": {
+                "resolved": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "proto.QuestionResponse": {
+            "type": "object",
+            "properties": {
+                "fill_in_text": {
+                    "type": "string"
+                },
+                "notes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "selected_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "yes": {
                     "type": "boolean"
                 }
             }
@@ -3716,6 +4006,9 @@ const docTemplate = `{
         "proto.Session": {
             "type": "object",
             "properties": {
+                "attached_clients": {
+                    "type": "integer"
+                },
                 "completion_tokens": {
                     "type": "integer"
                 },
@@ -3727,6 +4020,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "is_busy": {
+                    "type": "boolean"
                 },
                 "message_count": {
                     "type": "integer"
@@ -3751,6 +4047,31 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "integer"
+                }
+            }
+        },
+        "proto.ShellCommandRequest": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "term_width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "proto.ShellCommandResponse": {
+            "type": "object",
+            "properties": {
+                "exit_code": {
+                    "type": "integer"
+                },
+                "output": {
+                    "type": "string"
                 }
             }
         },
@@ -3782,6 +4103,9 @@ const docTemplate = `{
                 },
                 "source": {
                     "type": "string"
+                },
+                "user_invocable": {
+                    "type": "boolean"
                 }
             }
         },
@@ -3856,6 +4180,9 @@ const docTemplate = `{
         "proto.Workspace": {
             "type": "object",
             "properties": {
+                "client_id": {
+                    "type": "string"
+                },
                 "config": {
                     "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Config"
                 },
@@ -3897,12 +4224,12 @@ const docTemplate = `{
             "enum": [
                 "normal",
                 "yolo",
-                "super_yolo"
+                "sysadmin"
             ],
             "x-enum-varnames": [
                 "WorkspacePermissionModeNormal",
                 "WorkspacePermissionModeYolo",
-                "WorkspacePermissionModeSuperYolo"
+                "WorkspacePermissionModeSysadmin"
             ]
         },
         "time.Duration": {

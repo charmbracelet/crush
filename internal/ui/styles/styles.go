@@ -160,11 +160,11 @@ type Styles struct {
 		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
 		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
 
-		// Super YOLO mode prompt (" # " icon + ":::" dots).
-		PromptSuperYoloIconFocused lipgloss.Style
-		PromptSuperYoloIconBlurred lipgloss.Style
-		PromptSuperYoloDotsFocused lipgloss.Style
-		PromptSuperYoloDotsBlurred lipgloss.Style
+		// Sysadmin mode prompt (" # " icon + ":::" dots).
+		PromptSysadminIconFocused lipgloss.Style
+		PromptSysadminIconBlurred lipgloss.Style
+		PromptSysadminDotsFocused lipgloss.Style
+		PromptSysadminDotsBlurred lipgloss.Style
 	}
 
 	// Radio

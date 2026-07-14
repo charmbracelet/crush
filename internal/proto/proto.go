@@ -20,9 +20,9 @@ const (
 	// WorkspacePermissionModeYolo auto-approves non-dangerous commands and
 	// prompts for dangerous ones.
 	WorkspacePermissionModeYolo WorkspacePermissionMode = "yolo"
-	// WorkspacePermissionModeSuperYolo auto-approves everything, including
+	// WorkspacePermissionModeSysadmin auto-approves everything, including
 	// dangerous commands.
-	WorkspacePermissionModeSuperYolo WorkspacePermissionMode = "super_yolo"
+	WorkspacePermissionModeSysadmin WorkspacePermissionMode = "sysadmin"
 )
 
 // Workspace represents a running app.App workspace with its associated

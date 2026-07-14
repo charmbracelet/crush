@@ -2,62 +2,37 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/goal"
 )
 
-const (
-	maxGoalContinuations = 8
-	maxGoalFailures      = 3
-	maxGoalFailureChars  = 500
-)
-
-type goalFailure struct {
-	Tool   string `json:"tool"`
-	Class  string `json:"class,omitempty"`
-	Output string `json:"output"`
-}
-
-func goalModeContext(iteration int, failures []goalFailure) string {
-	var context strings.Builder
-	context.WriteString("<goal_mode>\n")
-	context.WriteString("Continue autonomously toward the user's exact objective. Choose tools from current evidence; no tool is forced. ")
-	context.WriteString("Use goal_status with complete after verification, or blocked when external input or state is required. ")
-	context.WriteString("A normal final response also ends the run; do not repeat completed work only to report status. ")
-	context.WriteString("Do not call goal_status for an intermediate failure.\n")
-	fmt.Fprintf(&context, "Continuation %d of %d.\n", iteration, maxGoalContinuations)
-	if len(failures) > 0 {
-		encoded, _ := json.Marshal(failures)
-		context.WriteString("Failures observed in the previous step: ")
-		context.Write(encoded)
-		context.WriteByte('\n')
-	}
-	context.WriteString("</goal_mode>")
-	return context.String()
-}
-
-func goalNeedsContinuation(steps []fantasy.StepResult) bool {
-	if len(steps) == 0 {
-		return false
-	}
-	return steps[len(steps)-1].FinishReason == fantasy.FinishReasonLength
-}
-
-func prepareGoalContinuation(call SessionAgentCall, steps []fantasy.StepResult) SessionAgentCall {
+func prepareGoalContinuation(call SessionAgentCall, state goal.State, steps []fantasy.StepResult) SessionAgentCall {
 	call.originalIntent = originalIntent(call)
 	call.Prompt = call.originalIntent
 	call.Attachments = nil
 	call.Accepted = nil
 	call.skipUserMessage = true
-	call.goalIteration++
-	call.TransientContext = appendTransientContext(call.goalBaseContext, goalModeContext(call.goalIteration, observedGoalFailures(steps)))
+	call.goalState = state
+	call.TransientContext = appendTransientContext(call.goalBaseContext, goal.Context(state, observedGoalFailures(steps)))
+	call.TransientContext = appendTransientContext(call.TransientContext, "<goal_continuation>Do not repeat the previous response. Perform a new concrete action, or call goal_status blocked if progress requires external input.</goal_continuation>")
 	return call
 }
 
-func terminalGoalStatus(steps []fantasy.StepResult) (string, bool) {
+func goalTurnMadeProgress(steps []fantasy.StepResult) bool {
+	for _, step := range steps {
+		for _, call := range step.Content.ToolCalls() {
+			if !call.Invalid {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func terminalGoalStatus(steps []fantasy.StepResult) (goal.Status, string, bool) {
 	for i := len(steps) - 1; i >= 0; i-- {
 		calls := make(map[string]tools.GoalStatusParams)
 		for _, call := range steps[i].Content.ToolCalls() {
@@ -78,16 +53,19 @@ func terminalGoalStatus(steps []fantasy.StepResult) (string, bool) {
 				continue
 			}
 			status := strings.ToLower(strings.TrimSpace(params.Status))
-			if status == "complete" || status == "blocked" {
-				return status, true
+			switch status {
+			case string(goal.StatusComplete):
+				return goal.StatusComplete, params.Summary, true
+			case string(goal.StatusBlocked):
+				return goal.StatusBlocked, params.Summary, true
 			}
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
-func observedGoalFailures(steps []fantasy.StepResult) []goalFailure {
-	var failures []goalFailure
+func observedGoalFailures(steps []fantasy.StepResult) []goal.Failure {
+	var failures []goal.Failure
 	seen := make(map[string]bool)
 	for _, step := range steps {
 		toolNames := make(map[string]string)
@@ -105,17 +83,14 @@ func observedGoalFailures(steps []fantasy.StepResult) []goalFailure {
 			if name == "" {
 				name = result.ToolName
 			}
-			output = compactGoalFailure(output)
+			output = strings.Join(strings.Fields(output), " ")
 			key := strings.ToLower(name + "\x00" + class + "\x00" + output)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
-			failures = append(failures, goalFailure{Tool: name, Class: class, Output: output})
+			failures = append(failures, goal.Failure{Tool: name, Class: class, Output: output})
 		}
-	}
-	if len(failures) > maxGoalFailures {
-		failures = failures[len(failures)-maxGoalFailures:]
 	}
 	return failures
 }
@@ -127,12 +102,4 @@ func looksLikeFailedCommand(output string) bool {
 		strings.Contains(lower, "exit code 127") ||
 		strings.HasPrefix(lower, "error:") ||
 		strings.HasPrefix(lower, "error ")
-}
-
-func compactGoalFailure(output string) string {
-	output = strings.Join(strings.Fields(output), " ")
-	if len(output) <= maxGoalFailureChars {
-		return output
-	}
-	return output[:maxGoalFailureChars] + "..."
 }

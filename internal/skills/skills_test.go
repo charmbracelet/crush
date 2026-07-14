@@ -493,6 +493,18 @@ func TestDiscoverBuiltin(t *testing.T) {
 		}
 	}
 	require.True(t, foundMCPSetup, "mcp-setup builtin skill not found")
+
+	var foundGoalProjectInit bool
+	for _, skill := range discovered {
+		if skill.Name == "goal-project-init" {
+			foundGoalProjectInit = true
+			require.Equal(t, "crush://skills/goal-project-init/SKILL.md", skill.SkillFilePath)
+			require.Contains(t, skill.Instructions, "Understand")
+			require.Contains(t, skill.Instructions, "Verify")
+			break
+		}
+	}
+	require.True(t, foundGoalProjectInit, "goal-project-init builtin skill not found")
 }
 
 func TestDeduplicate(t *testing.T) {

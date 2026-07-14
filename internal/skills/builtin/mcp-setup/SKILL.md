@@ -11,13 +11,16 @@ servers, and callable tools instead of inferring one from another.
 ## Existing Capabilities
 
 1. Use `mcp_manage` with `action=status` when current server state is unknown.
-2. Use `mcp_tool_search` with an empty query for connected server counts or a
-   capability query to search every connected native tool. Follow
-   `next_offset` when a broad result has more pages.
-3. Select an exact returned name with
-   `mcp_tool_search(query="select:<exact_name>")`, then call the activated
-   native tool directly. Do not reconstruct its schema from memory.
-4. Use MCP resources when a server exposes the needed read-only data.
+2. Every connected deferred tool is advertised by exact name through
+   `mcp_tool_search`. When the needed name is clear, load it with
+   `select:<exact_name>`. Otherwise search once with capability words. This
+   searches the tool catalog, not data such as repositories or files.
+3. Call the returned native tool directly. Its complete schema remains
+   available for the rest of the current user turn; do not search the catalog
+   again to query data or reconstruct its schema from memory.
+4. When an external object's exact coordinates are known, prefer a direct
+   get/read capability. Use broad data search only when discovery is required.
+5. Use MCP resources when a server exposes the needed read-only data.
 
 Do not reinstall or web-search a capability that the live catalog already
 reports. Do not invoke MCP tools through the shell.
@@ -43,6 +46,8 @@ and unrelated configuration fields.
 ## Recovery
 
 - On the first failure, use the exact error to correct one assumption.
+- Treat empty or partial results as the current server and credentials' visible
+  scope, not proof that an external object does not exist.
 - If package or server identity is uncertain, research before retrying.
 - If the same failure class repeats, stop that path and report the exact
   dependency, credential, platform, or transport blocker.

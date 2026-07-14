@@ -8,8 +8,21 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConvertCallToolResultPreservesMCPError(t *testing.T) {
+	t.Parallel()
+
+	result := convertCallToolResult(&mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: "GitHub API returned 422"}},
+		IsError: true,
+	})
+
+	require.True(t, result.IsError)
+	require.Equal(t, "GitHub API returned 422", result.Content)
+}
 
 func TestEnsureRawBytes(t *testing.T) {
 	t.Parallel()

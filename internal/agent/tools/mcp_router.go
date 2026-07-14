@@ -25,11 +25,9 @@ const (
 var mcpToolSearchDescription string
 
 type MCPToolSearchParams struct {
-	Query      string `json:"query,omitempty" description:"Capability to search for, or select:<exact_native_tool_name> to load one or more comma-separated native tool schemas."`
+	Query      string `json:"query,omitempty" description:"Exact deferred tool selection such as select:mcp_github_get_me, or capability keywords to search the deferred tool names and descriptions."`
 	Server     string `json:"server,omitempty" description:"Optional exact MCP server name used to restrict a keyword search."`
-	MaxResults int    `json:"max_results,omitempty" description:"Number of ranked keyword matches to return. Defaults to 5; no fixed catalog ceiling is applied."`
-	Offset     int    `json:"offset,omitempty" description:"Zero-based match offset for reading the next result page."`
-	Limit      int    `json:"limit,omitempty" description:"Deprecated alias for max_results."`
+	MaxResults int    `json:"max_results,omitempty" description:"Maximum fuzzy matches to load. Defaults to 5; exact select queries are not capped."`
 }
 
 type mcpToolMatch struct {
@@ -37,11 +35,13 @@ type mcpToolMatch struct {
 	score int
 }
 
-// DeferredToolProvider resolves names selected through a compact discovery
-// tool. The agent exposes resolved tools natively on the following step.
+// DeferredToolProvider resolves exact names or capability matches from a
+// compact discovery tool. The agent exposes resolved tools natively on the
+// following step.
 type DeferredToolProvider interface {
 	fantasy.AgentTool
 	ResolveDeferredTools(names []string) []fantasy.AgentTool
+	ResolveDeferredToolSearch(params MCPToolSearchParams) []fantasy.AgentTool
 }
 
 type mcpToolSearchTool struct {
@@ -76,6 +76,14 @@ func (m *mcpToolSearchTool) availableTools() []*Tool {
 	return allowedMCPTools(GetMCPTools(m.permissions, m.cfg, m.workingDir), m.allowed)
 }
 
+func (m *mcpToolSearchTool) Info() fantasy.ToolInfo {
+	info := m.AgentTool.Info()
+	if catalog := compactMCPToolCatalog(m.availableTools()); catalog != "" {
+		info.Description = strings.TrimSpace(info.Description) + "\n\n" + catalog
+	}
+	return info
+}
+
 func (m *mcpToolSearchTool) ResolveDeferredTools(names []string) []fantasy.AgentTool {
 	wanted := make(map[string]struct{}, len(names))
 	for _, name := range names {
@@ -97,6 +105,18 @@ func (m *mcpToolSearchTool) ResolveDeferredTools(names []string) []fantasy.Agent
 		if _, ok := wanted[strings.ToLower(tool.Name())]; ok {
 			resolved = append(resolved, tool)
 		}
+	}
+	return resolved
+}
+
+func (m *mcpToolSearchTool) ResolveDeferredToolSearch(params MCPToolSearchParams) []fantasy.AgentTool {
+	if strings.TrimSpace(params.Query) == "" || len(DeferredToolSelectionNames(params.Query)) > 0 {
+		return nil
+	}
+	matches, _ := rankedMCPToolMatches(m.availableTools(), params)
+	resolved := make([]fantasy.AgentTool, 0, len(matches))
+	for _, match := range matches {
+		resolved = append(resolved, match.tool)
 	}
 	return resolved
 }
@@ -128,17 +148,36 @@ func formatMCPToolSearch(available []*Tool, params MCPToolSearchParams) string {
 		return formatSelectedMCPTools(available, selected)
 	}
 
-	limit := params.MaxResults
-	if limit <= 0 {
-		limit = params.Limit
-	}
-	if limit <= 0 {
-		limit = defaultMCPToolMatches
-	}
-	offset := max(params.Offset, 0)
-
 	if query == "" && server == "" {
 		return formatMCPServerInventory(available)
+	}
+	if query == "" {
+		return formatMCPServerSearchPrompt(available, server)
+	}
+
+	matches, totalMatches := rankedMCPToolMatches(available, params)
+	if len(matches) == 0 {
+		return "No usable MCP tools matched. Retry once with an exact tool name from the catalog or an empty query to inspect it. If the needed capability is still unclear, load the mcp-setup skill for recovery guidance."
+	}
+
+	var output strings.Builder
+	output.WriteString("Matched native MCP tools are available on the next model step. Call the best match directly by name:\n")
+	for _, match := range matches {
+		info := match.tool.Info()
+		fmt.Fprintf(&output, "- name: %s\n  server: %s\n  description: %s\n",
+			match.tool.Name(), match.tool.MCP(), compactMCPDescription(info.Description))
+	}
+	fmt.Fprintf(&output, "total_matches: %d\nloaded: %d\ntotal_deferred_tools: %d", totalMatches, len(matches), len(available))
+	return strings.TrimSpace(output.String())
+}
+
+func rankedMCPToolMatches(available []*Tool, params MCPToolSearchParams) ([]mcpToolMatch, int) {
+	query := strings.TrimSpace(params.Query)
+	server := strings.TrimSpace(params.Server)
+	server, query = mcpSearchScope(available, server, query)
+	limit := params.MaxResults
+	if limit <= 0 {
+		limit = defaultMCPToolMatches
 	}
 
 	matches := make([]mcpToolMatch, 0, len(available))
@@ -158,30 +197,83 @@ func formatMCPToolSearch(available []*Tool, params MCPToolSearchParams) string {
 		}
 		return matches[i].tool.Name() < matches[j].tool.Name()
 	})
-	if len(matches) == 0 {
-		return "No usable MCP tools matched. Search with broader capability words, omit server, or inspect the connected-server inventory with an empty query."
-	}
 	totalMatches := len(matches)
-	if offset >= totalMatches {
-		return fmt.Sprintf("No matches at offset %d. total_matches: %d", offset, totalMatches)
-	}
-	end := min(offset+limit, totalMatches)
-	matches = matches[offset:end]
+	return matches[:min(limit, totalMatches)], totalMatches
+}
 
-	var output strings.Builder
-	output.WriteString("Deferred MCP tool matches:\n")
-	for _, match := range matches {
-		info := match.tool.Info()
-		fmt.Fprintf(&output, "- name: %s\n  server: %s\n  description: %s\n",
-			match.tool.Name(), match.tool.MCP(), compactMCPDescription(info.Description))
+func mcpSearchScope(available []*Tool, explicitServer, query string) (string, string) {
+	queryTerms := mcpSearchTerms(query)
+	if len(queryTerms) == 0 {
+		return explicitServer, query
 	}
-	fmt.Fprintf(&output, "total_matches: %d\nreturned: %d\noffset: %d\n", totalMatches, len(matches), offset)
-	if end < totalMatches {
-		fmt.Fprintf(&output, "next_offset: %d\n", end)
+
+	server := explicitServer
+	if server == "" {
+		seen := make(map[string]bool)
+		for _, tool := range available {
+			name := tool.MCP()
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			serverTerms := meaningfulMCPServerTerms(name)
+			if len(serverTerms) > 0 && containsAllMCPSearchTerms(queryTerms, serverTerms) {
+				if server != "" {
+					return explicitServer, query
+				}
+				server = name
+			}
+		}
 	}
-	fmt.Fprintf(&output, "total_deferred_tools: %d\n", len(available))
-	output.WriteString("Load a native schema with mcp_tool_search query select:<exact_name>. Multiple exact names may be comma-separated.")
-	return strings.TrimSpace(output.String())
+	if server == "" {
+		return "", query
+	}
+
+	remove := mcpSearchTermSet(strings.Join(meaningfulMCPServerTerms(server), " "))
+	remaining := make([]string, 0, len(queryTerms))
+	for _, term := range queryTerms {
+		if !remove[term] {
+			remaining = append(remaining, term)
+		}
+	}
+	return server, strings.Join(remaining, " ")
+}
+
+func meaningfulMCPServerTerms(server string) []string {
+	terms := mcpSearchTerms(server)
+	result := terms[:0]
+	for _, term := range terms {
+		if term != "mcp" {
+			result = append(result, term)
+		}
+	}
+	return result
+}
+
+func containsAllMCPSearchTerms(haystack, needles []string) bool {
+	available := make(map[string]bool, len(haystack))
+	for _, term := range haystack {
+		available[term] = true
+	}
+	for _, term := range needles {
+		if !available[term] {
+			return false
+		}
+	}
+	return true
+}
+
+func formatMCPServerSearchPrompt(available []*Tool, server string) string {
+	var matches []*Tool
+	for _, tool := range available {
+		if strings.EqualFold(server, tool.MCP()) {
+			matches = append(matches, tool)
+		}
+	}
+	if len(matches) == 0 {
+		return fmt.Sprintf("No usable MCP tools are connected for server %q. Inspect the connected-server inventory with an empty query.", server)
+	}
+	return compactMCPToolCatalog(matches) + "\nSelect an exact name or search this server with capability words to load matching schemas."
 }
 
 // DeferredToolSelectionNames parses the exact selection syntax shared by the
@@ -273,24 +365,34 @@ func formatMatchedMCPInstructions(matches []*Tool) string {
 }
 
 func formatMCPServerInventory(available []*Tool) string {
-	counts := make(map[string]int)
-	for _, tool := range available {
-		counts[tool.MCP()]++
-	}
-	if len(counts) == 0 {
+	if len(available) == 0 {
 		return "No usable MCP tools are currently connected."
 	}
-	names := make([]string, 0, len(counts))
-	for name := range counts {
-		names = append(names, name)
+	return compactMCPToolCatalog(available) + "\nSearch once with an exact tool name or a plain-language task; matching native schemas become callable on the next model step."
+}
+
+func compactMCPToolCatalog(available []*Tool) string {
+	if len(available) == 0 {
+		return ""
 	}
-	slices.Sort(names)
+	tools := slices.Clone(available)
+	sort.Slice(tools, func(i, j int) bool {
+		if tools[i].MCP() != tools[j].MCP() {
+			return tools[i].MCP() < tools[j].MCP()
+		}
+		return tools[i].Name() < tools[j].Name()
+	})
+
 	var output strings.Builder
-	output.WriteString("Connected MCP tool inventory:\n")
-	for _, name := range names {
-		fmt.Fprintf(&output, "- %s: %d tools\n", name, counts[name])
+	output.WriteString("Available deferred MCP tools. Exact names are visible now; full descriptions and input schemas load on demand:\n")
+	currentServer := ""
+	for _, tool := range tools {
+		if tool.MCP() != currentServer {
+			currentServer = tool.MCP()
+			fmt.Fprintf(&output, "%s:\n", currentServer)
+		}
+		fmt.Fprintf(&output, "- %s\n", tool.Name())
 	}
-	output.WriteString("Search by capability before selecting a native tool.")
 	return strings.TrimSpace(output.String())
 }
 
@@ -316,23 +418,70 @@ func scoreMCPTool(tool *Tool, query string) int {
 	if strings.Contains(description, query) {
 		score += 12
 	}
-	for _, token := range strings.FieldsFunc(query, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	}) {
-		if len(token) < 2 {
-			continue
+	nameTerms := mcpSearchTermSet(name)
+	serverTerms := mcpSearchTermSet(server)
+	descriptionTerms := mcpSearchTermSet(description)
+	for _, token := range mcpSearchTerms(query) {
+		if nameTerms[token] {
+			score += 20
 		}
-		if strings.Contains(name, token) {
-			score += 10
-		}
-		if strings.Contains(server, token) {
+		if serverTerms[token] {
 			score += 8
 		}
-		if strings.Contains(description, token) {
-			score += 3
+		if descriptionTerms[token] {
+			score += 6
 		}
 	}
 	return score
+}
+
+func mcpSearchTermSet(value string) map[string]bool {
+	terms := mcpSearchTerms(value)
+	result := make(map[string]bool, len(terms))
+	for _, term := range terms {
+		result[term] = true
+	}
+	return result
+}
+
+func mcpSearchTerms(value string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, token := range strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		token = normalizeMCPSearchTerm(token)
+		if len(token) < 3 || lowSignalMCPSearchTerm(token) || seen[token] {
+			continue
+		}
+		seen[token] = true
+		result = append(result, token)
+	}
+	return result
+}
+
+func lowSignalMCPSearchTerm(term string) bool {
+	switch term {
+	case "get", "info", "information", "detail", "tool", "using", "with":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeMCPSearchTerm(term string) string {
+	switch {
+	case len(term) > 4 && strings.HasSuffix(term, "ies"):
+		return term[:len(term)-3] + "y"
+	case len(term) > 4 && strings.HasSuffix(term, "ches"):
+		return term[:len(term)-2]
+	case len(term) > 4 && strings.HasSuffix(term, "shes"):
+		return term[:len(term)-2]
+	case len(term) > 3 && strings.HasSuffix(term, "s") && !strings.HasSuffix(term, "ss"):
+		return term[:len(term)-1]
+	default:
+		return term
+	}
 }
 
 func compactMCPDescription(description string) string {

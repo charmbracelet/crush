@@ -68,6 +68,20 @@ func (h *hookedTool) ResolveDeferredTools(names []string) []fantasy.AgentTool {
 	)
 }
 
+func (h *hookedTool) ResolveDeferredToolSearch(params tools.MCPToolSearchParams) []fantasy.AgentTool {
+	provider, ok := h.inner.(tools.DeferredToolProvider)
+	if !ok {
+		return nil
+	}
+	return wrapToolsWithHooks(
+		provider.ResolveDeferredToolSearch(params),
+		h.preRunner,
+		h.postRunner,
+		h.postFailureRunner,
+		false,
+	)
+}
+
 func (h *hookedTool) PollutesMemory() bool {
 	pollutingTool, ok := h.inner.(interface{ PollutesMemory() bool })
 	return ok && pollutingTool.PollutesMemory()

@@ -49,7 +49,8 @@ SET
     summary_message_id = ?,
     cost = ?,
     todos = ?,
-    sources = ?
+    sources = ?,
+    goal_state = ?
 WHERE id = ?
 RETURNING *;
 

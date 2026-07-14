@@ -140,6 +140,9 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
+	if result.IsError {
+		return fantasy.NewTextErrorResponse(result.Content), nil
+	}
 
 	switch result.Type {
 	case "image", "media":

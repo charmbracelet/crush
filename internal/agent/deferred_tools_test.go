@@ -9,6 +9,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -19,6 +20,10 @@ type testDeferredToolProvider struct {
 }
 
 func (t *testDeferredToolProvider) ResolveDeferredTools(names []string) []fantasy.AgentTool {
+	return slices.Clone(t.resolved)
+}
+
+func (t *testDeferredToolProvider) ResolveDeferredToolSearch(tools.MCPToolSearchParams) []fantasy.AgentTool {
 	return slices.Clone(t.resolved)
 }
 
@@ -68,9 +73,99 @@ func TestActivateDeferredToolsAddsResolvedNativeToolOnce(t *testing.T) {
 
 	result := activateDeferredTools([]fantasy.AgentTool{search}, steps)
 
-	require.Len(t, result, 2)
-	require.Equal(t, "mcp_tool_search", result[0].Info().Name)
-	require.Equal(t, "mcp_github_get_me", result[1].Info().Name)
+	require.Equal(t, []string{"mcp_github_get_me", "mcp_tool_search"}, agentToolNames(result))
+}
+
+func TestActivateDeferredToolsAddsKeywordSearchMatchesWithoutSelection(t *testing.T) {
+	t.Parallel()
+
+	native := fantasy.NewAgentTool(
+		"mcp_github_search_repositories",
+		"Search GitHub repositories.",
+		func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse("ok"), nil
+		},
+	)
+	search := &testDeferredToolProvider{
+		AgentTool: fantasy.NewAgentTool(
+			"mcp_tool_search",
+			"Search tools.",
+			func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			},
+		),
+		resolved: []fantasy.AgentTool{native},
+	}
+	steps := []fantasy.StepResult{{
+		Response: fantasy.Response{Content: fantasy.ResponseContent{
+			fantasy.ToolCallContent{
+				ToolName: "mcp_tool_search",
+				Input:    `{"query":"find GitHub repositories"}`,
+			},
+		}},
+	}}
+
+	result := activateDeferredTools([]fantasy.AgentTool{search}, steps)
+
+	require.Equal(t, []string{"mcp_github_search_repositories", "mcp_tool_search"}, agentToolNames(result))
+}
+
+func TestActivateDeferredToolsPreservesBaseToolsForUnknownSelection(t *testing.T) {
+	t.Parallel()
+
+	search := &testDeferredToolProvider{
+		AgentTool: fantasy.NewAgentTool(
+			"mcp_tool_search",
+			"Search tools.",
+			func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			},
+		),
+	}
+	view := fantasy.NewAgentTool(
+		"view",
+		"View a file.",
+		func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse("ok"), nil
+		},
+	)
+	steps := []fantasy.StepResult{{
+		Response: fantasy.Response{Content: fantasy.ResponseContent{
+			fantasy.ToolCallContent{
+				ToolName: "mcp_tool_search",
+				Input:    `{"query":"select:mcp_github_invented_tool"}`,
+			},
+		}},
+	}}
+
+	result := activateDeferredTools([]fantasy.AgentTool{search, view}, steps)
+
+	require.Equal(t, []string{"mcp_tool_search", "view"}, agentToolNames(result))
+}
+
+func TestActivateDeferredToolsResetsWhenNewTurnHasNoDiscoverySteps(t *testing.T) {
+	t.Parallel()
+
+	search := &testDeferredToolProvider{
+		AgentTool: fantasy.NewAgentTool(
+			"mcp_tool_search",
+			"Search tools.",
+			func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			},
+		),
+		resolved: []fantasy.AgentTool{fantasy.NewAgentTool(
+			"mcp_github_list_branches",
+			"List branches.",
+			func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			},
+		)},
+	}
+
+	result := activateDeferredTools([]fantasy.AgentTool{search}, nil)
+
+	require.Equal(t, []string{"mcp_tool_search"}, agentToolNames(result))
 }
 
 type deferredToolLifecycleModel struct {
@@ -94,7 +189,7 @@ func (m *deferredToolLifecycleModel) Stream(_ context.Context, call fantasy.Call
 	return func(yield func(fantasy.StreamPart) bool) {
 		switch callNumber {
 		case 1:
-			yieldToolCall(yield, "search-1", "mcp_tool_search", `{"query":"select:mcp_github_get_me"}`)
+			yieldToolCall(yield, "search-1", "mcp_tool_search", `{"query":"authenticated GitHub user"}`)
 		case 2:
 			yieldToolCall(yield, "native-1", "mcp_github_get_me", `{}`)
 		default:
@@ -120,7 +215,7 @@ func (m *deferredToolLifecycleModel) toolsForCall(index int) []string {
 	return slices.Clone(m.toolSets[index])
 }
 
-func TestRunActivatesAndExecutesSelectedDeferredTool(t *testing.T) {
+func TestRunActivatesAndExecutesMatchedDeferredTool(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
@@ -174,4 +269,5 @@ func TestRunActivatesAndExecutesSelectedDeferredTool(t *testing.T) {
 	require.Equal(t, int64(1), nativeCalls.Load())
 	require.Equal(t, []string{"mcp_tool_search"}, model.toolsForCall(0))
 	require.Equal(t, []string{"mcp_github_get_me", "mcp_tool_search"}, model.toolsForCall(1))
+	require.Equal(t, []string{"mcp_github_get_me", "mcp_tool_search"}, model.toolsForCall(2))
 }

@@ -4,9 +4,24 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
+
+type modesTestWorkspace struct {
+	workspace.Workspace
+	mode string
+}
+
+func (w modesTestWorkspace) AgentMode() string {
+	return w.mode
+}
+
+func (modesTestWorkspace) Config() *config.Config {
+	return nil
+}
 
 func TestModeModelTypeLabel(t *testing.T) {
 	t.Parallel()
@@ -44,4 +59,17 @@ func TestModesDialogKeepsEveryModeVisible(t *testing.T) {
 	heightOffset := sty.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		sty.Dialog.HelpView.GetVerticalFrameSize() + sty.Dialog.View.GetVerticalFrameSize()
 	require.GreaterOrEqual(t, modesDialogMaxHeight-heightOffset, len(modeDefinitions))
+}
+
+func TestModesDialogStartsAtTopForNonFirstActiveMode(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	dialog := NewModes(&common.Common{
+		Workspace: modesTestWorkspace{mode: config.AgentGoal},
+		Styles:    &sty,
+	})
+
+	require.Equal(t, 1, dialog.modeList.Selected())
+	require.Equal(t, 0, dialog.modeList.Offset())
 }

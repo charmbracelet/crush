@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 	"github.com/zeebo/xxh3"
@@ -59,6 +60,7 @@ type Session struct {
 	Cost             float64
 	Todos            []Todo
 	Sources          []Source
+	Goal             goal.State
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -198,6 +200,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	goalJSON, err := marshalGoal(session.Goal)
+	if err != nil {
+		return Session{}, err
+	}
 
 	dbSession, err := s.q.UpdateSession(ctx, db.UpdateSessionParams{
 		ID:               session.ID,
@@ -216,6 +222,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 		Sources: sql.NullString{
 			String: sourcesJSON,
 			Valid:  sourcesJSON != "",
+		},
+		GoalState: sql.NullString{
+			String: goalJSON,
+			Valid:  goalJSON != "",
 		},
 	})
 	if err != nil {
@@ -313,6 +323,10 @@ func (s *service) fromDBItem(item db.Session) Session {
 	if err != nil {
 		slog.Error("Failed to unmarshal sources", "session_id", item.ID, "error", err)
 	}
+	goalState, err := unmarshalGoal(item.GoalState.String)
+	if err != nil {
+		slog.Error("Failed to unmarshal goal state", "session_id", item.ID, "error", err)
+	}
 	return Session{
 		ID:               item.ID,
 		ParentSessionID:  item.ParentSessionID.String,
@@ -324,9 +338,32 @@ func (s *service) fromDBItem(item db.Session) Session {
 		Cost:             item.Cost,
 		Todos:            todos,
 		Sources:          sources,
+		Goal:             goalState,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}
+}
+
+func marshalGoal(state goal.State) (string, error) {
+	if state.Objective == "" {
+		return "", nil
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalGoal(data string) (goal.State, error) {
+	if data == "" {
+		return goal.State{}, nil
+	}
+	var state goal.State
+	if err := json.Unmarshal([]byte(data), &state); err != nil {
+		return goal.State{}, err
+	}
+	return state, nil
 }
 
 func marshalSources(sources []Source) (string, error) {

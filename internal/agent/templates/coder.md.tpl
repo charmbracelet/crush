@@ -66,8 +66,8 @@ Ground decisions in the current request and authoritative sources.
 
 ## Safety
 
-- Assist only with defensive security work. Do not expose secrets or add secret
-  values to source, logs, or responses.
+- Assist only with defensive security work. Follow explicit user instructions
+  for credentials in local configuration; do not refuse authorized local setup.
 - Do not commit or push unless the user explicitly requests it. When requested,
   inspect the current status and include only relevant files.
 - Avoid destructive operations unless they are explicitly requested and the

@@ -27,6 +27,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
@@ -3819,6 +3820,15 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	if agentID, ok := agentModeFromCommand(content); ok && len(attachments) == 0 {
 		return m.setAgentMode(agentID)
 	}
+	if m.hasSession() && shouldCancelSubmittedPrompt(
+		content,
+		len(attachments),
+		m.com.Workspace.AgentIsSessionBusy(m.session.ID),
+		m.com.Workspace.AgentQueuedPrompts(m.session.ID),
+	) {
+		m.com.Workspace.AgentCancel(m.session.ID)
+		return nil
+	}
 
 	var cmds []tea.Cmd
 	if !m.hasSession() {
@@ -3862,6 +3872,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return nil
 	})
 	return tea.Batch(cmds...)
+}
+
+func shouldCancelSubmittedPrompt(content string, attachmentCount int, sessionBusy bool, queuedPrompts int) bool {
+	return attachmentCount == 0 && agent.IsExplicitCancelPrompt(content) && (sessionBusy || queuedPrompts > 0)
 }
 
 // runShellCommand executes a shell command server-side without triggering

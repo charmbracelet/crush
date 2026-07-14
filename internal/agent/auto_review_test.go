@@ -247,7 +247,7 @@ func TestMaxTokensDoesNotStartHiddenReview(t *testing.T) {
 	require.Equal(t, 0, reviewTurns)
 }
 
-func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
+func TestContextOverflowRetriesOnceWithFullToolSurface(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	contextErr := &fantasy.ProviderError{
@@ -283,7 +283,7 @@ func TestContextOverflowRetriesOnceWithLeanTools(t *testing.T) {
 	require.Equal(t, int64(2), primary.streamCalls.Load(), "context overflow should retry once")
 	require.Equal(t, int64(0), review.streamCalls.Load(), "context overflow must not trigger auto-review")
 	require.ElementsMatch(t, []string{tools.BashToolName, tools.ViewToolName, tools.WriteToolName, tools.ReadMCPResourceToolName}, primary.toolNamesForCall(0))
-	require.ElementsMatch(t, []string{tools.BashToolName, tools.ViewToolName}, primary.toolNamesForCall(1))
+	require.ElementsMatch(t, []string{tools.BashToolName, tools.ViewToolName, tools.WriteToolName, tools.ReadMCPResourceToolName}, primary.toolNamesForCall(1))
 	require.Contains(t, primary.systemPromptForCall(0), "long provider prefix")
 	require.Contains(t, primary.systemPromptForCall(0), "long base prompt")
 	require.Contains(t, primary.systemPromptForCall(1), "compact recovery mode")

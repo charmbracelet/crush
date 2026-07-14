@@ -26,6 +26,7 @@ type ToolResult struct {
 	Content   string
 	Data      []byte
 	MediaType string
+	IsError   bool
 }
 
 var allTools = csync.NewMap[string, []*Tool]()
@@ -88,8 +89,12 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{}, err
 	}
 
+	return convertCallToolResult(result), nil
+}
+
+func convertCallToolResult(result *mcp.CallToolResult) ToolResult {
 	if len(result.Content) == 0 {
-		return ToolResult{Type: "text", Content: ""}, nil
+		return ToolResult{Type: "text", IsError: result.IsError}
 	}
 
 	var textParts []string
@@ -127,7 +132,8 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 			Content:   textContent,
 			Data:      ensureRawBytes(imageData),
 			MediaType: imageMimeType,
-		}, nil
+			IsError:   result.IsError,
+		}
 	}
 
 	if audioData != nil {
@@ -136,13 +142,15 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 			Content:   textContent,
 			Data:      ensureRawBytes(audioData),
 			MediaType: audioMimeType,
-		}, nil
+			IsError:   result.IsError,
+		}
 	}
 
 	return ToolResult{
 		Type:    "text",
 		Content: textContent,
-	}, nil
+		IsError: result.IsError,
+	}
 }
 
 func mcpToolTimeout(m config.MCPConfig) time.Duration {

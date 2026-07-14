@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
@@ -120,12 +121,12 @@ type SessionAgentCall struct {
 	// goalMode enables bounded autonomous continuation for the explicit Goal
 	// agent. Normal Task and Review turns never enter this lifecycle.
 	goalMode bool
-	// goalIteration counts internal Goal continuations after the admitted user
-	// turn. It bounds autonomy without changing the user's objective.
-	goalIteration int
 	// goalBaseContext preserves explicitly invoked skill context across Goal
 	// continuations without persisting it as another user message.
 	goalBaseContext string
+	// goalState is the durable objective snapshot carried across internal
+	// continuations and context compaction.
+	goalState goal.State
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -159,7 +160,7 @@ type SessionAgentCall struct {
 	// contextRetry is an internal one-shot retry path used when a
 	// provider rejects the request before generation because the prompt
 	// exceeds the model context window. The retry keeps the user's
-	// persisted prompt intact but sends a leaner tool surface.
+	// persisted prompt intact but sends leaner history.
 	contextRetry bool
 	// skipUserMessage prevents contextRetry from persisting the same
 	// user prompt twice.
@@ -168,6 +169,13 @@ type SessionAgentCall struct {
 	// contextRetry because the current prompt is supplied through
 	// AgentStreamCall.Prompt, not as history.
 	retryUserMessageID string
+	// toolProtocolRetry is an internal one-shot retry used when a model
+	// emits recognizable tool-call markup as ordinary assistant text instead
+	// of returning a provider-native structured tool call.
+	toolProtocolRetry bool
+	// toolProtocolNames records advertised tools from the malformed response so
+	// deferred native schemas can be added without restricting the base tools.
+	toolProtocolNames []string
 }
 
 type SessionAgent interface {
@@ -803,9 +811,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
-	if call.contextRetry {
-		agentTools = contextRetryTools(agentTools)
-	}
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	if call.contextRetry {
@@ -851,6 +856,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if strings.TrimSpace(call.originalIntent) == "" {
 		call.originalIntent = strings.TrimSpace(call.Prompt)
 	}
+	if call.goalMode {
+		if call.goalState.Objective == "" {
+			call.goalState = goal.Start(originalIntent(call))
+		}
+		currentSession.Goal = call.goalState
+		currentSession, err = a.sessions.Save(ctx, currentSession)
+		if err != nil {
+			return nil, fmt.Errorf("saving goal state: %w", err)
+		}
+	}
 	outboundPrompt := admitted.modelPrompt
 	if call.TransientContext != "" {
 		outboundPrompt = call.TransientContext + "\n\n" + outboundPrompt
@@ -885,7 +900,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		defer cancel()
 		defer a.activeRequests.Del(call.SessionID)
 	}
-	genCtx = tools.WithMCPSourceEvidence(genCtx, originalIntent(call))
 	if !call.contextRetry {
 		outboundPrompt = a.recallMemories(genCtx, call.SessionID, outboundPrompt)
 	}
@@ -1018,7 +1032,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	if call.goalMode {
 		stopWhen = append(stopWhen, func(steps []fantasy.StepResult) bool {
-			_, terminal := terminalGoalStatus(steps)
+			_, _, terminal := terminalGoalStatus(steps)
 			return terminal
 		})
 	}
@@ -1041,11 +1055,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				prepared.Messages[i].ProviderOptions = nil
 			}
 
-			// Use the latest tools and expose only deferred tools explicitly
-			// selected in a prior step of this turn.
+			// Preserve the base tool surface and keep deferred tools matched by
+			// any discovery step available for the remainder of this turn.
 			prepared.Tools = activateDeferredTools(a.tools.Copy(), options.Steps)
-			if call.contextRetry {
-				prepared.Tools = contextRetryTools(prepared.Tools)
+			if call.toolProtocolRetry && options.StepNumber == 0 {
+				prepared.Tools = activateNamedDeferredTools(prepared.Tools, call.toolProtocolNames)
 			}
 			if sourceParts := activatedSourceParts(options.Steps, largeModel.CatwalkCfg.SupportsImages); len(sourceParts) > 0 {
 				prepared.Messages = append(prepared.Messages, fantasy.Message{
@@ -1418,6 +1432,39 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
+	protocolTools := agentTools
+	if result != nil && len(result.Steps) > 1 {
+		protocolTools = activateDeferredTools(protocolTools, result.Steps[:len(result.Steps)-1])
+	}
+	if attemptedNames := attemptedTextToolNames(result, protocolTools); len(attemptedNames) > 0 {
+		if call.toolProtocolRetry {
+			return result, errToolProtocol
+		}
+		if currentAssistant != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			deleteErr := a.messages.Delete(cleanupCtx, currentAssistant.ID)
+			cleanupCancel()
+			if deleteErr != nil {
+				return result, fmt.Errorf("deleting malformed tool response: %w", deleteErr)
+			}
+		}
+		a.activeRequests.Del(call.SessionID)
+		cancel()
+		skipRunComplete = true
+		retryCall := call
+		retryCall.toolProtocolRetry = true
+		retryCall.toolProtocolNames = attemptedNames
+		retryCall.skipUserMessage = true
+		if userMsg.ID != "" {
+			retryCall.retryUserMessageID = userMsg.ID
+		}
+		retryCall.TransientContext = appendTransientContext(
+			retryCall.TransientContext,
+			"<tool_protocol_repair>The previous response wrote a tool call as ordinary text. Retry the requested action using provider-native structured tool calling. Do not print tool-call syntax.</tool_protocol_repair>",
+		)
+		return a.Run(ctx, retryCall)
+	}
+
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		existing, ok := a.messageQueue.Get(call.SessionID)
@@ -1431,22 +1478,41 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, summarizeErr
 		}
 	} else if call.goalMode {
-		status, terminal := terminalGoalStatus(result.Steps)
+		state := call.goalState
+		status, summary, terminal := terminalGoalStatus(result.Steps)
+		decision := goal.Decide(state, result.Response.FinishReason, goalTurnMadeProgress(result.Steps))
 		switch {
 		case terminal:
-			slog.Info("Goal reached terminal status", "session_id", call.SessionID, "status", status, "continuations", call.goalIteration)
-		case !goalNeedsContinuation(result.Steps):
-			slog.Info("Goal finished on normal model stop", "session_id", call.SessionID, "continuations", call.goalIteration)
-		case call.goalIteration >= maxGoalContinuations:
-			slog.Warn("Goal continuation limit reached", "session_id", call.SessionID, "continuations", call.goalIteration)
-		default:
+			state = state.WithStatus(status, summary)
+			if err := a.saveGoalState(ctx, &currentSession, &sessionLock, state); err != nil {
+				return nil, err
+			}
+			slog.Info("Goal reached terminal status", "session_id", call.SessionID, "status", status, "turns", state.Turns)
+		case decision.Kind == goal.DecisionPause:
+			summary := "automatic continuation safety limit reached"
+			state = state.WithStatus(goal.StatusPaused, summary)
+			if err := a.saveGoalState(ctx, &currentSession, &sessionLock, state); err != nil {
+				return nil, err
+			}
+			slog.Warn("Goal paused by runaway guard", "session_id", call.SessionID, "turns", state.Turns)
+		case decision.Kind == goal.DecisionStop:
+			state = state.WithStatus(goal.StatusPaused, "model ended the turn; goal preserved for user continuation")
+			if err := a.saveGoalState(ctx, &currentSession, &sessionLock, state); err != nil {
+				return nil, err
+			}
+			slog.Info("Goal turn ended without automatic continuation", "session_id", call.SessionID, "turns", state.Turns, "reason", decision.Reason)
+		case decision.Kind == goal.DecisionContinue:
 			existing, ok := a.messageQueue.Get(call.SessionID)
 			if !ok {
 				existing = nil
 			}
-			continuation := prepareGoalContinuation(call, result.Steps)
+			state = state.NextTurn()
+			if err := a.saveGoalState(ctx, &currentSession, &sessionLock, state); err != nil {
+				return nil, err
+			}
+			continuation := prepareGoalContinuation(call, state, result.Steps)
 			a.messageQueue.Set(call.SessionID, append([]SessionAgentCall{continuation}, existing...))
-			slog.Info("Goal remains active; scheduling continuation", "session_id", call.SessionID, "continuation", continuation.goalIteration)
+			slog.Info("Goal remains active; scheduling continuation", "session_id", call.SessionID, "turn", state.Turns, "reason", decision.Reason)
 		}
 	}
 
@@ -1782,12 +1848,24 @@ func prepareSummaryContinuation(call SessionAgentCall) SessionAgentCall {
 	call.TransientContext = "<summary_continuation>Continue the exact user objective from the new summary. Treat verified results as authoritative and choose the next step yourself.</summary_continuation>"
 	if call.goalMode {
 		call.TransientContext = appendTransientContext(call.goalBaseContext, call.TransientContext)
-		call.TransientContext = appendTransientContext(call.TransientContext, goalModeContext(call.goalIteration, nil))
+		call.TransientContext = appendTransientContext(call.TransientContext, goal.Context(call.goalState, nil))
 	}
 	call.Attachments = nil
 	call.Accepted = nil
 	call.skipUserMessage = true
 	return call
+}
+
+func (a *sessionAgent) saveGoalState(ctx context.Context, current *session.Session, lock *sync.Mutex, state goal.State) error {
+	lock.Lock()
+	defer lock.Unlock()
+	current.Goal = state
+	updated, err := a.sessions.Save(ctx, *current)
+	if err != nil {
+		return fmt.Errorf("saving goal state: %w", err)
+	}
+	*current = updated
+	return nil
 }
 
 func isAcknowledgement(text string) bool {
@@ -1830,42 +1908,6 @@ func isContextOverflowError(err error) bool {
 		}
 	}
 	return false
-}
-
-func contextRetryTools(agentTools []fantasy.AgentTool) []fantasy.AgentTool {
-	allowed := map[string]bool{
-		tools.BashToolName:      true,
-		tools.CrushInfoToolName: true,
-		tools.SourcesToolName:   true,
-		tools.FetchToolName:     true,
-		tools.GlobToolName:      true,
-		tools.GrepToolName:      true,
-		tools.JobKillToolName:   true,
-		tools.JobListToolName:   true,
-		tools.JobOutputToolName: true,
-		tools.LSToolName:        true,
-		tools.TmuxToolName:      true,
-		tools.TodosToolName:     true,
-		tools.ViewToolName:      true,
-		tools.WebFetchToolName:  true,
-		tools.WebSearchToolName: true,
-	}
-	if raw := strings.TrimSpace(os.Getenv("CRUSH_CONTEXT_RETRY_TOOLS")); raw != "" {
-		allowed = map[string]bool{}
-		for _, name := range strings.Split(raw, ",") {
-			name = strings.TrimSpace(name)
-			if name != "" {
-				allowed[name] = true
-			}
-		}
-	}
-	filtered := make([]fantasy.AgentTool, 0, len(agentTools))
-	for _, tool := range agentTools {
-		if allowed[tool.Info().Name] {
-			filtered = append(filtered, tool)
-		}
-	}
-	return filtered
 }
 
 func contextRetrySystemPrompt(recoveryContext string) string {
@@ -1992,12 +2034,33 @@ func agentToolNames(tools []fantasy.AgentTool) []string {
 }
 
 func activateDeferredTools(base []fantasy.AgentTool, steps []fantasy.StepResult) []fantasy.AgentTool {
-	selected := deferredToolSelections(steps)
-	if len(selected) == 0 {
+	if len(steps) == 0 {
 		return base
 	}
+	for _, params := range deferredToolSearches(steps) {
+		if selected := tools.DeferredToolSelectionNames(params.Query); len(selected) > 0 {
+			base = activateNamedDeferredTools(base, selected)
+			continue
+		}
+		base = activateMatchedDeferredTools(base, params)
+	}
+	return base
+}
 
-	seen := make(map[string]struct{}, len(base)+len(selected))
+func activateNamedDeferredTools(base []fantasy.AgentTool, selected []string) []fantasy.AgentTool {
+	return appendResolvedDeferredTools(base, func(provider tools.DeferredToolProvider) []fantasy.AgentTool {
+		return provider.ResolveDeferredTools(selected)
+	})
+}
+
+func activateMatchedDeferredTools(base []fantasy.AgentTool, params tools.MCPToolSearchParams) []fantasy.AgentTool {
+	return appendResolvedDeferredTools(base, func(provider tools.DeferredToolProvider) []fantasy.AgentTool {
+		return provider.ResolveDeferredToolSearch(params)
+	})
+}
+
+func appendResolvedDeferredTools(base []fantasy.AgentTool, resolve func(tools.DeferredToolProvider) []fantasy.AgentTool) []fantasy.AgentTool {
+	seen := make(map[string]struct{}, len(base))
 	for _, tool := range base {
 		seen[tool.Info().Name] = struct{}{}
 	}
@@ -2008,7 +2071,7 @@ func activateDeferredTools(base []fantasy.AgentTool, steps []fantasy.StepResult)
 		if !ok {
 			continue
 		}
-		for _, deferred := range provider.ResolveDeferredTools(selected) {
+		for _, deferred := range resolve(provider) {
 			name := deferred.Info().Name
 			if _, ok := seen[name]; ok {
 				continue
@@ -2023,9 +2086,8 @@ func activateDeferredTools(base []fantasy.AgentTool, steps []fantasy.StepResult)
 	return append(base, resolved...)
 }
 
-func deferredToolSelections(steps []fantasy.StepResult) []string {
-	seen := make(map[string]struct{})
-	var selected []string
+func deferredToolSearches(steps []fantasy.StepResult) []tools.MCPToolSearchParams {
+	var searches []tools.MCPToolSearchParams
 	for _, step := range steps {
 		for _, call := range step.Content.ToolCalls() {
 			if call.ToolName != tools.MCPToolSearchToolName || call.Invalid {
@@ -2035,14 +2097,23 @@ func deferredToolSelections(steps []fantasy.StepResult) []string {
 			if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
 				continue
 			}
-			for _, name := range tools.DeferredToolSelectionNames(params.Query) {
-				key := strings.ToLower(name)
-				if _, ok := seen[key]; ok {
-					continue
-				}
-				seen[key] = struct{}{}
-				selected = append(selected, name)
+			searches = append(searches, params)
+		}
+	}
+	return searches
+}
+
+func deferredToolSelections(steps []fantasy.StepResult) []string {
+	seen := make(map[string]struct{})
+	var selected []string
+	for _, params := range deferredToolSearches(steps) {
+		for _, name := range tools.DeferredToolSelectionNames(params.Query) {
+			key := strings.ToLower(name)
+			if _, ok := seen[key]; ok {
+				continue
 			}
+			seen[key] = struct{}{}
+			selected = append(selected, name)
 		}
 	}
 	return selected

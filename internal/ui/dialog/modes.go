@@ -228,7 +228,7 @@ func (m *Modes) setModeItems() {
 	}
 	m.modeList.SetItems(items...)
 	m.modeList.SetSelected(selected)
-	m.modeList.ScrollToSelected()
+	m.modeList.ScrollToTop()
 }
 
 func adjacentModelType(current config.SelectedModelType, direction int) config.SelectedModelType {

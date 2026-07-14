@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
@@ -299,12 +300,27 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	}
 
 	originalPrompt := prompt
-	expandedPrompt, explicitlyLoaded := injectExplicitSkillInvocations(prompt, c.activeSkills)
-	transientContext := skillTransientContext(originalPrompt, expandedPrompt, explicitlyLoaded)
+	transientContext := ""
+	var explicitlyLoaded []string
 	goalMode := c.CurrentAgentID() == config.AgentGoal
 	goalBaseContext := transientContext
+	goalState := goal.State{}
 	if goalMode {
-		transientContext = appendTransientContext(transientContext, goalModeContext(0, nil))
+		currentSession, err := c.sessions.Get(ctx, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load goal state: %w", err)
+		}
+		if currentSession.Goal.Objective != "" && currentSession.Goal.Status != goal.StatusComplete {
+			goalState = currentSession.Goal.Resume()
+		} else {
+			goalState = goal.Start(originalPrompt)
+		}
+		if workflow, ok := findSkill(c.activeSkills, "goal-project-init"); ok {
+			transientContext = appendTransientContext(transientContext, workflow.FormatInvocation())
+			explicitlyLoaded = append(explicitlyLoaded, workflow.Name)
+		}
+		goalBaseContext = transientContext
+		transientContext = appendTransientContext(transientContext, goal.Context(goalState, nil))
 	}
 	for _, name := range explicitlyLoaded {
 		c.MarkSkillLoaded(name)
@@ -383,6 +399,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			originalIntent:   originalPrompt,
 			goalMode:         goalMode,
 			goalBaseContext:  goalBaseContext,
+			goalState:        goalState,
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
@@ -414,11 +431,13 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	return result, originalErr
 }
 
-func skillTransientContext(originalPrompt, expandedPrompt string, loaded []string) string {
-	if len(loaded) == 0 {
-		return ""
+func findSkill(active []*skills.Skill, name string) (*skills.Skill, bool) {
+	for _, skill := range active {
+		if skill != nil && skill.Name == name && skill.Instructions != "" {
+			return skill, true
+		}
 	}
-	return strings.TrimSuffix(expandedPrompt, "\n\n"+originalPrompt)
+	return nil, false
 }
 
 func appendTransientContext(existing, addition string) string {
@@ -431,47 +450,6 @@ func appendTransientContext(existing, addition string) string {
 		return existing
 	}
 	return existing + "\n\n" + addition
-}
-
-func injectExplicitSkillInvocations(userPrompt string, activeSkills []*skills.Skill) (string, []string) {
-	if strings.Contains(userPrompt, "<loaded_skill>") {
-		return userPrompt, nil
-	}
-
-	lowerPrompt := strings.ToLower(userPrompt)
-	activationVerbs := []string{"load", "use", "follow", "invoke", "apply"}
-	var loaded []*skills.Skill
-	for _, skill := range activeSkills {
-		if skill == nil || skill.Name == "" || skill.Instructions == "" || skill.DisableModelInvocation {
-			continue
-		}
-		nameAt := strings.Index(lowerPrompt, strings.ToLower(skill.Name))
-		explicit := false
-		if nameAt >= 0 {
-			windowStart := max(0, nameAt-120)
-			windowEnd := min(len(lowerPrompt), nameAt+len(skill.Name)+120)
-			window := lowerPrompt[windowStart:windowEnd]
-			explicit = slices.ContainsFunc(activationVerbs, func(verb string) bool {
-				return strings.Contains(window, verb)
-			})
-		}
-		if !explicit {
-			continue
-		}
-		loaded = append(loaded, skill)
-	}
-	if len(loaded) == 0 {
-		return userPrompt, nil
-	}
-
-	parts := make([]string, 0, len(loaded)+1)
-	names := make([]string, 0, len(loaded))
-	for _, skill := range loaded {
-		parts = append(parts, skill.FormatInvocation())
-		names = append(names, skill.Name)
-	}
-	parts = append(parts, userPrompt)
-	return strings.Join(parts, "\n\n"), names
 }
 
 // effectiveReasoningEffort returns the reasoning effort to apply for provider calls.

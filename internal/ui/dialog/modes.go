@@ -17,7 +17,7 @@ const (
 	// ModesID is the identifier for the agent mode picker dialog.
 	ModesID              = "modes"
 	modesDialogMaxWidth  = 72
-	modesDialogMaxHeight = 11
+	modesDialogMaxHeight = 12
 )
 
 type modeDefinition struct {

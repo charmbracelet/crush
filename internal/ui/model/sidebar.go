@@ -85,13 +85,13 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	visible := strings.Join(lines[offset:end], "\n")
 
 	contentArea := bodyArea
-	contentArea.Min.X++
+	contentArea.Max.X--
 	uv.NewStyledString(visible).Draw(scr, contentArea)
 
 	scrollbar := common.Scrollbar(m.com.Styles, viewportHeight, len(lines), viewportHeight, offset)
 	if scrollbar != "" {
 		scrollbarArea := bodyArea
-		scrollbarArea.Max.X = scrollbarArea.Min.X + 1
+		scrollbarArea.Min.X = scrollbarArea.Max.X - 1
 		uv.NewStyledString(scrollbar).Draw(scr, scrollbarArea)
 	}
 }

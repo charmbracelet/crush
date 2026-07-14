@@ -25,7 +25,8 @@ func goalModeContext(iteration int, failures []goalFailure) string {
 	var context strings.Builder
 	context.WriteString("<goal_mode>\n")
 	context.WriteString("Continue autonomously toward the user's exact objective. Choose tools from current evidence; no tool is forced. ")
-	context.WriteString("Call goal_status with complete only after verification, or blocked only when external input or state is required. ")
+	context.WriteString("Use goal_status with complete after verification, or blocked when external input or state is required. ")
+	context.WriteString("A normal final response also ends the run; do not repeat completed work only to report status. ")
 	context.WriteString("Do not call goal_status for an intermediate failure.\n")
 	fmt.Fprintf(&context, "Continuation %d of %d.\n", iteration, maxGoalContinuations)
 	if len(failures) > 0 {
@@ -36,6 +37,13 @@ func goalModeContext(iteration int, failures []goalFailure) string {
 	}
 	context.WriteString("</goal_mode>")
 	return context.String()
+}
+
+func goalNeedsContinuation(steps []fantasy.StepResult) bool {
+	if len(steps) == 0 {
+		return false
+	}
+	return steps[len(steps)-1].FinishReason == fantasy.FinishReasonLength
 }
 
 func prepareGoalContinuation(call SessionAgentCall, steps []fantasy.StepResult) SessionAgentCall {

@@ -997,6 +997,29 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
+	stopWhen := []fantasy.StopCondition{
+		func(_ []fantasy.StepResult) bool {
+			cw := int64(largeModel.CatwalkCfg.ContextWindow)
+			// If context window is unknown (0), skip auto-summarize
+			// to avoid immediately truncating custom/local models.
+			if cw == 0 {
+				return false
+			}
+			tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+			remaining := cw - tokens
+			threshold := autoSummaryBuffer(cw)
+			if (remaining <= threshold) && !a.disableAutoSummarize {
+				shouldSummarize = true
+				slog.Info("Auto-summary threshold reached", "session_id", call.SessionID, "tokens", tokens, "context_window", cw, "remaining", remaining, "threshold", threshold)
+				return true
+			}
+			return false
+		},
+	}
+	if call.goalMode {
+		stopWhen = append(stopWhen, fantasy.HasToolCall(tools.GoalStatusToolName))
+	}
+
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
@@ -1236,25 +1259,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			currentSession = updatedSession
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool {
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
-				// If context window is unknown (0), skip auto-summarize
-				// to avoid immediately truncating custom/local models.
-				if cw == 0 {
-					return false
-				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-				remaining := cw - tokens
-				threshold := autoSummaryBuffer(cw)
-				if (remaining <= threshold) && !a.disableAutoSummarize {
-					shouldSummarize = true
-					slog.Info("Auto-summary threshold reached", "session_id", call.SessionID, "tokens", tokens, "context_window", cw, "remaining", remaining, "threshold", threshold)
-					return true
-				}
-				return false
-			},
-		},
+		StopWhen: stopWhen,
 	})
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
@@ -1427,6 +1432,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		switch {
 		case terminal:
 			slog.Info("Goal reached terminal status", "session_id", call.SessionID, "status", status, "continuations", call.goalIteration)
+		case !goalNeedsContinuation(result.Steps):
+			slog.Info("Goal finished on normal model stop", "session_id", call.SessionID, "continuations", call.goalIteration)
 		case call.goalIteration >= maxGoalContinuations:
 			slog.Warn("Goal continuation limit reached", "session_id", call.SessionID, "continuations", call.goalIteration)
 		default:

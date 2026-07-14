@@ -24,9 +24,9 @@ func (m *goalLifecycleModel) Stream(_ context.Context, _ fantasy.Call) (fantasy.
 		switch callNumber {
 		case 1:
 			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "progress"})
-			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "progress", Delta: "Work remains."})
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "progress", Delta: "Output was truncated."})
 			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "progress"})
-			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonLength})
 		case 2:
 			input := `{"status":"complete","summary":"verification passed"}`
 			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputStart, ID: "goal-1", ToolCallName: tools.GoalStatusToolName})
@@ -62,6 +62,18 @@ func TestTerminalGoalStatusRequiresSuccessfulToolResult(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestGoalNeedsContinuationOnlyForOutputLength(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, goalNeedsContinuation(nil))
+	require.False(t, goalNeedsContinuation([]fantasy.StepResult{{
+		Response: fantasy.Response{FinishReason: fantasy.FinishReasonStop},
+	}}))
+	require.True(t, goalNeedsContinuation([]fantasy.StepResult{{
+		Response: fantasy.Response{FinishReason: fantasy.FinishReasonLength},
+	}}))
+}
+
 func TestPrepareGoalContinuationPreservesIntentAndObservesFailures(t *testing.T) {
 	t.Parallel()
 
@@ -82,7 +94,7 @@ func TestPrepareGoalContinuationPreservesIntentAndObservesFailures(t *testing.T)
 	require.Contains(t, call.TransientContext, "Exit code 1")
 }
 
-func TestGoalModeContinuesUntilTerminalStatus(t *testing.T) {
+func TestGoalModeContinuesAfterOutputLengthUntilTerminalStatus(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
@@ -119,7 +131,7 @@ func TestGoalModeContinuesUntilTerminalStatus(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, int64(3), model.calls.Load())
+	require.Equal(t, int64(2), model.calls.Load())
 	require.Equal(t, 0, agent.QueuedPrompts(session.ID))
 	status, ok := terminalGoalStatus(result.Steps)
 	require.True(t, ok)

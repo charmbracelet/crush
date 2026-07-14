@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,4 +35,13 @@ func TestInteractiveModesMapTaskToWritableCoder(t *testing.T) {
 		{ID: config.AgentGoal, Title: "Goal"},
 		{ID: config.AgentReview, Title: "Review"},
 	}, modeDefinitions)
+}
+
+func TestModesDialogKeepsEveryModeVisible(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	heightOffset := sty.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
+		sty.Dialog.HelpView.GetVerticalFrameSize() + sty.Dialog.View.GetVerticalFrameSize()
+	require.GreaterOrEqual(t, modesDialogMaxHeight-heightOffset, len(modeDefinitions))
 }

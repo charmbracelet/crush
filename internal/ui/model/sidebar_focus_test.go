@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,6 +59,29 @@ func TestSidebarScrollIncrements(t *testing.T) {
 
 	m.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyDown})
 	require.Greater(t, m.sidebarScroll, 0, "scroll should increment on down")
+}
+
+// TestSidebarMouseWheelScrollsInChatDirection verifies the mouse wheel over
+// the sidebar scrolls in the same direction as the chat panel and the Down
+// key: wheel-down (DeltaY>0) increases the scroll offset (shows lower content).
+func TestSidebarMouseWheelScrollsInChatDirection(t *testing.T) {
+	t.Parallel()
+	m := newSidebarTestUI()
+	m.layout.sidebar = uv.Rect(0, 0, 40, 50) // sidebar spans x in [0,40)
+	m.sidebarScroll = 5
+
+	// Wheel down over the sidebar → scroll down (offset increases).
+	handled := m.scrollSidebarOnWheel(common.CoalescedWheelMsg{Mouse: tea.Mouse{X: 10}, DeltaY: 3})
+	require.True(t, handled, "wheel over the sidebar should be handled by the sidebar")
+	require.Equal(t, 8, m.sidebarScroll, "wheel down should scroll the sidebar down")
+
+	// Wheel up over the sidebar → scroll up (offset decreases).
+	m.scrollSidebarOnWheel(common.CoalescedWheelMsg{Mouse: tea.Mouse{X: 10}, DeltaY: -2})
+	require.Equal(t, 6, m.sidebarScroll, "wheel up should scroll the sidebar up")
+
+	// Wheel outside the sidebar's x-range is not handled here.
+	handled = m.scrollSidebarOnWheel(common.CoalescedWheelMsg{Mouse: tea.Mouse{X: 100}, DeltaY: 3})
+	require.False(t, handled, "wheel outside the sidebar should not be handled by it")
 }
 
 // TestSidebarFocusEnumExists documents the three-state non-compact cycle.

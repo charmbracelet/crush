@@ -127,6 +127,21 @@ func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skil
 	return maxFiles, maxLSPs, maxMCPs, maxSkills
 }
 
+// scrollSidebarOnWheel scrolls the sidebar when a wheel event lands over it,
+// returning true if it handled the event. DeltaY>0 is a scroll-down (matching
+// list.ScrollBy and the chat wheel handler), and a higher sidebarScroll shows
+// lower content, so the delta is added — keeping the wheel consistent with the
+// chat panel and the Down key. The upper bound is clamped at draw time.
+func (m *UI) scrollSidebarOnWheel(msg common.CoalescedWheelMsg) bool {
+	if msg.Mouse.X < m.layout.sidebar.Min.X || msg.Mouse.X >= m.layout.sidebar.Max.X {
+		return false
+	}
+	if lines := int(msg.DeltaY); lines != 0 {
+		m.sidebarScroll = max(0, m.sidebarScroll+lines)
+	}
+	return true
+}
+
 // sidebar renders the chat sidebar containing session title, working
 // directory, model info, file list, LSP status, and MCP status.
 func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
@@ -217,9 +232,10 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		skillsSection,
 	)
 
-	// Apply scroll offset when focused. Clamp against real content height.
+	// Apply scroll offset. Clamp against real content height.
 	contentLines := strings.Split(fullContent, "\n")
-	maxScroll := max(0, len(contentLines)-height)
+	contentHeight := len(contentLines)
+	maxScroll := max(0, contentHeight-height)
 	m.sidebarScroll = min(m.sidebarScroll, maxScroll)
 	scroll := min(m.sidebarScroll, maxScroll)
 	if scroll > 0 && scroll < len(contentLines) {
@@ -227,13 +243,22 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	}
 	scrolledContent := strings.Join(contentLines, "\n")
 
-	renderStyle := lipgloss.NewStyle().
-		MaxWidth(width).
-		MaxHeight(height)
-	if focused {
-		renderStyle = renderStyle.BorderLeft(true).BorderStyle(lipgloss.ThickBorder())
+	// Reserve 1 column for scrollbar when focused (same pattern as chat panel).
+	contentWidth := width
+	var scrollbar string
+	if focused && contentHeight > height {
+		contentWidth = width - 1
+		scrollbar = common.Scrollbar(t, height, contentHeight, height, scroll)
 	}
-	uv.NewStyledString(
-		renderStyle.Render(scrolledContent),
-	).Draw(scr, area)
+
+	contentStyle := lipgloss.NewStyle().
+		MaxWidth(contentWidth).
+		MaxHeight(height)
+	rendered := contentStyle.Render(scrolledContent)
+
+	if scrollbar != "" {
+		rendered = lipgloss.JoinHorizontal(lipgloss.Top, rendered, scrollbar)
+	}
+
+	uv.NewStyledString(rendered).Draw(scr, area)
 }

@@ -935,6 +935,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
+			// Route wheel events to the sidebar if the cursor is over it.
+			if m.scrollSidebarOnWheel(msg) {
+				break
+			}
 			if msg.DeltaX != 0 {
 				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
 			}

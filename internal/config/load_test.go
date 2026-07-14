@@ -26,6 +26,34 @@ func TestMain(m *testing.M) {
 	os.Exit(exitVal)
 }
 
+func TestPushPopCrushEnv(t *testing.T) {
+	t.Run("restores an existing variable", func(t *testing.T) {
+		t.Setenv("CRUSH_TEST_PUSH_POP_EXISTING", "override")
+		t.Setenv("TEST_PUSH_POP_EXISTING", "original")
+
+		restore := PushPopCrushEnv()
+		t.Cleanup(restore)
+		require.Equal(t, "override", os.Getenv("TEST_PUSH_POP_EXISTING"))
+
+		restore()
+		require.Equal(t, "original", os.Getenv("TEST_PUSH_POP_EXISTING"))
+	})
+
+	t.Run("unsets a variable that did not exist", func(t *testing.T) {
+		t.Setenv("CRUSH_TEST_PUSH_POP_UNSET", "temporary")
+		require.NoError(t, os.Unsetenv("TEST_PUSH_POP_UNSET"))
+		t.Cleanup(func() { _ = os.Unsetenv("TEST_PUSH_POP_UNSET") })
+
+		restore := PushPopCrushEnv()
+		t.Cleanup(restore)
+		require.Equal(t, "temporary", os.Getenv("TEST_PUSH_POP_UNSET"))
+
+		restore()
+		_, exists := os.LookupEnv("TEST_PUSH_POP_UNSET")
+		require.False(t, exists)
+	})
+}
+
 func TestConfig_LoadFromBytes(t *testing.T) {
 	data1 := []byte(`{"providers": {"openai": {"api_key": "key1", "base_url": "https://api.openai.com/v1"}}}`)
 	data2 := []byte(`{"providers": {"openai": {"api_key": "key2", "base_url": "https://api.openai.com/v2"}}}`)

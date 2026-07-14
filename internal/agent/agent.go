@@ -32,6 +32,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
+	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
@@ -1345,7 +1346,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
-		ProviderOptions: opts,
+		ProviderOptions: disableThinkingOptions(opts, largeModel.CatwalkCfg.CanReason),
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
@@ -1434,6 +1435,55 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
+}
+
+// disableThinkingOptions injects provider-specific options to disable
+// reasoning/thinking for models that support it. This ensures that small
+// background requests (like summarization) do not fail when using local
+// Llama.cpp servers or other thinking-capable models.
+func disableThinkingOptions(opts fantasy.ProviderOptions, canReason bool) fantasy.ProviderOptions {
+	if !canReason {
+		return opts
+	}
+
+	summaryOpts := make(fantasy.ProviderOptions, len(opts)+2)
+	for k, v := range opts {
+		summaryOpts[k] = v
+	}
+
+	// Disable for Anthropic
+	var anthropicOpts *anthropic.ProviderOptions
+	if a, ok := summaryOpts[anthropic.Name].(*anthropic.ProviderOptions); ok && a != nil {
+		copyOpts := *a
+		anthropicOpts = &copyOpts
+	} else {
+		anthropicOpts = &anthropic.ProviderOptions{}
+	}
+	omitted := anthropic.ThinkingDisplayOmitted
+	anthropicOpts.ThinkingDisplay = &omitted
+	summaryOpts[anthropic.Name] = anthropicOpts
+
+	// Disable for OpenAI-compatible (Ollama/Llama.cpp)
+	var openaicompatOpts *openaicompat.ProviderOptions
+	if o, ok := summaryOpts[openaicompat.Name].(*openaicompat.ProviderOptions); ok && o != nil {
+		copyOpts := *o
+		openaicompatOpts = &copyOpts
+	} else {
+		openaicompatOpts = &openaicompat.ProviderOptions{}
+	}
+	if openaicompatOpts.ExtraBody == nil {
+		openaicompatOpts.ExtraBody = make(map[string]any)
+	} else {
+		newBody := make(map[string]any, len(openaicompatOpts.ExtraBody)+1)
+		for k, v := range openaicompatOpts.ExtraBody {
+			newBody[k] = v
+		}
+		openaicompatOpts.ExtraBody = newBody
+	}
+	openaicompatOpts.ExtraBody["thinking"] = false
+	summaryOpts[openaicompat.Name] = openaicompatOpts
+
+	return summaryOpts
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
@@ -1744,6 +1794,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		if attempt.model.CatwalkCfg.CanReason {
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
+		streamCall.ProviderOptions = disableThinkingOptions(nil, attempt.model.CatwalkCfg.CanReason)
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {

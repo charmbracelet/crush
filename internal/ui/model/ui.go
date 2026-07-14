@@ -1670,6 +1670,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionMCPReconnect:
 		m.dialog.CloseDialog(dialog.MCPServersID)
+		m.dialog.CloseDialog(dialog.ChannelsID)
 		cmds = append(cmds, func() tea.Msg {
 			ctx := context.Background()
 			if err := m.com.Workspace.MCPReconnect(ctx, msg.ServerName); err != nil {
@@ -3893,6 +3894,8 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		}
 	case dialog.MCPServersID:
 		m.openMCPServersDialog()
+	case dialog.ChannelsID:
+		m.openChannelsDialog()
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4000,6 +4003,16 @@ func (m *UI) openMCPServersDialog() {
 	}
 	mcpDialog := dialog.NewMCPServers(m.com, m.com.Workspace)
 	m.dialog.OpenDialog(mcpDialog)
+}
+
+// openChannelsDialog opens the channels management dialog.
+func (m *UI) openChannelsDialog() {
+	if m.dialog.ContainsDialog(dialog.ChannelsID) {
+		m.dialog.BringToFront(dialog.ChannelsID)
+		return
+	}
+	channelsDialog := dialog.NewChannels(m.com, m.com.Workspace)
+	m.dialog.OpenDialog(channelsDialog)
 }
 
 // openSkillsDialog opens the skills management dialog.

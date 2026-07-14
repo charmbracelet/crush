@@ -203,6 +203,25 @@ func TestIsDangerousCommand(t *testing.T) {
 			command:   "brew install wget",
 			dangerous: true,
 		},
+		{
+			// Quoting the command name must not evade detection.
+			name:      "quoted dangerous command name",
+			command:   `"brew" install wget`,
+			dangerous: true,
+		},
+		{
+			// Quoted arguments must still be seen by argument blockers.
+			name:      "quoted dangerous argument",
+			command:   `go test "-exec" ./malicious ./...`,
+			dangerous: true,
+		},
+		{
+			// Command substitution can't be resolved without executing, so
+			// it is treated conservatively as dangerous.
+			name:      "command substitution is conservative",
+			command:   "$(echo brew) install wget",
+			dangerous: true,
+		},
 	}
 
 	for _, tt := range tests {

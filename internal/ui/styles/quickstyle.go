@@ -741,11 +741,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.QuestionRadioOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 	s.Editor.QuestionCheckOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
 	s.Editor.QuestionCheckOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
-	// Super Yolo
-	s.Editor.PromptSuperYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.destructive).Bold(true).SetString(" # ")
-	s.Editor.PromptSuperYoloIconBlurred = s.Editor.PromptSuperYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
-	s.Editor.PromptSuperYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.destructive).SetString(":::")
-	s.Editor.PromptSuperYoloDotsBlurred = s.Editor.PromptSuperYoloDotsFocused.Foreground(o.fgMoreSubtle)
+	// Sysadmin
+	s.Editor.PromptSysadminIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.destructive).Bold(true).SetString(" # ")
+	s.Editor.PromptSysadminIconBlurred = s.Editor.PromptSysadminIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptSysadminDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.destructive).SetString(":::")
+	s.Editor.PromptSysadminDotsBlurred = s.Editor.PromptSysadminDotsFocused.Foreground(o.fgMoreSubtle)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)

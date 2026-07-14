@@ -1435,7 +1435,13 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if existingItem != nil {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
-			assistantItem.SetMessage(&msg)
+			// SetMessage returns a StartAnimation Cmd when the message
+			// transitions back to spinning (e.g. its streamed content was
+			// reset for a retry). Propagate it so the spinner re-arms
+			// instead of freezing.
+			if cmd := assistantItem.SetMessage(&msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	}
 

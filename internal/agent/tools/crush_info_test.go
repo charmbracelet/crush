@@ -165,18 +165,18 @@ func TestCrushInfo_YoloMode(t *testing.T) {
 	require.Contains(t, output, "mode = yolo")
 }
 
-func TestCrushInfo_SuperYoloMode(t *testing.T) {
+func TestCrushInfo_SysadminMode(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
 		Providers:   csync.NewMap[string, config.ProviderConfig](),
 		Permissions: &config.Permissions{},
 	})
-	cfg.Overrides().PermissionMode = permission.PermissionModeSuperYolo
+	cfg.Overrides().PermissionMode = permission.PermissionModeSysadmin
 
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
-	require.Contains(t, output, "mode = super_yolo")
+	require.Contains(t, output, "mode = sysadmin")
 }
 
 func TestCrushInfo_AllowedTools(t *testing.T) {

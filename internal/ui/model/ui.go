@@ -2663,19 +2663,6 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds = append(binds, cancelBinding)
 		}
 
-		switch m.focus {
-		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
-		case uiFocusMain:
-			if m.isCompact {
-				tab.SetHelp("tab", "focus editor")
-			} else {
-				tab.SetHelp("tab", "focus sidebar")
-			}
-		case uiFocusSidebar:
-			tab.SetHelp("tab", "focus editor")
-		}
-
 		binds = append(
 			binds,
 			tab,
@@ -2704,10 +2691,11 @@ func (m *UI) ShortHelp() []key.Binding {
 		case uiFocusSidebar:
 			esc := k.Editor.Escape
 			esc.SetHelp("esc", "back to editor")
-			k.Chat.UpDown.SetHelp("↑/↓", "scroll")
+			upDown := k.Chat.UpDown
+			upDown.SetHelp("↑/↓", "scroll")
 			binds = append(
 				binds,
-				k.Chat.UpDown,
+				upDown,
 				esc,
 			)
 		}
@@ -2765,18 +2753,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 		mainBinds := []key.Binding{}
 		tab := k.Tab
-		switch m.focus {
-		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
-		case uiFocusMain:
-			if m.isCompact {
-				tab.SetHelp("tab", "focus editor")
-			} else {
-				tab.SetHelp("tab", "focus sidebar")
-			}
-		case uiFocusSidebar:
-			tab.SetHelp("tab", "focus editor")
-		}
 
 		mainBinds = append(
 			mainBinds,
@@ -3463,6 +3439,9 @@ func isWhitespace(b byte) bool {
 func (m *UI) isAgentBusy() bool {
 	if m.bangCancel != nil {
 		return true
+	}
+	if m.com == nil || m.com.Workspace == nil {
+		return false
 	}
 	return m.com.Workspace.AgentIsReady() &&
 		m.com.Workspace.AgentIsBusy()

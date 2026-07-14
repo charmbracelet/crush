@@ -25,6 +25,7 @@ func newSidebarTestUI() *UI {
 		dialog:   dialog.NewOverlay(),
 		chat:     NewChat(com, config.ScrollbarDefault),
 		textarea: textarea.New(),
+		keyMap:   DefaultKeyMap(),
 	}
 }
 

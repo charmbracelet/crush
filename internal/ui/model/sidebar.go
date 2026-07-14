@@ -144,6 +144,21 @@ func (m *UI) scrollSidebarOnWheel(msg common.CoalescedWheelMsg) bool {
 	return true
 }
 
+// sidebarScrollbarLayout decides how the sidebar splits its horizontal space
+// between content and the scrollbar column. When the content overflows the
+// viewport a 1-column gutter is reserved regardless of focus — focused draws a
+// real scrollbar, unfocused a blank spacer — so the content width (and thus the
+// alignment of elements like the logo) stays stable across focus transitions.
+func sidebarScrollbarLayout(width, contentHeight, viewportHeight int) (contentWidth int, scrollbarNeeded bool) {
+	const scrollbarWidth = 1
+	scrollbarNeeded = contentHeight > viewportHeight
+	contentWidth = width
+	if scrollbarNeeded {
+		contentWidth = max(width-scrollbarWidth, 0)
+	}
+	return contentWidth, scrollbarNeeded
+}
+
 // sidebar renders the chat sidebar containing session title, working
 // directory, model info, file list, LSP status, and MCP status.
 func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
@@ -250,20 +265,28 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	}
 	scrolledContent := strings.Join(contentLines, "\n")
 
-	// Reserve 1 column for scrollbar when focused (same pattern as chat panel).
-	contentWidth := width
-	var scrollbar string
-	if focused && contentHeight > height {
-		contentWidth = width - 1
-		scrollbar = common.Scrollbar(t, height, contentHeight, height, scroll)
-	}
+	contentWidth, scrollbarNeeded := sidebarScrollbarLayout(width, contentHeight, height)
 
 	contentStyle := lipgloss.NewStyle().
 		MaxWidth(contentWidth).
 		MaxHeight(height)
 	rendered := contentStyle.Render(scrolledContent)
 
-	if scrollbar != "" {
+	if scrollbarNeeded {
+		var scrollbar string
+		if focused {
+			scrollbar = common.Scrollbar(t, height, contentHeight, height, scroll)
+		} else {
+			var sb strings.Builder
+			for i := 0; i < height; i++ {
+				if i > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(" ")
+			}
+			scrollbar = sb.String()
+		}
+
 		rendered = lipgloss.JoinHorizontal(lipgloss.Top, rendered, scrollbar)
 	}
 

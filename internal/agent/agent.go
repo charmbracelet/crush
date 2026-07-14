@@ -931,6 +931,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+			// Reset streamed content so the retried response doesn't
+			// concatenate with partial content from the failed attempt.
+			// On the final attempt (no more retries), any partial content
+			// stays in the message as useful context beneath the error.
+			currentAssistant.ResetStreamedContent()
+			if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
+				slog.Error("Failed to reset message on retry", "error", updateErr)
+			}
 		},
 		OnAuthRefresh: call.OnAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
@@ -1160,6 +1168,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 		} else if errors.As(err, &fantasyErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+		} else if fantasy.IsTransportError(err) {
+			wrapped := fantasy.NewTransportError(err)
+			currentAssistant.AddFinish(message.FinishReasonError, stringext.Capitalize(wrapped.Title), wrapped.Message)
 		} else {
 			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
 		}

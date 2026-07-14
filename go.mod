@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.8
 	charm.land/catwalk v0.49.25
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.37.3
+	charm.land/fantasy v0.38.0
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.5
 	charm.land/log/v2 v2.0.0
@@ -28,7 +28,7 @@ require (
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260527151214-009e6338d40d
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
 	github.com/charmbracelet/x/exp/ordered v0.1.0
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260622092256-25656177ba8e
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260713092006-0d683c34c74b
 	github.com/charmbracelet/x/exp/strings v0.1.0
 	github.com/charmbracelet/x/powernap v0.1.6
 	github.com/charmbracelet/x/term v0.2.2
@@ -147,7 +147,7 @@ require (
 	github.com/jackmordaunt/icns/v3 v3.0.1 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
-	github.com/kaptinlin/jsonpointer v0.4.27 // indirect
+	github.com/kaptinlin/jsonpointer v0.4.28 // indirect
 	github.com/kaptinlin/jsonschema v0.9.3 // indirect
 	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect

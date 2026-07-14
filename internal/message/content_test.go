@@ -140,3 +140,36 @@ func BenchmarkPromptWithTextAttachments(b *testing.B) {
 		})
 	}
 }
+
+func TestResetStreamedContent(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.AddImageURL("https://example.com/img.png", "high")
+	msg.AppendContent("partial answer")
+	msg.AppendReasoningContent("thinking...")
+	msg.AddToolCall(ToolCall{ID: "1", Name: "bash"})
+	msg.AddToolResult(ToolResult{ToolCallID: "1", Content: "output"})
+	msg.AddFinish(FinishReasonError, "boom", "stream died")
+
+	msg.ResetStreamedContent()
+
+	// Streamed parts are gone.
+	require.Empty(t, msg.Content().Text, "text should be cleared")
+	require.Empty(t, msg.ReasoningContent().Thinking, "reasoning should be cleared")
+	require.Empty(t, msg.ToolCalls(), "tool calls should be cleared")
+	require.Nil(t, msg.FinishPart(), "finish should be cleared")
+
+	// Non-streamed parts survive.
+	require.Len(t, msg.ImageURLContent(), 1, "image should survive")
+	require.Len(t, msg.ToolResults(), 1, "tool results should survive")
+}
+
+func TestResetStreamedContentEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Reset on an empty message is a no-op and must not panic.
+	msg := &Message{}
+	msg.ResetStreamedContent()
+	require.Empty(t, msg.Parts)
+}

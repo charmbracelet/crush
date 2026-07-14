@@ -700,6 +700,33 @@ API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 }
 ```
 
+#### DaoXE multi-protocol gateway
+
+[DaoXE](https://daoxe.com) is a multi-model multi-protocol API gateway. Use type `openai-compat` with base URL `https://daoxe.com/v1`. Model IDs are account-scoped—use an exact ID from your DaoXE dashboard or `GET /v1/models` (do not rely on a static public list). Not available in mainland China. Set `DAOXE_API_KEY` in your environment.
+
+DaoXE also exposes Anthropic Messages and other protocols for clients that speak those APIs; this Crush path uses OpenAI-compatible Chat Completions.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "daoxe": {
+      "type": "openai-compat",
+      "base_url": "https://daoxe.com/v1",
+      "api_key": "$DAOXE_API_KEY",
+      "models": [
+        {
+          "id": "YOUR_DAOXE_MODEL_ID",
+          "name": "DaoXE (account model ID)",
+          "context_window": 128000,
+          "default_max_tokens": 8192
+        }
+      ]
+    }
+  }
+}
+```
+
 #### Anthropic-Compatible APIs
 
 Custom Anthropic-compatible providers follow this format:

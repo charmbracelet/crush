@@ -111,7 +111,7 @@ func (p *PlanHandoffInline) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	y++ // blank
 
 	buttonOptsList := []common.ButtonOpts{
-		{Text: "Switch to code", Selected: !p.selectedNo, Padding: 3, UnderlineIndex: -1},
+		{Text: "Implement", Selected: !p.selectedNo, Padding: 3, UnderlineIndex: -1},
 		{Text: "Keep editing", Selected: p.selectedNo, Padding: 3, UnderlineIndex: -1},
 	}
 	hoveredBtn := common.HitButtonIndex(p.compositor, p.hoverX, p.hoverY)

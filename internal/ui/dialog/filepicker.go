@@ -221,30 +221,38 @@ const (
 
 // Draw renders the [FilePicker] dialog as a string.
 func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	width := max(0, min(filePickerMinWidth, area.Dx()))
-	height := max(0, min(10, area.Dy()))
-	innerWidth := width - f.com.Styles.Dialog.View.GetHorizontalFrameSize()
-	imgPrevHeight := filePickerMinHeight*2 - f.com.Styles.Dialog.ImagePreview.GetVerticalFrameSize()
-	imgPrevWidth := innerWidth - f.com.Styles.Dialog.ImagePreview.GetHorizontalFrameSize()
+	t := f.com.Styles
+	width := max(0, min(filePickerMinWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(10, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+
+	// Scale down image preview on small screens. Hide it entirely
+	// when the dialog is too short to show both preview and files.
+	imgPrevHeight := 0
+	if height > 5 {
+		imgPrevHeight = filePickerMinHeight*2 - t.Dialog.ImagePreview.GetVerticalFrameSize()
+	}
+	imgPrevWidth := innerWidth - t.Dialog.ImagePreview.GetHorizontalFrameSize()
 	f.imgPrevWidth = imgPrevWidth
 	f.imgPrevHeight = imgPrevHeight
 	f.fp.SetHeight(height)
 
-	styles := f.com.Styles.FilePicker
+	styles := t.FilePicker
 	styles.File = styles.File.Width(innerWidth)
 	styles.Directory = styles.Directory.Width(innerWidth)
 	styles.Selected = styles.Selected.PaddingLeft(1).Width(innerWidth)
 	styles.DisabledSelected = styles.DisabledSelected.PaddingLeft(1).Width(innerWidth)
 	f.fp.Styles = styles
 
-	t := f.com.Styles
 	rc := NewRenderContext(t, width)
 	rc.Gap = 1
 	rc.Title = "Add Image"
 	rc.Help = f.help.View(f)
 
-	imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview(imgPrevWidth, imgPrevHeight))
-	rc.AddPart(imgPreview)
+	if imgPrevHeight > 0 {
+		imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview(imgPrevWidth, imgPrevHeight))
+		rc.AddPart(imgPreview)
+	}
 
 	files := strings.TrimSpace(f.fp.View())
 	rc.AddPart(files)

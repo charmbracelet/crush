@@ -923,8 +923,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.TitleGradFromColor = o.primary
 	s.Dialog.TitleGradToColor = o.secondary
 
-	// Dialog.ListItem (commands, reasoning, models)
-	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgBase)
+	// Dialog.ListItem (commands, reasoning, models). The info column holds
+	// secondary hints like keybind shortcuts, so mute it when blurred and
+	// keep it readable on the focused row.
+	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	// Dialog.Models

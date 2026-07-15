@@ -61,9 +61,9 @@ var (
 )
 
 const (
-	planHandoffQuestion        = "Plan is ready. Switch to code mode?"
-	planHandoffFeedbackPrompt  = "What should be changed in the plan?"
-	planHandoffCollapsedPrompt = "Plan is ready · Tab to review actions"
+	planHandoffQuestion        = "Ready to start coding?"
+	planHandoffFeedbackPrompt  = "What should change?"
+	planHandoffCollapsedPrompt = "Plan ready · Tab for actions"
 )
 
 type planHandoffChoiceLayout struct {
@@ -105,11 +105,11 @@ func NewPlanHandoffInline(com *common.Common) *PlanHandoffInline {
 		),
 		keyYes: key.NewBinding(
 			key.WithKeys("y", "Y"),
-			key.WithHelp("y", "switch to code"),
+			key.WithHelp("y", "start coding"),
 		),
 		keyNo: key.NewBinding(
 			key.WithKeys("n", "N"),
-			key.WithHelp("n", "request changes"),
+			key.WithHelp("n", "revise plan"),
 		),
 		keyClose: CloseKey,
 	}
@@ -200,30 +200,27 @@ func (p *PlanHandoffInline) Height(width int) int {
 	if !p.editing {
 		return p.choiceLayout(width).height
 	}
-	iconPrompt := questionIconPrompt(p.com.Styles, p.focused)
-	return sectionHeight(planHandoffFeedbackPrompt, max(1, width-lipgloss.Width(iconPrompt))) +
+	return sectionHeight(planHandoffFeedbackPrompt, max(1, width)) +
 		1 + p.editor.Height() + 1
 }
 
 func (p *PlanHandoffInline) choiceLayout(width int) planHandoffChoiceLayout {
 	width = max(1, width)
-	iconPrompt := questionIconPrompt(p.com.Styles, p.focused)
-	iconWidth := lipgloss.Width(iconPrompt)
-	question := iconPrompt + p.com.Styles.Editor.QuestionUnselected.Render(
-		ansi.Wrap(planHandoffQuestion, max(1, width-iconWidth), ""),
+	question := p.com.Styles.Editor.QuestionUnselected.Render(
+		ansi.Wrap(planHandoffQuestion, width, ""),
 	)
 
 	hoveredBtn := common.HitButtonIndex(p.compositor, p.hoverX, p.hoverY)
 	buttons := []common.ButtonOpts{
 		{
-			Text:           "Implement",
+			Text:           "Start coding",
 			Selected:       !p.requestChangesSelected,
 			Hovered:        hoveredBtn == 0,
 			Padding:        3,
 			UnderlineIndex: -1,
 		},
 		{
-			Text:           "Request changes",
+			Text:           "Revise plan",
 			Selected:       p.requestChangesSelected,
 			Hovered:        hoveredBtn == 1,
 			Padding:        3,
@@ -264,12 +261,10 @@ func (p *PlanHandoffInline) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 func (p *PlanHandoffInline) drawEditor(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	y := area.Min.Y
-	iconPrompt := questionIconPrompt(p.com.Styles, p.focused)
-	iconWidth := lipgloss.Width(iconPrompt)
 	questionText := p.com.Styles.Editor.QuestionUnselected.Render(
-		ansi.Wrap(planHandoffFeedbackPrompt, max(1, area.Dx()-iconWidth), ""),
+		ansi.Wrap(planHandoffFeedbackPrompt, max(1, area.Dx()), ""),
 	)
-	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), iconPrompt+questionText)
+	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), questionText)
 	y++
 
 	promptPrefix := p.com.Styles.Editor.QuestionBody.Render("> ")
@@ -336,10 +331,8 @@ func (p *PlanHandoffInline) CollapsedHelp() string { return "review plan" }
 // DrawCollapsed renders the persistent compact handoff while chat is focused.
 func (p *PlanHandoffInline) DrawCollapsed(scr uv.Screen, area uv.Rectangle) {
 	p.compositor = nil
-	icon := questionIconPrompt(p.com.Styles, false)
-	available := max(0, area.Dx()-lipgloss.Width(icon))
-	label := ansi.Truncate(planHandoffCollapsedPrompt, available, "…")
-	text := icon + p.com.Styles.Messages.AssistantInfoModel.Render(label)
+	label := ansi.Truncate(planHandoffCollapsedPrompt, max(0, area.Dx()), "…")
+	text := p.com.Styles.Messages.AssistantInfoModel.Render(label)
 	drawStyledText(scr, area, text)
 }
 
@@ -372,19 +365,19 @@ func (p *PlanHandoffInline) ShortHelp() []key.Binding {
 // SetHover implements MouseClickableEditor.
 func (p *PlanHandoffInline) SetHover(x, y int) { p.hoverX = x; p.hoverY = y }
 
-// HandleMouseClick implements MouseClickableEditor. Clicking "Implement"
-// stores the confirm cmd via PendingCmd; clicking "Request changes" opens the
+// HandleMouseClick implements MouseClickableEditor. Clicking "Start coding"
+// stores the confirm cmd via PendingCmd; clicking "Revise plan" opens the
 // feedback editor.
 func (p *PlanHandoffInline) HandleMouseClick(x, y int) (bool, bool) {
 	if p.editing {
 		return false, false
 	}
 	switch common.HitButtonIndex(p.compositor, x, y) {
-	case 0: // Implement
+	case 0: // Start coding.
 		p.requestChangesSelected = false
 		p.runConfirm()
 		return true, true
-	case 1: // Request changes
+	case 1: // Revise plan.
 		p.startEditing()
 		return false, true
 	}

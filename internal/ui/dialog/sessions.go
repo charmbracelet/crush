@@ -321,10 +321,7 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.AddPart(inputView)
 	}
 	listView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
-	scrollbar := common.Scrollbar(t, listHeight, listTotalHeight, listHeight, s.list.Offset())
-	if scrollbar != "" {
-		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
-	}
+	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, s.list.Offset())
 	rc.AddPart(listView)
 	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
 

@@ -347,27 +347,43 @@ func (p *Permissions) scrollRight() {
 }
 
 // Draw implements [Dialog].
-func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	t := p.com.Styles
-	// Force fullscreen when window is too small.
-	forceFullscreen := area.Dx() <= minWindowWidth || area.Dy() <= minWindowHeight
-
-	// Calculate dialog dimensions based on fullscreen state and content type.
-	var width, maxHeight int
-	if forceFullscreen || (p.fullscreen && p.hasDiffView()) {
-		// Use nearly full window for fullscreen.
-		width = area.Dx()
-		maxHeight = area.Dy()
-	} else if p.hasDiffView() {
+// dialogSize returns the outer dialog width and maximum height for the
+// given screen area, and whether the window is too small so the dialog
+// must fill it. Diff views get more room than simple prompts.
+func (p *Permissions) dialogSize(area uv.Rectangle) (width, maxHeight int, forceFullscreen bool) {
+	forceFullscreen = area.Dx() <= minWindowWidth || area.Dy() <= minWindowHeight
+	switch {
+	case forceFullscreen || (p.fullscreen && p.hasDiffView()):
+		width, maxHeight = area.Dx(), area.Dy()
+	case p.hasDiffView():
 		// Wide for side-by-side diffs, capped for readability.
 		width = min(int(float64(area.Dx())*diffSizeRatio), diffMaxWidth)
 		maxHeight = int(float64(area.Dy()) * diffSizeRatio)
-	} else {
-		// Narrower for simple content like commands/URLs.
+	default:
+		// Narrower for simple content like commands and URLs.
 		width = min(int(float64(area.Dx())*simpleSizeRatio), simpleMaxWidth)
 		maxHeight = int(float64(area.Dy()) * simpleHeightRatio)
 	}
+	return width, maxHeight, forceFullscreen
+}
 
+// contentViewportHeight returns the height for the scrollable content
+// viewport given the height taken by the fixed chrome (fixedHeight) and
+// the content's natural height. Simple prompts shrink to fit their
+// content; diff and fullscreen views always take all remaining height.
+func (p *Permissions) contentViewportHeight(forceFullscreen bool, maxHeight, fixedHeight, contentHeight int) int {
+	if p.hasDiffView() || forceFullscreen {
+		return maxHeight - fixedHeight
+	}
+	if fixedHeight+contentHeight < maxHeight {
+		return max(contentHeight, 3)
+	}
+	return max(maxHeight-fixedHeight, 3)
+}
+
+func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+	t := p.com.Styles
+	width, maxHeight, forceFullscreen := p.dialogSize(area)
 	dialogStyle := t.Dialog.View.Width(width).Padding(0, 1)
 
 	contentWidth := p.calculateContentWidth(width)
@@ -379,32 +395,15 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// applies for RenderContext dialogs.
 	helpView := shortHelpLine(&p.help, p.ShortHelp(), contentWidth)
 
-	// Calculate available height for content.
-	headerHeight := lipgloss.Height(header)
-	buttonsHeight := lipgloss.Height(buttons)
-	helpHeight := lipgloss.Height(helpView)
-	frameHeight := dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
-
 	p.defaultDiffSplitMode = width >= splitModeMinWidth
 
-	// Pre-render content to measure its actual height.
+	// Pre-render content to measure its actual height, then fit the
+	// scrollable viewport into whatever height the fixed chrome leaves.
 	renderedContent := p.renderContent(contentWidth)
 	contentHeight := lipgloss.Height(renderedContent)
-
-	// For non-diff views, shrink dialog to fit content if it's smaller than max.
-	var availableHeight int
-	if !p.hasDiffView() && !forceFullscreen {
-		fixedHeight := headerHeight + buttonsHeight + helpHeight + frameHeight
-		neededHeight := fixedHeight + contentHeight
-		if neededHeight < maxHeight {
-			availableHeight = contentHeight
-		} else {
-			availableHeight = maxHeight - fixedHeight
-		}
-		availableHeight = max(availableHeight, 3)
-	} else {
-		availableHeight = maxHeight - headerHeight - buttonsHeight - helpHeight - frameHeight
-	}
+	fixedHeight := lipgloss.Height(header) + lipgloss.Height(buttons) +
+		lipgloss.Height(helpView) + dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
+	availableHeight := p.contentViewportHeight(forceFullscreen, maxHeight, fixedHeight, contentHeight)
 
 	// Determine if scrollbar is needed.
 	needsScrollbar := p.hasDiffView() || contentHeight > availableHeight
@@ -420,7 +419,6 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	var content string
-	var scrollbar string
 	p.viewport.SetWidth(viewportWidth)
 	p.viewport.SetHeight(availableHeight)
 	if p.viewportDirty {
@@ -430,12 +428,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	content = p.viewport.View()
 	if needsScrollbar {
-		scrollbar = common.Scrollbar(t, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
-	}
-
-	// Join content with scrollbar if present.
-	if scrollbar != "" {
-		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbar)
+		content = joinScrollbar(t, content, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
 	}
 
 	parts := []string{header}

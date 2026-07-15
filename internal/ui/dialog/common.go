@@ -28,6 +28,17 @@ func dialogInputTextWidth(t *styles.Styles, input textinput.Model, contentWidth 
 		cursorPadding)
 }
 
+// joinScrollbar appends a vertical scrollbar to the right of view when the
+// content overflows its viewport, and returns view unchanged otherwise.
+// contentSize is the total content height, viewportSize the visible height,
+// and offset the current scroll position.
+func joinScrollbar(t *styles.Styles, view string, height, contentSize, viewportSize, offset int) string {
+	if sb := common.Scrollbar(t, height, contentSize, viewportSize, offset); sb != "" {
+		return lipgloss.JoinHorizontal(lipgloss.Top, view, sb)
+	}
+	return view
+}
+
 // Maximum share of a list row width the secondary info column may take
 // before it is hidden entirely, so it never crowds out the item name.
 // Command shortcuts are small and non-essential, so they yield sooner

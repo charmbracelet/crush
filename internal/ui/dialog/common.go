@@ -122,16 +122,22 @@ func (rc *RenderContext) Render() string {
 	var parts []string
 
 	if len(rc.Title) > 0 {
+		contentWidth := rc.Width - dialogStyle.GetHorizontalFrameSize() -
+			titleStyle.GetHorizontalFrameSize()
 		var titleInfoWidth int
-		if len(rc.TitleInfo) > 0 {
-			titleInfoWidth = lipgloss.Width(rc.TitleInfo)
+		titleInfo := rc.TitleInfo
+		if len(titleInfo) > 0 {
+			titleInfoWidth = lipgloss.Width(titleInfo)
+			// Truncate TitleInfo if it would push past dialog width.
+			if titleInfoWidth > contentWidth {
+				titleInfo = ansi.Truncate(titleInfo, max(0, contentWidth), "…")
+				titleInfoWidth = lipgloss.Width(titleInfo)
+			}
 		}
 		title := common.DialogTitle(rc.Styles, rc.Title,
-			max(0, rc.Width-dialogStyle.GetHorizontalFrameSize()-
-				titleStyle.GetHorizontalFrameSize()-
-				titleInfoWidth), rc.TitleGradientFromColor, rc.TitleGradientToColor)
-		if len(rc.TitleInfo) > 0 {
-			title += rc.TitleInfo
+			max(0, contentWidth-titleInfoWidth), rc.TitleGradientFromColor, rc.TitleGradientToColor)
+		if len(titleInfo) > 0 {
+			title += titleInfo
 		}
 		parts = append(parts, titleStyle.Render(title))
 		if rc.Gap > 0 {

@@ -71,10 +71,10 @@ func TestAssistantMessageItem_PlanCardFitsAvailableWidth(t *testing.T) {
 			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
 		},
 	}
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
-
 	for _, width := range []int{24, 72, 140} {
 		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
+			t.Parallel()
+			item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 			raw := item.RawRender(width)
 			rendered := item.Render(width)
 

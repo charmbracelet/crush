@@ -293,6 +293,9 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	c.list.SetSize(innerWidth, max(0, height-heightOffset))
 
+	// Hide the shortcut hints uniformly when the widest would crowd names.
+	applyInfoColumnVisibility(c.list.FilteredItems(), innerWidth, commandInfoMaxPercent)
+
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
 	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)

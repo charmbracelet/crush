@@ -51,6 +51,7 @@ type SessionItem struct {
 	cache            map[int]string
 	updateTitleInput textinput.Model
 	focused          bool
+	hideInfo         bool
 }
 
 // Finished implements list.Item. Session items are render-stable
@@ -104,9 +105,30 @@ func (s *SessionItem) Cursor() *tea.Cursor {
 	return s.updateTitleInput.Cursor()
 }
 
+// InfoText returns the secondary text shown on the right of the item.
+func (s *SessionItem) InfoText() string {
+	return humanize.Time(time.Unix(s.UpdatedAt, 0))
+}
+
+// SetHideInfo controls whether the timestamp info column is shown. The
+// dialog hides it uniformly when it would crowd the title.
+func (s *SessionItem) SetHideInfo(v bool) {
+	if s.hideInfo == v {
+		return
+	}
+	s.cache = nil
+	s.hideInfo = v
+	if s.Versioned != nil {
+		s.Bump()
+	}
+}
+
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
-	info := humanize.Time(time.Unix(s.UpdatedAt, 0))
+	info := s.InfoText()
+	if s.hideInfo {
+		info = ""
+	}
 	styles := ListItemStyles{
 		ItemBlurred:     s.t.Dialog.NormalItem,
 		ItemFocused:     s.t.Dialog.SelectedItem,

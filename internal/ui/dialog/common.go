@@ -10,8 +10,48 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
+
+// Maximum share of a list row width the secondary info column may take
+// before it is hidden entirely, so it never crowds out the item name.
+// Command shortcuts are small and non-essential, so they yield sooner
+// than the larger, more useful session timestamps.
+const (
+	sessionInfoMaxPercent = 35
+	commandInfoMaxPercent = 25
+)
+
+// infoColumnItem is a list item with a secondary info column (a session
+// timestamp, a command shortcut) that can be hidden when space is tight.
+type infoColumnItem interface {
+	// InfoText returns the raw info string, or "" when there is none.
+	InfoText() string
+	// SetHideInfo toggles whether the info column is rendered.
+	SetHideInfo(bool)
+}
+
+// applyInfoColumnVisibility hides the secondary info column across every
+// item uniformly when its widest entry would take more than maxPercent of
+// rowWidth, so item names keep their room. It returns once rowWidth grows
+// enough for the widest entry to fit within the budget again.
+func applyInfoColumnVisibility(items []list.Item, rowWidth, maxPercent int) {
+	widest := 0
+	for _, it := range items {
+		if ic, ok := it.(infoColumnItem); ok {
+			if info := ic.InfoText(); info != "" {
+				widest = max(widest, lipgloss.Width(" "+info+" "))
+			}
+		}
+	}
+	hide := rowWidth > 0 && widest*100 > rowWidth*maxPercent
+	for _, it := range items {
+		if ic, ok := it.(infoColumnItem); ok {
+			ic.SetHideInfo(hide)
+		}
+	}
+}
 
 // renderDialogHelp renders keybind hints as a single padded footer line at
 // contentWidth (the dialog's inner width: total minus the View border). The

@@ -242,6 +242,9 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
 	s.list.SetSize(listWidth, listHeight)
 
+	// Hide the timestamps uniformly when the widest would crowd the title.
+	applyInfoColumnVisibility(s.list.FilteredItems(), listWidth, sessionInfoMaxPercent)
+
 	// This makes it so we do not scroll the list if we don't have to
 	start, end := s.list.VisibleItemIndices()
 

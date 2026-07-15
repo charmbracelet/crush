@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -465,7 +466,26 @@ func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
 	if err != nil {
 		rendered = text
 	}
-	return box.Width(width).Render(strings.TrimSpace(rendered))
+	return renderPlanBox(box, rendered, width)
+}
+
+// renderPlanBox applies the card layout, then composes its background onto
+// every parsed cell so nested Markdown resets cannot expose the terminal
+// background. Foregrounds, text attributes, and hyperlinks remain unchanged.
+func renderPlanBox(style lipgloss.Style, content string, width int) string {
+	rendered := style.Width(width).Render(strings.TrimSpace(content))
+	cardWidth := lipgloss.Width(rendered)
+	cardHeight := lipgloss.Height(rendered)
+	scr := uv.NewScreenBuffer(cardWidth, cardHeight)
+	uv.NewStyledString(rendered).Draw(scr, uv.Rect(0, 0, cardWidth, cardHeight))
+
+	background := style.GetBackground()
+	for y := range scr.Lines {
+		for x := range scr.Lines[y] {
+			scr.Lines[y][x].Style.Bg = background
+		}
+	}
+	return scr.Render()
 }
 
 // cachedError returns the rendered error section.

@@ -967,7 +967,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Status.UpdateMessage = s.Status.SuccessMessage
 	s.Status.WarnMessage = s.Status.SuccessMessage.Foreground(o.bgMostVisible).Background(o.warningSubtle)
 	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(o.onPrimary).Background(o.error)
-	s.Status.Timer = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Completions styles
 	s.Completions.Normal = base.Background(o.bgLessVisible).Foreground(o.fgBase)

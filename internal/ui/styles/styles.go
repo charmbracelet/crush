@@ -519,8 +519,6 @@ type Styles struct {
 		InfoMessage    lipgloss.Style
 		UpdateMessage  lipgloss.Style
 		SuccessMessage lipgloss.Style
-
-		Timer lipgloss.Style
 	}
 
 	// Completions popup styles

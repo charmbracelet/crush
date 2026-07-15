@@ -7,12 +7,26 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
+
+// dialogInputTextWidth returns the text-area width for a dialog input so
+// that the input frame, its prompt (e.g. "> "), the text, and a trailing
+// cursor cell all fit within contentWidth. The prompt is rendered outside
+// the text area, so it must be subtracted or long values wrap past the
+// dialog border.
+func dialogInputTextWidth(t *styles.Styles, input textinput.Model, contentWidth int) int {
+	const cursorPadding = 1
+	return max(0, contentWidth-
+		t.Dialog.InputPrompt.GetHorizontalFrameSize()-
+		lipgloss.Width(input.Prompt)-
+		cursorPadding)
+}
 
 // Maximum share of a list row width the secondary info column may take
 // before it is hidden entirely, so it never crowds out the item name.

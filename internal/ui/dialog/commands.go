@@ -289,7 +289,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	c.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
+	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
 
 	c.list.SetSize(innerWidth, max(0, height-heightOffset))
 

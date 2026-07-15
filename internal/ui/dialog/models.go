@@ -265,7 +265,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
+	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
 	listHeight := max(0, height-heightOffset)
 	listTotalHeight := m.list.TotalHeight()

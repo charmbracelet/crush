@@ -174,6 +174,9 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
+		Suffix: func() string {
+			return common.Elapsed()
+		},
 	})
 	return a
 }

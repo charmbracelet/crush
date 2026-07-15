@@ -106,6 +106,10 @@ type Settings struct {
 	// animated ellipsis are visible. Useful for non-LLM contexts where
 	// scrambled glyphs imply "thinking" rather than "running".
 	NoScramble bool
+
+	// Suffix is an optional function that returns a dynamic suffix string
+	// to render after the label and ellipsis. Called on every Render().
+	Suffix func() string
 }
 
 // Default settings.
@@ -127,6 +131,7 @@ type Anim struct {
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
+	suffix           func() string
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -157,6 +162,11 @@ func New(opts Settings) *Anim {
 		a.cyclingCharWidth = opts.Size
 	}
 	a.labelColor = opts.LabelColor
+
+	// Store the suffix function if provided.
+	if opts.Suffix != nil {
+		a.suffix = opts.Suffix
+	}
 
 	// NoScramble means no cycling chars and no birth animation. Mark as
 	// initialized immediately so the label renders without a fade-in.
@@ -422,6 +432,15 @@ func (a *Anim) Render() string {
 		ellipsisStep := int(a.ellipsisStep.Load())
 		if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
 			b.WriteString(ellipsisFrame)
+		}
+	}
+
+	// Render optional suffix (e.g., elapsed time).
+	if a.suffix != nil {
+		suffixStr := a.suffix()
+		if suffixStr != "" {
+			b.WriteString(" ")
+			b.WriteString(lipgloss.NewStyle().Foreground(a.labelColor).Render(suffixStr))
 		}
 	}
 

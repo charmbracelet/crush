@@ -385,10 +385,13 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := p.com.Styles
 	width, maxHeight, forceFullscreen := p.dialogSize(area)
 	dialogStyle := t.Dialog.View.Width(width).Padding(0, 1)
+	// The dialog fills the screen when forced small or when a diff is
+	// expanded; center the buttons then instead of hugging the far edge.
+	fullscreen := forceFullscreen || (p.fullscreen && p.hasDiffView())
 
 	contentWidth := p.calculateContentWidth(width)
 	header := p.renderHeader(contentWidth)
-	buttons := p.renderButtons(contentWidth)
+	buttons := p.renderButtons(contentWidth, fullscreen)
 	// Pack the hints to the content width so they truncate cleanly instead
 	// of overflowing. The dialog frame supplies the padding, so this renders
 	// the hint line without the extra help view inset that renderDialogHelp
@@ -731,7 +734,7 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 	return panelStyle.Width(width).Render(content)
 }
 
-func (p *Permissions) renderButtons(contentWidth int) string {
+func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 	buttons := []common.ButtonOpts{
 		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
 		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
@@ -740,18 +743,21 @@ func (p *Permissions) renderButtons(contentWidth int) string {
 
 	content := common.ButtonGroup(p.com.Styles, buttons, "  ")
 
-	// If buttons are too wide, stack them vertically.
+	// Center when stacked or when the dialog fills the screen; otherwise
+	// hug the right edge next to the content. Right-aligning across a
+	// full-screen width leaves the buttons stranded in the corner.
+	align := lipgloss.Right
+	if fullscreen {
+		align = lipgloss.Center
+	}
 	if lipgloss.Width(content) > contentWidth {
 		content = common.ButtonGroup(p.com.Styles, buttons, "\n")
-		return lipgloss.NewStyle().
-			Width(contentWidth).
-			Align(lipgloss.Center).
-			Render(content)
+		align = lipgloss.Center
 	}
 
 	return lipgloss.NewStyle().
 		Width(contentWidth).
-		Align(lipgloss.Right).
+		Align(align).
 		Render(content)
 }
 

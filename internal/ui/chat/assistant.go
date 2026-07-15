@@ -456,8 +456,7 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 // plan is final by the time the marker appears, so this bypasses the
 // streaming-markdown cache and renders directly, like renderThinking.
 func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
-	box := a.sty.Messages.PlanBox
-	innerWidth := max(1, width-box.GetHorizontalPadding())
+	box, innerWidth := planBoxLayout(a.sty.Messages.PlanBox, width)
 	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
 	mu := common.LockMarkdownRenderer(renderer)
 	mu.Lock()
@@ -473,7 +472,12 @@ func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
 // every parsed cell so nested Markdown resets cannot expose the terminal
 // background. Foregrounds, text attributes, and hyperlinks remain unchanged.
 func renderPlanBox(style lipgloss.Style, content string, width int) string {
-	rendered := style.Width(width).Render(strings.TrimSpace(content))
+	style, innerWidth := planBoxLayout(style, width)
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, innerWidth, "")
+	}
+	rendered := style.Width(innerWidth).Render(strings.Join(lines, "\n"))
 	cardWidth := lipgloss.Width(rendered)
 	cardHeight := lipgloss.Height(rendered)
 	scr := uv.NewScreenBuffer(cardWidth, cardHeight)
@@ -486,6 +490,18 @@ func renderPlanBox(style lipgloss.Style, content string, width int) string {
 		}
 	}
 	return scr.Render()
+}
+
+// planBoxLayout returns a style and content width whose combined horizontal
+// frame fits within the available message width.
+func planBoxLayout(style lipgloss.Style, width int) (lipgloss.Style, int) {
+	width = max(1, width)
+	frameWidth := style.GetHorizontalFrameSize()
+	if frameWidth >= width {
+		style = style.PaddingLeft(0).PaddingRight(0)
+		frameWidth = style.GetHorizontalFrameSize()
+	}
+	return style, max(1, width-frameWidth)
 }
 
 // cachedError returns the rendered error section.

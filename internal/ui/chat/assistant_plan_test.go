@@ -30,8 +30,10 @@ func TestAssistantMessageItem_PlanCardHasUniformBackground(t *testing.T) {
 	first := item.RawRender(width)
 	second := item.RawRender(width)
 	require.Equal(t, first, second, "a cached plan render must be byte-stable")
-	require.Equal(t, [2]int{73, 12}, [2]int{lipgloss.Width(first), lipgloss.Height(first)},
-		"background composition must preserve the existing card geometry")
+	require.LessOrEqual(t, lipgloss.Width(first), cappedMessageWidth(width),
+		"plan card must fit the available message content width")
+	require.LessOrEqual(t, lipgloss.Width(item.Render(width)), width,
+		"prefixed plan card must fit the available item width")
 
 	scr := renderANSIToScreen(first)
 
@@ -55,6 +57,31 @@ func TestAssistantMessageItem_PlanCardHasUniformBackground(t *testing.T) {
 	require.True(t, foundItalic, "italic Markdown styling must survive background composition")
 	require.True(t, foundLink, "Markdown hyperlinks must survive background composition")
 	require.True(t, foundEmoji, "Unicode grapheme clusters must survive background composition")
+}
+
+func TestAssistantMessageItem_PlanCardFitsAvailableWidth(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{
+		ID:   "responsive-plan-card",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "# Plan\n\nA deliberately long plan line with `code`, a [link](https://example.com), and Unicode 👩‍💻.\n\n<!-- CRUSH_PLAN_READY -->"},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+	}
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+
+	for _, width := range []int{24, 72, 140} {
+		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
+			raw := item.RawRender(width)
+			rendered := item.Render(width)
+
+			require.LessOrEqual(t, lipgloss.Width(raw), cappedMessageWidth(width))
+			require.LessOrEqual(t, lipgloss.Width(rendered), width)
+		})
+	}
 }
 
 func TestAssistantMessageItem_NonPlanRepliesHaveNoPlanCard(t *testing.T) {

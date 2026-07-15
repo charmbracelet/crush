@@ -241,7 +241,6 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listTotalHeight := s.list.TotalHeight()
 	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
 	s.list.SetSize(listWidth, listHeight)
-	s.help.SetWidth(innerWidth)
 
 	// This makes it so we do not scroll the list if we don't have to
 	start, end := s.list.VisibleItemIndices()
@@ -317,7 +316,7 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
 	}
 	rc.AddPart(listView)
-	rc.Help = s.help.View(s)
+	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
 
 	view := rc.Render()
 

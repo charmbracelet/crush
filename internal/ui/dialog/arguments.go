@@ -323,7 +323,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		description = descStyle.Render(a.description)
 	}
 
-	helpView := s.Dialog.HelpView.Width(width).Render(a.help.View(a))
+	helpView := renderDialogHelp(s, &a.help, a, width)
 	if a.loading {
 		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
 	}

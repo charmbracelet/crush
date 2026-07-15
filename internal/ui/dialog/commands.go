@@ -292,7 +292,6 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	c.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
 	c.list.SetSize(innerWidth, height-heightOffset)
-	c.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
@@ -301,10 +300,10 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(inputView)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	rc.AddPart(listView)
-	rc.Help = c.help.View(c)
+	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
 
 	if c.loading {
-		rc.Help = c.spinner.View() + " Generating Prompt..."
+		rc.Help = t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt...")
 	}
 
 	view := rc.Render()

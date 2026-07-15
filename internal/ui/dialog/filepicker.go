@@ -247,7 +247,7 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, width)
 	rc.Gap = 1
 	rc.Title = "Add Image"
-	rc.Help = f.help.View(f)
+	rc.Help = renderDialogHelp(t, &f.help, f, innerWidth)
 
 	if imgPrevHeight > 0 {
 		imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview(imgPrevWidth, imgPrevHeight))

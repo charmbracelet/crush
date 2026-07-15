@@ -183,7 +183,6 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	n.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
 	n.list.SetSize(innerWidth, height-heightOffset)
-	n.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Notification Style"
@@ -199,7 +198,7 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	listView := t.Dialog.List.Height(n.list.Height()).Render(n.list.Render())
 	rc.AddPart(listView)
-	rc.Help = n.help.View(n)
+	rc.Help = renderDialogHelp(t, &n.help, n, innerWidth)
 
 	view := rc.Render()
 

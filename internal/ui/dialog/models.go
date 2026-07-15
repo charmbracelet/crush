@@ -266,7 +266,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.View.GetVerticalFrameSize()
 
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
-	m.help.SetWidth(innerWidth)
 
 	listHeight := height - heightOffset
 	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
@@ -292,7 +291,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	rc.AddPart(listView)
 
-	rc.Help = m.help.View(m)
+	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	cur := m.Cursor()
 

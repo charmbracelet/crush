@@ -163,10 +163,9 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
 	textStyle := t.Dialog.SecondaryText
-	helpStyle := t.Dialog.HelpView
 	dialogStyle := t.Dialog.View.Width(m.width)
 	inputStyle := t.Dialog.InputPrompt
-	helpStyle = helpStyle.Width(m.width - dialogStyle.GetHorizontalFrameSize())
+	helpView := renderDialogHelp(t, &m.help, m, m.width-dialogStyle.GetHorizontalFrameSize())
 
 	m.input.Prompt = m.spinner.View()
 
@@ -176,7 +175,7 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		textStyle.Render("This will be written in your global configuration:"),
 		textStyle.Render(config.GlobalConfigData()),
 		"",
-		helpStyle.Render(m.help.View(m)),
+		helpView,
 	}, "\n")
 
 	cur := m.Cursor()

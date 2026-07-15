@@ -241,20 +241,18 @@ func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 func (m *OAuth) dialogContent() string {
-	var (
-		t         = m.com.Styles
-		helpStyle = t.Dialog.HelpView
-	)
+	t := m.com.Styles
 
 	switch m.State {
 	case OAuthStateInitializing, OAuthStateSaving:
 		return m.innerDialogContent()
 
 	default:
+		innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
 		elements := []string{
 			m.headerContent(),
 			m.innerDialogContent(),
-			helpStyle.Render(m.help.View(m)),
+			renderDialogHelp(t, &m.help, m, innerWidth),
 		}
 		return strings.Join(elements, "\n")
 	}

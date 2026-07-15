@@ -174,7 +174,6 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	r.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
 	r.list.SetSize(innerWidth, height-heightOffset)
-	r.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Select Reasoning Effort"
@@ -190,7 +189,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	listView := t.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
 	rc.AddPart(listView)
-	rc.Help = r.help.View(r)
+	rc.Help = renderDialogHelp(t, &r.help, r, innerWidth)
 
 	view := rc.Render()
 

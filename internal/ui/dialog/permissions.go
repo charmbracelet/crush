@@ -373,7 +373,11 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	contentWidth := p.calculateContentWidth(width)
 	header := p.renderHeader(contentWidth)
 	buttons := p.renderButtons(contentWidth)
-	helpView := p.help.View(p)
+	// Pack the hints to the content width so they truncate cleanly instead
+	// of overflowing. The dialog frame supplies the padding, so this renders
+	// the hint line without the extra help view inset that renderDialogHelp
+	// applies for RenderContext dialogs.
+	helpView := shortHelpLine(&p.help, p.ShortHelp(), contentWidth)
 
 	// Calculate available height for content.
 	headerHeight := lipgloss.Height(header)

@@ -716,6 +716,10 @@ func (w *ClientWorkspace) MCPAuthURL(_ string) string {
 	return ""
 }
 
+func (w *ClientWorkspace) MCPReconnect(ctx context.Context, name string) error {
+	return w.client.MCPReconnect(ctx, w.workspaceID(), name)
+}
+
 // -- Lifecycle --
 
 func (w *ClientWorkspace) Subscribe(program *tea.Program) {

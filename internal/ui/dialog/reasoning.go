@@ -164,8 +164,8 @@ func (r *Reasoning) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := r.com.Styles
-	width := max(0, min(reasoningDialogMaxWidth, area.Dx()))
-	height := max(0, min(reasoningDialogMaxHeight, area.Dy()))
+	width := max(0, min(reasoningDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(reasoningDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +

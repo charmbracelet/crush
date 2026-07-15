@@ -173,8 +173,8 @@ func (n *Notifications) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := n.com.Styles
-	width := max(0, min(notificationsDialogMaxWidth, area.Dx()))
-	height := max(0, min(notificationsDialogMaxHeight, area.Dy()))
+	width := max(0, min(notificationsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(notificationsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +

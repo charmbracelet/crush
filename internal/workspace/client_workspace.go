@@ -646,6 +646,10 @@ func (w *ClientWorkspace) DisableDockerMCP() error {
 	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
 }
 
+func (w *ClientWorkspace) MCPReconnect(ctx context.Context, name string) error {
+	return w.client.MCPReconnect(ctx, w.workspaceID(), name)
+}
+
 // -- Lifecycle --
 
 func (w *ClientWorkspace) Subscribe(program *tea.Program) {

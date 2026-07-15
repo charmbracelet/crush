@@ -1734,6 +1734,33 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.disableDockerMCP)
+	case dialog.ActionMCPReconnect:
+		m.dialog.CloseDialog(dialog.MCPServersID)
+		cmds = append(cmds, func() tea.Msg {
+			ctx := context.Background()
+			if err := m.com.Workspace.MCPReconnect(ctx, msg.ServerName); err != nil {
+				return util.ReportError(err)()
+			}
+			return util.NewInfoMsg(fmt.Sprintf("MCP server %q reconnected", msg.ServerName))
+		})
+	case dialog.ActionMCPRefreshTools:
+		m.dialog.CloseDialog(dialog.MCPServersID)
+		cmds = append(cmds, func() tea.Msg {
+			m.com.Workspace.RefreshMCPTools(context.Background(), msg.ServerName)
+			return util.NewInfoMsg(fmt.Sprintf("Refreshed tools for MCP server %q", msg.ServerName))
+		})
+	case dialog.ActionMCPRefreshPrompts:
+		m.dialog.CloseDialog(dialog.MCPServersID)
+		cmds = append(cmds, func() tea.Msg {
+			m.com.Workspace.MCPRefreshPrompts(context.Background(), msg.ServerName)
+			return util.NewInfoMsg(fmt.Sprintf("Refreshed prompts for MCP server %q", msg.ServerName))
+		})
+	case dialog.ActionMCPRefreshResources:
+		m.dialog.CloseDialog(dialog.MCPServersID)
+		cmds = append(cmds, func() tea.Msg {
+			m.com.Workspace.MCPRefreshResources(context.Background(), msg.ServerName)
+			return util.NewInfoMsg(fmt.Sprintf("Refreshed resources for MCP server %q", msg.ServerName))
+		})
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3894,6 +3921,8 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.MCPServersID:
+		m.openMCPServersDialog()
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3989,6 +4018,16 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
 	return nil
+}
+
+// openMCPServersDialog opens the MCP servers management dialog.
+func (m *UI) openMCPServersDialog() {
+	if m.dialog.ContainsDialog(dialog.MCPServersID) {
+		m.dialog.BringToFront(dialog.MCPServersID)
+		return
+	}
+	mcpDialog := dialog.NewMCPServers(m.com, m.com.Workspace)
+	m.dialog.OpenDialog(mcpDialog)
 }
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already open,

@@ -166,6 +166,10 @@ type Workspace interface {
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
+	// MCPReconnect restarts a single MCP server by name. This re-resolves
+	// env vars (including OAuth/OIDC token refresh commands) and is the
+	// mechanism for refreshing expired credentials.
+	MCPReconnect(ctx context.Context, name string) error
 
 	// Events
 	Subscribe(program *tea.Program)

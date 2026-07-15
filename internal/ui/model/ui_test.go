@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"image"
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
@@ -12,11 +13,14 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
+	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )
 
@@ -300,7 +304,7 @@ func TestHandlePlanHandoff_DuplicateGuard(t *testing.T) {
 	require.Same(t, first, u.activeInline)
 }
 
-func TestHandlePlanHandoff_KeepEditingSendsFeedbackInPlanMode(t *testing.T) {
+func TestHandlePlanHandoff_RequestChangesSendsFeedbackInPlanMode(t *testing.T) {
 	t.Parallel()
 	u, ws := newPlanUI(t, "sess-1")
 	ws.agentReady = true
@@ -311,10 +315,10 @@ func TestHandlePlanHandoff_KeepEditingSendsFeedbackInPlanMode(t *testing.T) {
 
 	inline, ok := u.activeInline.(*dialog.PlanHandoffInline)
 	require.True(t, ok)
-	require.NotNil(t, inline.OnKeepEditing)
+	require.NotNil(t, inline.OnRequestChanges)
 	require.NotNil(t, inline.OnConfirm)
 
-	cmd := inline.OnKeepEditing("Revise the scope")
+	cmd := inline.OnRequestChanges("Revise the scope")
 	require.NotNil(t, cmd)
 	require.Equal(t, uiInputModePlan, u.mode)
 
@@ -327,6 +331,117 @@ func TestHandlePlanHandoff_KeepEditingSendsFeedbackInPlanMode(t *testing.T) {
 	}
 	require.Equal(t, []string{"Revise the scope"}, ws.runPrompts)
 	require.Equal(t, uiInputModePlan, u.mode)
+}
+
+func TestPlanHandoffCollapsePreservesAndRestoresInline(t *testing.T) {
+	t.Parallel()
+
+	u, _ := newPlanUI(t, "sess-1")
+	u.keyMap = DefaultKeyMap()
+	u.state = uiChat
+	u.handlePlanHandoff(notify.RunComplete{
+		SessionID: "sess-1",
+		Text:      "Here is the plan.\n<!-- CRUSH_PLAN_READY -->",
+	})
+	inline := u.activeInline
+
+	done, collapseCmd := inline.HandleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.False(t, done)
+	require.NotNil(t, collapseCmd)
+	u.Update(collapseCmd())
+
+	require.Same(t, inline, u.activeInline)
+	require.Equal(t, uiFocusMain, u.focus)
+	blurredHelp := u.ShortHelp()
+	require.Equal(t, "review plan", blurredHelp[0].Help().Desc)
+	for _, binding := range blurredHelp {
+		require.NotEqual(t, "confirm", binding.Help().Desc)
+	}
+
+	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Same(t, inline, u.activeInline)
+	require.Equal(t, uiFocusEditor, u.focus)
+	require.Equal(t, "confirm", u.ShortHelp()[1].Help().Desc)
+}
+
+func TestPlanHandoffCollapsedClickRestoresFocus(t *testing.T) {
+	t.Parallel()
+
+	u, _ := newPlanUI(t, "sess-1")
+	u.state = uiChat
+	u.handlePlanHandoff(notify.RunComplete{
+		SessionID: "sess-1",
+		Text:      "Here is the plan.\n<!-- CRUSH_PLAN_READY -->",
+	})
+	u.focusActiveInline(uiFocusMain)
+	u.layout.editor = image.Rect(0, 5, 80, 7)
+
+	u.handleClickFocus(tea.MouseClickMsg{X: 1, Y: 5})
+
+	require.True(t, isPlanHandoffInline(u))
+	require.Equal(t, uiFocusEditor, u.focus)
+}
+
+func TestPlanHandoffRequestChangesAllowsChatTextSelection(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}}
+	u.dialog = dialog.NewOverlay()
+	u.attachments = attachments.New(nil, attachments.Keymap{})
+	u.layout.main = image.Rect(0, 0, 60, 10)
+	u.chat.SetSize(u.layout.main.Dx(), u.layout.main.Dy())
+	u.chat.SetMessages(chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID:   "plan",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "Selectable plan text"},
+		},
+	}))
+
+	inline := dialog.NewPlanHandoffInline(u.com)
+	inline.SetFocused(true)
+	inline.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	u.activeInline = inline
+	u.focus = uiFocusEditor
+
+	startY := -1
+	for y := 0; y < u.layout.main.Dy(); y++ {
+		if handled, _ := u.chat.HandleMouseDown(4, y); handled {
+			startY = y
+			break
+		}
+	}
+	require.NotEqual(t, -1, startY, "expected selectable plan content in the chat viewport")
+
+	u.Update(tea.MouseMotionMsg{X: 18, Y: startY})
+
+	require.True(t, u.chat.HasHighlight(),
+		"request changes must not suppress chat selection dragging")
+}
+
+func TestPlanHandoffRequestChangesRoutesEditorTextSelection(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.dialog = dialog.NewOverlay()
+	inline := dialog.NewPlanHandoffInline(u.com)
+	inline.SetFocused(true)
+	inline.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	inline.HandlePaste(tea.PasteMsg{Content: "copy me"})
+	u.activeInline = inline
+	u.layout.editor = image.Rect(0, 10, 80, 10+inline.Height(80))
+	scr := uv.NewScreenBuffer(80, u.layout.editor.Max.Y)
+	inline.Draw(scr, u.layout.editor)
+
+	u.Update(tea.MouseClickMsg{X: 2, Y: 12})
+	u.Update(tea.MouseMotionMsg{X: 6, Y: 12})
+	_, cmd := u.Update(tea.MouseReleaseMsg{X: 6, Y: 12})
+
+	require.Equal(t, "copy", inline.SelectedText())
+	require.NotNil(t, cmd)
 }
 
 func TestSetInputMode_SwitchesToCode(t *testing.T) {

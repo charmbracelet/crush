@@ -3,29 +3,37 @@ package dialog
 import (
 	"image"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 )
 
 // PlanHandoffInline is a small inline prompt rendered at the bottom of the
 // editor area when the plan agent signals it is ready for execution.
 // It replaces the textarea temporarily, asking the user to switch to code
-// mode or keep editing the plan.
+// mode or request changes to the plan.
 type PlanHandoffInline struct {
-	com        *common.Common
-	selectedNo bool // false = "Implement" selected (the default)
-	editing    bool
-	focused    bool
-	compositor *lipgloss.Compositor
-	hoverX     int
-	hoverY     int
-	editor     textarea.Model
+	com                    *common.Common
+	requestChangesSelected bool
+	editing                bool
+	focused                bool
+	compositor             *lipgloss.Compositor
+	hoverX                 int
+	hoverY                 int
+	editor                 textarea.Model
+	editorTextArea         image.Rectangle
+	selectionAnchor        planHandoffSelectionPoint
+	selectionHead          planHandoffSelectionPoint
+	selectionSet           bool
+	selecting              bool
 
 	heightChanged bool
 
@@ -33,19 +41,43 @@ type PlanHandoffInline struct {
 	// The returned tea.Cmd is queued by the UI to perform the switch and
 	// start the coder agent.
 	OnConfirm func() tea.Cmd
-	// OnKeepEditing is called with the user's feedback when they submit it.
-	OnKeepEditing func(string) tea.Cmd
+	// OnRequestChanges is called with the user's feedback when they submit it.
+	OnRequestChanges func(string) tea.Cmd
 
 	pendingCmd tea.Cmd // set during mouse confirmation; retrieved via PendingCmd
 
 	keyLeftRight key.Binding
 	keyEnter     key.Binding
+	keyNewline   key.Binding
 	keyYes       key.Binding
 	keyNo        key.Binding
 	keyClose     key.Binding
 }
 
-var _ InlineEditor = (*PlanHandoffInline)(nil)
+var (
+	_ InlineEditor            = (*PlanHandoffInline)(nil)
+	_ CollapsibleInlineEditor = (*PlanHandoffInline)(nil)
+	_ ResizableInlineEditor   = (*PlanHandoffInline)(nil)
+)
+
+const (
+	planHandoffQuestion        = "Plan is ready. Switch to code mode?"
+	planHandoffFeedbackPrompt  = "What should be changed in the plan?"
+	planHandoffCollapsedPrompt = "Plan is ready · Tab to review actions"
+)
+
+type planHandoffChoiceLayout struct {
+	question string
+	buttons  []common.ButtonOpts
+	spacing  string
+	height   int
+}
+
+type planHandoffSelectionPoint struct {
+	offset int
+	row    int
+	col    int
+}
 
 // NewPlanHandoffInline creates an inline plan handoff prompt. Wire its
 // callbacks before setting it as the active inline editor.
@@ -56,9 +88,9 @@ func NewPlanHandoffInline(com *common.Common) *PlanHandoffInline {
 	editor.SetHeight(3)
 
 	return &PlanHandoffInline{
-		com:        com,
-		selectedNo: false, // default: "Implement" is highlighted
-		editor:     editor,
+		com:                    com,
+		requestChangesSelected: false,
+		editor:                 editor,
 		keyLeftRight: key.NewBinding(
 			key.WithKeys("left", "right"),
 			key.WithHelp("←/→", "switch"),
@@ -67,13 +99,17 @@ func NewPlanHandoffInline(com *common.Common) *PlanHandoffInline {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
+		keyNewline: key.NewBinding(
+			key.WithKeys("shift+enter", "ctrl+j"),
+			key.WithHelp("ctrl+j", "newline"),
+		),
 		keyYes: key.NewBinding(
 			key.WithKeys("y", "Y"),
 			key.WithHelp("y", "switch to code"),
 		),
 		keyNo: key.NewBinding(
 			key.WithKeys("n", "N"),
-			key.WithHelp("n", "keep editing"),
+			key.WithHelp("n", "request changes"),
 		),
 		keyClose: CloseKey,
 	}
@@ -84,19 +120,27 @@ func NewPlanHandoffInline(com *common.Common) *PlanHandoffInline {
 // user confirms.
 func (p *PlanHandoffInline) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	if p.editing {
+		p.clearSelection()
 		switch {
 		case key.Matches(msg, p.keyClose):
 			p.editing = false
 			p.editor.Blur()
 			p.heightChanged = true
 			return false, nil
+		case key.Matches(msg, p.keyNewline):
+			previousHeight := p.editor.Height()
+			p.editor.InsertRune('\n')
+			var cmd tea.Cmd
+			p.editor, cmd = p.editor.Update(msg)
+			p.heightChanged = p.heightChanged || previousHeight != p.editor.Height()
+			return false, cmd
 		case key.Matches(msg, p.keyEnter):
 			feedback := strings.TrimSpace(p.editor.Value())
 			if feedback == "" {
 				return false, nil
 			}
-			if p.OnKeepEditing != nil {
-				return true, p.OnKeepEditing(feedback)
+			if p.OnRequestChanges != nil {
+				return true, p.OnRequestChanges(feedback)
 			}
 			return true, nil
 		default:
@@ -110,14 +154,14 @@ func (p *PlanHandoffInline) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, p.keyClose):
-		return true, nil
+		return false, func() tea.Msg { return CollapseInlineMsg{} }
 	case key.Matches(msg, p.keyNo):
 		return false, p.startEditing()
 	case key.Matches(msg, p.keyLeftRight):
-		p.selectedNo = !p.selectedNo
+		p.requestChangesSelected = !p.requestChangesSelected
 		return false, nil
 	case key.Matches(msg, p.keyEnter):
-		if p.selectedNo {
+		if p.requestChangesSelected {
 			return false, p.startEditing()
 		}
 		return true, p.runConfirm()
@@ -129,8 +173,9 @@ func (p *PlanHandoffInline) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 func (p *PlanHandoffInline) startEditing() tea.Cmd {
 	p.editing = true
-	p.selectedNo = true
+	p.requestChangesSelected = true
 	p.heightChanged = true
+	p.clearSelection()
 	if p.focused {
 		return p.editor.Focus()
 	}
@@ -153,11 +198,50 @@ func (p *PlanHandoffInline) PendingCmd() tea.Cmd { return p.pendingCmd }
 // Height returns the number of lines needed by the current handoff state.
 func (p *PlanHandoffInline) Height(width int) int {
 	if !p.editing {
-		return 3
+		return p.choiceLayout(width).height
 	}
 	iconPrompt := questionIconPrompt(p.com.Styles, p.focused)
-	return sectionHeight("What should be changed in the plan?", width-lipgloss.Width(iconPrompt)) +
+	return sectionHeight(planHandoffFeedbackPrompt, max(1, width-lipgloss.Width(iconPrompt))) +
 		1 + p.editor.Height() + 1
+}
+
+func (p *PlanHandoffInline) choiceLayout(width int) planHandoffChoiceLayout {
+	width = max(1, width)
+	iconPrompt := questionIconPrompt(p.com.Styles, p.focused)
+	iconWidth := lipgloss.Width(iconPrompt)
+	question := iconPrompt + p.com.Styles.Editor.QuestionUnselected.Render(
+		ansi.Wrap(planHandoffQuestion, max(1, width-iconWidth), ""),
+	)
+
+	hoveredBtn := common.HitButtonIndex(p.compositor, p.hoverX, p.hoverY)
+	buttons := []common.ButtonOpts{
+		{
+			Text:           "Implement",
+			Selected:       !p.requestChangesSelected,
+			Hovered:        hoveredBtn == 0,
+			Padding:        3,
+			UnderlineIndex: -1,
+		},
+		{
+			Text:           "Request changes",
+			Selected:       p.requestChangesSelected,
+			Hovered:        hoveredBtn == 1,
+			Padding:        3,
+			UnderlineIndex: -1,
+		},
+	}
+
+	spacing := " "
+	if lipgloss.Width(common.ButtonGroup(p.com.Styles, buttons, spacing)) > width {
+		spacing = "\n"
+	}
+	buttonHeight := lipgloss.Height(common.ButtonGroup(p.com.Styles, buttons, spacing))
+	return planHandoffChoiceLayout{
+		question: question,
+		buttons:  buttons,
+		spacing:  spacing,
+		height:   lipgloss.Height(question) + 1 + buttonHeight,
+	}
 }
 
 // Draw renders the inline prompt at the given screen area.
@@ -167,21 +251,12 @@ func (p *PlanHandoffInline) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	y := area.Min.Y
-
-	iconPrompt := questionIconPrompt(p.com.Styles, p.focused)
-	qText := iconPrompt + p.com.Styles.Editor.QuestionUnselected.Render("Plan is ready. Switch to code mode?")
-	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), qText)
+	layout := p.choiceLayout(area.Dx())
+	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), layout.question)
 	y++ // blank
 
-	buttonOptsList := []common.ButtonOpts{
-		{Text: "Implement", Selected: !p.selectedNo, Padding: 3, UnderlineIndex: -1},
-		{Text: "Keep editing", Selected: p.selectedNo, Padding: 3, UnderlineIndex: -1},
-	}
-	hoveredBtn := common.HitButtonIndex(p.compositor, p.hoverX, p.hoverY)
-	buttonOptsList[0].Hovered = hoveredBtn == 0
-	buttonOptsList[1].Hovered = hoveredBtn == 1
-	p.compositor = common.ButtonHitCompositor(p.com.Styles, buttonOptsList, " ", area.Min.X, y)
-	buttons := common.ButtonGroup(p.com.Styles, buttonOptsList, " ")
+	p.compositor = common.ButtonHitCompositor(p.com.Styles, layout.buttons, layout.spacing, area.Min.X, y)
+	buttons := common.ButtonGroup(p.com.Styles, layout.buttons, layout.spacing)
 	drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), buttons)
 
 	return nil
@@ -192,17 +267,35 @@ func (p *PlanHandoffInline) drawEditor(scr uv.Screen, area uv.Rectangle) *tea.Cu
 	iconPrompt := questionIconPrompt(p.com.Styles, p.focused)
 	iconWidth := lipgloss.Width(iconPrompt)
 	questionText := p.com.Styles.Editor.QuestionUnselected.Render(
-		ansi.Wrap("What should be changed in the plan?", max(1, area.Dx()-iconWidth), ""),
+		ansi.Wrap(planHandoffFeedbackPrompt, max(1, area.Dx()-iconWidth), ""),
 	)
 	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), iconPrompt+questionText)
 	y++
 
 	promptPrefix := p.com.Styles.Editor.QuestionBody.Render("> ")
 	prefixWidth := lipgloss.Width(promptPrefix)
-	p.editor.SetWidth(max(1, area.Dx()-2-prefixWidth))
+	p.SetWidth(area.Dx())
 	editorCursor := p.editor.Cursor()
+	p.editorTextArea = image.Rect(
+		area.Min.X+prefixWidth,
+		y,
+		min(area.Max.X, area.Min.X+prefixWidth+p.editor.Width()),
+		min(area.Max.Y, y+p.editor.Height()),
+	)
+	editorView := p.editor.View()
+	if start, end, ok := p.visualSelectionRange(); ok {
+		editorView = list.Highlight(
+			editorView,
+			image.Rect(0, 0, p.editor.Width(), p.editor.Height()),
+			start.row,
+			start.col,
+			end.row,
+			end.col,
+			list.ToHighlighter(p.com.Styles.TextSelection),
+		)
+	}
 	var cursor *tea.Cursor
-	for row, line := range strings.Split(p.editor.View(), "\n") {
+	for row, line := range strings.Split(editorView, "\n") {
 		text := promptPrefix + line
 		if row > 0 {
 			text = strings.Repeat(" ", prefixWidth) + line
@@ -216,6 +309,38 @@ func (p *PlanHandoffInline) drawEditor(scr uv.Screen, area uv.Rectangle) *tea.Cu
 		}
 	}
 	return cursor
+}
+
+// SetWidth updates the feedback textarea width and records any resulting
+// dynamic-height change for layout reconciliation.
+func (p *PlanHandoffInline) SetWidth(width int) {
+	promptPrefix := p.com.Styles.Editor.QuestionBody.Render("> ")
+	previousHeight := p.editor.Height()
+	previousWidth := p.editor.Width()
+	p.editor.SetWidth(max(1, width-2-lipgloss.Width(promptPrefix)))
+	if p.editor.Width() != previousWidth {
+		p.clearSelection()
+	}
+	p.heightChanged = p.heightChanged || previousHeight != p.editor.Height()
+}
+
+// ShouldCollapse always uses the compact handoff while the chat has focus.
+func (p *PlanHandoffInline) ShouldCollapse(_, _ int) bool { return true }
+
+// CollapsedHeight returns the one-line compact handoff height.
+func (p *PlanHandoffInline) CollapsedHeight() int { return 1 }
+
+// CollapsedHelp returns the help description for restoring the handoff.
+func (p *PlanHandoffInline) CollapsedHelp() string { return "review plan" }
+
+// DrawCollapsed renders the persistent compact handoff while chat is focused.
+func (p *PlanHandoffInline) DrawCollapsed(scr uv.Screen, area uv.Rectangle) {
+	p.compositor = nil
+	icon := questionIconPrompt(p.com.Styles, false)
+	available := max(0, area.Dx()-lipgloss.Width(icon))
+	label := ansi.Truncate(planHandoffCollapsedPrompt, available, "…")
+	text := icon + p.com.Styles.Messages.AssistantInfoModel.Render(label)
+	drawStyledText(scr, area, text)
 }
 
 // HeightChanged reports whether the current state changed its layout height.
@@ -232,13 +357,14 @@ func (p *PlanHandoffInline) SetFocused(focused bool) {
 		p.editor.Focus()
 	} else {
 		p.editor.Blur()
+		p.clearSelection()
 	}
 }
 
 // ShortHelp returns key bindings for the status bar.
 func (p *PlanHandoffInline) ShortHelp() []key.Binding {
 	if p.editing {
-		return []key.Binding{p.keyEnter, p.keyClose}
+		return []key.Binding{p.keyEnter, p.keyNewline, p.keyClose}
 	}
 	return []key.Binding{p.keyLeftRight, p.keyEnter, p.keyYes, p.keyNo}
 }
@@ -247,7 +373,7 @@ func (p *PlanHandoffInline) ShortHelp() []key.Binding {
 func (p *PlanHandoffInline) SetHover(x, y int) { p.hoverX = x; p.hoverY = y }
 
 // HandleMouseClick implements MouseClickableEditor. Clicking "Implement"
-// stores the confirm cmd via PendingCmd; clicking "Keep editing" opens the
+// stores the confirm cmd via PendingCmd; clicking "Request changes" opens the
 // feedback editor.
 func (p *PlanHandoffInline) HandleMouseClick(x, y int) (bool, bool) {
 	if p.editing {
@@ -255,14 +381,163 @@ func (p *PlanHandoffInline) HandleMouseClick(x, y int) (bool, bool) {
 	}
 	switch common.HitButtonIndex(p.compositor, x, y) {
 	case 0: // Implement
-		p.selectedNo = false
+		p.requestChangesSelected = false
 		p.runConfirm()
 		return true, true
-	case 1: // Keep editing
+	case 1: // Request changes
 		p.startEditing()
 		return false, true
 	}
 	return false, false
+}
+
+// HandleMouseDown begins text selection inside the request-changes editor.
+func (p *PlanHandoffInline) HandleMouseDown(x, y int) bool {
+	point, editor, ok := p.selectionPointAt(x, y, false)
+	if !ok {
+		return false
+	}
+	p.editor = editor
+	p.selectionAnchor = point
+	p.selectionHead = point
+	p.selectionSet = true
+	p.selecting = true
+	return true
+}
+
+// HandleMouseDrag updates an active request-changes text selection.
+func (p *PlanHandoffInline) HandleMouseDrag(x, y int) bool {
+	if !p.selecting {
+		return false
+	}
+	point, editor, ok := p.selectionPointAt(x, y, true)
+	if !ok {
+		return false
+	}
+	p.editor = editor
+	p.selectionHead = point
+	return true
+}
+
+// HandleMouseRelease finishes selection and copies non-empty text.
+func (p *PlanHandoffInline) HandleMouseRelease(x, y int) (bool, tea.Cmd) {
+	if !p.selecting {
+		return false, nil
+	}
+	p.HandleMouseDrag(x, y)
+	p.selecting = false
+	selected := p.SelectedText()
+	if selected == "" {
+		return true, nil
+	}
+	return true, common.CopyToClipboard(selected, "Selected text copied to clipboard")
+}
+
+// SelectedText returns the current request-changes selection.
+func (p *PlanHandoffInline) SelectedText() string {
+	if !p.selectionSet || p.selectionAnchor.offset == p.selectionHead.offset {
+		return ""
+	}
+	start, end := p.selectionAnchor.offset, p.selectionHead.offset
+	if start > end {
+		start, end = end, start
+	}
+	value := []rune(p.editor.Value())
+	start = min(max(0, start), len(value))
+	end = min(max(0, end), len(value))
+	return string(value[start:end])
+}
+
+func (p *PlanHandoffInline) selectionPointAt(x, y int, clampToArea bool) (planHandoffSelectionPoint, textarea.Model, bool) {
+	if !p.editing || p.editorTextArea.Empty() {
+		return planHandoffSelectionPoint{}, p.editor, false
+	}
+	if clampToArea {
+		x = min(max(x, p.editorTextArea.Min.X), p.editorTextArea.Max.X)
+		y = min(max(y, p.editorTextArea.Min.Y), p.editorTextArea.Max.Y-1)
+	} else if !image.Pt(x, y).In(p.editorTextArea) {
+		return planHandoffSelectionPoint{}, p.editor, false
+	}
+
+	editor := p.editor
+	cursor := editor.Cursor()
+	if cursor == nil {
+		return planHandoffSelectionPoint{}, p.editor, false
+	}
+	targetRow := y - p.editorTextArea.Min.Y
+	for cursor.Y < targetRow {
+		previousLine, previousInfo := editor.Line(), editor.LineInfo()
+		editor.CursorDown()
+		cursor = editor.Cursor()
+		if editor.Line() == previousLine && editor.LineInfo() == previousInfo {
+			break
+		}
+	}
+	for cursor.Y > targetRow {
+		previousLine, previousInfo := editor.Line(), editor.LineInfo()
+		editor.CursorUp()
+		cursor = editor.Cursor()
+		if editor.Line() == previousLine && editor.LineInfo() == previousInfo {
+			break
+		}
+	}
+
+	lines := strings.Split(editor.Value(), "\n")
+	lineIndex := editor.Line()
+	if lineIndex < 0 || lineIndex >= len(lines) {
+		return planHandoffSelectionPoint{}, p.editor, false
+	}
+	line := []rune(lines[lineIndex])
+	info := editor.LineInfo()
+	segmentStart := min(info.StartColumn, len(line))
+	segmentEnd := min(info.StartColumn+info.Width, len(line))
+	targetCol := max(0, x-p.editorTextArea.Min.X)
+	column := segmentStart + runeIndexAtCell(line[segmentStart:segmentEnd], targetCol)
+	editor.SetCursorColumn(column)
+	cursor = editor.Cursor()
+
+	offset := column
+	for i := 0; i < lineIndex; i++ {
+		offset += utf8.RuneCountInString(lines[i]) + 1
+	}
+	return planHandoffSelectionPoint{
+		offset: offset,
+		row:    cursor.Y,
+		col:    cursor.X,
+	}, editor, true
+}
+
+func (p *PlanHandoffInline) visualSelectionRange() (planHandoffSelectionPoint, planHandoffSelectionPoint, bool) {
+	if !p.selectionSet || p.selectionAnchor.offset == p.selectionHead.offset {
+		return planHandoffSelectionPoint{}, planHandoffSelectionPoint{}, false
+	}
+	if p.selectionAnchor.offset < p.selectionHead.offset {
+		return p.selectionAnchor, p.selectionHead, true
+	}
+	return p.selectionHead, p.selectionAnchor, true
+}
+
+func (p *PlanHandoffInline) clearSelection() {
+	p.selectionAnchor = planHandoffSelectionPoint{}
+	p.selectionHead = planHandoffSelectionPoint{}
+	p.selectionSet = false
+	p.selecting = false
+}
+
+func runeIndexAtCell(runes []rune, cell int) int {
+	graphemes := uniseg.NewGraphemes(string(runes))
+	runeIndex := 0
+	width := 0
+	for graphemes.Next() {
+		grapheme := graphemes.Str()
+		nextWidth := width + graphemes.Width()
+		if cell < nextWidth {
+			return runeIndex
+		}
+		width = nextWidth
+		runeIndex += utf8.RuneCountInString(grapheme)
+	}
+	return runeIndex
 }
 
 // HandlePaste forwards paste events to the feedback editor.
@@ -270,6 +545,7 @@ func (p *PlanHandoffInline) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	if !p.editing {
 		return nil
 	}
+	p.clearSelection()
 	previousHeight := p.editor.Height()
 	var cmd tea.Cmd
 	p.editor, cmd = p.editor.Update(msg)

@@ -155,9 +155,13 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 		style = t.ItemFocused
 	}
 
+	// Build content to the width left after the item style's own padding,
+	// so the final rendered line is exactly `width` wide. Otherwise the
+	// padding pushes the line past the list width and it wraps.
+	lineWidth := max(0, width-style.GetHorizontalFrameSize())
+
 	var infoText string
 	var infoWidth int
-	lineWidth := width
 	if len(info) > 0 {
 		infoText = fmt.Sprintf(" %s ", info)
 		if focused {

@@ -182,7 +182,7 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.View.GetVerticalFrameSize()
 
 	n.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
-	n.list.SetSize(innerWidth, height-heightOffset)
+	n.list.SetSize(innerWidth, max(0, height-heightOffset))
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Notification Style"

@@ -173,7 +173,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.View.GetVerticalFrameSize()
 
 	r.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
-	r.list.SetSize(innerWidth, height-heightOffset)
+	r.list.SetSize(innerWidth, max(0, height-heightOffset))
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Select Reasoning Effort"

@@ -267,7 +267,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
-	listHeight := height - heightOffset
+	listHeight := max(0, height-heightOffset)
 	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
 	m.list.SetSize(listWidth, listHeight)
 	listTotalHeight := m.list.TotalHeight()

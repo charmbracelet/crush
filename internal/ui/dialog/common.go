@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // renderDialogHelp renders keybind hints as a single padded footer line at
@@ -182,15 +181,15 @@ func (rc *RenderContext) Render() string {
 	if len(rc.Title) > 0 {
 		contentWidth := rc.Width - dialogStyle.GetHorizontalFrameSize() -
 			titleStyle.GetHorizontalFrameSize()
-		var titleInfoWidth int
 		titleInfo := rc.TitleInfo
-		if len(titleInfo) > 0 {
-			titleInfoWidth = lipgloss.Width(titleInfo)
-			// Truncate TitleInfo if it would push past dialog width.
-			if titleInfoWidth > contentWidth {
-				titleInfo = ansi.Truncate(titleInfo, max(0, contentWidth), "…")
-				titleInfoWidth = lipgloss.Width(titleInfo)
-			}
+		titleInfoWidth := lipgloss.Width(titleInfo)
+		// Drop the title info entirely when it can't sit beside the title
+		// text with at least a one-cell gap. Title info is often styled
+		// (e.g. radio toggles with backgrounds and padding); truncating it
+		// mid-segment leaves broken colored fragments, so hide it instead.
+		if titleInfoWidth > 0 && lipgloss.Width(rc.Title)+1+titleInfoWidth > contentWidth {
+			titleInfo = ""
+			titleInfoWidth = 0
 		}
 		title := common.DialogTitle(rc.Styles, rc.Title,
 			max(0, contentWidth-titleInfoWidth), rc.TitleGradientFromColor, rc.TitleGradientToColor)

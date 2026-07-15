@@ -232,6 +232,20 @@ func TestPlanHandoffAdaptiveChoiceLayout(t *testing.T) {
 	require.Equal(t, firstY+1, secondY)
 }
 
+func TestPlanHandoffChoiceCopyHasNoQuestionBadge(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPlanHandoff()
+	scr := uv.NewScreenBuffer(80, p.Height(80))
+	p.Draw(scr, image.Rect(0, 0, 80, p.Height(80)))
+	rendered := strings.TrimSpace(ansi.Strip(scr.Render()))
+
+	require.True(t, strings.HasPrefix(rendered, planHandoffQuestion))
+	require.Contains(t, rendered, "Start coding")
+	require.Contains(t, rendered, "Revise plan")
+	require.NotContains(t, rendered, " ? "+planHandoffQuestion)
+}
+
 func TestPlanHandoffCollapsedView(t *testing.T) {
 	t.Parallel()
 
@@ -262,7 +276,7 @@ func TestPlanHandoffSetWidthRecalculatesFeedbackHeight(t *testing.T) {
 	require.True(t, p.HeightChanged())
 }
 
-func TestPlanHandoffImplement(t *testing.T) {
+func TestPlanHandoffStartCoding(t *testing.T) {
 	t.Parallel()
 
 	p := newTestPlanHandoff()

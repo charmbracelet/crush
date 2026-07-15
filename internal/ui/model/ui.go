@@ -2233,9 +2233,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 			switch {
 			case key.Matches(msg, m.keyMap.Editor.AddImage):
-				if !m.currentModelSupportsImages() {
-					break
-				}
 				if cmd := m.openFilesDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -2896,8 +2893,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
 			}
+			// AddImage (ctrl+f) opens the file picker, which now accepts text
+			// files on any model, so its hint always shows. Only the clipboard
+			// image paste stays gated to image-capable models.
+			editorBinds = append(editorBinds, k.Editor.AddImage)
 			if m.currentModelSupportsImages() {
-				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
+				editorBinds = append(editorBinds, k.Editor.PasteImage)
 			}
 			binds = append(binds, editorBinds)
 			if hasAttachments {
@@ -2951,8 +2952,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
 			}
+			// AddImage (ctrl+f) opens the file picker, which now accepts text
+			// files on any model, so its hint always shows. Only the clipboard
+			// image paste stays gated to image-capable models.
+			editorBinds = append(editorBinds, k.Editor.AddImage)
 			if m.currentModelSupportsImages() {
-				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
+				editorBinds = append(editorBinds, k.Editor.PasteImage)
 			}
 			binds = append(binds, editorBinds)
 			if hasAttachments {
@@ -4291,15 +4296,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 				return false
 			}
 
-			lowerPath := strings.ToLower(path)
-			isValid := false
-			for _, ext := range common.AllowedImageTypes {
-				if strings.HasSuffix(lowerPath, ext) {
-					isValid = true
-					break
-				}
-			}
-			if !isValid {
+			if !common.IsAllowedAttachmentType(path) {
 				return false
 			}
 		}
@@ -4398,16 +4395,8 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		return nil // Clipboard does not contain an image or valid file path
 	}
 
-	lowerPath := strings.ToLower(path)
-	isAllowed := false
-	for _, ext := range common.AllowedImageTypes {
-		if strings.HasSuffix(lowerPath, ext) {
-			isAllowed = true
-			break
-		}
-	}
-	if !isAllowed {
-		return util.NewInfoMsg("File type is not a supported image format")
+	if !common.IsAllowedAttachmentType(path) {
+		return util.NewInfoMsg("File type is not supported")
 	}
 
 	fileInfo, statErr := os.Stat(path)

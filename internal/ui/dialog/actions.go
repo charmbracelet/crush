@@ -152,7 +152,7 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("unable to read the image: %v", err),
+				Msg:  fmt.Sprintf("unable to read the file: %v", err),
 			}
 		}
 		if isFileLarge {
@@ -166,7 +166,7 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("unable to read the image: %v", err),
+				Msg:  fmt.Sprintf("unable to read the file: %v", err),
 			}
 		}
 

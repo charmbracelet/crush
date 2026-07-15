@@ -1569,6 +1569,9 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		if attachment.IsText() {
 			continue
 		}
+		if !supportsImages {
+			continue
+		}
 		files = append(files, fantasy.FilePart{
 			Filename:  attachment.FileName,
 			Data:      attachment.Content,

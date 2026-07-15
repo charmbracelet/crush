@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
@@ -4026,6 +4027,7 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	filePicker, cmd := dialog.NewFilePicker(m.com)
 	filePicker.SetImageCapabilities(&m.caps)
 	m.dialog.OpenDialog(filePicker)
+	event.FilePickerOpened()
 
 	return cmd
 }

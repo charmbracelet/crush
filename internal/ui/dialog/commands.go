@@ -20,6 +20,11 @@ import (
 // CommandsID is the identifier for the commands dialog.
 const CommandsID = "commands"
 
+// menuLevel captures the parent state when navigating into a sub-menu.
+type menuLevel struct {
+	items []list.Item
+}
+
 // CommandType represents the type of commands being displayed.
 type CommandType uint
 
@@ -50,6 +55,7 @@ type Commands struct {
 		Previous,
 		Tab,
 		ShiftTab,
+		Back,
 		Close key.Binding
 	}
 
@@ -73,6 +79,9 @@ type Commands struct {
 
 	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
+
+	menuStack  []menuLevel
+	breadcrumb []string
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -129,6 +138,10 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		key.WithKeys("shift+tab"),
 		key.WithHelp("shift+tab", "switch selection prev"),
 	)
+	c.keyMap.Back = key.NewBinding(
+		key.WithKeys("backspace", "alt+left"),
+		key.WithHelp("backspace", "back"),
+	)
 	closeKey := CloseKey
 	closeKey.SetHelp("esc", "cancel")
 	c.keyMap.Close = closeKey
@@ -172,7 +185,18 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Close):
+			if c.inSubMenu() {
+				c.popMenu()
+				return nil
+			}
 			return ActionClose{}
+		case key.Matches(msg, c.keyMap.Back) && c.inSubMenu():
+			// Backspace pops out of a sub-menu, but only while in one. At the
+			// top level it must fall through to the input so it can edit the
+			// type-ahead filter (otherwise the case swallows it and backspace
+			// does nothing).
+			c.popMenu()
+			return nil
 		case key.Matches(msg, c.keyMap.Previous):
 			c.list.Focus()
 			if c.list.IsSelectedFirst() {
@@ -192,16 +216,20 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, c.keyMap.Select):
 			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
 				if item, ok := selectedItem.(*CommandItem); ok && item != nil {
+					if item.HasChildren() {
+						c.pushMenu(item)
+						return nil
+					}
 					return item.Action()
 				}
 			}
 		case key.Matches(msg, c.keyMap.Tab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+			if !c.inSubMenu() && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0) {
 				c.selected = c.nextCommandType()
 				c.setCommandItems(c.selected)
 			}
 		case key.Matches(msg, c.keyMap.ShiftTab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+			if !c.inSubMenu() && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0) {
 				c.selected = c.previousCommandType()
 				c.setCommandItems(c.selected)
 			}
@@ -210,6 +238,10 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			for _, item := range c.list.FilteredItems() {
 				if item, ok := item.(*CommandItem); ok && item != nil {
 					if msg.String() == item.Shortcut() {
+						if item.HasChildren() {
+							c.pushMenu(item)
+							return nil
+						}
 						return item.Action()
 					}
 				}
@@ -296,7 +328,11 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
-	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
+	if c.inSubMenu() {
+		rc.Title = "Commands ▸ " + strings.Join(c.breadcrumb, " ▸ ")
+	} else {
+		rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
+	}
 	inputView := t.Dialog.InputPrompt.Render(c.input.View())
 	rc.AddPart(inputView)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
@@ -376,6 +412,60 @@ func (c *Commands) previousCommandType() CommandType {
 	default:
 		return SystemCommands
 	}
+}
+
+// inSubMenu reports whether the dialog is currently inside a sub-menu.
+func (c *Commands) inSubMenu() bool {
+	return len(c.menuStack) > 0
+}
+
+// pushMenu saves the current list state and navigates into a sub-menu.
+func (c *Commands) pushMenu(parent *CommandItem) {
+	// Clear any active filter before snapshotting so we save the FULL parent
+	// list, not just the currently-matched subset. Otherwise popping back would
+	// drop every top-level item that didn't match the filter that was active
+	// when the user entered the sub-menu.
+	c.input.SetValue("")
+	c.list.SetFilter("")
+
+	// Save current visible items (includes FilterableItem interface).
+	c.menuStack = append(c.menuStack, menuLevel{
+		items: c.list.FilteredItems(),
+	})
+	c.breadcrumb = append(c.breadcrumb, parent.title)
+
+	children := make([]list.FilterableItem, len(parent.children))
+	for i, child := range parent.children {
+		children[i] = child
+	}
+	c.list.SetItems(children...)
+	c.list.SetFilter("")
+	c.list.ScrollToTop()
+	c.list.SetSelected(0)
+	c.input.SetValue("")
+}
+
+// popMenu restores the previous menu level from the stack.
+func (c *Commands) popMenu() {
+	if len(c.menuStack) == 0 {
+		return
+	}
+	level := c.menuStack[len(c.menuStack)-1]
+	c.menuStack = c.menuStack[:len(c.menuStack)-1]
+	c.breadcrumb = c.breadcrumb[:len(c.breadcrumb)-1]
+
+	// Restore items by re-setting them as FilterableItems.
+	fitems := make([]list.FilterableItem, 0, len(level.items))
+	for _, item := range level.items {
+		if fi, ok := item.(list.FilterableItem); ok {
+			fitems = append(fitems, fi)
+		}
+	}
+	c.list.SetItems(fitems...)
+	c.list.SetFilter("")
+	c.list.ScrollToTop()
+	c.list.SetSelected(0)
+	c.input.SetValue("")
 }
 
 // setCommandItems sets the command items based on the specified command type.

@@ -186,6 +186,42 @@ func (l *List) TotalHeight() int {
 	return total
 }
 
+// Prewarm renders items in the range [from, from+batch) into the width
+// cache and returns the next index to warm (len(items) when done). It lets
+// a caller populate the per-item render cache incrementally across frames
+// so a later TotalHeight is instant instead of rendering everything at
+// once. Rendering is otherwise identical to what TotalHeight would do.
+func (l *List) Prewarm(from, batch int) int {
+	if from < 0 {
+		from = 0
+	}
+	end := min(from+batch, len(l.items))
+	for idx := from; idx < end; idx++ {
+		l.renderItemEntry(idx)
+	}
+	return end
+}
+
+// Overflows reports whether the items' total height exceeds the given
+// viewport height. It walks from the bottom and stops as soon as the
+// threshold is crossed, so for content taller than the viewport (the
+// common case) it renders only a viewport's worth of items rather than
+// all of them — much cheaper than TotalHeight when only the boolean is
+// needed (e.g. deciding whether a scrollbar is required).
+func (l *List) Overflows(height int) bool {
+	total := 0
+	for idx := len(l.items) - 1; idx >= 0; idx-- {
+		total += l.getItem(idx).height
+		if l.gap > 0 && idx < len(l.items)-1 {
+			total += l.gap
+		}
+		if total > height {
+			return true
+		}
+	}
+	return false
+}
+
 // Offset returns the current scroll offset in lines from the top.
 func (l *List) Offset() int {
 	offset := 0

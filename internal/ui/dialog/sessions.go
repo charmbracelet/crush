@@ -239,7 +239,14 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 	listHeight := max(0, height-heightOffset)
 	listTotalHeight := s.list.TotalHeight()
-	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
+	// Reserve one column for the scrollbar only when it will actually
+	// show. The item's own right padding provides the gap before it, so
+	// the list otherwise spans the full content width with no dead space.
+	scrollbarWidth := 0
+	if listTotalHeight > listHeight {
+		scrollbarWidth = 1
+	}
+	listWidth := max(0, innerWidth-scrollbarWidth)
 	s.list.SetSize(listWidth, listHeight)
 
 	// Hide the timestamps uniformly when the widest would crowd the title.

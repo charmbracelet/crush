@@ -268,9 +268,15 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
 	listHeight := max(0, height-heightOffset)
-	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
-	m.list.SetSize(listWidth, listHeight)
 	listTotalHeight := m.list.TotalHeight()
+	// Reserve one column for the scrollbar only when it will actually
+	// show, so the list otherwise spans the full content width.
+	scrollbarWidth := 0
+	if listTotalHeight > listHeight+1 {
+		scrollbarWidth = 1
+	}
+	listWidth := max(0, innerWidth-scrollbarWidth)
+	m.list.SetSize(listWidth, listHeight)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"

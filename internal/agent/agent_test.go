@@ -682,8 +682,16 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	msgs, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
-	// When supportsImages is false, image attachments should be stripped.
-	history, _ := agent.preparePrompt(msgs, false)
+	// New-turn image attachment (not yet stored in the DB).
+	imageAtt := message.Attachment{
+		FileName: "screenshot.png",
+		MimeType: "image/png",
+		Content:  []byte("fake-screenshot"),
+	}
+
+	// When supportsImages is false, image attachments should be stripped
+	// from history AND from the files list.
+	history, files := agent.preparePrompt(msgs, false, imageAtt)
 	// First message is the system reminder, second is the user message.
 	require.Len(t, history, 2)
 	require.Len(t, history[1].Content, 1)
@@ -691,9 +699,11 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	require.True(t, ok)
 	require.Contains(t, text.Text, "hello world")
 	require.Contains(t, text.Text, "important notes")
+	require.Empty(t, files, "image files should be excluded when model does not support images")
 
-	// When supportsImages is true, image attachments should remain.
-	history, _ = agent.preparePrompt(msgs, true)
+	// When supportsImages is true, image attachments should remain in
+	// history and be included in the files list.
+	history, files = agent.preparePrompt(msgs, true, imageAtt)
 	require.Len(t, history, 2)
 	require.Len(t, history[1].Content, 2)
 	text, ok = fantasy.AsMessagePart[fantasy.TextPart](history[1].Content[0])
@@ -702,6 +712,46 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	file, ok := fantasy.AsMessagePart[fantasy.FilePart](history[1].Content[1])
 	require.True(t, ok)
 	require.Equal(t, "image.png", file.Filename)
+	require.Len(t, files, 1, "new-turn image attachment should be included when model supports images")
+	require.Equal(t, "screenshot.png", files[0].Filename)
+}
+
+func TestCreateUserMessage_RetainsAllAttachments(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	// Mix of text and image attachments — all should be stored.
+	call := SessionAgentCall{
+		SessionID: sess.ID,
+		Prompt:    "look at this image",
+		Attachments: []message.Attachment{
+			{FileName: "notes.txt", FilePath: "notes.txt", MimeType: "text/plain", Content: []byte("notes")},
+			{FileName: "photo.png", FilePath: "photo.png", MimeType: "image/png", Content: []byte("fake-png")},
+		},
+	}
+
+	msg, err := agent.createUserMessage(ctx, call)
+	require.NoError(t, err)
+
+	// All attachments should be present as BinaryContent parts.
+	binaryParts := msg.BinaryContent()
+	require.Len(t, binaryParts, 2, "both text and image attachments should be stored in the user message")
+	require.Equal(t, "notes.txt", binaryParts[0].Path)
+	require.Equal(t, "text/plain", binaryParts[0].MIMEType)
+	require.Equal(t, "photo.png", binaryParts[1].Path)
+	require.Equal(t, "image/png", binaryParts[1].MIMEType)
+
+	// Reload from DB to verify persistence.
+	reloaded, err := env.messages.Get(ctx, msg.ID)
+	require.NoError(t, err)
+	binaryParts = reloaded.BinaryContent()
+	require.Len(t, binaryParts, 2, "attachments should survive DB round-trip")
+	require.Equal(t, "photo.png", binaryParts[1].Path)
 }
 
 func TestPreparePrompt_OrphanedToolUse(t *testing.T) {

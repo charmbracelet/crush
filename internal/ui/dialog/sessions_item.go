@@ -185,6 +185,12 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 	var infoText string
 	var infoWidth int
 	if len(info) > 0 {
+		// Cap the info column so a long value (e.g. a provider name) can
+		// truncate instead of overflowing the row or squeezing the title
+		// to nothing; the title keeps at least half the width.
+		if maxInfo := lineWidth / 2; lipgloss.Width(info)+2 > maxInfo {
+			info = ansi.Truncate(info, max(0, maxInfo-2), "…")
+		}
 		infoText = fmt.Sprintf(" %s ", info)
 		if focused {
 			infoText = t.InfoTextFocused.Render(infoText)

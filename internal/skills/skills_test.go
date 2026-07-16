@@ -400,6 +400,41 @@ func TestParseContent_NoFrontmatter(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestIsUserInvocable_DefaultTrue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{
+			name: "absent defaults to true",
+			yaml: "---\nname: a\ndescription: x.\n---\n",
+			want: true,
+		},
+		{
+			name: "explicit true",
+			yaml: "---\nname: a\ndescription: x.\nuser-invocable: true\n---\n",
+			want: true,
+		},
+		{
+			name: "explicit false",
+			yaml: "---\nname: a\ndescription: x.\nuser-invocable: false\n---\n",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			skill, err := ParseContent([]byte(tt.yaml))
+			require.NoError(t, err)
+			require.Equal(t, tt.want, skill.IsUserInvocable())
+		})
+	}
+}
+
 func TestDiscoverBuiltin(t *testing.T) {
 	t.Parallel()
 

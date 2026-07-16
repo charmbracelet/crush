@@ -346,13 +346,19 @@ func (m *Chat) SetSize(width, height int) {
 	// width is a no-op — critical after warming, where re-setting the same
 	// width would otherwise drop the freshly warmed cache and reintroduce
 	// the blocking full render.
+	// Capture whether we should stay pinned to the bottom *before* the size
+	// change. A width change rewraps every item, so the list's line offsets
+	// (offsetIdx/offsetLine) become stale and AtBottom() can no longer be
+	// trusted afterward. follow short-circuits the AtBottom() walk in the
+	// common streaming case.
+	wasFollowing := m.follow || m.AtBottom()
 	listWidth := width
 	if m.list.Overflows(height) {
 		listWidth = max(0, width-1)
 	}
 	m.list.SetSize(listWidth, height)
-	// Anchor to bottom if we were at the bottom.
-	if m.AtBottom() {
+	// Re-anchor to bottom if we were pinned there before the resize.
+	if wasFollowing {
 		m.ScrollToBottom()
 	}
 }

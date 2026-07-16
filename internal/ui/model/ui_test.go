@@ -87,9 +87,17 @@ func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 // testWorkspace is a minimal [workspace.Workspace] stub for unit tests.
 type testWorkspace struct {
 	workspace.Workspace
-	cfg *config.Config
+	cfg        *config.Config
+	workingDir string
 }
 
 func (w *testWorkspace) Config() *config.Config {
 	return w.cfg
+}
+
+func (w *testWorkspace) WorkingDir() string {
+	if w.workingDir != "" {
+		return w.workingDir
+	}
+	return ""
 }

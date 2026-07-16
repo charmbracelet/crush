@@ -44,6 +44,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/anim"
@@ -64,6 +65,7 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
+	"github.com/fsnotify/fsnotify"
 )
 
 // Compact mode breakpoints.
@@ -172,6 +174,10 @@ type (
 	// fetched from the API.
 	creditsUpdatedMsg struct {
 		credits int
+	}
+	// gitBranchLoadedMsg is sent when the git branch has been fetched.
+	gitBranchLoadedMsg struct {
+		branch string
 	}
 )
 
@@ -282,6 +288,11 @@ type UI struct {
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
+
+	// gitBranch is the current git branch name, kept live via fsnotify on
+	// .git/HEAD.
+	gitBranch  string
+	gitWatcher *fsnotify.Watcher
 
 	// Notification state
 	notifyBackend       notification.Backend
@@ -456,6 +467,7 @@ func (m *UI) Init() tea.Cmd {
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
+	cmds = append(cmds, m.loadGitBranch())
 	return tea.Batch(cmds...)
 }
 
@@ -1144,6 +1156,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case creditsUpdatedMsg:
 		m.hyperCredits = &msg.credits
+	case gitBranchLoadedMsg:
+		m.gitBranch = msg.branch
+		cmds = append(cmds, m.watchGitBranch())
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -4540,6 +4555,75 @@ func (m *UI) handleStateChanged() tea.Cmd {
 		m.com.Workspace.UpdateAgentModel(context.Background())
 		return mcpStateChangedMsg{
 			states: m.com.Workspace.MCPGetStates(),
+		}
+	}
+}
+
+func (m *UI) loadGitBranch() tea.Cmd {
+	return func() tea.Msg {
+		dir := m.com.Workspace.WorkingDir()
+		gitDir := filepath.Join(dir, ".git")
+		info, err := os.Stat(gitDir)
+		if err != nil {
+			return gitBranchLoadedMsg{}
+		}
+
+		// Resolve .git file (worktrees) to the actual git dir.
+		resolvedGitDir := gitDir
+		if !info.IsDir() {
+			data, err := os.ReadFile(gitDir)
+			if err != nil {
+				return gitBranchLoadedMsg{}
+			}
+			// Format: "gitdir: /path/to/.git"
+			line := strings.TrimSpace(strings.TrimPrefix(string(data), "gitdir:"))
+			if !filepath.IsAbs(line) {
+				line = filepath.Join(dir, line)
+			}
+			resolvedGitDir = line
+		}
+
+		// Start or restart the watcher on .git/HEAD.
+		if m.gitWatcher != nil {
+			m.gitWatcher.Close()
+		}
+		if w, err := fsnotify.NewWatcher(); err == nil {
+			headFile := filepath.Join(resolvedGitDir, "HEAD")
+			_ = w.Add(headFile)
+			// Also watch the refs/heads dir for branch creation/deletion.
+			_ = w.Add(filepath.Join(resolvedGitDir, "refs", "heads"))
+			m.gitWatcher = w
+		}
+
+		sh := shell.NewShell(&shell.Options{WorkingDir: dir})
+		out, _, err := sh.Exec(context.Background(), "git branch --show-current 2>/dev/null")
+		if err != nil {
+			return gitBranchLoadedMsg{}
+		}
+		return gitBranchLoadedMsg{branch: strings.TrimSpace(out)}
+	}
+}
+
+func (m *UI) watchGitBranch() tea.Cmd {
+	if m.gitWatcher == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		select {
+		case _, ok := <-m.gitWatcher.Events:
+			if !ok {
+				return nil
+			}
+			// Re-fetch the branch.
+			dir := m.com.Workspace.WorkingDir()
+			sh := shell.NewShell(&shell.Options{WorkingDir: dir})
+			out, _, err := sh.Exec(context.Background(), "git branch --show-current 2>/dev/null")
+			if err != nil {
+				return gitBranchLoadedMsg{}
+			}
+			return gitBranchLoadedMsg{branch: strings.TrimSpace(out)}
+		case <-m.gitWatcher.Errors:
+			return nil
 		}
 	}
 }

@@ -25,7 +25,9 @@ names are case-insensitive and accept snake_case (`PreToolUse`, `pretooluse`,
 
 `TurnEnd` is special among lifecycle events: its stdin payload includes a
 `text` field containing the assistant's rendered text output for the turn.
-The hook remains observe-only.
+The hook remains observe-only. It fires only for top-level turns, not for
+sub-agents (`agentic_fetch`, the task tool), so it runs once per user-facing
+turn rather than once per delegated sub-agent turn.
 
 ## Configuration
 

@@ -153,17 +153,8 @@ type CoordinatorOptions struct {
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
-	// Skills are pre-discovered by the caller (see app.New /
-	// backend.CreateWorkspace) and passed in via the manager. If no
-	// manager was provided (legacy callers), fall back to an in-line
-	// discovery so the coordinator still works.
-	var allSkills, activeSkills []*skills.Skill
-	if opts.Skills != nil {
-		allSkills = opts.Skills.AllSkills()
-		activeSkills = opts.Skills.ActiveSkills()
-	} else {
-		allSkills, activeSkills = discoverSkills(opts.Config)
-	}
+	allSkills := opts.Skills.AllSkills()
+	activeSkills := opts.Skills.ActiveSkills()
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
@@ -1550,33 +1541,6 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 	}
 
 	return nil
-}
-
-// discoverSkills is a thin fallback wrapper used only when no
-// skills.Manager has been threaded through to the coordinator. All
-// production call sites (backend.CreateWorkspace, setupLocalWorkspace)
-// run discovery in advance and pass the results via the manager;
-// reaching this path means a caller bypassed both. It deliberately does
-// NOT publish to the package-level broker — there are no subscribers in
-// that case, so doing so would be misleading without delivering the
-// snapshot anywhere useful.
-func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
-	opts := cfg.Config().Options
-	var paths, disabled []string
-	if opts != nil {
-		paths = opts.SkillsPaths
-		disabled = opts.DisabledSkills
-	}
-	var resolver func(string) (string, error)
-	if r := cfg.Resolver(); r != nil {
-		resolver = r.ResolveValue
-	}
-	allSkills, activeSkills, _ = skills.DiscoverFromConfig(skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		Resolver:       resolver,
-	})
-	return allSkills, activeSkills
 }
 
 // logTurnSkillUsage emits a per-turn diagnostic line showing which skills

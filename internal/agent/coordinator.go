@@ -506,6 +506,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			switch providerCfg.ID {
 			case string(catwalk.InferenceProviderIoNet):
 				extraBody["reasoning"] = map[string]string{"effort": reasoningEffort}
+			case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+				// MiniMax models use the "thinking" parameter instead of
+				// "reasoning_effort". Other models on these providers still
+				// use the standard field.
+				if !strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
+					mergedOptions["reasoning_effort"] = reasoningEffort
+				}
 			default:
 				mergedOptions["reasoning_effort"] = reasoningEffort
 			}
@@ -547,6 +554,19 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case string(catwalk.InferenceProviderBaseten):
 			extraBody["chat_template_args"] = map[string]any{
 				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "",
+			}
+
+		case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+			// MiniMax M3 uses the "thinking" parameter to control reasoning.
+			// "reasoning_split" must be true so thinking content is returned
+			// in the "reasoning_content" field instead of inline in "content".
+			if strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
+				if model.CatwalkCfg.CanReason && (model.ModelCfg.Think || reasoningEffort != "") {
+					extraBody["thinking"] = map[string]any{"type": "adaptive"}
+					extraBody["reasoning_split"] = true
+				} else {
+					extraBody["thinking"] = map[string]any{"type": "disabled"}
+				}
 			}
 
 		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):

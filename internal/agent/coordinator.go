@@ -1181,21 +1181,17 @@ func (c *coordinator) ReloadSkills(ctx context.Context) error {
 		return err
 	}
 
-	c.allSkills = allSkills
-	c.activeSkills = activeSkills
-	c.skillTracker = skills.NewTracker(activeSkills)
-	logPromptSkillStats(activeSkills)
-
-	// Rebuild the system prompt so <available_skills> reflects the new set.
-	p, err := coderPrompt(
-		prompt.WithWorkingDir(c.cfg.WorkingDir()),
-		prompt.WithSkills(c.activeSkills),
-	)
+	// Build everything that can fail BEFORE swapping coordinator state,
+	// so a mid-reload error leaves the agent on the old skills.
+	large, _, err := c.buildAgentModels(ctx, false)
 	if err != nil {
 		return err
 	}
 
-	large, _, err := c.buildAgentModels(ctx, false)
+	p, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithSkills(activeSkills),
+	)
 	if err != nil {
 		return err
 	}
@@ -1203,9 +1199,15 @@ func (c *coordinator) ReloadSkills(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// All builds succeeded — commit the new skill state, then rebuild
+	// tools (which capture the slices by value at construction time).
+	c.allSkills = allSkills
+	c.activeSkills = activeSkills
+	c.skillTracker = skills.NewTracker(activeSkills)
+	logPromptSkillStats(activeSkills)
 	c.currentAgent.SetSystemPrompt(systemPrompt)
 
-	// Rebuild tools — they capture skill slices and the tracker by reference.
 	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
 	if !ok {
 		return errCoderAgentNotConfigured

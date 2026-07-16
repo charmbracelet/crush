@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Crush Usage Statistics</title>
+    <link rel="icon" type="image/svg+xml" href='{{.Favicon}}' />
     <link rel="preconnect" href="https://cdn.jsdelivr.net" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -130,6 +131,7 @@
 
     <script>
       const stats = {{.StatsJSON}};
+      const projectStats = {{.ProjectStatsJSON}};
       {{.JS}}
     </script>
   </body>

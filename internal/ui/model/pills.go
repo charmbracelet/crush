@@ -12,14 +12,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// pillStyle returns the appropriate style for a pill based on focus state.
-func pillStyle(focused, panelFocused bool, t *styles.Styles) lipgloss.Style {
-	if !panelFocused || focused {
-		return t.Pills.Focused
-	}
-	return t.Pills.Blurred
-}
-
 const (
 	// pillHeightWithBorder is the height of a pill including its border.
 	pillHeightWithBorder = 3
@@ -52,8 +44,10 @@ func hasInProgressTodo(todos []session.Todo) bool {
 	return false
 }
 
-// queuePill renders the queue count pill with gradient triangles.
-func queuePill(queue int, focused, panelFocused bool, t *styles.Styles) string {
+// queuePill renders the queue count pill with gradient triangles. Pills always
+// render with a border; focus within the expanded panel is conveyed by the list
+// shown below the pills, not by hiding a pill's border.
+func queuePill(queue int, t *styles.Styles) string {
 	if queue <= 0 {
 		return ""
 	}
@@ -64,11 +58,11 @@ func queuePill(queue int, focused, panelFocused bool, t *styles.Styles) string {
 
 	text := t.Pills.QueueLabel.Render(fmt.Sprintf("%d Queued", queue))
 	content := fmt.Sprintf("%s %s", strings.Join(triangles, ""), text)
-	return pillStyle(focused, panelFocused, t).Render(content)
+	return t.Pills.Focused.Render(content)
 }
 
 // todoPill renders the todo progress pill with optional spinner and task name.
-func todoPill(todos []session.Todo, spinnerView string, focused, panelFocused bool, t *styles.Styles) string {
+func todoPill(todos []session.Todo, spinnerView string, panelFocused bool, t *styles.Styles) string {
 	if !hasIncompleteTodos(todos) {
 		return ""
 	}
@@ -108,7 +102,7 @@ func todoPill(todos []session.Todo, spinnerView string, focused, panelFocused bo
 		content = fmt.Sprintf("%s %s", label, progress)
 	}
 
-	return pillStyle(focused, panelFocused, t).Render(content)
+	return t.Pills.Focused.Render(content)
 }
 
 // todoList renders the expanded todo list.
@@ -225,6 +219,33 @@ func (m *UI) switchPillSection(dir int) tea.Cmd {
 	return nil
 }
 
+// effectiveFocusedSection returns the pill section that should be treated as
+// focused for rendering. The stored focusedPillSection can go stale when its
+// section loses all content (for example todos complete while the panel is open,
+// or it defaults to todos before any todos exist). In that case we fall through
+// to whichever section still has content so the expanded list stays populated.
+func (m *UI) effectiveFocusedSection() pillSection {
+	hasIncomplete := hasIncompleteTodos(m.session.Todos)
+	hasQueue := m.promptQueue > 0
+	switch m.focusedPillSection {
+	case pillSectionQueue:
+		if hasQueue {
+			return pillSectionQueue
+		}
+		if hasIncomplete {
+			return pillSectionTodos
+		}
+	default: // pillSectionTodos
+		if hasIncomplete {
+			return pillSectionTodos
+		}
+		if hasQueue {
+			return pillSectionQueue
+		}
+	}
+	return m.focusedPillSection
+}
+
 // pillsAreaHeight calculates the total height needed for the pills area.
 func (m *UI) pillsAreaHeight() int {
 	if !m.hasSession() {
@@ -244,10 +265,15 @@ func (m *UI) pillsAreaHeight() int {
 
 	pillsAreaHeight := pillHeightWithBorder
 	if m.pillsExpanded {
-		if m.focusedPillSection == pillSectionTodos && hasIncomplete {
-			pillsAreaHeight += len(m.session.Todos)
-		} else if m.focusedPillSection == pillSectionQueue && hasQueue {
-			pillsAreaHeight += m.promptQueue
+		switch m.effectiveFocusedSection() {
+		case pillSectionTodos:
+			if hasIncomplete {
+				pillsAreaHeight += len(m.session.Todos)
+			}
+		case pillSectionQueue:
+			if hasQueue {
+				pillsAreaHeight += m.promptQueue
+			}
 		}
 	}
 	return pillsAreaHeight
@@ -280,8 +306,9 @@ func (m *UI) renderPills() {
 	}
 
 	t := m.com.Styles
-	todosFocused := m.pillsExpanded && m.focusedPillSection == pillSectionTodos
-	queueFocused := m.pillsExpanded && m.focusedPillSection == pillSectionQueue
+	effective := m.effectiveFocusedSection()
+	todosFocused := m.pillsExpanded && effective == pillSectionTodos
+	queueFocused := m.pillsExpanded && effective == pillSectionQueue
 
 	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 	if m.todoIsSpinning {
@@ -290,10 +317,10 @@ func (m *UI) renderPills() {
 
 	var pills []string
 	if hasIncomplete {
-		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, todosFocused, m.pillsExpanded, t))
+		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
 	}
 	if hasQueue {
-		pills = append(pills, queuePill(m.promptQueue, queueFocused, m.pillsExpanded, t))
+		pills = append(pills, queuePill(m.promptQueue, t))
 	}
 
 	var expandedList string

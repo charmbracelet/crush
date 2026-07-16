@@ -762,6 +762,10 @@ fields are included.
 content for the completed turn. The hook remains observe-only; output is
 ignored.
 
+`TurnEnd` fires only for top-level turns. Sub-agents (`agentic_fetch`, the
+task tool, etc.) run non-interactively and do not fire it, so a hook runs
+once per user-facing turn rather than once per delegated sub-agent turn.
+
 ```jsonc
 {
   // ...common fields...

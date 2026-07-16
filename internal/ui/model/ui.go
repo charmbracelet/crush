@@ -1888,7 +1888,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	case dialog.ActionReloadSkills:
 		cmds = append(cmds, func() tea.Msg {
-			if err := m.com.Workspace.ReloadSkills(context.TODO()); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := m.com.Workspace.ReloadSkills(ctx); err != nil {
 				return util.NewErrorMsg(fmt.Errorf("failed to reload skills: %w", err))
 			}
 			return util.NewInfoMsg("Skills reloaded")

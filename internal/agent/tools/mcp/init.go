@@ -203,8 +203,12 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	initOnce.Do(func() { close(initDone) })
 }
 
-// WaitForInit blocks until MCP initialization is complete.
-// If Initialize was never called, this returns immediately.
+// WaitForInit blocks until MCP initialization is complete, i.e. until
+// Initialize has finished and closed initDone. If Initialize is never called,
+// initDone is never closed, so this blocks until ctx is cancelled and then
+// returns ctx.Err(). Callers must therefore pass a context that is eventually
+// cancelled (Initialize is spawned unconditionally during app startup, so in
+// practice initDone always closes).
 func WaitForInit(ctx context.Context) error {
 	select {
 	case <-initDone:

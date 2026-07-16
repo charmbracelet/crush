@@ -116,6 +116,14 @@ func (m *Manager) ActiveSkills() []*Skill {
 	return m.activeSkills
 }
 
+// SkillSnapshot returns allSkills and activeSkills in a single lock
+// acquisition, preventing torn reads across a concurrent Reload.
+func (m *Manager) SkillSnapshot() (all, active []*Skill) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.allSkills, m.activeSkills
+}
+
 // ResolvedPaths returns the expanded skills directory paths stored at
 // construction time.
 func (m *Manager) ResolvedPaths() []string {
@@ -176,12 +184,12 @@ func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event
 // Returns the new active skills so callers (e.g. the coordinator) can
 // propagate them to the system prompt and tools. The context is checked
 // for cancellation after discovery completes but before swapping state.
-func (m *Manager) Reload(ctx context.Context) ([]*Skill, error) {
+func (m *Manager) Reload(ctx context.Context) (all, active []*Skill, err error) {
 	allSkills, activeSkills, states := DiscoverFromConfig(m.discoveryCfg)
 	resolved := m.discoveryCfg.ResolvePaths()
 
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("skill reload cancelled: %w", err)
+		return nil, nil, fmt.Errorf("skill reload cancelled: %w", err)
 	}
 
 	m.mu.Lock()
@@ -192,7 +200,7 @@ func (m *Manager) Reload(ctx context.Context) ([]*Skill, error) {
 	m.mu.Unlock()
 
 	m.PublishStates(states)
-	return activeSkills, nil
+	return allSkills, activeSkills, nil
 }
 
 // Shutdown releases broker resources.

@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -266,7 +267,11 @@ func (w *ClientWorkspace) UpdateAgentModel(ctx context.Context) error {
 }
 
 func (w *ClientWorkspace) InitCoderAgent(ctx context.Context) error {
-	return w.client.InitiateAgentProcessing(ctx, w.workspaceID())
+	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), true)
+}
+
+func (w *ClientWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
+	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), false)
 }
 
 func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
@@ -340,6 +345,40 @@ func (w *ClientWorkspace) PermissionSkipRequests() bool {
 
 func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
 	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
+}
+
+// -- Questions --
+
+// QuestionAnswer submits answers for a question via the client SDK.
+func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	protoResp := proto.QuestionAnswer{
+		Responses: make([]proto.QuestionResponse, len(responses)),
+	}
+	for i, r := range responses {
+		protoResp.Responses[i] = proto.QuestionResponse{
+			QuestionID:  r.QuestionID,
+			SelectedIDs: r.SelectedIDs,
+			FillInText:  r.FillInText,
+			Yes:         r.Yes,
+			Notes:       r.Notes,
+		}
+	}
+	resolved, err := w.client.AnswerQuestionBatch(context.Background(), w.workspaceID(), protoResp)
+	if err != nil {
+		slog.Error("Failed to answer question", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// QuestionCancel cancels the pending question via the client SDK.
+func (w *ClientWorkspace) QuestionCancel() bool {
+	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
+	if err != nil {
+		slog.Error("Failed to cancel question", "error", err)
+		return false
+	}
+	return cancelled
 }
 
 // -- FileTracker --
@@ -706,6 +745,25 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 				Denied:     e.Payload.Denied,
 			},
 		}
+	case pubsub.Event[proto.QuestionRequest]:
+		return pubsub.Event[question.Request]{
+			Type: e.Type,
+			Payload: question.Request{
+				ID:                 e.Payload.ID,
+				SessionID:          e.Payload.SessionID,
+				ToolCallID:         e.Payload.ToolCallID,
+				Questions:          protoQuestionsToDomain(e.Payload.Questions),
+				ConfirmTitle:       e.Payload.ConfirmTitle,
+				ConfirmDescription: e.Payload.ConfirmDescription,
+			},
+		}
+	case pubsub.Event[proto.QuestionNotification]:
+		return pubsub.Event[question.Notification]{
+			Type: e.Type,
+			Payload: question.Notification{
+				BatchID: e.Payload.BatchID,
+			},
+		}
 	case pubsub.Event[proto.Message]:
 		return pubsub.Event[message.Message]{
 			Type:    e.Type,
@@ -965,6 +1023,32 @@ func todosToProto(todos []session.Todo) []proto.Todo {
 			Content:    t.Content,
 			Status:     string(t.Status),
 			ActiveForm: t.ActiveForm,
+		}
+	}
+	return out
+}
+
+func protoQuestionsToDomain(qs []proto.QuestionItem) []question.Question {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]question.Question, len(qs))
+	for i, q := range qs {
+		choices := make([]question.Choice, len(q.Choices))
+		for j, c := range q.Choices {
+			choices[j] = question.Choice{
+				ID:          c.ID,
+				Label:       c.Label,
+				Description: c.Description,
+			}
+		}
+		out[i] = question.Question{
+			ID:          q.ID,
+			Type:        question.Type(q.Type),
+			Label:       q.Label,
+			Text:        q.Question,
+			Description: q.Description,
+			Choices:     choices,
 		}
 	}
 	return out

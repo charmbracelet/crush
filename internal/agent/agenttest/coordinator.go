@@ -64,17 +64,10 @@ func NewCoordinator(
 	coderCfg.AllowedTools = nil
 	cfg.Config().Agents[config.AgentCoder] = coderCfg
 
-	return agent.NewCoordinator(
-		ctx,
-		cfg,
-		sessions,
-		messages,
-		permission.NewPermissionService(workingDir, true, nil),
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-	)
+	return agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+		Config:      cfg,
+		Sessions:    sessions,
+		Messages:    messages,
+		Permissions: permission.NewPermissionService(workingDir, true, nil),
+	})
 }

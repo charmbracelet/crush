@@ -323,7 +323,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		description = descStyle.Render(a.description)
 	}
 
-	helpView := s.Dialog.HelpView.Width(width).Render(a.help.View(a))
+	helpView := renderDialogHelp(s, &a.help, a, width)
 	if a.loading {
 		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
 	}
@@ -335,11 +335,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	a.viewport.SetHeight(viewportHeight)
 	a.viewport.SetContent(renderedFields)
 
-	scrollbar := common.Scrollbar(s, viewportHeight, a.viewport.TotalLineCount(), viewportHeight, a.viewport.YOffset())
-	content := a.viewport.View()
-	if scrollbar != "" {
-		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbar)
-	}
+	content := joinScrollbar(s, a.viewport.View(), viewportHeight, a.viewport.TotalLineCount(), viewportHeight, a.viewport.YOffset())
 	var contentParts []string
 	if description != "" {
 		contentParts = append(contentParts, description)

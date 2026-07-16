@@ -51,7 +51,16 @@ func (m *ModelGroup) Render(width int) string {
 	}
 
 	title := " " + m.Title + " "
-	title = ansi.Truncate(title, max(0, width-lipgloss.Width(configured)-1), "…")
+	// Keep the "Configured" badge only when the full title fits beside it
+	// (plus a separator). Otherwise drop it and let the title use the whole
+	// width, rather than truncating the title to reserve room for a badge
+	// that common.Section would then drop anyway, leaving dead space.
+	if configured != "" && lipgloss.Width(title)+lipgloss.Width(configured)+3 > width {
+		configured = ""
+	}
+	if configured == "" {
+		title = ansi.Truncate(title, max(0, width-1), "…")
+	}
 
 	return common.Section(m.t, title, width, configured)
 }

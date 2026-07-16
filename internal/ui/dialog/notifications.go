@@ -173,17 +173,16 @@ func (n *Notifications) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := n.com.Styles
-	width := max(0, min(notificationsDialogMaxWidth, area.Dx()))
-	height := max(0, min(notificationsDialogMaxHeight, area.Dy()))
+	width := max(0, min(notificationsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(notificationsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	n.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
-	n.list.SetSize(innerWidth, height-heightOffset)
-	n.help.SetWidth(innerWidth)
+	n.input.SetWidth(dialogInputTextWidth(t, n.input, innerWidth))
+	n.list.SetSize(innerWidth, max(0, height-heightOffset))
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Notification Style"
@@ -199,7 +198,7 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	listView := t.Dialog.List.Height(n.list.Height()).Render(n.list.Render())
 	rc.AddPart(listView)
-	rc.Help = n.help.View(n)
+	rc.Help = renderDialogHelp(t, &n.help, n, innerWidth)
 
 	view := rc.Render()
 

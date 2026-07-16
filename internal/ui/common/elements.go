@@ -225,8 +225,12 @@ func Section(t *styles.Styles, text string, width int, info ...string) string {
 }
 
 // DialogTitle renders a dialog title with a decorative line filling the
-// remaining width.
+// remaining width. When the title alone exceeds the available width it is
+// truncated with an ellipsis so it never wraps.
 func DialogTitle(t *styles.Styles, title string, width int, fromColor, toColor color.Color) string {
+	if width > 0 && lipgloss.Width(title) > width {
+		return ansi.Truncate(title, width, "…")
+	}
 	char := "╱"
 	length := lipgloss.Width(title) + 1
 	remainingWidth := width - length

@@ -10,7 +10,6 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -265,13 +264,18 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
-	m.help.SetWidth(innerWidth)
+	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
-	listHeight := height - heightOffset
-	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
-	m.list.SetSize(listWidth, listHeight)
+	listHeight := max(0, height-heightOffset)
 	listTotalHeight := m.list.TotalHeight()
+	// Reserve one column for the scrollbar only when it will actually
+	// show, so the list otherwise spans the full content width.
+	scrollbarWidth := 0
+	if listTotalHeight > listHeight+1 {
+		scrollbarWidth = 1
+	}
+	listWidth := max(0, innerWidth-scrollbarWidth)
+	m.list.SetSize(listWidth, listHeight)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
@@ -286,13 +290,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(inputView)
 
 	listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
-	scrollbar := common.Scrollbar(t, listHeight, listTotalHeight, listHeight+1, m.list.Offset())
-	if scrollbar != "" {
-		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
-	}
+	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight+1, m.list.Offset())
 	rc.AddPart(listView)
 
-	rc.Help = m.help.View(m)
+	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	cur := m.Cursor()
 

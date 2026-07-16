@@ -236,12 +236,21 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
-	s.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
-	listHeight := height - heightOffset
+	s.input.SetWidth(dialogInputTextWidth(t, s.input, innerWidth))
+	listHeight := max(0, height-heightOffset)
 	listTotalHeight := s.list.TotalHeight()
-	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
+	// Reserve one column for the scrollbar only when it will actually
+	// show. The item's own right padding provides the gap before it, so
+	// the list otherwise spans the full content width with no dead space.
+	scrollbarWidth := 0
+	if listTotalHeight > listHeight {
+		scrollbarWidth = 1
+	}
+	listWidth := max(0, innerWidth-scrollbarWidth)
 	s.list.SetSize(listWidth, listHeight)
-	s.help.SetWidth(innerWidth)
+
+	// Hide the timestamps uniformly when the widest would crowd the title.
+	applyInfoColumnVisibility(s.list.FilteredItems(), listWidth, sessionInfoMaxPercent)
 
 	// This makes it so we do not scroll the list if we don't have to
 	start, end := s.list.VisibleItemIndices()
@@ -312,12 +321,9 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.AddPart(inputView)
 	}
 	listView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
-	scrollbar := common.Scrollbar(t, listHeight, listTotalHeight, listHeight, s.list.Offset())
-	if scrollbar != "" {
-		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
-	}
+	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, s.list.Offset())
 	rc.AddPart(listView)
-	rc.Help = s.help.View(s)
+	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
 
 	view := rc.Render()
 

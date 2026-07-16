@@ -164,17 +164,16 @@ func (r *Reasoning) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := r.com.Styles
-	width := max(0, min(reasoningDialogMaxWidth, area.Dx()))
-	height := max(0, min(reasoningDialogMaxHeight, area.Dy()))
+	width := max(0, min(reasoningDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(reasoningDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	r.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
-	r.list.SetSize(innerWidth, height-heightOffset)
-	r.help.SetWidth(innerWidth)
+	r.input.SetWidth(dialogInputTextWidth(t, r.input, innerWidth))
+	r.list.SetSize(innerWidth, max(0, height-heightOffset))
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Select Reasoning Effort"
@@ -190,7 +189,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	listView := t.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
 	rc.AddPart(listView)
-	rc.Help = r.help.View(r)
+	rc.Help = renderDialogHelp(t, &r.help, r, innerWidth)
 
 	view := rc.Render()
 

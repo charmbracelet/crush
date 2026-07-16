@@ -152,8 +152,7 @@ type CoordinatorOptions struct {
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
-	allSkills := opts.Skills.AllSkills()
-	activeSkills := opts.Skills.ActiveSkills()
+	allSkills, activeSkills := opts.Skills.SkillSnapshot()
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
@@ -1177,12 +1176,12 @@ func (c *coordinator) ReloadSkills(ctx context.Context) error {
 		return errors.New("skill reload requires a skills manager")
 	}
 
-	activeSkills, err := c.skillsMgr.Reload(ctx)
+	allSkills, activeSkills, err := c.skillsMgr.Reload(ctx)
 	if err != nil {
 		return err
 	}
 
-	c.allSkills = c.skillsMgr.AllSkills()
+	c.allSkills = allSkills
 	c.activeSkills = activeSkills
 	c.skillTracker = skills.NewTracker(activeSkills)
 	logPromptSkillStats(activeSkills)

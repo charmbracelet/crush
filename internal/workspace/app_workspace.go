@@ -400,6 +400,13 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
 }
 
+func (w *AppWorkspace) GetSkillStates() []*skills.SkillState {
+	if w.app.Skills == nil {
+		return nil
+	}
+	return w.app.Skills.States()
+}
+
 // -- MCP operations --
 
 func (w *AppWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {

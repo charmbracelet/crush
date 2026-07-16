@@ -585,6 +585,13 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 	}, nil
 }
 
+func (w *ClientWorkspace) GetSkillStates() []*skills.SkillState {
+	if w.skills == nil {
+		return nil
+	}
+	return w.skills.States()
+}
+
 // -- MCP operations --
 
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {

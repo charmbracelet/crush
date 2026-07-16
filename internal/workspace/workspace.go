@@ -157,6 +157,10 @@ type Workspace interface {
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+	// GetSkillStates returns the current per-skill discovery states (including
+	// disabled and errored skills), used by the skills dialog to show all
+	// skills — not just the active catalog.
+	GetSkillStates() []*skills.SkillState
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo

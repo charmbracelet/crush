@@ -2,9 +2,13 @@ package agent
 
 import (
 	"fmt"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/fantasy"
 )
+
+const messageFramingTokens = 4
 
 func usageIsZero(usage fantasy.Usage) bool {
 	return usage.InputTokens == 0 &&
@@ -45,7 +49,10 @@ func cloneFantasyMessages(messages []fantasy.Message) []fantasy.Message {
 func estimateMessageTokens(messages []fantasy.Message) int64 {
 	var tokens int64
 	for _, msg := range messages {
-		tokens += approxTokenCount(string(msg.Role))
+		// Chat templates add fixed start/end/newline markers around every
+		// message. Four tokens covers the Qwen ChatML framing and prevents
+		// long histories of tiny tool messages from being underestimated.
+		tokens += messageFramingTokens + approxTokenCount(string(msg.Role))
 		for _, part := range msg.Content {
 			tokens += estimateMessagePartTokens(part)
 		}
@@ -172,5 +179,84 @@ func approxTokenCount(s string) int64 {
 	if s == "" {
 		return 0
 	}
-	return int64((len(s) + 3) / 4)
+	var counter approxTokenCounter
+	for _, r := range s {
+		counter.add(r)
+	}
+	return counter.total()
+}
+
+type approxTokenCounter struct {
+	tokens    int64
+	runLength int64
+	runKind   uint8
+}
+
+func (c *approxTokenCounter) add(r rune) {
+	const (
+		runAlphaNumeric uint8 = iota + 1
+		runWhitespace
+	)
+
+	var kind uint8
+	if r < utf8.RuneSelf {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			kind = runAlphaNumeric
+		case unicode.IsSpace(r):
+			kind = runWhitespace
+		}
+	}
+	if kind != 0 {
+		if c.runKind != kind {
+			c.flushRun()
+			c.runKind = kind
+		}
+		c.runLength++
+		return
+	}
+
+	c.flushRun()
+	if r < utf8.RuneSelf {
+		// ASCII punctuation and separators are frequently individual tokens
+		// in code, paths, JSON, and tool output. Counting each byte prevents
+		// the old bytes/4 heuristic from systematically underestimating them.
+		c.tokens++
+		return
+	}
+	if unicode.IsLetter(r) || unicode.IsNumber(r) {
+		// CJK tokenizers commonly encode one or more characters per token;
+		// one token per rune is intentionally conservative for prose.
+		c.tokens++
+		return
+	}
+	// Emoji and other symbols often decompose into multiple byte-level BPE
+	// tokens. UTF-8 width is a portable upper estimate for that decomposition.
+	c.tokens += int64(utf8.RuneLen(r))
+}
+
+func (c *approxTokenCounter) flushRun() {
+	if c.runLength == 0 {
+		return
+	}
+	if c.runKind == 1 {
+		if c.runLength <= 16 {
+			c.tokens += (c.runLength + 2) / 3
+		} else {
+			// Long unbroken alphanumeric runs are commonly hashes, minified
+			// data, random identifiers, or base64. They tokenize far more
+			// densely than natural-language words; Qwen3.6 is approximately
+			// 0.72 tokens/byte for representative base64 and random data.
+			c.tokens += (c.runLength*3 + 3) / 4
+		}
+	} else {
+		c.tokens += (c.runLength + 3) / 4
+	}
+	c.runLength = 0
+	c.runKind = 0
+}
+
+func (c approxTokenCounter) total() int64 {
+	c.flushRun()
+	return c.tokens
 }

@@ -663,6 +663,20 @@ it creates. You can customize this behavior with the `attribution` option:
 Crush supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
+Crush uses each model's `context_window` as a client-side admission limit. It
+conservatively estimates the complete request, including conversation history,
+tool definitions, tool results, message framing, and a reserved response. The
+estimate intentionally fails closed near the limit, but it is not an exact
+provider tokenizer result; provider-specific chat serialization and vision
+token accounting can differ.
+
+For models with a known context window, every request also carries an explicit
+response limit. Crush uses the selected model's `max_tokens` override first,
+then the provider model's `default_max_tokens`. If neither is configured, it
+uses the context safety reserve (20% for contexts up to 200,000 tokens, or
+20,000 tokens for larger contexts). Models with an unknown context window keep
+the provider's existing default when no response limit is configured.
+
 > [!NOTE]
 > Note that we support two "types" for OpenAI. Make sure to choose the right one
 > to ensure the best experience!

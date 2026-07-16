@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -21,6 +22,54 @@ func TestUsageIsZero(t *testing.T) {
 	require.False(t, usageIsZero(fantasy.Usage{ReasoningTokens: 1}))
 	require.False(t, usageIsZero(fantasy.Usage{CacheCreationTokens: 1}))
 	require.False(t, usageIsZero(fantasy.Usage{CacheReadTokens: 1}))
+}
+
+func TestApproxTokenCountDoesNotUndercountCJKAsUTF8Bytes(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, int64(4), approxTokenCount("翻译中文"))
+	require.Equal(t, int64(2), approxTokenCount("text"))
+}
+
+func TestApproxTokenCountCoversQwen36GoldenCorpus(t *testing.T) {
+	t.Parallel()
+
+	// Expected counts were generated with the Qwen3.6-27B tokenizer.json
+	// shipped with LM Studio. These are an independent oracle: changing the
+	// estimator cannot silently change the expected values with it.
+	tests := []struct {
+		text       string
+		qwenTokens int64
+	}{
+		{text: "text", qwenTokens: 1},
+		{text: "翻译中文", qwenTokens: 2},
+		{text: "Hello, world!", qwenTokens: 4},
+		{text: `func main() { fmt.Println("hello") }`, qwenTokens: 10},
+		{text: "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", qwenTokens: 4},
+		{text: "😀🧪🚀🫠", qwenTokens: 10},
+		{text: "snake_case_identifier_with_many_parts", qwenTokens: 6},
+		{text: "    ", qwenTokens: 1},
+		{text: "https://github.com/charmbracelet/crush/pull/3280", qwenTokens: 17},
+		{text: `{"path":"internal/agent/agent.go","line":698}`, qwenTokens: 16},
+		{text: strings.Repeat("deadbeef", 125), qwenTokens: 375},
+		{text: strings.Repeat("QWxhZGRpbjpvcGVuIHNlc2FtZQ==", 36), qwenTokens: 720},
+	}
+	for _, tt := range tests {
+		estimated := approxTokenCount(tt.text)
+		require.GreaterOrEqualf(t, estimated, tt.qwenTokens, "underestimated %q", tt.text)
+	}
+}
+
+func TestEstimateMessageTokensIncludesPerMessageFraming(t *testing.T) {
+	t.Parallel()
+
+	messages := []fantasy.Message{
+		{Role: fantasy.MessageRoleUser},
+		{Role: fantasy.MessageRoleAssistant},
+		{Role: fantasy.MessageRoleTool},
+	}
+	roles := approxTokenCount("user") + approxTokenCount("assistant") + approxTokenCount("tool")
+	require.Equal(t, roles+3*messageFramingTokens, estimateMessageTokens(messages))
 }
 
 func TestFallbackStepUsageKeepsProviderUsage(t *testing.T) {

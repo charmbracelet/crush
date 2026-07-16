@@ -86,6 +86,67 @@ func TestLmstudioEnricher(t *testing.T) {
 		require.Equal(t, int64(8192), result[0].ContextWindow)
 	})
 
+	t.Run("loaded instance caps configured context length", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+				Models: []lmstudioModelEntry{
+					{
+						Key:              "qwen/qwen3.6-27b",
+						MaxContextLength: 262144,
+						LoadedInstances: []lmstudioInstance{
+							{Config: lmstudioInstanceConfig{ContextLength: 204800}},
+						},
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL}
+		models := []catwalk.Model{{
+			ID:            "qwen/qwen3.6-27b",
+			Name:          "Qwen 3.6 27B",
+			ContextWindow: 262144,
+		}}
+
+		e := &lmstudioEnricher{}
+		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.Equal(t, int64(204800), result[0].ContextWindow)
+	})
+
+	t.Run("uses the smallest context across loaded instances", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+				Models: []lmstudioModelEntry{
+					{
+						Key:              "m1",
+						MaxContextLength: 262144,
+						LoadedInstances: []lmstudioInstance{
+							{Config: lmstudioInstanceConfig{ContextLength: 204800}},
+							{Config: lmstudioInstanceConfig{ContextLength: 131072}},
+							{Config: lmstudioInstanceConfig{ContextLength: 0}},
+						},
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		result, err := (&lmstudioEnricher{}).EnrichModels(
+			context.Background(),
+			Config{ID: "test-lmstudio", BaseURL: srv.URL},
+			&mockResolver{},
+			[]catwalk.Model{{ID: "m1", ContextWindow: 230000}},
+		)
+		require.NoError(t, err)
+		require.Equal(t, int64(131072), result[0].ContextWindow)
+	})
+
 	t.Run("preserves existing non-zero values", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -194,4 +255,26 @@ func TestLmstudioEnricher(t *testing.T) {
 		require.False(t, result[1].SupportsImages, "text-only model should have SupportsImages=false")
 		require.False(t, result[2].SupportsImages, "model without capabilities should default to false")
 	})
+}
+
+func TestMinPositive(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		values   []int64
+		expected int64
+	}{
+		{name: "empty", expected: 0},
+		{name: "ignores non-positive", values: []int64{0, -1, -100}, expected: 0},
+		{name: "single", values: []int64{204800}, expected: 204800},
+		{name: "smallest independent of order", values: []int64{262144, 131072, 204800}, expected: 131072},
+		{name: "mixed", values: []int64{0, 204800, -1, 262144}, expected: 204800},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.expected, minPositive(tt.values...))
+		})
+	}
 }

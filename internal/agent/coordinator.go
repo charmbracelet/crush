@@ -129,7 +129,7 @@ type coordinator struct {
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
-	skillsMgr    *skills.Manager // nil in legacy fallback mode
+	skillsMgr    *skills.Manager // required for ReloadSkills; nil only if caller bypassed normal setup
 
 	readyWg errgroup.Group
 }

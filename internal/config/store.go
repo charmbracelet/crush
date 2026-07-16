@@ -803,6 +803,13 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 	}
 }
 
+// SetTestStoreWorkingDir sets the workingDir on a test ConfigStore so
+// that ReloadFromDisk can locate config files. This is needed because
+// workingDir is an unexported field.
+func SetTestStoreWorkingDir(s *ConfigStore, dir string) {
+	s.workingDir = dir
+}
+
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
 func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	if s.HasConfigField(ScopeGlobal, "providers.copilot.api_key") || s.HasConfigField(ScopeGlobal, "providers.copilot.oauth") {

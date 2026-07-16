@@ -162,6 +162,34 @@ tool names to specific types:
 - Use `RenderContext` from `dialog/common.go` for consistent layout (title
   gradients, width, gap, cursor offset helpers).
 
+#### Dialog rendering rules
+
+These prevent the wrapping/overflow bugs that recur whenever a new dialog
+is copy-pasted from an old one. In lipgloss v2 `Width(n)` is the **total**
+box width — border and padding live *inside* it.
+
+- Size content to the dialog's **content area**, not the outer width:
+  `innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()`. Sizing a
+  block to the full `m.width` makes it 1–2 cols too wide, so the dialog
+  frame re-wraps it (the classic "last few chars wrap" bug).
+- Inset text with **`Padding`, never `Margin`**. Margin sits outside the
+  width and pushes the block past the frame; padding is inside the width
+  and applies to every wrapped line.
+- Render styled text segments **individually** and concatenate the results
+  (`styleA.Render(x) + styleB.Render(y)`), rather than concatenating raw
+  strings and wrapping the whole thing in one style. An inner segment's
+  reset code drops the outer color for everything after it.
+- Use the shared helpers instead of re-deriving widths:
+  - keybind hints → `renderDialogHelp(t, &m.help, m, innerWidth)` (sizes,
+    pads, truncates — never `helpStyle.Render(m.help.View(m))` raw);
+  - text inputs → `dialogInputTextWidth(t, input, innerWidth)` (accounts
+    for the `"> "` prompt);
+  - titles → `common.DialogTitle` (truncates instead of wrapping);
+  - list + scrollbar → `joinScrollbar`;
+  - hiding a crowded info column → `applyInfoColumnVisibility`.
+- Clamp width/height to the drawable `area` (`max(0, min(maxW, area.Dx()-frame))`)
+  so dialogs stay inside small terminals.
+
 ### Shared Context
 
 The `common.Common` struct holds `*app.App` and `*styles.Styles`. Thread it
@@ -195,6 +223,17 @@ through all components that need access to app state or styles.
 - The `list.List` only renders visible items (lazy). No render cache exists
   at the list level — items should cache internally if rendering is
   expensive.
+- Rendering is the chat's hot path; a few invariants keep resize/scroll fast
+  on large conversations:
+  - Syntax highlighting and diff formatting build the chroma style from the
+    theme, which is expensive — it is memoized in `common.ChromaStyle`, and
+    lexer lookups in `xchroma.MatchLexer`. Don't call
+    `chroma.MustNewStyle` / `lexers.Match` directly on a render path.
+  - `list.TotalHeight` renders **every** item; it's only for exact scrollbar
+    geometry. For "does it overflow?" use the bounded `list.Overflows`. Never
+    call `TotalHeight` per frame during a resize — the chat suppresses the
+    scrollbar mid-drag and warms the cache incrementally (`list.Prewarm`)
+    on settle instead.
 - Dialog messages are intercepted first in `Update` before other routing.
 - Focus state determines key event routing: `uiFocusEditor` sends keys to
   the textarea, `uiFocusMain` sends them to the chat list.

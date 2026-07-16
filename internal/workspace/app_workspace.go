@@ -383,7 +383,11 @@ func (w *AppWorkspace) MarkProjectInitialized() error {
 }
 
 func (w *AppWorkspace) InitializePrompt() (string, error) {
-	return agent.InitializePrompt(w.store)
+	var active []*skills.Skill
+	if w.app.Skills != nil {
+		active = w.app.Skills.ActiveSkills()
+	}
+	return agent.InitializePrompt(w.store, active)
 }
 
 func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, error) {

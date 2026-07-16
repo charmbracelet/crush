@@ -312,3 +312,63 @@ func TestManager_ReloadCancelled(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cancelled")
 }
+
+func TestManager_SkillSnapshot(t *testing.T) {
+	t.Parallel()
+
+	all := []*Skill{{Name: "a", Description: "desc-a"}, {Name: "b", Description: "desc-b"}}
+	active := []*Skill{{Name: "a", Description: "desc-a"}}
+	mgr := NewManager(all, active, nil)
+	t.Cleanup(mgr.Shutdown)
+
+	gotAll, gotActive := mgr.SkillSnapshot()
+	require.Equal(t, all, gotAll, "snapshot must return the all-skills slice")
+	require.Equal(t, active, gotActive, "snapshot must return the active-skills slice")
+}
+
+func TestManager_SkillSnapshot_AfterReload(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	cfg := DiscoveryConfig{SkillsPaths: []string{tmp}}
+	mgr := NewManager(nil, nil, nil, WithDiscoveryConfig(cfg))
+	t.Cleanup(mgr.Shutdown)
+
+	// Snapshot before: no user skills.
+	allBefore, activeBefore := mgr.SkillSnapshot()
+
+	// Add a skill.
+	skillDir := filepath.Join(tmp, "snap-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: snap-skill\ndescription: snapshot test.\n---\nBody.\n"),
+		0o644,
+	))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _, err := mgr.Reload(ctx)
+	require.NoError(t, err)
+
+	// Snapshot after: both slices must reflect the reload atomically.
+	allAfter, activeAfter := mgr.SkillSnapshot()
+	require.Greater(t, len(allAfter), len(allBefore),
+		"allSkills must grow after reload")
+	require.Greater(t, len(activeAfter), len(activeBefore),
+		"activeSkills must grow after reload")
+
+	// Both slices must agree — every active skill is in allSkills.
+	activeSet := make(map[string]bool, len(activeAfter))
+	for _, s := range activeAfter {
+		activeSet[s.Name] = true
+	}
+	for _, s := range allAfter {
+		if activeSet[s.Name] {
+			activeSet[s.Name] = false // mark as seen
+		}
+	}
+	for name, unseen := range activeSet {
+		require.False(t, unseen, "active skill %q must appear in allSkills", name)
+	}
+}

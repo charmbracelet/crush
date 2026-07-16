@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -42,6 +44,18 @@ var (
 // stream after creating a workspace before its creation hold is
 // released. Exposed as a package variable so tests can shorten it.
 var DefaultCreateGrace = 30 * time.Second
+
+// DefaultIdleShutdownDelay is how long the server stays alive after its
+// last workspace is released before it shuts itself down. The delay
+// exists so a client that closes one session and opens another moments
+// later (the same directory or a different one) reuses the still-running
+// server instead of racing its shutdown: with an immediate shutdown the
+// new client can attach to — or create a workspace on — a server that is
+// already tearing down, and then observe its coder agent as "offline".
+// Any workspace create within the window cancels the pending shutdown.
+// Overridable via CRUSH_SERVER_IDLE_TIMEOUT (seconds; 0 restores the
+// old shut-down-immediately behavior).
+var DefaultIdleShutdownDelay = 60 * time.Second
 
 // ShutdownFunc is called when the backend needs to trigger a server
 // shutdown (e.g. when the last workspace is removed).
@@ -76,12 +90,17 @@ type Backend struct {
 	// shut the whole server down out from under the workspace being
 	// born.
 	pending int
-	mu      sync.Mutex
+	// shutdownTimer, when non-nil, is an armed idle-shutdown timer
+	// waiting out lingerDelay before it shuts the server down. It is
+	// guarded by mu and cancelled the moment a new create arrives.
+	shutdownTimer *time.Timer
+	mu            sync.Mutex
 
 	cfg         *config.ConfigStore
 	ctx         context.Context
 	shutdownFn  ShutdownFunc
 	createGrace time.Duration
+	lingerDelay time.Duration
 }
 
 // clientState tracks one client's claim on a workspace.
@@ -205,7 +224,19 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		ctx:         ctx,
 		shutdownFn:  shutdownFn,
 		createGrace: DefaultCreateGrace,
+		lingerDelay: idleShutdownDelayFromEnv(),
 	}
+}
+
+// idleShutdownDelayFromEnv returns the idle-shutdown delay, honoring a
+// CRUSH_SERVER_IDLE_TIMEOUT override (in seconds; 0 disables lingering).
+func idleShutdownDelayFromEnv() time.Duration {
+	if v := os.Getenv("CRUSH_SERVER_IDLE_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return DefaultIdleShutdownDelay
 }
 
 // SetCreateGrace overrides the create-grace window. Intended for tests
@@ -214,6 +245,15 @@ func (b *Backend) SetCreateGrace(d time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.createGrace = d
+}
+
+// SetIdleShutdownDelay overrides how long the server lingers after its
+// last workspace is released before shutting down. A value <= 0 restores
+// the shut-down-immediately behavior. Intended for tests.
+func (b *Backend) SetIdleShutdownDelay(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lingerDelay = d
 }
 
 // GetWorkspace retrieves a workspace by ID.
@@ -257,6 +297,9 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	b.mu.Lock()
+	// A client is arriving: cancel any pending idle shutdown so we never
+	// hand back a workspace on a server that is about to tear itself down.
+	b.cancelShutdownLocked()
 	if existingID, ok := b.pathIndex[key]; ok {
 		if ws, found := b.workspaces.Get(existingID); found {
 			// Hold b.mu while registering: teardown also
@@ -292,12 +335,12 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		// If this create ended up registering nothing (it failed, or
 		// deduped onto an existing workspace that has since gone) and
 		// it was holding the last teardown back, the server may now be
-		// idle with no pending work. Reap it here so a failed create
-		// racing the last teardown does not leak an empty server that
-		// a plain teardown already declined to shut down.
-		idle := b.pending == 0 && b.workspaces.Len() == 0
+		// idle with no pending work. Arm the idle-shutdown timer here so
+		// a failed create racing the last teardown does not leak an
+		// empty server that a plain teardown already declined to reap.
+		shutdownNow := b.scheduleShutdownIfIdleLocked()
 		b.mu.Unlock()
-		if idle && b.shutdownFn != nil {
+		if shutdownNow {
 			slog.Info("No workspaces remain after create settled, shutting down server...")
 			b.shutdownFn()
 		}
@@ -611,19 +654,72 @@ func (b *Backend) teardown(ws *Workspace) {
 		delete(b.pathIndex, ws.resolvedPath)
 	}
 	b.workspaces.Del(ws.ID)
-	remaining := b.workspaces.Len()
-	pending := b.pending
+	// Arm (or, with lingering disabled, request) the idle shutdown. It
+	// only proceeds once there is genuinely nothing left: no live
+	// workspaces AND no create in flight. Deferring via the linger lets a
+	// client returning moments later reuse this server instead of racing
+	// its shutdown.
+	shutdownNow := b.scheduleShutdownIfIdleLocked()
 	b.mu.Unlock()
 
 	ws.invokeShutdown()
 
-	// Only shut the server down once there is genuinely nothing left:
-	// no live workspaces AND no create in flight. Ignoring pending here
-	// is what let a teardown race a concurrent create and kill the
-	// server while a new workspace was still being initialized.
-	if remaining == 0 && pending == 0 && b.shutdownFn != nil {
+	if shutdownNow {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
+	}
+}
+
+// scheduleShutdownIfIdleLocked decides what to do about server shutdown
+// after a workspace count or pending-create change. It must be called
+// with b.mu held.
+//
+// It returns true only when the caller should shut the server down
+// synchronously (after releasing b.mu) — that is, when the server is idle
+// and lingering is disabled (lingerDelay <= 0). When lingering is enabled
+// it instead arms a one-shot timer that re-checks idleness after
+// lingerDelay and shuts down then, and returns false. When the server is
+// not idle (a workspace is live or a create is in flight) it does
+// nothing and returns false.
+func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
+	if b.shutdownFn == nil {
+		return false
+	}
+	if b.workspaces.Len() != 0 || b.pending != 0 {
+		return false
+	}
+	if b.lingerDelay <= 0 {
+		return true
+	}
+	if b.shutdownTimer == nil {
+		b.shutdownTimer = time.AfterFunc(b.lingerDelay, b.maybeShutdown)
+	}
+	return false
+}
+
+// cancelShutdownLocked stops any armed idle-shutdown timer. It must be
+// called with b.mu held.
+func (b *Backend) cancelShutdownLocked() {
+	if b.shutdownTimer != nil {
+		b.shutdownTimer.Stop()
+		b.shutdownTimer = nil
+	}
+}
+
+// maybeShutdown is the idle-shutdown timer callback. It shuts the server
+// down only if it is still idle when the linger window elapses; any
+// create that arrived in the meantime cancelled the timer (or bumped
+// pending / the workspace count), so this re-check makes the linger
+// race-free.
+func (b *Backend) maybeShutdown() {
+	b.mu.Lock()
+	b.shutdownTimer = nil
+	idle := b.workspaces.Len() == 0 && b.pending == 0
+	fn := b.shutdownFn
+	b.mu.Unlock()
+	if idle && fn != nil {
+		slog.Info("Server idle, shutting down...")
+		fn()
 	}
 }
 

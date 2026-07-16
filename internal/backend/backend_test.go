@@ -1422,3 +1422,65 @@ func TestCreateWorkspace_PendingBalancedAndReapsOnFailure(t *testing.T) {
 	require.Equal(t, int32(1), shutdownCount.Load(),
 		"a failed create that leaves the server idle must reap it")
 }
+
+// TestServer_CreateCancelsPendingIdleShutdown is the regression test for
+// the coder-agent-offline handoff: when the last client of a session
+// leaves, the server must linger (not shut down immediately), and a
+// client returning within the linger window — the same directory or a
+// different one — must cancel that pending shutdown so it is never handed
+// a workspace on a server that is about to die.
+func TestServer_CreateCancelsPendingIdleShutdown(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	b, shutdownCount := newTestBackend(t)
+	b.SetIdleShutdownDelay(10 * time.Second) // long enough not to fire mid-test
+	b.SetCreateGrace(time.Hour)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	// Session 1: a workspace that is attached then leaves, arming the
+	// idle-shutdown timer.
+	wsA, _ := insertTestWorkspace(t, b, "/tmp/linger-A")
+	cidA := newClientID(t)
+	require.NoError(t, b.AttachClient(wsA.ID, cidA))
+	b.DetachClient(wsA.ID, cidA)
+
+	b.mu.Lock()
+	armed := b.shutdownTimer != nil
+	b.mu.Unlock()
+	require.True(t, armed, "idle-shutdown timer must be armed after the last client leaves")
+	require.Equal(t, int32(0), shutdownCount.Load(), "server must linger, not shut down immediately")
+
+	// Session 2 arrives within the linger window: creating a workspace
+	// must cancel the pending shutdown.
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	require.NoError(t, err)
+
+	b.mu.Lock()
+	stillArmed := b.shutdownTimer != nil
+	b.mu.Unlock()
+	require.False(t, stillArmed, "a create within the linger window must cancel the pending shutdown")
+	require.Equal(t, int32(0), shutdownCount.Load(), "server must not shut down after a client returns")
+}
+
+// TestServer_ShutsDownAfterLingerWhenIdle confirms the linger still ends
+// in a shutdown when no client returns: the server is not leaked.
+func TestServer_ShutsDownAfterLingerWhenIdle(t *testing.T) {
+	t.Parallel()
+
+	b, shutdownCount := newTestBackend(t)
+	b.SetIdleShutdownDelay(100 * time.Millisecond)
+
+	wsA, _ := insertTestWorkspace(t, b, "/tmp/linger-idle")
+	cidA := newClientID(t)
+	require.NoError(t, b.AttachClient(wsA.ID, cidA))
+	b.DetachClient(wsA.ID, cidA)
+
+	// Nobody returns: after the linger elapses the server shuts down.
+	require.Eventually(t, func() bool { return shutdownCount.Load() == 1 },
+		2*time.Second, 10*time.Millisecond,
+		"idle server must shut down after the linger window")
+}

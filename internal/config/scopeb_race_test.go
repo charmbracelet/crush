@@ -34,7 +34,7 @@ func TestScopeB_InPlaceMutationRace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store, err := Load(dir, dir, false)
+	store, err := Load(t.Context(), dir, dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}

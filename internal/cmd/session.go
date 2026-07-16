@@ -108,7 +108,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
-	cfg, err := config.Init("", dataDir, false)
+	cfg, err := config.Init(ctx, "", dataDir, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}

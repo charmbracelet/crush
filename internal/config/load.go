@@ -37,7 +37,9 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
-func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+// The context bounds the initial provider fetch so an interrupt during
+// startup cancels it promptly.
+func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 
@@ -100,7 +102,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 
 	// Load known providers, this loads the config from catwalk
-	providers, err := Providers(cfg)
+	providers, err := Providers(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +118,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.writeMu.Lock()
 	defer store.writeMu.Unlock()
 
-	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
+	// Pass the caller's context so an interrupt during startup also
+	// cancels model discovery (which reaches out to each provider's
+	// /models endpoint), not just the provider list fetch above.
+	if err := cfg.configureProviders(ctx, store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 

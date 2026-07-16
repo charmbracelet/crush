@@ -184,6 +184,8 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:  opts.Interactive,
 	}
 
+	logPromptSkillStats(activeSkills)
+
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil, errCoderAgentNotConfigured
@@ -1189,6 +1191,7 @@ func (c *coordinator) ReloadSkills(ctx context.Context) error {
 	c.allSkills = c.skillsMgr.AllSkills()
 	c.activeSkills = activeSkills
 	c.skillTracker = skills.NewTracker(activeSkills)
+	logPromptSkillStats(activeSkills)
 
 	// Rebuild the system prompt so <available_skills> reflects the new set.
 	p, err := coderPrompt(
@@ -1512,12 +1515,11 @@ func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.
 	if r := cfg.Resolver(); r != nil {
 		resolver = r.ResolveValue
 	}
-	allSkills, activeSkills, states := skills.DiscoverFromConfig(skills.DiscoveryConfig{
+	allSkills, activeSkills, _ = skills.DiscoverFromConfig(skills.DiscoveryConfig{
 		SkillsPaths:    paths,
 		DisabledSkills: disabled,
 		Resolver:       resolver,
 	})
-	logDiscoveryStats(states, paths, allSkills, activeSkills, disabled)
 	return allSkills, activeSkills
 }
 
@@ -1563,51 +1565,15 @@ func logTurnSkillUsage(
 	)
 }
 
-// logDiscoveryStats emits a single structured log line summarising skill
-// discovery for the current session. It is intentionally low-volume: one
-// line per session start. Builtin vs user counts are derived from the
-// SkillState.Path — builtin states use the "builtin/" embed prefix.
-func logDiscoveryStats(
-	states []*skills.SkillState,
-	userPaths []string,
-	allSkills, activeSkills []*skills.Skill,
-	disabled []string,
-) {
-	var builtinOK, builtinErr, userOK, userErr int
-	for _, s := range states {
-		isBuiltin := strings.HasPrefix(s.Path, "builtin/")
-		switch {
-		case isBuiltin && s.State == skills.StateNormal:
-			builtinOK++
-		case isBuiltin && s.State == skills.StateError:
-			builtinErr++
-		case !isBuiltin && s.State == skills.StateNormal:
-			userOK++
-		case !isBuiltin && s.State == skills.StateError:
-			userErr++
-		}
-	}
-
-	activeNames := make([]string, 0, len(activeSkills))
-	for _, s := range activeSkills {
-		activeNames = append(activeNames, s.Name)
-	}
-
+// logPromptSkillStats logs the prompt-injection size of the active
+// skills XML — the only discovery metric that is coordinator-specific
+// (depends on the active set AND the XML encoder).
+func logPromptSkillStats(activeSkills []*skills.Skill) {
 	xml := skills.ToPromptXML(activeSkills)
-
-	slog.Info(
-		"Skill discovery complete",
+	slog.Info("Skill prompt stats",
 		"component", "skills",
-		"builtin_ok", builtinOK,
-		"builtin_errors", builtinErr,
-		"user_ok", userOK,
-		"user_errors", userErr,
-		"user_paths", len(userPaths),
-		"deduped_total", len(allSkills),
 		"active", len(activeSkills),
-		"disabled", len(disabled),
 		"prompt_bytes", len(xml),
 		"prompt_tok_est", skills.ApproxTokenCount(xml),
-		"active_names", activeNames,
 	)
 }

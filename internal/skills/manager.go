@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -224,7 +225,41 @@ func DiscoverFromConfig(cfg DiscoveryConfig) (allSkills, activeSkills []*Skill, 
 	slices.SortStableFunc(allStates, func(a, b *SkillState) int {
 		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
 	})
+
+	logDiscovery(allSkills, activeSkills, allStates, userPaths, cfg.DisabledSkills)
+
 	return allSkills, activeSkills, allStates
+}
+
+// logDiscovery emits a single structured INFO line summarising a
+// discovery pass. Called from DiscoverFromConfig so every discovery —
+// initial startup AND reloads — is logged.
+func logDiscovery(all, active []*Skill, states []*SkillState, userPaths []string, disabled []string) {
+	var builtinOK, builtinErr, userOK, userErr int
+	for _, s := range states {
+		isBuiltin := strings.HasPrefix(s.Path, "builtin/")
+		switch {
+		case isBuiltin && s.State == StateNormal:
+			builtinOK++
+		case isBuiltin && s.State == StateError:
+			builtinErr++
+		case !isBuiltin && s.State == StateNormal:
+			userOK++
+		case !isBuiltin && s.State == StateError:
+			userErr++
+		}
+	}
+	slog.Info("Skill discovery complete",
+		"component", "skills",
+		"builtin_ok", builtinOK,
+		"builtin_errors", builtinErr,
+		"user_ok", userOK,
+		"user_errors", userErr,
+		"user_paths", len(userPaths),
+		"deduped_total", len(all),
+		"active", len(active),
+		"disabled", len(disabled),
+	)
 }
 
 // DiscoveryConfig contains the inputs DiscoverFromConfig needs. Using a

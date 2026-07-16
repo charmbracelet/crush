@@ -39,6 +39,18 @@ type Attachments struct {
 func (m *Attachments) List() []message.Attachment { return m.list }
 func (m *Attachments) Reset()                     { m.list = nil }
 
+// RemoveByPath removes the first attachment whose FilePath matches the given
+// path. Returns true if an attachment was removed.
+func (m *Attachments) RemoveByPath(path string) bool {
+	for i, a := range m.list {
+		if a.FilePath == path {
+			m.list = slices.Delete(m.list, i, i+1)
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Attachments) Update(msg tea.Msg) bool {
 	switch msg := msg.(type) {
 	case message.Attachment:

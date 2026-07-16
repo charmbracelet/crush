@@ -247,3 +247,128 @@ func TestDiscoverFromConfig_Resolver(t *testing.T) {
 	}
 	require.True(t, found, "DiscoverFromConfig must expand $VAR via Resolver")
 }
+
+func TestManager_Reload(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+
+	// Start with no skills.
+	cfg := DiscoveryConfig{
+		SkillsPaths: []string{tmp},
+	}
+	mgr := NewManager(nil, nil, nil, WithDiscoveryConfig(cfg))
+	t.Cleanup(mgr.Shutdown)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Initial state: no user skills (only builtins).
+	activeBefore := mgr.ActiveSkills()
+	statesBefore := mgr.States()
+
+	// Add a skill file after construction.
+	skillDir := filepath.Join(tmp, "late-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: late-skill\ndescription: Added after startup.\n---\nDo a thing.\n"),
+		0o644,
+	))
+
+	// Reload should pick up the new skill.
+	_, activeAfter, err := mgr.Reload(ctx)
+	require.NoError(t, err)
+
+	var found bool
+	for _, s := range activeAfter {
+		if s.Name == "late-skill" {
+			found = true
+		}
+	}
+	require.True(t, found, "Reload must discover skills added after construction")
+
+	// Manager slices must reflect the new state.
+	require.Greater(t, len(mgr.ActiveSkills()), len(activeBefore),
+		"ActiveSkills must reflect reload")
+	require.Greater(t, len(mgr.States()), len(statesBefore),
+		"States must reflect reload")
+	require.Equal(t, mgr.ActiveSkills(), activeAfter,
+		"ActiveSkills must match the returned slice")
+}
+
+func TestManager_ReloadCancelled(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	cfg := DiscoveryConfig{SkillsPaths: []string{tmp}}
+	mgr := NewManager(nil, nil, nil, WithDiscoveryConfig(cfg))
+	t.Cleanup(mgr.Shutdown)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before calling
+
+	_, _, err := mgr.Reload(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cancelled")
+}
+
+func TestManager_SkillSnapshot(t *testing.T) {
+	t.Parallel()
+
+	all := []*Skill{{Name: "a", Description: "desc-a"}, {Name: "b", Description: "desc-b"}}
+	active := []*Skill{{Name: "a", Description: "desc-a"}}
+	mgr := NewManager(all, active, nil)
+	t.Cleanup(mgr.Shutdown)
+
+	gotAll, gotActive := mgr.SkillSnapshot()
+	require.Equal(t, all, gotAll, "snapshot must return the all-skills slice")
+	require.Equal(t, active, gotActive, "snapshot must return the active-skills slice")
+}
+
+func TestManager_SkillSnapshot_AfterReload(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	cfg := DiscoveryConfig{SkillsPaths: []string{tmp}}
+	mgr := NewManager(nil, nil, nil, WithDiscoveryConfig(cfg))
+	t.Cleanup(mgr.Shutdown)
+
+	// Snapshot before: no user skills.
+	allBefore, activeBefore := mgr.SkillSnapshot()
+
+	// Add a skill.
+	skillDir := filepath.Join(tmp, "snap-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: snap-skill\ndescription: snapshot test.\n---\nBody.\n"),
+		0o644,
+	))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _, err := mgr.Reload(ctx)
+	require.NoError(t, err)
+
+	// Snapshot after: both slices must reflect the reload atomically.
+	allAfter, activeAfter := mgr.SkillSnapshot()
+	require.Greater(t, len(allAfter), len(allBefore),
+		"allSkills must grow after reload")
+	require.Greater(t, len(activeAfter), len(activeBefore),
+		"activeSkills must grow after reload")
+
+	// Both slices must agree — every active skill is in allSkills.
+	activeSet := make(map[string]bool, len(activeAfter))
+	for _, s := range activeAfter {
+		activeSet[s.Name] = true
+	}
+	for _, s := range allAfter {
+		if activeSet[s.Name] {
+			activeSet[s.Name] = false // mark as seen
+		}
+	}
+	for name, unseen := range activeSet {
+		require.False(t, unseen, "active skill %q must appear in allSkills", name)
+	}
+}

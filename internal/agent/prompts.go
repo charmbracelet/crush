@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 //go:embed templates/coder.md.tpl
@@ -33,8 +34,10 @@ func taskPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 	return systemPrompt, nil
 }
 
-func InitializePrompt(cfg *config.ConfigStore) (string, error) {
-	systemPrompt, err := prompt.NewPrompt("initialize", string(initializePromptTmpl))
+func InitializePrompt(cfg *config.ConfigStore, activeSkills []*skills.Skill) (string, error) {
+	systemPrompt, err := prompt.NewPrompt("initialize", string(initializePromptTmpl),
+		prompt.WithSkills(activeSkills),
+	)
 	if err != nil {
 		return "", err
 	}

@@ -241,11 +241,11 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		return err
 	}
 
-	tools, err := getTools(ctx, session)
+	toolCount, err := registerSessionTools(ctx, cfg, name, session)
 	if err != nil {
 		slog.Error("Error listing tools", "error", err)
 		updateState(name, StateError, err, nil, Counts{})
-		session.Close()
+		closeSession(name, session)
 		return err
 	}
 
@@ -253,11 +253,10 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	if err != nil {
 		slog.Error("Error listing prompts", "error", err)
 		updateState(name, StateError, err, nil, Counts{})
-		session.Close()
+		closeSession(name, session)
 		return err
 	}
 
-	toolCount := updateTools(cfg, name, tools)
 	updatePrompts(name, prompts)
 	sessions.Set(name, session)
 
@@ -271,15 +270,8 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 
 // DisableSingle disables and closes a single MCP client by name.
 func DisableSingle(cfg *config.ConfigStore, name string) error {
-	session, ok := sessions.Get(name)
-	if ok {
-		if err := session.Close(); err != nil &&
-			!errors.Is(err, io.EOF) &&
-			!errors.Is(err, context.Canceled) &&
-			err.Error() != "signal: killed" {
-			slog.Warn("Error closing MCP session", "name", name, "error", err)
-		}
-		sessions.Del(name)
+	if session, ok := sessions.Take(name); ok {
+		closeSession(name, session)
 	}
 
 	// Clear tools and prompts for this MCP.
@@ -316,9 +308,33 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 		return nil, err
 	}
 
-	updateState(name, StateConnected, nil, sess, state.Counts)
+	// The StateError transition above cleared this server's tools from the
+	// registry (and closed the dead session). Re-list and re-register them on
+	// the fresh session; otherwise the agent reconnects but the LLM's tool
+	// list stays empty and the next call fails with "tool not found".
+	counts := state.Counts
+	counts.Tools, err = registerSessionTools(ctx, cfg, name, sess)
+	if err != nil {
+		updateState(name, StateError, err, nil, state.Counts)
+		closeSession(name, sess)
+		return nil, err
+	}
+
 	sessions.Set(name, sess)
+	updateState(name, StateConnected, nil, sess, counts)
 	return sess, nil
+}
+
+// closeSession closes an MCP session, logging only unexpected errors. EOF,
+// context cancellation, and a killed child are the ordinary result of tearing
+// a session down and are not worth surfacing.
+func closeSession(name string, s *ClientSession) {
+	if err := s.Close(); err != nil &&
+		!errors.Is(err, io.EOF) &&
+		!errors.Is(err, context.Canceled) &&
+		err.Error() != "signal: killed" {
+		slog.Warn("Error closing MCP session", "name", name, "error", err)
+	}
 }
 
 // updateState updates the state of an MCP client and publishes an event
@@ -334,7 +350,17 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	case StateConnected:
 		info.ConnectedAt = time.Now()
 	case StateError:
-		sessions.Del(name)
+		// A session that has errored is dead to us. Atomically remove it and
+		// close it so the child process and its stdio pipes are released — the
+		// bare map delete this used to do leaked both. Clearing the tool
+		// registry keeps the agent from advertising tools it can no longer
+		// call: without it, crush_info / the `/mcp` menu and the tool list
+		// handed to the LLM diverge, so a server still reads "connected, N
+		// tools" while every call fails with "tool not found".
+		if old, ok := sessions.Take(name); ok {
+			closeSession(name, old)
+		}
+		allTools.Del(name)
 	}
 	states.Set(name, info)
 
@@ -457,6 +483,12 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		}
 		cmd := exec.CommandContext(ctx, home.Long(command), args...)
 		cmd.Env = append(os.Environ(), envs...)
+		// Run the child in its own process group and kill the whole group when
+		// the session context is cancelled. A stdio server often spawns its own
+		// children (signal-mcp launches signal-cli); os/exec's default
+		// cancellation kills only the direct child, orphaning the rest with
+		// PPID 1 — production accumulated 15+ such zombies over two days.
+		configureStdioProcess(cmd)
 		return &mcp.CommandTransport{
 			Command: cmd,
 		}, nil

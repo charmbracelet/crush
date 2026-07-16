@@ -92,11 +92,11 @@ func loginHyper(ws workspace.Workspace, force bool) error {
 	fmt.Println("The following code should be on clipboard already:")
 
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Render(resp.UserCode))
+	lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(resp.UserCode))
 	fmt.Println()
 	fmt.Println("Press enter to open this URL, and then paste it there:")
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Hyperlink(resp.VerificationURL, "id=hyper").Render(resp.VerificationURL))
+	lipgloss.Println(lipgloss.NewStyle().Hyperlink(resp.VerificationURL, "id=hyper").Render(resp.VerificationURL))
 	fmt.Println()
 	waitEnter()
 	if err := browser.OpenURL(resp.VerificationURL); err != nil {
@@ -169,13 +169,21 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 			return err
 		}
 
+		clipboard.WriteText(dc.UserCode)
 		fmt.Println()
-		fmt.Println("Open the following URL and follow the instructions to authenticate with GitHub Copilot:")
+		fmt.Println("The following code should be on clipboard already:")
 		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
+		lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
 		fmt.Println()
-		fmt.Println("Code:", lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
+		fmt.Println("Press enter to open this URL and authenticate with GitHub Copilot:")
 		fmt.Println()
+		lipgloss.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
+		fmt.Println()
+		waitEnter()
+		if err := browser.OpenURL(dc.VerificationURI); err != nil {
+			fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
+		}
+
 		fmt.Println("Waiting for authorization...")
 
 		t, err := copilot.PollForToken(loginCtx, dc)
@@ -183,11 +191,11 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 			fmt.Println()
 			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
 			fmt.Println()
-			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
+			lipgloss.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
 			fmt.Println()
 			fmt.Println("You may be able to request free access if eligible. For more information, see:")
 			fmt.Println()
-			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
+			lipgloss.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
 		}
 		if err != nil {
 			return err

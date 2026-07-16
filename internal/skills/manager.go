@@ -195,7 +195,6 @@ func (m *Manager) Reload(ctx context.Context) (all, active []*Skill, err error) 
 	m.mu.Lock()
 	m.allSkills = allSkills
 	m.activeSkills = activeSkills
-	m.states = states
 	m.resolvedPaths = resolved
 	m.mu.Unlock()
 

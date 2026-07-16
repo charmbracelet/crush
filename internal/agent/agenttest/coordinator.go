@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // NewCoordinator builds a real agent.Coordinator through the production
@@ -69,5 +70,6 @@ func NewCoordinator(
 		Sessions:    sessions,
 		Messages:    messages,
 		Permissions: permission.NewPermissionService(workingDir, true, nil),
+		Skills:      skills.NewManager(nil, nil, nil),
 	})
 }

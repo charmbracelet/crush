@@ -277,7 +277,7 @@ func TestManager_Reload(t *testing.T) {
 	))
 
 	// Reload should pick up the new skill.
-	activeAfter, err := mgr.Reload(ctx)
+	_, activeAfter, err := mgr.Reload(ctx)
 	require.NoError(t, err)
 
 	var found bool
@@ -308,7 +308,7 @@ func TestManager_ReloadCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before calling
 
-	_, err := mgr.Reload(ctx)
+	_, _, err := mgr.Reload(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cancelled")
 }

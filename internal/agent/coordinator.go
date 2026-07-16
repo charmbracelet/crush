@@ -1626,9 +1626,14 @@ func logTurnSkillUsage(
 // (depends on the active set AND the XML encoder).
 func logPromptSkillStats(activeSkills []*skills.Skill) {
 	xml := skills.ToPromptXML(activeSkills)
+	activeNames := make([]string, len(activeSkills))
+	for i, s := range activeSkills {
+		activeNames[i] = s.Name
+	}
 	slog.Info("Skill prompt stats",
 		"component", "skills",
 		"active", len(activeSkills),
+		"active_names", activeNames,
 		"prompt_bytes", len(xml),
 		"prompt_tok_est", skills.ApproxTokenCount(xml),
 	)

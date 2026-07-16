@@ -35,6 +35,13 @@ import (
 
 const defaultCatwalkURL = "https://catwalk.charm.land"
 
+// modelDiscoveryTimeout bounds how long startup waits for model
+// discovery across all custom providers that need it. Kept short so an
+// unreachable or slow provider (a broken or powered-off endpoint) cannot
+// stall startup: discovery is best-effort, and any provider that does
+// not answer in time simply contributes no discovered models.
+const modelDiscoveryTimeout = 1500 * time.Millisecond
+
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 // The context bounds the initial provider fetch so an interrupt during
@@ -379,7 +386,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	discoverCtx, discoverCancel := context.WithTimeout(ctx, 3*time.Second)
+	discoverCtx, discoverCancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
 	for id, pc := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
 			continue

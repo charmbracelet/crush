@@ -35,8 +35,11 @@ var (
 
 // providerFetchTimeout bounds how long the foreground provider fetch
 // (catwalk + hyper) may run before falling back to cached/embedded
-// providers.
-const providerFetchTimeout = 45 * time.Second
+// providers. Kept short so a slow or unreachable network cannot stall
+// startup: the underlying HTTP clients allow up to 30s on their own, and
+// there is always a usable cached or bundled provider list to fall back
+// to.
+const providerFetchTimeout = 5 * time.Second
 
 // file to cache provider data
 func cachePathFor(name string) string {

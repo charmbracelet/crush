@@ -33,6 +33,10 @@ type Manager struct {
 	resolvedPaths []string
 	workingDir    string
 
+	// discoveryCfg caches the config used at construction so Reload
+	// can re-run discovery without callers needing to pass it again.
+	discoveryCfg DiscoveryConfig
+
 	broker       *pubsub.Broker[Event]
 	globalMirror bool
 }
@@ -56,6 +60,15 @@ func WithGlobalMirror() ManagerOption {
 func WithResolvedPaths(paths []string) ManagerOption {
 	return func(m *Manager) {
 		m.resolvedPaths = paths
+	}
+}
+
+// WithDiscoveryConfig stores the config used during discovery so the
+// manager can re-run discovery later via Reload without callers needing
+// to pass it again.
+func WithDiscoveryConfig(cfg DiscoveryConfig) ManagerOption {
+	return func(m *Manager) {
+		m.discoveryCfg = cfg
 	}
 }
 
@@ -153,6 +166,26 @@ func (m *Manager) PublishStates(states []*SkillState) {
 // manager's workspace.
 func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return m.broker.Subscribe(ctx)
+}
+
+// Reload re-runs discovery from scratch using the stored DiscoveryConfig,
+// replacing allSkills, activeSkills, states, and resolvedPaths. It also
+// publishes a discovery event so subscribers (TUI sidebar, etc.) update.
+// Returns the new active skills so callers (e.g. the coordinator) can
+// propagate them to the system prompt and tools.
+func (m *Manager) Reload() []*Skill {
+	allSkills, activeSkills, states := DiscoverFromConfig(m.discoveryCfg)
+	resolved := m.discoveryCfg.ResolvePaths()
+
+	m.mu.Lock()
+	m.allSkills = allSkills
+	m.activeSkills = activeSkills
+	m.states = states
+	m.resolvedPaths = resolved
+	m.mu.Unlock()
+
+	m.PublishStates(states)
+	return activeSkills
 }
 
 // Shutdown releases broker resources.

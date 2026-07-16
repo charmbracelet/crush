@@ -136,7 +136,14 @@ func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
 			}
 		}
 
-		_, additions, deletions := diff.GenerateDiff(first.Content, last.Content, first.Path)
+		// Normalize line endings so that a CRLF/LF mismatch between
+		// historical versions does not inflate the diff stats. Files
+		// round-tripped through the write tool may end up with different
+		// line endings than the original (the LLM typically emits LF),
+		// which previously caused every line to be reported as changed.
+		firstContent, _ := fsext.ToUnixLineEndings(first.Content)
+		lastContent, _ := fsext.ToUnixLineEndings(last.Content)
+		_, additions, deletions := diff.GenerateDiff(firstContent, lastContent, first.Path)
 
 		sessionFiles = append(sessionFiles, SessionFile{
 			FirstVersion:  first,

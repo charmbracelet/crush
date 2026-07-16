@@ -502,7 +502,7 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
 
 	// Find the provider in the known providers list to get its default small model.
-	knownProviders, _ := config.Providers(cfg)
+	knownProviders, _ := config.Providers(context.Background(), cfg)
 	var knownProvider *catwalk.Provider
 	for _, p := range knownProviders {
 		if string(p.ID) == providerID {

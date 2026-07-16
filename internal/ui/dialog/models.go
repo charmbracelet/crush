@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"slices"
 
@@ -143,7 +144,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.keyMap.Close = CloseKey
 
 	var err error
-	m.providers, err = config.Providers(m.com.Config())
+	m.providers, err = config.Providers(context.Background(), m.com.Config())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get providers: %w", err)
 	}
@@ -364,7 +365,7 @@ func (m *Models) setProviderItems() error {
 	addedProviders := make(map[string]bool)
 
 	// Get a list of known providers to compare against
-	knownProviders, err := config.Providers(cfg)
+	knownProviders, err := config.Providers(context.Background(), cfg)
 	if err != nil {
 		return fmt.Errorf("failed to get providers: %w", err)
 	}

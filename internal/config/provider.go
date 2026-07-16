@@ -33,6 +33,11 @@ var (
 	providerErr  error
 )
 
+// providerFetchTimeout bounds how long the foreground provider fetch
+// (catwalk + hyper) may run before falling back to cached/embedded
+// providers.
+const providerFetchTimeout = 45 * time.Second
+
 // file to cache provider data
 func cachePathFor(name string) string {
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
@@ -136,7 +141,7 @@ var (
 // 2. load the cached providers
 // 3. try to get the fresh list of providers, and return either this new list,
 // the cached list, or the embedded list if all others fail.
-func Providers(cfg *Config) ([]catwalk.Provider, error) {
+func Providers(ctx context.Context, cfg *Config) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup
 		var errs []error
@@ -144,7 +149,10 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		autoupdate := !cfg.Options.DisableProviderAutoUpdate
 		customProvidersOnly := cfg.Options.DisableDefaultProviders
 
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		// Derive from the caller's context so an interrupt (Ctrl+C)
+		// during startup cancels the provider fetch instead of
+		// blocking until the timeout fires.
+		ctx, cancel := context.WithTimeout(ctx, providerFetchTimeout)
 		defer cancel()
 
 		var hyperProvider catwalk.Provider

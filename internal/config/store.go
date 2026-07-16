@@ -1027,7 +1027,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// Reconfigure providers
 	env := env.New()
 	resolver := NewShellVariableResolver(env)
-	providers, err := Providers(cfg)
+	providers, err := Providers(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to load providers during reload: %w", err)
 	}

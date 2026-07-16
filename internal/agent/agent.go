@@ -1265,7 +1265,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// subscribers see stale busy state at the moment of receipt.
 	a.activeRequests.Del(call.SessionID)
 	cancel()
-	a.fireTurnEndHook(ctx, call.SessionID, currentAssistant)
+
+	// Fire the TurnEnd hook only for top-level turns. Sub-agents
+	// (agentic_fetch, the task tool, etc.) run non-interactively and
+	// would otherwise fire the user's hook N times per delegated turn,
+	// matching the sub-agent exclusion applied to tool hooks.
+	if !call.NonInteractive {
+		a.fireTurnEndHook(ctx, call.SessionID, currentAssistant)
+	}
 
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions).

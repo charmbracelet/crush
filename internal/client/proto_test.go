@@ -158,6 +158,38 @@ func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
 	require.Contains(t, err.Error(), "status code 500")
 }
 
+func TestSetMainAgentSendsAgentID(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	var got proto.AgentSetMainRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SetMainAgent(context.Background(), "ws1", "plan"))
+
+	require.Equal(t, "/v1/workspaces/ws1/agent/main", gotPath)
+	require.Equal(t, "plan", got.AgentID)
+}
+
+func TestSetMainAgentPropagatesServerError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	err := c.SetMainAgent(context.Background(), "ws1", "plan")
+	require.Error(t, err)
+}
+
 func marshalSSEPayload(t *testing.T) []byte {
 	t.Helper()
 

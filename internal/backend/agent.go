@@ -164,6 +164,20 @@ func (b *Backend) UpdateAgent(ctx context.Context, workspaceID string) error {
 	return ws.UpdateAgentModel(ctx)
 }
 
+// SetMainAgent switches the workspace's active agent (coder or plan).
+func (b *Backend) SetMainAgent(workspaceID, agentID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	if ws.AgentCoordinator == nil {
+		return ErrAgentNotInitialized
+	}
+
+	return ws.AgentCoordinator.SetMainAgent(agentID)
+}
+
 // CancelSession cancels an ongoing agent operation for the given
 // session.
 func (b *Backend) CancelSession(workspaceID, sessionID string) error {

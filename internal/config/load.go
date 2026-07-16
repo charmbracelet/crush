@@ -273,20 +273,20 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			headers[k] = resolved
 		}
-		prepared := ProviderConfig{
-			ID:                 string(p.ID),
-			Name:               p.Name,
-			BaseURL:            p.APIEndpoint,
-			APIKey:             p.APIKey,
-			APIKeyTemplate:     p.APIKey, // Store original template for re-resolution
-			OAuthToken:         config.OAuthToken,
-			Type:               p.Type,
-			Disable:            config.Disable,
-			SystemPromptPrefix: config.SystemPromptPrefix,
-			ExtraHeaders:       headers,
-			ExtraBody:          config.ExtraBody,
-			ExtraParams:        make(map[string]string),
-			Models:             p.Models,
+		// Start from user config so all user fields survive without
+		// explicit copying. Overlay catwalk identity/endpoint fields
+		// (already merged with user overrides above).
+		prepared := config
+		prepared.ID = string(p.ID)
+		prepared.Name = p.Name
+		prepared.BaseURL = p.APIEndpoint
+		prepared.APIKey = p.APIKey
+		prepared.APIKeyTemplate = p.APIKey // Store original template for re-resolution
+		prepared.Type = p.Type
+		prepared.Models = p.Models
+		prepared.ExtraHeaders = headers
+		if prepared.ExtraParams == nil {
+			prepared.ExtraParams = make(map[string]string)
 		}
 
 		switch {

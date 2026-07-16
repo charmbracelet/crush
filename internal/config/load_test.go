@@ -2294,3 +2294,26 @@ func TestConfig_configureProviders_UnsetAzureEndpointSkipsProvider(t *testing.T)
 	_, exists := cfg.Providers.Get("azure")
 	require.False(t, exists)
 }
+
+func TestConfig_LoadFromBytes_Env(t *testing.T) {
+	data := []byte(`{"env": {"AWS_PROFILE": "my-profile", "AWS_REGION": "us-west-2"}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	require.NotNil(t, loadedConfig.Env)
+	require.Equal(t, "my-profile", loadedConfig.Env["AWS_PROFILE"])
+	require.Equal(t, "us-west-2", loadedConfig.Env["AWS_REGION"])
+}
+
+func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
+	data1 := []byte(`{"env": {"AWS_PROFILE": "first", "AWS_REGION": "us-east-1"}}`)
+	data2 := []byte(`{"env": {"AWS_PROFILE": "second"}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{data1, data2})
+
+	require.NoError(t, err)
+	require.NotNil(t, loadedConfig.Env)
+	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
+	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
+}

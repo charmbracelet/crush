@@ -302,8 +302,10 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
 	// Notify only if still unauthorized after retry — a successful
-	// retry means the user doesn't need to re-authenticate.
-	if originalErr != nil && c.isUnauthorized(originalErr) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+	// retry means the user doesn't need to re-authenticate. AWS SSO is
+	// handled transparently inside OnAuthRefresh, so it needs no post-run
+	// notification here.
+	if originalErr != nil && isUnauthorized(originalErr) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			Type:       notify.TypeReAuthenticate,
 			ProviderID: model.ModelCfg.Provider,
@@ -1240,11 +1242,9 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 		slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
 	}
 
-	summarize := func() error {
-		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
-	}
-
-	return c.runWithUnauthorizedRetry(ctx, providerCfg, summarize)
+	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
+	// the same path used by regular turns.
+	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
 }
 
 // GenerateTitle generates a session title using the current agent.
@@ -1264,25 +1264,11 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 	return c.refreshOAuth2Token(ctx, providerCfg)
 }
 
-// runWithUnauthorizedRetry executes fn. If fn returns a 401 error, it
-// attempts to refresh credentials and re-runs fn once. Returns the
-// final error: from the retry if a retry was attempted, otherwise from
-// the original run. Callers that need to notify the user on persistent
-// failure should check isUnauthorized on the returned error.
-func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg config.ProviderConfig, fn func() error) error {
-	err := fn()
-	if err != nil && c.isUnauthorized(err) {
-		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
-			return fn()
-		}
-	}
-	return err
-}
-
-// retryAfterUnauthorized attempts to refresh credentials after receiving a 401
-// and returns nil if retry should be attempted. When the refresh token is
-// revoked, it triggers interactive re-authentication and blocks until the user
-// completes it (or the context is cancelled).
+// retryAfterUnauthorized attempts to refresh credentials after an auth error
+// and returns nil if the request should be retried. For OAuth providers whose
+// refresh token is revoked, and for Bedrock providers whose AWS SSO session
+// has expired, it triggers interactive re-authentication and blocks until the
+// user completes it (or the context is cancelled).
 func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig) error {
 	switch {
 	case providerCfg.OAuthToken != nil:
@@ -1297,35 +1283,13 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 					Type:       notify.TypeReAuthenticate,
 					ProviderID: providerCfg.ID,
 				})
-				// Use a detached context with a generous timeout so the
-				// wait survives agent run cancellation. The user needs
-				// time to complete browser-based authentication.
-				waitCtx, waitCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-				defer waitCancel()
-				slog.Info("Blocking on WaitForTokenChange", "provider", providerCfg.ID)
-				if waitErr := c.cfg.WaitForTokenChange(waitCtx, providerCfg.ID); waitErr != nil {
-					slog.Info("WaitForTokenChange returned error", "provider", providerCfg.ID, "error", waitErr)
-					return waitErr
-				}
-				slog.Info("WaitForTokenChange unblocked, updating models", "provider", providerCfg.ID)
-				// Check if the original context is still alive. If it was
-				// cancelled during the wait, fantasy's retry will fail immediately.
-				if ctx.Err() != nil {
-					slog.Warn("Original context cancelled during auth wait, cannot retry",
-						"provider", providerCfg.ID, "ctx_err", ctx.Err())
-					return ctx.Err()
-				}
-				// Rebuild models so ModelProvider picks up the fresh credentials.
-				if updateErr := c.UpdateModels(waitCtx); updateErr != nil {
-					slog.Error("Failed to update models after re-authentication", "error", updateErr)
-					return updateErr
-				}
-				slog.Info("Models updated, returning nil to retry", "provider", providerCfg.ID)
-				return nil
+				return c.waitForInteractiveReauth(ctx, providerCfg.ID)
 			}
 			return err
 		}
 		return nil
+	case providerCfg.AWSAuthRefresh != "":
+		return c.refreshAWSCredentials(ctx, providerCfg)
 	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return c.refreshApiKeyTemplate(ctx, providerCfg)
@@ -1334,7 +1298,45 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 	}
 }
 
-func (c *coordinator) isUnauthorized(err error) bool {
+// errNoInteractiveAuth is returned by an OnAuthRefresh callback when a
+// provider needs interactive re-authentication but no notifier is available
+// to drive it (e.g. headless runs). Returning it surfaces the original auth
+// error rather than retrying.
+var errNoInteractiveAuth = errors.New("interactive authentication unavailable")
+
+// waitForInteractiveReauth blocks until interactive re-authentication for the
+// provider completes (signalled via SignalAuthComplete) or the context is
+// cancelled, then rebuilds models so the next attempt picks up fresh
+// credentials. Returns nil when the caller should retry.
+func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID string) error {
+	// Use a detached context with a generous timeout so the wait survives
+	// agent run cancellation. The user needs time to complete browser-based
+	// authentication.
+	waitCtx, waitCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	defer waitCancel()
+	slog.Info("Blocking on WaitForTokenChange", "provider", providerID)
+	if waitErr := c.cfg.WaitForTokenChange(waitCtx, providerID); waitErr != nil {
+		slog.Info("WaitForTokenChange returned error", "provider", providerID, "error", waitErr)
+		return waitErr
+	}
+	// If the original context was cancelled during the wait, fantasy's retry
+	// would fail immediately, so surface the cancellation instead.
+	if ctx.Err() != nil {
+		slog.Warn("Original context cancelled during auth wait, cannot retry",
+			"provider", providerID, "ctx_err", ctx.Err())
+		return ctx.Err()
+	}
+	// Rebuild models so ModelProvider picks up the fresh credentials.
+	if updateErr := c.UpdateModels(waitCtx); updateErr != nil {
+		slog.Error("Failed to update models after re-authentication", "error", updateErr)
+		return updateErr
+	}
+	slog.Info("Models updated, returning nil to retry", "provider", providerID)
+	return nil
+}
+
+// isUnauthorized reports whether err is an HTTP 401 from a provider.
+func isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
 	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
 }
@@ -1343,7 +1345,9 @@ func (c *coordinator) isUnauthorized(err error) bool {
 // delegates to the coordinator's existing credential refresh logic. Returns
 // nil if no refresh mechanism is configured for the provider.
 func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
-	if providerCfg.OAuthToken == nil && !strings.Contains(providerCfg.APIKeyTemplate, "$") {
+	if providerCfg.OAuthToken == nil &&
+		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
+		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
 	return func(ctx context.Context, _ *fantasy.ProviderError) error {
@@ -1436,8 +1440,9 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		})
 	}
 	result, err := run()
-	// Notify only if still unauthorized after retry.
-	if err != nil && c.isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+	// Notify only if still unauthorized after retry. AWS SSO is handled
+	// transparently inside OnAuthRefresh, so it needs no post-run notice.
+	if err != nil && isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			Type:       notify.TypeReAuthenticate,
 			ProviderID: model.ModelCfg.Provider,

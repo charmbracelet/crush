@@ -252,12 +252,19 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 			if d.IsDir() || d.Name() != SkillFileName {
 				return nil
 			}
+			// Resolve symlinks so the same file reached via different paths
+			// (e.g. a global dir symlinked into a project) is only parsed,
+			// validated, and warned about once.
+			realPath := path
+			if resolved, err := filepath.EvalSymlinks(path); err == nil {
+				realPath = resolved
+			}
 			mu.Lock()
-			if seen[path] {
+			if seen[realPath] {
 				mu.Unlock()
 				return nil
 			}
-			seen[path] = true
+			seen[realPath] = true
 			mu.Unlock()
 			skill, err := Parse(path)
 			if err != nil {

@@ -116,6 +116,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.writeMu.Lock()
 	defer store.writeMu.Unlock()
 
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
+	cfg.applyEnv(valueResolver)
+
 	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
@@ -498,6 +502,25 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	}
 
 	return nil
+}
+
+// applyEnv sets top-level env vars from the config. Keys are sorted for
+// deterministic ordering so that vars referencing other vars via the
+// value resolver produce consistent results.
+func (c *Config) applyEnv(resolver VariableResolver) {
+	keys := make([]string, 0, len(c.Env))
+	for k := range c.Env {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		resolved, err := resolver.ResolveValue(c.Env[k])
+		if err != nil {
+			slog.Warn("Skipping env var due to resolution failure.", "key", k, "value", c.Env[k], "error", err)
+			continue
+		}
+		os.Setenv(k, resolved)
+	}
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -173,10 +174,15 @@ func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event
 // replacing allSkills, activeSkills, states, and resolvedPaths. It also
 // publishes a discovery event so subscribers (TUI sidebar, etc.) update.
 // Returns the new active skills so callers (e.g. the coordinator) can
-// propagate them to the system prompt and tools.
-func (m *Manager) Reload() []*Skill {
+// propagate them to the system prompt and tools. The context is checked
+// for cancellation after discovery completes but before swapping state.
+func (m *Manager) Reload(ctx context.Context) ([]*Skill, error) {
 	allSkills, activeSkills, states := DiscoverFromConfig(m.discoveryCfg)
 	resolved := m.discoveryCfg.ResolvePaths()
+
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("skill reload cancelled: %w", err)
+	}
 
 	m.mu.Lock()
 	m.allSkills = allSkills
@@ -186,7 +192,7 @@ func (m *Manager) Reload() []*Skill {
 	m.mu.Unlock()
 
 	m.PublishStates(states)
-	return activeSkills
+	return activeSkills, nil
 }
 
 // Shutdown releases broker resources.

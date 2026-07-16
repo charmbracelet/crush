@@ -1186,7 +1186,10 @@ func (c *coordinator) ReloadSkills(ctx context.Context) error {
 		return errors.New("skill reload requires a skills manager")
 	}
 
-	activeSkills := c.skillsMgr.Reload()
+	activeSkills, err := c.skillsMgr.Reload(ctx)
+	if err != nil {
+		return err
+	}
 
 	c.allSkills = c.skillsMgr.AllSkills()
 	c.activeSkills = activeSkills

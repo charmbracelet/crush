@@ -4,8 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -871,22 +869,13 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.False(t, exists)
 	})
 
-	t.Run("custom provider with models and discover_models:true merges discovered models", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data": [
-				{"id": "existing-model", "object": "model"},
-				{"id": "discovered-model", "object": "model"}
-			]}`))
-		}))
-		defer server.Close()
-
+	t.Run("custom provider applies models found by background discovery", func(t *testing.T) {
 		discoverTrue := true
 		cfg := &Config{
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{
 				"custom": {
 					APIKey:  "test-key",
-					BaseURL: server.URL + "/v1",
+					BaseURL: "https://api.custom.com/v1",
 					Models: []catwalk.Model{
 						{ID: "existing-model", Name: "My Custom Name", ContextWindow: 200000},
 					},
@@ -896,9 +885,18 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		}
 		cfg.setDefaults("/tmp", "")
 
+		// Simulate a completed background discovery pass by seeding the
+		// store's in-memory cache; configureProviders applies it.
+		store := testStore(cfg)
+		store.discoveredModels = csync.NewMap[string, []catwalk.Model]()
+		store.discoveredModels.Set("custom", []catwalk.Model{
+			{ID: "existing-model", Name: "My Custom Name", ContextWindow: 200000},
+			{ID: "discovered-model", Name: "discovered-model"},
+		})
+
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), store, env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, 1, cfg.Providers.Len())
@@ -911,7 +909,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.Equal(t, "My Custom Name", p.Models[0].Name)
 		require.Equal(t, int64(200000), p.Models[0].ContextWindow)
 
-		// Discovered model is appended.
+		// Discovered model is included.
 		require.Equal(t, "discovered-model", p.Models[1].ID)
 	})
 
@@ -941,37 +939,29 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.Equal(t, "my-model", p.Models[0].ID)
 	})
 
-	t.Run("custom provider with no models auto-discovers successfully", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data": [
-				{"id": "auto-model-a", "object": "model"},
-				{"id": "auto-model-b", "object": "model"}
-			]}`))
-		}))
-		defer server.Close()
-
+	t.Run("custom provider with no models is dropped until background discovery runs", func(t *testing.T) {
 		cfg := &Config{
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{
 				"custom": {
 					APIKey:  "test-key",
-					BaseURL: server.URL + "/v1",
+					BaseURL: "https://api.custom.com/v1",
 				},
 			}),
 		}
 		cfg.setDefaults("/tmp", "")
 
+		// configureProviders no longer performs network discovery; with
+		// nothing in the discovery cache yet, a provider with no models is
+		// dropped. It reappears after DiscoverModels populates the cache
+		// and triggers a reload.
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
-		require.Equal(t, 1, cfg.Providers.Len())
-		p, exists := cfg.Providers.Get("custom")
-		require.True(t, exists)
-		require.Len(t, p.Models, 2)
-		require.Equal(t, "auto-model-a", p.Models[0].ID)
-		require.Equal(t, "auto-model-b", p.Models[1].ID)
+		require.Equal(t, 0, cfg.Providers.Len())
+		_, exists := cfg.Providers.Get("custom")
+		require.False(t, exists)
 	})
 
 	t.Run("custom provider with unsupported type is removed", func(t *testing.T) {

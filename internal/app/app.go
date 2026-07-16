@@ -163,13 +163,28 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
 		slog.Warn("No agent configuration found")
+		// Background discovery may still turn up a usable provider; when it
+		// does, discoverProviderModels initializes the coder agent.
+		go app.discoverProviderModels(ctx)
 		return app, nil
 	}
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 
-	// Set up callback for LSP state updates.
+	app.setupLSPTracking()
+
+	// Discover custom provider models off the startup path so a slow or
+	// unreachable provider never delays the UI.
+	go app.discoverProviderModels(ctx)
+
+	return app, nil
+}
+
+// setupLSPTracking wires the LSP state callback and starts tracking the
+// configured language servers. Shared by New and by the post-discovery
+// coder-agent initialization path.
+func (app *App) setupLSPTracking() {
 	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
 		if client == nil {
 			updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
@@ -179,8 +194,43 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		updateLSPState(name, client.GetServerState(), nil, client, 0)
 	})
 	go app.LSPManager.TrackConfigured()
+}
 
-	return app, nil
+// discoverProviderModels probes custom providers for their model lists off
+// the startup path. When it finds new models it reloads the config,
+// refreshes the agent's model set, and (if the app was previously
+// unconfigured) initializes the coder agent.
+func (app *App) discoverProviderModels(ctx context.Context) {
+	defer log.RecoverPanic("app.discoverProviderModels", nil)
+
+	if !app.config.HasPendingModelDiscovery() {
+		return
+	}
+
+	changed, err := app.config.DiscoverModels(ctx)
+	if err != nil {
+		slog.Debug("Background model discovery failed", "error", err)
+	}
+	if !changed {
+		return
+	}
+
+	if app.AgentCoordinator == nil {
+		// The app started unconfigured; discovery may have produced a
+		// usable provider, so bring the coder agent online now.
+		if app.Config().IsConfigured() {
+			if initErr := app.InitCoderAgent(ctx); initErr != nil {
+				slog.Error("Failed to initialize coder agent after discovery", "error", initErr)
+				return
+			}
+			app.setupLSPTracking()
+		}
+		return
+	}
+
+	if updateErr := app.AgentCoordinator.UpdateModels(ctx); updateErr != nil {
+		slog.Debug("Failed to refresh models after discovery", "error", updateErr)
+	}
 }
 
 // Config returns the pure-data configuration.

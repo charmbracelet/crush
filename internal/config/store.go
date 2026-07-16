@@ -13,6 +13,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -80,6 +81,20 @@ type ConfigStore struct {
 	overrides          RuntimeOverrides
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
+
+	// discoveredModels holds models found by background model discovery,
+	// keyed by provider id. configureProviders reads this cache instead
+	// of hitting the network, so startup never blocks on a slow or
+	// unreachable provider; the background DiscoverModels pass populates
+	// it and reloads to apply the results.
+	discoveredModels *csync.Map[string, []catwalk.Model]
+
+	// discoveryMu guards pendingDiscovery, the set of custom providers
+	// that need model discovery. It is captured during configureProviders
+	// (before empty providers are dropped) so the background pass still
+	// knows which providers to probe.
+	discoveryMu      sync.Mutex
+	pendingDiscovery []discoveryJob
 
 	// configMu guards the config pointer field against concurrent
 	// readers (Config) and the writeMu-serialised swap (setConfig). It

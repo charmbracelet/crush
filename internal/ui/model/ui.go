@@ -4389,6 +4389,8 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ChannelsID:
+		m.openChannelsDialog()
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4484,6 +4486,16 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
 	return nil
+}
+
+// openChannelsDialog opens the channels management dialog.
+func (m *UI) openChannelsDialog() {
+	if m.dialog.ContainsDialog(dialog.ChannelsID) {
+		m.dialog.BringToFront(dialog.ChannelsID)
+		return
+	}
+	channelsDialog := dialog.NewChannels(m.com, m.com.Workspace)
+	m.dialog.OpenDialog(channelsDialog)
 }
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already open,

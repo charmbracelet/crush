@@ -198,9 +198,6 @@ func newBaseToolMessageItem(
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
-		Suffix: func() string {
-			return common.Elapsed()
-		},
 	})
 
 	return t

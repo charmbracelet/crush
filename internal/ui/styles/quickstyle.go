@@ -99,6 +99,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.WorkingGradFromColor = o.primary
 	s.WorkingGradToColor = o.secondary
 	s.WorkingLabelColor = o.fgMostSubtle
+	s.WorkingTimerColor = o.fgMostSubtle
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{

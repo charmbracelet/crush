@@ -151,6 +151,7 @@ type Event struct {
 	// ChannelMessage is set only for EventChannelMessage: the fully rendered
 	// and escaped <channel>...</channel> element to inject into the session.
 	ChannelMessage string
+	ChannelMeta    map[string]string
 }
 
 // Counts number of available tools, prompts, etc.

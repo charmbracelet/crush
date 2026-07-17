@@ -27,9 +27,11 @@ type channelWorkspace struct {
 	createCalls  int
 	runCalls     []channelRun
 	runErr       error
+	channels     []string
 }
 
 type channelRun struct {
+	channel   string
 	sessionID string
 	prompt    string
 }
@@ -48,6 +50,16 @@ func (w *channelWorkspace) CreateSession(context.Context, string) (session.Sessi
 func (w *channelWorkspace) AgentRun(_ context.Context, sessionID, prompt string, _ ...message.Attachment) error {
 	w.runCalls = append(w.runCalls, channelRun{sessionID: sessionID, prompt: prompt})
 	return w.runErr
+}
+
+func (w *channelWorkspace) AgentRunChannel(_ context.Context, channel, sessionID, prompt string, _ ...message.Attachment) error {
+	w.runCalls = append(w.runCalls, channelRun{channel: channel, sessionID: sessionID, prompt: prompt})
+	return w.runErr
+}
+
+func (w *channelWorkspace) SetSessionChannel(_ context.Context, sessionID, channel string) (session.Session, error) {
+	w.channels = append(w.channels, channel)
+	return session.Session{ID: sessionID, Channel: channel}, nil
 }
 
 func (w *channelWorkspace) Config() *config.Config { return nil }
@@ -74,7 +86,7 @@ func TestHandleChannelMessageExistingSession(t *testing.T) {
 	m := newChannelUI(ws)
 	m.session = &session.Session{ID: "sess-1"}
 
-	cmd := m.handleChannelMessage(mcp.Event{ChannelMessage: "<channel source=\"s\">hi</channel>"})
+	cmd := m.handleChannelMessage(mcp.Event{Name: "s", ChannelMessage: "<channel source=\"s\">hi</channel>"})
 	if cmd == nil {
 		t.Fatal("expected a command for an active-session channel event")
 	}
@@ -86,6 +98,12 @@ func TestHandleChannelMessageExistingSession(t *testing.T) {
 	cmd()
 	if len(ws.runCalls) != 1 {
 		t.Fatalf("AgentRun calls = %d, want 1", len(ws.runCalls))
+	}
+	if ws.runCalls[0].channel != "s" {
+		t.Errorf("AgentRun channel = %q, want s", ws.runCalls[0].channel)
+	}
+	if len(ws.channels) != 1 || ws.channels[0] != "s" {
+		t.Errorf("session channels = %v, want [s]", ws.channels)
 	}
 	if ws.runCalls[0].sessionID != "sess-1" {
 		t.Errorf("AgentRun sessionID = %q, want sess-1", ws.runCalls[0].sessionID)
@@ -101,7 +119,7 @@ func TestHandleChannelMessageCreatesSessionWhenNoneActive(t *testing.T) {
 	m := newChannelUI(ws)
 	// No active session: a pushed event must not be dropped.
 
-	cmd := m.handleChannelMessage(mcp.Event{ChannelMessage: "<channel source=\"s\">hi</channel>"})
+	cmd := m.handleChannelMessage(mcp.Event{Name: "s", ChannelMessage: "<channel source=\"s\">hi</channel>"})
 	if cmd == nil {
 		t.Fatal("expected a command when auto-creating a session")
 	}

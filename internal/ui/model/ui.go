@@ -3900,10 +3900,17 @@ func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
 	if !m.hasSession() {
 		return loadCmd
 	}
+	updatedSession, err := m.com.Workspace.SetSessionChannel(context.Background(), m.session.ID, ev.Name)
+	if err != nil {
+		slog.Debug("Failed to set session channel", "error", err, "session", m.session.ID, "channel", ev.Name)
+		return loadCmd
+	}
+	m.session = &updatedSession
 	sessionID := m.session.ID
+	channel := ev.Name
 	content := ev.ChannelMessage
 	runCmd := func() tea.Msg {
-		if err := m.com.Workspace.AgentRun(context.Background(), sessionID, content); err != nil {
+		if err := m.com.Workspace.AgentRunChannel(context.Background(), channel, sessionID, content); err != nil {
 			slog.Debug("Failed to inject channel message", "error", err, "session", sessionID)
 		}
 		return nil

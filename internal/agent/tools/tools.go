@@ -15,6 +15,7 @@ type (
 	messageIDContextKey string
 	supportsImagesKey   string
 	modelNameKey        string
+	channelContextKey   string
 )
 
 const (
@@ -26,6 +27,8 @@ const (
 	SupportsImagesContextKey supportsImagesKey = "supports_images"
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
+	// ChannelContextKey is the key for the channel that originated the turn.
+	ChannelContextKey channelContextKey = "channel"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -44,6 +47,11 @@ func getContextValue[T any](ctx context.Context, key any, defaultValue T) T {
 // GetSessionFromContext retrieves the session ID from the context.
 func GetSessionFromContext(ctx context.Context) string {
 	return getContextValue(ctx, SessionIDContextKey, "")
+}
+
+// GetChannelFromContext retrieves the channel that originated the current turn.
+func GetChannelFromContext(ctx context.Context) string {
+	return getContextValue(ctx, ChannelContextKey, "")
 }
 
 // GetMessageFromContext retrieves the message ID from the context.

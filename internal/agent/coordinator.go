@@ -381,6 +381,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return agent.Run(ctx, SessionAgentCall{
 			SessionID:         sessionID,
 			RunID:             runID,
+			Channel:           ChannelFromContext(ctx),
 			Prompt:            prompt,
 			HiddenUserMessage: message.HiddenUserMessage(ctx),
 			Attachments:       attachments,

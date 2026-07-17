@@ -191,6 +191,7 @@ func publishChannelMessage(ctx context.Context, name string, raw json.RawMessage
 	broker.PublishMustDeliver(ctx, pubsub.CreatedEvent, Event{
 		Type:           EventChannelMessage,
 		Name:           name,
+		ChannelMeta:    p.Meta,
 		ChannelMessage: renderChannel(name, p),
 	})
 }

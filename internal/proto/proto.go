@@ -145,6 +145,7 @@ type AgentMessage struct {
 	HiddenUserMessage bool         `json:"hidden_user_message,omitempty"`
 	SessionID         string       `json:"session_id"`
 	RunID             string       `json:"run_id,omitempty"`
+	Channel           string       `json:"channel,omitempty"`
 	Prompt            string       `json:"prompt"`
 	Attachments       []Attachment `json:"attachments,omitempty"`
 }

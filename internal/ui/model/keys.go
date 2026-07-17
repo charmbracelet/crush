@@ -4,7 +4,6 @@ import "charm.land/bubbles/v2/key"
 
 type KeyMap struct {
 	Editor struct {
-		AddFile     key.Binding
 		SendMessage key.Binding
 		OpenEditor  key.Binding
 		Newline     key.Binding
@@ -107,10 +106,6 @@ func DefaultKeyMap() KeyMap {
 		),
 	}
 
-	km.Editor.AddFile = key.NewBinding(
-		key.WithKeys("/"),
-		key.WithHelp("/", "add file"),
-	)
 	km.Editor.SendMessage = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "send"),

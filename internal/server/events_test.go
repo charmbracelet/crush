@@ -52,9 +52,6 @@ func TestMessageToProtoToolResult(t *testing.T) {
 	require.False(t, tr.IsError)
 }
 
-// TestSkillsEventToProto_RoundTrip verifies that a pubsub.Event[skills.Event]
-// can be wrapped, marshaled, and unmarshaled back through the SSE
-// envelope without losing state values or error messages.
 // TestMCPChannelEventToProto_RoundTrip verifies that a channel push survives
 // the SSE envelope conversion with its type and rendered <channel> body intact,
 // so client/server sessions receive channel events rather than dropping the
@@ -82,6 +79,9 @@ func TestMCPChannelEventToProto_RoundTrip(t *testing.T) {
 	require.Equal(t, `<channel source="webhook">build failed</channel>`, decoded.Payload.ChannelMessage)
 }
 
+// TestSkillsEventToProto_RoundTrip verifies that a pubsub.Event[skills.Event]
+// can be wrapped, marshaled, and unmarshaled back through the SSE
+// envelope without losing state values or error messages.
 func TestSkillsEventToProto_RoundTrip(t *testing.T) {
 	t.Parallel()
 

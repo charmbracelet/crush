@@ -3879,7 +3879,16 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 // active yet, one is created so a pushed event is never silently dropped; if the
 // agent is busy, AgentRun enqueues the message and it is picked up on the next
 // step.
+//
+// Injection is skipped entirely when the workspace routes channel events
+// itself (client/server mode): the server injects each event exactly once,
+// and injecting here as well would duplicate the turn once per attached
+// client. The injected turn still reaches this client through the normal
+// session/message event stream.
 func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
+	if m.com.Workspace.RoutesChannelEvents() {
+		return nil
+	}
 	if ev.ChannelMessage == "" || !m.com.Workspace.AgentIsReady() {
 		return nil
 	}

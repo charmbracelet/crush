@@ -292,7 +292,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	updateState(name, StateStarting, nil, nil, Counts{})
 
 	// createSession handles its own timeout internally.
-	session, err := createSession(ctx, name, m, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
+	session, err := createSession(ctx, name, m, resolver, ChannelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return err
 	}
@@ -384,7 +384,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	// resources from the registry.
 	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), nil, state.Counts)
 
-	newSess, err := newSession(ctx, name, m, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	newSess, err := newSession(ctx, name, m, cfg.Resolver(), ChannelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return nil, err
 	}

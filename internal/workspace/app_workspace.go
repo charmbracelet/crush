@@ -81,6 +81,10 @@ func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) 
 	return nil
 }
 
+// RoutesChannelEvents reports false: in-process mode has no server to
+// route channel events, so the frontend injects them itself.
+func (w *AppWorkspace) RoutesChannelEvents() bool { return false }
+
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {

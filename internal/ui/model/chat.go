@@ -137,6 +137,15 @@ type Chat struct {
 	resizing        bool
 	resizeSettleSeq int
 	warmNext        int
+
+	// systemItems holds ephemeral Crush-generated advisories (e.g. small
+	// context window or super yolo warnings). They render after the
+	// transcript and are recomputed from live state rather than stored, so
+	// they are kept separate from the DB-driven transcript and re-applied
+	// on every rebuild. transcript caches the last real message items so
+	// SetSystemMessages can recompose without the caller re-passing them.
+	systemItems []chat.MessageItem
+	transcript  []chat.MessageItem
 }
 
 // scrollbarHideDuration is how long the scrollbar remains visible after scroll activity.
@@ -394,13 +403,55 @@ func (m *Chat) InvalidateRenderCaches() {
 }
 
 // SetMessages sets the chat messages to the provided list of message items.
+// Any active system messages are rendered after them.
 func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
-	m.idInxMap = make(map[string]int)
+	m.transcript = msgs
 	m.pausedAnimations = make(map[string]struct{})
 	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
+	m.applyItems()
+	m.ScrollToBottom()
+	return nil
+}
 
-	items := make([]list.Item, len(msgs))
-	for i, msg := range msgs {
+// SetSystemMessages replaces the ephemeral system advisories rendered after
+// the transcript. When the set changes it scrolls to the bottom so a new
+// advisory is revealed, and so removing one does not leave blank space below
+// the transcript. Scrolling is skipped when the user has scrolled up.
+func (m *Chat) SetSystemMessages(items ...chat.MessageItem) {
+	changed := !sameMessageItems(m.systemItems, items)
+	wasAtBottom := m.follow || m.AtBottom()
+	m.systemItems = items
+	m.applyItems()
+	if changed && wasAtBottom {
+		m.ScrollToBottom()
+	}
+}
+
+// sameMessageItems reports whether two item slices reference the same IDs in
+// the same order.
+func sameMessageItems(a, b []chat.MessageItem) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID() != b[i].ID() {
+			return false
+		}
+	}
+	return true
+}
+
+// applyItems rebuilds the list and ID map from the transcript followed by the
+// current system messages, keeping advisories anchored at the end.
+func (m *Chat) applyItems() {
+	m.idInxMap = make(map[string]int)
+
+	combined := make([]chat.MessageItem, 0, len(m.transcript)+len(m.systemItems))
+	combined = append(combined, m.transcript...)
+	combined = append(combined, m.systemItems...)
+
+	items := make([]list.Item, len(combined))
+	for i, msg := range combined {
 		m.idInxMap[msg.ID()] = i
 		// Register nested tool IDs for tools that contain nested tools.
 		if container, ok := msg.(chat.NestedToolContainer); ok {
@@ -411,12 +462,20 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 		items[i] = msg
 	}
 	m.list.SetItems(items...)
-	m.ScrollToBottom()
-	return nil
 }
 
 // AppendMessages appends a new message item to the chat list.
 func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
+	m.transcript = append(m.transcript, msgs...)
+
+	// When advisories are active they must stay after the transcript, so a
+	// full rebuild is required to re-anchor them. The fast append path is
+	// kept for the common case where there are none.
+	if len(m.systemItems) > 0 {
+		m.applyItems()
+		return
+	}
+
 	items := make([]list.Item, len(msgs))
 	indexOffset := m.list.Len()
 	for i, msg := range msgs {
@@ -757,6 +816,8 @@ func (m *Chat) ClearMessages() {
 	m.idInxMap = make(map[string]int)
 	m.pausedAnimations = make(map[string]struct{})
 	m.scrollbarVisible = false
+	m.systemItems = nil
+	m.transcript = nil
 	m.list.SetItems()
 	m.ClearMouse()
 }
@@ -773,6 +834,15 @@ func (m *Chat) RemoveMessage(id string) {
 
 	// Remove from index map
 	delete(m.idInxMap, id)
+
+	// Keep the transcript cache in sync so a later system-message rebuild
+	// does not resurrect the removed item.
+	for i, item := range m.transcript {
+		if item.ID() == id {
+			m.transcript = append(m.transcript[:i], m.transcript[i+1:]...)
+			break
+		}
+	}
 
 	// Rebuild index map for all items after the removed one
 	for i := idx; i < m.list.Len(); i++ {

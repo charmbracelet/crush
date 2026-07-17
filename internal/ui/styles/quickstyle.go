@@ -911,6 +911,14 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoDuration = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
 
+	// System message (ephemeral Crush advisories) styles.
+	s.Messages.SystemBadge = lipgloss.NewStyle().Padding(0, 1).Background(o.busy).Foreground(o.bgBase).Bold(true)
+	s.Messages.SystemTitle = base.Foreground(o.busy).Bold(true)
+	s.Messages.SystemBody = base.Foreground(o.fgBase)
+	s.Messages.SystemAccent = base.Foreground(o.success)
+	s.Messages.SystemFooterIcon = subtle
+	s.Messages.SystemFooterLabel = subtle
+
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted

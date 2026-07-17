@@ -31,6 +31,13 @@ func (m *UI) landingView() string {
 	}
 
 	parts = append(parts, "", m.modelInfo(width))
+
+	// Surface any active system advisories (small-context model, super yolo)
+	// above the landing info so fresh sessions warn before the first message.
+	if sys := m.systemMessagesView(width); sys != "" {
+		parts = append([]string{sys, ""}, parts...)
+	}
+
 	infoSection := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	var remainingHeightArea image.Rectangle

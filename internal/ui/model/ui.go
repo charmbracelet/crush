@@ -267,6 +267,12 @@ type UI struct {
 	// Chat components
 	chat *Chat
 
+	// suppressedSystemMessages tracks which ephemeral advisories the user has
+	// dismissed for the current session by sending a message. Dismissed kinds
+	// stay hidden until their triggering event fires again (model switch,
+	// mode toggle, or a new/switched session).
+	suppressedSystemMessages map[chat.SystemMessageKind]bool
+
 	// onboarding state
 	onboarding struct {
 		yesInitializeSelected bool
@@ -415,22 +421,23 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	header := newHeader(com)
 
 	ui := &UI{
-		com:                 com,
-		dialog:              dialog.NewOverlay(),
-		keyMap:              keyMap,
-		textarea:            ta,
-		chat:                ch,
-		header:              header,
-		completions:         comp,
-		attachments:         attachments,
-		todoSpinner:         todoSpinner,
-		lspStates:           make(map[string]workspace.LSPClientInfo),
-		mcpStates:           make(map[string]mcp.ClientInfo),
-		notifyBackend:       notification.NoopBackend{},
-		notifyWindowFocused: true,
-		initialSessionID:    initialSessionID,
-		continueLastSession: continueLast,
-		skillStates:         skills.GetLatestStates(),
+		com:                      com,
+		dialog:                   dialog.NewOverlay(),
+		keyMap:                   keyMap,
+		textarea:                 ta,
+		chat:                     ch,
+		header:                   header,
+		completions:              comp,
+		attachments:              attachments,
+		todoSpinner:              todoSpinner,
+		lspStates:                make(map[string]workspace.LSPClientInfo),
+		mcpStates:                make(map[string]mcp.ClientInfo),
+		notifyBackend:            notification.NoopBackend{},
+		notifyWindowFocused:      true,
+		initialSessionID:         initialSessionID,
+		continueLastSession:      continueLast,
+		skillStates:              skills.GetLatestStates(),
+		suppressedSystemMessages: make(map[chat.SystemMessageKind]bool),
 	}
 
 	status := NewStatus(com, ui)
@@ -1269,6 +1276,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ttl = DefaultStatusTTL
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
+	case modelChangedMsg:
+		// The agent model has finished updating. Switching models is a fresh
+		// trigger, so re-surface the context advisory.
+		m.retriggerSystemMessage(chat.SystemMessageContextWarning)
+		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg(msg.info)))
 	case app.UpdateAvailableMsg:
 		text := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
@@ -1389,6 +1401,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	if cmd := m.chat.SetMessages(items...); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	m.refreshSystemMessages()
 	if cmd := m.chat.RestartPausedVisibleAnimations(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -1772,6 +1785,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	// Session dialog messages.
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
+		if m.session == nil || m.session.ID != msg.Session.ID {
+			// A fresh session view should surface advisories again.
+			m.resetSystemMessageSuppression()
+		}
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
 
 	// Open dialog message.
@@ -2161,7 +2178,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
 
-		return util.NewInfoMsg(modelMsg)
+		return modelChangedMsg{info: modelMsg}
 	})
 
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
@@ -3577,6 +3594,8 @@ func (m *UI) toggleMode(target permission.PermissionMode) (enabled bool) {
 	// re-dispatches the stale probe.
 	m.busyFetchGen++
 	m.setEditorPrompt(mode)
+	// Toggling the mode is a fresh trigger for the sysadmin advisory.
+	m.retriggerSystemMessage(chat.SystemMessageSuperYolo)
 	return enabled
 }
 
@@ -3950,6 +3969,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	if err := m.com.Workspace.AgentReadyErr(); err != nil {
 		return util.ReportError(err)
 	}
+
+	// Sending a message counts as acknowledging any active advisory, so
+	// dismiss them rather than leaving them floating in the transcript.
+	m.dismissActiveSystemMessages()
 
 	// Start the turn timer.
 	common.StartTurn()
@@ -4489,6 +4512,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.textarea.Focus()
 	m.chat.Blur()
 	m.chat.ClearMessages()
+	m.resetSystemMessageSuppression()
 	m.pillsExpanded = false
 	m.pillsAutoExpanded = false
 	m.promptQueue = 0

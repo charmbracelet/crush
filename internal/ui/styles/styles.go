@@ -317,6 +317,15 @@ type Styles struct {
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+
+		// System message styles (Crush-generated ephemeral advisories,
+		// e.g. small-context-model and super-yolo warnings).
+		SystemBadge       lipgloss.Style // "!" badge box.
+		SystemTitle       lipgloss.Style // Bold warning title.
+		SystemBody        lipgloss.Style // Body copy.
+		SystemAccent      lipgloss.Style // Highlighted fragments (model, sizes, keybinds).
+		SystemFooterIcon  lipgloss.Style // Footer "◇" glyph.
+		SystemFooterLabel lipgloss.Style // Footer "Crush System Message" label.
 	}
 
 	// Tool - styles for tool call rendering

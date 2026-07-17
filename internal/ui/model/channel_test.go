@@ -20,12 +20,13 @@ import (
 // stub honest about what the code under test depends on.
 type channelWorkspace struct {
 	workspace.Workspace
-	ready       bool
-	createErr   error
-	newSession  session.Session
-	createCalls int
-	runCalls    []channelRun
-	runErr      error
+	ready        bool
+	routesRemote bool
+	createErr    error
+	newSession   session.Session
+	createCalls  int
+	runCalls     []channelRun
+	runErr       error
 }
 
 type channelRun struct {
@@ -33,7 +34,8 @@ type channelRun struct {
 	prompt    string
 }
 
-func (w *channelWorkspace) AgentIsReady() bool { return w.ready }
+func (w *channelWorkspace) AgentIsReady() bool        { return w.ready }
+func (w *channelWorkspace) RoutesChannelEvents() bool { return w.routesRemote }
 
 func (w *channelWorkspace) CreateSession(context.Context, string) (session.Session, error) {
 	w.createCalls++
@@ -108,6 +110,24 @@ func TestHandleChannelMessageCreatesSessionWhenNoneActive(t *testing.T) {
 	}
 	if !m.hasSession() || m.session.ID != "new-sess" {
 		t.Fatalf("expected active session new-sess, got %+v", m.session)
+	}
+}
+
+// TestHandleChannelMessageSkipsWhenServerRoutes verifies the client/server
+// split: when the workspace routes channel events itself (ClientWorkspace),
+// the TUI must not inject — the server injects exactly once and per-client
+// injection would duplicate the turn.
+func TestHandleChannelMessageSkipsWhenServerRoutes(t *testing.T) {
+	t.Parallel()
+	ws := &channelWorkspace{ready: true, routesRemote: true}
+	m := newChannelUI(ws)
+	m.session = &session.Session{ID: "sess-1"}
+
+	if cmd := m.handleChannelMessage(mcp.Event{ChannelMessage: "<channel source=\"s\">hi</channel>"}); cmd != nil {
+		t.Error("expected no command when the server owns channel routing")
+	}
+	if ws.createCalls != 0 || len(ws.runCalls) != 0 {
+		t.Errorf("server-routed event must not create sessions or run the agent locally; got %d creates, %d runs", ws.createCalls, len(ws.runCalls))
 	}
 }
 

@@ -1244,8 +1244,14 @@ func ProjectSkillsDir(workingDir string) []string {
 	return dirs
 }
 
-// GlobalSubagentsDirs returns the default global directories for subagent definitions.
+// GlobalSubagentsDirs returns the default global directories for subagent
+// definitions. The CRUSH_SUBAGENTS_DIR environment variable, when set to a
+// non-empty value, overrides the default list entirely.
 func GlobalSubagentsDirs() []string {
+	if crushSubagents := os.Getenv("CRUSH_SUBAGENTS_DIR"); crushSubagents != "" {
+		return []string{crushSubagents}
+	}
+
 	paths := []string{
 		filepath.Join(home.Config(), appName, "subagents"),
 		filepath.Join(home.Config(), "agents", "subagents"),

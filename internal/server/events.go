@@ -40,20 +40,20 @@ func wrapEvent(ev any) *pubsub.Payload {
 	case pubsub.Event[mcp.Event]:
 		pt := mcpEventTypeToProto(e.Payload.Type)
 		if pt == "" {
-			// Unsupported MCP event type (e.g. EventChannelMessage, which
-			// has no proto representation until session delivery is wired
-			// up). Drop it instead of fabricating a state_changed event.
+			// Unsupported MCP event type. Drop it instead of fabricating
+			// a state_changed event.
 			slog.Debug("Dropping unsupported MCP event type for SSE", "type", e.Payload.Type)
 			return nil
 		}
 		return envelope(pubsub.PayloadTypeMCPEvent, pubsub.Event[proto.MCPEvent]{
 			Type: e.Type,
 			Payload: proto.MCPEvent{
-				Type:      pt,
-				Name:      e.Payload.Name,
-				State:     proto.MCPState(e.Payload.State),
-				Error:     e.Payload.Error,
-				ToolCount: e.Payload.Counts.Tools,
+				Type:           pt,
+				Name:           e.Payload.Name,
+				State:          proto.MCPState(e.Payload.State),
+				Error:          e.Payload.Error,
+				ToolCount:      e.Payload.Counts.Tools,
+				ChannelMessage: e.Payload.ChannelMessage,
 			},
 		})
 	case pubsub.Event[permission.PermissionRequest]:
@@ -192,9 +192,11 @@ func mcpEventTypeToProto(t mcp.EventType) proto.MCPEventType {
 		return proto.MCPEventPromptsListChanged
 	case mcp.EventResourcesListChanged:
 		return proto.MCPEventResourcesListChanged
+	case mcp.EventChannelMessage:
+		return proto.MCPEventChannelMessage
 	default:
-		// Unsupported type (e.g. EventChannelMessage). Return empty so
-		// callers can drop it rather than coercing to state_changed.
+		// Unsupported type. Return empty so callers can drop it rather
+		// than coercing to state_changed.
 		return ""
 	}
 }

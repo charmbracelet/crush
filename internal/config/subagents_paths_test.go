@@ -183,3 +183,29 @@ func TestOptions_SubagentsPaths_JSONRoundtrip(t *testing.T) {
 	require.Equal(t, original.SubagentsPaths, restored.SubagentsPaths)
 	require.Equal(t, original.DisabledSubagents, restored.DisabledSubagents)
 }
+
+// TestGlobalSubagentsDirs_EnvOverride verifies that CRUSH_SUBAGENTS_DIR, when
+// set to a non-empty value, causes GlobalSubagentsDirs to return exactly that
+// single path, mirroring the CRUSH_SKILLS_DIR override on GlobalSkillsDirs.
+// When unset or empty, the existing default list is returned.
+func TestGlobalSubagentsDirs_EnvOverride(t *testing.T) {
+	override := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", override)
+
+	dirs := GlobalSubagentsDirs()
+	require.Equal(t, []string{override}, dirs,
+		"CRUSH_SUBAGENTS_DIR must fully replace the default subagents dirs")
+
+	t.Setenv("CRUSH_SUBAGENTS_DIR", "")
+
+	dirs = GlobalSubagentsDirs()
+	found := false
+	for _, d := range dirs {
+		if strings.HasSuffix(d, filepath.Join("crush", "subagents")) {
+			found = true
+			break
+		}
+	}
+	require.True(t, found,
+		"expected the default list (a path ending in crush/subagents) when CRUSH_SUBAGENTS_DIR is empty; got %v", dirs)
+}

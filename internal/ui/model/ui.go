@@ -923,12 +923,22 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if f := msg.Payload.Finished; f != nil && m.session != nil && f.ParentSessionID == m.session.ID {
 			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
 		}
+		if m.dialog.HasDialogs() {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case runningSubagentsMsg:
 		m.runningSubagents = msg.list
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention
 		// caches so removed subagents stop being offered without a restart.
 		m.rebuildSubagentCaches()
+		if m.dialog.HasDialogs() {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:

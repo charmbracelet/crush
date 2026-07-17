@@ -110,6 +110,102 @@ func remapSGR(params ansi.Params, palette [16]color.Color, buf *strings.Builder)
 	buf.WriteByte('m')
 }
 
+// StripCursorControl removes ANSI escape sequences that move the cursor,
+// erase regions of the screen, or change terminal modes. These sequences
+// are emitted by programs like git push, cargo build, and npm install to
+// animate progress bars and status lines. When captured as raw text and
+// replayed inside Crush's TUI viewport they corrupt the render state.
+//
+// Preserved: SGR (color/style) sequences, OSC hyperlinks, printable text.
+// Stripped: CSI cursor movement (A-H, f), erase (J, K), scroll (S, T),
+// save/restore cursor (s, u), DEC private modes (?h, ?l), and the ESC
+// save/restore cursor sequences (ESC 7, ESC 8). Bare carriage returns
+// (\r) are also handled by simulating line-overwrite behavior: within
+// each line, text after the last \r wins, matching what a real terminal
+// would display.
+func StripCursorControl(s string) string {
+	if !strings.ContainsRune(s, 0x1b) && !strings.ContainsRune(s, '\r') {
+		return s
+	}
+
+	var buf strings.Builder
+	buf.Grow(len(s))
+
+	parser := ansi.GetParser()
+	defer ansi.PutParser(parser)
+
+	var state byte
+	for len(s) > 0 {
+		parser.Reset()
+		seq, _, n, newState := ansi.DecodeSequence(s, state, parser)
+
+		if ansi.HasCsiPrefix(seq) {
+			cmd := parser.Command()
+			final := cmd & 0xff
+			prefix := (cmd >> 8) & 0xff
+
+			switch final {
+			case 'm':
+				// SGR: keep (colors/styles).
+				buf.WriteString(seq)
+			case 'h', 'l':
+				// DEC private mode set/reset (?h, ?l): strip.
+				// Regular h/l without ? prefix are also non-rendering.
+				_ = prefix
+			case 'A', 'B', 'C', 'D', // cursor up/down/forward/back
+				'E', 'F', // cursor next/prev line
+				'G',      // cursor horizontal absolute
+				'H', 'f', // cursor position
+				'J',      // erase display
+				'K',      // erase line
+				'S', 'T', // scroll up/down
+				's', 'u': // save/restore cursor
+				// Strip all cursor/screen control.
+			default:
+				// Unknown CSI: pass through to avoid data loss.
+				buf.WriteString(seq)
+			}
+		} else if ansi.HasEscPrefix(seq) && len(seq) == 2 {
+			// ESC followed by single byte: check for DEC save/restore.
+			switch seq[1] {
+			case '7', '8':
+				// DEC save/restore cursor: strip.
+			default:
+				buf.WriteString(seq)
+			}
+		} else {
+			buf.WriteString(seq)
+		}
+
+		s = s[n:]
+		state = newState
+	}
+
+	result := buf.String()
+
+	// Handle bare \r by simulating line-overwrite. Split on newlines
+	// first so we only process \r within individual lines.
+	if strings.ContainsRune(result, '\r') {
+		result = simulateCarriageReturns(result)
+	}
+
+	return result
+}
+
+// simulateCarriageReturns processes bare \r characters within each line,
+// keeping only the text after the last \r. This matches terminal behavior
+// where \r moves the cursor to column 0 and subsequent text overwrites
+// what was there before. Progress bars use this pattern extensively.
+func simulateCarriageReturns(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if idx := strings.LastIndex(line, "\r"); idx >= 0 {
+			lines[i] = line[idx+1:]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // writeTruecolor appends "introducer;2;r;g;b" to buf. Nil color emits
 // the bare introducer so the terminal default applies.
 func writeTruecolor(buf *strings.Builder, introducer int, c color.Color) {

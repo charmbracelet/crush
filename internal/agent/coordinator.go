@@ -57,6 +57,8 @@ import (
 // Coordinator errors.
 var (
 	errCoderAgentNotConfigured         = errors.New("coder agent not configured")
+	errPlanAgentNotConfigured          = errors.New("plan agent not configured")
+	errMainAgentNotFound               = errors.New("main agent not found")
 	errModelProviderNotConfigured      = errors.New("model provider not configured")
 	errLargeModelNotSelected           = errors.New("large model not selected")
 	errSmallModelNotSelected           = errors.New("small model not selected")
@@ -83,8 +85,7 @@ var opencodeMessagesModels = map[string]bool{
 }
 
 type Coordinator interface {
-	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
-	// SetMainAgent(string)
+	SetMainAgent(agentName string) error
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
@@ -121,8 +122,9 @@ type coordinator struct {
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
 
-	currentAgent SessionAgent
-	agents       map[string]SessionAgent
+	currentAgent     SessionAgent
+	currentAgentName string
+	agents           map[string]SessionAgent
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -187,19 +189,46 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	coderPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
+	agent, err := c.buildAgent(ctx, coderPrompt, agentCfg, false)
 	if err != nil {
 		return nil, err
 	}
-	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+
+	planCfg, ok := c.cfg.Config().Agents[config.AgentPlan]
+	if !ok {
+		return nil, errPlanAgentNotConfigured
+	}
+
+	planSystemPrompt, err := planPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	if err != nil {
+		return nil, err
+	}
+
+	planAgent, err := c.buildAgent(ctx, planSystemPrompt, planCfg, false)
+	if err != nil {
+		return nil, err
+	}
+	c.agents[config.AgentPlan] = planAgent
+
+	c.currentAgent = agent
+	c.currentAgentName = config.AgentCoder
 	return c, nil
+}
+
+func (c *coordinator) SetMainAgent(agentName string) error {
+	agent, ok := c.agents[agentName]
+	if !ok {
+		return fmt.Errorf("%w: %s", errMainAgentNotFound, agentName)
+	}
+	c.currentAgent = agent
+	c.currentAgentName = agentName
+	return nil
 }
 
 // Run implements Coordinator.
@@ -1182,9 +1211,9 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	}
 	c.currentAgent.SetModels(large, small)
 
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	agentCfg, ok := c.cfg.Config().Agents[c.currentAgentName]
 	if !ok {
-		return errCoderAgentNotConfigured
+		return fmt.Errorf("%w: %s", errMainAgentNotFound, c.currentAgentName)
 	}
 
 	tools, err := c.buildTools(ctx, agentCfg, false)

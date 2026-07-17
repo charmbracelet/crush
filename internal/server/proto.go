@@ -821,6 +821,36 @@ func (c *controllerV1) handlePostWorkspaceAgentUpdate(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentMain switches the workspace's active agent
+// (e.g. "coder" or "plan").
+//
+//	@Summary		Set main agent
+//	@Tags			agent
+//	@Accept			json
+//	@Param			id		path	string						true	"Workspace ID"
+//	@Param			request	body	proto.AgentSetMainRequest	true	"Set main agent request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/main [post]
+func (c *controllerV1) handlePostWorkspaceAgentMain(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.AgentSetMainRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode agent set-main request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SetMainAgent(id, req.AgentID); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceAgentSession returns a specific agent session.
 //
 //	@Summary		Get agent session

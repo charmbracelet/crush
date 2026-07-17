@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,9 @@ type blockingCoordinator struct {
 	entered  chan struct{}
 	release  chan struct{}
 	runCount atomic.Int32
+
+	setMainAgentErr  error
+	lastMainAgentSet atomic.Value
 }
 
 func newBlockingCoordinator() *blockingCoordinator {
@@ -58,6 +62,10 @@ func (c *blockingCoordinator) Summarize(context.Context, string) error          
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
+func (c *blockingCoordinator) SetMainAgent(agentName string) error {
+	c.lastMainAgentSet.Store(agentName)
+	return c.setMainAgentErr
+}
 
 // insertAgentWorkspace installs a synthetic workspace with the given
 // coordinator (or none) and a workspace run context, mirroring the
@@ -161,4 +169,42 @@ func TestSendMessage_SuccessIncrementsRunWG(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("runWG.Wait did not complete after the run returned")
 	}
+}
+
+func TestSetMainAgent_WorkspaceNotFound(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	err := b.SetMainAgent("nope", "plan")
+	require.ErrorIs(t, err, ErrWorkspaceNotFound)
+}
+
+func TestSetMainAgent_AgentNotInitialized(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	ws := insertAgentWorkspace(t, b, nil)
+	err := b.SetMainAgent(ws.ID, "plan")
+	require.ErrorIs(t, err, ErrAgentNotInitialized)
+}
+
+func TestSetMainAgent_Success(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	ws := insertAgentWorkspace(t, b, coord)
+
+	err := b.SetMainAgent(ws.ID, "plan")
+	require.NoError(t, err)
+	require.Equal(t, "plan", coord.lastMainAgentSet.Load())
+}
+
+func TestSetMainAgent_PropagatesCoordinatorError(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	wantErr := errors.New("main agent not found: 123")
+	coord.setMainAgentErr = wantErr
+	ws := insertAgentWorkspace(t, b, coord)
+
+	err := b.SetMainAgent(ws.ID, "123")
+	require.ErrorIs(t, err, wantErr)
 }

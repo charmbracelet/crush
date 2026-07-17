@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -432,9 +433,75 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	if a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
 	}
-	out := a.renderMarkdown(a.message.Content().Text, width)
+	text := a.message.Content().Text
+	// In plan mode the agent ends its final plan with a sentinel marker.
+	// Hide the end plan marker and wrap the message in a background "card" so
+	// the plan stands out from regular assistant replies. Mirrors the
+	// ThinkingBox treatment.
+	var out string
+	if common.PlanReadyMarkerPresent(text) {
+		out = a.renderPlanCard(common.StripPlanReadyMarker(text), width)
+	} else {
+		out = a.renderMarkdown(text, width)
+	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out
+}
+
+// renderPlanCard renders the final plan message as a full-width card. The
+// markdown is rendered at the card's inner width (accounting for PlanBox's
+// horizontal padding) with the PlanMarkdown style, whose per-primitive
+// background keeps the card fill uninterrupted by glamour's SGR resets;
+// PlanBox then paints the padding and pads each line out to full width. The
+// plan is final by the time the marker appears, so this bypasses the
+// streaming-markdown cache and renders directly, like renderThinking.
+func (a *AssistantMessageItem) renderPlanCard(text string, width int) string {
+	box, innerWidth := planBoxLayout(a.sty.Messages.PlanBox, width)
+	renderer := common.PlanMarkdownRenderer(a.sty, innerWidth)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	rendered, err := renderer.Render(text)
+	mu.Unlock()
+	if err != nil {
+		rendered = text
+	}
+	return renderPlanBox(box, rendered, width)
+}
+
+// renderPlanBox applies the card layout, then composes its background onto
+// every parsed cell so nested Markdown resets cannot expose the terminal
+// background. Foregrounds, text attributes, and hyperlinks remain unchanged.
+func renderPlanBox(style lipgloss.Style, content string, width int) string {
+	style, innerWidth := planBoxLayout(style, width)
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, innerWidth, "")
+	}
+	rendered := style.Width(innerWidth).Render(strings.Join(lines, "\n"))
+	cardWidth := lipgloss.Width(rendered)
+	cardHeight := lipgloss.Height(rendered)
+	scr := uv.NewScreenBuffer(cardWidth, cardHeight)
+	uv.NewStyledString(rendered).Draw(scr, uv.Rect(0, 0, cardWidth, cardHeight))
+
+	background := style.GetBackground()
+	for y := range scr.Lines {
+		for x := range scr.Lines[y] {
+			scr.Lines[y][x].Style.Bg = background
+		}
+	}
+	return scr.Render()
+}
+
+// planBoxLayout returns a style and content width whose combined horizontal
+// frame fits within the available message width.
+func planBoxLayout(style lipgloss.Style, width int) (lipgloss.Style, int) {
+	width = max(1, width)
+	frameWidth := style.GetHorizontalFrameSize()
+	if frameWidth >= width {
+		style = style.PaddingLeft(0).PaddingRight(0)
+		frameWidth = style.GetHorizontalFrameSize()
+	}
+	return style, max(1, width-frameWidth)
 }
 
 // cachedError returns the rendered error section.

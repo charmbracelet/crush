@@ -102,6 +102,7 @@ type Styles struct {
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
 	QuietMarkdown ansi.StyleConfig
+	PlanMarkdown  ansi.StyleConfig
 
 	// Inputs
 	TextInput textinput.Styles
@@ -298,6 +299,9 @@ type Styles struct {
 		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
 		SectionHeader      lipgloss.Style
+
+		// Plan section styles
+		PlanBox lipgloss.Style // Background+padding for the final plan message
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
@@ -536,7 +540,8 @@ type Styles struct {
 
 	// Status bar and help
 	Status struct {
-		Help lipgloss.Style
+		Help      lipgloss.Style
+		PlanBadge lipgloss.Style
 
 		ErrorIndicator   lipgloss.Style
 		WarnIndicator    lipgloss.Style

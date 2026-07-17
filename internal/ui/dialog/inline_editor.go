@@ -38,6 +38,46 @@ type InlineEditor interface {
 	SetFocused(focused bool)
 }
 
+// CollapseInlineMsg asks the UI to move focus away from the active inline
+// editor without dismissing it. The editor remains available for restoration.
+type CollapseInlineMsg struct{}
+
+// CollapsibleInlineEditor is implemented by inline editors that provide a
+// compact representation while the chat has focus.
+type CollapsibleInlineEditor interface {
+	InlineEditor
+
+	// ShouldCollapse reports whether the compact representation should be used
+	// for the given editor width and terminal height while the editor is blurred.
+	ShouldCollapse(width, terminalHeight int) bool
+
+	// CollapsedHeight returns the compact representation's content height.
+	CollapsedHeight() int
+
+	// DrawCollapsed renders the compact representation.
+	DrawCollapsed(scr uv.Screen, area uv.Rectangle)
+
+	// CollapsedHelp returns the help description for returning focus to the
+	// editor, such as "review plan" or "answer questions".
+	CollapsedHelp() string
+}
+
+// ResizableInlineEditor is implemented by inline editors whose internal
+// layout depends on the width allocated by the UI.
+type ResizableInlineEditor interface {
+	InlineEditor
+
+	// SetWidth updates the editor's available content width.
+	SetWidth(width int)
+}
+
+// CmdOnDone is an optional interface for inline editors that need to
+// run a tea.Cmd when dismissed via mouse. The UI checks for this after
+// HandleMouseClick returns done=true and queues the returned cmd.
+type CmdOnDone interface {
+	PendingCmd() tea.Cmd
+}
+
 // MouseClickableEditor is an optional interface for inline editors
 // that handle mouse clicks and hover highlighting. The UI
 // type-asserts for this before routing click and motion events.
@@ -52,6 +92,20 @@ type MouseClickableEditor interface {
 	// highlighting. Called on every MouseMotionMsg while the
 	// editor is active.
 	SetHover(x, y int)
+}
+
+// MouseSelectableEditor is implemented by inline editors that support mouse
+// drag selection within their own content.
+type MouseSelectableEditor interface {
+	InlineEditor
+	// HandleMouseDown begins a selection when the press lands in selectable
+	// content.
+	HandleMouseDown(x, y int) bool
+	// HandleMouseDrag updates an active selection.
+	HandleMouseDrag(x, y int) bool
+	// HandleMouseRelease finishes an active selection and optionally returns a
+	// command that copies it.
+	HandleMouseRelease(x, y int) (handled bool, cmd tea.Cmd)
 }
 
 // PasteableEditor is an optional interface for inline editors

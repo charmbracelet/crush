@@ -1028,9 +1028,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Attachments.Normal = base.Padding(0, 1).Background(o.fgMoreSubtle).Foreground(o.fgBase)
 	// Remove and Deleting share the same slot on the right side of a chip
 	// and must keep the same geometry so toggling delete-mode doesn't
-	// shift the chips.
-	s.Attachments.Remove = base.PaddingLeft(1).MarginRight(1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
-	s.Attachments.Deleting = base.PaddingLeft(1).MarginRight(1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
+	// shift the chips. Padding(0, 1) puts a colored cell on each side of the
+	// glyph so it isn't flush against the box edge; the trailing cell is
+	// padding (part of the box) rather than a transparent margin, which also
+	// keeps the chip-to-chip spacing intact.
+	s.Attachments.Remove = base.Padding(0, 1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
+	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
 
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)

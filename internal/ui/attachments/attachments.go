@@ -185,8 +185,11 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 			chips = append(chips, removeStr)
 			removeStart := offset + chipW
 			removeW := lipgloss.Width(removeStr)
-			// The trailing margin is the gap between chips, not part of
-			// the button, so it is excluded from the hit region.
+			// If the button carries a trailing margin it is the gap between
+			// chips, not part of the button, so exclude it from the hit
+			// region. (Currently the button uses padding rather than a
+			// margin, so this subtracts zero, but stays correct if that
+			// changes.)
 			r.bounds = append(r.bounds, chipBounds{
 				startX:    removeStart,
 				removeEnd: removeStart + removeW - r.removeStyle.GetHorizontalMargins(),

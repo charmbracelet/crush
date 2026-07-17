@@ -88,7 +88,8 @@ func (c *modeTTLCache) invalidate() {
 	c.at = time.Time{}
 }
 
-// busyStateMsg delivers the result of an off-thread busy/permission probe.
+// busyStateMsg delivers the result of an off-thread busy/permission/model
+// probe.
 type busyStateMsg struct {
 	// gen is the busy generation captured when the probe was dispatched.
 	// A result whose generation no longer matches m.busyFetchGen started

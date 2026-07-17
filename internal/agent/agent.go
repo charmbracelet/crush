@@ -54,7 +54,7 @@ const (
 	DefaultSessionName = "Untitled Session"
 
 	// Constants for auto-summarization thresholds
-	largeContextWindowThreshold = 200_000
+	largeContextWindowThreshold = config.MinRecommendedContextWindow
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
 )

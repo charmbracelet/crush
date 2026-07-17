@@ -58,6 +58,7 @@ type Session struct {
 	SummaryMessageID string
 	Cost             float64
 	Todos            []Todo
+	Channel          string
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -71,6 +72,7 @@ type Service interface {
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
+	SetChannel(ctx context.Context, sessionID, channel string) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
@@ -208,6 +210,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: todosJSON,
 			Valid:  todosJSON != "",
 		},
+		Channel: sql.NullString{
+			String: session.Channel,
+			Valid:  session.Channel != "",
+		},
 	})
 	if err != nil {
 		return Session{}, err
@@ -216,6 +222,23 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	s.setEstimatedUsageState(session.ID, estimatedUsage)
 	session = s.fromDBItem(dbSession)
 	session.EstimatedUsage = estimatedUsage
+	s.Publish(pubsub.UpdatedEvent, session)
+	return session, nil
+}
+
+func (s *service) SetChannel(ctx context.Context, sessionID, channel string) (Session, error) {
+	dbSession, err := s.q.SetSessionChannel(ctx, db.SetSessionChannelParams{
+		ID: sessionID,
+		Channel: sql.NullString{
+			String: channel,
+			Valid:  channel != "",
+		},
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	session := s.fromDBItem(dbSession)
+	s.applyEstimatedUsageState(&session)
 	s.Publish(pubsub.UpdatedEvent, session)
 	return session, nil
 }
@@ -310,6 +333,7 @@ func (s *service) fromDBItem(item db.Session) Session {
 		SummaryMessageID: item.SummaryMessageID.String,
 		Cost:             item.Cost,
 		Todos:            todos,
+		Channel:          item.Channel.String,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}

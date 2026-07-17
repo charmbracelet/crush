@@ -531,6 +531,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
 
+	// Add Channels command — opens the channels management dialog.
+	commands = append(commands, NewCommandItem(c.com.Styles, "channels", "Channels", "", ActionOpenDialog{DialogID: ChannelsID}))
+
 	commands = append(
 		commands,
 		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}).WithAliases("exit"),

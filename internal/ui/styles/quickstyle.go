@@ -1048,6 +1048,12 @@ func quickStyle(o quickStyleOpts) Styles {
 		BorderForeground(o.plan).
 		Padding(1, 2)
 
+	// Channel message metadata styles.
+	s.Messages.ChannelInfoIcon = subtle
+	s.Messages.ChannelInfoSender = muted
+	s.Messages.ChannelInfoProvider = subtle
+	s.Messages.ChannelInfoTimestamp = subtle
+
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted

@@ -81,6 +81,7 @@ func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string
 	}
 	if err := b.SendMessage(ws.ID, proto.AgentMessage{
 		SessionID: sessionID,
+		Channel:   serverName,
 		Prompt:    content,
 	}); err != nil {
 		slog.Warn("Channel message dropped: dispatch failed",

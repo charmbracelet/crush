@@ -191,6 +191,7 @@ type Event struct {
 	// ChannelMessage is set only for EventChannelMessage: the fully rendered
 	// and escaped <channel>...</channel> element to inject into the session.
 	ChannelMessage string
+	ChannelMeta    map[string]string
 }
 
 // Counts number of available tools, prompts, etc.
@@ -793,6 +794,29 @@ func closeSession(name string, s *ClientSession) {
 		!errors.Is(err, context.Canceled) &&
 		err.Error() != "signal: killed" {
 		slog.Warn("Error closing MCP session", "name", name, "error", err)
+	}
+}
+
+// stateOpt mutates the ClientInfo a transition is about to publish. Config
+// recording is opt-in: only the sites that actually own a config (the connect
+// and starting paths) pass one, so the many error and count-refresh call sites
+// can't accidentally clobber the recorded config by passing a zero value.
+type stateOpt func(*ClientInfo)
+
+// withConfig records the config now in effect. Used on StateConnected.
+func withConfig(m config.MCPConfig) stateOpt {
+	return func(i *ClientInfo) {
+		i.Config = m
+		i.PendingConfig = nil
+	}
+}
+
+// withPending records the config an in-flight attempt is connecting with.
+// Used on StateStarting.
+func withPending(m config.MCPConfig) stateOpt {
+	return func(i *ClientInfo) {
+		mc := m
+		i.PendingConfig = &mc
 	}
 }
 

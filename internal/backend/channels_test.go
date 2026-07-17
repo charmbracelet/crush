@@ -125,20 +125,23 @@ func TestWorkspaceViewedSessions(t *testing.T) {
 }
 
 // recordingCoordinator is a minimal agent.Coordinator that records the
-// session/prompt of each RunAccepted call.
+// session/prompt of each RunAccepted call, plus the per-turn channel
+// provenance carried on the context.
 type recordingCoordinator struct {
-	runs chan [2]string // {sessionID, prompt}
+	runs     chan [2]string // {sessionID, prompt}
+	channels chan string    // per-turn channel provenance
 }
 
 func newRecordingCoordinator() *recordingCoordinator {
-	return &recordingCoordinator{runs: make(chan [2]string, 8)}
+	return &recordingCoordinator{runs: make(chan [2]string, 8), channels: make(chan string, 8)}
 }
 
 func (c *recordingCoordinator) Run(context.Context, string, string, ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }
 
-func (c *recordingCoordinator) RunAccepted(_ context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+func (c *recordingCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+	c.channels <- agent.ChannelFromContext(ctx)
 	c.runs <- [2]string{sessionID, prompt}
 	return nil, nil
 }
@@ -245,6 +248,7 @@ func TestRouteChannelMessage_InjectsOncePerOptedInWorkspace(t *testing.T) {
 	case run := <-optedIn.runs:
 		require.Equal(t, "recent", run[0], "should land in the most recent session")
 		require.Equal(t, content, run[1])
+		require.Equal(t, "webhook", <-optedIn.channels, "the server-routed turn must carry its originating channel")
 	case <-time.After(5 * time.Second):
 		t.Fatal("expected the opted-in workspace to receive the channel push")
 	}

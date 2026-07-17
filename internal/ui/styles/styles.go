@@ -489,6 +489,7 @@ type Styles struct {
 
 		Quit struct {
 			Content lipgloss.Style // Wrapper for the quit dialog's inner content
+			Hint    lipgloss.Style // Style for quit hint
 			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 

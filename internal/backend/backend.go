@@ -295,11 +295,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	subagentsCfg := subagents.DiscoveryConfig{
-		SubagentsPaths:    cfg.Config().Options.SubagentsPaths,
-		DisabledSubagents: cfg.Config().Options.DisabledSubagents,
-		IsKnownModel:      cfg.Config().IsKnownModel,
-	}
+	subagentsCfg := subagentsDiscoveryConfig(cfg)
 	allSubagents, activeSubagents, subagentStates := subagents.DiscoverFromConfig(subagentsCfg)
 	subagentsMgr := subagents.NewManager(allSubagents, activeSubagents, subagentStates)
 
@@ -379,6 +375,27 @@ func skillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
 		DisabledSkills: disabled,
 		WorkingDir:     cfg.WorkingDir(),
 		Resolver:       resolver,
+	}
+}
+
+// subagentsDiscoveryConfig adapts a *config.ConfigStore to the
+// subagents.DiscoveryConfig that DiscoverFromConfig consumes.
+func subagentsDiscoveryConfig(cfg *config.ConfigStore) subagents.DiscoveryConfig {
+	opts := cfg.Config().Options
+	var paths, disabled []string
+	if opts != nil {
+		paths = opts.SubagentsPaths
+		disabled = opts.DisabledSubagents
+	}
+	var resolver func(string) (string, error)
+	if r := cfg.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
+	return subagents.DiscoveryConfig{
+		SubagentsPaths:    paths,
+		DisabledSubagents: disabled,
+		Resolver:          resolver,
+		IsKnownModel:      cfg.Config().IsKnownModel,
 	}
 }
 

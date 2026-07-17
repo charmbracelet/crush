@@ -303,11 +303,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	subagentsCfg := subagents.DiscoveryConfig{
-		SubagentsPaths:    cfg.Options.SubagentsPaths,
-		DisabledSubagents: cfg.Options.DisabledSubagents,
-		IsKnownModel:      cfg.IsKnownModel,
-	}
+	subagentsCfg := localSubagentsDiscoveryConfig(store)
 	allSubagents, activeSubagents, subagentStates := subagents.DiscoverFromConfig(subagentsCfg)
 	subagentsMgr := subagents.NewManager(allSubagents, activeSubagents, subagentStates)
 
@@ -345,6 +341,27 @@ func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfi
 		DisabledSkills: disabled,
 		WorkingDir:     store.WorkingDir(),
 		Resolver:       resolver,
+	}
+}
+
+// localSubagentsDiscoveryConfig adapts a *config.ConfigStore to the inputs
+// subagents.DiscoverFromConfig expects.
+func localSubagentsDiscoveryConfig(store *config.ConfigStore) subagents.DiscoveryConfig {
+	opts := store.Config().Options
+	var paths, disabled []string
+	if opts != nil {
+		paths = opts.SubagentsPaths
+		disabled = opts.DisabledSubagents
+	}
+	var resolver func(string) (string, error)
+	if r := store.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
+	return subagents.DiscoveryConfig{
+		SubagentsPaths:    paths,
+		DisabledSubagents: disabled,
+		Resolver:          resolver,
+		IsKnownModel:      store.Config().IsKnownModel,
 	}
 }
 

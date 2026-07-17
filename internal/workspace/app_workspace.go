@@ -552,7 +552,9 @@ func (w *AppWorkspace) SetSubagentDisabled(name string, disabled bool) error {
 
 // reloadSubagents re-runs discovery from the current config and swaps the
 // Manager's snapshot, publishing a discovery event. Model ids are validated
-// against the config (matching startup) so an invalid model stays rejected.
+// against the config (matching startup) so an invalid model stays rejected,
+// and the store's resolver is wired through so $VAR-style path entries
+// expand the same way they do at startup.
 func (w *AppWorkspace) reloadSubagents() {
 	cfg := w.store.Config()
 	var subagentsPaths, disabledSubagents []string
@@ -560,9 +562,17 @@ func (w *AppWorkspace) reloadSubagents() {
 		subagentsPaths = cfg.Options.SubagentsPaths
 		disabledSubagents = cfg.Options.DisabledSubagents
 	}
+	var resolver func(string) (string, error)
+	if r := w.store.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
 	all, active, states := subagents.DiscoverFromConfig(subagents.DiscoveryConfig{
 		SubagentsPaths:    subagentsPaths,
 		DisabledSubagents: disabledSubagents,
+
+		// Resolver expands $VAR-style path entries, matching startup
+		// discovery (cmd/root.go, backend.go).
+		Resolver: resolver,
 
 		// Match startup discovery (cmd/root.go, backend.go): validate model
 		// ids so a subagent with an invalid model stays rejected after reload.

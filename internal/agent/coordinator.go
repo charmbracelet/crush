@@ -627,8 +627,26 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		RunComplete:          c.runComplete,
 	})
 
+	// The readiness goroutines below perform one-time setup — building the
+	// system prompt and the (MCP-gated) tool list — whose results the
+	// coordinator needs for its whole lifetime, so they must survive the
+	// caller's context being canceled. Several entry points build an agent
+	// from a short-lived HTTP request context: the server's
+	// InitAgent/UpdateAgent handlers, and UpdateModels -> buildTools ->
+	// agentTool -> buildAgent for the sub-agent. Because mcp.WaitForInit
+	// blocks until MCP initialization finishes, a slow MCP server keeps one
+	// of these goroutines parked past the request; when the handler returns
+	// and cancels its context, WaitForInit would observe the cancellation,
+	// the errgroup would record context.Canceled, and every later run would
+	// fail at readyWg.Wait() before emitting anything — the client/server
+	// session hangs with no visible response. WithoutCancel drops
+	// cancellation while keeping context values; the work is bounded
+	// (WaitForInit by MCP init timeouts, the rest is local) so it always
+	// completes.
+	initCtx := context.WithoutCancel(ctx)
+
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
@@ -641,10 +659,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		// building the initial tool list. This ensures the first tool set
 		// (used if anything reads it before run() rebuilds) includes all
 		// MCP tools, not just fast-to-init ones.
-		if err := mcp.WaitForInit(ctx); err != nil {
+		if err := mcp.WaitForInit(initCtx); err != nil {
 			return err
 		}
-		tools, err := c.buildTools(ctx, agent, isSubAgent)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent)
 		if err != nil {
 			return err
 		}

@@ -32,19 +32,28 @@ type countingWorkspace struct {
 	agentBusy bool
 	yolo      bool
 	queued    []string
+	// sessionBusy is the per-session busy state behind
+	// AgentIsSessionBusy, keyed by session ID.
+	sessionBusy map[string]bool
 
-	readyCalls      int
-	agentBusyCalls  int
-	queuedCalls     int
-	queueListCalls  int
-	permCalls       int
-	permSetCalls    int
-	clearQueueCalls int
-	cancelCalls     int
+	readyCalls       int
+	agentBusyCalls   int
+	sessionBusyCalls []string
+	queuedCalls      int
+	queueListCalls   int
+	permCalls        int
+	permSetCalls     int
+	clearQueueCalls  int
+	cancelCalls      int
 }
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
-func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
+
+func (w *countingWorkspace) AgentIsSessionBusy(sessionID string) bool {
+	w.sessionBusyCalls = append(w.sessionBusyCalls, sessionID)
+	return w.sessionBusy[sessionID]
+}
+func (w *countingWorkspace) AgentIsBusy() bool { w.agentBusyCalls++; return w.agentBusy }
 
 func (w *countingWorkspace) AgentReadyErr() error {
 	w.readyCalls++
@@ -559,4 +568,48 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
+}
+
+// TestIsCurrentSessionBusyIsSessionScoped is the core of this change: the
+// current session's busy state must reflect only its own activity, never
+// another session's, so a paused To-Do is not shown as actively executing.
+func TestIsCurrentSessionBusyIsSessionScoped(t *testing.T) {
+	t.Parallel()
+
+	t.Run("current session busy", func(t *testing.T) {
+		t.Parallel()
+		ws := &countingWorkspace{ready: true, sessionBusy: map[string]bool{"s1": true}}
+		m := newBusyUI(ws)
+		require.True(t, m.isCurrentSessionBusy(),
+			"the viewed session's own activity must read as busy")
+	})
+
+	t.Run("another session busy does not affect current", func(t *testing.T) {
+		t.Parallel()
+		ws := &countingWorkspace{ready: true, sessionBusy: map[string]bool{"other": true}}
+		m := newBusyUI(ws)
+		require.False(t, m.isCurrentSessionBusy(),
+			"another session's activity must not mark the current session busy")
+		for _, id := range ws.sessionBusyCalls {
+			require.Equal(t, "s1", id,
+				"the busy check must be scoped to the current session ID")
+		}
+	})
+
+	t.Run("agent not ready", func(t *testing.T) {
+		t.Parallel()
+		ws := &countingWorkspace{ready: false, sessionBusy: map[string]bool{"s1": true}}
+		m := newBusyUI(ws)
+		require.False(t, m.isCurrentSessionBusy(),
+			"a not-ready agent must not read as busy")
+	})
+
+	t.Run("no active session", func(t *testing.T) {
+		t.Parallel()
+		ws := &countingWorkspace{ready: true, sessionBusy: map[string]bool{"s1": true}}
+		m := newBusyUI(ws)
+		m.session = nil
+		require.False(t, m.isCurrentSessionBusy(),
+			"no active session must not read as busy")
+	})
 }

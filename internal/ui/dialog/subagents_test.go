@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/workspace"
@@ -219,6 +221,165 @@ func TestSubagentsDialog_ToggleLibraryItem(t *testing.T) {
 	runCmd(d.HandleMsg(keyMsg(' ')))
 	require.Len(t, ws.disabledCalls, 2)
 	require.False(t, ws.disabledCalls[1].disabled, "second toggle must re-enable")
+}
+
+// TestSubagentsDialog_RuntimeEventRefreshesRunningTab verifies that a
+// RuntimeEvent for the dialog's own parent session causes the running tab to
+// be rebuilt from a fresh call to com.Workspace.RunningSubagents, reflecting
+// entries added after the dialog was constructed.
+func TestSubagentsDialog_RuntimeEventRefreshesRunningTab(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		running: []workspace.RunningSubagentInfo{
+			{ChildSessionID: "child-1", Name: "agent-one", Color: "blue", Model: "claude-opus-4-7"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	ws.running = []workspace.RunningSubagentInfo{
+		{ChildSessionID: "child-1", Name: "agent-one", Color: "blue", Model: "claude-opus-4-7"},
+		{ChildSessionID: "child-2", Name: "agent-two", Color: "red", Model: "claude-sonnet"},
+	}
+
+	d.HandleMsg(pubsub.Event[subagents.RuntimeEvent]{
+		Type: pubsub.UpdatedEvent,
+		Payload: subagents.RuntimeEvent{
+			ParentSessionID: "parent-session-id",
+			Entries:         nil,
+		},
+	})
+
+	require.Len(t, d.runningItems, 2, "running tab should be rebuilt from the workspace after a matching RuntimeEvent")
+
+	var ids []string
+	for _, item := range d.runningItems {
+		ids = append(ids, item.ID())
+	}
+	require.Contains(t, ids, "child-1")
+	require.Contains(t, ids, "child-2")
+}
+
+// TestSubagentsDialog_RuntimeEventIgnoresOtherParentSession verifies that a
+// RuntimeEvent for a different parent session does not affect the dialog's
+// running tab.
+func TestSubagentsDialog_RuntimeEventIgnoresOtherParentSession(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		running: []workspace.RunningSubagentInfo{
+			{ChildSessionID: "child-1", Name: "agent-one", Color: "blue", Model: "claude-opus-4-7"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	ws.running = []workspace.RunningSubagentInfo{}
+
+	d.HandleMsg(pubsub.Event[subagents.RuntimeEvent]{
+		Type: pubsub.UpdatedEvent,
+		Payload: subagents.RuntimeEvent{
+			ParentSessionID: "some-other-session",
+			Entries:         nil,
+		},
+	})
+
+	require.Len(t, d.runningItems, 1, "running tab must not change for a RuntimeEvent belonging to a different parent session")
+	require.Equal(t, "child-1", d.runningItems[0].ID())
+}
+
+// TestSubagentsDialog_RuntimeEventPreservesSelection verifies that the
+// selected running item is tracked by ID across a refresh, not by index.
+func TestSubagentsDialog_RuntimeEventPreservesSelection(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		running: []workspace.RunningSubagentInfo{
+			{ChildSessionID: "child-1", Name: "agent-one", Color: "blue", Model: "claude-opus-4-7"},
+			{ChildSessionID: "child-2", Name: "agent-two", Color: "red", Model: "claude-sonnet"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+	d.runningList.SetSelected(1)
+
+	ws.running = []workspace.RunningSubagentInfo{
+		{ChildSessionID: "child-2", Name: "agent-two", Color: "red", Model: "claude-sonnet"},
+		{ChildSessionID: "child-1", Name: "agent-one", Color: "blue", Model: "claude-opus-4-7"},
+	}
+
+	d.HandleMsg(pubsub.Event[subagents.RuntimeEvent]{
+		Type: pubsub.UpdatedEvent,
+		Payload: subagents.RuntimeEvent{
+			ParentSessionID: "parent-session-id",
+			Entries:         nil,
+		},
+	})
+
+	selected, ok := d.runningList.SelectedItem().(ListItem)
+	require.True(t, ok, "an item should remain selected after refresh")
+	require.Equal(t, "child-2", selected.ID(), "selection should follow the same logical item across a reorder")
+}
+
+// TestSubagentsDialog_LibraryEventRefreshesLibraryTab verifies that a
+// subagents.Event causes the library tab to be rebuilt from a fresh call to
+// com.Workspace.AllSubagents, reflecting entries added after the dialog was
+// constructed.
+func TestSubagentsDialog_LibraryEventRefreshesLibraryTab(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "agent-a", Scope: "user"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	ws.defs = []workspace.SubagentDefInfo{
+		{Name: "agent-a", Scope: "user"},
+		{Name: "agent-b", Scope: "project"},
+	}
+
+	d.HandleMsg(pubsub.Event[subagents.Event]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: subagents.Event{},
+	})
+
+	require.Len(t, d.libraryItems, 2, "library tab should be rebuilt from the workspace after a subagents.Event")
+
+	var ids []string
+	for _, item := range d.libraryItems {
+		ids = append(ids, item.ID())
+	}
+	require.Contains(t, ids, "agent-a")
+	require.Contains(t, ids, "agent-b")
+}
+
+// TestSubagentsDialog_LibraryEventPreservesSelection verifies that the
+// selected library item is tracked by ID across a refresh, not by index.
+func TestSubagentsDialog_LibraryEventPreservesSelection(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "agent-a", Scope: "user"},
+			{Name: "agent-b", Scope: "user"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+	d.libraryList.SetSelected(1)
+
+	ws.defs = []workspace.SubagentDefInfo{
+		{Name: "agent-b", Scope: "user"},
+		{Name: "agent-a", Scope: "user"},
+	}
+
+	d.HandleMsg(pubsub.Event[subagents.Event]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: subagents.Event{},
+	})
+
+	selected, ok := d.libraryList.SelectedItem().(ListItem)
+	require.True(t, ok, "an item should remain selected after refresh")
+	require.Equal(t, "agent-b", selected.ID(), "selection should follow the same logical item across a reorder")
 }
 
 // stripANSIDialog strips ANSI escape sequences from a string for plain-text

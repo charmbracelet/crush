@@ -4,6 +4,8 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -172,6 +174,17 @@ func (s *Subagents) activeList() *list.FilterableList {
 
 // HandleMsg implements [Dialog].
 func (s *Subagents) HandleMsg(msg tea.Msg) Action {
+	switch ev := msg.(type) {
+	case pubsub.Event[subagents.RuntimeEvent]:
+		if ev.Payload.ParentSessionID == s.parentSessionID {
+			s.refreshRunning()
+		}
+		return nil
+	case pubsub.Event[subagents.Event]:
+		s.refreshLibrary()
+		return nil
+	}
+
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return nil
@@ -315,6 +328,70 @@ func (s *Subagents) removeRunningItem(childID string) {
 	}
 	s.runningList.SetItems(filterable...)
 	s.runningList.SelectFirst()
+}
+
+// refreshRunning rebuilds the running tab from the workspace, preserving the
+// selected item's identity (by child session ID) across the rebuild when it
+// still exists in the new set.
+func (s *Subagents) refreshRunning() {
+	var selectedID string
+	if item, ok := s.runningList.SelectedItem().(ListItem); ok {
+		selectedID = item.ID()
+	}
+
+	running := s.com.Workspace.RunningSubagents(s.parentSessionID)
+	s.runningItems = make([]*RunningSubagentItem, len(running))
+	filterable := make([]list.FilterableItem, len(running))
+	selectedIdx := 0
+	for i, r := range running {
+		item := NewRunningSubagentItem(s.com.Styles, RunningSubagentItemData{
+			ChildSessionID:   r.ChildSessionID,
+			Name:             r.Name,
+			Color:            r.Color,
+			Model:            r.Model,
+			PromptTokens:     r.PromptTokens,
+			CompletionTokens: r.CompletionTokens,
+		})
+		s.runningItems[i] = item
+		filterable[i] = item
+		if selectedID != "" && r.ChildSessionID == selectedID {
+			selectedIdx = i
+		}
+	}
+	s.runningList.SetItems(filterable...)
+	s.runningList.SetSelected(selectedIdx)
+}
+
+// refreshLibrary rebuilds the library tab from the workspace, preserving the
+// selected item's identity (by name) across the rebuild when it still
+// exists in the new set.
+func (s *Subagents) refreshLibrary() {
+	var selectedID string
+	if item, ok := s.libraryList.SelectedItem().(ListItem); ok {
+		selectedID = item.ID()
+	}
+
+	defs := s.com.Workspace.AllSubagents()
+	s.libraryItems = make([]*LibrarySubagentItem, len(defs))
+	filterable := make([]list.FilterableItem, len(defs))
+	selectedIdx := 0
+	for i, d := range defs {
+		item := NewLibrarySubagentItem(s.com.Styles, LibrarySubagentItemData{
+			Name:        d.Name,
+			Description: d.Description,
+			Color:       d.Color,
+			FilePath:    d.FilePath,
+			Scope:       d.Scope,
+			Disabled:    d.Disabled,
+		})
+		s.libraryItems[i] = item
+		filterable[i] = item
+		if selectedID != "" && d.Name == selectedID {
+			selectedIdx = i
+		}
+	}
+	s.libraryList.SetItems(filterable...)
+	s.libraryList.SetSelected(selectedIdx)
 }
 
 // enterConfirmDelete sets confirm-delete mode for the currently selected

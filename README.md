@@ -611,6 +611,29 @@ To disable desktop notifications, set `disable_notifications` to `true` in your
 configuration. On macOS, notifications currently lack icons due to platform
 limitations.
 
+### Session logo
+
+The session logo (shown in the sidebar in normal mode, and in the header in
+compact mode) can be styled or hidden with the `options.tui.logo` setting:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "logo": "gradient"
+    }
+  }
+}
+```
+
+- `wordmark` (default): the Crush wordmark.
+- `gradient`: a text-free diagonal field using the theme's title gradient.
+- `hidden`: no logo at all.
+
+You can also switch it at runtime from the commands palette (Ctrl+P →
+**Session Logo**); the choice is saved to your global config.
+
 ### Initialization
 
 When you initialize a project, Crush analyzes your codebase and creates

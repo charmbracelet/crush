@@ -1662,6 +1662,24 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
+	case dialog.ActionSelectLogoStyle:
+		cfg := m.com.Config()
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			cfg.Options.TUI.Logo = config.LogoStyle(msg.Style)
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.logo", msg.Style); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			} else {
+				// Rebuild cached logos and re-layout so the change is visible
+				// immediately in both normal and compact modes.
+				m.header.refresh()
+				if m.layout.sidebar.Dx() > 0 {
+					m.cacheSidebarLogo(m.layout.sidebar.Dx())
+				}
+				m.updateLayoutAndSize()
+				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Logo: "+msg.Style)))
+			}
+		}
+		m.dialog.CloseDialog(dialog.LogoID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
@@ -3627,9 +3645,33 @@ func (m *UI) renderEditorView(width int) string {
 	}, "\n")
 }
 
+// sessionLogoStyle returns the configured session logo style, defaulting to
+// wordmark when unset.
+func sessionLogoStyle(cfg *config.Config) config.LogoStyle {
+	if cfg != nil {
+		if o := cfg.Options; o != nil && o.TUI != nil && o.TUI.Logo != "" {
+			return o.TUI.Logo
+		}
+	}
+	return config.LogoStyleWordmark
+}
+
+// logoStyle returns the configured session logo style, defaulting to wordmark.
+func (m *UI) logoStyle() config.LogoStyle {
+	if m.com == nil || m.com.Workspace == nil {
+		return config.LogoStyleWordmark
+	}
+	return sessionLogoStyle(m.com.Config())
+}
+
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+	style := m.logoStyle()
+	if style == config.LogoStyleHidden {
+		m.sidebarLogo = ""
+		return
+	}
+	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width, style)
 }
 
 // applyThemeForProvider swaps the active theme to the one associated with
@@ -3919,6 +3961,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.LogoID:
+		if cmd := m.openLogoDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4017,6 +4063,18 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
+	return nil
+}
+
+// openLogoDialog opens the session logo style picker dialog.
+func (m *UI) openLogoDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.LogoID) {
+		m.dialog.BringToFront(dialog.LogoID)
+		return nil
+	}
+
+	logoDialog := dialog.NewLogo(m.com)
+	m.dialog.OpenDialog(logoDialog)
 	return nil
 }
 
@@ -4595,7 +4653,7 @@ func (m *UI) disableDockerMCP() tea.Msg {
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.
-func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
+func renderLogo(t *styles.Styles, compact, hyper bool, width int, style config.LogoStyle) string {
 	return logo.Render(t.Logo.GradCanvas, version.Version, compact, logo.Opts{
 		FieldColor:   t.Logo.FieldColor,
 		TitleColorA:  t.Logo.TitleColorA,
@@ -4604,5 +4662,6 @@ func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 		VersionColor: t.Logo.VersionColor,
 		Width:        width,
 		Hyper:        hyper,
+		TextFree:     style == config.LogoStyleGradient,
 	})
 }

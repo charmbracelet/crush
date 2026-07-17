@@ -1026,8 +1026,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
 	s.Attachments.Skill = attachmentIconStyle.SetString(SkillIcon)
 	s.Attachments.Normal = base.Padding(0, 1).Background(o.fgMoreSubtle).Foreground(o.fgBase)
-	s.Attachments.Remove = base.Padding(0, 1).MarginRight(1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
-	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
+	// Remove and Deleting share the same slot on the right side of a chip
+	// and must keep the same geometry so toggling delete-mode doesn't
+	// shift the chips.
+	s.Attachments.Remove = base.PaddingLeft(1).MarginRight(1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
+	s.Attachments.Deleting = base.PaddingLeft(1).MarginRight(1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
 
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)

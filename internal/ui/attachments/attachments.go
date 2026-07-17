@@ -134,10 +134,12 @@ type chipBounds struct {
 	removeEnd int // exclusive end X of the remove button (0 if none)
 }
 
-// Render renders the attachment chips. When not in deleting mode and
-// showRemove is true, each chip shows an icon, filename, and a remove
-// button (✕) on the right. showRemove should be false for attachments on
-// already-posted messages, where removal is not possible.
+// Render renders the attachment chips. Each chip shows an icon and a
+// filename; when showRemove is true a remove button (✕) follows on the
+// right, and in deleting mode that slot shows the numeral to press
+// instead, so toggling delete-mode doesn't shift the chips. showRemove
+// should be false for attachments on already-posted messages, where
+// removal is not possible.
 func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove bool, width int) string {
 	var chips []string
 	r.bounds = r.bounds[:0]
@@ -159,41 +161,39 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 			filename = ansi.Truncate(filename, maxFilename, "…")
 		}
 
-		if deleting {
-			chips = append(
-				chips,
-				r.deletingStyle.Render(fmt.Sprintf("%d", i)),
-				r.normalStyle.Render(filename),
-			)
-			offset += lipgloss.Width(r.deletingStyle.Render(fmt.Sprintf("%d", i))) + lipgloss.Width(r.normalStyle.Render(filename))
-		} else {
-			iconStr := r.icon(att).String()
-			nameStyle := r.normalStyle
-			if !showRemove {
-				// Without a remove button there is nothing to carry the
-				// trailing margin that separates adjacent chips (the ✕'s
-				// MarginRight does this on the editor path), so put it on the
-				// filename instead. Otherwise posted messages with multiple
-				// attachments render with their chip backgrounds touching.
-				nameStyle = nameStyle.MarginRight(1)
-			}
-			nameStr := nameStyle.Render(filename)
+		iconStr := r.icon(att).String()
+		nameStyle := r.normalStyle
+		if !showRemove {
+			// Without a remove button there is nothing to carry the
+			// trailing margin that separates adjacent chips (the ✕'s
+			// MarginRight does this on the editor path), so put it on the
+			// filename instead. Otherwise posted messages with multiple
+			// attachments render with their chip backgrounds touching.
+			nameStyle = nameStyle.MarginRight(1)
+		}
+		nameStr := nameStyle.Render(filename)
 
-			chips = append(chips, iconStr, nameStr)
-			chipW := lipgloss.Width(iconStr) + lipgloss.Width(nameStr)
+		chips = append(chips, iconStr, nameStr)
+		chipW := lipgloss.Width(iconStr) + lipgloss.Width(nameStr)
 
-			if showRemove {
-				chips = append(chips, removeStr)
-				removeStart := offset + chipW
-				removeW := lipgloss.Width(removeStr)
-				r.bounds = append(r.bounds, chipBounds{
-					startX:    removeStart,
-					removeEnd: removeStart + removeW,
-				})
-				offset = removeStart + removeW
-			} else {
-				offset += chipW
-			}
+		switch {
+		case deleting:
+			numStr := r.deletingStyle.Render(fmt.Sprintf("%d", i))
+			chips = append(chips, numStr)
+			offset += chipW + lipgloss.Width(numStr)
+		case showRemove:
+			chips = append(chips, removeStr)
+			removeStart := offset + chipW
+			removeW := lipgloss.Width(removeStr)
+			// The trailing margin is the gap between chips, not part of
+			// the button, so it is excluded from the hit region.
+			r.bounds = append(r.bounds, chipBounds{
+				startX:    removeStart,
+				removeEnd: removeStart + removeW - r.removeStyle.GetHorizontalMargins(),
+			})
+			offset = removeStart + removeW
+		default:
+			offset += chipW
 		}
 
 		if i == fits && len(attachments) > i {

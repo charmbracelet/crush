@@ -86,6 +86,29 @@ func TestRender_ShowRemoveFalseKeepsGapBetweenChips(t *testing.T) {
 		"each posted chip must carry a 1-col trailing margin so adjacent chip backgrounds don't touch")
 }
 
+func TestRender_DeletingModeKeepsChipLayout(t *testing.T) {
+	t.Parallel()
+
+	// Regression for review feedback on #3338: entering delete-mode used
+	// to replace the leading icon with the numeral and drop the remove
+	// button, shifting every chip. The numeral must instead take over the
+	// remove button's slot, leaving the left side of the chip as-is.
+	r := newTestRenderer()
+	atts := []message.Attachment{
+		{FileName: "main.go"},
+		{FileName: "models.go"},
+	}
+	idle := r.Render(atts, false, true, 200)
+	deleting := r.Render(atts, true, true, 200)
+
+	require.Equal(t, lipgloss.Width(idle), lipgloss.Width(deleting),
+		"entering delete-mode must not shift the chips")
+	require.Contains(t, deleting, styles.TextIcon,
+		"delete-mode must keep the chip's icon")
+	require.Contains(t, deleting, "0")
+	require.Contains(t, deleting, "1")
+}
+
 func TestRender_MultipleChipsEachHaveRemoveButton(t *testing.T) {
 	t.Parallel()
 
@@ -145,6 +168,22 @@ func TestHitTestRemove_ReturnsCorrectIndex(t *testing.T) {
 	b1 := r.bounds[1]
 	idx = r.HitTestRemove(atts, b1.startX)
 	require.Equal(t, 1, idx)
+}
+
+func TestHitTestRemove_TrailingMarginNotClickable(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRenderer()
+	atts := []message.Attachment{
+		{FileName: "first.txt"},
+		{FileName: "second.txt"},
+	}
+	_ = r.Render(atts, false, true, 120)
+
+	// The cell after the button is the margin gap between chips — a click
+	// there must not remove anything.
+	b0 := r.bounds[0]
+	require.Equal(t, -1, r.HitTestRemove(atts, b0.removeEnd))
 }
 
 func TestHitTestRemove_OutsideAnyRemoveReturnsMinusOne(t *testing.T) {

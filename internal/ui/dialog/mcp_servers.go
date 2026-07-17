@@ -336,26 +336,27 @@ func (i *MCPServerItem) Render(width int) string {
 	lineWidth := max(0, width-style.GetHorizontalFrameSize())
 
 	// Build status indicator.
+	var iconStyle lipgloss.Style
 	var statusText string
 	switch i.state {
 	case mcp.StateStarting:
+		iconStyle = i.t.Resource.BusyIcon
 		statusText = "starting"
 	case mcp.StateConnected:
+		iconStyle = i.t.Resource.OnlineIcon
 		statusText = "on"
 	case mcp.StateError:
+		iconStyle = i.t.Resource.ErrorIcon
 		statusText = "error"
 	case mcp.StateDisabled:
+		iconStyle = i.t.Resource.DisabledIcon
 		statusText = "off"
 	default:
+		iconStyle = i.t.Resource.DisabledIcon
 		statusText = "off"
 	}
-
-	toggleText := fmt.Sprintf("◉ %s", statusText)
-	if i.focused {
-		toggleText = i.t.Dialog.ListItem.InfoFocused.Render(toggleText)
-	} else {
-		toggleText = i.t.Dialog.ListItem.InfoBlurred.Render(toggleText)
-	}
+	toggleColor := iconStyle.GetForeground()
+	toggleText := lipgloss.NewStyle().Foreground(toggleColor).Render("● " + statusText)
 
 	toggleWidth := lipgloss.Width(toggleText)
 

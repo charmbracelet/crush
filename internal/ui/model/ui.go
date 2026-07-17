@@ -3580,6 +3580,21 @@ func (m *UI) isAgentBusy() bool {
 		m.com.Workspace.AgentIsBusy()
 }
 
+// isCurrentSessionBusy reports whether the agent is actively processing a
+// request for the session the user is currently viewing. Unlike
+// isAgentBusy, activity in another session does not make the current
+// session appear busy.
+func (m *UI) isCurrentSessionBusy() bool {
+	if m.bangCancel != nil {
+		return true
+	}
+	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
+		return false
+	}
+	return m.com.Workspace.AgentIsReady() &&
+		m.com.Workspace.AgentIsSessionBusy(m.session.ID)
+}
+
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""

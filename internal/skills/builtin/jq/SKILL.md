@@ -1,6 +1,7 @@
 ---
 name: jq
 description: Use when the user needs to query, filter, reshape, extract, create, or construct JSON data — including API responses, config files, log output, or any structured data — or when helping the user write or debug JSON transformations.
+user-invocable: true
 ---
 
 # jq — Built-in JSON Processor

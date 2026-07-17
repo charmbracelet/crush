@@ -49,6 +49,8 @@ const (
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
 
+	ChannelIcon string = "󰍩"
+
 	LSPErrorIcon   string = "E"
 	LSPWarningIcon string = "W"
 	LSPInfoIcon    string = "I"
@@ -310,6 +312,12 @@ type Styles struct {
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+
+		// Channel message metadata line styles.
+		ChannelInfoIcon      lipgloss.Style // Chat-bubble glyph prefix
+		ChannelInfoSender    lipgloss.Style // Sender name in channel metadata line
+		ChannelInfoProvider  lipgloss.Style // "via <channel>" text
+		ChannelInfoTimestamp lipgloss.Style // "at <timestamp>" text
 	}
 
 	// Tool - styles for tool call rendering

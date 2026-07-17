@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -208,4 +210,86 @@ func TestGlobalSubagentsDirs_EnvOverride(t *testing.T) {
 	}
 	require.True(t, found,
 		"expected the default list (a path ending in crush/subagents) when CRUSH_SUBAGENTS_DIR is empty; got %v", dirs)
+}
+
+// gitInitTempDir resolves a fresh temp dir's symlinks (macOS reports
+// t.TempDir() under a symlink while git reports the physical path) and
+// initializes a git repository there. It skips the test when git is
+// unavailable or init fails.
+func gitInitTempDir(t *testing.T) string {
+	t.Helper()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = root
+	if err := cmd.Run(); err != nil {
+		t.Skip("git init failed")
+	}
+
+	return root
+}
+
+// TestProjectSubagentsDir_MonorepoGitRoot verifies that when workingDir is a
+// subdirectory of a git repository, ProjectSubagentsDir returns the
+// repository-root paths FIRST and the working-directory paths LAST. Working
+// directory entries must be last because Deduplicate keeps the last
+// occurrence of a name, so a working-dir subagent overrides a monorepo-root
+// subagent with the same name.
+func TestProjectSubagentsDir_MonorepoGitRoot(t *testing.T) {
+	t.Parallel()
+
+	root := gitInitTempDir(t)
+	sub := filepath.Join(root, "services", "api")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+
+	dirs := ProjectSubagentsDir(sub)
+
+	expected := []string{
+		filepath.Join(root, ".agents", "subagents"),
+		filepath.Join(root, ".crush", "subagents"),
+		filepath.Join(sub, ".agents", "subagents"),
+		filepath.Join(sub, ".crush", "subagents"),
+	}
+	require.Equal(t, expected, dirs)
+}
+
+// TestProjectSubagentsDir_AtGitRoot verifies that when workingDir IS the
+// repository root, ProjectSubagentsDir returns exactly the two working-dir
+// paths with no duplication.
+func TestProjectSubagentsDir_AtGitRoot(t *testing.T) {
+	t.Parallel()
+
+	root := gitInitTempDir(t)
+
+	dirs := ProjectSubagentsDir(root)
+
+	expected := []string{
+		filepath.Join(root, ".agents", "subagents"),
+		filepath.Join(root, ".crush", "subagents"),
+	}
+	require.Equal(t, expected, dirs)
+}
+
+// TestProjectSubagentsDir_OutsideGitRepo verifies that when workingDir is not
+// inside a git repository at all, ProjectSubagentsDir returns exactly the two
+// working-dir paths.
+func TestProjectSubagentsDir_OutsideGitRepo(t *testing.T) {
+	t.Parallel()
+
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	dirs := ProjectSubagentsDir(root)
+
+	expected := []string{
+		filepath.Join(root, ".agents", "subagents"),
+		filepath.Join(root, ".crush", "subagents"),
+	}
+	require.Equal(t, expected, dirs)
 }

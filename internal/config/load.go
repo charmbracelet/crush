@@ -1271,12 +1271,41 @@ func GlobalSubagentsDirs() []string {
 	return paths
 }
 
-// ProjectSubagentsDir returns the default project directories for subagent definitions.
+// projectSubagentSubdirs lists the conventional subdirectories where
+// project-level subagents are discovered. Shared across working-dir and
+// git-root lookups to prevent drift when a new convention is added.
+var projectSubagentSubdirs = []string{
+	".agents/subagents",
+	".crush/subagents",
+}
+
+// ProjectSubagentsDir returns the default project directories in which
+// Crush looks for subagent definitions. In addition to the working
+// directory, it also checks the git working tree root so that
+// monorepo-level subagents are discovered when the user is inside a
+// subdirectory.
+//
+// Unlike ProjectSkillsDir, repository-root paths come first and
+// working-directory paths come last. subagents.Deduplicate keeps the last
+// occurrence of a given name, so listing the working directory last means
+// a working-directory subagent definition overrides a monorepo-root
+// definition with the same name.
 func ProjectSubagentsDir(workingDir string) []string {
-	return []string{
-		filepath.Join(workingDir, ".agents", "subagents"),
-		filepath.Join(workingDir, ".crush", "subagents"),
+	dirs := make([]string, 0, len(projectSubagentSubdirs)*2)
+
+	// When the working directory is inside a git repository, also look at
+	// the repository root so monorepo-level .agents/subagents are found.
+	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
+		for _, sub := range projectSubagentSubdirs {
+			dirs = append(dirs, filepath.Join(root, sub))
+		}
 	}
+
+	for _, sub := range projectSubagentSubdirs {
+		dirs = append(dirs, filepath.Join(workingDir, sub))
+	}
+
+	return dirs
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

@@ -44,6 +44,7 @@ type Notifications struct {
 
 	keyMap struct {
 		Select   key.Binding
+		Test     key.Binding
 		Next     key.Binding
 		Previous key.Binding
 		UpDown   key.Binding
@@ -94,6 +95,10 @@ func NewNotifications(com *common.Common) *Notifications {
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "confirm"),
 	)
+	n.keyMap.Test = key.NewBinding(
+		key.WithKeys("ctrl+t"),
+		key.WithHelp("ctrl+t", "test"),
+	)
 	n.keyMap.Next = key.NewBinding(
 		key.WithKeys("down", "ctrl+n"),
 		key.WithHelp("↓", "next item"),
@@ -142,6 +147,16 @@ func (n *Notifications) HandleMsg(msg tea.Msg) Action {
 			}
 			n.list.SelectNext()
 			n.list.ScrollToSelected()
+		case key.Matches(msg, n.keyMap.Test):
+			selectedItem := n.list.SelectedItem()
+			if selectedItem == nil {
+				break
+			}
+			notifItem, ok := selectedItem.(*NotificationItem)
+			if !ok {
+				break
+			}
+			return ActionSendTestNotification{Style: notifItem.style.ID}
 		case key.Matches(msg, n.keyMap.Select):
 			selectedItem := n.list.SelectedItem()
 			if selectedItem == nil {
@@ -213,6 +228,7 @@ func (n *Notifications) ShortHelp() []key.Binding {
 	return []key.Binding{
 		n.keyMap.UpDown,
 		n.keyMap.Select,
+		n.keyMap.Test,
 		n.keyMap.Close,
 	}
 }
@@ -222,6 +238,7 @@ func (n *Notifications) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
 	slice := []key.Binding{
 		n.keyMap.Select,
+		n.keyMap.Test,
 		n.keyMap.Next,
 		n.keyMap.Previous,
 		n.keyMap.Close,

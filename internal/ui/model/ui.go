@@ -494,26 +494,35 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 // function that should be called once during initialization or when capabilities
 // change.
 func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
-	// Check for explicit user preference first.
-	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
-		switch cfg.Options.NotificationStyle {
-		case "native":
-			slog.Debug("Using native backend (user preference)")
-			return notification.NewNativeBackend(notification.Icon)
-		case "osc":
-			slog.Debug("Using OSC backend (user preference)", "osc99_supported", caps.OSC99Notifications)
-			return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
-		case "bell":
-			slog.Debug("Using bell backend (user preference)")
-			return notification.NewBellBackend()
-		case "disabled":
-			slog.Debug("Notifications disabled (user preference)")
-			return notification.NoopBackend{}
-		case "auto":
-			// Fall through to auto-detection below.
-		default:
-			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.NotificationStyle)
-		}
+	style := ""
+	if cfg != nil && cfg.Options != nil {
+		style = cfg.Options.NotificationStyle
+	}
+	return notificationBackendForStyle(caps, style)
+}
+
+// notificationBackendForStyle builds a notification backend for an explicit
+// style. An empty style or "auto" auto-detects based on environment and
+// capabilities. This lets callers preview a specific style without mutating
+// config.
+func notificationBackendForStyle(caps common.Capabilities, style string) notification.Backend {
+	switch style {
+	case "native":
+		slog.Debug("Using native backend (user preference)")
+		return notification.NewNativeBackend(notification.Icon)
+	case "osc":
+		slog.Debug("Using OSC backend (user preference)", "osc99_supported", caps.OSC99Notifications)
+		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+	case "bell":
+		slog.Debug("Using bell backend (user preference)")
+		return notification.NewBellBackend()
+	case "disabled":
+		slog.Debug("Notifications disabled (user preference)")
+		return notification.NoopBackend{}
+	case "", "auto":
+		// Fall through to auto-detection below.
+	default:
+		slog.Warn("Unknown notification style, using auto", "style", style)
 	}
 
 	// Auto-detect based on environment and capabilities.
@@ -1637,6 +1646,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
+	case dialog.ActionSendTestNotification:
+		// Preview the highlighted style directly, bypassing focus/config
+		// gating since the user explicitly asked to test it. Keep the dialog
+		// open so they can try other styles.
+		backend := notificationBackendForStyle(m.caps, msg.Style)
+		cmds = append(cmds, backend.Send(notification.Notification{
+			Title:   "Crush",
+			Message: "This is a test notification.",
+		}))
 	case dialog.ActionSelectScrollbarStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -131,6 +132,10 @@ const (
 	EventToolsListChanged
 	EventPromptsListChanged
 	EventResourcesListChanged
+	// EventChannelMessage is published when a channel server pushes a
+	// notifications/claude/channel event. ChannelMessage carries the rendered,
+	// escaped <channel> element ready for injection into the session.
+	EventChannelMessage
 )
 
 // Event represents an event in the MCP system
@@ -140,6 +145,9 @@ type Event struct {
 	State  State
 	Error  error
 	Counts Counts
+	// ChannelMessage is set only for EventChannelMessage: the fully rendered
+	// and escaped <channel>...</channel> element to inject into the session.
+	ChannelMessage string
 }
 
 // Counts number of available tools, prompts, etc.
@@ -284,7 +292,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	updateState(name, StateStarting, nil, nil, Counts{})
 
 	// createSession handles its own timeout internally.
-	session, err := createSession(ctx, name, m, resolver)
+	session, err := createSession(ctx, name, m, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return err
 	}
@@ -376,7 +384,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	// resources from the registry.
 	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), nil, state.Counts)
 
-	newSess, err := newSession(ctx, name, m, cfg.Resolver())
+	newSess, err := newSession(ctx, name, m, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +487,7 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	})
 }
 
-func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
+func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
@@ -492,6 +500,13 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 		cancelTimer.Stop()
 		return nil, err
 	}
+
+	// Wrap the transport so channel notifications can be intercepted. The gate
+	// starts closed and is only opened below once the server is confirmed to
+	// declare the channel capability and to have been opted in via --channels,
+	// so a non-channel or non-enabled server can never inject content.
+	channelGate := &atomic.Bool{}
+	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
 	client := mcp.NewClient(
 		&mcp.Implementation{
@@ -537,6 +552,15 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 
 	cancelTimer.Stop()
 	slog.Debug("MCP client initialized", "name", name)
+
+	// Open the channel gate only for a server that both declares the
+	// claude/channel capability and was opted in via --channels. Listed in MCP
+	// config is not enough; this enforces the "listed is not enabled" model.
+	if channelOptIn && hasChannelCapability(session.InitializeResult()) {
+		channelGate.Store(true)
+		slog.Info("MCP channel enabled", "name", name)
+	}
+
 	return &ClientSession{session, cancel}, nil
 }
 

@@ -143,6 +143,8 @@ type MCPClientInfo struct {
 	PromptCount   int       `json:"prompt_count,omitempty"`
 	ResourceCount int       `json:"resource_count,omitempty"`
 	ConnectedAt   time.Time `json:"connected_at"`
+	// Channel reports whether this server is an active channel.
+	Channel bool `json:"channel,omitempty"`
 }
 
 type MCPPromptArgument struct {

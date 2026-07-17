@@ -76,6 +76,14 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		case mcp.StateConnected:
 			icon = t.Resource.OnlineIcon.String()
 			extraContent = mcpCounts(t, m.Counts)
+			if m.Channel {
+				badge := t.Resource.StatusText.Render("channel")
+				if extraContent != "" {
+					extraContent += " " + badge
+				} else {
+					extraContent = badge
+				}
+			}
 		case mcp.StateError:
 			icon = t.Resource.ErrorIcon.String()
 			description = t.Resource.StatusText.Render("error")

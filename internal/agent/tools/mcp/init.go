@@ -53,6 +53,9 @@ type ClientSession struct {
 	*mcp.ClientSession
 	cancel       context.CancelFunc
 	oauthHandler *mcpoauth.Handler
+	// channel reports whether this server is an active channel (it declared
+	// the claude/channel capability and was opted in via --channels).
+	channel bool
 }
 
 // Close cancels the session context and then closes the underlying session.
@@ -224,6 +227,10 @@ type ClientInfo struct {
 	// progress rather than the last successful one, which would leave the
 	// server skipped as "starting" and never restarted for the new config.
 	PendingConfig *config.MCPConfig
+
+	// Channel reports whether this server is an active channel (declared the
+	// claude/channel capability and opted in via --channels).
+	Channel bool
 }
 
 // SubscribeEvents returns a channel for MCP events.
@@ -511,7 +518,7 @@ func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Co
 // suppression enabled on the freshly created handler.
 func runAuthFlow(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig) error {
 	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), ChannelEnabled(cfg.Overrides().EnabledChannels, name))
 	return err
 }
 
@@ -835,29 +842,6 @@ func closeSession(name string, s *ClientSession) {
 	}
 }
 
-// stateOpt mutates the ClientInfo a transition is about to publish. Config
-// recording is opt-in: only the sites that actually own a config (the connect
-// and starting paths) pass one, so the many error and count-refresh call sites
-// can't accidentally clobber the recorded config by passing a zero value.
-type stateOpt func(*ClientInfo)
-
-// withConfig records the config now in effect. Used on StateConnected.
-func withConfig(m config.MCPConfig) stateOpt {
-	return func(i *ClientInfo) {
-		i.Config = m
-		i.PendingConfig = nil
-	}
-}
-
-// withPending records the config an in-flight attempt is connecting with.
-// Used on StateStarting.
-func withPending(m config.MCPConfig) stateOpt {
-	return func(i *ClientInfo) {
-		mc := m
-		i.PendingConfig = &mc
-	}
-}
-
 // updateState updates the state of an MCP client and publishes an event.
 //
 // Config bookkeeping is split between the caller and the state machine:
@@ -875,6 +859,7 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	info.Error = err
 	info.Client = client
 	info.Counts = counts
+	info.Channel = client != nil && client.channel
 	for _, opt := range opts {
 		opt(&info)
 	}
@@ -1021,7 +1006,8 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	// Otherwise close it (fail closed). Resolving drains buffered messages
 	// that arrived during negotiation so a fast server does not lose early
 	// events.
-	if channelOptIn && hasChannelCapability(session.InitializeResult()) {
+	isChannel := channelOptIn && hasChannelCapability(session.InitializeResult())
+	if isChannel {
 		buffered := channelGate.resolve(true)
 		for _, raw := range buffered {
 			publishChannelMessage(mcpCtx, name, raw)
@@ -1035,6 +1021,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 		ClientSession: session,
 		cancel:        cancel,
 		oauthHandler:  oauthHandler,
+		channel:       isChannel,
 	}, nil
 }
 

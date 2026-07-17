@@ -256,6 +256,26 @@ func (b *Backend) DisableDockerMCP(workspaceID string) error {
 	return nil
 }
 
+// MCPEnable starts a named MCP server in-memory for the session.
+func (b *Backend) MCPEnable(ctx context.Context, workspaceID, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	ws.Cfg.SetMCPDisabledInMemory(name, false)
+	return mcptools.InitializeSingle(ctx, name, ws.Cfg)
+}
+
+// MCPDisable stops a named MCP server in-memory for the session.
+func (b *Backend) MCPDisable(workspaceID, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	ws.Cfg.SetMCPDisabledInMemory(name, true)
+	return mcptools.DisableSingle(ws.Cfg, name)
+}
+
 // RefreshMCPTools refreshes the tools for a named MCP server.
 func (b *Backend) RefreshMCPTools(ctx context.Context, workspaceID, name string) error {
 	ws, err := b.GetWorkspace(workspaceID)

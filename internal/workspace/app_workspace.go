@@ -459,6 +459,16 @@ func (w *AppWorkspace) DisableDockerMCP() error {
 	return w.store.DisableDockerMCP()
 }
 
+func (w *AppWorkspace) MCPEnable(ctx context.Context, name string) error {
+	w.store.SetMCPDisabledInMemory(name, false)
+	return mcptools.InitializeSingle(ctx, name, w.store)
+}
+
+func (w *AppWorkspace) MCPDisable(name string) error {
+	w.store.SetMCPDisabledInMemory(name, true)
+	return mcptools.DisableSingle(w.store, name)
+}
+
 // -- Lifecycle --
 
 func (w *AppWorkspace) Subscribe(program *tea.Program) {

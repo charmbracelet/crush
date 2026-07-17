@@ -43,11 +43,6 @@ type EditResponseMetadata struct {
 
 const EditToolName = "edit"
 
-var (
-	oldStringNotFoundErr        = fantasy.NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks.")
-	oldStringMultipleMatchesErr = fantasy.NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true")
-)
-
 //go:embed edit.md
 var editDescription string
 
@@ -196,38 +191,85 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	), nil
 }
 
-type editableFileContent struct {
-	sessionID  string
-	oldContent string
-	isCrlf     bool
+// findAndReplace performs a find-and-replace on content. When replaceAll is
+// false it requires exactly one match. Returns the new content or an error
+// describing why the replacement could not be made.
+func findAndReplace(content, old, new string, replaceAll bool) (string, error) {
+	if replaceAll {
+		if !strings.Contains(content, old) {
+			return "", fmt.Errorf("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks")
+		}
+		return strings.ReplaceAll(content, old, new), nil
+	}
+
+	index := strings.Index(content, old)
+	if index == -1 {
+		return "", fmt.Errorf("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks")
+	}
+
+	lastIndex := strings.LastIndex(content, old)
+	if index != lastIndex {
+		return "", fmt.Errorf("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true")
+	}
+
+	return content[:index] + new + content[index+len(old):], nil
 }
 
-func loadExistingEditableFile(edit editContext, filePath, sessionError string) (editableFileContent, fantasy.ToolResponse, error) {
+// commitFileChange writes newContent to filePath, updates the file history,
+// and records the read in the file tracker. Callers must convert line endings
+// before calling this function.
+func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string) error {
+	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	file, err := edit.files.GetByPathAndSession(edit.ctx, filePath, sessionID)
+	if err != nil {
+		_, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent)
+		if err != nil {
+			return fmt.Errorf("error creating file history: %w", err)
+		}
+	}
+	if file.Content != oldContent {
+		// User manually changed the content; store an intermediate version.
+		if _, err := edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent); err != nil {
+			slog.Error("Error creating file history version", "error", err)
+		}
+	}
+	if _, err := edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent); err != nil {
+		slog.Error("Error creating file history version", "error", err)
+	}
+
+	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+	return nil
+}
+
+func loadExistingFile(edit editContext, filePath, sessionError string) (sessionID, oldContent string, isCrlf bool, resp fantasy.ToolResponse, err error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return editableFileContent{}, fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)), nil
+			return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)), nil
 		}
-		return editableFileContent{}, fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	if fileInfo.IsDir() {
-		return editableFileContent{}, fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
+		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
 	}
 
-	sessionID := GetSessionFromContext(edit.ctx)
+	sessionID = GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
-		return editableFileContent{}, fantasy.ToolResponse{}, fmt.Errorf("%s", sessionError)
+		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("%s", sessionError)
 	}
 
 	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
 	if lastRead.IsZero() {
-		return editableFileContent{}, fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
+		return "", "", false, fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
 	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
-		return editableFileContent{}, fantasy.NewTextErrorResponse(
+		return "", "", false, fantasy.NewTextErrorResponse(
 			fmt.Sprintf(
 				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
 				filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
@@ -237,65 +279,15 @@ func loadExistingEditableFile(edit editContext, filePath, sessionError string) (
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return editableFileContent{}, fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
+		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
-	return editableFileContent{
-		sessionID:  sessionID,
-		oldContent: oldContent,
-		isCrlf:     isCrlf,
-	}, fantasy.ToolResponse{}, nil
-}
-
-func deleteFromContent(oldContent, oldString string, replaceAll bool) (string, fantasy.ToolResponse) {
-	if replaceAll {
-		newContent := strings.ReplaceAll(oldContent, oldString, "")
-		if newContent == oldContent {
-			return "", oldStringNotFoundErr
-		}
-		return newContent, fantasy.ToolResponse{}
-	}
-
-	index := strings.Index(oldContent, oldString)
-	if index == -1 {
-		return "", oldStringNotFoundErr
-	}
-
-	lastIndex := strings.LastIndex(oldContent, oldString)
-	if index != lastIndex {
-		return "", oldStringMultipleMatchesErr
-	}
-
-	return oldContent[:index] + oldContent[index+len(oldString):], fantasy.ToolResponse{}
-}
-
-func replaceInContent(oldContent, oldString, newString string, replaceAll bool) (string, fantasy.ToolResponse) {
-	var newContent string
-	if replaceAll {
-		newContent = strings.ReplaceAll(oldContent, oldString, newString)
-	} else {
-		index := strings.Index(oldContent, oldString)
-		if index == -1 {
-			return "", oldStringNotFoundErr
-		}
-
-		lastIndex := strings.LastIndex(oldContent, oldString)
-		if index != lastIndex {
-			return "", oldStringMultipleMatchesErr
-		}
-
-		newContent = oldContent[:index] + newString + oldContent[index+len(oldString):]
-	}
-
-	if oldContent == newContent {
-		return "", fantasy.NewTextErrorResponse("new content is the same as old content. No changes made.")
-	}
-	return newContent, fantasy.ToolResponse{}
+	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
+	return sessionID, oldContent, isCrlf, fantasy.ToolResponse{}, nil
 }
 
 func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	editable, resp, err := loadExistingEditableFile(edit, filePath, "session ID is required for deleting content")
+	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for deleting content")
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -303,13 +295,9 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return resp, nil
 	}
 
-	sessionID := editable.sessionID
-	oldContent := editable.oldContent
-	isCrlf := editable.isCrlf
-
-	newContent, resp := deleteFromContent(oldContent, oldString, replaceAll)
-	if resp.Content != "" || resp.IsError {
-		return resp, nil
+	newContent, err := findAndReplace(oldContent, oldString, "", replaceAll)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
 	_, additions, removals := diff.GenerateDiff(
@@ -348,44 +336,20 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return resp, nil
 	}
 
+	writeContent := newContent
 	if isCrlf {
-		newContent, _ = fsext.ToWindowsLineEndings(newContent)
+		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	err = os.WriteFile(filePath, []byte(newContent), 0o644)
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
-
-	// Check if file exists in history
-	file, err := edit.files.GetByPathAndSession(edit.ctx, filePath, sessionID)
-	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			// Log error but don't fail the operation
-			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User manually changed the content; store an intermediate version
-		_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			slog.Error("Error creating file history version", "error", err)
-		}
-	}
-	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent)
-	if err != nil {
-		slog.Error("Error creating file history version", "error", err)
-	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content deleted from file: "+filePath),
 		EditResponseMetadata{
 			OldContent: oldContent,
-			NewContent: newContent,
+			NewContent: writeContent,
 			Additions:  additions,
 			Removals:   removals,
 		},
@@ -393,7 +357,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 }
 
 func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	editable, resp, err := loadExistingEditableFile(edit, filePath, "session ID is required for edit a file")
+	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for editing a file")
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -401,17 +365,17 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return resp, nil
 	}
 
-	sessionID := editable.sessionID
-	oldContent := editable.oldContent
-	isCrlf := editable.isCrlf
-
-	newContent, resp := replaceInContent(oldContent, oldString, newString, replaceAll)
-	if resp.Content != "" || resp.IsError {
-		return resp, nil
+	result, err := findAndReplace(oldContent, oldString, newString, replaceAll)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
+	if result == oldContent {
+		return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
+	}
+
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
-		newContent,
+		result,
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
 
@@ -427,7 +391,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 			Params: EditPermissionsParams{
 				FilePath:   filePath,
 				OldContent: oldContent,
-				NewContent: newContent,
+				NewContent: result,
 			},
 		},
 	)
@@ -438,51 +402,27 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		resp := NewPermissionDeniedResponse()
 		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
 			OldContent: oldContent,
-			NewContent: newContent,
+			NewContent: result,
 			Additions:  additions,
 			Removals:   removals,
 		})
 		return resp, nil
 	}
 
+	writeContent := result
 	if isCrlf {
-		newContent, _ = fsext.ToWindowsLineEndings(newContent)
+		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	err = os.WriteFile(filePath, []byte(newContent), 0o644)
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
-
-	// Check if file exists in history
-	file, err := edit.files.GetByPathAndSession(edit.ctx, filePath, sessionID)
-	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			// Log error but don't fail the operation
-			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User manually changed the content; store an intermediate version
-		_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			slog.Debug("Error creating file history version", "error", err)
-		}
-	}
-	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent)
-	if err != nil {
-		slog.Error("Error creating file history version", "error", err)
-	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content replaced in file: "+filePath),
 		EditResponseMetadata{
 			OldContent: oldContent,
-			NewContent: newContent,
+			NewContent: writeContent,
 			Additions:  additions,
 			Removals:   removals,
 		},

@@ -130,6 +130,20 @@ func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
+// registerSessionTools lists the tools a live session exposes and writes them
+// into the shared registry, returning the number registered after any
+// configured allow/deny filtering. It is the single seam through which a
+// (re)connected session's tools enter the registry, so both the initial
+// connect and a lazy renew repopulate the tool list the agent sends to the LLM
+// instead of leaving it empty.
+func registerSessionTools(ctx context.Context, cfg *config.ConfigStore, name string, sess *ClientSession) (int, error) {
+	tools, err := getTools(ctx, sess)
+	if err != nil {
+		return 0, err
+	}
+	return updateTools(cfg, name, tools), nil
+}
+
 func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	// Always call ListTools to get the actual available tools.
 	// The InitializeResult Capabilities.Tools field may be an empty object {},

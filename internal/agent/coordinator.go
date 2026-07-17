@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
@@ -219,6 +220,15 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
+	}
+
+	// Wait for MCP initialization to complete before building the tool list.
+	// Without this, slow-to-start MCP servers (e.g. stdio Python via uv) may
+	// not have registered their tools yet when buildTools reads the registry,
+	// so their tools silently never appear in the LLM tool palette — even
+	// though crush_info reports them as connected.
+	if err := mcp.WaitForInit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
 	// refresh models before each run
@@ -627,6 +637,13 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
+		// Wait for MCP servers to finish registering their tools before
+		// building the initial tool list. This ensures the first tool set
+		// (used if anything reads it before run() rebuilds) includes all
+		// MCP tools, not just fast-to-init ones.
+		if err := mcp.WaitForInit(ctx); err != nil {
+			return err
+		}
 		tools, err := c.buildTools(ctx, agent, isSubAgent)
 		if err != nil {
 			return err

@@ -99,6 +99,7 @@ const (
 	uiFocusNone uiFocusState = iota
 	uiFocusEditor
 	uiFocusMain
+	uiFocusSidebar
 )
 
 type uiState uint8
@@ -282,6 +283,18 @@ type UI struct {
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
+
+	// Sidebar scroll state for virtual scrolling.
+	sidebarOffset           int  // current scroll offset in lines
+	sidebarScrollable       bool // true when sidebar content exceeds available height
+	sidebarScrollbarVisible bool
+	sidebarScrollbarSeq     int    // sequence number for auto-hide timer
+	sidebarMaxOffsetVal     int    // max scroll offset, computed in updateSidebarScrollState
+	sidebarContent          string // cached rendered sidebar content
+	sidebarTotalLines       int    // total lines in sidebarContent
+	sidebarContentHeight    int    // available height for sidebar content
+	sidebarContentWidth     int    // available width for sidebar content
+	sidebarDrawLogo         string // logo to render (may differ from sidebarLogo for short heights)
 
 	// Notification state
 	notifyBackend       notification.Backend
@@ -640,6 +653,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
+		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
@@ -1001,6 +1015,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
+			// When sidebar is focused, route wheel events to sidebar scrolling.
+			if m.focus == uiFocusSidebar {
+				lines := int(msg.DeltaY)
+				if lines != 0 {
+					m.sidebarOffset = max(0, min(m.sidebarOffset+lines, m.sidebarMaxOffsetVal))
+					m.sidebarScrollbarSeq++
+					m.sidebarScrollbarVisible = true
+					cmds = append(cmds, sidebarScrollbarHideCmd(m.sidebarScrollbarSeq))
+				}
+				break
+			}
 			if msg.DeltaX != 0 {
 				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
 			}
@@ -1051,6 +1076,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// reservation) is cheap.
 				m.updateLayoutAndSize()
 			}
+		}
+	case sidebarScrollbarHideMsg:
+		if msg.seq == m.sidebarScrollbarSeq && m.focus != uiFocusSidebar {
+			m.sidebarScrollbarVisible = false
 		}
 	case spinner.TickMsg:
 		if m.dialog.HasDialogs() {
@@ -1407,7 +1436,10 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	switch {
 	case m.state != uiChat:
 		return nil
-	case image.Pt(msg.X, msg.Y).In(m.layout.sidebar):
+	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.sidebarScrollable:
+		m.focus = uiFocusSidebar
+		m.textarea.Blur()
+		m.chat.Blur()
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
 		m.focus = uiFocusEditor
@@ -1416,9 +1448,11 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		} else {
 			cmd = m.textarea.Focus()
 		}
+		m.sidebarScrollbarVisible = false
 		m.chat.Blur()
 	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
 		m.focus = uiFocusMain
+		m.sidebarScrollbarVisible = false
 		m.textarea.Blur()
 		m.chat.Focus()
 	}
@@ -2440,8 +2474,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
 				m.focus = uiFocusEditor
+				m.sidebarScrollbarVisible = false
 				cmds = append(cmds, m.textarea.Focus())
 				m.chat.Blur()
+			case key.Matches(msg, m.keyMap.Chat.FocusSidebar):
+				if m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebarScrollable {
+					m.focus = uiFocusSidebar
+					m.chat.Blur()
+				}
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -2523,6 +2563,38 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					handleGlobalKeys(msg)
 				}
 			}
+		case uiFocusSidebar:
+			if m.state != uiChat || m.isCompact || !m.hasSession() {
+				break
+			}
+			switch {
+			case key.Matches(msg, m.keyMap.Chat.Up):
+				m.sidebarOffset = max(0, m.sidebarOffset-4)
+				m.sidebarScrollbarSeq++
+			case key.Matches(msg, m.keyMap.Chat.Down):
+				maxOffset := m.sidebarMaxOffsetVal
+				if m.sidebarOffset < maxOffset {
+					m.sidebarOffset = min(m.sidebarOffset+4, maxOffset)
+					m.sidebarScrollbarSeq++
+				}
+			case key.Matches(msg, m.keyMap.Chat.Home):
+				m.sidebarOffset = 0
+				m.sidebarScrollbarSeq++
+			case key.Matches(msg, m.keyMap.Chat.End):
+				m.sidebarOffset = m.sidebarMaxOffsetVal
+				m.sidebarScrollbarSeq++
+			case key.Matches(msg, m.keyMap.Chat.FocusChat):
+				m.focus = uiFocusMain
+				m.sidebarScrollbarVisible = false
+				m.chat.Focus()
+			case key.Matches(msg, m.keyMap.Tab):
+				m.focus = uiFocusEditor
+				m.sidebarScrollbarVisible = false
+				cmds = append(cmds, m.textarea.Focus())
+				m.chat.Blur()
+			default:
+				handleGlobalKeys(msg)
+			}
 		default:
 			handleGlobalKeys(msg)
 		}
@@ -2560,6 +2632,10 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		// renderPills, but only when the layout actually differs;
 		// this catches the steady-state case.
 		m.renderPills()
+	}
+
+	if m.state == uiChat && m.hasSession() && !m.isCompact {
+		m.updateSidebarScrollState()
 	}
 
 	// Clear the screen first
@@ -2778,9 +2854,10 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds = append(binds, cancelBinding)
 		}
 
-		if m.focus == uiFocusEditor {
+		switch m.focus {
+		case uiFocusEditor:
 			tab.SetHelp("tab", "focus chat")
-		} else {
+		default:
 			tab.SetHelp("tab", "focus editor")
 		}
 
@@ -2796,6 +2873,12 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds = append(
 				binds,
 				k.Editor.Newline,
+			)
+		case uiFocusSidebar:
+			binds = append(
+				binds,
+				k.Chat.UpDown,
+				k.Chat.FocusChat,
 			)
 		case uiFocusMain:
 			binds = append(
@@ -2869,9 +2952,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 		mainBinds := []key.Binding{}
 		tab := k.Tab
-		if m.focus == uiFocusEditor {
+		switch m.focus {
+		case uiFocusEditor:
 			tab.SetHelp("tab", "focus chat")
-		} else {
+		default:
 			tab.SetHelp("tab", "focus editor")
 		}
 
@@ -2910,6 +2994,20 @@ func (m *UI) FullHelp() [][]key.Binding {
 					},
 				)
 			}
+		case uiFocusSidebar:
+			binds = append(
+				binds,
+				[]key.Binding{
+					k.Chat.UpDown,
+				},
+				[]key.Binding{
+					k.Chat.FocusChat,
+				},
+				[]key.Binding{
+					k.Chat.Home,
+					k.Chat.End,
+				},
+			)
 		case uiFocusMain:
 			binds = append(
 				binds,
@@ -2924,6 +3022,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.HalfPageDown,
 					k.Chat.Home,
 					k.Chat.End,
+					k.Chat.FocusSidebar,
 				},
 				[]key.Binding{
 					k.Chat.Copy,
@@ -3112,7 +3211,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		}
 	}
 	// The sidebar width
-	sidebarWidth := 30
+	sidebarWidth := 32
 	// The header height
 	const landingHeaderHeight = 4
 
@@ -4203,6 +4302,7 @@ func (m *UI) newSession() tea.Cmd {
 	}
 
 	m.session = nil
+	m.sidebarOffset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
 	m.setState(uiLanding, uiFocusEditor)

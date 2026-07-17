@@ -200,6 +200,7 @@ type Styles struct {
 	WorkingGradFromColor color.Color
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
+	WorkingTimerColor    color.Color // Elapsed timer suffix color
 
 	// Section Title
 	Section struct {

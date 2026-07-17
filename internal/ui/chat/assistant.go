@@ -177,6 +177,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		Suffix: func() string {
 			return common.Elapsed()
 		},
+		SuffixColor: sty.WorkingTimerColor,
 	})
 	return a
 }

@@ -338,7 +338,7 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	}
 	finishTime := time.Unix(finishData.Time, 0)
 	duration := finishTime.Sub(a.lastUserMessageTime)
-	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(duration.String())
+	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(fmt.Sprintf("in %s", duration))
 	icon := a.sty.Messages.AssistantInfoIcon.Render(styles.ModelIcon)
 	model := a.cfg.GetModel(a.message.Provider, a.message.Model)
 	if model == nil {

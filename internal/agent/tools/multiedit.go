@@ -247,7 +247,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 }
 
 func processMultiEditExistingFile(edit editContext, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	editable, resp, err := loadExistingEditableFile(edit, params.FilePath, "session ID is required for editing file")
+	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, params.FilePath, "session ID is required for editing a file")
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -255,9 +255,6 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return resp, nil
 	}
 
-	sessionID := editable.sessionID
-	oldContent := editable.oldContent
-	isCrlf := editable.isCrlf
 	currentContent, failedEdits := applyEditsToContent(oldContent, params.Edits, 0)
 
 	// Check if content actually changed
@@ -314,39 +311,14 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return resp, nil
 	}
 
+	writeContent := currentContent
 	if isCrlf {
-		currentContent, _ = fsext.ToWindowsLineEndings(currentContent)
+		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	// Write the updated content
-	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+	if err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
-
-	// Update file history
-	file, err := edit.files.GetByPathAndSession(edit.ctx, params.FilePath, sessionID)
-	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, oldContent)
-		if err != nil {
-			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User manually changed the content, store an intermediate version
-		_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, oldContent)
-		if err != nil {
-			slog.Error("Error creating file history version", "error", err)
-		}
-	}
-
-	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
-	if err != nil {
-		slog.Error("Error creating file history version", "error", err)
-	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -377,29 +349,5 @@ func applyEditToContent(content string, edit MultiEditOperation) (string, error)
 		return "", fmt.Errorf("old_string cannot be empty for content replacement")
 	}
 
-	if edit.ReplaceAll {
-		return replaceAllContent(content, edit.OldString, edit.NewString)
-	}
-	return replaceUniqueContent(content, edit.OldString, edit.NewString)
-}
-
-func replaceAllContent(content, oldString, newString string) (string, error) {
-	if !strings.Contains(content, oldString) {
-		return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
-	}
-	return strings.ReplaceAll(content, oldString, newString), nil
-}
-
-func replaceUniqueContent(content, oldString, newString string) (string, error) {
-	index := strings.Index(content, oldString)
-	if index == -1 {
-		return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
-	}
-
-	lastIndex := strings.LastIndex(content, oldString)
-	if index != lastIndex {
-		return "", fmt.Errorf("old_string appears multiple times in the content. Please provide more context to ensure a unique match, or set replace_all to true")
-	}
-
-	return content[:index] + newString + content[index+len(oldString):], nil
+	return findAndReplace(content, edit.OldString, edit.NewString, edit.ReplaceAll)
 }

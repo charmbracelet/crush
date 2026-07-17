@@ -96,8 +96,9 @@ func (q *Quit) HandleMsg(msg tea.Msg) Action {
 // Draw implements [Dialog].
 func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	const (
-		question = "Are you sure you want to quit?"
-		hint     = "To quit without confirmation\npress ctrl+c twice."
+		question    = "Are you sure you want to quit?"
+		hintLineOne = "To quit without confirmation"
+		hintLineTwo = "press ctrl+c twice."
 	)
 	var (
 		baseStyle = q.com.Styles.Dialog.Quit.Content
@@ -115,7 +116,8 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			"",
 			buttons,
 			"",
-			hintStyle.Render(hint),
+			hintStyle.Render(hintLineOne),
+			hintStyle.Render(hintLineTwo),
 		),
 	)
 

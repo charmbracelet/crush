@@ -19,7 +19,18 @@ func swapInitGate(t *testing.T) chan struct{} {
 	t.Helper()
 	orig := initDone
 	initDone = make(chan struct{})
-	t.Cleanup(func() { initDone = orig })
+
+	initMu.Lock()
+	origStarted := initStarted
+	initStarted = true
+	initMu.Unlock()
+
+	t.Cleanup(func() {
+		initDone = orig
+		initMu.Lock()
+		initStarted = origStarted
+		initMu.Unlock()
+	})
 	return initDone
 }
 
@@ -41,6 +52,29 @@ func TestWaitForInit_BlocksUntilInitCompletes(t *testing.T) {
 	close(gate)
 	require.NoError(t, WaitForInit(context.Background()),
 		"WaitForInit must return once initialization has completed")
+}
+
+// TestWaitForInit_ReturnsWhenNotArmed is the regression test for coordinators
+// built outside app startup. Those paths never call mcp.Initialize (which is
+// what arms the gate), so WaitForInit must return immediately instead of
+// blocking on a channel that will never close. Before the fix it blocked until
+// ctx was cancelled, hanging coordinator.run's readyWg forever.
+func TestWaitForInit_ReturnsWhenNotArmed(t *testing.T) {
+	// Ensure the gate looks unarmed regardless of test ordering.
+	initMu.Lock()
+	orig := initStarted
+	initStarted = false
+	initMu.Unlock()
+	t.Cleanup(func() {
+		initMu.Lock()
+		initStarted = orig
+		initMu.Unlock()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, WaitForInit(ctx),
+		"WaitForInit must return immediately when initialization was never armed")
 }
 
 // TestWaitForInit_ToolsVisibleAfterInit is the regression test for the bug the

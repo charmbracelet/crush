@@ -140,6 +140,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
+	// Arm initialization synchronously before launching it so WaitForInit
+	// blocks for the in-flight init instead of racing the goroutine and
+	// returning before any MCP tools register.
+	mcp.ArmInit()
 	go mcp.Initialize(ctx, app.Permissions, store)
 
 	// Start herdr integration when running inside a herdr pane.

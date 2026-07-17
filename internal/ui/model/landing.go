@@ -34,6 +34,14 @@ func (m *UI) landingView() string {
 	}
 
 	parts = append(parts, "", m.modelInfo(width))
+
+	// Surface any active system advisories directly beneath the model info,
+	// so a context warning reads as commentary on the model line above it
+	// rather than as a banner detached from what triggered it.
+	if sys := m.systemMessagesView(width); sys != "" {
+		parts = append(parts, "", sys)
+	}
+
 	infoSection := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	var remainingHeightArea image.Rectangle

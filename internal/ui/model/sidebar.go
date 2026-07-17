@@ -97,6 +97,7 @@ func (m *UI) updateSidebarScrollState() {
 	lspSection := m.lspInfo(contentWidth, len(m.lspStates), true)
 	mcpSection := m.mcpInfo(contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
 	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
+	channelsSection := m.channelsInfo(contentWidth, len(m.channelStatusItems()), true)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
 
 	// Build the scrollable content.
@@ -115,6 +116,8 @@ func (m *UI) updateSidebarScrollState() {
 		mcpSection,
 		"",
 		skillsSection,
+		"",
+		channelsSection,
 	)
 
 	totalLines := strings.Count(content, "\n") + 1

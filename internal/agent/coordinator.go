@@ -188,10 +188,10 @@ type coordinator struct {
 
 	// subagentModelCache memoizes resolveModelByID results. rebuildModels
 	// clears it through resetSubagentModelCache, which also bumps
-	// subagentModelCacheGen so an in-flight build cannot store a stale model.
-	subagentModelCache    map[subagentModelKey]Model
-	subagentModelCacheGen uint64
-	subagentModelCacheMu  sync.RWMutex
+	// subagentModelGen: entries are keyed by the generation they were built in,
+	// so a build that started before a rebuild cannot be read after it.
+	subagentModelCache *csync.Map[subagentModelKey, Model]
+	subagentModelGen   atomic.Uint64
 
 	// subagentCancels maps a running subagent's child session ID to the cancel
 	// func for its run. Dispatched subagents run on ad-hoc SessionAgents whose
@@ -252,7 +252,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills:       activeSkills,
 		skillTracker:       skillTracker,
 		interactive:        opts.Interactive,
-		subagentModelCache: make(map[subagentModelKey]Model),
+		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 	}
 
@@ -854,14 +854,12 @@ func (c *coordinator) activeSubagentsList() []*subagents.Subagent {
 // rebuilt (see resetSubagentModelCache), so a refreshed credential is picked up
 // by the next call.
 func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
-	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent}
+	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent, gen: c.subagentModelGen.Load()}
 
-	c.subagentModelCacheMu.RLock()
-	m, ok := c.subagentModelCache[key]
-	gen := c.subagentModelCacheGen
-	c.subagentModelCacheMu.RUnlock()
-	if ok {
-		return m, nil
+	if c.subagentModelCache != nil {
+		if m, ok := c.subagentModelCache.Get(key); ok {
+			return m, nil
+		}
 	}
 
 	providerCfg, catwalkModel, err := c.cfg.Config().FindModelProvider(providerOverride, modelID)
@@ -873,28 +871,24 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 	if err != nil {
 		return Model{}, err
 	}
-	m, err = c.assembleModel(ctx, provider, providerCfg, selModel, catwalkModel)
+	m, err := c.assembleModel(ctx, provider, providerCfg, selModel, catwalkModel)
 	if err != nil {
 		return Model{}, err
 	}
 
-	// Skip the write when a rebuild cleared the cache while this one was
-	// building from the older credential.
-	c.subagentModelCacheMu.Lock()
-	if c.subagentModelCache != nil && c.subagentModelCacheGen == gen {
-		c.subagentModelCache[key] = m
+	if c.subagentModelCache != nil {
+		c.subagentModelCache.Set(key, m)
 	}
-	c.subagentModelCacheMu.Unlock()
 	return m, nil
 }
 
 // resetSubagentModelCache drops every memoized subagent model so the next
 // resolveModelByID builds from the live config and credentials.
 func (c *coordinator) resetSubagentModelCache() {
-	c.subagentModelCacheMu.Lock()
-	c.subagentModelCache = make(map[subagentModelKey]Model)
-	c.subagentModelCacheGen++
-	c.subagentModelCacheMu.Unlock()
+	c.subagentModelGen.Add(1)
+	if c.subagentModelCache != nil {
+		c.subagentModelCache.Reset(make(map[subagentModelKey]Model))
+	}
 }
 
 // subagentModels returns the model source for an agent built from sm, layered
@@ -1841,6 +1835,9 @@ type subagentModelKey struct {
 	modelID    string
 	provider   string
 	isSubAgent bool
+	// gen is the cache generation the model was built in; see
+	// coordinator.subagentModelGen.
+	gen uint64
 }
 
 // subAgentParams holds the parameters for running a sub-agent.
@@ -1926,7 +1923,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if authRefresh != nil {
 		inner := authRefresh
 		authRefresh = func(ctx context.Context, pe *fantasy.ProviderError) error {
-			c.runtime.SetStatus(session.ID, "retrying")
+			c.runtime.SetStatus(session.ID, subagents.StatusRetrying)
 			err := inner(ctx, pe)
 			if err == nil {
 				c.runtime.SetStatus(session.ID, subagents.StatusRunning)

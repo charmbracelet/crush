@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -411,4 +412,43 @@ func TestConfirmBypassPermissions(t *testing.T) {
 		require.True(t, ok)
 		require.Len(t, perms.requests, 1)
 	})
+}
+
+// TestAgentTool_TaskDispatch_BuildsOnLocalGroup verifies the task path of the
+// dispatcher end-to-end with a real (offline) coordinator: the dispatch waits
+// for the task agent's local build group before running, the run failure
+// (unreachable provider) surfaces as a tool-error response rather than a turn
+// abort, and the coordinator-wide readyWg stays clean throughout — a task
+// build living on readyWg would risk both a promptless start and a sticky
+// error failing every later turn.
+func TestAgentTool_TaskDispatch_BuildsOnLocalGroup(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	tool, err := coord.agentTool(t.Context())
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	// Deadline-bound: the unreachable provider is retried with backoff, and
+	// without a deadline the failure takes over a minute to surface.
+	runCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	input, err := json.Marshal(AgentDispatchParams{Prompt: "find something"})
+	require.NoError(t, err)
+
+	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+
+	require.NoError(t, err, "a task run failure must not abort the turn")
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Failed to generate response")
+	require.NoError(t, coord.readyWg.Wait(), "the coordinator-wide readyWg must stay clean after a task dispatch")
 }

@@ -55,10 +55,11 @@ const (
 
 // Permissions represents a dialog for permission requests.
 type Permissions struct {
-	com          *common.Common
-	windowWidth  int // Terminal window dimensions.
-	windowHeight int
-	fullscreen   bool // true when dialog is fullscreen
+	com           *common.Common
+	windowWidth   int // Terminal window dimensions.
+	windowHeight  int
+	fullscreen    bool // true when dialog is fullscreen
+	diffMinimized bool // true when diff view is minimized
 
 	permission     permission.PermissionRequest
 	selectedOption int // 0: Allow, 1: Allow for session, 2: Deny
@@ -79,22 +80,23 @@ type Permissions struct {
 }
 
 type permissionsKeyMap struct {
-	Left             key.Binding
-	Right            key.Binding
-	Tab              key.Binding
-	Select           key.Binding
-	Allow            key.Binding
-	AllowSession     key.Binding
-	Deny             key.Binding
-	Close            key.Binding
-	ToggleDiffMode   key.Binding
-	ToggleFullscreen key.Binding
-	ScrollUp         key.Binding
-	ScrollDown       key.Binding
-	ScrollLeft       key.Binding
-	ScrollRight      key.Binding
-	Choose           key.Binding
-	Scroll           key.Binding
+	Left                key.Binding
+	Right               key.Binding
+	Tab                 key.Binding
+	Select              key.Binding
+	Allow               key.Binding
+	AllowSession        key.Binding
+	Deny                key.Binding
+	Close               key.Binding
+	ToggleDiffMode      key.Binding
+	ToggleFullscreen    key.Binding
+	ToggleDiffMinimized key.Binding
+	ScrollUp            key.Binding
+	ScrollDown          key.Binding
+	ScrollLeft          key.Binding
+	ScrollRight         key.Binding
+	Choose              key.Binding
+	Scroll              key.Binding
 }
 
 func defaultPermissionsKeyMap() permissionsKeyMap {
@@ -135,6 +137,10 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 		ToggleFullscreen: key.NewBinding(
 			key.WithKeys("f"),
 			key.WithHelp("f", "toggle fullscreen"),
+		),
+		ToggleDiffMinimized: key.NewBinding(
+			key.WithKeys("m"),
+			key.WithHelp("m", "minimize/restore"),
 		),
 		ScrollUp: key.NewBinding(
 			key.WithKeys("shift+up", "K"),
@@ -230,8 +236,42 @@ func (p *Permissions) ToolCallID() string {
 	return p.permission.ToolCallID
 }
 
+// IsMinimized returns whether the diff view is minimized.
+func (p *Permissions) IsMinimized() bool {
+	return p.diffMinimized && p.hasDiffView()
+}
+
+// HasDiffView returns whether this permission dialog has a diff view.
+func (p *Permissions) HasDiffView() bool {
+	return p.hasDiffView()
+}
+
+// SetMinimized sets the minimized state.
+func (p *Permissions) SetMinimized(minimized bool) {
+	p.diffMinimized = minimized
+	p.viewportDirty = true
+}
+
+// KeyMap returns the key map.
+func (p *Permissions) KeyMap() permissionsKeyMap {
+	return p.keyMap
+}
+
 // HandleMsg implements [Dialog].
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
+	// If diff is minimized, only handle the m key to restore it.
+	// All other keys should pass through to the chat.
+	if p.diffMinimized && p.hasDiffView() {
+		if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+			if key.Matches(keyMsg, p.keyMap.ToggleDiffMinimized) {
+				p.diffMinimized = false
+				p.viewportDirty = true
+				return nil
+			}
+		}
+		return nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch {
@@ -260,6 +300,11 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, p.keyMap.ToggleFullscreen):
 			if p.hasDiffView() {
 				p.fullscreen = !p.fullscreen
+			}
+		case key.Matches(msg, p.keyMap.ToggleDiffMinimized):
+			if p.hasDiffView() {
+				p.diffMinimized = !p.diffMinimized
+				p.viewportDirty = true
 			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
 			p.viewport, _ = p.viewport.Update(msg)
@@ -346,7 +391,6 @@ func (p *Permissions) scrollRight() {
 	p.viewportDirty = true
 }
 
-// Draw implements [Dialog].
 // dialogSize returns the outer dialog width and maximum height for the
 // given screen area, and whether the window is too small so the dialog
 // must fill it. Diff views get more room than simple prompts.
@@ -381,8 +425,16 @@ func (p *Permissions) contentViewportHeight(forceFullscreen bool, maxHeight, fix
 	return max(maxHeight-fixedHeight, 3)
 }
 
+// Draw implements [Dialog].
 func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := p.com.Styles
+
+	// When minimized, do not draw the dialog at all; the UI renders a banner
+	// in the editor area instead.
+	if p.diffMinimized && p.hasDiffView() {
+		return nil
+	}
+
 	width, maxHeight, forceFullscreen := p.dialogSize(area)
 	dialogStyle := t.Dialog.View.Width(width).Padding(0, 1)
 	// The dialog fills the screen when forced small or when a diff is
@@ -808,6 +860,7 @@ func (p *Permissions) ShortHelp() []key.Binding {
 			bindings,
 			p.keyMap.ToggleDiffMode,
 			p.keyMap.ToggleFullscreen,
+			p.keyMap.ToggleDiffMinimized,
 		)
 	}
 

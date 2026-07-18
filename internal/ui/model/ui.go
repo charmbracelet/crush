@@ -878,7 +878,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chat.HandleDelayedClick(msg)
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
+		if m.dialog.HasVisibleDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -919,7 +919,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMotionMsg:
 		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
+		if m.dialog.HasVisibleDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -974,7 +974,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseReleaseMsg:
 		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
+		if m.dialog.HasVisibleDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -1006,7 +1006,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Pass mouse events to dialogs first if any are open.
-		if m.dialog.HasDialogs() {
+		if m.dialog.HasVisibleDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -1084,7 +1084,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sidebarScrollbarVisible = false
 		}
 	case spinner.TickMsg:
-		if m.dialog.HasDialogs() {
+		if m.dialog.HasVisibleDialogs() {
 			// route to dialog
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -1210,7 +1210,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"options", msg.Options)
 		}
 	default:
-		if m.dialog.HasDialogs() {
+		if m.dialog.HasVisibleDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -2183,8 +2183,61 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
+	// When a permission dialog is minimized, intercept keys: restore on m,
+	// allow chat scroll keys, block everything else.
+	if perm := m.minimizedPermission(); perm != nil {
+		if key.Matches(msg, perm.KeyMap().ToggleDiffMinimized) {
+			perm.SetMinimized(false)
+			return nil
+		}
+		// Allow chat scroll keys through.
+		switch {
+		case key.Matches(msg, m.keyMap.Chat.UpOneItem):
+			m.chat.SelectPrev()
+			if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case key.Matches(msg, m.keyMap.Chat.DownOneItem):
+			m.chat.SelectNext()
+			if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case key.Matches(msg, m.keyMap.Chat.PageUp):
+			if cmd := m.chat.ScrollByAndAnimate(-m.chat.Height()); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.chat.SelectFirstInView()
+		case key.Matches(msg, m.keyMap.Chat.PageDown):
+			if cmd := m.chat.ScrollByAndAnimate(m.chat.Height()); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.chat.SelectLastInView()
+		case key.Matches(msg, m.keyMap.Chat.HalfPageUp):
+			if cmd := m.chat.ScrollByAndAnimate(-m.chat.Height() / 2); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.chat.SelectFirstInView()
+		case key.Matches(msg, m.keyMap.Chat.HalfPageDown):
+			if cmd := m.chat.ScrollByAndAnimate(m.chat.Height() / 2); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.chat.SelectLastInView()
+		case key.Matches(msg, m.keyMap.Chat.Home):
+			if cmd := m.chat.ScrollToTopAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.chat.SelectFirst()
+		case key.Matches(msg, m.keyMap.Chat.End):
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.chat.SelectLast()
+		}
+		return tea.Batch(cmds...)
+	}
+
 	// Route all messages to dialog if one is open.
-	if m.dialog.HasDialogs() {
+	if m.dialog.HasVisibleDialogs() {
 		return m.handleDialogMsg(msg)
 	}
 
@@ -2704,8 +2757,12 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			if !m.isCompact {
 				editorWidth -= layout.sidebar.Dx()
 			}
-			editor := uv.NewStyledString(m.renderEditorView(editorWidth))
-			editor.Draw(scr, layout.editor)
+			if perm := m.minimizedPermission(); perm != nil {
+				m.drawMinimizedPermissionBanner(scr, layout.editor, perm)
+			} else {
+				editor := uv.NewStyledString(m.renderEditorView(editorWidth))
+				editor.Draw(scr, layout.editor)
+			}
 			m.inlineCursor = nil
 		}
 
@@ -2754,7 +2811,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// This needs to come last to overlay on top of everything. We always pass
 	// the full screen bounds because the dialogs will position themselves
 	// accordingly.
-	if m.dialog.HasDialogs() {
+	if m.dialog.HasVisibleDialogs() {
 		return m.dialog.Draw(scr, scr.Bounds())
 	}
 
@@ -3146,6 +3203,27 @@ func (m *UI) handleTextareaHeightChange(prevHeight int) tea.Cmd {
 		return m.chat.ScrollToBottomAndAnimate()
 	}
 	return nil
+}
+
+// minimizedPermission returns the minimized Permissions dialog if one exists.
+func (m *UI) minimizedPermission() *dialog.Permissions {
+	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
+		if perm, ok := d.(*dialog.Permissions); ok && perm.IsMinimized() {
+			return perm
+		}
+	}
+	return nil
+}
+
+// drawMinimizedPermissionBanner draws a banner in the editor area indicating
+// a permission dialog is minimized and how to restore it.
+func (m *UI) drawMinimizedPermissionBanner(scr uv.Screen, area uv.Rectangle, _ *dialog.Permissions) {
+	t := m.com.Styles
+	banner := t.Dialog.SecondaryText.
+		Width(area.Dx()).
+		Align(lipgloss.Center).
+		Render("⚠ Permission pending · press m to restore diff view")
+	uv.NewStyledString(banner).Draw(scr, area)
 }
 
 // updateTextarea updates the textarea for msg and then reconciles layout if
@@ -4354,7 +4432,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Normalize \r\n before the textarea sanitizer sees it.
 	msg.Content = strings.ReplaceAll(msg.Content, "\r\n", "\n")
 
-	if m.dialog.HasDialogs() {
+	if m.dialog.HasVisibleDialogs() {
 		return m.handleDialogMsg(msg)
 	}
 

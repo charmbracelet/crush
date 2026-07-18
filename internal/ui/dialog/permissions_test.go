@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -18,6 +19,23 @@ func newTestPermissions(t *testing.T) *Permissions {
 		ID:         "perm-test",
 		ToolCallID: "tool-call-test",
 		ToolName:   "bash",
+	}
+	return NewPermissions(com, perm)
+}
+
+func newTestDiffPermissions(t *testing.T) *Permissions {
+	t.Helper()
+	s := styles.CharmtonePantera()
+	com := &common.Common{Styles: &s}
+	perm := permission.PermissionRequest{
+		ID:         "perm-diff-test",
+		ToolCallID: "tool-call-diff-test",
+		ToolName:   "edit",
+		Params: tools.EditPermissionsParams{
+			FilePath:   "main.go",
+			OldContent: "hello",
+			NewContent: "world",
+		},
 	}
 	return NewPermissions(com, perm)
 }
@@ -95,4 +113,70 @@ func TestPermissions_EscapeDenies(t *testing.T) {
 	resp, ok := action.(ActionPermissionResponse)
 	require.True(t, ok)
 	require.Equal(t, PermissionDeny, resp.Action)
+}
+
+// TestPermissions_MinimizeTogglesDiffDialog verifies that pressing m on a diff
+// permission dialog toggles the minimized state.
+func TestPermissions_MinimizeTogglesDiffDialog(t *testing.T) {
+	t.Parallel()
+
+	p := newTestDiffPermissions(t)
+	require.False(t, p.IsMinimized())
+
+	p.HandleMsg(keyMsg('m'))
+	require.True(t, p.IsMinimized())
+
+	p.HandleMsg(keyMsg('m'))
+	require.False(t, p.IsMinimized())
+}
+
+// TestPermissions_MinimizeBlocksActionsWhenMinimized verifies that action keys
+// are ignored while the dialog is minimized.
+func TestPermissions_MinimizeBlocksActionsWhenMinimized(t *testing.T) {
+	t.Parallel()
+
+	actionKeys := []tea.KeyPressMsg{
+		keyMsg('a'), keyMsg('d'), keyMsg('s'),
+		{Code: tea.KeyEnter},
+		{Code: tea.KeyEscape},
+	}
+
+	for _, k := range actionKeys {
+		p := newTestDiffPermissions(t)
+		p.HandleMsg(keyMsg('m'))
+		require.True(t, p.IsMinimized())
+
+		action := p.HandleMsg(k)
+		require.Nil(t, action, "key %q should be blocked when minimized", k.Text)
+	}
+}
+
+// TestPermissions_MinimizeOnlyWorksWithDiffView verifies that m does nothing
+// on a non-diff permission dialog (e.g. bash).
+func TestPermissions_MinimizeOnlyWorksWithDiffView(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPermissions(t) // bash — no diff view
+	p.HandleMsg(keyMsg('m'))
+	require.False(t, p.IsMinimized())
+}
+
+// TestPermissions_HasVisibleDialogsRespectsMinimized verifies that the overlay
+// considers a minimized diff dialog as not visible.
+func TestPermissions_HasVisibleDialogsRespectsMinimized(t *testing.T) {
+	t.Parallel()
+
+	overlay := NewOverlay()
+	overlay.OpenDialog(newTestDiffPermissions(t))
+
+	require.True(t, overlay.HasVisibleDialogs())
+
+	perm := overlay.Dialog(PermissionsID).(*Permissions)
+	perm.HandleMsg(keyMsg('m'))
+
+	require.True(t, overlay.HasDialogs())
+	require.False(t, overlay.HasVisibleDialogs())
+
+	perm.HandleMsg(keyMsg('m'))
+	require.True(t, overlay.HasVisibleDialogs())
 }

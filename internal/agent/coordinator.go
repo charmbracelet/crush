@@ -249,7 +249,11 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	coderPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	// TODO: make this dynamic when we support multiple agents
+	coderPrompt, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithAvailableSubagentsXML(subagents.ToPromptXML(c.activeSubagentsList())),
+	)
 	if err != nil {
 		return nil, err
 	}

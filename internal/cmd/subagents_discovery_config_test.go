@@ -64,7 +64,7 @@ func TestLocalSubagentsDiscoveryConfig_ResolverExpandsEnvVar(t *testing.T) {
 	t.Setenv("CRUSH_TEST_SUBAGENT_VAR", varDir)
 
 	workingDir := t.TempDir()
-	store, err := config.Init(workingDir, "", false)
+	store, err := config.Init(t.Context(), workingDir, "", false)
 	require.NoError(t, err)
 
 	got := localSubagentsDiscoveryConfig(store)

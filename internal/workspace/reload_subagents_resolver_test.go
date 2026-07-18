@@ -37,7 +37,7 @@ func TestReloadSubagents_ExpandsEnvVarPath(t *testing.T) {
 
 	t.Setenv("CRUSH_TEST_SA_DIR", saDir)
 
-	store, err := config.Init(t.TempDir(), "", false)
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
 	require.NoError(t, err)
 
 	store.Config().Options.SubagentsPaths = append(

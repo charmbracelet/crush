@@ -55,7 +55,7 @@ func TestSetSubagentDisabled_DoesNotCopyOtherScopes(t *testing.T) {
 	isolateConfigHome(t)
 
 	workDir := t.TempDir()
-	store, err := config.Init(workDir, "", false)
+	store, err := config.Init(t.Context(), workDir, "", false)
 	require.NoError(t, err)
 
 	// Stand in for an entry inherited from the global scope: it is present in
@@ -86,7 +86,7 @@ func TestSetSubagentDisabled_RoundTripsWithinScope(t *testing.T) {
 	isolateConfigHome(t)
 
 	workDir := t.TempDir()
-	store, err := config.Init(workDir, "", false)
+	store, err := config.Init(t.Context(), workDir, "", false)
 	require.NoError(t, err)
 
 	mgr := subagents.NewManager(nil, nil, nil)
@@ -134,7 +134,7 @@ func TestSetSubagentDisabled_EnableOverridesBroaderScope(t *testing.T) {
 	t.Setenv("CRUSH_SUBAGENTS_DIR", saDir)
 
 	workDir := t.TempDir()
-	store, err := config.Init(workDir, "", false)
+	store, err := config.Init(t.Context(), workDir, "", false)
 	require.NoError(t, err)
 
 	// Disable at global scope, persisted to disk so it survives the config

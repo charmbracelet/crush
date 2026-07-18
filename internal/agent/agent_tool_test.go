@@ -392,7 +392,7 @@ func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
 
 	// Build a minimal offline config with one provider and one model, mirroring
 	// agenttest.NewCoordinator so no network call is needed.
-	cfg, err := config.Init(env.workingDir, "", false)
+	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 	require.NoError(t, err)
 
 	const (

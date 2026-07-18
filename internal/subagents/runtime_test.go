@@ -2,6 +2,8 @@ package subagents
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -266,3 +268,31 @@ func TestRuntime_ConcurrentAccess(t *testing.T) {
 
 // Compile-time assertion: Subscribe must return the correct channel type.
 var _ <-chan pubsub.Event[RuntimeEvent] = (*Runtime)(nil).Subscribe(context.Background())
+
+// TestRuntime_ListOrderIsDeterministic verifies that List returns entries in
+// start order (tie-broken by child session ID) rather than map-iteration
+// order, so UI rows don't shuffle across events.
+func TestRuntime_ListOrderIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	rt := NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	for _, id := range []string{"child-c", "child-a", "child-b", "child-e", "child-d"} {
+		rt.Register("parent", id, "agent-"+id, "red", "model")
+	}
+
+	first := rt.List("parent")
+	require.Len(t, first, 5)
+	require.True(t, slices.IsSortedFunc(first, func(a, b RunningEntry) int {
+		if c := a.StartedAt.Compare(b.StartedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ChildSessionID, b.ChildSessionID)
+	}), "List must be ordered by start time, then child session ID")
+
+	// Repeated calls must return the identical order.
+	for range 5 {
+		require.Equal(t, first, rt.List("parent"))
+	}
+}

@@ -2,6 +2,8 @@ package subagents
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,23 +123,15 @@ func (r *Runtime) SetStatus(childSessionID, status string) {
 	}
 }
 
-// List returns a snapshot of all running entries belonging to parentSessionID.
-// The returned slice is a copy; mutating it does not affect internal state.
-// Returns nil when r is nil or no entries match.
+// List returns a snapshot of all running entries belonging to parentSessionID,
+// ordered by start time (then child session ID). The returned slice is a copy;
+// mutating it does not affect internal state. Returns nil when r is nil or no
+// entries match.
 func (r *Runtime) List(parentSessionID string) []RunningEntry {
 	if r == nil {
 		return nil
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var out []RunningEntry
-	for _, e := range r.entries {
-		if e.ParentSessionID == parentSessionID {
-			out = append(out, e)
-		}
-	}
-	return out
+	return r.entriesFor(parentSessionID)
 }
 
 // Subscribe returns a channel that receives RuntimeEvents whenever the set of
@@ -169,16 +163,25 @@ func (r *Runtime) publish(parentSessionID string) {
 	})
 }
 
-// entriesFor returns a snapshot of all entries belonging to parentSessionID.
+// entriesFor returns a snapshot of all entries belonging to parentSessionID,
+// ordered by start time (then child session ID) — the entries map iterates in
+// random order, and unsorted output would make UI rows shuffle on every event.
 // Acquires the read lock; callers must hold no locks.
 func (r *Runtime) entriesFor(parentSessionID string) []RunningEntry {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	var entries []RunningEntry
 	for _, e := range r.entries {
 		if e.ParentSessionID == parentSessionID {
 			entries = append(entries, e)
 		}
 	}
+	r.mu.RUnlock()
+
+	slices.SortFunc(entries, func(a, b RunningEntry) int {
+		if c := a.StartedAt.Compare(b.StartedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ChildSessionID, b.ChildSessionID)
+	})
 	return entries
 }

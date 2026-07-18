@@ -515,25 +515,23 @@ the context, which only exists during config loading.
 `crush.json` and `crush.sh` coexist and merge through the same `jsons.Merge`
 deep-merge pipeline. The priority rules are unchanged from today:
 
-- Global configs (lowest priority) → parent directories → cwd (highest
-  priority)
+- Global configs (lowest priority) → parent directories → cwd (highest priority)
 - Within each directory, `crush.sh` is listed after `crush.json` in
   `configNames`, so on conflicting keys `.sh` wins over `.json`
 
 ### Same-directory coexistence
 
-If both `crush.json` and `crush.sh` exist in the **same directory**, Crush
-emits a warning and still merges them (`.sh` wins on conflicts). This handles
-the common case of migrating from JSON to Bash incrementally — you can move
-sections one at a time from `crush.json` to `crush.sh` without breaking
-anything.
+If both `crush.json` and `crush.sh` exist in the **same directory**, Crush emits
+a warning and still merges them (`.sh` wins on conflicts). This handles the
+common case of migrating from JSON to Bash incrementally — you can move sections
+one at a time from `crush.json` to `crush.sh` without breaking anything.
 
 ### Cross-directory coexistence
 
-This is the expected primary use case. A global `~/.config/crush/crush.json`
-can define base providers, while a project-level `crush.sh` overrides or adds
-providers, hooks, and MCPs. The merge is seamless — `.sh` output is JSON
-that feeds into the same pipeline.
+This is the expected primary use case. A global `~/.config/crush/crush.json` can
+define base providers, while a project-level `crush.sh` overrides or adds
+providers, hooks, and MCPs. The merge is seamless — `.sh` output is JSON that
+feeds into the same pipeline.
 
 ## Open Questions
 
@@ -569,3 +567,140 @@ that feeds into the same pipeline.
   builtins don't encourage it.
 - **Config file generation from Bash**: No `export` or `emit` command. The
   builtins write directly to Go memory; there's no intermediate JSON.
+
+## Command Reference
+
+The reference below reflects the builtins as implemented in
+`internal/shellconfig/`, written in a `--help` style. Booleans accept
+`true|1|yes` or `false|0|no`. Flags marked _(repeatable)_ accumulate into an
+array; each occurrence appends one value. Flags marked _(key value)_ consume two
+arguments.
+
+```text
+provider <id> [flags]
+    Define or extend a provider. Repeated calls with the same <id> merge.
+
+    --name NAME                  Display name (json: name)
+    --type TYPE                  Provider type, e.g. openai, anthropic (json: type)
+    --api-key KEY                API key (json: api_key)
+    --base-url URL               Base URL (json: base_url)
+    --disable BOOL               Disable the provider (json: disable)
+    --flat-rate BOOL             Flat-rate billing (json: flat_rate)
+    --system-prompt-prefix TEXT  Prefix injected into system prompt (json: system_prompt_prefix)
+    --extra-header KEY VALUE     Extra HTTP header, repeatable (json: extra_headers[KEY])
+```
+
+```text
+provider-model <provider-id> --id <model-id> [flags]
+    Append a custom model to the provider's models array. --id is required.
+
+    --id ID                      Model ID (required) (json: id)
+    --name NAME                  Display name (json: name)
+    --context-window N           Context window in tokens (json: context_window)
+    --default-max-tokens N       Default max output tokens (json: default_max_tokens)
+    --can-reason BOOL            Model supports reasoning (json: can_reason)
+    --supports-images BOOL       Model accepts image input (json: supports_attachments)
+    --cost-per-1m-in F           Input cost per 1M tokens (json: cost_per_1m_in)
+    --cost-per-1m-out F          Output cost per 1M tokens (json: cost_per_1m_out)
+    --reasoning-effort LEVEL     low|medium|high (json: default_reasoning_effort)
+```
+
+```text
+model <large|small> --provider <id> --model <name> [flags]
+    Select the model for the large or small slot.
+
+    --provider ID                Provider ID (required) (json: provider)
+    --model NAME                 Model name (required) (json: model)
+    --think                      Enable thinking; flag takes no value (json: think)
+    --reasoning-effort LEVEL     low|medium|high (json: reasoning_effort)
+    --max-tokens N               Max output tokens (json: max_tokens)
+    --temperature F              Sampling temperature (json: temperature)
+```
+
+```text
+mcp <name> [flags]
+    Define an MCP server. --type defaults to stdio.
+
+    --type TYPE                  stdio|sse|http (default: stdio) (json: type)
+    --command CMD                Executable for stdio servers (json: command)
+    --args ARG                   Command argument, repeatable (json: args)
+    --env KEY VALUE              Environment variable, repeatable (json: env[KEY])
+    --url URL                    URL for sse/http servers (json: url)
+    --header KEY VALUE           HTTP header, repeatable (json: headers[KEY])
+    --timeout N                  Startup timeout in seconds (json: timeout)
+    --disabled BOOL              Disable the server (json: disabled)
+    --disabled-tools TOOL        Deny a tool, repeatable (json: disabled_tools)
+    --enabled-tools TOOL         Allow a tool, repeatable (json: enabled_tools)
+```
+
+```text
+lsp <name> [flags]
+    Define an LSP server.
+
+    --command CMD                Executable to launch (json: command)
+    --args ARG                   Command argument, repeatable (json: args)
+    --env KEY VALUE              Environment variable, repeatable (json: env[KEY])
+    --filetypes TYPE             File type to attach to, repeatable (json: filetypes)
+    --root-markers MARKER        Root marker file, repeatable (json: root_markers)
+    --timeout N                  Startup timeout in seconds (json: timeout)
+    --disabled BOOL              Disable the server (json: disabled)
+    --init-options JSON          Initialization options as a JSON string (json: init_options)
+    --options JSON               Server options as a JSON string (json: options)
+```
+
+```text
+permissions [flags]
+    Add tools to the allow list.
+
+    --allow TOOL                 Allow a tool, repeatable (json: allowed_tools)
+```
+
+```text
+hook <event> --command <cmd> [flags]
+    Append a hook to the given event. --command is required.
+
+    --command CMD                Shell command to run (required) (json: command)
+    --matcher REGEX              Tool name matcher (json: matcher)
+    --timeout N                  Timeout in seconds (json: timeout)
+    --name NAME                  Hook name (json: name)
+```
+
+```text
+option <key> [value]
+    Set a single field under options. Positional key/value form (no --flags).
+    Boolean keys may omit the value (defaults to true). List keys append on
+    each call.
+
+    Boolean keys (value optional, defaults true):
+      debug                        (json: debug)
+      debug-lsp                    (json: debug_lsp)
+      auto-lsp                     (json: auto_lsp)
+      progress                     (json: progress)
+
+    Boolean keys phrased positively, stored as their negation
+    (e.g. "metrics false" -> disable_metrics true):
+      metrics                      (json: disable_metrics)
+      notifications                (json: disable_notifications)
+      auto-summarize               (json: disable_auto_summarize)
+      provider-auto-update         (json: disable_provider_auto_update)
+      default-providers            (json: disable_default_providers)
+
+    String keys (value required):
+      data-directory VALUE         (json: data_directory)
+      initialize-as VALUE          (json: initialize_as)
+      notification-style VALUE     (json: notification_style)
+
+    List keys (value required, repeatable):
+      context-paths VALUE          (json: context_paths)
+      global-context-paths VALUE   (json: global_context_paths)
+      skills-paths VALUE           (json: skills_paths)
+      disabled-tools VALUE         (json: disabled_tools)
+      disabled-skills VALUE        (json: disabled_skills)
+
+    Examples:
+      option debug true
+      option progress false
+      option metrics false
+      option data-directory .crush
+      option context-paths .cursorrules
+```

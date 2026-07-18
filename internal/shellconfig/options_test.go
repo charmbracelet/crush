@@ -13,7 +13,7 @@ func TestOption_Bool(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option debug true
-option no-progress`
+option progress false`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -77,7 +77,7 @@ func TestOption_BoolShorthand(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option debug
-option no-metrics`
+option metrics`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -89,6 +89,25 @@ option no-metrics`
 	opts := result["options"].(map[string]any)
 	require.Equal(t, true, opts["debug"])
 	require.Equal(t, false, opts["disable_metrics"])
+}
+
+func TestOption_InvertedBool(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option metrics false
+option notifications true`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Equal(t, true, opts["disable_metrics"])
+	require.Equal(t, false, opts["disable_notifications"])
 }
 
 func TestOption_UnknownKey(t *testing.T) {

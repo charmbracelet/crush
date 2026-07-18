@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
-	"strings"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -15,22 +14,22 @@ import (
 //
 // Usage: option <key> <value>
 //
-// Sets a single option field. The key is the JSON field name (snake_case).
-// The value is parsed as a boolean, integer, float, or string depending on
-// the field. For list fields (context_paths, disabled_tools, etc.), each
-// call appends to the list.
+// Sets a single option field. The key is a kebab-case name; for list fields
+// (context-paths, disabled-tools, etc.) each call appends to the list.
+//
+// Some config fields are phrased negatively (disable_metrics). Those are
+// exposed positively — the user sets "metrics false" and it is stored as
+// "disable_metrics true".
 //
 // Examples:
 //
-//	option no-progress true
 //	option data-directory .crush
 //	option context-paths .cursorrules
-//	option disable-metrics true
+//	option metrics false
 //	option debug true
 //	option auto-lsp false
 //
 // Boolean shortcuts: for boolean fields, omitting the value sets it to true.
-// Negated keys (no-progress, no-auto-lsp) set the corresponding field to false.
 func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := shell.ConfigBuilderFromCtx(ctx)
 	if b == nil {
@@ -50,19 +49,7 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		val = args[2]
 	}
 
-	// Negated boolean keys: no-foo sets the corresponding field to false
-	if strings.HasPrefix(key, "no-") {
-		realKey := key[3:]
-		jsonKey := negatedOptionKeyMap(realKey)
-		if jsonKey == "" {
-			return usage(stderr, fmt.Sprintf("option: unknown key %q", key))
-		}
-		o[jsonKey] = false
-		slog.Info("Option set in shell config", "key", key, "value", false)
-		return f.append(b)
-	}
-
-	jsonKey := optionKeyMap(key)
+	jsonKey, inverted := optionKeyMap(key)
 	if jsonKey == "" {
 		return usage(stderr, fmt.Sprintf("option: unknown key %q", key))
 	}
@@ -77,17 +64,21 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return f.append(b)
 	}
 
-	// Boolean fields: if no value, default to true
+	// Boolean fields: if no value, default to true. Inverted keys store the
+	// negation, so a positive key like "metrics" maps onto "disable_metrics".
 	if isBoolOption(jsonKey) {
-		if val == "" {
-			o[jsonKey] = true
-		} else {
-			bv, err := parseBool(val)
+		bv := true
+		if val != "" {
+			parsed, err := parseBool(val)
 			if err != nil {
 				return usage(stderr, fmt.Sprintf("option: %s expects true/false, got %q", key, val))
 			}
-			o[jsonKey] = bv
+			bv = parsed
 		}
+		if inverted {
+			bv = !bv
+		}
+		o[jsonKey] = bv
 		slog.Info("Option set in shell config", "key", key, "value", o[jsonKey])
 		return f.append(b)
 	}
@@ -115,75 +106,57 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	return f.append(b)
 }
 
-// negatedOptionKeyMap maps the part after "no-" to the JSON field name
-// that should be set to false. Returns empty string for unknown keys.
-func negatedOptionKeyMap(key string) string {
+// optionKeyMap maps user-facing kebab-case keys to JSON field names. The
+// second return value reports whether the key's boolean value must be
+// inverted before storing: several config fields are phrased negatively
+// (disable_metrics), but users set the positive sense (metrics false).
+// Returns an empty jsonKey for unknown keys.
+func optionKeyMap(key string) (jsonKey string, inverted bool) {
 	switch key {
-	case "progress":
-		return "progress"
-	case "auto-lsp":
-		return "auto_lsp"
-	case "metrics":
-		return "disable_metrics"
-	case "notifications":
-		return "disable_notifications"
-	case "auto-summarize":
-		return "disable_auto_summarize"
-	case "provider-auto-update":
-		return "disable_provider_auto_update"
-	case "default-providers":
-		return "disable_default_providers"
-	default:
-		return ""
-	}
-}
-
-// optionKeyMap maps user-facing kebab-case keys to JSON field names.
-// Returns empty string for unknown keys.
-func optionKeyMap(key string) string {
-	switch key {
-	// Boolean fields
+	// Boolean fields (stored as-is).
 	case "debug":
-		return "debug"
+		return "debug", false
 	case "debug-lsp":
-		return "debug_lsp"
-	case "disable-auto-summarize":
-		return "disable_auto_summarize"
-	case "disable-provider-auto-update":
-		return "disable_provider_auto_update"
-	case "disable-default-providers":
-		return "disable_default_providers"
-	case "disable-metrics":
-		return "disable_metrics"
-	case "disable-notifications":
-		return "disable_notifications"
+		return "debug_lsp", false
 	case "auto-lsp":
-		return "auto_lsp"
+		return "auto_lsp", false
 	case "progress":
-		return "progress"
+		return "progress", false
+
+	// Boolean fields exposed positively but stored as their negation.
+	case "metrics":
+		return "disable_metrics", true
+	case "notifications":
+		return "disable_notifications", true
+	case "auto-summarize":
+		return "disable_auto_summarize", true
+	case "provider-auto-update":
+		return "disable_provider_auto_update", true
+	case "default-providers":
+		return "disable_default_providers", true
 
 	// String fields
 	case "data-directory":
-		return "data_directory"
+		return "data_directory", false
 	case "initialize-as":
-		return "initialize_as"
+		return "initialize_as", false
 	case "notification-style":
-		return "notification_style"
+		return "notification_style", false
 
 	// List fields
 	case "context-paths":
-		return "context_paths"
+		return "context_paths", false
 	case "global-context-paths":
-		return "global_context_paths"
+		return "global_context_paths", false
 	case "skills-paths":
-		return "skills_paths"
+		return "skills_paths", false
 	case "disabled-tools":
-		return "disabled_tools"
+		return "disabled_tools", false
 	case "disabled-skills":
-		return "disabled_skills"
+		return "disabled_skills", false
 
 	default:
-		return ""
+		return "", false
 	}
 }
 
@@ -198,7 +171,7 @@ func isBoolOption(jsonKey string) bool {
 	}
 }
 
-func isIntOption(jsonKey string) bool {
+func isIntOption(_ string) bool {
 	return false
 }
 

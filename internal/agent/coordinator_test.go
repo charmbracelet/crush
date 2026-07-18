@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // mockSessionAgent is a minimal mock for the SessionAgent interface.
@@ -760,7 +761,8 @@ func TestBuildAgent_SubagentModel(t *testing.T) {
 		// Zero-value subagentModel must be accepted without panicking. With no
 		// models configured, buildNamedModel fails before any prompt is needed,
 		// verifying the struct parameter is wired into model-selection logic.
-		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{})
+		var wg errgroup.Group
+		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{}, &wg)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "model")
 	})

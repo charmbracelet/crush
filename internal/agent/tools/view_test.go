@@ -321,6 +321,20 @@ func TestReadBuiltinFile(t *testing.T) {
 		require.NoError(t, err)
 		require.NotContains(t, resp.Content, "     1|")
 	})
+
+	t.Run("negative offset does not panic", func(t *testing.T) {
+		t.Parallel()
+
+		// A model can pass any int as offset; a negative value previously
+		// reached lines[offset:] and panicked with "slice bounds out of
+		// range [-1:]". It should clamp to the start of the file instead.
+		resp, err := readBuiltinFile(ViewParams{
+			FilePath: "crush://skills/crush-config/SKILL.md",
+			Offset:   -1,
+		}, nil)
+		require.NoError(t, err)
+		require.Contains(t, resp.Content, "Crush Configuration")
+	})
 }
 
 func TestSniffImageMimeType(t *testing.T) {

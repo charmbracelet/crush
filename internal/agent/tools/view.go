@@ -461,7 +461,9 @@ func readBuiltinFile(params ViewParams, skillTracker *skills.Tracker) (fantasy.T
 	}
 
 	lines := strings.Split(content, "\n")
-	offset := min(params.Offset, len(lines))
+	// Clamp to [0, len(lines)]: a model can pass a negative offset, and a bare
+	// min() would leave it negative, panicking on lines[offset:].
+	offset := max(0, min(params.Offset, len(lines)))
 	lines = lines[offset:]
 
 	hasMore := len(lines) > limit

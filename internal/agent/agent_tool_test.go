@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -465,4 +466,106 @@ func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
 	require.True(t, resp.IsError)
 	// The subagent name must appear in the error message.
 	require.Contains(t, resp.Content, "broken")
+}
+
+// stubRequestPermissions stubs permission.Service to record Request calls and
+// return a configured answer. All other methods are inherited (nil) and must
+// not be called by the code under test.
+type stubRequestPermissions struct {
+	permission.Service
+	requests []permission.CreatePermissionRequest
+	grant    bool
+}
+
+func (s *stubRequestPermissions) Request(_ context.Context, opts permission.CreatePermissionRequest) (bool, error) {
+	s.requests = append(s.requests, opts)
+	return s.grant, nil
+}
+
+// TestConfirmBypassPermissions verifies the per-dispatch confirmation gate for
+// permissionMode: bypassPermissions. User-scope (global-dir) definitions pass
+// without a prompt; anything else — which can arrive with a cloned repository
+// — requires an explicit user confirmation on every dispatch, and a denial
+// blocks the dispatch with a tool-error response.
+//
+// Not parallel: subtests pin the global subagents dir via CRUSH_SUBAGENTS_DIR
+// so scope detection is hermetic.
+func TestConfirmBypassPermissions(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", globalDir)
+
+	t.Run("no bypass mode never prompts", func(t *testing.T) {
+		perms := &stubRequestPermissions{grant: false}
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{Name: "plain", FilePath: filepath.Join(projectDir, "plain.md")}
+
+		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
+		require.True(t, ok)
+		require.Empty(t, perms.requests)
+	})
+
+	t.Run("user-scoped bypass never prompts", func(t *testing.T) {
+		perms := &stubRequestPermissions{grant: false}
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{
+			Name:           "trusted",
+			PermissionMode: subagents.PermissionModeBypassPermissions,
+			FilePath:       filepath.Join(globalDir, "trusted.md"),
+		}
+
+		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
+		require.True(t, ok)
+		require.Empty(t, perms.requests)
+	})
+
+	t.Run("project-scoped bypass denied blocks dispatch", func(t *testing.T) {
+		perms := &stubRequestPermissions{grant: false}
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{
+			Name:           "repo-agent",
+			PermissionMode: subagents.PermissionModeBypassPermissions,
+			FilePath:       filepath.Join(projectDir, ".crush", "subagents", "repo-agent.md"),
+		}
+
+		resp, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
+		require.False(t, ok)
+		require.True(t, resp.IsError)
+		require.Contains(t, resp.Content, "repo-agent")
+		require.Len(t, perms.requests, 1)
+		require.Equal(t, bypassPermissionsToolName, perms.requests[0].ToolName)
+		require.Equal(t, "repo-agent", perms.requests[0].Action)
+	})
+
+	// An allowlist entry or hook approval for the agent tool must not
+	// answer the bypass prompt: the real service has to ask the user, which
+	// here times out and blocks the dispatch.
+	t.Run("agent allowlist and hook approval do not confirm bypass", func(t *testing.T) {
+		perms := permission.NewPermissionService(projectDir, false, []string{AgentToolName})
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{
+			Name:           "repo-agent",
+			PermissionMode: subagents.PermissionModeBypassPermissions,
+			FilePath:       filepath.Join(projectDir, ".crush", "subagents", "repo-agent.md"),
+		}
+
+		ctx, cancel := context.WithTimeout(permission.WithHookApproval(t.Context(), "call"), 50*time.Millisecond)
+		defer cancel()
+		_, ok := c.confirmBypassPermissions(ctx, sa, "sess", "call")
+		require.False(t, ok)
+	})
+
+	t.Run("project-scoped bypass granted proceeds", func(t *testing.T) {
+		perms := &stubRequestPermissions{grant: true}
+		c := &coordinator{permissions: perms}
+		sa := &subagents.Subagent{
+			Name:           "repo-agent",
+			PermissionMode: subagents.PermissionModeBypassPermissions,
+			FilePath:       filepath.Join(projectDir, ".crush", "subagents", "repo-agent.md"),
+		}
+
+		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
+		require.True(t, ok)
+		require.Len(t, perms.requests, 1)
+	})
 }

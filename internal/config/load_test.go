@@ -131,6 +131,16 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.Contains(t, got, GlobalConfig())
 		require.Contains(t, got, GlobalConfigData())
 	})
+
+	t.Run("global shell config (crush.sh) is included", func(t *testing.T) {
+		project := t.TempDir()
+
+		got := lookupConfigs(project)
+		// A global crush.sh must be discoverable alongside crush.json,
+		// otherwise ~/.config/crush/crush.sh would silently never load.
+		require.Contains(t, got, shConfigVariant(GlobalConfig()))
+		require.Contains(t, got, shConfigVariant(GlobalConfigData()))
+	})
 }
 
 func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {

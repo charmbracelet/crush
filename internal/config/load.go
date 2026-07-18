@@ -865,10 +865,16 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 // up. Global user-level config locations are always included
 // regardless of the boundary.
 func lookupConfigs(cwd string) []string {
-	// prepend default config paths
+	// Prepend default config paths. Each global location contributes both a
+	// JSON and a shell config, so a global crush.sh (e.g. in
+	// ~/.config/crush/) is discovered just like a project-level one. The .sh
+	// sibling is listed after the .json so it wins on conflicts, matching the
+	// same-directory precedence rule. Missing files are skipped when loaded.
 	configPaths := []string{
 		GlobalConfig(),
+		shConfigVariant(GlobalConfig()),
 		GlobalConfigData(),
+		shConfigVariant(GlobalConfigData()),
 	}
 
 	configNames := []string{appName + ".json", "." + appName + ".json", appName + ".sh", "." + appName + ".sh"}
@@ -1066,6 +1072,13 @@ func GlobalConfig() string {
 		return filepath.Join(crushGlobal, fmt.Sprintf("%s.json", appName))
 	}
 	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
+}
+
+// shConfigVariant returns the crush.sh path that sits alongside a given
+// crush.json path (same directory, .sh extension). Used so global config
+// locations pick up a shell config, not just JSON.
+func shConfigVariant(jsonPath string) string {
+	return strings.TrimSuffix(jsonPath, filepath.Ext(jsonPath)) + ".sh"
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the

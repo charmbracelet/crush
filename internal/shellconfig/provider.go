@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleProvider implements the `provider` builtin.
@@ -16,10 +14,9 @@ import (
 //	[--base-url URL] [--disable true|false] [--flat-rate true|false]
 //	[--system-prompt-prefix TEXT] [--extra-header KEY VALUE]
 //
-// Each call appends a provider fragment to the ConfigBuilder. Multiple calls
-// with the same ID will be deep-merged by the config loader.
+// Repeated calls with the same <id> update the same provider.
 func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := shell.ConfigBuilderFromCtx(ctx)
+	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
@@ -29,8 +26,7 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 
 	id := args[1]
 	slog.Info("Provider defined in shell config", "provider", id)
-	f := newFragmentBuilder()
-	p := f.nestedMap("providers", id)
+	p := childMap(b.section("providers"), id)
 
 	i := 2
 	for i < len(args) {
@@ -82,21 +78,12 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			eh, _ := p["extra_headers"].(map[string]any)
-			if eh == nil {
-				eh = make(map[string]any)
-				p["extra_headers"] = eh
-			}
-			eh[k] = v
+			childMap(p, "extra_headers")[k] = v
 		default:
 			return usage(stderr, fmt.Sprintf("provider: unknown flag %s", args[i]))
 		}
 	}
 
-	if err := f.append(b); err != nil {
-		slog.Error("Failed to append provider fragment", "provider", id, "error", err)
-		return err
-	}
-	slog.Debug("Provider fragment appended", "provider", id)
+	slog.Debug("Provider recorded", "provider", id)
 	return nil
 }

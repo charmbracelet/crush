@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleLSP implements the `lsp` builtin.
@@ -17,7 +15,7 @@ import (
 //	[--timeout N] [--disabled true|false]
 //	[--init-options JSON] [--options JSON]
 func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := shell.ConfigBuilderFromCtx(ctx)
+	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
@@ -27,13 +25,7 @@ func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 
 	name := args[1]
 	slog.Info("LSP server defined in shell config", "name", name)
-	f := newFragmentBuilder()
-	if f.m["lsp"] == nil {
-		f.m["lsp"] = make(map[string]any)
-	}
-	lsps := f.m["lsp"].(map[string]any)
-	l := make(map[string]any)
-	lsps[name] = l
+	l := childMap(b.section("lsp"), name)
 
 	i := 2
 	for i < len(args) {
@@ -55,12 +47,7 @@ func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			envMap, ok := l["env"].(map[string]any)
-			if !ok {
-				envMap = make(map[string]any)
-				l["env"] = envMap
-			}
-			envMap[k] = v
+			childMap(l, "env")[k] = v
 		case "--filetypes":
 			v, err := flagStr(args, &i, "filetypes")
 			if err != nil {
@@ -110,10 +97,6 @@ func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 		}
 	}
 
-	if err := f.append(b); err != nil {
-		slog.Error("Failed to append LSP fragment", "name", name, "error", err)
-		return err
-	}
-	slog.Debug("LSP fragment appended", "name", name)
+	slog.Debug("LSP recorded", "name", name)
 	return nil
 }

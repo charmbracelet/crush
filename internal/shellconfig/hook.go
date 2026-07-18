@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleHook implements the `hook` builtin.
@@ -15,7 +13,7 @@ import (
 //
 // Multiple hooks for the same event accumulate into an array.
 func handleHook(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := shell.ConfigBuilderFromCtx(ctx)
+	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
@@ -63,18 +61,10 @@ func handleHook(ctx context.Context, args []string, stdin io.Reader, stdout, std
 		return usage(stderr, "hook: --command is required")
 	}
 
-	f := newFragmentBuilder()
-	if f.m["hooks"] == nil {
-		f.m["hooks"] = make(map[string]any)
-	}
-	hooks := f.m["hooks"].(map[string]any)
+	hooks := b.section("hooks")
 	arr, _ := hooks[event].([]any)
 	hooks[event] = append(arr, h)
 
-	if err := f.append(b); err != nil {
-		slog.Error("Failed to append hook fragment", "event", event, "error", err)
-		return err
-	}
-	slog.Debug("Hook fragment appended", "event", event)
+	slog.Debug("Hook recorded", "event", event)
 	return nil
 }

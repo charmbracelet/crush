@@ -5,21 +5,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handlePermissions implements the `permissions` builtin.
 //
 // Usage: permissions --allow TOOL [--allow TOOL ...]
 func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := shell.ConfigBuilderFromCtx(ctx)
+	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
 	slog.Info("Permissions defined in shell config")
-	f := newFragmentBuilder()
-	perms := f.rootMap("permissions")
+	perms := b.section("permissions")
 
 	i := 1
 	for i < len(args) {
@@ -35,10 +32,6 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 		}
 	}
 
-	if err := f.append(b); err != nil {
-		slog.Error("Failed to append permissions fragment", "error", err)
-		return err
-	}
-	slog.Debug("Permissions fragment appended")
+	slog.Debug("Permissions recorded")
 	return nil
 }

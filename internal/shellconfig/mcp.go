@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleMCP implements the `mcp` builtin.
@@ -17,7 +15,7 @@ import (
 //	[--timeout N] [--disabled true|false]
 //	[--disabled-tools TOOL ...] [--enabled-tools TOOL ...]
 func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := shell.ConfigBuilderFromCtx(ctx)
+	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
@@ -27,16 +25,12 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 
 	name := args[1]
 	slog.Info("MCP server defined in shell config", "name", name)
-	f := newFragmentBuilder()
-	if f.m["mcp"] == nil {
-		f.m["mcp"] = make(map[string]any)
-	}
-	mcps := f.m["mcp"].(map[string]any)
-	m := make(map[string]any)
-	mcps[name] = m
+	m := childMap(b.section("mcp"), name)
 
 	// Default type is stdio.
-	m["type"] = "stdio"
+	if _, ok := m["type"]; !ok {
+		m["type"] = "stdio"
+	}
 
 	i := 2
 	for i < len(args) {
@@ -64,12 +58,7 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			envMap, ok := m["env"].(map[string]any)
-			if !ok {
-				envMap = make(map[string]any)
-				m["env"] = envMap
-			}
-			envMap[k] = v
+			childMap(m, "env")[k] = v
 		case "--url":
 			v, err := flagStr(args, &i, "url")
 			if err != nil {
@@ -81,12 +70,7 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
-			hMap, ok := m["headers"].(map[string]any)
-			if !ok {
-				hMap = make(map[string]any)
-				m["headers"] = hMap
-			}
-			hMap[k] = v
+			childMap(m, "headers")[k] = v
 		case "--timeout":
 			v, err := flagInt(args, &i, "timeout")
 			if err != nil {
@@ -116,10 +100,6 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 		}
 	}
 
-	if err := f.append(b); err != nil {
-		slog.Error("Failed to append MCP fragment", "name", name, "error", err)
-		return err
-	}
-	slog.Debug("MCP fragment appended", "name", name)
+	slog.Debug("MCP recorded", "name", name)
 	return nil
 }

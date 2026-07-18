@@ -1,19 +1,17 @@
 // Package shellconfig implements the Bash-powered config format for Crush.
 //
-// It provides shell builtins (provider, model, mcp, lsp, permissions, hook,
-// options) that populate config via JSON fragments stored on a
-// shell.ConfigBuilder. The builtins are registered at init time via
+// It provides shell builtins (provider, provider-model, model, mcp, lsp,
+// permissions, hook, option) that populate config by mutating a ConfigBuilder
+// stored on the shell context. The builtins are registered at init time via
 // shell.RegisterBuiltin and are gated by the ConfigBuilder on the context —
 // they are no-ops during normal bash tool execution.
 //
-// This package sits between shell and config: it imports shell (for the
-// ConfigBuilder and RegisterBuiltin), and config imports shell (for
-// ExpandValue). The shellconfig package is imported by the config loader
-// to run crush.sh files.
+// This package sits between shell and config: it imports shell (for
+// RegisterBuiltin and Run), and config imports shellconfig to run crush.sh
+// files.
 package shellconfig
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,52 +32,6 @@ func init() {
 	shell.RegisterBuiltin("option", handleOption)
 }
 
-// fragmentBuilder helps accumulate key-value pairs into a JSON object
-// before appending to the ConfigBuilder.
-type fragmentBuilder struct {
-	m map[string]any
-}
-
-func newFragmentBuilder() *fragmentBuilder {
-	return &fragmentBuilder{m: make(map[string]any)}
-}
-
-// nestedMap returns the map at f.m[parent][key], creating both levels if
-// needed. The returned map can be mutated directly by callers.
-func (f *fragmentBuilder) nestedMap(parent, key string) map[string]any {
-	p, ok := f.m[parent].(map[string]any)
-	if !ok {
-		p = make(map[string]any)
-		f.m[parent] = p
-	}
-	inner, ok := p[key].(map[string]any)
-	if !ok {
-		inner = make(map[string]any)
-		p[key] = inner
-	}
-	return inner
-}
-
-// rootMap returns the map at f.m[key], creating it if needed.
-func (f *fragmentBuilder) rootMap(key string) map[string]any {
-	m, ok := f.m[key].(map[string]any)
-	if !ok {
-		m = make(map[string]any)
-		f.m[key] = m
-	}
-	return m
-}
-
-// append marshals the fragment to JSON and adds it to the builder.
-func (f *fragmentBuilder) append(b *shell.ConfigBuilder) error {
-	data, err := json.Marshal(f.m)
-	if err != nil {
-		return err
-	}
-	b.AppendFragment(data)
-	return nil
-}
-
 // flagStr returns the value at args[i+1] as a string and advances i by 2.
 func flagStr(args []string, i *int, flag string) (string, error) {
 	if *i+1 >= len(args) {
@@ -90,7 +42,8 @@ func flagStr(args []string, i *int, flag string) (string, error) {
 	return v, nil
 }
 
-// flagBool parses the next arg as a boolean for the given flag.
+// flagBool parses the next arg as a boolean for the given flag. Values are
+// case-insensitive.
 func flagBool(args []string, i *int, flag string) (bool, error) {
 	v, err := flagStr(args, i, flag)
 	if err != nil {
@@ -143,26 +96,21 @@ func flagKeyValue(args []string, i *int, flag string) (string, string, error) {
 	return k, v, nil
 }
 
-// jsonUnmarshal is a wrapper around json.Unmarshal for use by handlers
-// that accept JSON string flags (e.g. --init-options).
+// jsonUnmarshal is a wrapper around json.Unmarshal for use by handlers that
+// accept JSON string flags (e.g. --init-options).
 func jsonUnmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
 }
 
-// usage prints a usage message to stderr and returns exit code 2.
+// usage prints a usage message to stderr and returns an error.
 func usage(stderr io.Writer, msg string) error {
 	fmt.Fprintln(stderr, msg)
 	return fmt.Errorf("%s", msg)
 }
 
-// appendArr returns the slice for the given key, appending value. If the key
-// doesn't exist yet, creates a new slice.
+// appendArr appends value to the string slice stored at m[key], creating it if
+// needed, and returns the result.
 func appendArr(m map[string]any, key, value string) []any {
 	arr, _ := m[key].([]any)
 	return append(arr, value)
 }
-
-// Compiler note: ctx, stdin, stdout params are used by some handlers and
-// unused by others. They exist for signature compatibility with
-// shell.BuiltinHandler.
-var _ = context.Background

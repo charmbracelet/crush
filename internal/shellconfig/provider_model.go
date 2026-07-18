@@ -6,8 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"strings"
-
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleProviderModel implements the `provider-model` builtin.
@@ -22,7 +20,7 @@ import (
 // The first positional arg is the provider ID. --id (the model ID) is
 // required. Each call appends a model to the provider's "models" array.
 func handleProviderModel(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := shell.ConfigBuilderFromCtx(ctx)
+	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
@@ -155,19 +153,10 @@ func handleProviderModel(ctx context.Context, args []string, stdin io.Reader, st
 		model["default_reasoning_effort"] = reasoningEffort
 	}
 
-	f := newFragmentBuilder()
-	p := f.nestedMap("providers", providerID)
-	models := p["models"]
-	if models == nil {
-		models = make([]any, 0)
-	}
-	modelsArr, _ := models.([]any)
+	p := childMap(b.section("providers"), providerID)
+	modelsArr, _ := p["models"].([]any)
 	p["models"] = append(modelsArr, model)
 
-	if err := f.append(b); err != nil {
-		slog.Error("Failed to append provider-model fragment", "provider", providerID, "model", modelID, "error", err)
-		return err
-	}
-	slog.Debug("Provider model fragment appended", "provider", providerID, "model", modelID)
+	slog.Debug("Provider model recorded", "provider", providerID, "model", modelID)
 	return nil
 }

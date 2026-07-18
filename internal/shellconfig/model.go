@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // handleModel implements the `model` builtin.
@@ -16,7 +14,7 @@ import (
 //	[--think] [--reasoning-effort low|medium|high]
 //	[--max-tokens N] [--temperature F]
 func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := shell.ConfigBuilderFromCtx(ctx)
+	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
@@ -32,13 +30,7 @@ func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		return usage(stderr, fmt.Sprintf("model: type must be 'large' or 'small', got %q", modelType))
 	}
 
-	f := newFragmentBuilder()
-	if f.m["models"] == nil {
-		f.m["models"] = make(map[string]any)
-	}
-	models := f.m["models"].(map[string]any)
-	m := make(map[string]any)
-	models[modelType] = m
+	m := childMap(b.section("models"), modelType)
 
 	i := 2
 	for i < len(args) {
@@ -88,10 +80,6 @@ func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		return usage(stderr, "model: --provider is required")
 	}
 
-	if err := f.append(b); err != nil {
-		slog.Error("Failed to append model fragment", "type", modelType, "error", err)
-		return err
-	}
-	slog.Debug("Model fragment appended", "type", modelType)
+	slog.Debug("Model recorded", "type", modelType)
 	return nil
 }

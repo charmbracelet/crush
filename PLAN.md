@@ -593,14 +593,61 @@ feeds into the same pipeline.
 
 ## Non-Goals
 
-- **Replacing JSON config**: JSON and Bash configs coexist and merge. Users
-  choose whichever they prefer.
+- **Replacing JSON config (short term)**: for now JSON and Bash configs
+  coexist and merge. Longer term the Bash format is intended to supersede JSON
+  — see "Architecture Evolution" below for the phased retirement plan.
 - **Turing-complete config evaluation**: While Bash is Turing-complete, the
   config builtins are a flat set of commands. No loops over providers, no
   generated config sections. Users can do this in Bash if they want, but the
   builtins don't encourage it.
 - **Config file generation from Bash**: No `export` or `emit` command. The
   builtins write directly to Go memory; there's no intermediate JSON.
+
+## Architecture Evolution: Structured Builder and JSON Sunset
+
+The first implementation accumulated one JSON fragment per builtin call and
+deep-merged them with `jsons.Merge`. That works for purely additive config,
+but a `crush.sh` is an **imperative, ordered** script (statements run top to
+bottom, `source` runs inline), and the fragment approach flattens that order
+away. Every non-additive feature (`option reset`, `provider … remove`) then
+needs a marker value plus a post-merge resolver pass to reconstruct intent —
+machinery that grows with each verb.
+
+We are therefore moving to a **structured builder**: builtins mutate a shared
+nested `map[string]any` directly, in execution order, and the script emits one
+clean JSON object at the end. Removal and reset become ordinary map/slice
+operations (`delete`, filter, `= nil`) — no sentinels, no resolver passes.
+
+### Per-file vs cross-file
+
+- **Within a file** (including `source`d includes): resolved imperatively by
+  the builder. `reset`/`remove` are exact and order-correct.
+- **Across files**: each config file still contributes to the final config in
+  precedence order.
+
+### Precedence — local wins
+
+Config files are folded **least-specific first, most-specific last**, because
+the builder is last-wins: whatever is applied last overrides earlier state.
+
+    global  →  parent dirs  →  cwd/local        (local applied last, local wins)
+
+This ordering is also what makes cross-file removal work: a local
+`provider openai remove` can only drop what a global config set if local is
+applied *after* global.
+
+### Phased path (JSON is slated for retirement)
+
+1. **Structured builder, per-file scope** *(current work)*. Mutate the model,
+   emit one JSON blob per `.sh`, keep merging with `crush.json` via the
+   existing pipeline. Removes the sentinel/marker machinery; `reset`/`remove`
+   work within a file.
+2. **Unified ingestion**. Feed every config file into one ordered builder in
+   precedence order (`.json` applied as a declarative deep-set, `.sh` as
+   imperative ops); emit `config.Config` directly. Cross-file `remove`/override
+   starts working. Same-dir rule: `.json` applied before `.sh`.
+3. **Retire JSON**. Delete the `.json` ingestion path. The builder is the only
+   config format.
 
 ## Command Reference
 

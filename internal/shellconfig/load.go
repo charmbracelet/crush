@@ -2,7 +2,6 @@ package shellconfig
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,21 +9,21 @@ import (
 
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/qjebbs/go-jsons"
 )
 
-// LoadShellConfig executes a crush.sh script and returns the merged JSON
-// config bytes. The script uses config builtins (provider, model, mcp, etc.)
-// that accumulate JSON fragments on a ConfigBuilder. After execution, the
-// fragments are deep-merged into a single JSON object.
+// LoadShellConfig executes a crush.sh script and returns its config as a
+// single JSON object. The script uses config builtins (provider, model, mcp,
+// etc.) that mutate a ConfigBuilder in execution order; the builder is then
+// marshaled to JSON, which the config loader merges with any other config
+// files.
 //
 // The script runs with the same shell interpreter used by the bash tool and
 // hooks, so source, $VAR, $(cmd), and other shell constructs all work.
 func LoadShellConfig(path string, src []byte) ([]byte, error) {
 	slog.Info("Loading shell config", "path", path)
 
-	builder := &shell.ConfigBuilder{}
-	ctx := shell.WithConfigBuilder(context.Background(), builder)
+	builder := newConfigBuilder()
+	ctx := withConfigBuilder(context.Background(), builder)
 
 	cwd := filepath.Dir(path)
 
@@ -42,32 +41,17 @@ func LoadShellConfig(path string, src []byte) ([]byte, error) {
 		return nil, fmt.Errorf("executing shell config %s: %w", path, err)
 	}
 
-	slog.Info("Shell config executed successfully", "path", path, "fragments", len(builder.Fragments))
-
-	if len(builder.Fragments) == 0 {
-		slog.Warn("Shell config produced no config fragments", "path", path)
+	if builder.empty() {
+		slog.Warn("Shell config produced no config", "path", path)
 		return nil, nil
 	}
 
-	merged, err := jsons.Merge(builder.Fragments)
+	data, err := builder.JSON()
 	if err != nil {
-		slog.Error("Failed to merge shell config fragments", "path", path, "error", err)
-		return nil, fmt.Errorf("merging shell config fragments from %s: %w", path, err)
+		slog.Error("Failed to marshal shell config", "path", path, "error", err)
+		return nil, fmt.Errorf("marshaling shell config %s: %w", path, err)
 	}
 
-	// Apply `option reset` markers now that all list fragments are merged.
-	merged, err = resolveResetSentinels(merged)
-	if err != nil {
-		slog.Error("Failed to resolve reset sentinels", "path", path, "error", err)
-		return nil, fmt.Errorf("resolving reset sentinels from %s: %w", path, err)
-	}
-
-	// Validate that the merged result is a valid JSON object.
-	if !json.Valid(merged) {
-		slog.Error("Shell config produced invalid JSON", "path", path)
-		return nil, fmt.Errorf("shell config %s produced invalid JSON", path)
-	}
-
-	slog.Info("Shell config loaded successfully", "path", path, "bytes", len(merged))
-	return merged, nil
+	slog.Info("Shell config loaded successfully", "path", path, "bytes", len(data))
+	return data, nil
 }

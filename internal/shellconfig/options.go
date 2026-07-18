@@ -2,23 +2,12 @@ package shellconfig
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"strconv"
 	"strings"
-
-	"github.com/charmbracelet/crush/internal/shell"
 )
-
-// resetSentinel marks a "reset" point inside a list option. Because the
-// config merge concatenates lists, `option reset <key>` appends this marker
-// instead of trying to clear the slice in place. resolveResetSentinels
-// truncates each list at its last sentinel after merging, so values added
-// after a reset survive while earlier ones are dropped. The NUL prefix makes
-// accidental collision with a real config value effectively impossible.
-const resetSentinel = "\x00__crush_reset__"
 
 // handleOption implements the `option` builtin.
 //
@@ -45,7 +34,7 @@ const resetSentinel = "\x00__crush_reset__"
 //
 // Boolean shortcuts: for boolean fields, omitting the value sets it to true.
 func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	b := shell.ConfigBuilderFromCtx(ctx)
+	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
@@ -54,13 +43,11 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 
 	key := args[1]
-	f := newFragmentBuilder()
-	o := f.rootMap("options")
+	o := b.section("options")
 
-	// "option reset <key>" wipes a list back to empty. It emits a sentinel
-	// element that rides the concatenating merge and is resolved (everything
-	// up to and including the last sentinel is dropped) after the script's
-	// fragments are merged. This keeps "reset then re-add" order-correct.
+	// "option reset <key>" wipes a list back to empty. Because the builder
+	// applies operations in execution order, this is just an assignment:
+	// values added after the reset are kept, earlier ones are dropped.
 	if key == "reset" {
 		if len(args) < 3 {
 			return usage(stderr, "usage: option reset <list-key>")
@@ -73,9 +60,9 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		if !isListOption(jsonKey) {
 			return usage(stderr, fmt.Sprintf("option: reset only applies to list options, %q is not one", target))
 		}
-		o[jsonKey] = []any{resetSentinel}
+		o[jsonKey] = []any{}
 		slog.Info("Option list reset in shell config", "key", target)
-		return f.append(b)
+		return nil
 	}
 
 	// Determine the value.
@@ -96,7 +83,7 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 		o[jsonKey] = appendArr(o, jsonKey, val)
 		slog.Info("Option set in shell config", "key", key, "value", val)
-		return f.append(b)
+		return nil
 	}
 
 	// Boolean fields: if no value, default to true. Inverted keys store the
@@ -115,7 +102,7 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 		o[jsonKey] = bv
 		slog.Info("Option set in shell config", "key", key, "value", o[jsonKey])
-		return f.append(b)
+		return nil
 	}
 
 	// Integer fields
@@ -129,7 +116,7 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		}
 		o[jsonKey] = n
 		slog.Info("Option set in shell config", "key", key, "value", n)
-		return f.append(b)
+		return nil
 	}
 
 	// String fields
@@ -138,7 +125,7 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	o[jsonKey] = val
 	slog.Info("Option set in shell config", "key", key, "value", val)
-	return f.append(b)
+	return nil
 }
 
 // optionKeyMap maps user-facing kebab-case keys to JSON field names. The
@@ -229,52 +216,4 @@ func parseBool(s string) (bool, error) {
 	default:
 		return false, fmt.Errorf("invalid boolean %q", s)
 	}
-}
-
-// resolveResetSentinels applies `option reset` markers to the merged config.
-// For every list under "options", it keeps only the elements that follow the
-// last resetSentinel (dropping the sentinel and everything before it), so a
-// reset wipes inherited values while later additions survive. Lists without a
-// sentinel are left untouched. It returns the (possibly rewritten) JSON.
-func resolveResetSentinels(data []byte) ([]byte, error) {
-	var root map[string]any
-	if err := json.Unmarshal(data, &root); err != nil {
-		// Not a JSON object; nothing to resolve.
-		return data, nil
-	}
-	opts, ok := root["options"].(map[string]any)
-	if !ok {
-		return data, nil
-	}
-
-	changed := false
-	for key, v := range opts {
-		arr, ok := v.([]any)
-		if !ok {
-			continue
-		}
-		last := -1
-		for i, item := range arr {
-			if s, ok := item.(string); ok && s == resetSentinel {
-				last = i
-			}
-		}
-		if last < 0 {
-			continue
-		}
-		kept := make([]any, 0, len(arr)-last-1)
-		for _, item := range arr[last+1:] {
-			if s, ok := item.(string); ok && s == resetSentinel {
-				continue
-			}
-			kept = append(kept, item)
-		}
-		opts[key] = kept
-		changed = true
-	}
-
-	if !changed {
-		return data, nil
-	}
-	return json.Marshal(root)
 }

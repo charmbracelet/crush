@@ -157,7 +157,8 @@ func (h *mcpOAuthHandler) Authorize(ctx context.Context, req *http.Request, resp
 // buildInner lazily creates the SDK AuthorizationCodeHandler. The
 // redirect URL is allocated on first use because we need a free port.
 func (h *mcpOAuthHandler) buildInner() (*auth.AuthorizationCodeHandler, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate callback port: %w", err)
 	}
@@ -272,7 +273,8 @@ func openBrowserAndCapture(ctx context.Context, authURL string, port int, server
 	})
 
 	srv := &http.Server{Handler: mux}
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on callback port: %w", err)
 	}

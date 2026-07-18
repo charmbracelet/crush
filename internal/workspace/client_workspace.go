@@ -615,13 +615,13 @@ func (w *ClientWorkspace) AllSubagents() []SubagentDefInfo {
 }
 
 // DeleteUserSubagent returns an error in client mode.
-func (w *ClientWorkspace) DeleteUserSubagent(_ string) error {
-	return nil
+func (w *ClientWorkspace) DeleteUserSubagent(name string) error {
+	return fmt.Errorf("deleting subagent %q is not supported in client/server mode", name)
 }
 
-// SetSubagentDisabled is a no-op in client mode.
-func (w *ClientWorkspace) SetSubagentDisabled(_ string, _ bool) error {
-	return nil
+// SetSubagentDisabled returns an error in client mode.
+func (w *ClientWorkspace) SetSubagentDisabled(name string, _ bool) error {
+	return fmt.Errorf("toggling subagent %q is not supported in client/server mode", name)
 }
 
 // SessionTokens returns zero token counts in client mode.

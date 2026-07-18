@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -488,27 +488,58 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 
 	result := make([]SubagentDefInfo, len(all))
 	for i, s := range all {
-		scope := "user"
-		if s.FilePath == "" {
-			scope = "builtin"
-		} else if workingDir != "" && (strings.HasPrefix(s.FilePath, workingDir+"/") || s.FilePath == workingDir) {
-			scope = "project"
-		}
 		result[i] = SubagentDefInfo{
 			Name:        s.Name,
 			Description: s.Description,
 			Color:       s.ResolvedColor(),
 			FilePath:    s.FilePath,
-			Scope:       scope,
+			Scope:       subagentScope(s.FilePath, workingDir),
 			Disabled:    disabledSet[s.Name],
 		}
 	}
 	return result
 }
 
+// subagentScope classifies a subagent definition path: "builtin" (no file),
+// "project" for files under the working directory or any project discovery
+// dir (which includes the git worktree root for monorepo-level subagents),
+// and "user" otherwise. Comparison uses fsext.HasPrefix (filepath.Rel-based)
+// so it works with either path separator.
+func subagentScope(filePath, workingDir string) string {
+	if filePath == "" {
+		return "builtin"
+	}
+	if workingDir != "" && fsext.HasPrefix(filePath, workingDir) {
+		return "project"
+	}
+	for _, dir := range config.ProjectSubagentsDir(workingDir) {
+		if fsext.HasPrefix(filePath, dir) {
+			return "project"
+		}
+	}
+	return "user"
+}
+
+// subagentDeletable reports whether the definition file lives under one of
+// the global (user-scope) subagents directories. Deletion is restricted to
+// those — scope labeling is display-oriented, and a monorepo-root or
+// custom-path file must never be deletable as if it were the user's own.
+func subagentDeletable(filePath string) bool {
+	if filePath == "" {
+		return false
+	}
+	for _, dir := range config.GlobalSubagentsDirs() {
+		if fsext.HasPrefix(filePath, dir) {
+			return true
+		}
+	}
+	return false
+}
+
 // DeleteUserSubagent removes a user-scoped subagent by name. It returns an
-// error if the subagent is not found or is not user-scoped. On success it
-// deletes the file from disk and reloads the Subagents manager.
+// error if the subagent is not found or its file is not inside one of the
+// global (user-scope) subagents directories. On success it deletes the file
+// from disk and reloads the Subagents manager.
 func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	var target *SubagentDefInfo
 	for _, info := range w.AllSubagents() {
@@ -521,8 +552,8 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	if target == nil {
 		return fmt.Errorf("subagent %q not found", name)
 	}
-	if target.Scope != "user" {
-		return fmt.Errorf("subagent %q is not user-scoped and cannot be deleted", name)
+	if !subagentDeletable(target.FilePath) {
+		return fmt.Errorf("subagent %q is not in a user subagents directory and cannot be deleted", name)
 	}
 	if err := os.Remove(target.FilePath); err != nil {
 		return err

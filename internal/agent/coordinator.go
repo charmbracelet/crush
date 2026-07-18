@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -146,8 +145,7 @@ type coordinator struct {
 
 	// subagentModelCache memoizes resolveModelByID results within a config
 	// generation. Cleared by UpdateModels to avoid reusing stale clients.
-	subagentModelCache   map[subagentModelKey]Model
-	subagentModelCacheMu sync.RWMutex
+	subagentModelCache *csync.Map[subagentModelKey, Model]
 
 	// subagentCancels maps a running subagent's child session ID to the cancel
 	// func for its run. Dispatched subagents run on ad-hoc SessionAgents whose
@@ -208,7 +206,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills:       activeSkills,
 		skillTracker:       skillTracker,
 		interactive:        opts.Interactive,
-		subagentModelCache: make(map[subagentModelKey]Model),
+		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 	}
 
@@ -745,12 +743,11 @@ func (c *coordinator) buildNamedModel(ctx context.Context, modelType config.Sele
 func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
 	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent}
 
-	c.subagentModelCacheMu.RLock()
-	if m, ok := c.subagentModelCache[key]; ok {
-		c.subagentModelCacheMu.RUnlock()
-		return m, nil
+	if c.subagentModelCache != nil {
+		if m, ok := c.subagentModelCache.Get(key); ok {
+			return m, nil
+		}
 	}
-	c.subagentModelCacheMu.RUnlock()
 
 	providerCfg, catwalkModel, ok := c.findModelProvider(modelID, providerOverride)
 	if !ok {
@@ -763,9 +760,7 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 	}
 
 	if c.subagentModelCache != nil {
-		c.subagentModelCacheMu.Lock()
-		c.subagentModelCache[key] = m
-		c.subagentModelCacheMu.Unlock()
+		c.subagentModelCache.Set(key, m)
 	}
 	return m, nil
 }
@@ -1344,9 +1339,9 @@ func (c *coordinator) Model() Model {
 func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// Clear the subagent model cache so that any stale LanguageModel instances
 	// (built against the old config) are not reused after a config reload.
-	c.subagentModelCacheMu.Lock()
-	c.subagentModelCache = make(map[subagentModelKey]Model)
-	c.subagentModelCacheMu.Unlock()
+	if c.subagentModelCache != nil {
+		c.subagentModelCache.Reset(make(map[subagentModelKey]Model))
+	}
 
 	// build the models again so we make sure we get the latest config
 	large, small, err := c.buildAgentModels(ctx, false)
@@ -1608,7 +1603,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if authRefresh != nil {
 		inner := authRefresh
 		authRefresh = func(ctx context.Context, pe *fantasy.ProviderError) error {
-			c.runtime.SetStatus(session.ID, "retrying")
+			c.runtime.SetStatus(session.ID, subagents.StatusRetrying)
 			return inner(ctx, pe)
 		}
 	}

@@ -133,21 +133,8 @@ func (s *ConfigStore) setConfig(cfg *Config) {
 	s.config = cfg
 }
 
-// WorkingDir returns the current working directory. When workingDir is empty
-// (as in test stores created via NewTestStore) and exactly one loaded path was
-// supplied that refers to an existing directory on disk, that path is returned
-// as the working directory. This allows test helpers that pass a temp directory
-// as a loaded path to get correct scope-detection results without requiring the
-// full production initialization path.
+// WorkingDir returns the current working directory.
 func (s *ConfigStore) WorkingDir() string {
-	if s.workingDir != "" {
-		return s.workingDir
-	}
-	if len(s.loadedPaths) == 1 {
-		if info, err := os.Stat(s.loadedPaths[0]); err == nil && info.IsDir() {
-			return s.loadedPaths[0]
-		}
-	}
 	return s.workingDir
 }
 

@@ -14,6 +14,8 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
 )
 
@@ -78,6 +80,45 @@ func (c *coordinator) subagentSessionSetup(sa *subagents.Subagent) func(sessionI
 	return func(sessionID string) {
 		c.permissions.AutoApproveSession(sessionID)
 	}
+}
+
+// subagentIsUserScoped reports whether the subagent definition file lives in
+// one of the user-scope (global) subagents directories. Anything else —
+// project directories, monorepo roots, custom subagents_paths — can arrive
+// with a cloned repository and is not trusted to bypass permissions silently.
+func subagentIsUserScoped(sa *subagents.Subagent) bool {
+	for _, dir := range config.GlobalSubagentsDirs() {
+		if fsext.HasPrefix(sa.FilePath, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// confirmBypassPermissions gates permissionMode: bypassPermissions behind an
+// explicit user confirmation for every dispatch of a subagent that is not
+// user-scoped. A repository can ship a subagent definition with a description
+// crafted to get auto-dispatched, so repo-provided bypass must never
+// auto-approve a whole child session without the user seeing it. Returns
+// (zero, true) when dispatch may proceed and (denial response, false)
+// otherwise. Yolo mode and the standard allowlist/auto-approve paths are
+// honored by the permission service itself.
+func (c *coordinator) confirmBypassPermissions(ctx context.Context, sa *subagents.Subagent, sessionID, toolCallID string) (fantasy.ToolResponse, bool) {
+	if sa.PermissionMode != subagents.PermissionModeBypassPermissions || subagentIsUserScoped(sa) {
+		return fantasy.ToolResponse{}, true
+	}
+	granted, err := c.permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		ToolCallID:  toolCallID,
+		ToolName:    AgentToolName,
+		Description: fmt.Sprintf("Subagent %q is defined in this project and requests bypassPermissions: it would run with every tool call auto-approved.", sa.Name),
+		Action:      "bypass_permissions:" + sa.Name,
+		Path:        sa.FilePath,
+	})
+	if err != nil || !granted {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("subagent %q requests bypassPermissions and the user did not approve it", sa.Name)), false
+	}
+	return fantasy.ToolResponse{}, true
 }
 
 // buildAgentDispatchInfo builds the ToolInfo for the agent dispatcher tool with
@@ -174,6 +215,10 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			sa := findSubagentByName(c.activeSubagentsList(), subagentType)
 			if sa == nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
+			}
+
+			if resp, ok := c.confirmBypassPermissions(ctx, sa, sessionID, call.ID); !ok {
+				return resp, nil
 			}
 
 			agentCfg := sa.ToConfigAgent(coderCfg)

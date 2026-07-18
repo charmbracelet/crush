@@ -53,16 +53,19 @@ else
 fi
 
 # Providers
-provider openai --api-key "$OPENAI_KEY"
-provider anthropic --api-key "$ANTHROPIC_API_KEY"
-provider my-llm \
+provider add openai --api-key "$OPENAI_KEY"
+provider add anthropic --api-key "$ANTHROPIC_API_KEY"
+provider add my-llm \
   --type openai \
   --api-key "ollama" \
   --base-url "http://localhost:11434/v1"
 
-# Models
-model large --provider openai --model gpt-4o --think
-model small --provider anthropic --model claude-3-5-haiku
+# Custom models (provider must be declared first)
+model add my-llm/llama3.3 --name "Llama 3.3" --context-window 128000
+
+# Model selection (matches `crush models` output: provider/id)
+model large openai/gpt-4o --think
+model small anthropic/claude-3-5-haiku
 
 # MCP Servers
 mcp github --type stdio --command npx --args "-y" "@modelcontextprotocol/server-github"
@@ -609,7 +612,7 @@ The first implementation accumulated one JSON fragment per builtin call and
 deep-merged them with `jsons.Merge`. That works for purely additive config,
 but a `crush.sh` is an **imperative, ordered** script (statements run top to
 bottom, `source` runs inline), and the fragment approach flattens that order
-away. Every non-additive feature (`option reset`, `provider … remove`) then
+away. Every non-additive feature (`option reset`, `provider unset`) then
 needs a marker value plus a post-merge resolver pass to reconstruct intent —
 machinery that grows with each verb.
 
@@ -633,7 +636,7 @@ the builder is last-wins: whatever is applied last overrides earlier state.
     global  →  parent dirs  →  cwd/local        (local applied last, local wins)
 
 This ordering is also what makes cross-file removal work: a local
-`provider openai remove` can only drop what a global config set if local is
+`provider unset openai` can only drop what a global config set if local is
 applied *after* global.
 
 ### Phased path (JSON is slated for retirement)
@@ -658,8 +661,8 @@ array; each occurrence appends one value. Flags marked _(key value)_ consume two
 arguments.
 
 ```text
-provider <id> [flags]
-    Define or extend a provider. Repeated calls with the same <id> merge.
+provider add <id> [flags]
+    Define or update a provider. Repeated calls with the same <id> merge.
 
     --name NAME                  Display name (json: name)
     --type TYPE                  Provider type, e.g. openai, anthropic (json: type)
@@ -669,13 +672,17 @@ provider <id> [flags]
     --flat-rate BOOL             Flat-rate billing (json: flat_rate)
     --system-prompt-prefix TEXT  Prefix injected into system prompt (json: system_prompt_prefix)
     --extra-header KEY VALUE     Extra HTTP header, repeatable (json: extra_headers[KEY])
+
+provider unset <id>
+    Remove a provider and all of its children (its custom models).
 ```
 
 ```text
-provider-model <provider-id> --id <model-id> [flags]
-    Append a custom model to the provider's models array. --id is required.
+model add <provider>/<id> [flags]
+    Register a custom model on a provider. The provider must already have
+    been declared with `provider add`. The <provider>/<id> form matches the
+    output of `crush models`; a missing slash is an error.
 
-    --id ID                      Model ID (required) (json: id)
     --name NAME                  Display name (json: name)
     --context-window N           Context window in tokens (json: context_window)
     --default-max-tokens N       Default max output tokens (json: default_max_tokens)
@@ -684,14 +691,15 @@ provider-model <provider-id> --id <model-id> [flags]
     --cost-per-1m-in F           Input cost per 1M tokens (json: cost_per_1m_in)
     --cost-per-1m-out F          Output cost per 1M tokens (json: cost_per_1m_out)
     --reasoning-effort LEVEL     low|medium|high (json: default_reasoning_effort)
-```
 
-```text
-model <large|small> --provider <id> --model <name> [flags]
-    Select the model for the large or small slot.
+model unset <provider>/<id>
+    Remove a custom model from the provider's catalog.
 
-    --provider ID                Provider ID (required) (json: provider)
-    --model NAME                 Model name (required) (json: model)
+model large [<provider>/<id>] [flags]
+model small [<provider>/<id>] [flags]
+    Select the model for the large or small slot. With no argument, print the
+    current selection as <provider>/<id> (usable via $(model large)).
+
     --think                      Enable thinking; flag takes no value (json: think)
     --reasoning-effort LEVEL     low|medium|high (json: reasoning_effort)
     --max-tokens N               Max output tokens (json: max_tokens)

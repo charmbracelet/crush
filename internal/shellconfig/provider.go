@@ -9,26 +9,43 @@ import (
 
 // handleProvider implements the `provider` builtin.
 //
-// Usage: provider <id> [--name NAME] [--type TYPE] [--api-key KEY]
+// Usage:
 //
-//	[--base-url URL] [--disable true|false] [--flat-rate true|false]
-//	[--system-prompt-prefix TEXT] [--extra-header KEY VALUE]
+//	provider add <id> [--name NAME] [--type TYPE] [--api-key KEY]
+//	    [--base-url URL] [--disable true|false] [--flat-rate true|false]
+//	    [--system-prompt-prefix TEXT] [--extra-header KEY VALUE]
+//	provider unset <id>
 //
-// Repeated calls with the same <id> update the same provider.
+// "add" defines or updates a provider; repeated calls with the same <id>
+// update the same entry. "unset" removes a provider and all its children.
 func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: provider <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE]")
+		return usage(stderr, "usage: provider add <id> [flags] | provider unset <id>")
 	}
 
-	id := args[1]
+	switch args[1] {
+	case "add":
+		return providerAdd(b, args, stderr)
+	case "unset":
+		return providerUnset(b, args, stderr)
+	default:
+		return usage(stderr, fmt.Sprintf("provider: unknown subcommand %q (expected add or unset)", args[1]))
+	}
+}
+
+func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) < 3 {
+		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE]")
+	}
+	id := args[2]
 	slog.Info("Provider defined in shell config", "provider", id)
 	p := childMap(b.section("providers"), id)
 
-	i := 2
+	i := 3
 	for i < len(args) {
 		switch args[i] {
 		case "--name":
@@ -80,10 +97,20 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 			}
 			childMap(p, "extra_headers")[k] = v
 		default:
-			return usage(stderr, fmt.Sprintf("provider: unknown flag %s", args[i]))
+			return usage(stderr, fmt.Sprintf("provider add: unknown flag %s", args[i]))
 		}
 	}
 
 	slog.Debug("Provider recorded", "provider", id)
+	return nil
+}
+
+func providerUnset(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) < 3 {
+		return usage(stderr, "usage: provider unset <id>")
+	}
+	id := args[2]
+	delete(b.section("providers"), id)
+	slog.Info("Provider removed in shell config", "provider", id)
 	return nil
 }

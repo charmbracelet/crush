@@ -15,7 +15,7 @@ import (
 // correct JSON for a basic provider definition.
 func TestLoadShellConfig_Provider(t *testing.T) {
 	dir := t.TempDir()
-	script := `provider openai --api-key "$OPENAI_API_KEY" --base-url "https://api.openai.com/v1"`
+	script := `provider add openai --api-key "$OPENAI_API_KEY" --base-url "https://api.openai.com/v1"`
 	path := filepath.Join(dir, "crush.sh")
 
 	t.Setenv("OPENAI_API_KEY", "test-key-123")
@@ -40,7 +40,7 @@ func TestLoadShellConfig_FlagBoolCaseInsensitive(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider openai --api-key key --disable TRUE`
+	script := `provider add openai --api-key key --disable TRUE`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -59,8 +59,8 @@ func TestLoadShellConfig_MultipleProviders(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider openai --api-key "key1"
-provider anthropic --api-key "key2"`
+	script := `provider add openai --api-key "key1"
+provider add anthropic --api-key "key2"`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -80,8 +80,8 @@ func TestLoadShellConfig_Model(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `model large --provider openai --model gpt-4o --think
-model small --provider anthropic --model claude-3-5-haiku`
+	script := `model large openai/gpt-4o --think
+model small anthropic/claude-3-5-haiku`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -236,13 +236,13 @@ func TestLoadShellConfig_SourceInclude(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create an included file with a provider definition.
-	includeContent := `provider openai --api-key "included-key"`
+	includeContent := `provider add openai --api-key "included-key"`
 	includePath := filepath.Join(dir, "shared.sh")
 	require.NoError(t, os.WriteFile(includePath, []byte(includeContent), 0o644))
 
 	// Create the main script that sources the include.
 	script := `source ` + includePath + `
-provider anthropic --api-key "main-key"`
+provider add anthropic --api-key "main-key"`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -261,9 +261,9 @@ provider anthropic --api-key "main-key"`
 func TestLoadShellConfig_Conditionals(t *testing.T) {
 	dir := t.TempDir()
 	script := `if [[ "$USE_ANTHROPIC" == "1" ]]; then
-  provider anthropic --api-key "ant-key"
+  provider add anthropic --api-key "ant-key"
 else
-  provider openai --api-key "oai-key"
+  provider add openai --api-key "oai-key"
 fi`
 	path := filepath.Join(dir, "crush.sh")
 
@@ -283,7 +283,7 @@ fi`
 // to the script so it can feature-detect the running Crush version.
 func TestLoadShellConfig_CrushVersionEnv(t *testing.T) {
 	dir := t.TempDir()
-	script := `provider openai --api-key "$CRUSH_VERSION"`
+	script := `provider add openai --api-key "$CRUSH_VERSION"`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -302,7 +302,7 @@ func TestLoadShellConfig_CommandSubstitution(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider openai --api-key "$(echo dynamic-key)"`
+	script := `provider add openai --api-key "$(echo dynamic-key)"`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -319,7 +319,7 @@ func TestLoadShellConfig_CommandSubstitution(t *testing.T) {
 // TestLoadShellConfig_EnvVarExpansion verifies that $VAR expansion works.
 func TestLoadShellConfig_EnvVarExpansion(t *testing.T) {
 	dir := t.TempDir()
-	script := `provider openai --api-key "$MY_API_KEY"`
+	script := `provider add openai --api-key "$MY_API_KEY"`
 	path := filepath.Join(dir, "crush.sh")
 
 	t.Setenv("MY_API_KEY", "env-key-456")
@@ -339,7 +339,7 @@ func TestLoadShellConfig_UnknownFlag(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider openai --bogus-flag "value"`
+	script := `provider add openai --bogus-flag "value"`
 	path := filepath.Join(dir, "crush.sh")
 
 	_, err := LoadShellConfig(path, []byte(script))
@@ -377,7 +377,7 @@ func TestLoadShellConfig_ExtraHeader(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `provider custom --api-key "key" --extra-header "X-Custom" "value123"`
+	script := `provider add custom --api-key "key" --extra-header "X-Custom" "value123"`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -401,13 +401,13 @@ func TestLoadShellConfig_FullConfig(t *testing.T) {
 	script := `#!/usr/bin/env bash
 
 # Providers
-provider openai --api-key "$OPENAI_API_KEY" --base-url "https://api.openai.com/v1"
-provider anthropic --api-key "$ANTHROPIC_API_KEY"
-provider my-llm --type openai --api-key "ollama" --base-url "http://localhost:11434/v1"
+provider add openai --api-key "$OPENAI_API_KEY" --base-url "https://api.openai.com/v1"
+provider add anthropic --api-key "$ANTHROPIC_API_KEY"
+provider add my-llm --type openai --api-key "ollama" --base-url "http://localhost:11434/v1"
 
 # Models
-model large --provider openai --model gpt-4o --think
-model small --provider anthropic --model claude-3-5-haiku
+model large openai/gpt-4o --think
+model small anthropic/claude-3-5-haiku
 
 # MCP
 mcp github --type stdio --command npx --args "-y" --args "@modelcontextprotocol/server-github"
@@ -482,7 +482,7 @@ func TestConfigBuilder_NoBuilderInContext(t *testing.T) {
 	// "provider" without a ConfigBuilder should be a no-op (return nil),
 	// not an error. The builtins check for the builder and silently skip.
 	err := shell.Run(t.Context(), shell.RunOptions{
-		Command: `provider openai --api-key "test"`,
+		Command: `provider add openai --api-key "test"`,
 		Cwd:     dir,
 		Env:     os.Environ(),
 	})

@@ -16,10 +16,10 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
-	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 // mockSessionAgent is a minimal mock for the SessionAgent interface.
@@ -762,7 +762,8 @@ func TestBuildAgent_SubagentModel(t *testing.T) {
 		// Zero-value subagentModel must be accepted without panicking. With no
 		// models configured, buildNamedModel fails before any prompt is needed,
 		// verifying the struct parameter is wired into model-selection logic.
-		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{})
+		var wg errgroup.Group
+		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{}, &wg)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "model")
 	})
@@ -896,40 +897,10 @@ func TestRunSubAgent_AuthRefreshWrapper_ResetsStatusAfterSuccess(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
-	cfg, err := config.Init(env.workingDir, "", false)
-	require.NoError(t, err)
-
-	const (
-		providerID = "test-openai-compat"
-		modelID    = "test-model"
-	)
-	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
-		ID:      providerID,
-		Name:    "Test",
-		Type:    openaicompat.Name,
-		BaseURL: "http://127.0.0.1:0/v1",
-		APIKey:  "test",
-		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
-	})
-	selected := config.SelectedModel{Provider: providerID, Model: modelID}
-	cfg.Config().Models[config.SelectedModelTypeLarge] = selected
-	cfg.Config().Models[config.SelectedModelTypeSmall] = selected
-	cfg.SetupAgents()
-	for _, agentID := range []string{config.AgentCoder, config.AgentTask} {
-		a := cfg.Config().Agents[agentID]
-		a.AllowedTools = nil
-		cfg.Config().Agents[agentID] = a
-	}
-	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
-		Config:      cfg,
-		Sessions:    env.sessions,
-		Messages:    env.messages,
-		Permissions: permission.NewPermissionService(env.workingDir, true, nil),
-	})
-	require.NoError(t, err)
-	coord := c.(*coordinator)
+	coord := newOfflineCoordinator(t, env)
 	require.NoError(t, coord.readyWg.Wait())
 
+	const providerID = "test-openai-compat"
 	providerCfg, ok := coord.cfg.Config().Providers.Get(providerID)
 	require.True(t, ok)
 	// Any "$"-containing APIKeyTemplate is enough for makeAuthRefreshCallback

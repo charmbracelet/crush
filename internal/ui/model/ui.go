@@ -889,7 +889,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if the click landed on an attachment's remove button.
 		// The attachment chips are rendered on the first row of the
 		// editor layout area, above the textarea.
-		if len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
+		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
 			relX := msg.X - m.layout.editor.Min.X
 			if m.attachments.HandleClick(relX) {
 				return m, tea.Batch(cmds...)

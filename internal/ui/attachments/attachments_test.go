@@ -143,6 +143,28 @@ func TestRender_RemoveButtonHasRightPadding(t *testing.T) {
 		"the cell to the right of ✕ must share the button's background (padding), not be a transparent margin")
 }
 
+func TestRender_RemoveButtonKeepsGapBetweenChips(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRenderer()
+	atts := []message.Attachment{
+		{FileName: "first.txt"},
+		{FileName: "second.txt"},
+	}
+	cells := parseCells(r.Render(atts, false, true, 200))
+
+	xi := -1
+	for i, c := range cells {
+		if c.r == styles.RemoveIcon {
+			xi = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, xi, 0)
+	require.Less(t, xi+2, len(cells))
+	require.Empty(t, cells[xi+2].bg, "adjacent attachment chips must have a transparent one-cell gap")
+}
+
 // cell is one rendered terminal cell: its rune and the truecolor background
 // in effect ("r;g;b", or "" for none).
 type cell struct {

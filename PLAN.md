@@ -72,7 +72,7 @@ mcp github --type stdio --command npx --args "-y" "@modelcontextprotocol/server-
 mcp local-server --type http --url "http://localhost:3000/mcp" --header "Authorization" "Bearer $TOKEN"
 
 # LSP Servers
-lsp gopls --command gopls --filetypes go,mod --root-markers go.mod
+lsp add gopls --command gopls --filetypes go,mod --root-markers go.mod
 
 # Permissions
 permissions --allow bash --allow view
@@ -468,7 +468,7 @@ This lets scripts feature-detect the engine before calling builtins:
 
 ```bash
 # Skip a builtin unless we're on a released build.
-[[ "$CRUSH_VERSION" != devel ]] && lsp gopls --command gopls
+[[ "$CRUSH_VERSION" != devel ]] && lsp add gopls --command gopls
 
 # Prefix / glob matching on a minor series.
 if [[ "$CRUSH_VERSION" == v0.85.* ]]; then
@@ -724,8 +724,8 @@ mcp <name> [flags]
 ```
 
 ```text
-lsp <name> [flags]
-    Define an LSP server.
+lsp add <name> [flags]
+    Define or update an LSP server. Repeated calls with the same <name> merge.
 
     --command CMD                Executable to launch (json: command)
     --args ARG                   Command argument, repeatable (json: args)
@@ -736,6 +736,9 @@ lsp <name> [flags]
     --disabled BOOL              Disable the server (json: disabled)
     --init-options JSON          Initialization options as a JSON string (json: init_options)
     --options JSON               Server options as a JSON string (json: options)
+
+lsp remove <name>   (alias: rm)
+    Remove an LSP server.
 ```
 
 ```text

@@ -9,25 +9,44 @@ import (
 
 // handleLSP implements the `lsp` builtin.
 //
-// Usage: lsp <name> --command CMD [--args ARG ...] [--env KEY VALUE ...]
+// Usage:
 //
-//	[--filetypes TYPE ...] [--root-markers MARKER ...]
-//	[--timeout N] [--disabled true|false]
-//	[--init-options JSON] [--options JSON]
+//	lsp add <name> --command CMD [--args ARG ...] [--env KEY VALUE ...]
+//	    [--filetypes TYPE ...] [--root-markers MARKER ...]
+//	    [--timeout N] [--disabled true|false]
+//	    [--init-options JSON] [--options JSON]
+//	lsp remove <name>   (alias: rm)
+//
+// "add" defines or updates an LSP server; repeated calls with the same <name>
+// update the same entry. "remove" deletes it.
 func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: lsp <name> --command CMD [--args ARG ...] [--env KEY VALUE ...] [--filetypes TYPE ...] [--root-markers MARKER ...] [--timeout N] [--disabled true|false] [--init-options JSON] [--options JSON]")
+		return usage(stderr, "usage: lsp add <name> --command CMD [flags] | lsp remove <name>")
 	}
 
-	name := args[1]
+	switch args[1] {
+	case "add":
+		return lspAdd(b, args, stderr)
+	case "remove", "rm":
+		return lspRemove(b, args, stderr)
+	default:
+		return usage(stderr, fmt.Sprintf("lsp: unknown subcommand %q (expected add or remove)", args[1]))
+	}
+}
+
+func lspAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) < 3 {
+		return usage(stderr, "usage: lsp add <name> --command CMD [--args ARG ...] [--env KEY VALUE ...] [--filetypes TYPE ...] [--root-markers MARKER ...] [--timeout N] [--disabled true|false] [--init-options JSON] [--options JSON]")
+	}
+	name := args[2]
 	slog.Info("LSP server defined in shell config", "name", name)
 	l := childMap(b.section("lsp"), name)
 
-	i := 2
+	i := 3
 	for i < len(args) {
 		switch args[i] {
 		case "--command":
@@ -79,7 +98,7 @@ func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 			}
 			var parsed any
 			if err := jsonUnmarshal([]byte(v), &parsed); err != nil {
-				return usage(stderr, fmt.Sprintf("lsp: --init-options expects valid JSON, got %q: %s", v, err))
+				return usage(stderr, fmt.Sprintf("lsp add: --init-options expects valid JSON, got %q: %s", v, err))
 			}
 			l["init_options"] = parsed
 		case "--options":
@@ -89,14 +108,24 @@ func handleLSP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 			}
 			var parsed any
 			if err := jsonUnmarshal([]byte(v), &parsed); err != nil {
-				return usage(stderr, fmt.Sprintf("lsp: --options expects valid JSON, got %q: %s", v, err))
+				return usage(stderr, fmt.Sprintf("lsp add: --options expects valid JSON, got %q: %s", v, err))
 			}
 			l["options"] = parsed
 		default:
-			return usage(stderr, fmt.Sprintf("lsp: unknown flag %s", args[i]))
+			return usage(stderr, fmt.Sprintf("lsp add: unknown flag %s", args[i]))
 		}
 	}
 
 	slog.Debug("LSP recorded", "name", name)
+	return nil
+}
+
+func lspRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) < 3 {
+		return usage(stderr, "usage: lsp remove <name>")
+	}
+	name := args[2]
+	delete(b.section("lsp"), name)
+	slog.Info("LSP server removed in shell config", "name", name)
 	return nil
 }

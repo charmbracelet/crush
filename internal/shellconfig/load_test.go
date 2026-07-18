@@ -140,7 +140,7 @@ func TestLoadShellConfig_LSP(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `lsp gopls --command gopls --filetypes go --filetypes mod --root-markers go.mod --timeout 60`
+	script := `lsp add gopls --command gopls --filetypes go --filetypes mod --root-markers go.mod --timeout 60`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -413,7 +413,7 @@ model small anthropic/claude-3-5-haiku
 mcp github --type stdio --command npx --args "-y" --args "@modelcontextprotocol/server-github"
 
 # LSP
-lsp gopls --command gopls --filetypes go --root-markers go.mod
+lsp add gopls --command gopls --filetypes go --root-markers go.mod
 
 # Permissions
 permissions --allow bash --allow view

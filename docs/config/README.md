@@ -3,61 +3,96 @@
 > [!NOTE]
 > This document was designed for both humans and agents.
 
-Crush is configured with a little Bash script called `crush.sh`. Think of it as
-a `.bashrc` for your agent: it runs when Crush starts, and you set things up by
-calling a handful of small commands.
-
-Because it's real Bash, you get all the good stuff for free — `source` other
-files, pull secrets from `$(op read …)`, branch on `$HOSTNAME`, define variables
-once and reuse them. No new syntax to learn.
-
-Prefer JSON? `crush.json` still works and happily coexists with `crush.sh`. See
-[Legacy JSON](#legacy-json) at the bottom.
-
-### Hot Config Facts
-
-- Config is just a Bash script — it runs top to bottom when Crush starts.
-- Every setting is a small verb-first command: `provider add`, `model large`,
-  `mcp add`, `option`, and friends.
-- Entities you can add you can also remove (`remove`, alias `rm`).
-- It's real Bash, so `source`, `$VARS`, `$(commands)`, and `if` all work.
-- `crush.json` still works and merges with `crush.sh`.
-- `$CRUSH_VERSION` is available inside the script for feature detection.
-
-## Baby's First Config
-
-Let's wire up a local [Ollama](https://ollama.com) provider and use it. Drop
-this in `~/.config/crush/crush.sh` (global) or `./crush.sh` (project):
+Crush is configured with Bash via set a set of crush-specific builtin
+commands. By default it lives in `~/.config/crush/crushrc` and works like
+a `.bashrc`. It runs when Crush starts and configures the agent.
 
 ```bash
-#!/usr/bin/env bash
-
-# Add a local Ollama provider. It runs on your machine, so there's no API key.
+# Add Ollama.
 provider add ollama --type ollama --base-url "http://localhost:11434/v1"
 
-# Register a model you've pulled (ollama pull llama3.3), then make it the big one.
+# Register a model on Ollama.
 model add ollama/llama3.3 --name "Llama 3.3" --context-window 128000
-model large ollama/llama3.3
 
-# Auto-approve a few safe tools so Crush stops asking.
-permissions allow view ls grep
+# Auto-approve some tools.
+permissions allow view edit
+
+# Add an MCP server
+mcp add github \
+  --type http \
+  --url "https://api.githubcopilot.com/mcp/" \
+  --header Authorization "Bearer $GITHUB_TOKEN"
 ```
 
-That's it. Start Crush and you're configured. Read on for the full command
-list.
+Since it’s Bash, so you can use logic, `source` other files, and so on. It’s
+really handy.
+
+```bash
+# Change config based on the machine you're on.
+if [[ $HOSTNAME == "babysquid" ]]; then
+    option skill-path "$HOME/squid-skills"
+fi
+
+# Load some extra config
+source "$XDG_CONFIG_HOME/squid-config.sh"
+
+# Get API keys from your password manager.
+provider add my-secret-provider \
+  --type openai-compat \
+  --base-url "https://api.example.com/v1" \
+  --api-key "$(op read my-secret-key)"
+```
+
+## By the way
+
+Is this too crazy? The good news is that Crush knows all this already can
+configure itself. Just tell it what you want it to do.
+
+## Why Bash?
+
+Why did we do this? Two reasons:
+
+1. Crush ships with a first-class Bash interpreter, so we get the logic for
+   free.
+2. Ultimately, Crush needs to be able to configure itself, and command-based
+   config allows both users and the agent to use the same tools.
+
+## What about JSON?
+
+JSON is still supported but is deprecated and, while it's supported, it won't
+be receiving new features. For more see [Legacy JSON](#legacy-json).
+
+## Config versioning
+
+Not breaking the config API is really important to us! That said, you can
+target specific Crush versions with `$CRUSH_VERSION`:
+
+```bash
+if [[ $CURSH_VERSION == "0.85.*" ]]; then
+    option debug true
+fi
+```
+
+## Security
+
+Just like `crush.json`, `crushrc` is a trusted file. Guard it carefully and
+don't download random configs without reading them first.
 
 ## Where config lives
 
-Crush looks for these, closest-to-you wins:
+Crush looks for config in the following places, with the higher numbers taking
+precedence:
 
-1. `./.crush.sh` / `./crush.sh` / `./.crush.json` / `./crush.json` (project)
-2. `$XDG_CONFIG_HOME/crush/` or `~/.config/crush/` (global)
+1. "./.crushrc" (project-level)
+2. "./crushrc" (project-level)
+3. "$XDG_DATA_HOME/crush/crushrc" (global)
+4. "$XDG_CONFIG_HOME/crush/crushrc" (global):
 
 Everything found is merged, with project settings overriding global ones. If a
-folder has both a `.sh` and a `.json`, they merge too (`.sh` wins on conflicts)
-and Crush logs a friendly warning.
+folder has both a `crushrc` and a `json`, they merge too, with `crushrc`
+winning on conflicts (crush will log a wanrning).
 
-## Commands
+## Command Reference
 
 All the entity commands read the same way: `<thing> add …` to create,
 `<thing> remove …` (or `rm`) to delete. Booleans accept `true/false/1/0/yes/no`,

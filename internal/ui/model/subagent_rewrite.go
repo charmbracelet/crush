@@ -28,17 +28,20 @@ func (m *UI) rebuildSubagentCaches() {
 }
 
 // rewriteSubagentPrompt detects the pattern `@name rest` at the start of
-// content and rewrites it to a delegation instruction when name is a known
-// active subagent. Returns content unchanged if the pattern doesn't match.
+// content — with any whitespace (space, tab, or newline) after the name — and
+// rewrites it to a delegation instruction when name is a known active
+// subagent. Returns content unchanged if the pattern doesn't match.
 func rewriteSubagentPrompt(content string, activeNames map[string]bool) string {
 	if !strings.HasPrefix(content, "@") {
 		return content
 	}
-	name, prompt, ok := strings.Cut(content[1:], " ")
-	if !ok {
+	rest := content[1:]
+	idx := strings.IndexAny(rest, " \t\n\r")
+	if idx < 0 {
 		return content
 	}
-	prompt = strings.TrimSpace(prompt)
+	name := rest[:idx]
+	prompt := strings.TrimSpace(rest[idx+1:])
 	if prompt == "" {
 		return content
 	}

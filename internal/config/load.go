@@ -176,18 +176,23 @@ func PushPopCrushEnv() func() {
 			found = append(found, strings.TrimPrefix(pair[0], "CRUSH_"))
 		}
 	}
-	backups := make(map[string]string)
+	backups := make(map[string]*string)
 	for _, ev := range found {
-		backups[ev] = os.Getenv(ev)
-	}
-
-	for _, ev := range found {
+		if value, ok := os.LookupEnv(ev); ok {
+			backups[ev] = &value
+		} else {
+			backups[ev] = nil
+		}
 		os.Setenv(ev, os.Getenv("CRUSH_"+ev))
 	}
 
 	restore := func() {
 		for k, v := range backups {
-			os.Setenv(k, v)
+			if v != nil {
+				os.Setenv(k, *v)
+			} else {
+				os.Unsetenv(k)
+			}
 		}
 	}
 	return restore

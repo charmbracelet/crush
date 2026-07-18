@@ -53,6 +53,21 @@ tools:
 			wantTools:       []string{"Read", "Grep"},
 		},
 		{
+			name: "yaml_array_tools_trimmed",
+			content: `---
+name: my-agent
+description: A test agent.
+tools:
+  - "Read "
+  - " Grep"
+  - "  "
+---
+`,
+			wantName:        "my-agent",
+			wantDescription: "A test agent.",
+			wantTools:       []string{"Read", "Grep"},
+		},
+		{
 			name: "no_tools_field",
 			content: `---
 name: my-agent

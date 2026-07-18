@@ -61,7 +61,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 		cfg:                cfg,
 		sessions:           env.sessions,
 		messages:           env.messages,
-		subagentModelCache: make(map[subagentModelKey]Model),
+		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 	}
 }
 
@@ -1018,19 +1018,19 @@ func TestUpdateModels_ClearsSubagentModelCache(t *testing.T) {
 	coord := &coordinator{
 		cfg:                config.NewTestStoreWithWorkingDir(&config.Config{}, env.workingDir),
 		sessions:           env.sessions,
-		subagentModelCache: make(map[subagentModelKey]Model),
+		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 	}
 
 	// Manually populate the cache with a dummy entry.
-	coord.subagentModelCache[subagentModelKey{modelID: "some-model", provider: "", isSubAgent: true}] = Model{}
+	coord.subagentModelCache.Set(subagentModelKey{modelID: "some-model", provider: "", isSubAgent: true}, Model{})
 
-	require.Len(t, coord.subagentModelCache, 1)
+	require.Equal(t, 1, coord.subagentModelCache.Len())
 
 	// UpdateModels will error (no models configured in empty config), but the
 	// cache must be cleared regardless.
 	_ = coord.UpdateModels(t.Context())
 
-	require.Empty(t, coord.subagentModelCache)
+	require.Equal(t, 0, coord.subagentModelCache.Len())
 }
 
 // TestResolveModelByID_CacheHitSkipsBuild verifies that a second call to
@@ -1048,23 +1048,23 @@ func TestResolveModelByID_CacheHitSkipsBuild(t *testing.T) {
 	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
 
 	// First call — cache is empty.
-	require.Empty(t, coord.subagentModelCache)
+	require.Equal(t, 0, coord.subagentModelCache.Len())
 
 	_, err := coord.resolveModelByID(t.Context(), "model-x", "test-provider", true)
 	if err != nil {
 		// Provider construction may fail in the test environment (fake API key).
 		// Errors must not be cached.
-		require.Empty(t, coord.subagentModelCache, "failed build must not populate cache")
+		require.Equal(t, 0, coord.subagentModelCache.Len(), "failed build must not populate cache")
 		return
 	}
 
 	// Success path: cache must contain exactly one entry.
-	require.Len(t, coord.subagentModelCache, 1)
+	require.Equal(t, 1, coord.subagentModelCache.Len())
 
 	// Second call must hit the cache (same result, no error).
 	_, err2 := coord.resolveModelByID(t.Context(), "model-x", "test-provider", true)
 	require.NoError(t, err2)
-	require.Len(t, coord.subagentModelCache, 1, "second call must not add a new entry")
+	require.Equal(t, 1, coord.subagentModelCache.Len(), "second call must not add a new entry")
 }
 
 // TestResolveModelByID_ModelNotFound verifies that resolveModelByID returns an
@@ -1083,5 +1083,5 @@ func TestResolveModelByID_ModelNotFound(t *testing.T) {
 	_, err := coord.resolveModelByID(t.Context(), "does-not-exist", "", true)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "not found")
-	require.Empty(t, coord.subagentModelCache)
+	require.Equal(t, 0, coord.subagentModelCache.Len())
 }

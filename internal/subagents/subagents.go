@@ -73,8 +73,14 @@ func (t *ToolList) UnmarshalYAML(value *yaml.Node) error {
 		if err := value.Decode(&items); err != nil {
 			return err
 		}
-		if len(items) > 0 {
-			*t = items
+		result := make([]string, 0, len(items))
+		for _, item := range items {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		if len(result) > 0 {
+			*t = result
 		}
 		return nil
 	default:

@@ -28,6 +28,21 @@ const ReplaceSymbolToolName = "lsp_replace_symbol"
 //go:embed lsp_replace_symbol.md
 var replaceSymbolDescription string
 
+// ReplaceSymbolResponseMetadata carries diff data for the renderer.
+type ReplaceSymbolResponseMetadata struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content"`
+	NewContent string `json:"new_content"`
+	Action     string `json:"action"`
+}
+
+// ReplaceSymbolPermissionsParams carries diff data for the permission dialog.
+type ReplaceSymbolPermissionsParams struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content"`
+	NewContent string `json:"new_content"`
+}
+
 func NewReplaceSymbolTool(
 	lspManager *lsp.Manager,
 	permissions permission.Service,
@@ -89,29 +104,7 @@ func NewReplaceSymbolTool(
 				return fantasy.NewTextErrorResponse("symbol range exceeds file length"), nil
 			}
 
-			oldText := strings.Join(lines[startLine:endLine+1], "\n")
-
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID != "" && permissions != nil {
-				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					ToolName:    ReplaceSymbolToolName,
-					Description: fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
-				})
-				if err != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
-				}
-				if !granted {
-					return fantasy.NewTextErrorResponse("edit denied by user"), nil
-				}
-			}
-
-			if files != nil && sessionID != "" {
-				if _, err := files.CreateVersion(ctx, sessionID, params.FilePath, string(content)); err != nil {
-					slog.Warn("Failed to create file version before replace", "path", params.FilePath, "error", err)
-				}
-			}
-
+			// Compute new content before permission so the dialog can show a diff.
 			var newLines []string
 			switch action {
 			case "replace":
@@ -136,6 +129,34 @@ func NewReplaceSymbolTool(
 			}
 
 			newContent := strings.Join(newLines, "\n")
+
+			sessionID := GetSessionFromContext(ctx)
+			if sessionID != "" && permissions != nil {
+				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        params.FilePath,
+					ToolName:    ReplaceSymbolToolName,
+					Description: fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
+					Params: ReplaceSymbolPermissionsParams{
+						FilePath:   params.FilePath,
+						OldContent: string(content),
+						NewContent: newContent,
+					},
+				})
+				if err != nil {
+					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
+				}
+				if !granted {
+					return NewPermissionDeniedResponse(), nil
+				}
+			}
+
+			if files != nil && sessionID != "" {
+				if _, err := files.CreateVersion(ctx, sessionID, params.FilePath, string(content)); err != nil {
+					slog.Warn("Failed to create file version before replace", "path", params.FilePath, "error", err)
+				}
+			}
+
 			if err := os.WriteFile(params.FilePath, []byte(newContent), 0o644); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 			}
@@ -146,27 +167,26 @@ func NewReplaceSymbolTool(
 
 			notifyLSPs(ctx, lspManager, params.FilePath)
 
-			var b strings.Builder
+			var summary string
 			switch action {
 			case "replace":
-				fmt.Fprintf(&b, "Replaced symbol '%s' in %s (lines %d-%d)\n\n", params.Symbol, params.FilePath, startLine+1, endLine+1)
-				fmt.Fprintf(&b, "Old (%d lines):\n%s\n\n", endLine-startLine+1, truncateText(oldText, 500))
-				fmt.Fprintf(&b, "New (%d lines):\n%s\n", strings.Count(params.Replacement, "\n")+1, truncateText(params.Replacement, 500))
+				summary = fmt.Sprintf("Replaced symbol '%s' in %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
 			case "add_before":
-				fmt.Fprintf(&b, "Inserted before symbol '%s' in %s (before line %d)\n\n", params.Symbol, params.FilePath, startLine+1)
-				fmt.Fprintf(&b, "Inserted (%d lines):\n%s\n", strings.Count(params.Replacement, "\n")+1, truncateText(params.Replacement, 500))
+				summary = fmt.Sprintf("Inserted before symbol '%s' in %s (before line %d)", params.Symbol, params.FilePath, startLine+1)
 			case "add_after":
-				fmt.Fprintf(&b, "Inserted after symbol '%s' in %s (after line %d)\n\n", params.Symbol, params.FilePath, endLine+1)
-				fmt.Fprintf(&b, "Inserted (%d lines):\n%s\n", strings.Count(params.Replacement, "\n")+1, truncateText(params.Replacement, 500))
+				summary = fmt.Sprintf("Inserted after symbol '%s' in %s (after line %d)", params.Symbol, params.FilePath, endLine+1)
 			case "delete":
-				fmt.Fprintf(&b, "Deleted symbol '%s' from %s (lines %d-%d)\n\n", params.Symbol, params.FilePath, startLine+1, endLine+1)
-				fmt.Fprintf(&b, "Removed (%d lines):\n%s\n", endLine-startLine+1, truncateText(oldText, 500))
+				summary = fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
 			}
 
-			text := b.String()
-			text += "\n" + getDiagnostics(params.FilePath, lspManager)
-
-			return fantasy.NewTextResponse(text), nil
+			resp := fantasy.NewTextResponse(summary + "\n" + getDiagnostics(params.FilePath, lspManager))
+			resp = fantasy.WithResponseMetadata(resp, ReplaceSymbolResponseMetadata{
+				FilePath:   params.FilePath,
+				OldContent: string(content),
+				NewContent: newContent,
+				Action:     action,
+			})
+			return resp, nil
 		},
 	)
 }
@@ -188,12 +208,4 @@ func findSymbolByName(symbols []protocol.DocumentSymbolResult, name string) prot
 		}
 	}
 	return nil
-}
-
-// truncateText truncates a string to maxLen bytes, appending a note if truncated.
-func truncateText(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "\n... (truncated)"
 }

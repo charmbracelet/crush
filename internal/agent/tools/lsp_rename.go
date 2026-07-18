@@ -71,7 +71,7 @@ func NewRenameTool(
 					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
 				}
 				if !granted {
-					return fantasy.NewTextErrorResponse("rename denied by user"), nil
+					return NewPermissionDeniedResponse(), nil
 				}
 			}
 

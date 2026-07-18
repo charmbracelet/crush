@@ -24,6 +24,13 @@ const DefinitionToolName = "lsp_definition"
 //go:embed lsp_definition.md
 var definitionDescription string
 
+// DefinitionResponseMetadata carries structured data for the renderer.
+type DefinitionResponseMetadata struct {
+	FilePath string `json:"file_path"`
+	Line     int    `json:"line"`
+	Content  string `json:"content"`
+}
+
 func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DefinitionToolName,
@@ -51,16 +58,23 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
 			}
 
-			return fantasy.NewTextResponse(formatDefinitions(locations)), nil
+			text, meta := formatDefinitions(locations)
+			resp := fantasy.NewTextResponse(text)
+			if meta != nil {
+				resp = fantasy.WithResponseMetadata(resp, meta)
+			}
+			return resp, nil
 		},
 	)
 }
 
-func formatDefinitions(locations []protocol.Location) string {
+func formatDefinitions(locations []protocol.Location) (string, *DefinitionResponseMetadata) {
 	locations = cleanupLocations(locations)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Found %d definition(s):\n\n", len(locations))
+
+	var firstMeta *DefinitionResponseMetadata
 
 	for _, loc := range locations {
 		path, err := loc.URI.Path()
@@ -76,9 +90,18 @@ func formatDefinitions(locations []protocol.Location) string {
 			b.WriteString(snippet)
 			b.WriteString("\n")
 		}
+
+		// Capture metadata for the first definition (most common case).
+		if firstMeta == nil && snippet != "" {
+			firstMeta = &DefinitionResponseMetadata{
+				FilePath: path,
+				Line:     int(loc.Range.Start.Line),
+				Content:  readSourceLines(path, int(loc.Range.Start.Line), 3),
+			}
+		}
 	}
 
-	return b.String()
+	return b.String(), firstMeta
 }
 
 func readSourceContext(filePath string, targetLine int, contextLines int) string {
@@ -100,4 +123,18 @@ func readSourceContext(filePath string, targetLine int, contextLines int) string
 		fmt.Fprintf(&b, "%s%4d | %s\n", marker, i+1, lines[i])
 	}
 	return b.String()
+}
+
+// readSourceLines returns raw source lines around targetLine without markers.
+func readSourceLines(filePath string, targetLine int, contextLines int) string {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(data), "\n")
+	start := max(0, targetLine-contextLines)
+	end := min(len(lines), targetLine+contextLines+1)
+
+	return strings.Join(lines[start:end], "\n")
 }

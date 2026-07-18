@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -30,7 +31,7 @@ type ReplaceSymbolToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
+	// Replace symbol uses full width for diffs, like edit.
 	if opts.IsPending() {
 		return pendingTool(sty, "Replace Symbol", opts.Anim, opts.Compact)
 	}
@@ -38,20 +39,36 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 	var params tools.ReplaceSymbolParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
-	header := toolHeader(sty, opts.Status, "Replace Symbol", cappedWidth, opts, params.Symbol, params.FilePath)
+	file := fsext.PrettyPath(params.FilePath)
+	header := toolHeader(sty, opts.Status, "Replace Symbol", width, opts, params.Symbol, file)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
-	if opts.HasEmptyResult() {
+	if !opts.HasResult() {
 		return header
 	}
 
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+	// Try to render as a diff using metadata.
+	var meta tools.ReplaceSymbolResponseMetadata
+	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.OldContent != "" || meta.NewContent != "" {
+		diff := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
+
+		// On error, show error above the diff.
+		if opts.Result.IsError {
+			errLine := toolErrorContent(sty, opts.Result, width)
+			return joinToolParts(header, errLine+"\n"+diff)
+		}
+
+		return joinToolParts(header, diff)
+	}
+
+	// Fallback to plain text if no metadata.
+	bodyWidth := width - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

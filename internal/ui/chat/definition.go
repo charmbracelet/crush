@@ -51,6 +51,14 @@ func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		return header
 	}
 
+	// Try to render code with syntax highlighting using metadata.
+	var meta tools.DefinitionResponseMetadata
+	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.Content != "" {
+		body := toolOutputCodeContent(sty, meta.FilePath, meta.Content, 0, cappedWidth, opts.ExpandedContent)
+		return joinToolParts(header, body)
+	}
+
+	// Fallback to plain text.
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)

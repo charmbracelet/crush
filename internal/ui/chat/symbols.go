@@ -51,7 +51,7 @@ func (r *SymbolsToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 		return header
 	}
 
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+	// Render as code to preserve tree indentation.
+	body := toolOutputCodeContent(sty, params.FilePath, opts.Result.Content, 0, cappedWidth, opts.ExpandedContent)
 	return joinToolParts(header, body)
 }

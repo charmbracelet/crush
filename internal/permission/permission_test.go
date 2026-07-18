@@ -192,6 +192,45 @@ func TestPermissionService_HookApproval(t *testing.T) {
 }
 
 func TestPermissionService_AutoApproveRequestsContext(t *testing.T) {
+	t.Run("prompt policy overrides inherited auto approval", func(t *testing.T) {
+		service := NewPermissionService(t.TempDir(), false, nil)
+		requests := service.Subscribe(t.Context())
+		ctx := WithRequestPolicy(WithAutoApproveRequests(t.Context()), RequestPolicyPrompt)
+		assert.Equal(t, RequestPolicyPrompt, RequestPolicyFromContext(ctx))
+		assert.Equal(t, RequestPolicyPrompt, RequestPolicyFromContext(t.Context()))
+
+		type requestResult struct {
+			granted bool
+			err     error
+		}
+		result := make(chan requestResult, 1)
+		go func() {
+			granted, err := service.Request(ctx, CreatePermissionRequest{
+				SessionID:  "interactive-session",
+				ToolCallID: "interactive-call",
+				ToolName:   "ls",
+				Action:     "list",
+				Path:       t.TempDir(),
+			})
+			result <- requestResult{granted: granted, err: err}
+		}()
+
+		select {
+		case event := <-requests:
+			assert.True(t, service.Deny(event.Payload))
+		case <-time.After(2 * time.Second):
+			t.Fatal("prompt policy inherited auto-approval")
+		}
+
+		select {
+		case got := <-result:
+			require.NoError(t, got.err)
+			assert.False(t, got.granted)
+		case <-time.After(2 * time.Second):
+			t.Fatal("prompt request did not return after denial")
+		}
+	})
+
 	t.Run("approval is scoped to one context tree", func(t *testing.T) {
 		service := NewPermissionService(t.TempDir(), false, nil)
 		requests := service.Subscribe(t.Context())

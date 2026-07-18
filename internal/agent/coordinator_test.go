@@ -368,6 +368,7 @@ func TestRunSubAgentInheritsNonInteractivePermissionPolicy(t *testing.T) {
 
 	agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 		assert.NotEqual(t, parentSession.ID, call.SessionID)
+		assert.Equal(t, permission.RequestPolicyAutoApprove, call.PermissionPolicy)
 		granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
 			SessionID:  call.SessionID,
 			ToolCallID: "child-call",
@@ -452,6 +453,7 @@ func TestRunSubAgentInteractiveParentDoesNotApproveChild(t *testing.T) {
 	select {
 	case call := <-calls:
 		assert.True(t, call.NonInteractive)
+		assert.Equal(t, permission.RequestPolicyPrompt, call.PermissionPolicy)
 		assert.NotEqual(t, parentSession.ID, call.SessionID)
 	case <-time.After(2 * time.Second):
 		t.Fatal("child agent was never run")

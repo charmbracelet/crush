@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -22,10 +23,11 @@ import (
 // Subsequent Stream calls (e.g. the recursive run draining the queue)
 // proceed immediately.
 type gatedStreamModel struct {
-	text    string
-	gate    chan struct{}
-	entered chan struct{}
-	calls   atomic.Int64
+	text     string
+	gate     chan struct{}
+	entered  chan struct{}
+	policies chan permission.RequestPolicy
+	calls    atomic.Int64
 }
 
 func (m *gatedStreamModel) Provider() string { return "fake" }
@@ -39,6 +41,9 @@ func (m *gatedStreamModel) Generate(ctx context.Context, call fantasy.Call) (*fa
 }
 
 func (m *gatedStreamModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	if m.policies != nil {
+		m.policies <- permission.RequestPolicyFromContext(ctx)
+	}
 	if m.calls.Add(1) == 1 {
 		close(m.entered)
 		select {
@@ -178,4 +183,146 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	}
 	require.Equal(t, 2, assistants, "the active turn and the recursive turn each produce one assistant message")
 	require.Equal(t, 1, follows, "the follow-up prompt is its own user turn")
+}
+
+func TestRun_QueuedTurnUsesItsOwnPermissionPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		activePolicy permission.RequestPolicy
+		queuedPolicy permission.RequestPolicy
+	}{
+		{
+			name:         "queued auto approval does not inherit prompting",
+			activePolicy: permission.RequestPolicyPrompt,
+			queuedPolicy: permission.RequestPolicyAutoApprove,
+		},
+		{
+			name:         "queued prompt does not inherit auto approval",
+			activePolicy: permission.RequestPolicyAutoApprove,
+			queuedPolicy: permission.RequestPolicyPrompt,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := testEnv(t)
+			large := &gatedStreamModel{
+				text:     "done",
+				gate:     make(chan struct{}),
+				entered:  make(chan struct{}),
+				policies: make(chan permission.RequestPolicy, 2),
+			}
+			small := &finishStreamModel{text: "title"}
+			sa := NewSessionAgent(SessionAgentOptions{
+				LargeModel: Model{
+					Model: large,
+					CatwalkCfg: catwalk.Model{
+						ContextWindow:    200000,
+						DefaultMaxTokens: 10000,
+					},
+				},
+				SmallModel: Model{
+					Model: small,
+					CatwalkCfg: catwalk.Model{
+						ContextWindow:    200000,
+						DefaultMaxTokens: 10000,
+					},
+				},
+				IsYolo:   true,
+				Sessions: env.sessions,
+				Messages: env.messages,
+			}).(*sessionAgent)
+
+			sess, err := env.sessions.Create(t.Context(), "session")
+			require.NoError(t, err)
+
+			mainDone := make(chan error, 1)
+			go func() {
+				_, runErr := sa.Run(t.Context(), SessionAgentCall{
+					SessionID:        sess.ID,
+					Prompt:           "main",
+					PermissionPolicy: tt.activePolicy,
+				})
+				mainDone <- runErr
+			}()
+
+			select {
+			case <-large.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("main run never entered Stream")
+			}
+			require.Equal(t, tt.activePolicy, <-large.policies)
+
+			result, err := sa.Run(t.Context(), SessionAgentCall{
+				SessionID:        sess.ID,
+				Prompt:           "queued",
+				PermissionPolicy: tt.queuedPolicy,
+			})
+			require.NoError(t, err)
+			require.Nil(t, result)
+			require.Equal(t, 1, sa.QueuedPrompts(sess.ID))
+
+			close(large.gate)
+			require.NoError(t, <-mainDone)
+			require.Equal(t, tt.queuedPolicy, <-large.policies)
+			require.Equal(t, int64(2), large.calls.Load())
+		})
+	}
+}
+
+func TestSummarize_QueuedTurnUsesItsOwnPermissionPolicy(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	large := &gatedStreamModel{
+		text:     "done",
+		gate:     make(chan struct{}),
+		entered:  make(chan struct{}),
+		policies: make(chan permission.RequestPolicy, 2),
+	}
+	sa := testSessionAgent(env, large, &finishStreamModel{text: "title"}, "system").(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "existing message"},
+		},
+	})
+	require.NoError(t, err)
+
+	summarizeDone := make(chan error, 1)
+	go func() {
+		summarizeDone <- sa.Summarize(
+			permission.WithAutoApproveRequests(t.Context()),
+			sess.ID,
+			nil,
+		)
+	}()
+
+	select {
+	case <-large.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("summarization never entered Stream")
+	}
+	require.Equal(t, permission.RequestPolicyAutoApprove, <-large.policies)
+
+	result, err := sa.Run(t.Context(), SessionAgentCall{
+		SessionID:        sess.ID,
+		Prompt:           "queued",
+		PermissionPolicy: permission.RequestPolicyPrompt,
+	})
+	require.NoError(t, err)
+	require.Nil(t, result)
+	require.Equal(t, 1, sa.QueuedPrompts(sess.ID))
+
+	close(large.gate)
+	require.NoError(t, <-summarizeDone)
+	require.Equal(t, permission.RequestPolicyPrompt, <-large.policies)
+	require.Equal(t, int64(2), large.calls.Load())
 }

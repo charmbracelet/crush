@@ -140,6 +140,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
+	// Arm initialization synchronously before launching it so WaitForInit
+	// blocks for the in-flight init instead of racing the goroutine and
+	// returning before any MCP tools register.
+	mcp.ArmInit()
 	go mcp.Initialize(ctx, app.Permissions, store)
 
 	// Start herdr integration when running inside a herdr pane.
@@ -178,7 +182,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		client.SetDiagnosticsCallback(updateLSPDiagnostics)
 		updateLSPState(name, client.GetServerState(), nil, client, 0)
 	})
-	go app.LSPManager.TrackConfigured()
+
+	// TrackConfigured must run after SetCallback so the callback is already
+	// installed when configured-but-not-yet-started LSPs are announced.
+	go app.LSPManager.TrackConfigured(ctx)
 
 	return app, nil
 }

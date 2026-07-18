@@ -321,7 +321,7 @@ func (p *Permissions) respond(action PermissionAction) tea.Msg {
 
 func (p *Permissions) hasDiffView() bool {
 	switch p.permission.ToolName {
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName:
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ReplaceSymbolToolName:
 		return true
 	}
 	return false
@@ -453,9 +453,18 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 
 	// Tool info.
 	toolLine := p.renderToolName(contentWidth)
-	pathLine := p.renderKeyValue("Path", fsext.PrettyPath(p.permission.Path), contentWidth)
 
-	lines := []string{title, "", toolLine, pathLine}
+	lines := []string{title, "", toolLine}
+
+	// Show generic Path only for tools that don't render their own file/path line.
+	switch p.permission.ToolName {
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName,
+		tools.ViewToolName, tools.ReplaceSymbolToolName,
+		tools.DownloadToolName, tools.LSToolName:
+		// These tools show their own File/Directory line below.
+	default:
+		lines = append(lines, p.renderKeyValue("Path", fsext.PrettyPath(p.permission.Path), contentWidth))
+	}
 
 	// Add tool-specific header info.
 	switch p.permission.ToolName {
@@ -468,7 +477,7 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
 		}
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ViewToolName:
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ViewToolName, tools.ReplaceSymbolToolName:
 		var filePath string
 		switch params := p.permission.Params.(type) {
 		case tools.EditPermissionsParams:
@@ -478,6 +487,8 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		case tools.MultiEditPermissionsParams:
 			filePath = params.FilePath
 		case tools.ViewPermissionsParams:
+			filePath = params.FilePath
+		case tools.ReplaceSymbolPermissionsParams:
 			filePath = params.FilePath
 		}
 		if filePath != "" {
@@ -536,6 +547,8 @@ func (p *Permissions) renderContent(width int) string {
 		return p.renderWriteContent(width)
 	case tools.MultiEditToolName:
 		return p.renderMultiEditContent(width)
+	case tools.ReplaceSymbolToolName:
+		return p.renderReplaceSymbolContent(width)
 	case tools.DownloadToolName:
 		return p.renderDownloadContent(width)
 	case tools.FetchToolName:
@@ -578,6 +591,14 @@ func (p *Permissions) renderWriteContent(contentWidth int) string {
 
 func (p *Permissions) renderMultiEditContent(contentWidth int) string {
 	params, ok := p.permission.Params.(tools.MultiEditPermissionsParams)
+	if !ok {
+		return ""
+	}
+	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
+}
+
+func (p *Permissions) renderReplaceSymbolContent(contentWidth int) string {
+	params, ok := p.permission.Params.(tools.ReplaceSymbolPermissionsParams)
 	if !ok {
 		return ""
 	}

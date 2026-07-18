@@ -1,1 +1,1 @@
-Edit a file by exact find-and-replace; can also create or delete content. For renames/moves use bash. For large edits use write.
+Edit a file by exact find-and-replace; can also create or delete content. For whole-function/method/type replacements prefer `lsp_replace_symbol` (no whitespace matching needed). For renames prefer `lsp_rename` (semantic, cross-file). For large edits use write.

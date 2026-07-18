@@ -125,3 +125,32 @@ func TestWithPreloadedSkillsXML_EmptyString(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "", result)
 }
+
+// TestWithAvailableSubagentsXML verifies that WithAvailableSubagentsXML stores
+// the XML string in PromptDat.AvailSubagentXML and that the template can
+// render it.
+func TestWithAvailableSubagentsXML(t *testing.T) {
+	t.Parallel()
+
+	const xml = "<available_subagents>\n  <subagent>\n    <name>my-agent</name>\n  </subagent>\n</available_subagents>"
+
+	p, err := NewPrompt("test", `{{.AvailSubagentXML}}`, WithAvailableSubagentsXML(xml))
+	require.NoError(t, err)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	require.NoError(t, err)
+	require.Equal(t, xml, result)
+}
+
+// TestWithAvailableSubagentsXML_EmptyString verifies that an empty XML string
+// is stored and rendered correctly (default when the option is not provided).
+func TestWithAvailableSubagentsXML_EmptyString(t *testing.T) {
+	t.Parallel()
+
+	p, err := NewPrompt("test", `{{.AvailSubagentXML}}`, WithAvailableSubagentsXML(""))
+	require.NoError(t, err)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	require.NoError(t, err)
+	require.Equal(t, "", result)
+}

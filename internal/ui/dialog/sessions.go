@@ -232,22 +232,8 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
 	s.input.SetWidth(dialogInputTextWidth(t, s.input, innerWidth))
-	listHeight := max(0, height-heightOffset)
-	listTotalHeight := s.list.TotalHeight()
-	// Reserve one column for the scrollbar only when it will actually
-	// show. The item's own right padding provides the gap before it, so
-	// the list otherwise spans the full content width with no dead space.
-	scrollbarWidth := 0
-	if listTotalHeight > listHeight {
-		scrollbarWidth = 1
-	}
-	listWidth := max(0, innerWidth-scrollbarWidth)
-	s.list.SetSize(listWidth, listHeight)
+	listHeight, listTotalHeight, listWidth := sizeDialogList(t, s.list, innerWidth, height)
 
 	// Hide the timestamps uniformly when the widest would crowd the title.
 	applyInfoColumnVisibility(s.list.FilteredItems(), listWidth, sessionInfoMaxPercent)

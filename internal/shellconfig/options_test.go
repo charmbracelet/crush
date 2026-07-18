@@ -50,9 +50,9 @@ func TestOption_List(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `option context-paths .cursorrules
-option context-paths CRUSH.md
-option disabled-tools bash`
+	script := `option context-path .cursorrules
+option context-path CRUSH.md
+option disable-tool bash`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))

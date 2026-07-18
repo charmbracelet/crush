@@ -15,7 +15,7 @@ import (
 // Usage: option <key> <value>
 //
 // Sets a single option field. The key is a kebab-case name; for list fields
-// (context-paths, disabled-tools, etc.) each call appends to the list.
+// (context-path, disable-tool, etc.) each call appends to the list.
 //
 // Some config fields are phrased negatively (disable_metrics). Those are
 // exposed positively — the user sets "metrics false" and it is stored as
@@ -24,7 +24,7 @@ import (
 // Examples:
 //
 //	option data-directory .crush
-//	option context-paths .cursorrules
+//	option context-path .cursorrules
 //	option metrics false
 //	option debug true
 //	option auto-lsp false
@@ -143,16 +143,16 @@ func optionKeyMap(key string) (jsonKey string, inverted bool) {
 	case "notification-style":
 		return "notification_style", false
 
-	// List fields
-	case "context-paths":
+	// List fields. Keys are singular because each call appends one value.
+	case "context-path":
 		return "context_paths", false
-	case "global-context-paths":
+	case "global-context-path":
 		return "global_context_paths", false
-	case "skills-paths":
+	case "skill-path":
 		return "skills_paths", false
-	case "disabled-tools":
+	case "disable-tool":
 		return "disabled_tools", false
-	case "disabled-skills":
+	case "disable-skill":
 		return "disabled_skills", false
 
 	default:

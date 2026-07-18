@@ -724,17 +724,17 @@ option <key> [value]
       initialize-as VALUE          (json: initialize_as)
       notification-style VALUE     (json: notification_style)
 
-    List keys (value required, repeatable):
-      context-paths VALUE          (json: context_paths)
-      global-context-paths VALUE   (json: global_context_paths)
-      skills-paths VALUE           (json: skills_paths)
-      disabled-tools VALUE         (json: disabled_tools)
-      disabled-skills VALUE        (json: disabled_skills)
+    List keys (singular; value required; append one value per call):
+      context-path VALUE           (json: context_paths)
+      global-context-path VALUE    (json: global_context_paths)
+      skill-path VALUE             (json: skills_paths)
+      disable-tool VALUE           (json: disabled_tools)
+      disable-skill VALUE          (json: disabled_skills)
 
     Examples:
       option debug true
       option progress false
       option metrics false
       option data-directory .crush
-      option context-paths .cursorrules
+      option context-path .cursorrules
 ```

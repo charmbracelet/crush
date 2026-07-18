@@ -72,6 +72,71 @@ option disable-tool bash`
 	require.Equal(t, "bash", tools[0])
 }
 
+func TestOption_Reset(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option skill-path ./a
+option skill-path ./b
+option reset skill-path`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Empty(t, opts["skills_paths"].([]any))
+}
+
+func TestOption_ResetThenReadd(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option skill-path ./inherited-a
+option skill-path ./inherited-b
+option reset skill-path
+option skill-path ./mine`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	paths := opts["skills_paths"].([]any)
+	require.Len(t, paths, 1)
+	require.Equal(t, "./mine", paths[0])
+}
+
+func TestOption_ResetUnknownKey(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option reset bogus-key`
+	path := filepath.Join(dir, "crush.sh")
+
+	_, err := LoadShellConfig(path, []byte(script))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown key")
+}
+
+func TestOption_ResetNonListKey(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option reset debug`
+	path := filepath.Join(dir, "crush.sh")
+
+	_, err := LoadShellConfig(path, []byte(script))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not one")
+}
+
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 

@@ -701,9 +701,14 @@ hook <event> --command <cmd> [flags]
 
 ```text
 option <key> [value]
+option reset <list-key>
     Set a single field under options. Positional key/value form (no --flags).
     Boolean keys may omit the value (defaults to true). List keys append on
     each call.
+
+    "option reset <list-key>" wipes a list back to empty, dropping values set
+    earlier in the script or pulled in via source. Values appended after the
+    reset are kept, so "reset then re-add" works. Only valid for list keys.
 
     Boolean keys (value optional, defaults true):
       debug                        (json: debug)
@@ -737,4 +742,5 @@ option <key> [value]
       option metrics false
       option data-directory .crush
       option context-path .cursorrules
+      option reset skill-path
 ```

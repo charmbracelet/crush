@@ -55,6 +55,13 @@ func LoadShellConfig(path string, src []byte) ([]byte, error) {
 		return nil, fmt.Errorf("merging shell config fragments from %s: %w", path, err)
 	}
 
+	// Apply `option reset` markers now that all list fragments are merged.
+	merged, err = resolveResetSentinels(merged)
+	if err != nil {
+		slog.Error("Failed to resolve reset sentinels", "path", path, "error", err)
+		return nil, fmt.Errorf("resolving reset sentinels from %s: %w", path, err)
+	}
+
 	// Validate that the merged result is a valid JSON object.
 	if !json.Valid(merged) {
 		slog.Error("Shell config produced invalid JSON", "path", path)

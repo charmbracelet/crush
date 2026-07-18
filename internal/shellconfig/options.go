@@ -2,6 +2,7 @@ package shellconfig
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,12 +11,23 @@ import (
 	"github.com/charmbracelet/crush/internal/shell"
 )
 
+// resetSentinel marks a "reset" point inside a list option. Because the
+// config merge concatenates lists, `option reset <key>` appends this marker
+// instead of trying to clear the slice in place. resolveResetSentinels
+// truncates each list at its last sentinel after merging, so values added
+// after a reset survive while earlier ones are dropped. The NUL prefix makes
+// accidental collision with a real config value effectively impossible.
+const resetSentinel = "\x00__crush_reset__"
+
 // handleOption implements the `option` builtin.
 //
 // Usage: option <key> <value>
 //
 // Sets a single option field. The key is a kebab-case name; for list fields
 // (context-path, disable-tool, etc.) each call appends to the list.
+//
+// "option reset <list-key>" wipes a list back to empty, dropping values set
+// earlier in the script or via source. Values added after the reset are kept.
 //
 // Some config fields are phrased negatively (disable_metrics). Those are
 // exposed positively — the user sets "metrics false" and it is stored as
@@ -25,6 +37,7 @@ import (
 //
 //	option data-directory .crush
 //	option context-path .cursorrules
+//	option reset skill-path
 //	option metrics false
 //	option debug true
 //	option auto-lsp false
@@ -42,6 +55,27 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	key := args[1]
 	f := newFragmentBuilder()
 	o := f.rootMap("options")
+
+	// "option reset <key>" wipes a list back to empty. It emits a sentinel
+	// element that rides the concatenating merge and is resolved (everything
+	// up to and including the last sentinel is dropped) after the script's
+	// fragments are merged. This keeps "reset then re-add" order-correct.
+	if key == "reset" {
+		if len(args) < 3 {
+			return usage(stderr, "usage: option reset <list-key>")
+		}
+		target := args[2]
+		jsonKey, _ := optionKeyMap(target)
+		if jsonKey == "" {
+			return usage(stderr, fmt.Sprintf("option: unknown key %q", target))
+		}
+		if !isListOption(jsonKey) {
+			return usage(stderr, fmt.Sprintf("option: reset only applies to list options, %q is not one", target))
+		}
+		o[jsonKey] = []any{resetSentinel}
+		slog.Info("Option list reset in shell config", "key", target)
+		return f.append(b)
+	}
 
 	// Determine the value.
 	var val string
@@ -194,4 +228,52 @@ func parseBool(s string) (bool, error) {
 	default:
 		return false, fmt.Errorf("invalid boolean %q", s)
 	}
+}
+
+// resolveResetSentinels applies `option reset` markers to the merged config.
+// For every list under "options", it keeps only the elements that follow the
+// last resetSentinel (dropping the sentinel and everything before it), so a
+// reset wipes inherited values while later additions survive. Lists without a
+// sentinel are left untouched. It returns the (possibly rewritten) JSON.
+func resolveResetSentinels(data []byte) ([]byte, error) {
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		// Not a JSON object; nothing to resolve.
+		return data, nil
+	}
+	opts, ok := root["options"].(map[string]any)
+	if !ok {
+		return data, nil
+	}
+
+	changed := false
+	for key, v := range opts {
+		arr, ok := v.([]any)
+		if !ok {
+			continue
+		}
+		last := -1
+		for i, item := range arr {
+			if s, ok := item.(string); ok && s == resetSentinel {
+				last = i
+			}
+		}
+		if last < 0 {
+			continue
+		}
+		kept := make([]any, 0, len(arr)-last-1)
+		for _, item := range arr[last+1:] {
+			if s, ok := item.(string); ok && s == resetSentinel {
+				continue
+			}
+			kept = append(kept, item)
+		}
+		opts[key] = kept
+		changed = true
+	}
+
+	if !changed {
+		return data, nil
+	}
+	return json.Marshal(root)
 }

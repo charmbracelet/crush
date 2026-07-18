@@ -34,6 +34,25 @@ func TestLoadShellConfig_Provider(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v1", openai["base_url"])
 }
 
+// TestLoadShellConfig_FlagBoolCaseInsensitive verifies that flag booleans
+// accept mixed-case values like TRUE/False.
+func TestLoadShellConfig_FlagBoolCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `provider openai --api-key key --disable TRUE`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	openai := result["providers"].(map[string]any)["openai"].(map[string]any)
+	require.Equal(t, true, openai["disable"])
+}
+
 // TestLoadShellConfig_MultipleProviders verifies that multiple provider calls
 // each produce separate entries.
 func TestLoadShellConfig_MultipleProviders(t *testing.T) {

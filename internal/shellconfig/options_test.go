@@ -27,6 +27,27 @@ option progress false`
 	require.Equal(t, false, opts["progress"])
 }
 
+func TestOption_BoolCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option debug TRUE
+option progress False
+option metrics YES`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Equal(t, true, opts["debug"])
+	require.Equal(t, false, opts["progress"])
+	require.Equal(t, false, opts["disable_metrics"])
+}
+
 func TestOption_String(t *testing.T) {
 	t.Parallel()
 

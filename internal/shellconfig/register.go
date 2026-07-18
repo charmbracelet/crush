@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -95,7 +96,7 @@ func flagBool(args []string, i *int, flag string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	switch v {
+	switch strings.ToLower(v) {
 	case "true", "1", "yes":
 		return true, nil
 	case "false", "0", "no":

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -220,7 +221,7 @@ func isListOption(jsonKey string) bool {
 }
 
 func parseBool(s string) (bool, error) {
-	switch s {
+	switch strings.ToLower(s) {
 	case "true", "1", "yes":
 		return true, nil
 	case "false", "0", "no":

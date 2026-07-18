@@ -996,6 +996,8 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		opts = append(opts, openaicompat.WithSDKOptions(openaisdk.WithJSONSet(extraKey, extraValue)))
 	}
 
+	opts = append(opts, openaicompat.WithSDKOptions(openAICompatSDKOptions()...))
+
 	return openaicompat.New(opts...)
 }
 

@@ -385,9 +385,9 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // publish their terminal cancelled RunComplete (a caller waiting on that
 // RunID, e.g. `crush run`, would otherwise hang). Uncanceled calls without
 // a RunID and the same permission policy as the active turn are returned in
-// fold, preserving the existing follow-up behavior. Calls with a RunID or a
-// different permission policy are left in the queue so each runs as its own
-// turn with its own lifecycle and permission behavior. fold is processed by
+// fold until a surviving call cannot be folded. That call and all later
+// survivors are left in the queue, preserving submission order while each
+// runs with its own lifecycle and permission behavior. fold is processed by
 // the caller without the lock held.
 func (a *sessionAgent) drainQueueForStep(sessionID string, activePolicy permission.RequestPolicy) (fold, canceledWithRunID []SessionAgentCall) {
 	dispatchLock := a.sessionMu(sessionID)
@@ -395,7 +395,7 @@ func (a *sessionAgent) drainQueueForStep(sessionID string, activePolicy permissi
 	defer dispatchLock.Unlock()
 	queuedCalls, _ := a.messageQueue.Get(sessionID)
 	var keep []SessionAgentCall
-	var policyBarrier bool
+	var queueBarrier bool
 	for _, queued := range queuedCalls {
 		if a.canceledBySeq(sessionID, queued.acceptSeq) {
 			if queued.RunID != "" {
@@ -403,12 +403,8 @@ func (a *sessionAgent) drainQueueForStep(sessionID string, activePolicy permissi
 			}
 			continue
 		}
-		if policyBarrier || queued.PermissionPolicy != activePolicy {
-			policyBarrier = true
-			keep = append(keep, queued)
-			continue
-		}
-		if queued.RunID != "" {
+		if queueBarrier || queued.PermissionPolicy != activePolicy || queued.RunID != "" {
+			queueBarrier = true
 			keep = append(keep, queued)
 			continue
 		}

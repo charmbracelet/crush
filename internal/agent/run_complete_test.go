@@ -171,7 +171,8 @@ func TestDrainQueueForStep_KeepsDifferentPermissionPolicyQueued(t *testing.T) {
 // publish a RunComplete for its RunID, hanging a `crush run` caller that
 // blocks on that event. Such prompts are left in the queue so the
 // recursive run path gives each its own turn and its own RunComplete.
-// Non-RunID prompts are still folded.
+// Foldable prompts before the first RunID prompt are still folded, while
+// later prompts stay queued to preserve submission order.
 func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 	t.Parallel()
 
@@ -186,6 +187,7 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 		{SessionID: sessionID, Prompt: "fold-me", acceptSeq: 1},
 		{SessionID: sessionID, RunID: "run-a", Prompt: "keep-me", acceptSeq: 2},
 		{SessionID: sessionID, RunID: "run-b", Prompt: "keep-me-too", acceptSeq: 3},
+		{SessionID: sessionID, Prompt: "keep-after-runid", acceptSeq: 4},
 	})
 
 	fold, canceledWithRunID := a.drainQueueForStep(sessionID, permission.RequestPolicyPrompt)
@@ -196,9 +198,10 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 
 	kept, ok := a.messageQueue.Get(sessionID)
 	require.True(t, ok, "RunID-bearing prompts must remain queued for the recursive run path")
-	require.Len(t, kept, 2)
+	require.Len(t, kept, 3, "prompts after a RunID prompt must remain queued to preserve submission order")
 	require.Equal(t, "run-a", kept[0].RunID)
 	require.Equal(t, "run-b", kept[1].RunID)
+	require.Equal(t, "keep-after-runid", kept[2].Prompt)
 }
 
 // TestDrainQueueForStep_ReportsCanceledRunIDDrops verifies that a queued

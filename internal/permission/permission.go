@@ -39,11 +39,11 @@ type requestPolicyKey struct{}
 
 // RequestPolicy controls how permission requests are resolved for one agent
 // turn.
-type RequestPolicy bool
+type RequestPolicy uint8
 
 const (
-	RequestPolicyPrompt      RequestPolicy = false
-	RequestPolicyAutoApprove RequestPolicy = true
+	RequestPolicyPrompt RequestPolicy = iota
+	RequestPolicyAutoApprove
 )
 
 // WithAutoApproveRequests returns a context whose permission requests are

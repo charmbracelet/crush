@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -184,6 +185,26 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 	}
 }
 
+// handleGetWorkspaceClients returns all attached clients for a workspace.
+//
+//	@Summary		List attached clients
+//	@Tags			workspaces
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Success		200	{array}		proto.ClientInfo
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/clients [get]
+func (c *controllerV1) handleGetWorkspaceClients(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	clients, err := c.backend.ListClients(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, clients)
+}
+
 // handleDeleteWorkspaces deletes a workspace.
 //
 //	@Summary		Delete workspace
@@ -271,7 +292,8 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		c.handleError(w, r, err)
 		return
 	}
-	if err := c.backend.AttachClient(id, clientID); err != nil {
+	pid, _ := strconv.Atoi(r.URL.Query().Get("pid"))
+	if err := c.backend.AttachClient(id, clientID, pid); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

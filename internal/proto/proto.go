@@ -56,6 +56,13 @@ type CurrentSession struct {
 	SessionID string `json:"session_id"`
 }
 
+// ClientInfo describes a single attached client within a workspace.
+type ClientInfo struct {
+	ClientID         string `json:"client_id"`
+	CurrentSessionID string `json:"current_session_id,omitempty"`
+	PID              int    `json:"pid,omitempty"`
+}
+
 // RunComplete is the authoritative end-of-run signal for a session,
 // emitted exactly once per top-level agent turn after all message
 // updates for the turn have flushed. Clients that need a reliable

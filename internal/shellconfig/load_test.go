@@ -167,7 +167,7 @@ func TestLoadShellConfig_Permissions(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `permissions --allow bash --allow view`
+	script := `permissions allow bash view`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -416,7 +416,7 @@ mcp add github --type stdio --command npx --args "-y" --args "@modelcontextproto
 lsp add gopls --command gopls --filetypes go --root-markers go.mod
 
 # Permissions
-permissions --allow bash --allow view
+permissions allow bash view
 
 # Hooks
 hook add PreToolUse --command "echo running" --matcher "bash" --timeout 10

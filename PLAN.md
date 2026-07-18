@@ -75,7 +75,7 @@ mcp add local-server --type http --url "http://localhost:3000/mcp" --header "Aut
 lsp add gopls --command gopls --filetypes go,mod --root-markers go.mod
 
 # Permissions
-permissions --allow bash --allow view
+permissions allow bash view
 
 # Hooks
 hook add PreToolUse --matcher "bash" --command "echo 'Running bash'" --timeout 10 --name run-bash
@@ -745,10 +745,9 @@ lsp remove <name>   (alias: rm)
 ```
 
 ```text
-permissions [flags]
-    Add tools to the allow list.
-
-    --allow TOOL                 Allow a tool, repeatable (json: allowed_tools)
+permissions allow <tool> [<tool> ...]
+    Add one or more tools to the allow-list (tools that skip permission
+    prompts). Adding a tool already present is a no-op. (json: allowed_tools)
 ```
 
 ```text

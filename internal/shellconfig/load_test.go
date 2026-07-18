@@ -106,8 +106,8 @@ func TestLoadShellConfig_MCP(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `mcp github --type stdio --command npx --args "-y" --args "@modelcontextprotocol/server-github" --env GITHUB_TOKEN "ghp_xxx"
-mcp local-server --type http --url "http://localhost:3000/mcp" --header "Authorization" "Bearer token"`
+	script := `mcp add github --type stdio --command npx --args "-y" --args "@modelcontextprotocol/server-github" --env GITHUB_TOKEN "ghp_xxx"
+mcp add local-server --type http --url "http://localhost:3000/mcp" --header "Authorization" "Bearer token"`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -410,7 +410,7 @@ model large openai/gpt-4o --think
 model small anthropic/claude-3-5-haiku
 
 # MCP
-mcp github --type stdio --command npx --args "-y" --args "@modelcontextprotocol/server-github"
+mcp add github --type stdio --command npx --args "-y" --args "@modelcontextprotocol/server-github"
 
 # LSP
 lsp add gopls --command gopls --filetypes go --root-markers go.mod

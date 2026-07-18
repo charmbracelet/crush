@@ -68,8 +68,8 @@ model large openai/gpt-4o --think
 model small anthropic/claude-3-5-haiku
 
 # MCP Servers
-mcp github --type stdio --command npx --args "-y" "@modelcontextprotocol/server-github"
-mcp local-server --type http --url "http://localhost:3000/mcp" --header "Authorization" "Bearer $TOKEN"
+mcp add github --type stdio --command npx --args "-y" "@modelcontextprotocol/server-github"
+mcp add local-server --type http --url "http://localhost:3000/mcp" --header "Authorization" "Bearer $TOKEN"
 
 # LSP Servers
 lsp add gopls --command gopls --filetypes go,mod --root-markers go.mod
@@ -708,8 +708,8 @@ model small [<provider>/<id>] [flags]
 ```
 
 ```text
-mcp <name> [flags]
-    Define an MCP server. --type defaults to stdio.
+mcp add <name> [flags]
+    Define or update an MCP server. --type defaults to stdio.
 
     --type TYPE                  stdio|sse|http (default: stdio) (json: type)
     --command CMD                Executable for stdio servers (json: command)
@@ -721,6 +721,9 @@ mcp <name> [flags]
     --disabled BOOL              Disable the server (json: disabled)
     --disabled-tools TOOL        Deny a tool, repeatable (json: disabled_tools)
     --enabled-tools TOOL         Allow a tool, repeatable (json: enabled_tools)
+
+mcp remove <name>   (alias: rm)
+    Remove an MCP server.
 ```
 
 ```text

@@ -9,21 +9,40 @@ import (
 
 // handleMCP implements the `mcp` builtin.
 //
-// Usage: mcp <name> --type stdio|sse|http [--command CMD] [--args ARG ...]
+// Usage:
 //
-//	[--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...]
-//	[--timeout N] [--disabled true|false]
-//	[--disabled-tools TOOL ...] [--enabled-tools TOOL ...]
+//	mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...]
+//	    [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...]
+//	    [--timeout N] [--disabled true|false]
+//	    [--disabled-tools TOOL ...] [--enabled-tools TOOL ...]
+//	mcp remove <name>   (alias: rm)
+//
+// "add" defines or updates an MCP server; repeated calls with the same <name>
+// update the same entry. "remove" deletes it.
 func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: mcp <name> --type stdio|sse|http [--command CMD] [--args ARG ...] [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...] [--timeout N] [--disabled true|false] [--disabled-tools TOOL ...] [--enabled-tools TOOL ...]")
+		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [flags] | mcp remove <name>")
 	}
 
-	name := args[1]
+	switch args[1] {
+	case "add":
+		return mcpAdd(b, args, stderr)
+	case "remove", "rm":
+		return mcpRemove(b, args, stderr)
+	default:
+		return usage(stderr, fmt.Sprintf("mcp: unknown subcommand %q (expected add or remove)", args[1]))
+	}
+}
+
+func mcpAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) < 3 {
+		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...] [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...] [--timeout N] [--disabled true|false] [--disabled-tools TOOL ...] [--enabled-tools TOOL ...]")
+	}
+	name := args[2]
 	slog.Info("MCP server defined in shell config", "name", name)
 	m := childMap(b.section("mcp"), name)
 
@@ -32,7 +51,7 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 		m["type"] = "stdio"
 	}
 
-	i := 2
+	i := 3
 	for i < len(args) {
 		switch args[i] {
 		case "--type":
@@ -96,10 +115,20 @@ func handleMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 			}
 			m["enabled_tools"] = appendArr(m, "enabled_tools", v)
 		default:
-			return usage(stderr, fmt.Sprintf("mcp: unknown flag %s", args[i]))
+			return usage(stderr, fmt.Sprintf("mcp add: unknown flag %s", args[i]))
 		}
 	}
 
 	slog.Debug("MCP recorded", "name", name)
+	return nil
+}
+
+func mcpRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) < 3 {
+		return usage(stderr, "usage: mcp remove <name>")
+	}
+	name := args[2]
+	delete(b.section("mcp"), name)
+	slog.Info("MCP server removed in shell config", "name", name)
 	return nil
 }

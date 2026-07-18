@@ -35,6 +35,19 @@ func hookApproved(ctx context.Context, toolCallID string) bool {
 	return v == toolCallID
 }
 
+type autoApproveRequestsKey struct{}
+
+// WithAutoApproveRequests returns a context whose permission requests are
+// automatically approved throughout the derived context tree.
+func WithAutoApproveRequests(ctx context.Context) context.Context {
+	return context.WithValue(ctx, autoApproveRequestsKey{}, true)
+}
+
+func autoApproveRequests(ctx context.Context) bool {
+	autoApprove, _ := ctx.Value(autoApproveRequestsKey{}).(bool)
+	return autoApprove
+}
+
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
 	ToolCallID  string `json:"tool_call_id"`
@@ -78,7 +91,6 @@ type Service interface {
 	// already been resolved or is unknown.
 	Deny(permission PermissionRequest) bool
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
-	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
@@ -95,14 +107,12 @@ type PermissionKey struct {
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
-	notificationBroker    *pubsub.Broker[PermissionNotification]
-	workingDir            string
-	sessionPermissions    *csync.Map[PermissionKey, bool]
-	pendingRequests       *csync.Map[string, chan bool]
-	autoApproveSessions   map[string]bool
-	autoApproveSessionsMu sync.RWMutex
-	skip                  atomic.Bool
-	allowedTools          []string
+	notificationBroker *pubsub.Broker[PermissionNotification]
+	workingDir         string
+	sessionPermissions *csync.Map[PermissionKey, bool]
+	pendingRequests    *csync.Map[string, chan bool]
+	skip               atomic.Bool
+	allowedTools       []string
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -182,6 +192,13 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	if s.skip.Load() {
 		return true, nil
 	}
+	if autoApproveRequests(ctx) {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			ToolCallID: opts.ToolCallID,
+			Granted:    true,
+		})
+		return true, nil
+	}
 
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
@@ -208,18 +225,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: opts.ToolCallID,
 	})
-
-	s.autoApproveSessionsMu.RLock()
-	autoApprove := s.autoApproveSessions[opts.SessionID]
-	s.autoApproveSessionsMu.RUnlock()
-
-	if autoApprove {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-			ToolCallID: opts.ToolCallID,
-			Granted:    true,
-		})
-		return true, nil
-	}
 
 	fileInfo, err := os.Stat(opts.Path)
 	dir := opts.Path
@@ -277,12 +282,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 }
 
-func (s *permissionService) AutoApproveSession(sessionID string) {
-	s.autoApproveSessionsMu.Lock()
-	s.autoApproveSessions[sessionID] = true
-	s.autoApproveSessionsMu.Unlock()
-}
-
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {
 	return s.notificationBroker.Subscribe(ctx)
 }
@@ -297,13 +296,12 @@ func (s *permissionService) SkipRequests() bool {
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	svc := &permissionService{
-		Broker:              pubsub.NewBroker[PermissionRequest](),
-		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
-		workingDir:          workingDir,
-		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
-		autoApproveSessions: make(map[string]bool),
-		allowedTools:        allowedTools,
-		pendingRequests:     csync.NewMap[string, chan bool](),
+		Broker:             pubsub.NewBroker[PermissionRequest](),
+		notificationBroker: pubsub.NewBroker[PermissionNotification](),
+		workingDir:         workingDir,
+		sessionPermissions: csync.NewMap[PermissionKey, bool](),
+		allowedTools:       allowedTools,
+		pendingRequests:    csync.NewMap[string, chan bool](),
 	}
 	svc.skip.Store(skip)
 	return svc

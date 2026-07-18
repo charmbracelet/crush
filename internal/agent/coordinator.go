@@ -1386,9 +1386,6 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
-	// SessionSetup is an optional callback invoked after session creation
-	// but before agent execution, for custom session configuration.
-	SessionSetup func(sessionID string)
 }
 
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
@@ -1400,11 +1397,6 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
-	}
-
-	// Call session setup function if provided
-	if params.SessionSetup != nil {
-		params.SessionSetup(session.ID)
 	}
 
 	// Get model configuration

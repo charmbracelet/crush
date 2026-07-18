@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -11,6 +12,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -315,33 +317,6 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Equal(t, "Failed to generate response: provider request failed", resp.Content)
 	})
 
-	t.Run("session setup callback is invoked", func(t *testing.T) {
-		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
-
-		parentSession, err := env.sessions.Create(t.Context(), "Parent")
-		require.NoError(t, err)
-
-		var setupCalledWith string
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
-			return agentResultWithText("ok"), nil
-		})
-
-		_, err = coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
-			SessionSetup: func(sessionID string) {
-				setupCalledWith = sessionID
-			},
-		})
-		require.NoError(t, err)
-		assert.NotEmpty(t, setupCalledWith, "SessionSetup should have been called")
-	})
-
 	t.Run("cost propagation to parent session", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)
@@ -377,6 +352,263 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.InDelta(t, 0.05, updated.Cost, 1e-9)
 	})
+}
+
+func TestRunSubAgentInheritsNonInteractivePermissionPolicy(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	permissions := permission.NewPermissionService(env.workingDir, false, nil)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+	outsidePath := t.TempDir()
+
+	agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		assert.NotEqual(t, parentSession.ID, call.SessionID)
+		granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+			SessionID:  call.SessionID,
+			ToolCallID: "child-call",
+			ToolName:   "ls",
+			Action:     "list",
+			Path:       outsidePath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !granted {
+			return nil, errors.New("child permission was denied")
+		}
+		return agentResultWithText("done"), nil
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	resp, err := coord.runSubAgent(permission.WithAutoApproveRequests(ctx), subAgentParams{
+		Agent:          agent,
+		SessionID:      parentSession.ID,
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-1",
+		Prompt:         "inspect outside the workspace",
+		SessionTitle:   "Validator",
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.IsError)
+	assert.Equal(t, "done", resp.Content)
+}
+
+func TestRunSubAgentInteractiveParentDoesNotApproveChild(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	permissions := permission.NewPermissionService(env.workingDir, false, nil)
+	events := permissions.Subscribe(t.Context())
+	outsidePath := t.TempDir()
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	calls := make(chan SessionAgentCall, 1)
+	agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		calls <- call
+		granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+			SessionID:  call.SessionID,
+			ToolCallID: "child-call",
+			ToolName:   "ls",
+			Action:     "list",
+			Path:       outsidePath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if granted {
+			return agentResultWithText("granted"), nil
+		}
+		return agentResultWithText("denied"), nil
+	})
+
+	type subAgentResult struct {
+		response fantasy.ToolResponse
+		err      error
+	}
+	result := make(chan subAgentResult, 1)
+	go func() {
+		response, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "inspect outside the workspace",
+			SessionTitle:   "Validator",
+		})
+		result <- subAgentResult{response: response, err: err}
+	}()
+
+	select {
+	case call := <-calls:
+		assert.True(t, call.NonInteractive)
+		assert.NotEqual(t, parentSession.ID, call.SessionID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("child agent was never run")
+	}
+
+	select {
+	case event := <-events:
+		assert.True(t, permissions.Deny(event.Payload))
+	case <-time.After(2 * time.Second):
+		t.Fatal("child permission request was never published")
+	}
+
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		assert.False(t, got.response.IsError)
+		assert.Equal(t, "denied", got.response.Content)
+	case <-time.After(2 * time.Second):
+		t.Fatal("child agent did not return after permission denial")
+	}
+}
+
+func TestRunSubAgentNestedDescendantInheritsPermissionPolicy(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	permissions := permission.NewPermissionService(env.workingDir, false, nil)
+	outsidePath := t.TempDir()
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	grandchildSessions := make(chan string, 1)
+	grandchild := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		grandchildSessions <- call.SessionID
+		granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+			SessionID:  call.SessionID,
+			ToolCallID: "grandchild-permission",
+			ToolName:   "ls",
+			Action:     "list",
+			Path:       outsidePath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !granted {
+			return nil, errors.New("grandchild permission was denied")
+		}
+		return agentResultWithText("nested done"), nil
+	})
+
+	child := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		response, err := coord.runSubAgent(ctx, subAgentParams{
+			Agent:          grandchild,
+			SessionID:      call.SessionID,
+			AgentMessageID: "child-msg",
+			ToolCallID:     "grandchild-call",
+			Prompt:         "inspect outside the workspace",
+			SessionTitle:   "Nested Validator",
+		})
+		if err != nil {
+			return nil, err
+		}
+		if response.IsError {
+			return nil, errors.New(response.Content)
+		}
+		return agentResultWithText(response.Content), nil
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	response, err := coord.runSubAgent(permission.WithAutoApproveRequests(ctx), subAgentParams{
+		Agent:          child,
+		SessionID:      parentSession.ID,
+		AgentMessageID: "parent-msg",
+		ToolCallID:     "child-call",
+		Prompt:         "delegate validation",
+		SessionTitle:   "Validator",
+	})
+	require.NoError(t, err)
+	assert.False(t, response.IsError)
+	assert.Equal(t, "nested done", response.Content)
+
+	select {
+	case grandchildSessionID := <-grandchildSessions:
+		assert.NotEqual(t, parentSession.ID, grandchildSessionID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("grandchild agent was never run")
+	}
+}
+
+func TestRunSubAgentPermissionRequestCancellation(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	permissions := permission.NewPermissionService(env.workingDir, false, nil)
+	events := permissions.Subscribe(t.Context())
+	outsidePath := t.TempDir()
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+			SessionID:  call.SessionID,
+			ToolCallID: "child-call",
+			ToolName:   "ls",
+			Action:     "list",
+			Path:       outsidePath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if !granted {
+			return nil, errors.New("child permission was denied")
+		}
+		return agentResultWithText("done"), nil
+	})
+
+	type subAgentResult struct {
+		response fantasy.ToolResponse
+		err      error
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan subAgentResult, 1)
+	go func() {
+		response, err := coord.runSubAgent(ctx, subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "inspect outside the workspace",
+			SessionTitle:   "Validator",
+		})
+		result <- subAgentResult{response: response, err: err}
+	}()
+
+	select {
+	case <-events:
+		cancel()
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("child permission request was never published")
+	}
+
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		assert.True(t, got.response.IsError)
+		assert.Contains(t, got.response.Content, context.Canceled.Error())
+	case <-time.After(2 * time.Second):
+		t.Fatal("child agent did not return after cancellation")
+	}
 }
 
 func TestUpdateParentSessionCost(t *testing.T) {

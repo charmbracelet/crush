@@ -241,22 +241,38 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 > Crush ships with a builtin `crush-config` skill for configuring itself. In
 > many cases you can simply ask Crush to configure itself.
 
-Crush runs great with no configuration. That said, if you do need or want to
-customize Crush, configuration can be added either local to the project itself,
-or globally, with the following priority:
+Crush runs great with no configuration. When you do want to customize it,
+there are two formats:
 
-1. `.crush.json`
-2. `crush.json`
-3. `$HOME/.config/crush/crush.json`
+- **`crush.sh`** — a small Bash script that configures Crush with simple
+  commands (`provider add`, `model large`, `mcp add`, `option`, …).
+  **Preferred:** because it's real Bash you get `source`, environment
+  variables, `$(…)` secrets, and conditionals for free. See the full
+  [config guide](./docs/config/).
+- **`crush.json`** — the original static JSON format. Still fully supported.
 
-Configuration itself is stored as a JSON object:
+Config can live local to the project or globally, discovered with the
+following priority (closest wins):
 
-```json
-{
-  "this-setting": { "this": "that" },
-  "that-setting": ["ceci", "cela"]
-}
+1. `.crush.sh` / `.crush.json`
+2. `crush.sh` / `crush.json`
+3. `$HOME/.config/crush/crush.sh` (or `crush.json`)
+
+Everything found is merged. If a directory has both a `.sh` and a `.json`,
+they merge and the `.sh` wins on conflicts.
+
+A quick `crush.sh`:
+
+```bash
+#!/usr/bin/env bash
+provider add ollama --type ollama --base-url "http://localhost:11434/v1"
+model add ollama/llama3.3 --name "Llama 3.3" --context-window 128000
+model large ollama/llama3.3
+permissions allow view ls grep
 ```
+
+The examples below show both formats where it helps; the commands map
+directly onto the JSON keys.
 
 As an additional note, Crush also stores ephemeral data, such as application
 state, in one additional location:
@@ -280,7 +296,15 @@ $HOME/.local/share/crush/crush.json
 Crush can use LSPs for additional context to help inform its decisions, just
 like you would. LSPs can be added manually like so:
 
+```bash
+# crush.sh
+lsp add go --command gopls --env GOTOOLCHAIN go1.24.5
+lsp add typescript --command typescript-language-server --args --stdio
+lsp add nix --command nil
+```
+
 ```json
+// crush.json
 {
   "$schema": "https://charm.land/crush.json",
   "lsp": {
@@ -330,11 +354,26 @@ Provider `extra_body` is a non-expanding JSON passthrough; put env-driven
 values in `extra_headers` or the provider's `api_key` / `base_url`, all of
 which do expand.
 
-> **Security note:** `crush.json` is trusted code. Any `$(...)` in it runs at
-> load time with your shell's privileges, before the UI appears. Don't launch
-> Crush in a directory whose `crush.json` you haven't reviewed.
+> **Security note:** config is trusted code. A `crush.sh` runs in full, and
+> any `$(...)` in a `crush.json` runs at load time, with your shell's
+> privileges, before the UI appears. Don't launch Crush in a directory whose
+> config you haven't reviewed.
+
+```bash
+# crush.sh — the shell handles $VAR and $(…) natively.
+mcp add filesystem --command node --args /path/to/mcp-server.js \
+  --timeout 120 --disabled-tools some-tool-name --env NODE_ENV production
+
+mcp add github --type http --url "https://api.githubcopilot.com/mcp/" \
+  --timeout 120 --header Authorization "Bearer $GH_PAT" \
+  --disabled-tools create_issue --disabled-tools create_pull_request
+
+mcp add streaming-service --type sse --url "https://example.com/mcp/sse" \
+  --timeout 120 --header API-Key "$API_KEY"
+```
 
 ```json
+// crush.json
 {
   "$schema": "https://charm.land/crush.json",
   "mcp": {
@@ -454,7 +493,13 @@ By default, Crush will ask you for permission before running tool calls. If
 you'd like, you can allow tools to be executed without prompting you for
 permissions. Use this with care.
 
+```bash
+# crush.sh
+permissions allow view ls grep edit mcp_context7_get-library-doc
+```
+
 ```json
+// crush.json
 {
   "$schema": "https://charm.land/crush.json",
   "permissions": {
@@ -478,7 +523,14 @@ If you'd like to prevent Crush from using certain built-in tools entirely, you
 can disable them via the `options.disabled_tools` list. Disabled tools are
 completely hidden from the agent.
 
+```bash
+# crush.sh
+option disable-tool bash
+option disable-tool sourcegraph
+```
+
 ```json
+// crush.json
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
@@ -495,7 +547,13 @@ If you'd like to prevent Crush from using certain skills entirely, you can
 disable them via the `options.disabled_skills` list. Disabled skills are hidden
 from the agent, including builtin skills and skills discovered from disk.
 
+```bash
+# crush.sh
+option disable-skill crush-config
+```
+
 ```json
+// crush.json
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
@@ -675,7 +733,20 @@ Anthropic-compatible APIs.
 Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
 API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
+```bash
+# crush.sh — set DEEPSEEK_API_KEY in your environment.
+provider add deepseek --type openai-compat \
+  --base-url "https://api.deepseek.com/v1" \
+  --api-key "$DEEPSEEK_API_KEY"
+model add deepseek/deepseek-chat --name "Deepseek V3" \
+  --context-window 64000 --default-max-tokens 5000 \
+  --cost-per-1m-in 0.27 --cost-per-1m-out 1.1
+# Cached-token costs (cost_per_1m_in_cached, …) don't have flags yet;
+# set those in crush.json if you need them.
+```
+
 ```json
+// crush.json
 {
   "$schema": "https://charm.land/crush.json",
   "providers": {
@@ -784,7 +855,13 @@ with `type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama`
 and leave out the models list. Crush will populate the model list
 automatically.
 
+```bash
+# crush.sh — no model list needed; Crush discovers them.
+provider add ollama --name Ollama --type ollama --base-url "http://localhost:11434/v1/"
+```
+
 ```json
+// crush.json
 {
   "providers": {
     "ollama": {

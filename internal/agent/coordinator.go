@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
@@ -182,6 +183,12 @@ type coordinator struct {
 	subagentModelCache   map[subagentModelKey]Model
 	subagentModelCacheMu sync.RWMutex
 
+	// subagentCancels maps a running subagent's child session ID to the cancel
+	// func for its run. Dispatched subagents run on ad-hoc SessionAgents whose
+	// activeRequests are invisible to currentAgent, so Cancel consults this
+	// registry to reach them.
+	subagentCancels *csync.Map[string, context.CancelFunc]
+
 	readyWg errgroup.Group
 }
 
@@ -236,6 +243,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		skillTracker:       skillTracker,
 		interactive:        opts.Interactive,
 		subagentModelCache: make(map[subagentModelKey]Model),
+		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 	}
 
 	c.subagentsMgr = opts.SubagentsMgr
@@ -1486,10 +1494,31 @@ func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
 }
 
 func (c *coordinator) Cancel(sessionID string) {
+	// Running subagents live on ad-hoc SessionAgents, invisible to
+	// currentAgent's activeRequests — cancel them via the registry keyed by
+	// child session ID. A child session has no queued or accepted state on
+	// the coder agent, so there is nothing further to do for it.
+	if c.subagentCancels != nil {
+		if cancel, ok := c.subagentCancels.Get(sessionID); ok && cancel != nil {
+			cancel()
+			return
+		}
+	}
 	c.currentAgent().Cancel(sessionID)
 }
 
 func (c *coordinator) CancelAll() {
+	// Running subagents live on ad-hoc SessionAgents, invisible to
+	// currentAgent's activeRequests — cancel each one via the registry (a
+	// snapshot, so this is safe against concurrent Del calls from finishing
+	// runs) before falling through to the coder agent's own bookkeeping.
+	if c.subagentCancels != nil {
+		for cancel := range c.subagentCancels.Seq() {
+			if cancel != nil {
+				cancel()
+			}
+		}
+	}
 	c.currentAgent().CancelAll()
 }
 
@@ -1502,6 +1531,16 @@ func (c *coordinator) IsBusy() bool {
 }
 
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
+	// Running subagents live on ad-hoc SessionAgents, invisible to
+	// currentAgent's own request tracking — check the registry first,
+	// mirroring Cancel's per-session lookup, so a caller polling a child
+	// session's busy state (e.g. Backend.GetAgentSession) doesn't see it
+	// reported idle while the subagent is still running.
+	if c.subagentCancels != nil {
+		if _, ok := c.subagentCancels.Get(sessionID); ok {
+			return true
+		}
+	}
 	return c.currentAgent().IsSessionBusy(sessionID)
 }
 
@@ -1768,6 +1807,17 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		params.SessionSetup(session.ID)
 	}
 
+	// Make this run individually cancellable by child session ID (see
+	// coordinator.Cancel): cancelling runCtx stops only this subagent while
+	// the parent turn keeps running. Registered before the runtime announces
+	// the child session so anyone who learns the ID can cancel immediately.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	if c.subagentCancels != nil {
+		c.subagentCancels.Set(session.ID, cancelRun)
+		defer c.subagentCancels.Del(session.ID)
+	}
+
 	// Register with the runtime tracker and finish on return. finalStatus is
 	// captured by the deferred call and updated below based on the outcome.
 	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
@@ -1808,7 +1858,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	// Run the agent
 	run := func() (*fantasy.AgentResult, error) {
-		return params.Agent.Run(ctx, SessionAgentCall{
+		return params.Agent.Run(runCtx, SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
 			MaxOutputTokens:  maxTokens,

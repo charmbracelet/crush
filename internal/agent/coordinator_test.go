@@ -947,6 +947,237 @@ func TestRunSubAgent_AuthRefreshWrapper_ResetsStatusAfterSuccess(t *testing.T) {
 		"runtime status must return to running once OnAuthRefresh succeeds, not stay stuck at retrying")
 }
 
+// TestCancel_StopsRunningSubagent verifies the full targeted-cancel path: a
+// dispatched subagent runs on its own SessionAgent (invisible to
+// currentAgent's activeRequests), so Cancel(childSessionID) must reach it via
+// the subagentCancels registry — stopping only that run while the parent
+// turn's context stays alive — and must not fall through to currentAgent.
+func TestCancel_StopsRunningSubagent(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	// Blocks until its context is cancelled, like a real in-flight run.
+	subAgent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	coderMock := newMockAgent(providerID, 4096, nil)
+
+	coord := &coordinator{
+		cfg:             cfg,
+		sessions:        env.sessions,
+		runtime:         rt,
+		mainAgent:       coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		resp, _ := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          subAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "long running work",
+			SessionTitle:   "Cancel Target",
+			AgentName:      "worker",
+			AgentColor:     "blue",
+		})
+		done <- resp
+	}()
+
+	// The cancel registry is populated before the runtime announces the child
+	// session, so once List returns the entry it is safe to cancel.
+	var childID string
+	require.Eventually(t, func() bool {
+		entries := rt.List(parentSession.ID)
+		if len(entries) == 0 {
+			return false
+		}
+		childID = entries[0].ChildSessionID
+		return true
+	}, 5*time.Second, 10*time.Millisecond)
+
+	coord.Cancel(childID)
+
+	select {
+	case resp := <-done:
+		require.True(t, resp.IsError)
+		require.Equal(t, "Subagent cancelled by user", resp.Content)
+	case <-time.After(5 * time.Second):
+		t.Fatal("subagent run did not stop after Cancel(childSessionID)")
+	}
+
+	require.Empty(t, coderMock.cancelled, "targeted subagent cancel must not fall through to the coder agent")
+	_, stillRegistered := coord.subagentCancels.Get(childID)
+	require.False(t, stillRegistered, "cancel registry entry must be cleaned up after the run")
+	require.Empty(t, rt.List(parentSession.ID))
+}
+
+// TestCancelAll_StopsRunningSubagents verifies that CancelAll reaches
+// dispatched subagents through the subagentCancels registry, not just the
+// coder agent's own activeRequests — subagents run on ad-hoc SessionAgents
+// invisible to currentAgent, so App.Shutdown calling CancelAll must not leave
+// them running past shutdown.
+func TestCancelAll_StopsRunningSubagents(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	// Blocks until its context is cancelled, like a real in-flight run.
+	subAgent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	coderMock := newMockAgent(providerID, 4096, nil)
+
+	coord := &coordinator{
+		cfg:             cfg,
+		sessions:        env.sessions,
+		runtime:         rt,
+		mainAgent:       coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		resp, _ := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          subAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "long running work",
+			SessionTitle:   "CancelAll Target",
+			AgentName:      "worker",
+			AgentColor:     "blue",
+		})
+		done <- resp
+	}()
+
+	require.Eventually(t, func() bool {
+		return len(rt.List(parentSession.ID)) > 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	coord.CancelAll()
+
+	select {
+	case resp := <-done:
+		require.True(t, resp.IsError)
+		require.Equal(t, "Subagent cancelled by user", resp.Content)
+	case <-time.After(5 * time.Second):
+		t.Fatal("subagent run did not stop after CancelAll()")
+	}
+
+	require.Empty(t, rt.List(parentSession.ID))
+}
+
+// TestIsSessionBusy_TrueForRunningSubagent verifies that IsSessionBusy
+// reports a dispatched subagent's child session as busy while it runs, even
+// though the coder agent's own IsSessionBusy has no record of it (subagents
+// run on ad-hoc SessionAgents, invisible to currentAgent).
+func TestIsSessionBusy_TrueForRunningSubagent(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	runStarted := make(chan struct{})
+	subAgent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		close(runStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	coderMock := newMockAgent(providerID, 4096, nil)
+
+	coord := &coordinator{
+		cfg:             cfg,
+		sessions:        env.sessions,
+		runtime:         rt,
+		mainAgent:       coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		resp, _ := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          subAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "long running work",
+			SessionTitle:   "Busy Target",
+			AgentName:      "worker",
+			AgentColor:     "blue",
+		})
+		done <- resp
+	}()
+	<-runStarted
+
+	var childID string
+	require.Eventually(t, func() bool {
+		entries := rt.List(parentSession.ID)
+		if len(entries) == 0 {
+			return false
+		}
+		childID = entries[0].ChildSessionID
+		return true
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.True(t, coord.IsSessionBusy(childID), "child session must be reported busy while its subagent runs")
+
+	coord.Cancel(childID)
+	<-done
+
+	require.False(t, coord.IsSessionBusy(childID), "child session must be reported idle once the subagent finishes")
+}
+
+// TestCancel_UnknownSessionFallsThroughToCoder verifies that Cancel for a
+// session with no registry entry still reaches the coder agent (the
+// pre-existing behavior for parent sessions).
+func TestCancel_UnknownSessionFallsThroughToCoder(t *testing.T) {
+	t.Parallel()
+
+	coderMock := newMockAgent("p", 4096, nil)
+	coord := &coordinator{
+		mainAgent:       coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	coord.Cancel("some-parent-session")
+
+	require.Equal(t, []string{"some-parent-session"}, coderMock.cancelled)
+}
+
 // TestActiveSubagentsList verifies the coordinator reads the live manager
 // snapshot when present (so Library reloads are reflected) and falls back to
 // the construction-time slice when no manager is wired.

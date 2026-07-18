@@ -224,7 +224,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false, subagentModel{})
+	agent, err := c.buildAgent(ctx, prompt, agentCfg, false, subagentModel{}, &c.readyWg)
 	if err != nil {
 		return nil, err
 	}
@@ -787,7 +787,14 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 // resolved via resolveModelByID. sm.Effort is applied to the resolved primary,
 // which is also the only large/specific model built — small always backs
 // titles/summaries, so it is built unconditionally.
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel) (SessionAgent, error) {
+//
+// The system prompt and tool set are built asynchronously on wg. Construction
+// paths pass &c.readyWg (waited at the start of every run); dispatch-time
+// callers must pass a local group and Wait on it before running the returned
+// agent — both so the agent doesn't run promptless/toolless, and so a build
+// failure surfaces to that caller instead of poisoning the coordinator-wide
+// errgroup (whose error is sticky and would fail every subsequent turn).
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel, wg *errgroup.Group) (SessionAgent, error) {
 	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
 		return nil, err
@@ -840,7 +847,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// values; the work is local and always completes.
 	initCtx := context.WithoutCancel(ctx)
 
-	c.readyWg.Go(func() error {
+	wg.Go(func() error {
 		systemPrompt, err := prompt.Build(initCtx, primary.Model.Provider(), primary.Model.Model(), c.cfg)
 		if err != nil {
 			return err
@@ -849,7 +856,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil
 	})
 
-	c.readyWg.Go(func() error {
+	wg.Go(func() error {
 		tools, err := c.buildTools(initCtx, agent, isSubAgent, primary.CatwalkCfg.ID)
 		if err != nil {
 			return err

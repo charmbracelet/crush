@@ -24,10 +24,6 @@ import (
 // tokenFileName is the file where MCP OAuth tokens are persisted.
 const tokenFileName = "mcp-oauth-tokens.json"
 
-// openURL opens a URL in the user's browser. It is a package variable so tests
-// can simulate a headless environment where the browser cannot be launched.
-var openURL = browser.OpenURL
-
 // oauthInteractiveTimeout bounds the interactive browser authorization flow.
 // It is deliberately much longer than the MCP connection timeout because the
 // user has to switch to a browser, sign in, and grant consent.
@@ -142,6 +138,9 @@ type mcpOAuthHandler struct {
 	// connection timeout, so we suspend that timeout once authorization
 	// actually starts. It may be nil (e.g. in tests).
 	stopConnTimeout func()
+	// openURL opens a URL in the user's browser. Injected so tests can
+	// simulate a headless environment or drive the callback directly.
+	openURL func(string) error
 
 	mu       sync.Mutex
 	tokenSrc oauth2.TokenSource
@@ -155,6 +154,7 @@ func newMCPOAuthHandler(serverURL string, stopConnTimeout func()) *mcpOAuthHandl
 		serverURL:       serverURL,
 		store:           store,
 		stopConnTimeout: stopConnTimeout,
+		openURL:         browser.OpenURL,
 	}
 	// Restore any saved token so we can skip the browser flow on
 	// subsequent startups. The client ID, secret and endpoints are
@@ -286,7 +286,7 @@ func (h *mcpOAuthHandler) buildInner(reg *clientRegistration, port int, redirect
 		PreregisteredClient: creds,
 		RedirectURL:         redirectURL,
 		AuthorizationCodeFetcher: func(fetchCtx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-			return openBrowserAndCapture(fetchCtx, args.URL, port, h.serverURL)
+			return openBrowserAndCapture(fetchCtx, args.URL, port, h.serverURL, h.openURL)
 		},
 	}
 	return auth.NewAuthorizationCodeHandler(cfg)
@@ -417,7 +417,7 @@ func allocateCallbackPort(ctx context.Context) (int, error) {
 
 // openBrowserAndCapture opens the authorization URL in the user's
 // browser and listens on the given port for the OAuth callback redirect.
-func openBrowserAndCapture(ctx context.Context, authURL string, port int, serverName string) (*auth.AuthorizationResult, error) {
+func openBrowserAndCapture(ctx context.Context, authURL string, port int, serverName string, open func(string) error) (*auth.AuthorizationResult, error) {
 	resultCh := make(chan auth.AuthorizationResult, 1)
 	errCh := make(chan error, 1)
 
@@ -454,7 +454,7 @@ func openBrowserAndCapture(ctx context.Context, authURL string, port int, server
 	defer srv.Shutdown(context.Background())
 
 	slog.Info("Opening browser for MCP server authorization", "url", authURL)
-	if err := openURL(authURL); err != nil {
+	if err := open(authURL); err != nil {
 		// If the browser can't be opened (headless, remote SSH, etc.), keep the
 		// callback listener running and tell the user to open the URL manually.
 		// Returning here would tear down the listener and make manual

@@ -164,10 +164,11 @@ func TestDiscoverAndRegister(t *testing.T) {
 }
 
 // TestAuthorize_EndToEnd drives the entire authorization-code flow against a
-// fake OAuth server, simulating the browser by having openURL hit the callback
-// with a valid code. It proves the token is obtained, cached, and persisted
-// together with the dynamically registered client ID (so a later restart can
-// refresh), and that the connection timeout is suspended along the way.
+// fake OAuth server, simulating the browser by having the injected opener hit
+// the callback with a valid code. It proves the token is obtained, cached, and
+// persisted together with the dynamically registered client ID (so a later
+// restart can refresh), and that the connection timeout is suspended along the
+// way.
 func TestAuthorize_EndToEnd(t *testing.T) {
 	_, mcpURL := newOAuthTestServer(t, oauthServerOpts{
 		servePRM: true, serveASM: true, registrationEndpoint: true,
@@ -176,8 +177,7 @@ func TestAuthorize_EndToEnd(t *testing.T) {
 
 	// Simulate the user's browser: extract the redirect_uri and state from the
 	// authorization URL and redirect back to the local callback with a code.
-	orig := openURL
-	openURL = func(rawAuthURL string) error {
+	simulateBrowser := func(rawAuthURL string) error {
 		u, err := url.Parse(rawAuthURL)
 		if err != nil {
 			return err
@@ -199,12 +199,12 @@ func TestAuthorize_EndToEnd(t *testing.T) {
 		}()
 		return nil
 	}
-	t.Cleanup(func() { openURL = orig })
 
 	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
 
 	stopped := false
 	h := newMCPOAuthHandler(mcpURL, func() { stopped = true })
+	h.openURL = simulateBrowser
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, mcpURL, nil)
 	require.NoError(t, err)
@@ -401,10 +401,8 @@ func TestOpenBrowserAndCapture(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Not parallel: swaps the package-level openURL seam.
-			orig := openURL
-			openURL = func(string) error { return tt.openErr }
-			t.Cleanup(func() { openURL = orig })
+			t.Parallel()
+			open := func(string) error { return tt.openErr }
 
 			port, err := allocateCallbackPort(t.Context())
 			require.NoError(t, err)
@@ -415,7 +413,7 @@ func TestOpenBrowserAndCapture(t *testing.T) {
 			}
 			done := make(chan outcome, 1)
 			go func() {
-				res, err := openBrowserAndCapture(t.Context(), "https://auth.example.com/authorize", port, "test-server")
+				res, err := openBrowserAndCapture(t.Context(), "https://auth.example.com/authorize", port, "test-server", open)
 				done <- outcome{res, err}
 			}()
 
@@ -440,17 +438,15 @@ func TestOpenBrowserAndCapture(t *testing.T) {
 }
 
 func TestOpenBrowserAndCapture_ContextCancelled(t *testing.T) {
-	orig := openURL
-	openURL = func(string) error { return nil }
-	t.Cleanup(func() { openURL = orig })
-
+	t.Parallel()
 	port, err := allocateCallbackPort(context.Background())
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before we start so the select takes the ctx.Done branch
 
-	res, err := openBrowserAndCapture(ctx, "https://auth.example.com/authorize", port, "test-server")
+	open := func(string) error { return nil }
+	res, err := openBrowserAndCapture(ctx, "https://auth.example.com/authorize", port, "test-server", open)
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, res)

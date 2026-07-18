@@ -79,3 +79,55 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, refetched.EstimatedUsage)
 }
+
+func TestListChildSessions_ReturnsOnlyDirectChildren(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn)
+
+	parent, err := sessions.Create(t.Context(), "parent title")
+	require.NoError(t, err)
+
+	child1, err := sessions.CreateTaskSession(t.Context(), "tool-call-1", parent.ID, "child 1 title")
+	require.NoError(t, err)
+
+	child2, err := sessions.CreateTaskSession(t.Context(), "tool-call-2", parent.ID, "child 2 title")
+	require.NoError(t, err)
+
+	_, err = sessions.CreateTaskSession(t.Context(), "tool-call-3", child1.ID, "grandchild title")
+	require.NoError(t, err)
+
+	children, err := sessions.ListChildSessions(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Len(t, children, 2)
+
+	ids := []string{children[0].ID, children[1].ID}
+	require.ElementsMatch(t, []string{child1.ID, child2.ID}, ids)
+}
+
+func TestListChildSessions_NoChildren(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn)
+
+	lonely, err := sessions.Create(t.Context(), "lonely title")
+	require.NoError(t, err)
+
+	children, err := sessions.ListChildSessions(t.Context(), lonely.ID)
+	require.NoError(t, err)
+	require.Len(t, children, 0)
+}

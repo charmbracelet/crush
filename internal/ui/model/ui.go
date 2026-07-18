@@ -299,6 +299,15 @@ type UI struct {
 	// refreshed on each RuntimeEvent.
 	runningSubagents []workspace.RunningSubagentInfo
 
+	// knownChildSessionIDs accumulates child (subagent) session IDs seen via
+	// subagents.RuntimeEvent for the currently-viewed session. Gates live
+	// history.File events in handleFileEvent (internal/ui/model/session.go)
+	// without a DB round trip per event. Entries are only added, never
+	// removed, so a child that already finished is still recognized for
+	// file events that arrive just after RuntimeEvent's Finished drops it
+	// from Entries.
+	knownChildSessionIDs map[string]bool
+
 	// Subagents — cached at init, static for session lifetime.
 	activeSubagentItems []completions.SubagentCompletionValue
 	activeSubagentNames map[string]bool
@@ -744,6 +753,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.parentTitle = ""
 		m.subagentColor = ""
+		m.knownChildSessionIDs = nil
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {
@@ -915,10 +925,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.session == nil:
 			m.runningSubagents = nil
+			m.knownChildSessionIDs = nil
 		case msg.Payload.ParentSessionID == m.session.ID:
 			// Only the current session's children populate the panel; ignore
 			// events for other parents to avoid spurious DB refreshes.
 			cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
+			if m.knownChildSessionIDs == nil {
+				m.knownChildSessionIDs = make(map[string]bool)
+			}
+			for _, e := range msg.Payload.Entries {
+				m.knownChildSessionIDs[e.ChildSessionID] = true
+			}
+			if f := msg.Payload.Finished; f != nil {
+				m.knownChildSessionIDs[f.ChildSessionID] = true
+			}
 		}
 		if f := msg.Payload.Finished; f != nil && m.session != nil && f.ParentSessionID == m.session.ID {
 			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
@@ -4545,6 +4565,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.sidebarOffset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
+	m.knownChildSessionIDs = nil
 	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()

@@ -96,6 +96,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
 	}
+	if q.listChildSessionsStmt, err = db.PrepareContext(ctx, listChildSessions); err != nil {
+		return nil, fmt.Errorf("error preparing query ListChildSessions: %w", err)
+	}
 	if q.listFilesByPathStmt, err = db.PrepareContext(ctx, listFilesByPath); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesByPath: %w", err)
 	}
@@ -260,6 +263,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
 		}
 	}
+	if q.listChildSessionsStmt != nil {
+		if cerr := q.listChildSessionsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listChildSessionsStmt: %w", cerr)
+		}
+	}
 	if q.listFilesByPathStmt != nil {
 		if cerr := q.listFilesByPathStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listFilesByPathStmt: %w", cerr)
@@ -388,6 +396,7 @@ type Queries struct {
 	getUsageByHourStmt             *sql.Stmt
 	getUsageByModelStmt            *sql.Stmt
 	listAllUserMessagesStmt        *sql.Stmt
+	listChildSessionsStmt          *sql.Stmt
 	listFilesByPathStmt            *sql.Stmt
 	listFilesBySessionStmt         *sql.Stmt
 	listLatestSessionFilesStmt     *sql.Stmt
@@ -431,6 +440,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUsageByHourStmt:             q.getUsageByHourStmt,
 		getUsageByModelStmt:            q.getUsageByModelStmt,
 		listAllUserMessagesStmt:        q.listAllUserMessagesStmt,
+		listChildSessionsStmt:          q.listChildSessionsStmt,
 		listFilesByPathStmt:            q.listFilesByPathStmt,
 		listFilesBySessionStmt:         q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:     q.listLatestSessionFilesStmt,

@@ -288,7 +288,7 @@ func (w *AppWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID s
 // -- History --
 
 func (w *AppWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
-	return w.app.History.ListBySession(ctx, sessionID)
+	return w.app.ListSessionHistory(ctx, sessionID)
 }
 
 // -- LSP --

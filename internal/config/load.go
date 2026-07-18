@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
@@ -37,7 +36,9 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
-func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+// The context bounds the initial provider fetch so an interrupt during
+// startup cancels it promptly.
+func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 
@@ -51,11 +52,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	cfg.setDefaults(workingDir, dataDir)
 
 	store := &ConfigStore{
-		config:         cfg,
-		workingDir:     workingDir,
-		globalDataPath: GlobalConfigData(),
-		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
-		loadedPaths:    loadedPaths,
+		config:           cfg,
+		workingDir:       workingDir,
+		globalDataPath:   GlobalConfigData(),
+		workspacePath:    filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+		loadedPaths:      loadedPaths,
+		discoveredModels: csync.NewMap[string, []catwalk.Model](),
 	}
 
 	if debug {
@@ -100,7 +102,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 
 	// Load known providers, this loads the config from catwalk
-	providers, err := Providers(cfg)
+	providers, err := Providers(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +118,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.writeMu.Lock()
 	defer store.writeMu.Unlock()
 
-	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
+	// Pass the caller's context so an interrupt during startup also
+	// cancels model discovery (which reaches out to each provider's
+	// /models endpoint), not just the provider list fetch above.
+	if err := cfg.configureProviders(ctx, store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
@@ -125,6 +130,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return store, nil
 	}
 
+	// Capture the originally-selected providers before overwriting so we
+	// can tell a genuine invalid-selection fallback from one caused by a
+	// provider whose models are still being discovered in the background.
+	origLargeProvider := cfg.Models[SelectedModelTypeLarge].Provider
+	origSmallProvider := cfg.Models[SelectedModelTypeSmall].Provider
+
 	resolved, err := resolveSelectedModels(cfg, store.knownProviders)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
@@ -132,15 +143,20 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	cfg.Models[SelectedModelTypeLarge] = resolved.Large
 	cfg.Models[SelectedModelTypeSmall] = resolved.Small
 
-	// Persist any fallback corrections while we still hold writeMu.
-	if resolved.LargeFallback {
+	// Persist fallback corrections while we still hold writeMu, but not
+	// when the selected provider is only awaiting background discovery:
+	// persisting would overwrite the user's real choice before discovery
+	// has a chance to make it valid. The in-memory fallback keeps the app
+	// usable until discovery completes and the reload restores the
+	// original selection.
+	if resolved.LargeFallback && !store.isPendingDiscovery(origLargeProvider) {
 		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
 			return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
 		}); err != nil {
 			return nil, fmt.Errorf("failed to update preferred large model: %w", err)
 		}
 	}
-	if resolved.SmallFallback {
+	if resolved.SmallFallback && !store.isPendingDiscovery(origSmallProvider) {
 		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
 			return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
 		}); err != nil {
@@ -193,7 +209,11 @@ func PushPopCrushEnv() func() {
 	return restore
 }
 
-func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+// configureProviders resolves and validates the provider list. It no
+// longer performs model discovery (that runs in the background via
+// ConfigStore.DiscoverModels), so it takes no context; the parameter is
+// retained for call-site stability across the load and reload paths.
+func (c *Config) configureProviders(_ context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
@@ -362,54 +382,15 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		c.Providers.Set(string(p.ID), prepared)
 	}
 
-	// Discover models concurrently for custom providers that need it.
-	// A provider needs discovery when discover_models is explicitly true,
-	// or when the models list is empty (auto-trigger, unless opted out).
-	type discoveryResult struct {
-		models []catwalk.Model
-		err    error
+	// Model discovery runs in the background (see ConfigStore.DiscoverModels)
+	// so a slow or unreachable provider never blocks startup. Capture the
+	// providers that need discovery now, while they are all still present;
+	// the validation loop below drops any that still lack models, and they
+	// reappear on the reload a completed discovery triggers. Here we only
+	// apply models a prior discovery pass already cached.
+	if store != nil {
+		store.setPendingDiscovery(collectDiscoveryJobs(c, knownProviderNames))
 	}
-
-	discoveryResults := make(map[string]discoveryResult)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	discoverCtx, discoverCancel := context.WithTimeout(ctx, 3*time.Second)
-	for id, pc := range c.Providers.Seq2() {
-		if knownProviderNames[id] {
-			continue
-		}
-		if pc.Disable || pc.BaseURL == "" {
-			continue
-		}
-		wantsDiscovery := pc.AutoDiscoverModels != nil && *pc.AutoDiscoverModels
-		autoTrigger := len(pc.Models) == 0 && (pc.AutoDiscoverModels == nil || *pc.AutoDiscoverModels)
-		if !wantsDiscovery && !autoTrigger {
-			continue
-		}
-		providerID := cmp.Or(pc.ID, id)
-		cfg := discover.Config{
-			ID:             providerID,
-			BaseURL:        pc.BaseURL,
-			APIKey:         pc.APIKey,
-			ExtraHeaders:   pc.ExtraHeaders,
-			ExistingModels: pc.Models,
-		}
-		providerType := cmp.Or(pc.Type, catwalk.TypeOpenAICompat)
-		wg.Go(func() {
-			models, err := discover.DiscoverModels(discoverCtx, cfg, resolver)
-			if err == nil && len(models) > 0 {
-				if enricher := discover.GetEnricher(string(providerType)); enricher != nil {
-					models, _ = enricher.EnrichModels(discoverCtx, cfg, resolver, models)
-				}
-			}
-			mu.Lock()
-			discoveryResults[id] = discoveryResult{models: models, err: err}
-			mu.Unlock()
-		})
-	}
-	wg.Wait()
-	discoverCancel()
 
 	// Validate the custom providers.
 	for id, providerConfig := range c.Providers.Seq2() {
@@ -444,18 +425,11 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			continue
 		}
 
-		// Apply discovery results if available.
-		if result, ok := discoveryResults[id]; ok {
-			if result.err != nil {
-				slog.Warn("Model discovery failed", "provider", id, "error", result.err)
-				if len(providerConfig.Models) == 0 {
-					slog.Warn("Skipping provider with no models after failed discovery", "provider", id)
-					c.Providers.Del(id)
-					continue
-				}
-			} else if len(result.models) > 0 {
-				providerConfig.Models = result.models
-				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
+		// Apply models found by a previous background discovery pass.
+		if store != nil && store.discoveredModels != nil {
+			if discovered, ok := store.discoveredModels.Get(id); ok && len(discovered) > 0 {
+				providerConfig.Models = discovered
+				slog.Info("Applied discovered models for provider", "provider", id, "count", len(discovered))
 			}
 		}
 

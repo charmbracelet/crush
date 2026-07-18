@@ -45,6 +45,9 @@ crush login -f copilot
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
+			if isStartupInterrupted(cmd, err) {
+				return nil
+			}
 			return err
 		}
 		defer cleanup()

@@ -110,6 +110,9 @@ crush --continue
 
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
+			if isStartupInterrupted(cmd, err) {
+				return nil
+			}
 			return err
 		}
 		defer cleanup()
@@ -217,6 +220,16 @@ func useClientServer() bool {
 	return v
 }
 
+// isStartupInterrupted reports whether err results from the command
+// context being canceled (for example, the user pressed Ctrl+C during
+// startup). Such interruptions should exit quietly instead of printing a
+// crash-style error, since the cancellation now propagates through config
+// loading, provider discovery, and the database connection.
+func isStartupInterrupted(cmd *cobra.Command, err error) bool {
+	return err != nil &&
+		(errors.Is(err, context.Canceled) || cmd.Context().Err() != nil)
+}
+
 // setupWorkspaceWithProgressBar wraps setupWorkspace with an optional
 // terminal progress bar shown during initialization.
 func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, func(), error) {
@@ -258,7 +271,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
-	store, err := config.Init(cwd, dataDir, debug)
+	store, err := config.Init(ctx, cwd, dataDir, debug)
 	if err != nil {
 		return nil, nil, err
 	}

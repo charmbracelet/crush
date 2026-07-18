@@ -24,6 +24,10 @@ import (
 // tokenFileName is the file where MCP OAuth tokens are persisted.
 const tokenFileName = "mcp-oauth-tokens.json"
 
+// openURL opens a URL in the user's browser. It is a package variable so tests
+// can simulate a headless environment where the browser cannot be launched.
+var openURL = browser.OpenURL
+
 // oauthInteractiveTimeout bounds the interactive browser authorization flow.
 // It is deliberately much longer than the MCP connection timeout because the
 // user has to switch to a browser, sign in, and grant consent.
@@ -450,7 +454,7 @@ func openBrowserAndCapture(ctx context.Context, authURL string, port int, server
 	defer srv.Shutdown(context.Background())
 
 	slog.Info("Opening browser for MCP server authorization", "url", authURL)
-	if err := browser.OpenURL(authURL); err != nil {
+	if err := openURL(authURL); err != nil {
 		// If the browser can't be opened (headless, remote SSH, etc.), keep the
 		// callback listener running and tell the user to open the URL manually.
 		// Returning here would tear down the listener and make manual

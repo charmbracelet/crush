@@ -145,6 +145,7 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
+	PopQueuedPrompt(sessionID string) (string, bool)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
@@ -2057,6 +2058,27 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 		prompts[i] = call.Prompt
 	}
 	return prompts
+}
+
+// PopQueuedPrompt removes and returns the oldest queued prompt for the
+// session, mirroring the first-element dequeue used by the agent's
+// internal queue-drain paths. Unlike ClearQueue it does not publish
+// cancelled RunComplete events for the remaining entries: the caller
+// intends to redeliver the popped prompt to the editor, and any
+// siblings should keep their place in the queue so they run after
+// the current turn completes. The Get/Set pair is not atomic, but the
+// window is small and the only concurrent writers (enqueueCall and
+// the queue-drain paths) run under separate per-session dispatch
+// mutexes, so a duplicated or skipped dequeue is self-correcting on
+// the next user keystroke.
+func (a *sessionAgent) PopQueuedPrompt(sessionID string) (string, bool) {
+	l, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(l) == 0 {
+		return "", false
+	}
+	first := l[0]
+	a.messageQueue.Set(sessionID, l[1:])
+	return first.Prompt, true
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {

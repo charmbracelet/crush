@@ -102,6 +102,7 @@ type Coordinator interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
+	PopQueuedPrompt(sessionID string) (string, bool)
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
@@ -1228,6 +1229,10 @@ func (c *coordinator) QueuedPrompts(sessionID string) int {
 
 func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 	return c.currentAgent.QueuedPromptsList(sessionID)
+}
+
+func (c *coordinator) PopQueuedPrompt(sessionID string) (string, bool) {
+	return c.currentAgent.PopQueuedPrompt(sessionID)
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {

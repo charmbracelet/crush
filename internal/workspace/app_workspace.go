@@ -212,6 +212,13 @@ func (w *AppWorkspace) AgentClearQueue(sessionID string) {
 	}
 }
 
+func (w *AppWorkspace) AgentPopQueuedPrompt(sessionID string) (string, bool) {
+	if w.app.AgentCoordinator == nil {
+		return "", false
+	}
+	return w.app.AgentCoordinator.PopQueuedPrompt(sessionID)
+}
+
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
 	if w.app.AgentCoordinator == nil {
 		return errors.New("agent coordinator not initialized")

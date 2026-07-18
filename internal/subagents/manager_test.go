@@ -383,3 +383,35 @@ func TestManager_Reload(t *testing.T) {
 		t.Fatal("timed out waiting for Reload event")
 	}
 }
+
+// TestDiscoverFromConfig_LaterPathWinsNameCollision verifies the documented
+// precedence contract (see ProjectSubagentsDir): when two discovery paths
+// define the same subagent name, the later path wins — regardless of how the
+// paths compare lexicographically. The earlier dir here sorts
+// lexicographically AFTER the later one, which would invert precedence if
+// Deduplicate ran on a globally sorted list instead of a path-ordered one.
+func TestDiscoverFromConfig_LaterPathWinsNameCollision(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	earlier := filepath.Join(root, "z-global") // listed first, sorts last
+	later := filepath.Join(root, "a-project")  // listed last, sorts first
+	require.NoError(t, os.MkdirAll(earlier, 0o755))
+	require.NoError(t, os.MkdirAll(later, 0o755))
+
+	write := func(dir, origin string) {
+		content := "---\nname: shared-agent\ndescription: from " + origin + "\n---\n\nBody from " + origin + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "shared-agent.md"), []byte(content), 0o644))
+	}
+	write(earlier, "global")
+	write(later, "project")
+
+	all, active, _ := DiscoverFromConfig(DiscoveryConfig{
+		SubagentsPaths: []string{earlier, later},
+	})
+
+	require.Len(t, all, 1)
+	require.Equal(t, "from project", all[0].Description, "the later path must win the name collision")
+	require.Len(t, active, 1)
+	require.Equal(t, "from project", active[0].Description)
+}

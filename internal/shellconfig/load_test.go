@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/stretchr/testify/require"
 )
 
@@ -257,6 +258,24 @@ fi`
 	providers := result["providers"].(map[string]any)
 	require.Len(t, providers, 1)
 	require.Contains(t, providers, "anthropic")
+}
+
+// TestLoadShellConfig_CrushVersionEnv verifies that CRUSH_VERSION is exposed
+// to the script so it can feature-detect the running Crush version.
+func TestLoadShellConfig_CrushVersionEnv(t *testing.T) {
+	dir := t.TempDir()
+	script := `provider openai --api-key "$CRUSH_VERSION"`
+	path := filepath.Join(dir, "crush.sh")
+
+	jsonBytes, err := LoadShellConfig(path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	providers := result["providers"].(map[string]any)
+	openai := providers["openai"].(map[string]any)
+	require.Equal(t, version.Version, openai["api_key"])
 }
 
 // TestLoadShellConfig_CommandSubstitution verifies that $(...) works in config values.

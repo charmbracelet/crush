@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/qjebbs/go-jsons"
 )
 
@@ -26,7 +27,10 @@ func LoadShellConfig(path string, src []byte) ([]byte, error) {
 	ctx := shell.WithConfigBuilder(context.Background(), builder)
 
 	cwd := filepath.Dir(path)
-	env := os.Environ()
+
+	// Expose the running Crush version so scripts can feature-detect, e.g.
+	// [[ "$CRUSH_VERSION" == "devel" ]] or branch on the release.
+	env := append(os.Environ(), "CRUSH_VERSION="+version.Version)
 
 	err := shell.Run(ctx, shell.RunOptions{
 		Command: string(src),

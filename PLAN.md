@@ -653,6 +653,68 @@ applied *after* global.
 3. **Retire JSON**. Delete the `.json` ingestion path. The builder is the only
    config format.
 
+## Next: Real-Time Config via the bash Tool
+
+The same builtins that a `crush.sh` uses at load time could also run from the
+agent's `bash` tool to reconfigure the **running session**. The mental model
+is exactly Bash and `.bashrc`:
+
+- Running a config command (`model large …`, `option …`, `mcp add …`) changes
+  the **current session only** — like typing `export` or `alias` at a live
+  shell prompt.
+- To make it stick, the user edits their `crush.sh` — like editing `.bashrc`.
+
+**Persistence is explicitly a non-goal.** The bash tool never writes config
+files. This sidesteps the fact that a script can't be round-tripped: you don't
+regenerate `.bashrc` from live shell state, and we don't regenerate `crush.sh`
+from live config state.
+
+### Why it's mostly wiring
+
+The command surface already exists and is already reached by the bash tool —
+it is just gated off. Config builtins check `configBuilderFromCtx(ctx)` and
+no-op when there is no builder on the context (i.e. during normal bash tool
+execution). Real-time config is largely a matter of attaching a *live* sink
+instead of that no-op.
+
+The runtime mutation layer also already exists in `internal/config/store.go`
+and is used today by the model-switch dialog and API-key entry:
+
+- `ConfigStore.mutateInMemory(func(*Config))` — copy-on-write live mutation.
+- `RuntimeOverrides` / `OverridePreferredModel` — ephemeral, session-only
+  changes that never touch disk. This is the sink we want.
+- Pub/sub plus on-demand MCP/LSP startup already exist for reacting to change.
+
+### Steps
+
+1. **Attach a live applier to the bash tool's context.** Analogous to
+   `ConfigBuilder`, but pointing at the live `ConfigStore` (ephemeral path).
+   When present, config builtins apply to the session instead of no-op.
+2. **Map builtin output to ephemeral mutation.** The builtins already produce
+   a nested `map[string]any` whose shape matches the store's dotted field
+   paths; route it through `RuntimeOverrides` / `mutateInMemory`, never
+   `SetConfigField` (which persists).
+3. **Reconcile subsystems**, ranked by difficulty:
+   - Easy: `option` flags, `permissions allow`, disabled tools/skills — read
+     on demand.
+   - Medium: `model large|small` — already reconciled live by the switch
+     dialog.
+   - Harder: `provider add` — rebuild the fantasy client with the new
+     key/base-url.
+   - Hardest: `mcp` / `lsp` add/remove — process lifecycle (start/stop/
+     reconnect); the on-demand-startup infra helps.
+4. **Guardrails.** This is a privilege-escalation surface (the model could
+   grant itself tools, swap providers, add an exfiltrating MCP). Gate it behind
+   a permission prompt, make it opt-in, and consider a denylist for sensitive
+   fields (API keys, `permissions`).
+
+### Suggested first cut
+
+Ephemeral, session-only apply for the **easy tier** (`option`, `permissions`,
+`model`) behind a permission prompt. High value, small blast radius, and no
+persistence work. Live `provider` / `mcp` / `lsp` reload is a larger, later
+increment.
+
 ## Command Reference
 
 The reference below reflects the builtins as implemented in

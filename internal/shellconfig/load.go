@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 )
 
-// LoadShellConfig executes a crush.sh script and returns its config as a
+// LoadShellConfig executes a crushrc script and returns its config as a
 // single JSON object. The script uses config builtins (provider, model, mcp,
 // etc.) that mutate a ConfigBuilder in execution order; the builder is then
 // marshaled to JSON, which the config loader merges with any other config

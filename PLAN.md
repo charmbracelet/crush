@@ -7,7 +7,7 @@ support shell expansion (`$VAR`, `$(cmd)`, `${VAR:-default}`) via
 `VariableResolver` / `shell.ExpandValue` at load time. But JSON itself is static
 — no includes, no conditionals, no variables, no composition.
 
-A Bash-based config format (`crush.sh`) would give users:
+A Bash-based config format (`crushrc`) would give users:
 
 - **Includes** — `source ~/.config/crush/shared.sh` (native shell)
 - **Secrets** — `provider openai --api-key "$(op read 'op://vault/openai')"`
@@ -25,7 +25,7 @@ builtins.
 
 ### Format
 
-A `crush.sh` file is a plain Bash script. Crush discovers it alongside
+A `crushrc` file is a plain Bash script. Crush discovers it alongside
 `crush.json` in the same directory traversal (`internal/config/load.go:866`
 `lookupConfigs`). The script uses Crush-provided builtin commands (shell
 builtins registered via `internal/shell/run.go`) to build a `Config` struct in
@@ -40,7 +40,7 @@ sub-commands. One builtin per config section, each parsing its own
 
 ```bash
 #!/usr/bin/env bash
-# crush.sh
+# crushrc
 
 # Includes
 source ~/.config/crush/secrets.sh
@@ -342,7 +342,7 @@ default:
 ### 5. Discovery and Loading
 
 Modify `lookupConfigs` (`internal/config/load.go:866`) to also search for
-`crush.sh` and `.crush.sh`:
+`crushrc` and `.crushrc`:
 
 ```go
 configNames := []string{
@@ -433,13 +433,13 @@ into the same `jsons.Merge` pipeline, shell configs and JSON configs are fully
 interoperable:
 
 - A global `crush.json` can define base providers
-- A project-level `crush.sh` can override or add providers, hooks, MCPs
+- A project-level `crushrc` can override or add providers, hooks, MCPs
 - The merge resolves conflicts with the same priority rules (closer-to-cwd wins)
 
 ### 7. Scope of Builtins
 
 The config builtins (`provider`, `model`, `mcp`, `lsp`, `permissions`, `hook`,
-`options`) should only be available when Crush is loading a `crush.sh` config
+`options`) should only be available when Crush is loading a `crushrc` config
 file, not when the `bash` tool runs commands during an agent session. This
 prevents agents from modifying config via shell commands.
 
@@ -456,7 +456,7 @@ the context, which only exists during config loading.
 
 ### 8. Version Awareness (`CRUSH_VERSION`)
 
-When Crush executes a `crush.sh` file, it injects the running Crush version
+When Crush executes a `crushrc` file, it injects the running Crush version
 into the script environment as `CRUSH_VERSION` (`internal/shellconfig/load.go`).
 The value is `version.Version` passed through verbatim:
 
@@ -482,7 +482,7 @@ comparison logic behind it. Two things to keep in mind:
 - **Glob, not semver.** In `[[ ... == pattern ]]`, an *unquoted* right-hand
   side is a glob pattern (`v0.85.*` matches any suffix). Quoting it
   (`"v0.85.*"`) makes `*` literal, so it only matches exactly. Confirmed under
-  the mvdan/sh interpreter that runs `crush.sh`.
+  the mvdan/sh interpreter that runs `crushrc`.
 - **No ordering.** Lexical `>`/`<` comparison does not implement semver: a
   pseudo-version like `v0.85.1-0.2026…` sorts *before* `v0.85.1`, and `devel`
   sorts arbitrarily. Reliable `>=` gating requires a Go-side builtin
@@ -530,7 +530,7 @@ comparison logic behind it. Two things to keep in mind:
    - Use context gating (Option B)
 
 10. **Discovery** — modify `lookupConfigs` (`internal/config/load.go`)
-    - Add `crush.sh` and `.crush.sh` to `configNames`
+    - Add `crushrc` and `.crushrc` to `configNames`
 
 11. **Loader** — modify `loadFromConfigPaths` (`internal/config/load.go`)
     - Branch on `.sh` suffix
@@ -538,8 +538,8 @@ comparison logic behind it. Two things to keep in mind:
     - Marshal builder output to JSON for merge pipeline
 
 12. **Integration tests**
-    - End-to-end: write a `crush.sh`, load it, verify `Config` struct
-    - Merge: `crush.json` + `crush.sh` in the same directory tree
+    - End-to-end: write a `crushrc`, load it, verify `Config` struct
+    - Merge: `crush.json` + `crushrc` in the same directory tree
     - Includes: `source` another `.sh` file with config builtins
     - Error cases: unknown flags, missing required args, script failures
 
@@ -550,24 +550,24 @@ comparison logic behind it. Two things to keep in mind:
 
 ## Precedence and Merging
 
-`crush.json` and `crush.sh` coexist and merge through the same `jsons.Merge`
+`crush.json` and `crushrc` coexist and merge through the same `jsons.Merge`
 deep-merge pipeline. The priority rules are unchanged from today:
 
 - Global configs (lowest priority) → parent directories → cwd (highest priority)
-- Within each directory, `crush.sh` is listed after `crush.json` in
+- Within each directory, `crushrc` is listed after `crush.json` in
   `configNames`, so on conflicting keys `.sh` wins over `.json`
 
 ### Same-directory coexistence
 
-If both `crush.json` and `crush.sh` exist in the **same directory**, Crush emits
+If both `crush.json` and `crushrc` exist in the **same directory**, Crush emits
 a warning and still merges them (`.sh` wins on conflicts). This handles the
 common case of migrating from JSON to Bash incrementally — you can move sections
-one at a time from `crush.json` to `crush.sh` without breaking anything.
+one at a time from `crush.json` to `crushrc` without breaking anything.
 
 ### Cross-directory coexistence
 
 This is the expected primary use case. A global `~/.config/crush/crush.json` can
-define base providers, while a project-level `crush.sh` overrides or adds
+define base providers, while a project-level `crushrc` overrides or adds
 providers, hooks, and MCPs. The merge is seamless — `.sh` output is JSON that
 feeds into the same pipeline.
 
@@ -611,7 +611,7 @@ feeds into the same pipeline.
 
 The first implementation accumulated one JSON fragment per builtin call and
 deep-merged them with `jsons.Merge`. That works for purely additive config,
-but a `crush.sh` is an **imperative, ordered** script (statements run top to
+but a `crushrc` is an **imperative, ordered** script (statements run top to
 bottom, `source` runs inline), and the fragment approach flattens that order
 away. Every non-additive feature (`option reset`, `provider remove`) then
 needs a marker value plus a post-merge resolver pass to reconstruct intent —
@@ -655,18 +655,18 @@ applied *after* global.
 
 ## Next: Real-Time Config via the bash Tool
 
-The same builtins that a `crush.sh` uses at load time could also run from the
+The same builtins that a `crushrc` uses at load time could also run from the
 agent's `bash` tool to reconfigure the **running session**. The mental model
 is exactly Bash and `.bashrc`:
 
 - Running a config command (`model large …`, `option …`, `mcp add …`) changes
   the **current session only** — like typing `export` or `alias` at a live
   shell prompt.
-- To make it stick, the user edits their `crush.sh` — like editing `.bashrc`.
+- To make it stick, the user edits their `crushrc` — like editing `.bashrc`.
 
 **Persistence is explicitly a non-goal.** The bash tool never writes config
 files. This sidesteps the fact that a script can't be round-tripped: you don't
-regenerate `.bashrc` from live shell state, and we don't regenerate `crush.sh`
+regenerate `.bashrc` from live shell state, and we don't regenerate `crushrc`
 from live config state.
 
 ### Why it's mostly wiring

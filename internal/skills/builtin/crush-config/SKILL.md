@@ -1,13 +1,13 @@
 ---
 name: crush-config
-description: Use when the user needs help configuring Crush — writing crush.sh (the Bash config format) or crush.json, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing Crush behavior.
+description: Use when the user needs help configuring Crush — writing crushrc (the Bash config format) or crush.json, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing Crush behavior.
 ---
 
 # Crush Configuration
 
 Crush supports two config formats:
 
-- **`crush.sh`** — a Bash script that builds config by calling Crush builtins.
+- **`crushrc`** — a Bash script that builds config by calling Crush builtins.
   **Preferred.** Because it is real Bash you get includes, secrets,
   conditionals, and variables for free.
 - **`crush.json`** — static JSON. Fully supported; see
@@ -15,16 +15,16 @@ Crush supports two config formats:
 
 Both are discovered together and deep-merged. Priority (highest to lowest):
 
-1. `.crush.sh` / `crush.sh` / `.crush.json` / `crush.json` (project-local,
+1. `.crushrc` / `crushrc` / `.crush.json` / `crush.json` (project-local,
    closer-to-cwd wins)
 2. `$XDG_CONFIG_HOME/crush/` or `$HOME/.config/crush/` (global)
 
-If a directory has both `crush.sh` and `crush.json`, they merge (`.sh` wins on
-conflicts) and Crush logs a warning.
+If a directory has both `crushrc` and `crush.json`, they merge (`crushrc` wins
+on conflicts) and Crush logs a warning.
 
-## crush.sh at a glance
+## crushrc at a glance
 
-A `crush.sh` is a plain Bash script executed at load time with the same embedded
+A `crushrc` is a plain Bash script executed at load time with the same embedded
 shell the `bash` tool uses. It builds config by calling builtins (`provider`,
 `model`, `mcp`, `lsp`, `hook`, `permissions`, `option`). Statements run top to
 bottom; later statements win, and `remove`/`reset` operate on anything defined
@@ -184,10 +184,10 @@ option disable-skill crush-config
 > `skill-path`: `.agents/skills`, `.crush/skills`, `.claude/skills`,
 > `.cursor/skills`.
 
-### Fields not yet expressible in crush.sh
+### Fields not yet expressible in crushrc
 
 A few advanced fields have no builtin yet. Put them in a `crush.json` alongside
-your `crush.sh` (they merge):
+your `crushrc` (they merge):
 
 - Nested `options.tui` (`compact_mode`, `diff_mode`, `transparent`) and
   `options.attribution`.
@@ -295,7 +295,7 @@ user-invocable: true
 
 ## Environment variables
 
-- `CRUSH_VERSION` — exported into `crush.sh` at load; the running version (or
+- `CRUSH_VERSION` — exported into `crushrc` at load; the running version (or
   `devel` for local builds).
 - `CRUSH_GLOBAL_CONFIG` — override global config location.
 - `CRUSH_GLOBAL_DATA` — override data directory location.
@@ -304,7 +304,7 @@ user-invocable: true
 ## Legacy JSON format
 
 `crush.json` is the original static format. It still works and merges with
-`crush.sh`. Basic structure:
+`crushrc`. Basic structure:
 
 ```json
 {
@@ -321,9 +321,9 @@ user-invocable: true
 
 The `$schema` property enables IDE autocomplete but is optional.
 
-### crush.sh ↔ crush.json mapping
+### crushrc ↔ crush.json mapping
 
-| crush.sh                             | crush.json                                             |
+| crushrc                             | crush.json                                             |
 | ------------------------------------ | ------------------------------------------------------ |
 | `provider add openai --api-key "$K"` | `providers.openai = {"api_key": "$K"}`                 |
 | `model add openai/gpt-x --name X`    | append to `providers.openai.models[]`                  |
@@ -338,7 +338,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 ### Shell expansion in crush.json
 
 In JSON, only selected string fields are run through the embedded shell at load
-time (in `crush.sh`, everything is native Bash so this table does not apply):
+time (in `crushrc`, everything is native Bash so this table does not apply):
 
 | Surface                                                         | Expansion                          |
 | --------------------------------------------------------------- | ---------------------------------- |
@@ -355,7 +355,7 @@ the request.
 
 ### Security note
 
-Both formats are trusted code. `crush.sh` runs entirely, and any `$(...)` in
+Both formats are trusted code. `crushrc` runs entirely, and any `$(...)` in
 `crush.json` runs at load time, with the invoking user's shell privileges,
 before the UI appears. Don't launch Crush in a directory whose config you
 haven't reviewed.

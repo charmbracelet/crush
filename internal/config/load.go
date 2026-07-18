@@ -866,18 +866,27 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 // regardless of the boundary.
 func lookupConfigs(cwd string) []string {
 	// Prepend default config paths. Each global location contributes both a
-	// JSON and a shell config, so a global crush.sh (e.g. in
-	// ~/.config/crush/) is discovered just like a project-level one. The .sh
-	// sibling is listed after the .json so it wins on conflicts, matching the
+	// JSON and a shell config, so a global crushrc (e.g. in ~/.config/crush/)
+	// is discovered just like a project-level one. The crushrc sibling is
+	// listed after the JSON so it wins on conflicts, matching the
 	// same-directory precedence rule. Missing files are skipped when loaded.
 	configPaths := []string{
 		GlobalConfig(),
-		shConfigVariant(GlobalConfig()),
+		shellConfigSibling(GlobalConfig()),
 		GlobalConfigData(),
-		shConfigVariant(GlobalConfigData()),
+		shellConfigSibling(GlobalConfigData()),
 	}
 
-	configNames := []string{appName + ".json", "." + appName + ".json", appName + ".sh", "." + appName + ".sh"}
+	// Ordered high-to-low priority within a directory. LookupBounded returns
+	// matches in this order, and the later reverse + merge make the earliest
+	// listed name win on conflict. So: .crushrc beats crushrc, both beat the
+	// JSON configs, and .crush.json beats crush.json.
+	configNames := []string{
+		"." + appName + "rc",
+		appName + "rc",
+		"." + appName + ".json",
+		appName + ".json",
+	}
 
 	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
 	if err != nil {
@@ -895,7 +904,7 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 	var configs [][]byte
 	var loaded []string
 
-	// Track directories that have both crush.json and crush.sh to warn
+	// Track directories that have both crush.json and crushrc to warn
 	// about potential confusion.
 	jsonDirs := make(map[string]bool)
 	shDirs := make(map[string]bool)
@@ -913,7 +922,7 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		}
 
 		dir := filepath.Dir(path)
-		if strings.HasSuffix(path, ".sh") {
+		if isShellConfig(path) {
 			shDirs[dir] = true
 			jsonBytes, err := shellconfig.LoadShellConfig(path, data)
 			if err != nil {
@@ -933,10 +942,10 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		}
 	}
 
-	// Warn if both crush.json and crush.sh exist in the same directory.
+	// Warn if both a JSON config and a crushrc exist in the same directory.
 	for dir := range jsonDirs {
 		if shDirs[dir] {
-			slog.Warn("Found both crush.json and crush.sh in the same directory; merging with .sh taking precedence", "dir", dir)
+			slog.Warn("Found both a JSON config and a crushrc in the same directory; merging with crushrc taking precedence", "dir", dir)
 		}
 	}
 
@@ -1074,11 +1083,18 @@ func GlobalConfig() string {
 	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
 }
 
-// shConfigVariant returns the crush.sh path that sits alongside a given
-// crush.json path (same directory, .sh extension). Used so global config
-// locations pick up a shell config, not just JSON.
-func shConfigVariant(jsonPath string) string {
-	return strings.TrimSuffix(jsonPath, filepath.Ext(jsonPath)) + ".sh"
+// shellConfigSibling returns the crushrc path that sits alongside a given
+// crush.json path (same directory). Used so global config locations pick up a
+// shell config, not just JSON.
+func shellConfigSibling(jsonPath string) string {
+	return filepath.Join(filepath.Dir(jsonPath), appName+"rc")
+}
+
+// isShellConfig reports whether a config path is a shell config (crushrc or
+// the hidden .crushrc), as opposed to a JSON config.
+func isShellConfig(path string) bool {
+	base := filepath.Base(path)
+	return base == appName+"rc" || base == "."+appName+"rc"
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the

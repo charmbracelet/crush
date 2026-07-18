@@ -13,7 +13,7 @@ it as a scratchpad for what's next, not as documentation of current behavior.
 
 ### Motivation
 
-Right now `crush.sh` runs once, at startup. If you want to change something
+Right now `crushrc` runs once, at startup. If you want to change something
 mid-session — swap the large model, allow a tool, add an MCP server — you edit
 the file and restart.
 
@@ -23,7 +23,7 @@ session**. The mental model is exactly a shell and its `.bashrc`:
 
 - Running a config command changes the **current session only** — like typing
   `export` or `alias` at a live prompt.
-- To make it stick, you edit your `crush.sh` — like editing `.bashrc`.
+- To make it stick, you edit your `crushrc` — like editing `.bashrc`.
 
 So you could say "Crush, switch to the small model for a bit" and it just
 runs `model small …`, live, no restart.
@@ -32,7 +32,7 @@ runs `model small …`, live, no restart.
 > **Persistence is a non-goal.** The bash tool never writes config files.
 > This is deliberate: a script can't be round-tripped. You don't regenerate
 > your `.bashrc` from the live shell's state, and we won't regenerate
-> `crush.sh` from live config state. Want it permanent? Edit `crush.sh`.
+> `crushrc` from live config state. Want it permanent? Edit `crushrc`.
 
 ### Why it's mostly wiring
 

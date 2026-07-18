@@ -244,7 +244,7 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 Crush runs great with no configuration. When you do want to customize it,
 there are two formats:
 
-- **`crush.sh`** — a small Bash script that configures Crush with simple
+- **`crushrc`** — a small Bash script that configures Crush with simple
   commands (`provider add`, `model large`, `mcp add`, `option`, …).
   **Preferred:** because it's real Bash you get `source`, environment
   variables, `$(…)` secrets, and conditionals for free. See the full
@@ -254,14 +254,14 @@ there are two formats:
 Config can live local to the project or globally, discovered with the
 following priority (closest wins):
 
-1. `.crush.sh` / `.crush.json`
-2. `crush.sh` / `crush.json`
-3. `$HOME/.config/crush/crush.sh` (or `crush.json`)
+1. `.crushrc` / `.crush.json`
+2. `crushrc` / `crush.json`
+3. `$HOME/.config/crush/crushrc` (or `crush.json`)
 
-Everything found is merged. If a directory has both a `.sh` and a `.json`,
-they merge and the `.sh` wins on conflicts.
+Everything found is merged. If a directory has both a `crushrc` and a JSON
+config, they merge and the `crushrc` wins on conflicts.
 
-A quick `crush.sh`:
+A quick `crushrc`:
 
 ```bash
 #!/usr/bin/env bash
@@ -297,7 +297,7 @@ Crush can use LSPs for additional context to help inform its decisions, just
 like you would. LSPs can be added manually like so:
 
 ```bash
-# crush.sh
+# crushrc
 lsp add go --command gopls --env GOTOOLCHAIN go1.24.5
 lsp add typescript --command typescript-language-server --args --stdio
 lsp add nix --command nil
@@ -354,13 +354,13 @@ Provider `extra_body` is a non-expanding JSON passthrough; put env-driven
 values in `extra_headers` or the provider's `api_key` / `base_url`, all of
 which do expand.
 
-> **Security note:** config is trusted code. A `crush.sh` runs in full, and
+> **Security note:** config is trusted code. A `crushrc` runs in full, and
 > any `$(...)` in a `crush.json` runs at load time, with your shell's
 > privileges, before the UI appears. Don't launch Crush in a directory whose
 > config you haven't reviewed.
 
 ```bash
-# crush.sh — the shell handles $VAR and $(…) natively.
+# crushrc — the shell handles $VAR and $(…) natively.
 mcp add filesystem --command node --args /path/to/mcp-server.js \
   --timeout 120 --disabled-tools some-tool-name --env NODE_ENV production
 
@@ -494,7 +494,7 @@ you'd like, you can allow tools to be executed without prompting you for
 permissions. Use this with care.
 
 ```bash
-# crush.sh
+# crushrc
 permissions allow view ls grep edit mcp_context7_get-library-doc
 ```
 
@@ -524,7 +524,7 @@ can disable them via the `options.disabled_tools` list. Disabled tools are
 completely hidden from the agent.
 
 ```bash
-# crush.sh
+# crushrc
 option disable-tool bash
 option disable-tool sourcegraph
 ```
@@ -548,7 +548,7 @@ disable them via the `options.disabled_skills` list. Disabled skills are hidden
 from the agent, including builtin skills and skills discovered from disk.
 
 ```bash
-# crush.sh
+# crushrc
 option disable-skill crush-config
 ```
 
@@ -734,7 +734,7 @@ Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
 API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```bash
-# crush.sh — set DEEPSEEK_API_KEY in your environment.
+# crushrc — set DEEPSEEK_API_KEY in your environment.
 provider add deepseek --type openai-compat \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "$DEEPSEEK_API_KEY"
@@ -856,7 +856,7 @@ and leave out the models list. Crush will populate the model list
 automatically.
 
 ```bash
-# crush.sh — no model list needed; Crush discovers them.
+# crushrc — no model list needed; Crush discovers them.
 provider add ollama --name Ollama --type ollama --base-url "http://localhost:11434/v1/"
 ```
 

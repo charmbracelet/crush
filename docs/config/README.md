@@ -80,17 +80,17 @@ don't download random configs without reading them first.
 
 ## Where config lives
 
-Crush looks for config in the following places, with the higher numbers taking
+Crush looks for config in the following places, with the lower numbers taking
 precedence:
 
-1. "./.crushrc" (project-level)
-2. "./crushrc" (project-level)
-3. "$XDG_DATA_HOME/crush/crushrc" (global)
-4. "$XDG_CONFIG_HOME/crush/crushrc" (global):
+1. `./.crushrc` (project-level, hidden — highest priority)
+2. `./crushrc` (project-level)
+3. `./.crush.json` / `./crush.json` (project-level JSON)
+4. `$XDG_CONFIG_HOME/crush/crushrc` or `~/.config/crush/crushrc` (global)
 
-Everything found is merged, with project settings overriding global ones. If a
-folder has both a `crushrc` and a `json`, they merge too, with `crushrc`
-winning on conflicts (crush will log a wanrning).
+Everything found is merged, with project settings overriding global ones, and
+`crushrc` overriding `crush.json` in the same directory. If a folder has both,
+they merge and Crush logs a warning.
 
 ## Command Reference
 
@@ -263,7 +263,7 @@ option disable-tool bash
 Because it's Bash, a shared base config is just a `source`:
 
 ```bash
-# ~/.config/crush/crush.sh
+# ~/.config/crush/crushrc
 source ~/team/crush-base.sh    # sets up providers, a few skills
 
 # …but on this machine, drop a skill path the base added and add my own.
@@ -277,7 +277,7 @@ script or pulled in via `source`. Later lines win, just like a shell.
 ## A few things still live in JSON
 
 Most config has a command, but a handful of advanced knobs don't yet. Put them
-in a `crush.json` next to your `crush.sh` (they merge):
+in a `crush.json` next to your `crushrc` (they merge):
 
 - Nested `options.tui` (compact mode, diff mode, transparency) and
   `options.attribution`.
@@ -304,7 +304,7 @@ just static:
 ```
 
 In JSON, only selected string fields (API keys, URLs, MCP/LSP commands and args,
-headers) are shell-expanded at load time. In `crush.sh` there's no such list —
+headers) are shell-expanded at load time. In `crushrc` there's no such list —
 it's all just Bash.
 
 Both formats are trusted code: they run with your shell privileges before the UI

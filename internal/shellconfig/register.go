@@ -7,7 +7,7 @@
 // they are no-ops during normal bash tool execution.
 //
 // This package sits between shell and config: it imports shell (for
-// RegisterBuiltin and Run), and config imports shellconfig to run crush.sh
+// RegisterBuiltin and Run), and config imports shellconfig to run crushrc
 // files.
 package shellconfig
 

@@ -188,7 +188,7 @@ func TestLoadShellConfig_Hook(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `hook PreToolUse --command "echo running" --matcher "bash" --timeout 10 --name "my-hook"`
+	script := `hook add PreToolUse --command "echo running" --matcher "bash" --timeout 10 --name "my-hook"`
 	path := filepath.Join(dir, "crush.sh")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -419,7 +419,7 @@ lsp gopls --command gopls --filetypes go --root-markers go.mod
 permissions --allow bash --allow view
 
 # Hooks
-hook PreToolUse --command "echo running" --matcher "bash" --timeout 10
+hook add PreToolUse --command "echo running" --matcher "bash" --timeout 10
 
 # Options
 option data-directory .crush

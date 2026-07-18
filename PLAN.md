@@ -78,10 +78,11 @@ lsp gopls --command gopls --filetypes go,mod --root-markers go.mod
 permissions --allow bash --allow view
 
 # Hooks
-hook PreToolUse --matcher "bash" --command "echo 'Running bash'" --timeout 10
+hook add PreToolUse --matcher "bash" --command "echo 'Running bash'" --timeout 10 --name run-bash
 
 # Options
-options --data-directory .crush --disable-metrics
+option data-directory .crush
+option metrics false
 ```
 
 ### Why flags (not key/value pairs or block style)
@@ -745,13 +746,18 @@ permissions [flags]
 ```
 
 ```text
-hook <event> --command <cmd> [flags]
+hook add <event> --command <cmd> [flags]
     Append a hook to the given event. --command is required.
 
     --command CMD                Shell command to run (required) (json: command)
     --matcher REGEX              Tool name matcher (json: matcher)
     --timeout N                  Timeout in seconds (json: timeout)
-    --name NAME                  Hook name (json: name)
+    --name NAME                  Hook name; needed to remove it later (json: name)
+
+hook remove <event> [--name NAME]   (alias: rm)
+    With --name, remove the named hook(s) from the event. Without --name,
+    clear every hook for the event. Only named hooks can be removed
+    individually.
 ```
 
 ```text

@@ -443,7 +443,7 @@ func TestValidateAgainst(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := tt.agent.ValidateAgainst(isKnown)
+			err := tt.agent.ValidateAgainst(isKnown, nil)
 			if tt.wantErr {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.errMsg)
@@ -460,7 +460,7 @@ func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
 	// Without a resolver, model id strings cannot be validated; ValidateAgainst
 	// should accept any non-empty model string and defer enforcement.
 	s := Subagent{Name: "a", Description: "d", Model: "gpt-99-future"}
-	require.NoError(t, s.ValidateAgainst(nil))
+	require.NoError(t, s.ValidateAgainst(nil, nil))
 }
 
 // TestValidateAgainst_ProviderPropagated verifies that ValidateAgainst forwards
@@ -476,7 +476,7 @@ func TestValidateAgainst_ProviderPropagated(t *testing.T) {
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "openai", Model: "gpt-4o"}
-	require.NoError(t, s.ValidateAgainst(isKnown))
+	require.NoError(t, s.ValidateAgainst(isKnown, nil))
 	require.Equal(t, "openai", capturedProvider)
 	require.Equal(t, "gpt-4o", capturedModel)
 }
@@ -494,7 +494,7 @@ func TestValidateAgainst_EmptyProviderPropagated(t *testing.T) {
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "", Model: "gpt-4o"}
-	require.NoError(t, s.ValidateAgainst(isKnown))
+	require.NoError(t, s.ValidateAgainst(isKnown, nil))
 	require.Equal(t, "", capturedProvider)
 }
 
@@ -900,7 +900,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
 
 		require.Len(t, agents, 2)
 		names := make([]string, 0, len(agents))
@@ -922,7 +922,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
 
 		require.Empty(t, agents)
 		require.Len(t, states, 1)
@@ -933,7 +933,7 @@ func TestDiscoverWithStates(t *testing.T) {
 	t.Run("nonexistent_path_silently_skipped", func(t *testing.T) {
 		t.Parallel()
 
-		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")}, nil)
+		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")}, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -942,7 +942,7 @@ func TestDiscoverWithStates(t *testing.T) {
 	t.Run("empty_dir_returns_no_results", func(t *testing.T) {
 		t.Parallel()
 
-		agents, states := DiscoverWithStates([]string{t.TempDir()}, nil)
+		agents, states := DiscoverWithStates([]string{t.TempDir()}, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -958,7 +958,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp}, nil)
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -981,7 +981,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			return true
 		}
 
-		agents, states := DiscoverWithStates([]string{tmp}, isKnown)
+		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil)
 
 		require.Len(t, agents, 1)
 		require.Len(t, states, 1)
@@ -1002,7 +1002,7 @@ func TestDiscoverWithStates(t *testing.T) {
 
 		isKnown := func(provider, model string) bool { return false }
 
-		agents, states := DiscoverWithStates([]string{tmp}, isKnown)
+		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil)
 
 		require.Empty(t, agents)
 		require.Len(t, states, 1)
@@ -1030,4 +1030,28 @@ func TestValidate_ReportsAllToolOverlaps(t *testing.T) {
 	require.ErrorContains(t, err, "view")
 	require.ErrorContains(t, err, "edit")
 	require.ErrorContains(t, err, "bash")
+}
+
+// TestValidateAgainst_SkillsValidated verifies that with a non-nil
+// isKnownSkill resolver, unknown skills references fail validation and known
+// ones pass; a nil resolver skips the check entirely.
+func TestValidateAgainst_SkillsValidated(t *testing.T) {
+	t.Parallel()
+
+	s := Subagent{
+		Name:        "skilled-agent",
+		Description: "Uses skills.",
+		Skills:      []string{"known-skill", "unknown-skill"},
+	}
+	isKnown := func(name string) bool { return name == "known-skill" }
+
+	err := s.ValidateAgainst(nil, isKnown)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `skill "unknown-skill" is not a known active skill`)
+	require.NotContains(t, err.Error(), `skill "known-skill"`)
+
+	require.NoError(t, s.ValidateAgainst(nil, nil), "nil resolver must skip the skills check")
+
+	s.Skills = []string{"known-skill"}
+	require.NoError(t, s.ValidateAgainst(nil, isKnown))
 }

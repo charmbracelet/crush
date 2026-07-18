@@ -296,7 +296,10 @@ func (s *Subagents) loadSelectedRunning() Action {
 }
 
 // cancelSelectedRunning cancels the currently selected running subagent via
-// the workspace and removes it from the list.
+// the workspace. The row is not removed here: the runtime publishes a Finish
+// event once the run actually stops, and refreshRunning drops the row then —
+// removing it optimistically would make it reappear on the next RuntimeEvent
+// while the run winds down.
 func (s *Subagents) cancelSelectedRunning() {
 	item := s.runningList.SelectedItem()
 	if item == nil {
@@ -306,28 +309,7 @@ func (s *Subagents) cancelSelectedRunning() {
 	if !ok {
 		return
 	}
-	childID := ri.ID()
-	s.com.Workspace.CancelSubagent(childID)
-	s.removeRunningItem(childID)
-}
-
-// removeRunningItem removes the running item with the given child session ID
-// from the list.
-func (s *Subagents) removeRunningItem(childID string) {
-	var newItems []*RunningSubagentItem
-	for _, item := range s.runningItems {
-		if item.ID() == childID {
-			continue
-		}
-		newItems = append(newItems, item)
-	}
-	s.runningItems = newItems
-	filterable := make([]list.FilterableItem, len(s.runningItems))
-	for i, item := range s.runningItems {
-		filterable[i] = item
-	}
-	s.runningList.SetItems(filterable...)
-	s.runningList.SelectFirst()
+	s.com.Workspace.CancelSubagent(ri.ID())
 }
 
 // refreshRunning rebuilds the running tab from the workspace, preserving the

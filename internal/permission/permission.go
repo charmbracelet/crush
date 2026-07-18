@@ -35,7 +35,7 @@ func hookApproved(ctx context.Context, toolCallID string) bool {
 	return v == toolCallID
 }
 
-type autoApproveRequestsKey struct{}
+type requestPolicyKey struct{}
 
 // RequestPolicy controls how permission requests are resolved for one agent
 // turn.
@@ -55,13 +55,13 @@ func WithAutoApproveRequests(ctx context.Context) context.Context {
 // WithRequestPolicy returns a context with the given permission request
 // policy. The policy replaces any inherited policy.
 func WithRequestPolicy(ctx context.Context, policy RequestPolicy) context.Context {
-	return context.WithValue(ctx, autoApproveRequestsKey{}, policy)
+	return context.WithValue(ctx, requestPolicyKey{}, policy)
 }
 
 // RequestPolicyFromContext returns the permission request policy carried by
 // ctx. Contexts without an explicit policy prompt for permission.
 func RequestPolicyFromContext(ctx context.Context) RequestPolicy {
-	policy, _ := ctx.Value(autoApproveRequestsKey{}).(RequestPolicy)
+	policy, _ := ctx.Value(requestPolicyKey{}).(RequestPolicy)
 	return policy
 }
 

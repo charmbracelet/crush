@@ -131,6 +131,12 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
+	// channelMeta holds the attributes of the <channel> element a
+	// channel-originated turn was started with, parsed once at Run
+	// entry. It survives the auto-summarize continuation, whose Prompt
+	// is rewritten and no longer carries the element, so the reply
+	// target is not lost when a long channel turn is summarized.
+	channelMeta map[string]string
 }
 
 func filterToolsForChannel(agentTools []fantasy.AgentTool, channel string, states map[string]mcp.ClientInfo) []fantasy.AgentTool {
@@ -181,9 +187,13 @@ type sessionAgent struct {
 	systemPrompt       *csync.Value[string]
 	tools              *csync.Slice[fantasy.AgentTool]
 
-	isSubAgent           bool
-	sessions             session.Service
-	messages             message.Service
+	isSubAgent bool
+	sessions   session.Service
+	messages   message.Service
+	// cfg backs channel reply routing (config lookup + MCP tool
+	// invocation). Nil in tests and sub-agents that never see channel
+	// turns; sendChannelReply treats nil as "routing disabled".
+	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
@@ -240,6 +250,7 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	Cfg                  *config.ConfigStore
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
@@ -256,6 +267,7 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		cfg:                  opts.Cfg,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
@@ -576,6 +588,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
+	if call.Channel != "" && call.channelMeta == nil {
+		call.channelMeta, _ = parseChannelMeta(call.Prompt)
+	}
+
 	// genCtx/cancel are the run context and its cancel func, created under
 	// the per-session dispatch mutex below so a concurrent Cancel can observe
 	// the activeRequests entry before the assistant message exists.
@@ -792,6 +808,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
 	sanitizedToolCalls := make(map[string]bool)
+	// Full names of tool calls that completed without error this turn.
+	// Written only from the streaming callbacks (which run sequentially)
+	// and read after Stream returns, where sendChannelReply uses it to
+	// tell whether the model already replied on the originating channel.
+	completedToolCalls := make(map[string]struct{})
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {
@@ -974,6 +995,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if sanitizedToolCalls[result.ToolCallID] {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
+			}
+			if !toolResult.IsError && toolResult.Name != "" {
+				completedToolCalls[toolResult.Name] = struct{}{}
 			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
@@ -1202,6 +1226,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
 		}
+	}
+
+	// Route the finished turn's response back to the channel it came
+	// from, unless the turn was cut short for summarization with work
+	// still pending — the queued continuation carries the channel and
+	// replies when it actually finishes. Runs before the busy state is
+	// released so a follow-up push queued behind this turn cannot
+	// overtake its reply.
+	if currentAssistant != nil && (!shouldSummarize || len(currentAssistant.ToolCalls()) == 0) {
+		a.sendChannelReply(ctx, call, currentAssistant.Content().String(), completedToolCalls)
 	}
 
 	// Release active request before publishing the notification.

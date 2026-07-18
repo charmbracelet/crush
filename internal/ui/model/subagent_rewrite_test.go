@@ -164,10 +164,10 @@ func TestRewriteSubagentPrompt(t *testing.T) {
 			want:        "@code-reviewer review it",
 		},
 		{
-			name:        "newline_as_separator_not_supported",
+			name:        "newline_as_separator",
 			content:     "@code-reviewer\nreview this",
 			activeNames: map[string]bool{"code-reviewer": true},
-			want:        "@code-reviewer\nreview this",
+			want:        `Use the agent tool with subagent_type="code-reviewer" to handle this request: review this`,
 		},
 		{
 			name:        "multiple_at_mentions_only_first_rewritten",
@@ -176,10 +176,10 @@ func TestRewriteSubagentPrompt(t *testing.T) {
 			want:        `Use the agent tool with subagent_type="code-reviewer" to handle this request: review and @tester test`,
 		},
 		{
-			name:        "tab_after_name_not_supported_as_separator",
+			name:        "tab_as_separator",
 			content:     "@code-reviewer\treview this",
 			activeNames: map[string]bool{"code-reviewer": true},
-			want:        "@code-reviewer\treview this",
+			want:        `Use the agent tool with subagent_type="code-reviewer" to handle this request: review this`,
 		},
 	}
 

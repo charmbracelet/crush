@@ -130,6 +130,20 @@ func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
+// registerSessionTools lists the tools a live session exposes and writes them
+// into the shared registry, returning the number registered after any
+// configured allow/deny filtering. It is the single seam through which a
+// (re)connected session's tools enter the registry, so both the initial
+// connect and a lazy renew repopulate the tool list the agent sends to the LLM
+// instead of leaving it empty.
+func registerSessionTools(ctx context.Context, cfg *config.ConfigStore, name string, sess *ClientSession) (int, error) {
+	tools, err := getTools(ctx, sess)
+	if err != nil {
+		return 0, err
+	}
+	return updateTools(cfg, name, tools), nil
+}
+
 func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	// Always call ListTools to get the actual available tools.
 	// The InitializeResult Capabilities.Tools field may be an empty object {},
@@ -142,7 +156,10 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 }
 
 func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
-	tools = filterDisabledTools(cfg, name, tools)
+	mcpCfg, ok := cfg.Config().MCP[name]
+	if ok {
+		tools = filterTools(mcpCfg, tools)
+	}
 	if len(tools) == 0 {
 		allTools.Del(name)
 		return 0
@@ -151,20 +168,30 @@ func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
 	return len(tools)
 }
 
-// filterDisabledTools removes tools that are disabled via config.
-func filterDisabledTools(cfg *config.ConfigStore, mcpName string, tools []*Tool) []*Tool {
-	mcpCfg, ok := cfg.Config().MCP[mcpName]
-	if !ok || len(mcpCfg.DisabledTools) == 0 {
-		return tools
+// filterTools filters tools based on enabled_tools (allow list) and
+// disabled_tools (deny list) from the MCP config.
+func filterTools(mcpCfg config.MCPConfig, tools []*Tool) []*Tool {
+	if len(mcpCfg.EnabledTools) > 0 {
+		filtered := make([]*Tool, 0, len(mcpCfg.EnabledTools))
+		for _, tool := range tools {
+			if slices.Contains(mcpCfg.EnabledTools, tool.Name) {
+				filtered = append(filtered, tool)
+			}
+		}
+		tools = filtered
 	}
 
-	filtered := make([]*Tool, 0, len(tools))
-	for _, tool := range tools {
-		if !slices.Contains(mcpCfg.DisabledTools, tool.Name) {
-			filtered = append(filtered, tool)
+	if len(mcpCfg.DisabledTools) > 0 {
+		filtered := make([]*Tool, 0, len(tools))
+		for _, tool := range tools {
+			if !slices.Contains(mcpCfg.DisabledTools, tool.Name) {
+				filtered = append(filtered, tool)
+			}
 		}
+		tools = filtered
 	}
-	return filtered
+
+	return tools
 }
 
 // ensureRawBytes normalizes MCP media data into raw binary bytes.

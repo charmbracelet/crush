@@ -2,11 +2,14 @@ package hooks
 
 import (
 	"context"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -192,6 +195,13 @@ func TestBuildEnv(t *testing.T) {
 	require.Equal(t, "/project", envMap["CRUSH_PROJECT_DIR"])
 	require.Equal(t, "ls", envMap["CRUSH_TOOL_INPUT_COMMAND"])
 	require.Equal(t, "/tmp/f.txt", envMap["CRUSH_TOOL_INPUT_FILE_PATH"])
+
+	// Shared Crush markers must be present so hook-authored scripts can
+	// detect they're running under Crush the same way bash-tool-invoked
+	// scripts can.
+	require.Equal(t, "1", envMap["CRUSH"])
+	require.Equal(t, "crush", envMap["AGENT"])
+	require.Equal(t, "crush", envMap["AI_AGENT"])
 }
 
 func splitFirst(s, sep string) []string {
@@ -373,6 +383,40 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, DecisionNone, result.Decision)
 	})
+
+	// Runner must compile matchers itself; it cannot rely on
+	// ValidateHooks having run first. This is the guarantee that prevents
+	// the reload-drops-matcher class of bug.
+	t.Run("runner compiles matcher without ValidateHooks", func(t *testing.T) {
+		t.Parallel()
+		raw := []config.HookConfig{
+			{Command: `echo '{"decision":"deny","reason":"blocked"}'`, Matcher: "^bash$"},
+		}
+		r := NewRunner(raw, t.TempDir(), t.TempDir())
+
+		deny, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionDeny, deny.Decision)
+
+		noop, err := r.Run(context.Background(), EventPreToolUse, "sess", "view", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionNone, noop.Decision)
+	})
+
+	// A matcher that fails to compile at Runner construction must not
+	// degrade to match-everything; the hook is dropped instead.
+	t.Run("runner skips hooks with invalid matcher", func(t *testing.T) {
+		t.Parallel()
+		raw := []config.HookConfig{
+			{Command: `echo '{"decision":"deny","reason":"should not fire"}'`, Matcher: "[invalid"},
+		}
+		r := NewRunner(raw, t.TempDir(), t.TempDir())
+
+		result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionNone, result.Decision)
+		require.Empty(t, r.Hooks())
+	})
 }
 
 func TestValidateHooksInvalidRegex(t *testing.T) {
@@ -430,6 +474,37 @@ func TestValidateHooksNormalizesEventNames(t *testing.T) {
 			require.Len(t, cfg.Hooks[EventPreToolUse], 1)
 		})
 	}
+}
+
+func TestRunnerHookNameUsesDisplayName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("name field is used when set", func(t *testing.T) {
+		t.Parallel()
+		hookCfg := config.HookConfig{
+			Name:    "my-hook",
+			Command: `echo '{"decision":"allow"}'`,
+		}
+		r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+		result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionAllow, result.Decision)
+		require.Len(t, result.Hooks, 1)
+		require.Equal(t, "my-hook", result.Hooks[0].Name)
+	})
+
+	t.Run("command is used when name is empty", func(t *testing.T) {
+		t.Parallel()
+		hookCfg := config.HookConfig{
+			Command: `echo '{"decision":"allow"}'`,
+		}
+		r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+		result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionAllow, result.Decision)
+		require.Len(t, result.Hooks, 1)
+		require.Equal(t, `echo '{"decision":"allow"}'`, result.Hooks[0].Name)
+	})
 }
 
 func TestRunnerParallelExecution(t *testing.T) {
@@ -494,7 +569,8 @@ func TestAggregationUpdatedInput(t *testing.T) {
 		require.Equal(t, DecisionAllow, agg.Decision)
 		// command overridden by second patch; keep preserved from first
 		// patch; timeout preserved from original input.
-		require.JSONEq(t,
+		require.JSONEq(
+			t,
 			`{"command":"second","keep":"me","timeout":60}`,
 			agg.UpdatedInput,
 		)
@@ -506,7 +582,8 @@ func TestAggregationUpdatedInput(t *testing.T) {
 			{Decision: DecisionAllow, UpdatedInput: `{"env":{"FOO":"bar"}}`},
 		}, `{"env":{"BAZ":"qux"},"command":"ls"}`)
 		// "env" is replaced entirely; "command" preserved.
-		require.JSONEq(t,
+		require.JSONEq(
+			t,
 			`{"env":{"FOO":"bar"},"command":"ls"}`,
 			agg.UpdatedInput,
 		)
@@ -568,6 +645,63 @@ func TestAggregationUpdatedInput(t *testing.T) {
 	})
 }
 
+// TestRunnerAbandonRaceSafety verifies that if a hook's shell execution
+// does not yield to ctx cancellation within abandonGrace, runOne returns
+// promptly and never touches the shared stdout/stderr buffers again —
+// even while the abandoned goroutine continues to write to them.
+//
+// The substitute shell executor ignores ctx entirely, writes to Stdout
+// both before and after the abandon deadline, and only then returns.
+// Under -race this catches any code path in runOne that reads those
+// buffers after returning the DecisionNone abandon result.
+func TestRunnerAbandonRaceSafety(t *testing.T) {
+	origRunShell := runShell
+	t.Cleanup(func() { runShell = origRunShell })
+
+	// Synchronize shutdown with the abandoned goroutine so the test
+	// exits cleanly even under -race.
+	var wg sync.WaitGroup
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		wg.Wait()
+	})
+
+	runShell = func(_ context.Context, opts shell.RunOptions) error {
+		wg.Add(1)
+		defer wg.Done()
+		// Write before the caller observes ctx.Done(); the caller will
+		// not read the buffer while we still own it.
+		_, _ = io.WriteString(opts.Stdout, "before\n")
+		// Hold past ctx deadline + abandonGrace so the caller takes
+		// the abandon branch, then continue writing. If the caller
+		// reads these buffers after abandoning, -race will flag it.
+		select {
+		case <-time.After(5 * time.Second):
+		case <-release:
+		}
+		_, _ = io.WriteString(opts.Stdout, "after\n")
+		return nil
+	}
+
+	hookCfg := config.HookConfig{
+		Command: "# irrelevant; runShell is stubbed",
+		Timeout: 1,
+	}
+	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+
+	start := time.Now()
+	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.Equal(t, DecisionNone, result.Decision)
+	// Abandon must happen at ~timeout + abandonGrace. Allow generous
+	// slack so CI noise doesn't flake the test.
+	require.Less(t, elapsed, 3500*time.Millisecond,
+		"runOne should return within timeout+abandonGrace+slack")
+}
+
 func TestRunnerUpdatedInput(t *testing.T) {
 	t.Parallel()
 	hookCfg := config.HookConfig{
@@ -577,7 +711,8 @@ func TestRunnerUpdatedInput(t *testing.T) {
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{"command":"echo original","timeout":60}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, result.Decision)
-	require.JSONEq(t,
+	require.JSONEq(
+		t,
 		`{"command":"echo rewritten","timeout":60}`,
 		result.UpdatedInput,
 	)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/tidwall/gjson"
 )
 
@@ -51,7 +52,9 @@ func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []b
 // It includes all current process env vars plus hook-specific ones.
 func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON string) []string {
 	env := os.Environ()
-	env = append(env,
+	env = append(env, shell.CrushEnvMarkers()...)
+	env = append(
+		env,
 		fmt.Sprintf("CRUSH_EVENT=%s", eventName),
 		fmt.Sprintf("CRUSH_TOOL_NAME=%s", toolName),
 		fmt.Sprintf("CRUSH_SESSION_ID=%s", sessionID),
@@ -103,7 +106,8 @@ func parseStdout(stdout string) HookResult {
 	}
 
 	if parsed.Version > SupportedOutputVersion {
-		slog.Debug("Hook output declared a newer envelope version than this build supports",
+		slog.Debug(
+			"Hook output declared a newer envelope version than this build supports",
 			"version", parsed.Version,
 			"supported", SupportedOutputVersion,
 		)
@@ -157,6 +161,7 @@ func parseClaudeCodeOutput(data json.RawMessage) HookResult {
 		PermissionDecision       string          `json:"permissionDecision"`
 		PermissionDecisionReason string          `json:"permissionDecisionReason"`
 		UpdatedInput             json.RawMessage `json:"updatedInput"`
+		AdditionalContext        string          `json:"additionalContext"`
 	}
 	if err := json.Unmarshal(data, &hso); err != nil {
 		return HookResult{Decision: DecisionNone}
@@ -165,6 +170,7 @@ func parseClaudeCodeOutput(data json.RawMessage) HookResult {
 	result := HookResult{
 		Decision: parseDecision(hso.PermissionDecision),
 		Reason:   hso.PermissionDecisionReason,
+		Context:  hso.AdditionalContext,
 	}
 
 	// Marshal updatedInput back to a string for our opaque format.

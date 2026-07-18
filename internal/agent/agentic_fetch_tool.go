@@ -17,7 +17,7 @@ import (
 )
 
 //go:embed templates/agentic_fetch.md
-var agenticFetchToolDescription []byte
+var agenticFetchToolDescription string
 
 // agenticFetchValidationResult holds the validated parameters from the tool call context.
 type agenticFetchValidationResult struct {
@@ -65,7 +65,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 	return fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
-		tools.FirstLineDescription(agenticFetchToolDescription),
+		agenticFetchToolDescription,
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			validationResult, err := validateAgenticFetchParams(ctx, params)
 			if err != nil {
@@ -80,7 +80,8 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				description = "Search the web and analyze results"
 			}
 
-			p, err := c.permissions.Request(ctx,
+			p, err := c.permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   validationResult.SessionID,
 					Path:        c.cfg.WorkingDir(),
@@ -166,7 +167,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
 				webSearchTool,
-				tools.NewGlobTool(tmpDir),
+				tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob),
 				tools.NewGrepTool(tmpDir, c.cfg.Config().Tools.Grep),
 				tools.NewSourcegraphTool(client),
 				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
@@ -200,5 +201,6 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 					c.permissions.AutoApproveSession(sessionID)
 				},
 			})
-		}), nil
+		},
+	), nil
 }

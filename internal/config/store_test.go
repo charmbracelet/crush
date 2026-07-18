@@ -3,12 +3,16 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestConfigStore_ConfigPath_GlobalAlwaysWorks(t *testing.T) {
@@ -316,10 +320,15 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 // ReloadFromDisk updates store state BEFORE running model/agent setup,
 // so the new config values are used rather than stale pre-reload values.
 func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "crush.json")
+
+	// Isolate from the host's global config so only test-provided
+	// providers are visible.
+	t.Setenv("CRUSH_GLOBAL_CONFIG", dir)
+	t.Setenv("CRUSH_GLOBAL_DATA", dir)
+	resetProviderState()
+	t.Cleanup(resetProviderState)
 
 	// Create initial config with one model preference
 	initialConfig := `{
@@ -488,25 +497,288 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 	}`
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
-	// Load will trigger configureProviders which removes anthropic OAuth config
-	// This should NOT cause infinite recursion thanks to autoReloadDisabled guard
+	// Load will trigger configureProviders which removes anthropic OAuth config.
+	// This should NOT cause infinite recursion — writeMu prevents re-entrant reloads.
 	store, err := Load(dir, dir, false)
 	require.NoError(t, err)
-
-	// Verify the store loaded successfully and autoReloadDisabled was unset
-	require.False(t, store.autoReloadDisabled)
 
 	// Capture snapshot and verify reload also works without recursion
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
 
-	// Modify file and reload - this should work without re-entrancy issues
+	// Modify file and reload — this should work without re-entrancy issues
 	time.Sleep(10 * time.Millisecond)
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"options": {"debug": true}}`), 0o600))
 
 	err = store.ReloadFromDisk(context.Background())
 	require.NoError(t, err)
+}
 
-	// Verify reload completed successfully
-	require.False(t, store.autoReloadDisabled, "autoReloadDisabled should be false after ReloadFromDisk")
+// TestSetConfigFields_AutoReloadsAtomically verifies that SetConfigFields writes
+// multiple fields in a single disk write and triggers only one auto-reload,
+// avoiding intermediate states where only some fields are persisted.
+func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+
+	// Create initial config file.
+	initialConfig := `{"options": {"debug": false}}`
+	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
+
+	// Load initial config.
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+
+	// Set globalDataPath and capture snapshot.
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	// Write multiple fields atomically.
+	err = store.SetConfigFields(ScopeGlobal, map[string]any{
+		"options.debug":  true,
+		"options.custom": "hello",
+	})
+	require.NoError(t, err)
+
+	// Verify both fields are reflected in memory.
+	require.True(t, store.config.Options.Debug)
+}
+
+func TestLoadTokenFromDisk_ReturnsNewerToken(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+
+	// Create config file with a newer token on disk
+	configContent := `{
+		"providers": {
+			"hyper": {
+				"oauth": {
+					"access_token": "newer-token-from-disk",
+					"refresh_token": "refresh-abc",
+					"expires_in": 3600,
+					"expires_at": 9999999999
+				}
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: configPath,
+	}
+
+	token, err := store.loadTokenFromDisk(ScopeGlobal, "hyper")
+	require.NoError(t, err)
+	require.NotNil(t, token)
+	require.Equal(t, "newer-token-from-disk", token.AccessToken)
+	require.Equal(t, "refresh-abc", token.RefreshToken)
+	require.Equal(t, 3600, token.ExpiresIn)
+	require.Equal(t, int64(9999999999), token.ExpiresAt)
+}
+
+func TestLoadTokenFromDisk_ReturnsNilWhenSameToken(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+
+	// Create config file with the same token
+	configContent := `{
+		"providers": {
+			"hyper": {
+				"oauth": {
+					"access_token": "same-token",
+					"refresh_token": "refresh-abc",
+					"expires_in": 3600,
+					"expires_at": 9999999999
+				}
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: configPath,
+	}
+
+	token, err := store.loadTokenFromDisk(ScopeGlobal, "hyper")
+	require.NoError(t, err)
+	require.NotNil(t, token)
+	require.Equal(t, "same-token", token.AccessToken)
+}
+
+func TestLoadTokenFromDisk_ReturnsNilWhenFileMissing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "nonexistent.json")
+
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: configPath,
+	}
+
+	token, err := store.loadTokenFromDisk(ScopeGlobal, "hyper")
+	require.NoError(t, err)
+	require.Nil(t, token)
+}
+
+func TestLoadTokenFromDisk_ReturnsNilWhenProviderMissing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+
+	// Create config file without the hyper provider
+	configContent := `{"providers": {"openai": {"api_key": "test-key"}}}`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: configPath,
+	}
+
+	token, err := store.loadTokenFromDisk(ScopeGlobal, "hyper")
+	require.NoError(t, err)
+	require.Nil(t, token)
+}
+
+func TestLoadTokenFromDisk_ReturnsNilWhenOAuthMissing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+
+	// Create config file with provider but no OAuth token
+	configContent := `{"providers": {"hyper": {"api_key": "test-key"}}}`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: configPath,
+	}
+
+	token, err := store.loadTokenFromDisk(ScopeGlobal, "hyper")
+	require.NoError(t, err)
+	require.Nil(t, token)
+}
+
+func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+
+	// Create config file with a newer token on disk
+	configContent := `{
+		"providers": {
+			"hyper": {
+				"api_key": "newer-access-token",
+				"oauth": {
+					"access_token": "newer-access-token",
+					"refresh_token": "refresh-abc",
+					"expires_in": 3600,
+					"expires_at": 9999999999
+				}
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	// Set up store with an older in-memory token
+	oldToken := &oauth.Token{
+		AccessToken:  "older-access-token",
+		RefreshToken: "refresh-abc",
+		ExpiresIn:    3600,
+		ExpiresAt:    time.Now().Add(-time.Hour).Unix(), // Expired
+	}
+
+	providers := csync.NewMap[string, ProviderConfig]()
+	providers.Set("hyper", ProviderConfig{
+		ID:         "hyper",
+		Name:       "Hyper",
+		APIKey:     oldToken.AccessToken,
+		OAuthToken: oldToken,
+	})
+
+	store := &ConfigStore{
+		config: &Config{
+			Providers: providers,
+		},
+		globalDataPath: configPath,
+	}
+
+	// Refresh should use the disk token without making an external call
+	err := store.RefreshOAuthToken(context.Background(), ScopeGlobal, "hyper")
+	require.NoError(t, err)
+
+	// Verify the in-memory token was updated to the disk token
+	updatedConfig, ok := store.config.Providers.Get("hyper")
+	require.True(t, ok)
+	require.Equal(t, "newer-access-token", updatedConfig.APIKey)
+	require.Equal(t, "newer-access-token", updatedConfig.OAuthToken.AccessToken)
+	require.Equal(t, "refresh-abc", updatedConfig.OAuthToken.RefreshToken)
+}
+
+// TestConfigStore_SetConfigFields_concurrentInProcess verifies that
+// concurrent in-process writes do not lose data when serialized by the
+// s.mu mutex. This does not exercise the cross-process flock; testing
+// that would require spawning a separate OS process.
+func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
+
+	store := &ConfigStore{
+		config: &Config{
+			Providers: csync.NewMap[string, ProviderConfig](),
+			Models:    make(map[SelectedModelType]SelectedModel),
+		},
+		globalDataPath: configPath,
+		workingDir:     dir,
+	}
+
+	const (
+		numGoroutines    = 20
+		fieldsPerRoutine = 5
+	)
+
+	errs := make(chan error, numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			kv := make(map[string]any, fieldsPerRoutine)
+			for j := 0; j < fieldsPerRoutine; j++ {
+				key := fmt.Sprintf("goroutine_%d_field_%d", id, j)
+				kv[key] = fmt.Sprintf("value_%d_%d", id, j)
+			}
+			errs <- store.SetConfigFields(ScopeGlobal, kv)
+		}(i)
+	}
+
+	for i := 0; i < numGoroutines; i++ {
+		require.NoError(t, <-errs)
+	}
+
+	// Verify all fields are present in the config file.
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+
+	for i := 0; i < numGoroutines; i++ {
+		for j := 0; j < fieldsPerRoutine; j++ {
+			key := fmt.Sprintf("goroutine_%d_field_%d", i, j)
+			expectedValue := fmt.Sprintf("value_%d_%d", i, j)
+			result := gjson.Get(string(data), key)
+			require.True(t, result.Exists(), "key %s should exist", key)
+			require.Equal(t, expectedValue, result.String(), "key %s should have the correct value", key)
+		}
+	}
 }

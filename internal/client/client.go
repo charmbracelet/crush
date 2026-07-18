@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/server"
+	"github.com/google/uuid"
 )
 
 // DummyHost is used to satisfy the http.Client's requirement for a URL.
@@ -22,10 +23,11 @@ const DummyHost = "api.crush.localhost"
 
 // Client represents an RPC client connected to a Crush server.
 type Client struct {
-	h       *http.Client
-	path    string
-	network string
-	addr    string
+	h        *http.Client
+	path     string
+	network  string
+	addr     string
+	clientID string
 }
 
 // DefaultClient creates a new [Client] connected to the default server address.
@@ -44,6 +46,7 @@ func NewClient(path, network, address string) (*Client, error) {
 	c.path = filepath.Clean(path)
 	c.network = network
 	c.addr = address
+	c.clientID = uuid.New().String()
 	p := &http.Protocols{}
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)
@@ -63,6 +66,12 @@ func NewClient(path, network, address string) (*Client, error) {
 // Path returns the client's workspace filesystem path.
 func (c *Client) Path() string {
 	return c.path
+}
+
+// ClientID returns the per-process client ID minted in [NewClient].
+// The server uses it as a presence/coordination handle.
+func (c *Client) ClientID() string {
+	return c.clientID
 }
 
 // GetGlobalConfig retrieves the server's configuration.
@@ -119,6 +128,14 @@ func (c *Client) ShutdownServer(ctx context.Context) error {
 		return fmt.Errorf("server shutdown failed: %s", rsp.Status)
 	}
 	return nil
+}
+
+// Dial opens a connection to the server using the same scheme-aware
+// logic the client uses for its HTTP transport. Exposed so callers can
+// reuse the dialer when they need to construct sibling HTTP transports
+// (e.g. a readiness probe in the CLI).
+func (c *Client) Dial(ctx context.Context, network, address string) (net.Conn, error) {
+	return c.dialer(ctx, network, address)
 }
 
 func (c *Client) dialer(ctx context.Context, network, address string) (net.Conn, error) {

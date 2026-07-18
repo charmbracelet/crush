@@ -7,6 +7,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/bedrock"
+	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,6 +24,10 @@ type mockSessionAgent struct {
 
 func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 	return m.runFunc(ctx, call)
+}
+
+func (m *mockSessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
+	return &AcceptedRun{sessionID: sessionID}
 }
 
 func (m *mockSessionAgent) Model() Model                        { return m.model }
@@ -39,6 +46,7 @@ func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
+func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
@@ -48,6 +56,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	return &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,
+		messages: env.messages,
 	}
 }
 
@@ -105,6 +114,99 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "done", resp.Content)
 		assert.False(t, resp.IsError)
+	})
+
+	t.Run("cost update failure preserves output", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return agentResultWithText("output before cost failure"), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      "missing-parent-session",
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError)
+		assert.Equal(t, "output before cost failure", resp.Content)
+	})
+
+	t.Run("response with text returns it", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return agentResultWithText("the answer"), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError)
+		assert.Equal(t, "the answer", resp.Content)
+	})
+
+	t.Run("nil result returns error response", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return nil, nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Equal(t, "Sub-agent completed but produced no text output.", resp.Content)
+	})
+
+	t.Run("empty result returns error response", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return &fantasy.AgentResult{}, nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Equal(t, "Sub-agent completed but produced no text output.", resp.Content)
 	})
 
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {
@@ -196,7 +298,7 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
-			return nil, errors.New("agent exploded")
+			return nil, errors.New("provider request failed")
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
@@ -210,7 +312,7 @@ func TestRunSubAgent(t *testing.T) {
 		// runSubAgent returns (errorResponse, nil) when agent.Run fails — not a Go error.
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
-		assert.Equal(t, "error generating response", resp.Content)
+		assert.Equal(t, "Failed to generate response: provider request failed", resp.Content)
 	})
 
 	t.Run("session setup callback is invoked", func(t *testing.T) {
@@ -382,4 +484,71 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		require.NoError(t, err)
 		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
 	})
+}
+
+func TestGetProviderOptionsReasoningEffort(t *testing.T) {
+	// Bedrock is Fantasy's Anthropic under a different provider name; options
+	// must land under anthropic.Name so the Anthropic language model picks them up.
+	tests := []struct {
+		name         string
+		providerType catwalk.Type
+	}{
+		{"anthropic honors reasoning_effort", catwalk.Type(anthropic.Name)},
+		{"bedrock honors reasoning_effort", catwalk.Type(bedrock.Name)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model := Model{
+				CatwalkCfg: catwalk.Model{
+					ID:              "claude-opus-4-7",
+					CanReason:       true,
+					ReasoningLevels: []string{"max"},
+				},
+				ModelCfg: config.SelectedModel{
+					Provider:        "test",
+					ReasoningEffort: "max",
+				},
+			}
+			providerCfg := config.ProviderConfig{ID: "test", Type: tc.providerType}
+
+			opts := getProviderOptions(model, providerCfg)
+
+			raw, ok := opts[anthropic.Name]
+			require.True(t, ok, "options should be keyed under anthropic.Name for type %q", tc.providerType)
+			parsed, ok := raw.(*anthropic.ProviderOptions)
+			require.True(t, ok)
+			require.NotNil(t, parsed.Effort)
+			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
+		})
+	}
+}
+
+func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ID:              "glm-5.2",
+			CanReason:       true,
+			ReasoningLevels: []string{"high", "max"},
+		},
+		ModelCfg: config.SelectedModel{
+			Provider: "zai",
+		},
+	}
+	providerCfg := config.ProviderConfig{
+		ID:   string(catwalk.InferenceProviderZAI),
+		Type: openaicompat.Name,
+	}
+
+	opts := getProviderOptions(model, providerCfg)
+
+	raw, ok := opts[openaicompat.Name]
+	require.True(t, ok)
+	parsed, ok := raw.(*openaicompat.ProviderOptions)
+	require.True(t, ok)
+	require.NotNil(t, parsed.ReasoningEffort)
+	assert.Equal(t, "high", string(*parsed.ReasoningEffort))
+
+	thinking, ok := parsed.ExtraBody["thinking"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "enabled", thinking["type"])
 }

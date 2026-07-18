@@ -224,6 +224,12 @@ func (*Permissions) ID() string {
 	return PermissionsID
 }
 
+// ToolCallID returns the tool call ID associated with this dialog's
+// permission request.
+func (p *Permissions) ToolCallID() string {
+	return p.permission.ToolCallID
+}
+
 // HandleMsg implements [Dialog].
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -272,18 +278,17 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 				p.viewport, _ = p.viewport.Update(msg)
 			}
 		}
-	case tea.MouseWheelMsg:
+	case common.CoalescedWheelMsg:
 		if p.hasDiffView() {
-			switch msg.Button {
-			case tea.MouseWheelLeft:
+			if msg.DeltaX < 0 {
 				p.scrollLeft()
-			case tea.MouseWheelRight:
+			} else if msg.DeltaX > 0 {
 				p.scrollRight()
-			default:
-				p.viewport, _ = p.viewport.Update(msg)
+			} else {
+				p.viewport, _ = p.viewport.Update(tea.MouseWheelMsg(msg.Mouse))
 			}
 		} else {
-			p.viewport, _ = p.viewport.Update(msg)
+			p.viewport, _ = p.viewport.Update(tea.MouseWheelMsg(msg.Mouse))
 		}
 	default:
 		// Pass unhandled keys to viewport for non-diff content scrolling.
@@ -316,7 +321,7 @@ func (p *Permissions) respond(action PermissionAction) tea.Msg {
 
 func (p *Permissions) hasDiffView() bool {
 	switch p.permission.ToolName {
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName:
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ReplaceSymbolToolName:
 		return true
 	}
 	return false
@@ -342,60 +347,66 @@ func (p *Permissions) scrollRight() {
 }
 
 // Draw implements [Dialog].
-func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	t := p.com.Styles
-	// Force fullscreen when window is too small.
-	forceFullscreen := area.Dx() <= minWindowWidth || area.Dy() <= minWindowHeight
-
-	// Calculate dialog dimensions based on fullscreen state and content type.
-	var width, maxHeight int
-	if forceFullscreen || (p.fullscreen && p.hasDiffView()) {
-		// Use nearly full window for fullscreen.
-		width = area.Dx()
-		maxHeight = area.Dy()
-	} else if p.hasDiffView() {
+// dialogSize returns the outer dialog width and maximum height for the
+// given screen area, and whether the window is too small so the dialog
+// must fill it. Diff views get more room than simple prompts.
+func (p *Permissions) dialogSize(area uv.Rectangle) (width, maxHeight int, forceFullscreen bool) {
+	forceFullscreen = area.Dx() <= minWindowWidth || area.Dy() <= minWindowHeight
+	switch {
+	case forceFullscreen || (p.fullscreen && p.hasDiffView()):
+		width, maxHeight = area.Dx(), area.Dy()
+	case p.hasDiffView():
 		// Wide for side-by-side diffs, capped for readability.
 		width = min(int(float64(area.Dx())*diffSizeRatio), diffMaxWidth)
 		maxHeight = int(float64(area.Dy()) * diffSizeRatio)
-	} else {
-		// Narrower for simple content like commands/URLs.
+	default:
+		// Narrower for simple content like commands and URLs.
 		width = min(int(float64(area.Dx())*simpleSizeRatio), simpleMaxWidth)
 		maxHeight = int(float64(area.Dy()) * simpleHeightRatio)
 	}
+	return width, maxHeight, forceFullscreen
+}
 
+// contentViewportHeight returns the height for the scrollable content
+// viewport given the height taken by the fixed chrome (fixedHeight) and
+// the content's natural height. Simple prompts shrink to fit their
+// content; diff and fullscreen views always take all remaining height.
+func (p *Permissions) contentViewportHeight(forceFullscreen bool, maxHeight, fixedHeight, contentHeight int) int {
+	if p.hasDiffView() || forceFullscreen {
+		return maxHeight - fixedHeight
+	}
+	if fixedHeight+contentHeight < maxHeight {
+		return max(contentHeight, 3)
+	}
+	return max(maxHeight-fixedHeight, 3)
+}
+
+func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+	t := p.com.Styles
+	width, maxHeight, forceFullscreen := p.dialogSize(area)
 	dialogStyle := t.Dialog.View.Width(width).Padding(0, 1)
+	// The dialog fills the screen when forced small or when a diff is
+	// expanded; center the buttons then instead of hugging the far edge.
+	fullscreen := forceFullscreen || (p.fullscreen && p.hasDiffView())
 
 	contentWidth := p.calculateContentWidth(width)
 	header := p.renderHeader(contentWidth)
-	buttons := p.renderButtons(contentWidth)
-	helpView := p.help.View(p)
-
-	// Calculate available height for content.
-	headerHeight := lipgloss.Height(header)
-	buttonsHeight := lipgloss.Height(buttons)
-	helpHeight := lipgloss.Height(helpView)
-	frameHeight := dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
+	buttons := p.renderButtons(contentWidth, fullscreen)
+	// Pack the hints to the content width so they truncate cleanly instead
+	// of overflowing. The dialog frame supplies the padding, so this renders
+	// the hint line without the extra help view inset that renderDialogHelp
+	// applies for RenderContext dialogs.
+	helpView := shortHelpLine(&p.help, p.ShortHelp(), contentWidth)
 
 	p.defaultDiffSplitMode = width >= splitModeMinWidth
 
-	// Pre-render content to measure its actual height.
+	// Pre-render content to measure its actual height, then fit the
+	// scrollable viewport into whatever height the fixed chrome leaves.
 	renderedContent := p.renderContent(contentWidth)
 	contentHeight := lipgloss.Height(renderedContent)
-
-	// For non-diff views, shrink dialog to fit content if it's smaller than max.
-	var availableHeight int
-	if !p.hasDiffView() && !forceFullscreen {
-		fixedHeight := headerHeight + buttonsHeight + helpHeight + frameHeight
-		neededHeight := fixedHeight + contentHeight
-		if neededHeight < maxHeight {
-			availableHeight = contentHeight
-		} else {
-			availableHeight = maxHeight - fixedHeight
-		}
-		availableHeight = max(availableHeight, 3)
-	} else {
-		availableHeight = maxHeight - headerHeight - buttonsHeight - helpHeight - frameHeight
-	}
+	fixedHeight := lipgloss.Height(header) + lipgloss.Height(buttons) +
+		lipgloss.Height(helpView) + dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
+	availableHeight := p.contentViewportHeight(forceFullscreen, maxHeight, fixedHeight, contentHeight)
 
 	// Determine if scrollbar is needed.
 	needsScrollbar := p.hasDiffView() || contentHeight > availableHeight
@@ -411,7 +422,6 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	var content string
-	var scrollbar string
 	p.viewport.SetWidth(viewportWidth)
 	p.viewport.SetHeight(availableHeight)
 	if p.viewportDirty {
@@ -421,12 +431,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	content = p.viewport.View()
 	if needsScrollbar {
-		scrollbar = common.Scrollbar(t, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
-	}
-
-	// Join content with scrollbar if present.
-	if scrollbar != "" {
-		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbar)
+		content = joinScrollbar(t, content, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
 	}
 
 	parts := []string{header}
@@ -448,9 +453,18 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 
 	// Tool info.
 	toolLine := p.renderToolName(contentWidth)
-	pathLine := p.renderKeyValue("Path", fsext.PrettyPath(p.permission.Path), contentWidth)
 
-	lines := []string{title, "", toolLine, pathLine}
+	lines := []string{title, "", toolLine}
+
+	// Show generic Path only for tools that don't render their own file/path line.
+	switch p.permission.ToolName {
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName,
+		tools.ViewToolName, tools.ReplaceSymbolToolName,
+		tools.DownloadToolName, tools.LSToolName:
+		// These tools show their own File/Directory line below.
+	default:
+		lines = append(lines, p.renderKeyValue("Path", fsext.PrettyPath(p.permission.Path), contentWidth))
+	}
 
 	// Add tool-specific header info.
 	switch p.permission.ToolName {
@@ -463,7 +477,7 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
 		}
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ViewToolName:
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ViewToolName, tools.ReplaceSymbolToolName:
 		var filePath string
 		switch params := p.permission.Params.(type) {
 		case tools.EditPermissionsParams:
@@ -473,6 +487,8 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		case tools.MultiEditPermissionsParams:
 			filePath = params.FilePath
 		case tools.ViewPermissionsParams:
+			filePath = params.FilePath
+		case tools.ReplaceSymbolPermissionsParams:
 			filePath = params.FilePath
 		}
 		if filePath != "" {
@@ -531,6 +547,8 @@ func (p *Permissions) renderContent(width int) string {
 		return p.renderWriteContent(width)
 	case tools.MultiEditToolName:
 		return p.renderMultiEditContent(width)
+	case tools.ReplaceSymbolToolName:
+		return p.renderReplaceSymbolContent(width)
 	case tools.DownloadToolName:
 		return p.renderDownloadContent(width)
 	case tools.FetchToolName:
@@ -573,6 +591,14 @@ func (p *Permissions) renderWriteContent(contentWidth int) string {
 
 func (p *Permissions) renderMultiEditContent(contentWidth int) string {
 	params, ok := p.permission.Params.(tools.MultiEditPermissionsParams)
+	if !ok {
+		return ""
+	}
+	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
+}
+
+func (p *Permissions) renderReplaceSymbolContent(contentWidth int) string {
+	params, ok := p.permission.Params.(tools.ReplaceSymbolPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -729,7 +755,7 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 	return panelStyle.Width(width).Render(content)
 }
 
-func (p *Permissions) renderButtons(contentWidth int) string {
+func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 	buttons := []common.ButtonOpts{
 		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
 		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
@@ -738,18 +764,21 @@ func (p *Permissions) renderButtons(contentWidth int) string {
 
 	content := common.ButtonGroup(p.com.Styles, buttons, "  ")
 
-	// If buttons are too wide, stack them vertically.
+	// Center when stacked or when the dialog fills the screen; otherwise
+	// hug the right edge next to the content. Right-aligning across a
+	// full-screen width leaves the buttons stranded in the corner.
+	align := lipgloss.Right
+	if fullscreen {
+		align = lipgloss.Center
+	}
 	if lipgloss.Width(content) > contentWidth {
 		content = common.ButtonGroup(p.com.Styles, buttons, "\n")
-		return lipgloss.NewStyle().
-			Width(contentWidth).
-			Align(lipgloss.Center).
-			Render(content)
+		align = lipgloss.Center
 	}
 
 	return lipgloss.NewStyle().
 		Width(contentWidth).
-		Align(lipgloss.Right).
+		Align(align).
 		Render(content)
 }
 
@@ -775,7 +804,8 @@ func (p *Permissions) ShortHelp() []key.Binding {
 	}
 
 	if p.hasDiffView() {
-		bindings = append(bindings,
+		bindings = append(
+			bindings,
 			p.keyMap.ToggleDiffMode,
 			p.keyMap.ToggleFullscreen,
 		)

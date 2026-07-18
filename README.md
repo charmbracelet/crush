@@ -173,25 +173,39 @@ go install github.com/charmbracelet/crush@latest
 
 ## Getting Started
 
-The quickest way to get started is to grab an API key for your preferred
-provider such as Anthropic, OpenAI, Groq, OpenRouter, or Vercel AI Gateway and just start
-Crush. You'll be prompted to enter your API key.
+The quickest way to get started is to choose a [Hyper][hyper] model from model
+picker. Follow the steps to authenticate and you'll be good to go.
 
-That said, you can also set environment variables for preferred providers.
+[Hyper], from Charm, is the official Crush provider. It’s subscription-based,
+with a free tier, and optimized for Crush. It’s privacy focused, with zero data
+retention (ZDR) is and designed to comply with GDPR. [More on Hyper][hyper].
+
+<p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
+
+## API Keys
+
+You can also use Crush with many other providers such as Anthopic, OpenAI,
+Gemini, OpenRouter and so on. Press <kbd>ctrl+l</kbd> to open the model picker,
+choose the provider of your choice, and paste your API key.
+
+That said, you can also set environment variables for preferred providers:
 
 | Environment Variable        | Provider                                           |
 | --------------------------- | -------------------------------------------------- |
+| `HYPER_API_KEY`             | [Charm Hyper][hyper]                               |
 | `ANTHROPIC_API_KEY`         | Anthropic                                          |
 | `OPENAI_API_KEY`            | OpenAI                                             |
 | `VERCEL_API_KEY`            | Vercel AI Gateway                                  |
 | `GEMINI_API_KEY`            | Google Gemini                                      |
-| `SYNTHETIC_API_KEY`         | Synthetic                                          |
 | `ZAI_API_KEY`               | Z.ai                                               |
 | `MINIMAX_API_KEY`           | MiniMax                                            |
+| `SYNTHETIC_API_KEY`         | Synthetic                                          |
 | `HF_TOKEN`                  | Hugging Face Inference                             |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
+| `ALIBABA_SINGAPORE_API_KEY` | Alibaba (Singapore)                                |
+| `ALIBABA_US_API_KEY`        | Alibaba (United States)                            |
 | `GROQ_API_KEY`              | Groq                                               |
 | `AVIAN_API_KEY`             | Avian                                              |
 | `OPENCODE_API_KEY`          | OpenCode Zen & Go                                  |
@@ -205,16 +219,13 @@ That said, you can also set environment variables for preferred providers.
 | `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
+| `MOONSHOT_API_KEY`          | Moonshot                                           |
 
-### Subscriptions
+[hyper]: https://hyper.charm.land
 
-If you prefer subscription-based usage, here are some plans that work well in
-Crush:
-
-- [Synthetic](https://synthetic.new/pricing)
-- [GLM Coding Plan](https://z.ai/subscribe)
-- [Kimi Code](https://www.kimi.com/membership/pricing)
-- [MiniMax Coding Plan](https://platform.minimax.io/subscribe/coding-plan)
+Also note that Crush can support nearly any provider, including
+[Local Models](#local-models). For more info see
+[Custom Providers](#custom-providers) below.
 
 ### By the Way
 
@@ -292,10 +303,36 @@ like you would. LSPs can be added manually like so:
 
 ### MCPs
 
-Crush also supports Model Context Protocol (MCP) servers through three
-transport types: `stdio` for command-line servers, `http` for HTTP endpoints,
-and `sse` for Server-Sent Events. Environment variable expansion is supported
-using `$(echo $VAR)` syntax.
+Crush also supports Model Context Protocol (MCP) servers through three transport
+types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse`
+for Server-Sent Events.
+
+Shell-style value expansion (`$VAR`, `${VAR:-default}`, `$(command)`, quoting,
+nesting) works in `command`, `args`, `env`, `headers`, and `url`, so
+file-based secrets work out of the box. You can use values like `"$TOKEN"`
+or `"$(cat /path/to/secret/token)"`. Expansion runs through Crush's embedded
+shell, so the same syntax works on every supported system, Windows included.
+
+Unset variables expand to the empty string by default, matching bash. For
+required credentials, use `${VAR:?message}` so an unset variable fails loudly
+at load time with `message` instead of silently resolving to empty:
+
+```json
+{ "api_key": "${CODEBERG_TOKEN:?set CODEBERG_TOKEN}" }
+```
+
+Headers (both MCP `headers` and provider `extra_headers`) whose value
+resolves to the empty string are dropped from the outgoing request rather
+than sent as `Header:`. That keeps optional env-gated headers like
+`"OpenAI-Organization": "$OPENAI_ORG_ID"` clean when the variable is unset.
+
+Provider `extra_body` is a non-expanding JSON passthrough; put env-driven
+values in `extra_headers` or the provider's `api_key` / `base_url`, all of
+which do expand.
+
+> **Security note:** `crush.json` is trusted code. Any `$(...)` in it runs at
+> load time with your shell's privileges, before the UI appears. Don't launch
+> Crush in a directory whose `crush.json` you haven't reviewed.
 
 ```json
 {
@@ -339,6 +376,67 @@ using `$(echo $VAR)` syntax.
 
 Crush has preliminary support for hooks. For details, see
 [the hook guide](./docs/hooks/).
+
+### Sharing a workspace across clients
+
+When Crush is run against a shared backend (for example two TUIs talking to
+the same `crush serve`), clients are grouped into **workspaces** keyed by
+their resolved `--cwd`. Two clients with the same `--cwd` join the same
+underlying workspace, so they share the session list, message history,
+permission queue, LSP, and MCP state.
+
+Joining is implicit: pointing a second client at the same working directory
+attaches it to the existing workspace. Each new invocation, however, starts
+in its own fresh session by default. To pick up the conversation another
+client already has open, use the session manager (the session picker) and
+select it. Sessions surface two signals there:
+
+- `IsBusy` is set while an agent turn is in flight for that session.
+- `AttachedClients` reports how many clients are currently viewing it.
+
+A non-zero `AttachedClients` (often combined with `IsBusy`) is the cue that a
+session is "in progress" on another client and joining it will mirror that
+view live.
+
+The first client to create a workspace fixes its process-wide flags. In
+particular, `--yolo` and `--debug` follow a **first-wins** rule: later
+clients that arrive at the same `--cwd` with different values for those
+flags do not change the running workspace. A debug log line is emitted
+recording the mismatch, and the workspace keeps the flags it was created
+with.
+
+A workspace lives as long as at least one client has an SSE event stream
+open against it. When the last stream disconnects, the workspace is torn
+down. There is a short grace window right after `POST /v1/workspaces` so a
+client that has created the workspace but not yet opened its event stream
+does not get reaped before it can attach.
+
+### Global context files
+
+Crush automatically includes two files for cross-project instructions.
+
+- `~/.config/crush/CRUSH.md`: Crush-specific rules that would confuse other
+  agentic coding tools. If you only use Crush, this is the only one you need to
+  edit.
+- `~/.config/AGENTS.md`: generic instructions that other coding tools might
+  read. Avoid referring to Crush-specific features or workflows here. You
+  probably only care about this if you use multiple agentic coding tools and
+  want to share instructions between them.
+
+You can customize these paths using the `global_context_paths` option in your
+configuration:
+
+```jsonc
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "global_context_paths": [
+      "~/path/to/custom/context/file.md",
+      "/full/path/to/folder/of/files/" // recursively load all .md files in folder
+    ]
+  }
+}
+```
 
 ### Ignoring Files
 
@@ -418,6 +516,8 @@ The global paths we looks for skills are:
 * `$CRUSH_SKILLS_DIR`
 * `$XDG_CONFIG_HOME/agents/skills` or `~/.config/agents/skills/`
 * `$XDG_CONFIG_HOME/crush/skills` or `~/.config/crush/skills/`
+* `~/.agents/skills/`
+* `~/.claude/skills/`
 * On Windows, we _also_ look at
   * `%LOCALAPPDATA%\agents\skills\` or `%USERPROFILE%\AppData\Local\agents\skills\`
   * `%LOCALAPPDATA%\crush\skills\` or `%USERPROFILE%\AppData\Local\crush\skills\`
@@ -460,6 +560,37 @@ cd "$env:LOCALAPPDATA\crush\skills"
 git clone https://github.com/anthropics/skills.git _temp
 mv _temp/skills/* . ; rm -r -force _temp
 ```
+
+#### User-Invocable Skills
+
+Skills can be made invocable as commands from the commands palette (Ctrl+P). Add `user-invocable: true` to the skill's YAML frontmatter:
+
+```yaml
+---
+name: my-skill
+description: A skill that can be invoked as a command.
+user-invocable: true
+---
+```
+
+User-invocable skills appear in the commands palette with a `user:` or `project:` prefix:
+- Skills from global directories show as `user:skill-name`
+- Skills from project directories show as `project:skill-name`
+
+When invoked, the skill's instructions are loaded into the conversation context.
+
+To prevent the model from auto-triggering a skill (while still allowing user invocation), add `disable-model-invocation: true`:
+
+```yaml
+---
+name: my-skill
+description: Only invocable by users, not the model.
+user-invocable: true
+disable-model-invocation: true
+---
+```
+
+Skills with `disable-model-invocation` won't appear in the model's available skills list but can still be invoked manually by users.
 
 ### Desktop notifications
 
@@ -521,8 +652,7 @@ it creates. You can customize this behavior with the `attribution` option:
 
 - `trailer_style`: Controls the attribution trailer added to commit messages
   (default: `assisted-by`)
-  - `assisted-by`: Adds `Assisted-by: [Model Name] via Crush <crush@charm.land>`
-    (includes the model name)
+  - `assisted-by`: Adds `Assisted-by: Crush:[ModelID]` as specified in [the convention](https://docs.kernel.org/process/coding-assistants.html#attribution)
   - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
   - `none`: No attribution trailer
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to
@@ -649,9 +779,10 @@ To add specific models to the configuration, configure as such:
 
 ### Local Models
 
-Local models can also be configured via OpenAI-compatible API. Here are two common examples:
-
-#### Ollama
+Crush can auto-discovers models from local providers. Add a custom provider
+with `type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama`
+and leave out the models list. Crush will populate the model list
+automatically.
 
 ```json
 {
@@ -659,7 +790,41 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
     "ollama": {
       "name": "Ollama",
       "base_url": "http://localhost:11434/v1/",
-      "type": "openai-compat",
+      "type": "ollama"
+    }
+  }
+}
+```
+
+For llama.cpp (`llama-server`), point at the server's base URL:
+
+```json
+{
+  "providers": {
+    "llamacpp": {
+      "name": "llama.cpp",
+      "base_url": "http://localhost:2222",
+      "type": "llamacpp"
+    }
+  }
+}
+```
+
+#### Manual Model Configuration
+
+You can still list models explicitly. User-defined models always take
+precedence over discovered ones, and any fields you set won't be overwritten
+by auto-discovery. Auto discovery will run if the model list is empty for any
+`openai-compat` provider or if you pass `"discover_models": true` it will merge
+ the found models with your hand configured ones.
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "name": "Ollama",
+      "base_url": "http://localhost:11434/v1/",
+      "type": "ollama",
       "models": [
         {
           "name": "Qwen 3 30B",
@@ -667,29 +832,8 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
           "context_window": 256000,
           "default_max_tokens": 20000
         }
-      ]
-    }
-  }
-}
-```
-
-#### LM Studio
-
-```json
-{
-  "providers": {
-    "lmstudio": {
-      "name": "LM Studio",
-      "base_url": "http://localhost:1234/v1/",
-      "type": "openai-compat",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen/qwen3-30b-a3b-2507",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
+      ],
+      "discover_models": true
     }
   }
 }

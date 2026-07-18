@@ -10,6 +10,21 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func openDBReadOnly(dbPath string) (*sql.DB, error) {
+	params := url.Values{}
+	// Only set safe pragmas for read-only mode - most pragmas require write access
+	params.Set("_txlock", "immediate")
+	params.Set("mode", "ro")
+
+	dsn := fmt.Sprintf("file:%s?%s", dbPath, params.Encode())
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return db, nil
+}
+
 func openDB(dbPath string) (*sql.DB, error) {
 	// Set pragmas for better performance via _pragma query params.
 	// Format: _pragma=name(value)
@@ -17,6 +32,9 @@ func openDB(dbPath string) (*sql.DB, error) {
 	for name, value := range pragmas {
 		params.Add("_pragma", fmt.Sprintf("%s(%s)", name, value))
 	}
+	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
+	// preventing deferred-to-writer upgrade deadlocks.
+	params.Set("_txlock", "immediate")
 
 	dsn := fmt.Sprintf("file:%s?%s", dbPath, params.Encode())
 	db, err := sql.Open("sqlite", dsn)

@@ -22,20 +22,18 @@ type DiagnosticsParams struct {
 const DiagnosticsToolName = "lsp_diagnostics"
 
 //go:embed diagnostics.md
-var diagnosticsDescription []byte
+var diagnosticsDescription string
 
 func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
-		FirstLineDescription(diagnosticsDescription),
+		diagnosticsDescription,
 		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if lspManager.Clients().Len() == 0 {
-				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
-			}
 			notifyLSPs(ctx, lspManager, params.FilePath)
 			output := getDiagnostics(params.FilePath, lspManager)
 			return fantasy.NewTextResponse(output), nil
-		})
+		},
+	)
 }
 
 // openInLSPs ensures LSP servers are running and aware of the file, but does

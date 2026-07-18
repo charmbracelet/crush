@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,19 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
+// sameFuzzyMatch reports whether two fuzzy.Match values are
+// observably equal. Because Match contains a slice (MatchedIndexes)
+// it is not directly comparable with ==; we compare the scalar
+// fields and then walk the indexes. The dialog list items use this
+// to skip gratuitous version bumps when SetMatch reapplies the same
+// match.
+func sameFuzzyMatch(a, b fuzzy.Match) bool {
+	return a.Str == b.Str &&
+		a.Index == b.Index &&
+		a.Score == b.Score &&
+		slices.Equal(a.MatchedIndexes, b.MatchedIndexes)
+}
+
 // ListItem represents a selectable and searchable item in a dialog list.
 type ListItem interface {
 	list.FilterableItem
@@ -29,6 +43,7 @@ type ListItem interface {
 
 // SessionItem wraps a [session.Session] to implement the [ListItem] interface.
 type SessionItem struct {
+	*list.Versioned
 	session.Session
 	t                *styles.Styles
 	sessionsMode     sessionsMode
@@ -36,6 +51,14 @@ type SessionItem struct {
 	cache            map[int]string
 	updateTitleInput textinput.Model
 	focused          bool
+	hideInfo         bool
+}
+
+// Finished implements list.Item. Session items are render-stable
+// outside of explicit SetFocused / SetMatch calls, both of which
+// bump Version() and therefore invalidate the F6 frozen entry.
+func (s *SessionItem) Finished() bool {
+	return true
 }
 
 var _ ListItem = &SessionItem{}
@@ -52,8 +75,14 @@ func (s *SessionItem) ID() string {
 
 // SetMatch sets the fuzzy match for the session item.
 func (s *SessionItem) SetMatch(m fuzzy.Match) {
+	if sameFuzzyMatch(s.m, m) {
+		return
+	}
 	s.cache = nil
 	s.m = m
+	if s.Versioned != nil {
+		s.Bump()
+	}
 }
 
 // InputValue returns the updated title value
@@ -65,6 +94,9 @@ func (s *SessionItem) InputValue() string {
 func (s *SessionItem) HandleInput(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	s.updateTitleInput, cmd = s.updateTitleInput.Update(msg)
+	if s.Versioned != nil {
+		s.Bump()
+	}
 	return cmd
 }
 
@@ -73,9 +105,30 @@ func (s *SessionItem) Cursor() *tea.Cursor {
 	return s.updateTitleInput.Cursor()
 }
 
+// InfoText returns the secondary text shown on the right of the item.
+func (s *SessionItem) InfoText() string {
+	return humanize.Time(time.Unix(s.UpdatedAt, 0))
+}
+
+// SetHideInfo controls whether the timestamp info column is shown. The
+// dialog hides it uniformly when it would crowd the title.
+func (s *SessionItem) SetHideInfo(v bool) {
+	if s.hideInfo == v {
+		return
+	}
+	s.cache = nil
+	s.hideInfo = v
+	if s.Versioned != nil {
+		s.Bump()
+	}
+}
+
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
-	info := humanize.Time(time.Unix(s.UpdatedAt, 0))
+	info := s.InfoText()
+	if s.hideInfo {
+		info = ""
+	}
 	styles := ListItemStyles{
 		ItemBlurred:     s.t.Dialog.NormalItem,
 		ItemFocused:     s.t.Dialog.SelectedItem,
@@ -124,10 +177,20 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 		style = t.ItemFocused
 	}
 
+	// Build content to the width left after the item style's own padding,
+	// so the final rendered line is exactly `width` wide. Otherwise the
+	// padding pushes the line past the list width and it wraps.
+	lineWidth := max(0, width-style.GetHorizontalFrameSize())
+
 	var infoText string
 	var infoWidth int
-	lineWidth := width
 	if len(info) > 0 {
+		// Cap the info column so a long value (e.g. a provider name) can
+		// truncate instead of overflowing the row or squeezing the title
+		// to nothing; the title keeps at least half the width.
+		if maxInfo := lineWidth / 2; lipgloss.Width(info)+2 > maxInfo {
+			info = ansi.Truncate(info, max(0, maxInfo-2), "…")
+		}
 		infoText = fmt.Sprintf(" %s ", info)
 		if focused {
 			infoText = t.InfoTextFocused.Render(infoText)
@@ -156,7 +219,8 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 			// precisely via [ansi.AttrUnderline] and [ansi.AttrNoUnderline]
 			// which only affect the underline attribute without interfering
 			// with other style attributes.
-			parts = append(parts,
+			parts = append(
+				parts,
 				ansi.NewStyle().Underline(true).String(),
 				ansi.Cut(title, start, stop+1),
 				ansi.NewStyle().Underline(false).String(),
@@ -177,10 +241,14 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 
 // SetFocused sets the focus state of the session item.
 func (s *SessionItem) SetFocused(focused bool) {
-	if s.focused != focused {
-		s.cache = nil
+	if s.focused == focused {
+		return
 	}
+	s.cache = nil
 	s.focused = focused
+	if s.Versioned != nil {
+		s.Bump()
+	}
 }
 
 // sessionItems takes a slice of [session.Session]s and convert them to a slice
@@ -188,7 +256,7 @@ func (s *SessionItem) SetFocused(focused bool) {
 func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Session) []list.FilterableItem {
 	items := make([]list.FilterableItem, len(sessions))
 	for i, s := range sessions {
-		item := &SessionItem{Session: s, t: t, sessionsMode: mode}
+		item := &SessionItem{Versioned: list.NewVersioned(), Session: s, t: t, sessionsMode: mode}
 		if mode == sessionsModeUpdating {
 			item.updateTitleInput = textinput.New()
 			item.updateTitleInput.SetVirtualCursor(false)

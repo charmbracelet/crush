@@ -16,7 +16,7 @@ import (
 const LSPRestartToolName = "lsp_restart"
 
 //go:embed lsp_restart.md
-var lspRestartDescription []byte
+var lspRestartDescription string
 
 type LSPRestartParams struct {
 	// Name is the optional name of a specific LSP client to restart.
@@ -27,12 +27,8 @@ type LSPRestartParams struct {
 func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSPRestartToolName,
-		FirstLineDescription(lspRestartDescription),
+		lspRestartDescription,
 		func(ctx context.Context, params LSPRestartParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if lspManager.Clients().Len() == 0 {
-				return fantasy.NewTextErrorResponse("no LSP clients available to restart"), nil
-			}
-
 			clientsToRestart := make(map[string]*lsp.Client)
 			if params.Name == "" {
 				maps.Insert(clientsToRestart, lspManager.Clients().Seq2())
@@ -42,6 +38,10 @@ func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("LSP client '%s' not found", params.Name)), nil
 				}
 				clientsToRestart[params.Name] = client
+			}
+
+			if len(clientsToRestart) == 0 {
+				return fantasy.NewTextResponse("No LSP clients to restart"), nil
 			}
 
 			var restarted []string
@@ -75,5 +75,6 @@ func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			}
 
 			return fantasy.NewTextResponse(output), nil
-		})
+		},
+	)
 }

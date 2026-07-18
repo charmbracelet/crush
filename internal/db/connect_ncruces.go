@@ -10,8 +10,22 @@ import (
 	"github.com/ncruces/go-sqlite3/driver"
 )
 
+func openDBReadOnly(dbPath string) (*sql.DB, error) {
+	dsn := fmt.Sprintf("file:%s?mode=ro&_txlock=immediate", dbPath)
+	db, err := driver.Open(dsn, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	return db, nil
+}
+
 func openDB(dbPath string) (*sql.DB, error) {
-	db, err := driver.Open(dbPath, func(c *sqlite3.Conn) error {
+	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
+	// preventing deferred-to-writer upgrade deadlocks. The "file:" prefix
+	// is required for the ncruces driver to parse query parameters.
+	dsn := fmt.Sprintf("file:%s?_txlock=immediate", dbPath)
+	db, err := driver.Open(dsn, func(c *sqlite3.Conn) error {
 		// Set pragmas for better performance via _pragma query params.
 		// Format: PRAGMA name = value;
 		for name, value := range pragmas {

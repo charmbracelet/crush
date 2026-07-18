@@ -17,7 +17,10 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // LSPClientInfo holds information about an LSP client's state. This is
@@ -67,6 +70,12 @@ type Workspace interface {
 	DeleteSession(ctx context.Context, sessionID string) error
 	CreateAgentToolSessionID(messageID, toolCallID string) string
 	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
+	// SetCurrentSession reports the session this client is currently
+	// viewing. Empty sessionID clears the entry (e.g. landing screen).
+	// In single-client local mode this is a no-op. In client/server
+	// mode it informs the server's per-client presence map so other
+	// observers can compute attached-client counts per session.
+	SetCurrentSession(ctx context.Context, sessionID string) error
 
 	// Messages
 	ListMessages(ctx context.Context, sessionID string) ([]message.Message, error)
@@ -75,6 +84,7 @@ type Workspace interface {
 
 	// Agent
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
+	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
 	AgentIsBusy() bool
 	AgentIsSessionBusy(sessionID string) bool
@@ -86,14 +96,31 @@ type Workspace interface {
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
+	InitCoderAgentNonInteractive(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel
 
 	// Permissions
-	PermissionGrant(perm permission.PermissionRequest)
-	PermissionGrantPersistent(perm permission.PermissionRequest)
-	PermissionDeny(perm permission.PermissionRequest)
+	//
+	// PermissionGrant, PermissionGrantPersistent, and PermissionDeny
+	// return true if the call resolved the pending request and false if
+	// it had already been resolved by another subscriber (or is no
+	// longer pending). A false return is not an error; the modal can
+	// still close locally because the resolution will arrive via the
+	// PermissionNotification event stream regardless of which client
+	// won the race.
+	PermissionGrant(perm permission.PermissionRequest) bool
+	PermissionGrantPersistent(perm permission.PermissionRequest) bool
+	PermissionDeny(perm permission.PermissionRequest) bool
 	PermissionSkipRequests() bool
 	PermissionSetSkipRequests(skip bool)
+
+	// Questions
+	//
+	// QuestionAnswer resolves the pending question with responses.
+	QuestionAnswer(responses []question.Answer) bool
+
+	// QuestionCancel cancels the pending question.
+	QuestionCancel() bool
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
@@ -127,6 +154,8 @@ type Workspace interface {
 	ProjectNeedsInitialization() (bool, error)
 	MarkProjectInitialized() error
 	InitializePrompt() (string, error)
+	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
+	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo

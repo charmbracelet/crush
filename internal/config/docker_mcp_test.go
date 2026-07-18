@@ -75,9 +75,10 @@ func TestEnableDockerMCP(t *testing.T) {
 		err := store.EnableDockerMCP()
 		require.NoError(t, err)
 
-		// Check in-memory config.
-		require.True(t, cfg.IsDockerMCPEnabled())
-		mcpConfig, exists := cfg.MCP[DockerMCPName]
+		// Check in-memory config via the store (copy-on-write publishes
+		// a new Config; the captured cfg pointer stays unchanged).
+		require.True(t, store.Config().IsDockerMCPEnabled())
+		mcpConfig, exists := store.Config().MCP[DockerMCPName]
 		require.True(t, exists)
 		require.Equal(t, MCPStdio, mcpConfig.Type)
 		require.Equal(t, "docker", mcpConfig.Command)
@@ -145,9 +146,10 @@ func TestDisableDockerMCP(t *testing.T) {
 		err := store.DisableDockerMCP()
 		require.NoError(t, err)
 
-		// Check in-memory config.
-		require.False(t, cfg.IsDockerMCPEnabled())
-		_, exists := cfg.MCP[DockerMCPName]
+		// Check in-memory config via the store (copy-on-write publishes a
+		// new Config; the original cfg pointer is intentionally unchanged).
+		require.False(t, store.Config().IsDockerMCPEnabled())
+		_, exists := store.Config().MCP[DockerMCPName]
 		require.False(t, exists)
 	})
 
@@ -189,5 +191,5 @@ func TestEnableDockerMCPWithRealDockerWhenAvailable(t *testing.T) {
 
 	err := store.EnableDockerMCP()
 	require.NoError(t, err)
-	require.True(t, cfg.IsDockerMCPEnabled())
+	require.True(t, store.Config().IsDockerMCPEnabled())
 }

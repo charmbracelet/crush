@@ -85,18 +85,15 @@ func (f *ModelsList) SetSelected(index int) {
 // SetSelectedItem sets the selected item in the list by item ID.
 func (f *ModelsList) SetSelectedItem(itemID string) {
 	if itemID == "" {
-		f.SetSelected(0)
 		return
 	}
 
-	count := 0
-	for _, g := range f.groups {
-		for _, item := range g.Items {
-			if item.ID() == itemID {
-				f.SetSelected(count)
-				return
-			}
-			count++
+	// Walk the selectable model items using the same helpers that
+	// keyboard navigation uses, so we stay in sync with the flat
+	// list layout.
+	for ok := f.SelectFirst(); ok; ok = f.SelectNext() {
+		if mi, is := f.SelectedItem().(*ModelItem); is && mi.ID() == itemID {
+			return
 		}
 	}
 }
@@ -257,7 +254,6 @@ func (f *ModelsList) VisibleItems() []list.Item {
 
 // Render renders the filterable list.
 func (f *ModelsList) Render() string {
-	f.SetItems(f.VisibleItems()...)
 	return f.List.Render()
 }
 

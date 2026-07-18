@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,7 +18,11 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -67,9 +72,24 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 	return w.app.Sessions.ParseAgentToolSessionID(sessionID)
 }
 
+// SetCurrentSession reports the active session to herdr so the pane
+// can persist a resumable reference. Multi-client presence tracking
+// is irrelevant in single-client local mode, but herdr still needs
+// to know which session is live to support agent resume.
+func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	w.app.ReportCurrentSession(sessionID)
+	return nil
+}
+
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	// Drain any debounced updates so the caller observes the latest
+	// in-memory state. message.Service buffers streaming deltas and a
+	// cold List would otherwise miss them at session-switch time.
+	if err := w.app.Messages.FlushAll(ctx); err != nil {
+		return nil, err
+	}
 	return w.app.Messages.List(ctx, sessionID)
 }
 
@@ -89,6 +109,52 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 	}
 	_, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	return err
+}
+
+func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error) {
+	var persist shell.PersistFunc
+	if sessionID != "" {
+		persist = func(cmd, output string, exitCode int) error {
+			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode)
+		}
+	}
+
+	opts := shell.RunOptions{
+		Command:   command,
+		Cwd:       w.store.WorkingDir(),
+		TermWidth: termWidth,
+	}
+
+	var result shell.CaptureResult
+	var err error
+
+	if onProgress != nil {
+		result, err = shell.RunAndCaptureStream(ctx, opts, onProgress)
+	} else {
+		result, err = shell.RunAndPersist(ctx, opts, persist)
+	}
+
+	if err != nil && onProgress == nil {
+		return proto.ShellCommandResponse{}, err
+	}
+
+	// Persist if we used the streaming path (persist wasn't called by RunAndPersist).
+	if onProgress != nil && persist != nil {
+		if persistErr := persist(command, result.Output, result.ExitCode); persistErr != nil {
+			slog.Error("Failed to persist shell command output", "error", persistErr, "command", command)
+		}
+	}
+
+	// Generate a title from the shell command if it was the first message.
+	if isFirstMessage && w.app.AgentCoordinator != nil {
+		titleCtx := context.WithoutCancel(ctx)
+		w.app.AgentCoordinator.GenerateTitle(titleCtx, sessionID, "$ "+command)
+	}
+
+	return proto.ShellCommandResponse{
+		Output:   result.Output,
+		ExitCode: result.ExitCode,
+	}, nil
 }
 
 func (w *AppWorkspace) AgentCancel(sessionID string) {
@@ -161,22 +227,26 @@ func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
 }
 
+func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
+	return w.app.InitCoderAgentNonInteractive(ctx)
+}
+
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	return w.app.GetDefaultSmallModel(providerID)
 }
 
 // -- Permissions --
 
-func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) {
-	w.app.Permissions.Grant(perm)
+func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.Grant(perm)
 }
 
-func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) {
-	w.app.Permissions.GrantPersistent(perm)
+func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.GrantPersistent(perm)
 }
 
-func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) {
-	w.app.Permissions.Deny(perm)
+func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.Deny(perm)
 }
 
 func (w *AppWorkspace) PermissionSkipRequests() bool {
@@ -185,6 +255,16 @@ func (w *AppWorkspace) PermissionSkipRequests() bool {
 
 func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.app.Permissions.SetSkipRequests(skip)
+}
+
+// -- Questions --
+
+func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	return w.app.Questions.Answer(responses)
+}
+
+func (w *AppWorkspace) QuestionCancel() bool {
+	return w.app.Questions.Cancel()
 }
 
 // -- FileTracker --
@@ -265,7 +345,11 @@ func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 }
 
 func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
-	return w.store.SetProviderAPIKey(scope, providerID, apiKey)
+	if err := w.store.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
+		return err
+	}
+	w.store.SignalAuthComplete(providerID)
+	return nil
 }
 
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
@@ -296,6 +380,16 @@ func (w *AppWorkspace) MarkProjectInitialized() error {
 
 func (w *AppWorkspace) InitializePrompt() (string, error) {
 	return agent.InitializePrompt(w.store)
+}
+
+func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, error) {
+	mgr := w.app.Skills
+	return skills.Catalog(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir()), nil
+}
+
+func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
+	mgr := w.app.Skills
+	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
 }
 
 // -- MCP operations --
@@ -345,13 +439,13 @@ func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
 
 	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, w.store); err != nil {
 		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
-		delete(w.store.Config().MCP, config.DockerMCPName)
+		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
 	if err := w.store.PersistDockerMCPConfig(mcpConfig); err != nil {
 		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
-		delete(w.store.Config().MCP, config.DockerMCPName)
+		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
 	}
 

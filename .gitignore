@@ -42,6 +42,9 @@ Thumbs.db
 .env
 .env.local
 
+# Nix/direnv
+.direnv/
+
 **/.crush/**
 
 /crush

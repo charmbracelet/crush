@@ -59,7 +59,7 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 		toolParams = append(toolParams, string(parsed))
 	}
 
-	header := toolHeader(sty, opts.Status, name, cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, name, cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

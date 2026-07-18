@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/message"
 )
 
 // CreateMessageParams represents parameters for creating a message.
@@ -153,6 +154,8 @@ type ToolResult struct {
 	ToolCallID string `json:"tool_call_id"`
 	Name       string `json:"name"`
 	Content    string `json:"content"`
+	Data       string `json:"data,omitempty"`
+	MIMEType   string `json:"mime_type,omitempty"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
 }
@@ -168,6 +171,15 @@ type Finish struct {
 }
 
 func (Finish) isPart() {}
+
+// ShellCommand stores a bang-mode shell command and its output.
+type ShellCommand struct {
+	Command  string `json:"command"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
+
+func (ShellCommand) isPart() {}
 
 // MarshalJSON implements the [json.Marshaler] interface.
 func (m Message) MarshalJSON() ([]byte, error) {
@@ -492,13 +504,14 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 type partType string
 
 const (
-	reasoningType  partType = "reasoning"
-	textType       partType = "text"
-	imageURLType   partType = "image_url"
-	binaryType     partType = "binary"
-	toolCallType   partType = "tool_call"
-	toolResultType partType = "tool_result"
-	finishType     partType = "finish"
+	reasoningType    partType = "reasoning"
+	textType         partType = "text"
+	imageURLType     partType = "image_url"
+	binaryType       partType = "binary"
+	toolCallType     partType = "tool_call"
+	toolResultType   partType = "tool_result"
+	finishType       partType = "finish"
+	shellCommandType partType = "shell_command"
 )
 
 type partWrapper struct {
@@ -528,6 +541,8 @@ func MarshalParts(parts []ContentPart) ([]byte, error) {
 			typ = toolResultType
 		case Finish:
 			typ = finishType
+		case ShellCommand:
+			typ = shellCommandType
 		default:
 			return nil, fmt.Errorf("unknown part type: %T", part)
 		}
@@ -603,6 +618,12 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 				return nil, err
 			}
 			parts = append(parts, part)
+		case shellCommandType:
+			part := ShellCommand{}
+			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
 		default:
 			return nil, fmt.Errorf("unknown part type: %s", wrapper.Type)
 		}
@@ -617,6 +638,47 @@ type Attachment struct {
 	FileName string `json:"file_name"`
 	MimeType string `json:"mime_type"`
 	Content  []byte `json:"content"`
+}
+
+// ToMessage converts a proto Attachment to a [message.Attachment].
+func (a Attachment) ToMessage() message.Attachment {
+	return message.Attachment{
+		FilePath: a.FilePath,
+		FileName: a.FileName,
+		MimeType: a.MimeType,
+		Content:  a.Content,
+	}
+}
+
+// AttachmentFromMessage converts a [message.Attachment] to a proto
+// Attachment.
+func AttachmentFromMessage(a message.Attachment) Attachment {
+	return Attachment{
+		FilePath: a.FilePath,
+		FileName: a.FileName,
+		MimeType: a.MimeType,
+		Content:  a.Content,
+	}
+}
+
+// AttachmentsToMessage converts a slice of proto Attachments to a slice
+// of [message.Attachment].
+func AttachmentsToMessage(as []Attachment) []message.Attachment {
+	out := make([]message.Attachment, len(as))
+	for i, a := range as {
+		out[i] = a.ToMessage()
+	}
+	return out
+}
+
+// AttachmentsFromMessage converts a slice of [message.Attachment] to a
+// slice of proto Attachments.
+func AttachmentsFromMessage(as []message.Attachment) []Attachment {
+	out := make([]Attachment, len(as))
+	for i, a := range as {
+		out[i] = AttachmentFromMessage(a)
+	}
+	return out
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

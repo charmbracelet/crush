@@ -30,9 +30,14 @@ const (
 	// change every 8 frames (400 milliseconds).
 	ellipsisAnimSpeed = 8
 
-	// The maximum amount of time that can pass before a character appears.
-	// This is used to create a staggered entrance effect.
-	maxBirthOffset = time.Second
+	// The maximum number of animation steps that can pass before a
+	// character appears. With fps == 20 this is ~1s of staggered
+	// entrance, identical to the previous wall-clock-driven value.
+	// Switching from wall-clock + rand to a step-driven birth schedule
+	// keeps Render() deterministic: two Anim instances built from the
+	// same Settings produce byte-identical output when no Animate ticks
+	// have advanced their step counter.
+	maxBirthSteps = 20
 
 	// Number of frames to prerender for the animation. After this number
 	// of frames, the animation will loop. This only applies when color
@@ -78,8 +83,8 @@ var animCacheMap = csync.NewMap[string, *animCache]()
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()
-	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t",
-		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors)
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v",
+		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -95,6 +100,20 @@ type Settings struct {
 	GradColorA  color.Color
 	GradColorB  color.Color
 	CycleColors bool
+
+	// NoScramble disables the scrambled rune animation. The cycling
+	// character region is removed entirely so only the label and its
+	// animated ellipsis are visible. Useful for non-LLM contexts where
+	// scrambled glyphs imply "thinking" rather than "running".
+	NoScramble bool
+
+	// Suffix is an optional function that returns a dynamic suffix string
+	// to render after the label and ellipsis. Called on every Render().
+	Suffix func() string
+
+	// SuffixColor is the color used to render the suffix text.
+	// Falls back to LabelColor if unset.
+	SuffixColor color.Color
 }
 
 // Default settings.
@@ -107,15 +126,17 @@ type Anim struct {
 	label            *csync.Slice[string]
 	labelWidth       int
 	labelColor       color.Color
-	startTime        time.Time
-	birthOffsets     []time.Duration
+	birthSteps       []int
 	initialFrames    [][]string // frames for the initial characters
 	initialized      atomic.Bool
 	cyclingFrames    [][]string           // frames for the cycling characters
-	step             atomic.Int64         // current main frame step
+	step             atomic.Int64         // current main frame step (wraps)
+	framesSinceStart atomic.Int64         // total Animate ticks (does not wrap)
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
+	suffix           func() string
+	suffixColor      color.Color
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -140,9 +161,28 @@ func New(opts Settings) *Anim {
 	} else {
 		a.id = fmt.Sprintf("%d", nextID())
 	}
-	a.startTime = time.Now()
-	a.cyclingCharWidth = opts.Size
+	if opts.NoScramble {
+		a.cyclingCharWidth = 0
+	} else {
+		a.cyclingCharWidth = opts.Size
+	}
 	a.labelColor = opts.LabelColor
+
+	// Store the suffix function if provided.
+	if opts.Suffix != nil {
+		a.suffix = opts.Suffix
+	}
+	if opts.SuffixColor != nil {
+		a.suffixColor = opts.SuffixColor
+	} else {
+		a.suffixColor = opts.LabelColor
+	}
+
+	// NoScramble means no cycling chars and no birth animation. Mark as
+	// initialized immediately so the label renders without a fade-in.
+	if opts.NoScramble {
+		a.initialized.Store(true)
+	}
 
 	// Check cache first
 	cacheKey := settingsHash(opts)
@@ -160,10 +200,14 @@ func New(opts Settings) *Anim {
 		// Generate new values and cache them
 		a.labelWidth = lipgloss.Width(opts.Label)
 
-		// Total width of anim, in cells.
-		a.width = opts.Size
+		// Total width of anim, in cells. When NoScramble is set there
+		// are no cycling chars so the label gap is unnecessary.
+		a.width = a.cyclingCharWidth
 		if opts.Label != "" {
-			a.width += labelGapWidth + lipgloss.Width(opts.Label)
+			if a.cyclingCharWidth > 0 {
+				a.width += labelGapWidth
+			}
+			a.width += lipgloss.Width(opts.Label)
 		}
 
 		// Render the label
@@ -207,7 +251,13 @@ func New(opts Settings) *Anim {
 			}
 		}
 
-		// Prerender scrambled rune frames for the animation.
+		// Prerender scrambled rune frames for the animation. Seed
+		// the rune picker off the settings hash so cyclingFrames is
+		// a pure function of Settings: two processes with identical
+		// Settings populate the cache with the same glyphs, which
+		// keeps any cross-process golden-file comparison stable.
+		seed := xxh3.HashString(cacheKey)
+		rng := rand.New(rand.NewPCG(seed, ^seed))
 		a.cyclingFrames = make([][]string, numFrames)
 		offset = 0
 		for i := range a.cyclingFrames {
@@ -219,7 +269,7 @@ func New(opts Settings) *Anim {
 
 				// Also prerender the color with Lip Gloss here to avoid processing
 				// in the render loop.
-				r := availableRunes[rand.IntN(len(availableRunes))]
+				r := availableRunes[rng.IntN(len(availableRunes))]
 				a.cyclingFrames[i][j] = lipgloss.NewStyle().
 					Foreground(ramp[j+offset]).
 					Render(string(r))
@@ -249,10 +299,20 @@ func New(opts Settings) *Anim {
 		animCacheMap.Set(cacheKey, cached)
 	}
 
-	// Random assign a birth to each character for a stagged entrance effect.
-	a.birthOffsets = make([]time.Duration, a.width)
-	for i := range a.birthOffsets {
-		a.birthOffsets[i] = time.Duration(rand.N(int64(maxBirthOffset))) * time.Nanosecond
+	// Assign a deterministic birth step to each column for a
+	// staggered entrance effect. The schedule is seeded off the
+	// spinner id and the settings hash, so two spinners with the
+	// same role and identity stagger identically (this is what
+	// keeps Render() byte-equal across cache hits and across
+	// processes for the same Settings+ID) while spinners with
+	// different ids — distinct assistant messages, different tool
+	// calls, "Thinking" vs "Generating" labels — fade in with
+	// different patterns instead of marching in lock-step.
+	birthSeed := xxh3.HashString(a.id + "|" + cacheKey)
+	birthRng := rand.New(rand.NewPCG(birthSeed, ^birthSeed))
+	a.birthSteps = make([]int, a.width)
+	for i := range a.birthSteps {
+		a.birthSteps[i] = birthRng.IntN(maxBirthSteps)
 	}
 
 	return a
@@ -262,10 +322,13 @@ func New(opts Settings) *Anim {
 func (a *Anim) SetLabel(newLabel string) {
 	a.labelWidth = lipgloss.Width(newLabel)
 
-	// Update total width
+	// Update total width. Skip the label gap when there are no cycling chars.
 	a.width = a.cyclingCharWidth
 	if newLabel != "" {
-		a.width += labelGapWidth + a.labelWidth
+		if a.cyclingCharWidth > 0 {
+			a.width += labelGapWidth
+		}
+		a.width += a.labelWidth
 	}
 
 	// Re-render the label
@@ -333,13 +396,14 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 		a.step.Store(0)
 	}
 
+	frames := a.framesSinceStart.Add(1)
 	if a.initialized.Load() && a.labelWidth > 0 {
 		// Manage the ellipsis animation.
 		ellipsisStep := a.ellipsisStep.Add(1)
 		if int(ellipsisStep) >= ellipsisAnimSpeed*len(ellipsisFrames) {
 			a.ellipsisStep.Store(0)
 		}
-	} else if !a.initialized.Load() && time.Since(a.startTime) >= maxBirthOffset {
+	} else if !a.initialized.Load() && int(frames) >= maxBirthSteps {
 		a.initialized.Store(true)
 	}
 	return a.Step()
@@ -349,30 +413,53 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 func (a *Anim) Render() string {
 	var b strings.Builder
 	step := int(a.step.Load())
+	frames := int(a.framesSinceStart.Load())
 	for i := range a.width {
 		switch {
-		case !a.initialized.Load() && i < len(a.birthOffsets) && time.Since(a.startTime) < a.birthOffsets[i]:
-			// Birth offset not reached: render initial character.
+		case !a.initialized.Load() && i < len(a.birthSteps) && frames < a.birthSteps[i]:
+			// Birth step not reached: render initial character.
 			b.WriteString(a.initialFrames[step][i])
 		case i < a.cyclingCharWidth:
 			// Render a cycling character.
 			b.WriteString(a.cyclingFrames[step][i])
-		case i == a.cyclingCharWidth:
-			// Render label gap.
+		case i == a.cyclingCharWidth && a.cyclingCharWidth > 0:
+			// Render label gap (only when there are cycling chars).
 			b.WriteString(labelGap)
-		case i > a.cyclingCharWidth:
-			// Label.
-			if labelChar, ok := a.label.Get(i - a.cyclingCharWidth - labelGapWidth); ok {
+		default:
+			// Label. Offset past cycling chars and gap (if any).
+			offset := a.cyclingCharWidth
+			if a.cyclingCharWidth > 0 {
+				offset += labelGapWidth
+			}
+			if labelChar, ok := a.label.Get(i - offset); ok {
 				b.WriteString(labelChar)
 			}
 		}
 	}
 	// Render animated ellipsis at the end of the label if all characters
-	// have been initialized.
+	// have been initialized. Skip when a suffix is active to avoid visual
+	// competition between the animated dots and the timer.
 	if a.initialized.Load() && a.labelWidth > 0 {
-		ellipsisStep := int(a.ellipsisStep.Load())
-		if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
-			b.WriteString(ellipsisFrame)
+		showEllipsis := true
+		if a.suffix != nil {
+			if s := a.suffix(); s != "" {
+				showEllipsis = false
+			}
+		}
+		if showEllipsis {
+			ellipsisStep := int(a.ellipsisStep.Load())
+			if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
+				b.WriteString(ellipsisFrame)
+			}
+		}
+	}
+
+	// Render optional suffix (e.g., elapsed time).
+	if a.suffix != nil {
+		suffixStr := a.suffix()
+		if suffixStr != "" {
+			b.WriteString(" ")
+			b.WriteString(lipgloss.NewStyle().Foreground(a.suffixColor).Render(suffixStr))
 		}
 	}
 

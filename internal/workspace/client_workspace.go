@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,8 +12,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -21,7 +24,9 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -32,27 +37,41 @@ import (
 type ClientWorkspace struct {
 	client *client.Client
 
-	mu sync.RWMutex
-	ws proto.Workspace
+	mu     sync.RWMutex
+	ws     proto.Workspace
+	skills *skills.Manager
+
+	// herdrClient reports agent state to herdr when running inside
+	// a herdr-managed pane. Nil when not in a herdr environment.
+	herdrClient *herdr.Client
 }
 
 // NewClientWorkspace creates a new ClientWorkspace that proxies all
 // operations through the given client SDK. The ws parameter is the
-// proto.Workspace snapshot returned by the server at creation time.
+// proto.Workspace snapshot returned by the server at creation time. The
+// snapshot's Skills field seeds a process-local skills.Manager so the
+// TUI sees discovery state before the first SSE event arrives. The
+// manager is constructed with WithGlobalMirror because the client
+// process represents exactly one workspace and the TUI reads
+// skills.GetLatestStates directly at construction time.
 func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	if ws.Config != nil {
 		ws.Config.SetupAgents()
 	}
+	states := protoToSkillStates(ws.Skills)
+	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	return &ClientWorkspace{
-		client: c,
-		ws:     ws,
+		client:      c,
+		ws:          ws,
+		skills:      mgr,
+		herdrClient: herdr.Init(),
 	}
 }
 
 // refreshWorkspace re-fetches the workspace from the server, updating
 // the cached snapshot. Called after config-mutating operations.
 func (w *ClientWorkspace) refreshWorkspace() {
-	updated, err := w.client.GetWorkspace(context.Background(), w.ws.ID)
+	updated, err := w.client.GetWorkspace(context.Background(), w.workspaceID())
 	if err != nil {
 		slog.Error("Failed to refresh workspace", "error", err)
 		return
@@ -131,6 +150,15 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 	return parts[0], parts[1], true
 }
 
+// SetCurrentSession reports the session this client is currently
+// viewing to the server. Empty sessionID clears the entry. Errors
+// are propagated to the caller; the TUI logs and ignores them since
+// the presence record is a hint, not correctness-critical state.
+func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	w.herdrClient.SetSessionID(sessionID)
+	return w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID)
+}
+
 // -- Messages --
 
 func (w *ClientWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
@@ -160,7 +188,15 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, prompt, attachments...)
+	// The interactive TUI does not consume notify.RunComplete for
+	// completion detection (it observes message events directly),
+	// so passing an empty RunID is correct here: it skips the
+	// correlator stamping path without functional consequences.
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", prompt, attachments...)
+}
+
+func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, _ func(string), _ bool) (proto.ShellCommandResponse, error) {
+	return w.client.RunShellCommand(ctx, w.workspaceID(), sessionID, command, termWidth)
 }
 
 func (w *ClientWorkspace) AgentCancel(sessionID string) {
@@ -231,7 +267,11 @@ func (w *ClientWorkspace) UpdateAgentModel(ctx context.Context) error {
 }
 
 func (w *ClientWorkspace) InitCoderAgent(ctx context.Context) error {
-	return w.client.InitiateAgentProcessing(ctx, w.workspaceID())
+	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), true)
+}
+
+func (w *ClientWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
+	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), false)
 }
 
 func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
@@ -244,24 +284,8 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.Selecte
 
 // -- Permissions --
 
-func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) {
-	_ = w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
-		Permission: proto.PermissionRequest{
-			ID:          perm.ID,
-			SessionID:   perm.SessionID,
-			ToolCallID:  perm.ToolCallID,
-			ToolName:    perm.ToolName,
-			Description: perm.Description,
-			Action:      perm.Action,
-			Path:        perm.Path,
-			Params:      perm.Params,
-		},
-		Action: proto.PermissionAllowForSession,
-	})
-}
-
-func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) {
-	_ = w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
+func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
 		Permission: proto.PermissionRequest{
 			ID:          perm.ID,
 			SessionID:   perm.SessionID,
@@ -274,10 +298,28 @@ func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRe
 		},
 		Action: proto.PermissionAllow,
 	})
+	return resolved
 }
 
-func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) {
-	_ = w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
+func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
+		Permission: proto.PermissionRequest{
+			ID:          perm.ID,
+			SessionID:   perm.SessionID,
+			ToolCallID:  perm.ToolCallID,
+			ToolName:    perm.ToolName,
+			Description: perm.Description,
+			Action:      perm.Action,
+			Path:        perm.Path,
+			Params:      perm.Params,
+		},
+		Action: proto.PermissionAllowForSession,
+	})
+	return resolved
+}
+
+func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
 		Permission: proto.PermissionRequest{
 			ID:          perm.ID,
 			SessionID:   perm.SessionID,
@@ -290,6 +332,7 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) {
 		},
 		Action: proto.PermissionDeny,
 	})
+	return resolved
 }
 
 func (w *ClientWorkspace) PermissionSkipRequests() bool {
@@ -302,6 +345,40 @@ func (w *ClientWorkspace) PermissionSkipRequests() bool {
 
 func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
 	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
+}
+
+// -- Questions --
+
+// QuestionAnswer submits answers for a question via the client SDK.
+func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	protoResp := proto.QuestionAnswer{
+		Responses: make([]proto.QuestionResponse, len(responses)),
+	}
+	for i, r := range responses {
+		protoResp.Responses[i] = proto.QuestionResponse{
+			QuestionID:  r.QuestionID,
+			SelectedIDs: r.SelectedIDs,
+			FillInText:  r.FillInText,
+			Yes:         r.Yes,
+			Notes:       r.Notes,
+		}
+	}
+	resolved, err := w.client.AnswerQuestionBatch(context.Background(), w.workspaceID(), protoResp)
+	if err != nil {
+		slog.Error("Failed to answer question", "error", err)
+		return false
+	}
+	return resolved
+}
+
+// QuestionCancel cancels the pending question via the client SDK.
+func (w *ClientWorkspace) QuestionCancel() bool {
+	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
+	if err != nil {
+		slog.Error("Failed to cancel question", "error", err)
+		return false
+	}
+	return cancelled
 }
 
 // -- FileTracker --
@@ -472,6 +549,38 @@ func (w *ClientWorkspace) InitializePrompt() (string, error) {
 	return w.client.GetInitializePrompt(context.Background(), w.workspaceID())
 }
 
+func (w *ClientWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
+	entries, err := w.client.ListSkills(ctx, w.workspaceID())
+	if err != nil {
+		return nil, err
+	}
+	result := make([]skills.CatalogEntry, len(entries))
+	for i, entry := range entries {
+		result[i] = skills.CatalogEntry{
+			ID:            entry.ID,
+			Name:          entry.Name,
+			Description:   entry.Description,
+			Label:         entry.Label,
+			Source:        skills.SourceType(entry.Source),
+			UserInvocable: entry.UserInvocable,
+		}
+	}
+	return result, nil
+}
+
+func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
+	resp, err := w.client.ReadSkill(ctx, w.workspaceID(), skillID)
+	if err != nil {
+		return nil, skills.SkillReadResult{}, err
+	}
+	return resp.Content, skills.SkillReadResult{
+		Name:        resp.Result.Name,
+		Description: resp.Result.Description,
+		Source:      skills.SourceType(resp.Result.Source),
+		Builtin:     resp.Result.Builtin,
+	}, nil
+}
+
 // -- MCP operations --
 
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
@@ -551,21 +660,41 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 		return
 	}
 
+	w.consumeEvents(evc, program.Send)
+}
+
+// consumeEvents drives the workspace event loop. It is split out from
+// Subscribe so tests can drive it without a real *tea.Program.
+// ConfigChanged events trigger a workspace refresh; all other events
+// are translated into domain types and forwarded to send.
+func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 	for ev := range evc {
-		translated := translateEvent(ev)
-		if translated != nil {
-			program.Send(translated)
+		// Forward events to herdr if running inside a herdr pane.
+		if hev := herdr.Translate(ev); hev != nil {
+			w.herdrClient.HandleEvent(hev)
+		}
+
+		if _, ok := ev.(pubsub.Event[proto.ConfigChanged]); ok {
+			w.refreshWorkspace()
+			continue
+		}
+		translated := w.translateEvent(ev)
+		if translated != nil && send != nil {
+			send(translated)
 		}
 	}
 }
 
 func (w *ClientWorkspace) Shutdown() {
+	w.herdrClient.Close()
 	_ = w.client.DeleteWorkspace(context.Background(), w.workspaceID())
 }
 
 // translateEvent converts proto-typed SSE events into the domain types
-// that the TUI's Update() method expects.
-func translateEvent(ev any) tea.Msg {
+// that the TUI's Update() method expects. Skills events also update the
+// process-local skills.Manager so callers reading
+// skills.GetLatestStates see fresh data.
+func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 	switch e := ev.(type) {
 	case pubsub.Event[proto.LSPEvent]:
 		return pubsub.Event[LSPEvent]{
@@ -616,6 +745,25 @@ func translateEvent(ev any) tea.Msg {
 				Denied:     e.Payload.Denied,
 			},
 		}
+	case pubsub.Event[proto.QuestionRequest]:
+		return pubsub.Event[question.Request]{
+			Type: e.Type,
+			Payload: question.Request{
+				ID:                 e.Payload.ID,
+				SessionID:          e.Payload.SessionID,
+				ToolCallID:         e.Payload.ToolCallID,
+				Questions:          protoQuestionsToDomain(e.Payload.Questions),
+				ConfirmTitle:       e.Payload.ConfirmTitle,
+				ConfirmDescription: e.Payload.ConfirmDescription,
+			},
+		}
+	case pubsub.Event[proto.QuestionNotification]:
+		return pubsub.Event[question.Notification]{
+			Type: e.Type,
+			Payload: question.Notification{
+				BatchID: e.Payload.BatchID,
+			},
+		}
 	case pubsub.Event[proto.Message]:
 		return pubsub.Event[message.Message]{
 			Type:    e.Type,
@@ -632,13 +780,51 @@ func translateEvent(ev any) tea.Msg {
 			Payload: protoToFile(e.Payload),
 		}
 	case pubsub.Event[proto.AgentEvent]:
+		n := notify.Notification{
+			SessionID:    e.Payload.SessionID,
+			SessionTitle: e.Payload.SessionTitle,
+			RunID:        e.Payload.RunID,
+			Type:         notify.Type(e.Payload.Type),
+		}
+		if e.Payload.Error != nil {
+			n.Message = e.Payload.Error.Error()
+		}
 		return pubsub.Event[notify.Notification]{
+			Type:    e.Type,
+			Payload: n,
+		}
+	case pubsub.Event[proto.RunComplete]:
+		// Translate the wire-level proto.RunComplete back into the
+		// agent's domain notify.RunComplete. Without this case the
+		// default branch below warns on every run completion in the
+		// server-mode TUI, even though the TUI itself doesn't act
+		// on RunComplete — converting silently keeps the workspace
+		// event bridge symmetric with the server-side wrapEvent.
+		return pubsub.Event[notify.RunComplete]{
 			Type: e.Type,
-			Payload: notify.Notification{
-				SessionID:    e.Payload.SessionID,
-				SessionTitle: e.Payload.SessionTitle,
-				Type:         notify.Type(e.Payload.Type),
+			Payload: notify.RunComplete{
+				SessionID: e.Payload.SessionID,
+				RunID:     e.Payload.RunID,
+				MessageID: e.Payload.MessageID,
+				Text:      e.Payload.Text,
+				Error:     e.Payload.Error,
+				Cancelled: e.Payload.Cancelled,
 			},
+		}
+	case pubsub.Event[proto.SkillsEvent]:
+		states := protoToSkillStates(e.Payload.States)
+		if w.skills != nil {
+			w.skills.SetLatestStates(states)
+		}
+		return pubsub.Event[skills.Event]{
+			Type:    e.Type,
+			Payload: skills.Event{States: states},
+		}
+	case pubsub.Event[proto.UpdateAvailable]:
+		return app.UpdateAvailableMsg{
+			CurrentVersion: e.Payload.CurrentVersion,
+			LatestVersion:  e.Payload.LatestVersion,
+			IsDevelopment:  e.Payload.IsDevelopment,
 		}
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
@@ -661,6 +847,13 @@ func protoToMCPEventType(t proto.MCPEventType) mcp.EventType {
 	}
 }
 
+// protoToSession converts a wire-level proto.Session into the domain
+// session.Session. Fields that exist only on the wire (computed-on-read
+// signals like IsBusy, and any future presence counters) are
+// intentionally dropped here: session.Session models persisted state,
+// not transient runtime signals. UI features that need those signals
+// should either extend session.Session or read them from the proto
+// payload directly before this conversion runs.
 func protoToSession(s proto.Session) session.Session {
 	return session.Session{
 		ID:               s.ID,
@@ -671,9 +864,25 @@ func protoToSession(s proto.Session) session.Session {
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
+		Todos:            protoToTodos(s.Todos),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+func protoToTodos(todos []proto.Todo) []session.Todo {
+	if len(todos) == 0 {
+		return nil
+	}
+	out := make([]session.Todo, len(todos))
+	for i, t := range todos {
+		out[i] = session.Todo{
+			Content:    t.Content,
+			Status:     session.TodoStatus(t.Status),
+			ActiveForm: t.ActiveForm,
+		}
+	}
+	return out
 }
 
 func protoToFile(f proto.File) history.File {
@@ -722,6 +931,9 @@ func protoToMessage(m proto.Message) message.Message {
 				ToolCallID: v.ToolCallID,
 				Name:       v.Name,
 				Content:    v.Content,
+				Data:       v.Data,
+				MIMEType:   v.MIMEType,
+				Metadata:   v.Metadata,
 				IsError:    v.IsError,
 			})
 		case proto.Finish:
@@ -735,6 +947,12 @@ func protoToMessage(m proto.Message) message.Message {
 			msg.Parts = append(msg.Parts, message.ImageURLContent{URL: v.URL, Detail: v.Detail})
 		case proto.BinaryContent:
 			msg.Parts = append(msg.Parts, message.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
+		case proto.ShellCommand:
+			msg.Parts = append(msg.Parts, message.ShellCommand{
+				Command:  v.Command,
+				Output:   v.Output,
+				ExitCode: v.ExitCode,
+			})
 		}
 	}
 
@@ -767,7 +985,71 @@ func sessionToProto(s session.Session) proto.Session {
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
+		Todos:            todosToProto(s.Todos),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+// protoToSkillStates reconstructs internal skill state slices from
+// their wire representation. Non-empty Error strings are turned into
+// synthetic error values; the TUI never type-asserts on Err.
+func protoToSkillStates(in []proto.SkillState) []*skills.SkillState {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*skills.SkillState, len(in))
+	for i, s := range in {
+		state := &skills.SkillState{
+			Name:  s.Name,
+			Path:  s.Path,
+			State: skills.DiscoveryState(s.State),
+		}
+		if s.Error != "" {
+			state.Err = errors.New(s.Error)
+		}
+		out[i] = state
+	}
+	return out
+}
+
+func todosToProto(todos []session.Todo) []proto.Todo {
+	if len(todos) == 0 {
+		return nil
+	}
+	out := make([]proto.Todo, len(todos))
+	for i, t := range todos {
+		out[i] = proto.Todo{
+			Content:    t.Content,
+			Status:     string(t.Status),
+			ActiveForm: t.ActiveForm,
+		}
+	}
+	return out
+}
+
+func protoQuestionsToDomain(qs []proto.QuestionItem) []question.Question {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]question.Question, len(qs))
+	for i, q := range qs {
+		choices := make([]question.Choice, len(q.Choices))
+		for j, c := range q.Choices {
+			choices[j] = question.Choice{
+				ID:          c.ID,
+				Label:       c.Label,
+				Description: c.Description,
+			}
+		}
+		out[i] = question.Question{
+			ID:          q.ID,
+			Type:        question.Type(q.Type),
+			Label:       q.Label,
+			Text:        q.Question,
+			Description: q.Description,
+			Choices:     choices,
+		}
+	}
+	return out
 }

@@ -111,7 +111,12 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		),
 	)
 
-	view := q.com.Styles.Dialog.Quit.Frame.Render(content)
+	frameStyle := q.com.Styles.Dialog.Quit.Frame
+	maxWidth := area.Dx() - frameStyle.GetHorizontalBorderSize()
+	if maxWidth < lipgloss.Width(content) {
+		frameStyle = frameStyle.Padding(1, 0)
+	}
+	view := frameStyle.Render(content)
 	DrawCenter(scr, area, view)
 	return nil
 }

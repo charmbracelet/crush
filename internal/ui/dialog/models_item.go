@@ -5,6 +5,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
@@ -12,6 +13,7 @@ import (
 
 // ModelGroup represents a group of model items.
 type ModelGroup struct {
+	*list.Versioned
 	Title      string
 	Items      []*ModelItem
 	configured bool
@@ -21,11 +23,17 @@ type ModelGroup struct {
 // NewModelGroup creates a new ModelGroup.
 func NewModelGroup(t *styles.Styles, title string, configured bool, items ...*ModelItem) ModelGroup {
 	return ModelGroup{
+		Versioned:  list.NewVersioned(),
 		Title:      title,
 		Items:      items,
 		configured: configured,
 		t:          t,
 	}
+}
+
+// Finished implements list.Item. Model groups are immutable headers.
+func (m *ModelGroup) Finished() bool {
+	return true
 }
 
 // AppendItems appends [ModelItem]s to the group.
@@ -43,13 +51,24 @@ func (m *ModelGroup) Render(width int) string {
 	}
 
 	title := " " + m.Title + " "
-	title = ansi.Truncate(title, max(0, width-lipgloss.Width(configured)-1), "…")
+	// Keep the "Configured" badge only when the full title fits beside it
+	// (plus a separator). Otherwise drop it and let the title use the whole
+	// width, rather than truncating the title to reserve room for a badge
+	// that common.Section would then drop anyway, leaving dead space.
+	if configured != "" && lipgloss.Width(title)+lipgloss.Width(configured)+3 > width {
+		configured = ""
+	}
+	if configured == "" {
+		title = ansi.Truncate(title, max(0, width-1), "…")
+	}
 
 	return common.Section(m.t, title, width, configured)
 }
 
 // ModelItem represents a list item for a model type.
 type ModelItem struct {
+	*list.Versioned
+
 	prov      catwalk.Provider
 	model     catwalk.Model
 	modelType ModelType
@@ -59,6 +78,12 @@ type ModelItem struct {
 	m            fuzzy.Match
 	focused      bool
 	showProvider bool
+}
+
+// Finished implements list.Item. Model items are render-stable
+// outside of explicit SetFocused / SetMatch.
+func (m *ModelItem) Finished() bool {
+	return true
 }
 
 // SelectedModel returns this model item as a [config.SelectedModel] instance.
@@ -81,6 +106,7 @@ var _ ListItem = &ModelItem{}
 // NewModelItem creates a new ModelItem.
 func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool) *ModelItem {
 	return &ModelItem{
+		Versioned:    list.NewVersioned(),
 		prov:         prov,
 		model:        model,
 		modelType:    typ,
@@ -117,14 +143,24 @@ func (m *ModelItem) Render(width int) string {
 
 // SetFocused implements ListItem.
 func (m *ModelItem) SetFocused(focused bool) {
-	if m.focused != focused {
-		m.cache = nil
+	if m.focused == focused {
+		return
 	}
+	m.cache = nil
 	m.focused = focused
+	if m.Versioned != nil {
+		m.Bump()
+	}
 }
 
 // SetMatch implements ListItem.
 func (m *ModelItem) SetMatch(fm fuzzy.Match) {
+	if sameFuzzyMatch(m.m, fm) {
+		return
+	}
 	m.cache = nil
 	m.m = fm
+	if m.Versioned != nil {
+		m.Bump()
+	}
 }

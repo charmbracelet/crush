@@ -101,11 +101,13 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	ind := indStyle.String()
 	indWidth := lipgloss.Width(ind)
+	msgPad := msgStyle.GetPaddingLeft() + msgStyle.GetPaddingRight()
+	avail := max(0, area.Dx()-indWidth-msgPad)
 	msg := strings.Join(strings.Split(s.msg.Msg, "\n"), " ")
-	msgWidth := lipgloss.Width(msg)
-	msg = ansi.Truncate(msg, area.Dx()-indWidth-msgWidth, "…")
-	padWidth := max(0, area.Dx()-indWidth-msgWidth)
-	msg += strings.Repeat(" ", padWidth)
+	msg = ansi.Truncate(msg, avail, "…")
+	if w := lipgloss.Width(msg); w < avail {
+		msg += strings.Repeat(" ", avail-w)
+	}
 	info := msgStyle.Render(msg)
 
 	// Draw the info message over the help view

@@ -486,6 +486,7 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 		disabledSet[name] = true
 	}
 
+	projectDirs := config.ProjectSubagentsDir(workingDir)
 	result := make([]SubagentDefInfo, len(all))
 	for i, s := range all {
 		result[i] = SubagentDefInfo{
@@ -493,7 +494,7 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 			Description: s.Description,
 			Color:       s.ResolvedColor(),
 			FilePath:    s.FilePath,
-			Scope:       subagentScope(s.FilePath, workingDir),
+			Scope:       subagentScope(s.FilePath, workingDir, projectDirs),
 			Disabled:    disabledSet[s.Name],
 		}
 	}
@@ -505,35 +506,19 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 // dir (which includes the git worktree root for monorepo-level subagents),
 // and "user" otherwise. Comparison uses fsext.HasPrefix (filepath.Rel-based)
 // so it works with either path separator.
-func subagentScope(filePath, workingDir string) string {
+func subagentScope(filePath, workingDir string, projectDirs []string) string {
 	if filePath == "" {
 		return "builtin"
 	}
 	if workingDir != "" && fsext.HasPrefix(filePath, workingDir) {
 		return "project"
 	}
-	for _, dir := range config.ProjectSubagentsDir(workingDir) {
+	for _, dir := range projectDirs {
 		if fsext.HasPrefix(filePath, dir) {
 			return "project"
 		}
 	}
 	return "user"
-}
-
-// subagentDeletable reports whether the definition file lives under one of
-// the global (user-scope) subagents directories. Deletion is restricted to
-// those — scope labeling is display-oriented, and a monorepo-root or
-// custom-path file must never be deletable as if it were the user's own.
-func subagentDeletable(filePath string) bool {
-	if filePath == "" {
-		return false
-	}
-	for _, dir := range config.GlobalSubagentsDirs() {
-		if fsext.HasPrefix(filePath, dir) {
-			return true
-		}
-	}
-	return false
 }
 
 // DeleteUserSubagent removes a user-scoped subagent by name. It returns an
@@ -552,7 +537,10 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	if target == nil {
 		return fmt.Errorf("subagent %q not found", name)
 	}
-	if !subagentDeletable(target.FilePath) {
+	// Deletion is restricted to global (user-scope) dirs — scope labeling is
+	// display-oriented, and a monorepo-root or custom-path file must never be
+	// deletable as if it were the user's own.
+	if !subagents.InGlobalDir(target.FilePath) {
 		return fmt.Errorf("subagent %q is not in a user subagents directory and cannot be deleted", name)
 	}
 	if err := os.Remove(target.FilePath); err != nil {

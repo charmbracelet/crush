@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -128,7 +129,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if err != nil {
 		return nil, err
 	}
-	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{})
+	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, &c.readyWg)
 	if err != nil {
 		return nil, err
 	}
@@ -184,8 +185,16 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent prompt %q: %v", sa.Name, err)), nil
 			}
-			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider})
+			// Build on a local group and wait before running: the agent must
+			// not start promptless/toolless, and a build failure must land
+			// here as a tool error rather than in the coordinator-wide
+			// readyWg, whose sticky error would fail every subsequent turn.
+			var buildWg errgroup.Group
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}, &buildWg)
 			if err != nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
+			}
+			if err := buildWg.Wait(); err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
 			}
 

@@ -405,6 +405,12 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // per-file state slice describing parse/validation outcomes. When
 // isKnownModel is non-nil it is used to validate non-alias model ids; nil
 // skips that check.
+//
+// The returned agents preserve the caller's path order: all subagents from
+// paths[0] (sorted by file path), then paths[1], and so on. Deduplicate keeps
+// the last occurrence of a name, so this ordering is what makes later paths —
+// the working directory, per ProjectSubagentsDir — override earlier ones
+// (monorepo root, global dirs) on a name collision.
 func DiscoverWithStates(paths []string, isKnownModel func(provider, model string) bool) ([]*Subagent, []*SubagentState) {
 	var agents []*Subagent
 	var states []*SubagentState
@@ -423,6 +429,7 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 	}
 
 	for _, base := range paths {
+		var baseAgents []*Subagent
 		conf := fastwalk.Config{
 			Follow:  true,
 			ToSlash: fastwalk.DefaultToSlash(),
@@ -457,7 +464,7 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 			}
 			slog.Debug("Successfully loaded subagent", "name", agent.Name, "path", path)
 			mu.Lock()
-			agents = append(agents, agent)
+			baseAgents = append(baseAgents, agent)
 			mu.Unlock()
 			addState(agent.Name, path, StateNormal, nil)
 			return nil
@@ -465,16 +472,18 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 		if err != nil && !os.IsNotExist(err) {
 			slog.Warn("Failed to walk subagents path", "path", base, "error", err)
 		}
-	}
 
-	// fastwalk traversal order is non-deterministic, so sort for stable output.
-	// Sort by filepath first, then alphabetically by name within each path.
-	slices.SortStableFunc(agents, func(a, b *Subagent) int {
-		if c := strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath)); c != 0 {
-			return c
-		}
-		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
-	})
+		// fastwalk traversal order within a base is non-deterministic, so
+		// sort each base's results for stable output. Sorting per base (never
+		// across bases) preserves the caller's path-order precedence.
+		slices.SortStableFunc(baseAgents, func(a, b *Subagent) int {
+			if c := strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath)); c != 0 {
+				return c
+			}
+			return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+		})
+		agents = append(agents, baseAgents...)
+	}
 
 	return agents, states
 }

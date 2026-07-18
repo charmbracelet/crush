@@ -45,12 +45,15 @@ var acceptLanguages = []string{
 	"en-CA,en;q=0.9,en-US;q=0.8",
 }
 
-func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, maxResults int) ([]SearchResult, error) {
+func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, maxResults int, baseURL string) ([]SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 10
 	}
 
-	searchURL := "https://lite.duckduckgo.com/lite/?q=" + url.QueryEscape(query)
+	if baseURL == "" {
+		baseURL = "https://lite.duckduckgo.com/lite/"
+	}
+	searchURL := baseURL + "?q=" + url.QueryEscape(query)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {

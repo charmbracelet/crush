@@ -450,6 +450,40 @@ Two approaches:
 Recommended: **Option B**. The builtins are no-ops without a `ConfigBuilder` in
 the context, which only exists during config loading.
 
+### 8. Version Awareness (`CRUSH_VERSION`)
+
+When Crush executes a `crush.sh` file, it injects the running Crush version
+into the script environment as `CRUSH_VERSION` (`internal/shellconfig/load.go`).
+The value is `version.Version` passed through verbatim:
+
+- Release builds report a semver-shaped Go pseudo-version, e.g.
+  `v0.85.1-0.20260718172327-796fe8aeaf99+dirty`.
+- Local/development builds report the literal `devel`.
+
+This lets scripts feature-detect the engine before calling builtins:
+
+```bash
+# Skip a builtin unless we're on a released build.
+[[ "$CRUSH_VERSION" != devel ]] && lsp gopls --command gopls
+
+# Prefix / glob matching on a minor series.
+if [[ "$CRUSH_VERSION" == v0.85.* ]]; then
+  provider new-thing --api-key "$KEY"
+fi
+```
+
+**Matching semantics** — `CRUSH_VERSION` is only a string; there is no
+comparison logic behind it. Two things to keep in mind:
+
+- **Glob, not semver.** In `[[ ... == pattern ]]`, an *unquoted* right-hand
+  side is a glob pattern (`v0.85.*` matches any suffix). Quoting it
+  (`"v0.85.*"`) makes `*` literal, so it only matches exactly. Confirmed under
+  the mvdan/sh interpreter that runs `crush.sh`.
+- **No ordering.** Lexical `>`/`<` comparison does not implement semver: a
+  pseudo-version like `v0.85.1-0.2026…` sorts *before* `v0.85.1`, and `devel`
+  sorts arbitrarily. Reliable `>=` gating requires a Go-side builtin
+  (`crush-min-version`, using `golang.org/x/mod/semver`), which is deferred.
+
 ## Implementation Steps
 
 1. **Create `ConfigBuilder`** (`internal/shell/config_builder.go`)

@@ -353,7 +353,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
 
-	transport, err := createTransport(mcpCtx, m, resolver)
+	transport, err := createTransport(mcpCtx, m, resolver, cancelTimer)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		slog.Error("Error creating MCP client", "error", err, "name", name)
@@ -437,7 +437,7 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 	return err
 }
 
-func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
+func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver, connTimeout *time.Timer) (mcp.Transport, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		command, err := resolver.ResolveValue(m.Command)
@@ -486,8 +486,16 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		// (e.g. Cairn, other MCP servers using OIDC) to work
 		// automatically: on 401, the SDK opens a browser for the user
 		// to authenticate, captures the callback, and retries.
+		//
+		// The interactive flow can take far longer than the connection
+		// timeout, so hand the handler a way to suspend that timeout once
+		// authorization actually begins.
 		if !hasAuthHeader(headers) {
-			transport.OAuthHandler = newMCPOAuthHandler(url)
+			var stopConnTimeout func()
+			if connTimeout != nil {
+				stopConnTimeout = func() { connTimeout.Stop() }
+			}
+			transport.OAuthHandler = newMCPOAuthHandler(url, stopConnTimeout)
 		}
 		return transport, nil
 	case config.MCPSSE:

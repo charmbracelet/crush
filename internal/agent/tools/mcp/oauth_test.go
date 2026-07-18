@@ -1,10 +1,14 @@
 package mcp
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
@@ -99,7 +103,7 @@ func TestMCPOAuthHandler_TokenSourceEmptyByDefault(t *testing.T) {
 	// token source, which tells the transport to send requests without
 	// an Authorization header (triggering the 401 → Authorize flow).
 	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
-	h := newMCPOAuthHandler("https://mcp.example.com/mcp")
+	h := newMCPOAuthHandler("https://mcp.example.com/mcp", nil)
 	ts, err := h.TokenSource(t.Context())
 	require.NoError(t, err)
 	require.Nil(t, ts)
@@ -159,7 +163,7 @@ func TestMCPOAuthHandler_RestoresSavedToken(t *testing.T) {
 	saved.Endpoints.TokenURL = "https://auth.example.com/token"
 	seed.save(serverURL, saved)
 
-	h := newMCPOAuthHandler(serverURL)
+	h := newMCPOAuthHandler(serverURL, nil)
 	ts, err := h.TokenSource(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, ts, "a saved token should produce a non-nil token source")
@@ -167,4 +171,135 @@ func TestMCPOAuthHandler_RestoresSavedToken(t *testing.T) {
 	tok, err := ts.Token()
 	require.NoError(t, err)
 	require.Equal(t, "abc123", tok.AccessToken, "restored token source should yield the saved (unexpired) token")
+}
+
+// TestMCPOAuthHandler_RestoredTokenRefreshes proves the persisted client ID and
+// token endpoint are enough to refresh an expired token without going back
+// through the browser. This is the lifecycle case that fails if the client ID
+// is not captured at authorization time.
+func TestMCPOAuthHandler_RestoredTokenRefreshes(t *testing.T) {
+	var gotGrant, gotRefresh, gotClientID string
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		gotGrant = r.Form.Get("grant_type")
+		gotRefresh = r.Form.Get("refresh_token")
+		gotClientID = r.Form.Get("client_id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"fresh-access","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer tokenSrv.Close()
+
+	globalDir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_CONFIG", globalDir)
+
+	serverURL := "https://mcp.example.com/mcp"
+	seed := &tokenStore{
+		path: filepath.Join(filepath.Dir(config.GlobalConfig()), tokenFileName),
+		data: make(map[string]mcptoken),
+	}
+	saved := mcptoken{
+		// An already-expired access token with a refresh token forces the
+		// oauth2 library to refresh on the first Token() call.
+		Token: &oauth2.Token{
+			AccessToken:  "stale-access",
+			RefreshToken: "refresh456",
+			TokenType:    "Bearer",
+			Expiry:       time.Now().Add(-time.Hour),
+		},
+		ClientID:  "dynamic-client-id",
+		AuthStyle: int(oauth2.AuthStyleInParams),
+	}
+	saved.Endpoints.AuthURL = "https://auth.example.com/authorize"
+	saved.Endpoints.TokenURL = tokenSrv.URL
+	seed.save(serverURL, saved)
+
+	h := newMCPOAuthHandler(serverURL, nil)
+	ts, err := h.TokenSource(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, ts)
+
+	tok, err := ts.Token()
+	require.NoError(t, err, "an expired token with a saved client ID and token URL must refresh")
+	require.Equal(t, "fresh-access", tok.AccessToken)
+	require.Equal(t, "refresh_token", gotGrant)
+	require.Equal(t, "refresh456", gotRefresh)
+	require.Equal(t, "dynamic-client-id", gotClientID, "the persisted client ID must be sent on refresh")
+}
+
+// TestMCPOAuthHandler_ForbiddenPreservesToken proves that a genuine
+// (non-insufficient_scope) 403 does not wipe a restored token source: the
+// handler returns nil so the request is retried and the real error surfaces,
+// while TokenSource keeps yielding the saved token.
+func TestMCPOAuthHandler_ForbiddenPreservesToken(t *testing.T) {
+	globalDir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_CONFIG", globalDir)
+
+	serverURL := "https://mcp.example.com/mcp"
+	seed := &tokenStore{
+		path: filepath.Join(filepath.Dir(config.GlobalConfig()), tokenFileName),
+		data: make(map[string]mcptoken),
+	}
+	saved := mcptoken{Token: &oauth2.Token{AccessToken: "keep-me", TokenType: "Bearer"}}
+	saved.Endpoints.TokenURL = "https://auth.example.com/token"
+	seed.save(serverURL, saved)
+
+	h := newMCPOAuthHandler(serverURL, nil)
+
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Header:     http.Header{"Www-Authenticate": []string{`Bearer error="access_denied"`}},
+		Body:       http.NoBody,
+	}
+	require.NoError(t, h.Authorize(t.Context(), &http.Request{}, resp),
+		"a genuine 403 should return nil (retry), not an error")
+
+	ts, err := h.TokenSource(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, ts, "the restored token source must survive a genuine 403")
+	tok, err := ts.Token()
+	require.NoError(t, err)
+	require.Equal(t, "keep-me", tok.AccessToken)
+}
+
+// TestTokenStore_ConcurrentSavePreservesEntries proves that handlers for
+// different servers authorizing concurrently do not clobber each other. In
+// production every handler shares one store (see sharedTokenStore), so its
+// mutex serializes the read-modify-write. Before that fix each handler held an
+// independent snapshot and the last save erased the others' tokens.
+func TestTokenStore_ConcurrentSavePreservesEntries(t *testing.T) {
+	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
+
+	servers := []string{"https://a.example.com", "https://b.example.com", "https://c.example.com"}
+	var wg sync.WaitGroup
+	for _, server := range servers {
+		wg.Add(1)
+		go func(server string) {
+			defer wg.Done()
+			// Each handler resolves its store the same way production does.
+			store := sharedTokenStore()
+			store.save(server, mcptoken{Token: &oauth2.Token{AccessToken: server}})
+		}(server)
+	}
+	wg.Wait()
+
+	// A fresh read from disk must see every entry.
+	final := &tokenStore{
+		path: filepath.Join(filepath.Dir(config.GlobalConfig()), tokenFileName),
+		data: make(map[string]mcptoken),
+	}
+	final.load()
+	for _, server := range servers {
+		got, ok := final.get(server)
+		require.True(t, ok, "entry for %s should survive concurrent saves", server)
+		require.Equal(t, server, got.Token.AccessToken)
+	}
+}
+
+// TestSharedTokenStore_SameInstancePerPath proves handlers in one process share
+// a single store (and its mutex) rather than each loading an independent
+// snapshot of the token file.
+func TestSharedTokenStore_SameInstancePerPath(t *testing.T) {
+	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
+	require.Same(t, sharedTokenStore(), sharedTokenStore(),
+		"sharedTokenStore must return the same instance for the same config dir")
 }

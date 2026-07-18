@@ -24,15 +24,26 @@ import (
 // tokenFileName is the file where MCP OAuth tokens are persisted.
 const tokenFileName = "mcp-oauth-tokens.json"
 
+// oauthInteractiveTimeout bounds the interactive browser authorization flow.
+// It is deliberately much longer than the MCP connection timeout because the
+// user has to switch to a browser, sign in, and grant consent.
+const oauthInteractiveTimeout = 3 * time.Minute
+
+// oauthEndpoints holds the authorization and token endpoints needed to rebuild
+// an oauth2 config (and therefore refresh a token) on a later startup.
+type oauthEndpoints struct {
+	AuthURL  string `json:"auth_url"`
+	TokenURL string `json:"token_url"`
+}
+
 // mcptoken stores a serialised OAuth token plus the client registration
-// info needed to refresh it.
+// info needed to refresh it without going through the browser again.
 type mcptoken struct {
-	Token     *oauth2.Token `json:"token"`
-	ClientID  string        `json:"client_id,omitempty"`
-	Endpoints struct {
-		AuthURL  string `json:"auth_url"`
-		TokenURL string `json:"token_url"`
-	} `json:"endpoints"`
+	Token        *oauth2.Token  `json:"token"`
+	ClientID     string         `json:"client_id,omitempty"`
+	ClientSecret string         `json:"client_secret,omitempty"`
+	AuthStyle    int            `json:"auth_style,omitempty"`
+	Endpoints    oauthEndpoints `json:"endpoints"`
 }
 
 // tokenStore persists MCP OAuth tokens keyed by server URL. It is safe
@@ -43,16 +54,36 @@ type tokenStore struct {
 	data map[string]mcptoken
 }
 
-func newTokenStore() *tokenStore {
+// storeCache holds one tokenStore per on-disk path so that every OAuth handler
+// in the process shares a single store (and mutex). Without this, each handler
+// would load an independent snapshot of the token file and later rewrite the
+// whole file, letting one server's save erase another server's entry.
+var (
+	storeCacheMu sync.Mutex
+	storeCache   = map[string]*tokenStore{}
+)
+
+// sharedTokenStore returns the process-wide tokenStore for the current crush
+// config directory, creating and loading it on first use.
+func sharedTokenStore() *tokenStore {
 	// globalConfigPath already returns the crush config directory, so the
 	// token file sits alongside crush.json (e.g. ~/.config/crush/). Do not
 	// take filepath.Dir again — that would drop the file a level too high
 	// (e.g. ~/.config/).
-	dir := globalConfigPath()
-	return &tokenStore{
-		path: filepath.Join(dir, tokenFileName),
+	path := filepath.Join(globalConfigPath(), tokenFileName)
+
+	storeCacheMu.Lock()
+	defer storeCacheMu.Unlock()
+	if s, ok := storeCache[path]; ok {
+		return s
+	}
+	s := &tokenStore{
+		path: path,
 		data: make(map[string]mcptoken),
 	}
+	s.load()
+	storeCache[path] = s
+	return s
 }
 
 func (s *tokenStore) load() {
@@ -75,6 +106,19 @@ func (s *tokenStore) get(serverURL string) (mcptoken, bool) {
 func (s *tokenStore) save(serverURL string, t mcptoken) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Merge any entries written to disk since we last read it — another MCP
+	// server authorizing concurrently, or a second crush process — so we do
+	// not clobber them by writing back a stale snapshot.
+	if b, err := os.ReadFile(s.path); err == nil {
+		var onDisk map[string]mcptoken
+		if json.Unmarshal(b, &onDisk) == nil {
+			for k, v := range onDisk {
+				if _, ok := s.data[k]; !ok {
+					s.data[k] = v
+				}
+			}
+		}
+	}
 	s.data[serverURL] = t
 	b, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
@@ -89,28 +133,37 @@ func (s *tokenStore) save(serverURL string, t mcptoken) {
 type mcpOAuthHandler struct {
 	serverURL string
 	store     *tokenStore
-	inner     *auth.AuthorizationCodeHandler
-	mu        sync.Mutex
-	tokenSrc  oauth2.TokenSource
+	// stopConnTimeout stops the MCP connection timeout timer, if any. The
+	// interactive browser flow can take minutes, far longer than the
+	// connection timeout, so we suspend that timeout once authorization
+	// actually starts. It may be nil (e.g. in tests).
+	stopConnTimeout func()
+
+	mu       sync.Mutex
+	tokenSrc oauth2.TokenSource
 }
 
 var _ auth.OAuthHandler = (*mcpOAuthHandler)(nil)
 
-func newMCPOAuthHandler(serverURL string) *mcpOAuthHandler {
-	store := newTokenStore()
-	store.load()
+func newMCPOAuthHandler(serverURL string, stopConnTimeout func()) *mcpOAuthHandler {
+	store := sharedTokenStore()
 	h := &mcpOAuthHandler{
-		serverURL: serverURL,
-		store:     store,
+		serverURL:       serverURL,
+		store:           store,
+		stopConnTimeout: stopConnTimeout,
 	}
 	// Restore any saved token so we can skip the browser flow on
-	// subsequent startups.
+	// subsequent startups. The client ID, secret and endpoints are
+	// persisted alongside the token so the oauth2 library can refresh it
+	// when it expires.
 	if saved, ok := store.get(serverURL); ok && saved.Token != nil {
 		cfg := &oauth2.Config{
-			ClientID: saved.ClientID,
+			ClientID:     saved.ClientID,
+			ClientSecret: saved.ClientSecret,
 			Endpoint: oauth2.Endpoint{
-				AuthURL:  saved.Endpoints.AuthURL,
-				TokenURL: saved.Endpoints.TokenURL,
+				AuthURL:   saved.Endpoints.AuthURL,
+				TokenURL:  saved.Endpoints.TokenURL,
+				AuthStyle: oauth2.AuthStyle(saved.AuthStyle),
 			},
 		}
 		h.tokenSrc = cfg.TokenSource(context.Background(), saved.Token)
@@ -127,57 +180,107 @@ func (h *mcpOAuthHandler) TokenSource(_ context.Context) (oauth2.TokenSource, er
 	return h.tokenSrc, nil
 }
 
+// clientRegistration is the result of discovering the authorization server and
+// dynamically registering a client with it. Capturing the registered client ID
+// ourselves (rather than letting the SDK register internally) is what lets us
+// persist enough information to refresh the token later.
+type clientRegistration struct {
+	clientID     string
+	clientSecret string
+	authURL      string
+	tokenURL     string
+	authStyle    oauth2.AuthStyle
+}
+
 // Authorize implements auth.OAuthHandler. It performs the full OAuth
 // authorization-code flow (discovery, registration, browser, PKCE,
 // token exchange) then persists the resulting token.
 func (h *mcpOAuthHandler) Authorize(ctx context.Context, req *http.Request, resp *http.Response) error {
-	inner, err := h.buildInner(ctx)
+	// Mirror the SDK: a 403 that is not an insufficient_scope challenge is a
+	// genuine permission error, not an authorization prompt. Return nil so the
+	// request is retried and the real error surfaces — without registering a
+	// throwaway client or discarding a previously restored token.
+	if resp.StatusCode == http.StatusForbidden && !isInsufficientScope(resp) {
+		resp.Body.Close()
+		return nil
+	}
+
+	// Interactive OAuth (browser login + consent) routinely takes longer than
+	// the MCP connection timeout that bounds ctx. Suspend that timeout so the
+	// flow is not cancelled mid-login, then run under our own, more generous
+	// deadline.
+	if h.stopConnTimeout != nil {
+		h.stopConnTimeout()
+	}
+	authCtx, cancel := context.WithTimeout(ctx, oauthInteractiveTimeout)
+	defer cancel()
+
+	port, err := allocateCallbackPort(authCtx)
 	if err != nil {
 		resp.Body.Close()
 		return err
 	}
-	if err := inner.Authorize(ctx, req, resp); err != nil {
+	redirectURL := fmt.Sprintf("http://localhost:%d/callback", port)
+
+	// Register a client ourselves so we know its ID/secret and can persist
+	// them for refresh. The SDK's internal dynamic registration never exposes
+	// the resulting client ID.
+	reg, err := h.discoverAndRegister(authCtx, redirectURL)
+	if err != nil {
+		resp.Body.Close()
 		return err
 	}
-	// After a successful Authorize the inner handler holds a fresh
-	// token source. Cache it and persist to disk.
-	ts, _ := inner.TokenSource(ctx)
+
+	inner, err := h.buildInner(reg, port, redirectURL)
+	if err != nil {
+		resp.Body.Close()
+		return err
+	}
+	// inner.Authorize takes ownership of resp and closes its body.
+	if err := inner.Authorize(authCtx, req, resp); err != nil {
+		return err
+	}
+
+	ts, _ := inner.TokenSource(authCtx)
+	if ts == nil {
+		// The SDK short-circuits non-OAuth 403s (e.g. a genuine permission
+		// error, not an auth challenge) by returning nil without establishing
+		// a token source. Don't discard any previously restored token in that
+		// case.
+		return nil
+	}
+
+	// After a successful Authorize the inner handler holds a fresh token
+	// source. Cache it and persist to disk.
 	h.mu.Lock()
 	h.tokenSrc = ts
-	h.inner = inner
 	h.mu.Unlock()
-	if ts != nil {
-		if tok, err := ts.Token(); err == nil {
-			h.persistToken(tok)
-		}
+	if tok, err := ts.Token(); err == nil {
+		h.store.save(h.serverURL, mcptoken{
+			Token:        tok,
+			ClientID:     reg.clientID,
+			ClientSecret: reg.clientSecret,
+			AuthStyle:    int(reg.authStyle),
+			Endpoints: oauthEndpoints{
+				AuthURL:  reg.authURL,
+				TokenURL: reg.tokenURL,
+			},
+		})
 	}
 	return nil
 }
 
-// buildInner lazily creates the SDK AuthorizationCodeHandler. The
-// redirect URL is allocated on first use because we need a free port.
-func (h *mcpOAuthHandler) buildInner(ctx context.Context) (*auth.AuthorizationCodeHandler, error) {
-	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, fmt.Errorf("failed to allocate callback port: %w", err)
+// buildInner creates the SDK AuthorizationCodeHandler using the client we
+// already registered, so that the token is issued under a client ID we can
+// persist and later refresh with.
+func (h *mcpOAuthHandler) buildInner(reg *clientRegistration, port int, redirectURL string) (*auth.AuthorizationCodeHandler, error) {
+	creds := &oauthex.ClientCredentials{ClientID: reg.clientID}
+	if reg.clientSecret != "" {
+		creds.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: reg.clientSecret}
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close() // the handler's callback server will re-listen
-	redirectURL := fmt.Sprintf("http://localhost:%d/callback", port)
-
 	cfg := &auth.AuthorizationCodeHandlerConfig{
-		DynamicClientRegistrationConfig: &auth.DynamicClientRegistrationConfig{
-			Metadata: &oauthex.ClientRegistrationMetadata{
-				ClientName:              "Crush",
-				RedirectURIs:            []string{redirectURL},
-				GrantTypes:              []string{"authorization_code", "refresh_token"},
-				ResponseTypes:           []string{"code"},
-				TokenEndpointAuthMethod: "none",
-				Scope:                   "mcp",
-			},
-		},
-		RedirectURL: redirectURL,
+		PreregisteredClient: creds,
+		RedirectURL:         redirectURL,
 		AuthorizationCodeFetcher: func(fetchCtx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
 			return openBrowserAndCapture(fetchCtx, args.URL, port, h.serverURL)
 		},
@@ -185,43 +288,59 @@ func (h *mcpOAuthHandler) buildInner(ctx context.Context) (*auth.AuthorizationCo
 	return auth.NewAuthorizationCodeHandler(cfg)
 }
 
-// persistToken saves the current token to the store. It is called
-// after Authorize succeeds and lazily captures the endpoint/client info
-// from the inner handler.
-func (h *mcpOAuthHandler) persistToken(tok *oauth2.Token) {
-	entry := mcptoken{Token: tok}
-	h.mu.Lock()
-	inner := h.inner
-	h.mu.Unlock()
-	if inner != nil {
-		// Best-effort: the inner handler doesn't expose its config, so
-		// we fetch the metadata endpoints now to persist them for use
-		// on the next startup.
-		endpoints, clientID := h.discoverEndpoints(context.Background(), h.serverURL)
-		entry.Endpoints.AuthURL = endpoints.AuthURL
-		entry.Endpoints.TokenURL = endpoints.TokenURL
-		entry.ClientID = clientID
+// discoverAndRegister discovers the authorization server for the MCP server and
+// dynamically registers a client with it, returning the client credentials and
+// endpoints needed to complete and later refresh the flow.
+func (h *mcpOAuthHandler) discoverAndRegister(ctx context.Context, redirectURL string) (*clientRegistration, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	asm, err := h.discoverAuthServer(ctx, client)
+	if err != nil {
+		return nil, err
 	}
-	h.store.save(h.serverURL, entry)
+	if asm.RegistrationEndpoint == "" {
+		return nil, fmt.Errorf("authorization server %q does not support dynamic client registration", asm.Issuer)
+	}
+	meta := &oauthex.ClientRegistrationMetadata{
+		ClientName:              "Crush",
+		RedirectURIs:            []string{redirectURL},
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		ResponseTypes:           []string{"code"},
+		TokenEndpointAuthMethod: "none",
+		Scope:                   "mcp",
+	}
+	reg, err := oauthex.RegisterClient(ctx, asm.RegistrationEndpoint, meta, client)
+	if err != nil {
+		return nil, fmt.Errorf("dynamic client registration failed: %w", err)
+	}
+	if reg.ClientID == "" {
+		return nil, fmt.Errorf("dynamic client registration returned an empty client_id")
+	}
+	return &clientRegistration{
+		clientID:     reg.ClientID,
+		clientSecret: reg.ClientSecret,
+		authURL:      asm.AuthorizationEndpoint,
+		tokenURL:     asm.TokenEndpoint,
+		authStyle:    authStyleForRegistration(reg, asm),
+	}, nil
 }
 
-// discoverEndpoints fetches the OAuth metadata for the server URL to
-// extract the authorization and token endpoints. This is used to
-// persist enough info to restore the token source on restart.
-func (h *mcpOAuthHandler) discoverEndpoints(ctx context.Context, serverURL string) (struct{ AuthURL, TokenURL string }, string) {
-	result := struct{ AuthURL, TokenURL string }{}
-	u, err := url.Parse(serverURL)
+// discoverAuthServer resolves the OAuth authorization server metadata for the
+// MCP server URL, following RFC 9728 protected-resource-metadata discovery and
+// falling back to treating the server origin as the authorization server.
+func (h *mcpOAuthHandler) discoverAuthServer(ctx context.Context, client *http.Client) (*oauthex.AuthServerMeta, error) {
+	u, err := url.Parse(h.serverURL)
 	if err != nil {
-		return result, ""
+		return nil, fmt.Errorf("invalid MCP server URL %q: %w", h.serverURL, err)
 	}
+	origin := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+
 	// Try RFC 9728 protected resource metadata.
 	prmURLs := []string{
-		fmt.Sprintf("%s/.well-known/oauth-protected-resource/%s", fmt.Sprintf("%s://%s", u.Scheme, u.Host), strings.TrimLeft(u.Path, "/")),
-		fmt.Sprintf("%s://%s/.well-known/oauth-protected-resource", u.Scheme, u.Host),
+		fmt.Sprintf("%s/.well-known/oauth-protected-resource/%s", origin, strings.TrimLeft(u.Path, "/")),
+		fmt.Sprintf("%s/.well-known/oauth-protected-resource", origin),
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
 	for _, pURL := range prmURLs {
-		prm, err := oauthex.GetProtectedResourceMetadata(ctx, pURL, serverURL, client)
+		prm, err := oauthex.GetProtectedResourceMetadata(ctx, pURL, h.serverURL, client)
 		if err != nil || prm == nil || len(prm.AuthorizationServers) == 0 {
 			continue
 		}
@@ -229,18 +348,67 @@ func (h *mcpOAuthHandler) discoverEndpoints(ctx context.Context, serverURL strin
 		if err != nil || asm == nil {
 			continue
 		}
-		result.AuthURL = asm.AuthorizationEndpoint
-		result.TokenURL = asm.TokenEndpoint
-		return result, ""
+		return asm, nil
 	}
+
 	// Fallback: server root as authorization server.
-	authServer := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
-	asm, err := auth.GetAuthServerMetadata(ctx, authServer, client)
-	if err == nil && asm != nil {
-		result.AuthURL = asm.AuthorizationEndpoint
-		result.TokenURL = asm.TokenEndpoint
+	asm, err := auth.GetAuthServerMetadata(ctx, origin, client)
+	if err != nil {
+		return nil, fmt.Errorf("could not discover OAuth authorization server for %s: %w", h.serverURL, err)
 	}
-	return result, ""
+	if asm == nil {
+		return nil, fmt.Errorf("no OAuth authorization server metadata found for %s", h.serverURL)
+	}
+	return asm, nil
+}
+
+// isInsufficientScope reports whether the response's WWW-Authenticate header
+// carries a Bearer "insufficient_scope" error, i.e. a step-up authorization
+// prompt rather than a hard permission denial.
+func isInsufficientScope(resp *http.Response) bool {
+	challenges, err := oauthex.ParseWWWAuthenticate(resp.Header[http.CanonicalHeaderKey("WWW-Authenticate")])
+	if err != nil {
+		return false
+	}
+	for _, c := range challenges {
+		if c.Scheme == "bearer" && c.Params["error"] == "insufficient_scope" {
+			return true
+		}
+	}
+	return false
+}
+
+// authStyleForRegistration mirrors the SDK's choice of how the client
+// authenticates at the token endpoint, so the persisted config refreshes the
+// same way the initial exchange happened.
+func authStyleForRegistration(reg *oauthex.ClientRegistrationResponse, asm *oauthex.AuthServerMeta) oauth2.AuthStyle {
+	if reg.ClientSecret == "" {
+		// Public client (PKCE): the client_id is sent as a request parameter.
+		return oauth2.AuthStyleInParams
+	}
+	for _, m := range asm.TokenEndpointAuthMethodsSupported {
+		switch m {
+		case "client_secret_post":
+			return oauth2.AuthStyleInParams
+		case "client_secret_basic":
+			return oauth2.AuthStyleInHeader
+		}
+	}
+	return oauth2.AuthStyleAutoDetect
+}
+
+// allocateCallbackPort reserves a free localhost port for the OAuth callback
+// server. The listener is closed immediately; the callback server re-listens on
+// the same port.
+func allocateCallbackPort(ctx context.Context) (int, error) {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("failed to allocate callback port: %w", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	return port, nil
 }
 
 // openBrowserAndCapture opens the authorization URL in the user's
@@ -283,13 +451,14 @@ func openBrowserAndCapture(ctx context.Context, authURL string, port int, server
 
 	slog.Info("Opening browser for MCP server authorization", "url", authURL)
 	if err := browser.OpenURL(authURL); err != nil {
-		// If the browser can't be opened (headless, remote SSH, etc.), return
-		// a user-facing error containing the exact URL so the TUI can show it.
-		return nil, fmt.Errorf(
-			"could not open browser for MCP OAuth (%s): %w\nopen this URL manually to continue:\n%s",
-			serverName,
-			err,
-			authURL,
+		// If the browser can't be opened (headless, remote SSH, etc.), keep the
+		// callback listener running and tell the user to open the URL manually.
+		// Returning here would tear down the listener and make manual
+		// completion impossible.
+		slog.Warn("Could not open browser for MCP OAuth; open this URL manually to authorize",
+			"server", serverName,
+			"url", authURL,
+			"error", err,
 		)
 	}
 

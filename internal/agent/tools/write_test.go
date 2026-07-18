@@ -24,6 +24,31 @@ func (m mockFileTrackerService) ListReadFiles(ctx context.Context, sessionID str
 	return nil, nil
 }
 
+func TestWriteToolRespectsCrushignore(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, ".crushignore"), []byte("_*.md\n"), 0o644))
+
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	tool := NewWriteTool(nil, &mockPermissionService{}, &mockHistoryService{}, mockFileTrackerService{}, workingDir)
+
+	input, err := json.Marshal(WriteParams{FilePath: "_secret.md", Content: "sneaky"})
+	require.NoError(t, err)
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "test-call",
+		Name:  WriteToolName,
+		Input: string(input),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "ignored")
+
+	_, statErr := os.Stat(filepath.Join(workingDir, "_secret.md"))
+	require.True(t, os.IsNotExist(statErr), "file should not have been created")
+}
+
 func TestWriteToolWritesEmptyNewFile(t *testing.T) {
 	t.Parallel()
 

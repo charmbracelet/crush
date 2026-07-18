@@ -2,10 +2,12 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -74,6 +76,37 @@ func (m *mockHistoryService) Delete(ctx context.Context, id string) error {
 
 func (m *mockHistoryService) DeleteSessionFiles(ctx context.Context, sessionID string) error {
 	return nil
+}
+
+func TestMultiEditToolRespectsCrushignore(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, ".crushignore"), []byte("_*.md\n"), 0o644))
+	testFile := filepath.Join(workingDir, "_secret.md")
+	require.NoError(t, os.WriteFile(testFile, []byte("line 1\n"), 0o644))
+
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	tool := NewMultiEditTool(nil, &mockPermissionService{}, &mockHistoryService{}, mockFileTrackerService{}, workingDir)
+
+	input, err := json.Marshal(MultiEditParams{
+		FilePath: "_secret.md",
+		Edits:    []MultiEditOperation{{OldString: "line 1", NewString: "LINE 1"}},
+	})
+	require.NoError(t, err)
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "test-call",
+		Name:  MultiEditToolName,
+		Input: string(input),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "ignored")
+
+	content, err := os.ReadFile(testFile)
+	require.NoError(t, err)
+	require.Equal(t, "line 1\n", string(content), "file should not have been modified")
 }
 
 func TestApplyEditToContentPartialSuccess(t *testing.T) {

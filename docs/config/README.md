@@ -1,6 +1,7 @@
 # Config
 
-> [!NOTE] This document was designed for both humans and agents.
+> [!NOTE]
+> This document was designed for both humans and agents.
 
 Crush is configured with a little Bash script called `crush.sh`. Think of it as
 a `.bashrc` for your agent: it runs when Crush starts, and you set things up by
@@ -25,24 +26,25 @@ Prefer JSON? `crush.json` still works and happily coexists with `crush.sh`. See
 
 ## Baby's First Config
 
-Let's set a provider and pick our models. Drop this in
-`~/.config/crush/crush.sh` (global) or `./crush.sh` (project):
+Let's wire up a local [Ollama](https://ollama.com) provider and use it. Drop
+this in `~/.config/crush/crush.sh` (global) or `./crush.sh` (project):
 
 ```bash
 #!/usr/bin/env bash
 
-# Add a provider. The API key is pulled from your environment at load time.
-provider add anthropic --api-key "$ANTHROPIC_API_KEY"
+# Add a local Ollama provider. It runs on your machine, so there's no API key.
+provider add ollama --type ollama --base-url "http://localhost:11434/v1"
 
-# Pick the big model for coding and a small one for summaries.
-model large anthropic/claude-sonnet-4-20250514 --max-tokens 16384
-model small anthropic/claude-haiku-4-20250514
+# Register a model you've pulled (ollama pull llama3.3), then make it the big one.
+model add ollama/llama3.3 --name "Llama 3.3" --context-window 128000
+model large ollama/llama3.3
 
 # Auto-approve a few safe tools so Crush stops asking.
 permissions allow view ls grep
 ```
 
-That's it. Start Crush and you're configured. Read on for the full command list.
+That's it. Start Crush and you're configured. Read on for the full command
+list.
 
 ## Where config lives
 

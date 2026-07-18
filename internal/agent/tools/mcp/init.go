@@ -55,7 +55,7 @@ func (s *ClientSession) Close() error {
 var (
 	sessions = csync.NewMap[string, *ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
-	broker   = pubsub.NewBroker[Event]()
+	broker   = pubsub.NewBrokerWithName[Event]("mcp")
 	initOnce sync.Once
 	initDone = make(chan struct{})
 

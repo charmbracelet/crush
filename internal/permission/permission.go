@@ -82,6 +82,9 @@ type Service interface {
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+
+	// Stats returns broker health metrics for diagnostics.
+	Stats() pubsub.BrokerStats
 }
 
 // PermissionKey is a composite key for session permission lookups.
@@ -297,8 +300,8 @@ func (s *permissionService) SkipRequests() bool {
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	svc := &permissionService{
-		Broker:              pubsub.NewBroker[PermissionRequest](),
-		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
+		Broker:              pubsub.NewBrokerWithName[PermissionRequest]("permissions"),
+		notificationBroker:  pubsub.NewBrokerWithName[PermissionNotification]("permissions_notifications"),
 		workingDir:          workingDir,
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),

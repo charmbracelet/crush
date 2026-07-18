@@ -28,6 +28,7 @@ type Prompt struct {
 	workingDir         string
 	subagentBody       string
 	preloadedSkillsXML string
+	availSubagentXML   string
 	// suppressAvailableSkills omits the <available_skills> discovery list. Set
 	// for subagents that pin an explicit skills set, so the preloaded skills are
 	// their only skill exposure.
@@ -46,6 +47,7 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	AvailSubagentXML   string
 	SubagentBody       string
 	PreloadedSkillsXML string
 }
@@ -85,6 +87,16 @@ func WithSubagentBody(body string) Option {
 
 func WithPreloadedSkillsXML(xml string) Option {
 	return func(p *Prompt) { p.preloadedSkillsXML = xml }
+}
+
+// WithAvailableSubagentsXML sets the pre-rendered <available_subagents> XML
+// block for the coder prompt (see subagents.ToPromptXML). The caller supplies
+// the already-discovered active-subagent list rather than this package doing
+// its own discovery, so the prompt's view of "available subagents" and the
+// agent tool's subagent_type enum are guaranteed to come from the same
+// snapshot.
+func WithAvailableSubagentsXML(xml string) Option {
+	return func(p *Prompt) { p.availSubagentXML = xml }
 }
 
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
@@ -189,6 +201,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 			Model:              model,
 			SubagentBody:       p.subagentBody,
 			PreloadedSkillsXML: p.preloadedSkillsXML,
+			AvailSubagentXML:   p.availSubagentXML,
 		}, nil
 	}
 
@@ -246,6 +259,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		Platform:           platform,
 		Date:               p.now().Format("1/2/2006"),
 		AvailSkillXML:      availSkillXML,
+		AvailSubagentXML:   p.availSubagentXML,
 		SubagentBody:       p.subagentBody,
 		PreloadedSkillsXML: p.preloadedSkillsXML,
 	}

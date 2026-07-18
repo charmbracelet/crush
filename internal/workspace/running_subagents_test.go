@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -339,13 +340,14 @@ func TestAppWorkspace_DeleteUserSubagent_NonUserScope(t *testing.T) {
 }
 
 // TestAppWorkspace_DeleteUserSubagent_Success verifies that deleting a
-// user-scope subagent removes the file from disk and the agent no longer
-// appears in AllSubagents after the internal Manager is reloaded.
+// subagent whose file lives in a global (user-scope) subagents directory
+// removes the file from disk and the agent no longer appears in AllSubagents
+// after the internal Manager is reloaded. Not parallel: pins the global
+// subagents dir via CRUSH_SUBAGENTS_DIR.
 func TestAppWorkspace_DeleteUserSubagent_Success(t *testing.T) {
-	t.Parallel()
-
 	workDir := t.TempDir()
 	userDir := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
 
 	userFile := filepath.Join(userDir, "user-agent.md")
 	require.NoError(t, os.WriteFile(
@@ -378,6 +380,86 @@ func TestAppWorkspace_DeleteUserSubagent_Success(t *testing.T) {
 	for _, info := range w.AllSubagents() {
 		require.NotEqual(t, "user-agent", info.Name, "deleted agent must not appear in AllSubagents after reload")
 	}
+}
+
+// TestAppWorkspace_DeleteUserSubagent_OutsideGlobalDirsRefused verifies that a
+// subagent that merely *displays* as user scope (its file lives in a custom
+// discovery path, not in a global subagents dir) is refused deletion — scope
+// labeling is display-oriented and must not authorize file removal.
+func TestAppWorkspace_DeleteUserSubagent_OutsideGlobalDirsRefused(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	customDir := t.TempDir()
+
+	customFile := filepath.Join(customDir, "custom-agent.md")
+	require.NoError(t, os.WriteFile(
+		customFile,
+		[]byte("---\nname: custom-agent\ndescription: Custom path agent.\n---\n\nBody.\n"),
+		0o644,
+	))
+
+	customAgent := &subagents.Subagent{Name: "custom-agent", Description: "Custom path agent.", FilePath: customFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{customAgent},
+		[]*subagents.Subagent{customAgent},
+		nil,
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
+	}
+
+	require.Error(t, w.DeleteUserSubagent("custom-agent"))
+	_, statErr := os.Stat(customFile)
+	require.NoError(t, statErr, "the file must not have been deleted")
+}
+
+// TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope verifies that a
+// subagent discovered at the git worktree root — outside the working
+// directory — is labeled project scope, not user scope (a user-scope label
+// previously made repo-tracked files deletable).
+func TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope(t *testing.T) {
+	t.Parallel()
+
+	// Resolve symlinks up front: macOS temp dirs live behind /private
+	// symlinks, and git rev-parse --show-toplevel (what worktreeRoot uses)
+	// reports the resolved path — file paths must match that view.
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	out, err := exec.Command("git", "init", repoRoot).CombinedOutput()
+	require.NoError(t, err, "git init: %s", out)
+
+	workDir := filepath.Join(repoRoot, "apps", "web")
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+
+	rootFile := filepath.Join(repoRoot, ".agents", "subagents", "root-agent.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(rootFile), 0o755))
+	require.NoError(t, os.WriteFile(
+		rootFile,
+		[]byte("---\nname: root-agent\ndescription: Monorepo root agent.\n---\n\nBody.\n"),
+		0o644,
+	))
+
+	rootAgent := &subagents.Subagent{Name: "root-agent", Description: "Monorepo root agent.", FilePath: rootFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{rootAgent},
+		[]*subagents.Subagent{rootAgent},
+		nil,
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
+	}
+
+	got := w.AllSubagents()
+	require.Len(t, got, 1)
+	require.Equal(t, "project", got[0].Scope, "a worktree-root subagent must be project scope")
+	require.Error(t, w.DeleteUserSubagent("root-agent"), "a worktree-root subagent must not be deletable")
 }
 
 // TestAppWorkspace_SessionTokens_Found verifies that SessionTokens returns the
@@ -439,12 +521,13 @@ func TestAddOrRemove(t *testing.T) {
 // TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel verifies that the
 // reload after a delete validates model ids (passes cfg.IsKnownModel, not
 // nil). A subagent referencing an unknown model must NOT become active after
-// the reload — with a nil validator it would be wrongly accepted.
+// the reload — with a nil validator it would be wrongly accepted. Not
+// parallel: pins the global subagents dir via CRUSH_SUBAGENTS_DIR so the
+// delete passes the user-scope check.
 func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
-	t.Parallel()
-
 	workDir := t.TempDir()
 	userDir := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
 
 	// One valid user subagent to delete, and one with an unknown model id.
 	keepFile := filepath.Join(userDir, "keep-agent.md")

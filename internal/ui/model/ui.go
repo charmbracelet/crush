@@ -1637,13 +1637,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
 			cfg.Options.NotificationStyle = msg.Style
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notification_style", msg.Style); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			} else {
-				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
-			}
-			// Reinitialize notification backend with new style.
+			// Reinitialize notification backend so the new style takes
+			// effect immediately.
 			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
+		}
+		if err := m.com.Workspace.SetNotificationStyle(config.ScopeGlobal, msg.Style); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		} else {
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionSendTestNotification:
@@ -1662,12 +1663,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				cfg.Options.TUI = &config.TUIOptions{}
 			}
 			cfg.Options.TUI.Scrollbar = msg.Style
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.scrollbar", msg.Style); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			} else {
-				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Scrollbar set to: "+msg.Style)))
-			}
 			m.chat.SetScrollbarMode(msg.Style)
+		}
+		if err := m.com.Workspace.SetScrollbar(config.ScopeGlobal, msg.Style); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		} else {
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Scrollbar set to: "+msg.Style)))
 		}
 		m.dialog.CloseDialog(dialog.ScrollbarID)
 	case dialog.ActionNewSession:
@@ -1740,38 +1741,25 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
-		// Capture preferences dialog reference before the async command so
-		// we can refresh the label after the config write completes.
-		var prefsDialog *dialog.Preferences
-		if m.dialog.ContainsDialog(dialog.PreferencesID) {
-			if dlg := m.dialog.Dialog(dialog.PreferencesID); dlg != nil {
-				prefsDialog, _ = dlg.(*dialog.Preferences)
-			}
-		}
-		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent
-			newValue := !isTransparent
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
-				return util.ReportError(err)()
-			}
+		newValue := !m.isTransparent
+		if err := m.com.Workspace.SetTransparentBackground(config.ScopeGlobal, newValue); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		} else {
 			m.isTransparent = newValue
-
-			// Refresh the label now that the config has been written.
-			if prefsDialog != nil {
-				prefsDialog.RefreshItems()
+			// Refresh the preferences label to match the new state.
+			if m.dialog.ContainsDialog(dialog.PreferencesID) {
+				if dlg := m.dialog.Dialog(dialog.PreferencesID); dlg != nil {
+					if prefs, ok := dlg.(*dialog.Preferences); ok {
+						prefs.RefreshItems()
+					}
+				}
 			}
-
 			status := "disabled"
 			if newValue {
 				status = "enabled"
 			}
-			return util.NewInfoMsg("Transparent background " + status)
-		})
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Transparent background "+status)))
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)

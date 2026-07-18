@@ -654,16 +654,23 @@ func (c *Config) cloneForWrite() *Config {
 	return &nc
 }
 
-// ensureTUI returns c.Options.TUI, allocating Options and TUI as needed so
-// callers can assign TUI fields without nil checks.
-func (c *Config) ensureTUI() *TUIOptions {
+// ensureOptions returns c.Options, allocating it as needed so callers can
+// assign option fields without nil checks.
+func (c *Config) ensureOptions() *Options {
 	if c.Options == nil {
 		c.Options = &Options{}
 	}
-	if c.Options.TUI == nil {
-		c.Options.TUI = &TUIOptions{}
+	return c.Options
+}
+
+// ensureTUI returns c.Options.TUI, allocating Options and TUI as needed so
+// callers can assign TUI fields without nil checks.
+func (c *Config) ensureTUI() *TUIOptions {
+	opts := c.ensureOptions()
+	if opts.TUI == nil {
+		opts.TUI = &TUIOptions{}
 	}
-	return c.Options.TUI
+	return opts.TUI
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {

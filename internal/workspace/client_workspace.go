@@ -492,6 +492,30 @@ func (w *ClientWorkspace) SetCompactMode(scope config.Scope, enabled bool) error
 	return err
 }
 
+func (w *ClientWorkspace) SetTransparentBackground(scope config.Scope, enabled bool) error {
+	err := w.client.SetTransparentBackground(context.Background(), w.workspaceID(), scope, enabled)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
+func (w *ClientWorkspace) SetScrollbar(scope config.Scope, style string) error {
+	err := w.client.SetScrollbar(context.Background(), w.workspaceID(), scope, style)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
+func (w *ClientWorkspace) SetNotificationStyle(scope config.Scope, style string) error {
+	err := w.client.SetNotificationStyle(context.Background(), w.workspaceID(), scope, style)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
 func (w *ClientWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
 	err := w.client.SetProviderAPIKey(context.Background(), w.workspaceID(), scope, providerID, apiKey)
 	if err == nil {

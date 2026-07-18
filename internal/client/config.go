@@ -77,6 +77,54 @@ func (c *Client) SetCompactMode(ctx context.Context, id string, scope config.Sco
 	return nil
 }
 
+// SetTransparentBackground sets the transparent background on the server.
+func (c *Client) SetTransparentBackground(ctx context.Context, id string, scope config.Scope, enabled bool) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/transparent", id), nil, jsonBody(struct {
+		Scope   config.Scope `json:"scope"`
+		Enabled bool         `json:"enabled"`
+	}{Scope: scope, Enabled: enabled}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set transparent background: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set transparent background: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// SetScrollbar sets the scrollbar style on the server.
+func (c *Client) SetScrollbar(ctx context.Context, id string, scope config.Scope, style string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/scrollbar", id), nil, jsonBody(struct {
+		Scope config.Scope `json:"scope"`
+		Style string       `json:"style"`
+	}{Scope: scope, Style: style}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set scrollbar: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set scrollbar: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// SetNotificationStyle sets the notification style on the server.
+func (c *Client) SetNotificationStyle(ctx context.Context, id string, scope config.Scope, style string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/notification", id), nil, jsonBody(struct {
+		Scope config.Scope `json:"scope"`
+		Style string       `json:"style"`
+	}{Scope: scope, Style: style}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set notification style: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set notification style: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // SetProviderAPIKey sets a provider API key on the server. The wire
 // format tags the credential with an explicit Kind so the server can
 // decode it back into the right Go type — JSON's `any` loses that

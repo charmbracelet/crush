@@ -344,6 +344,18 @@ func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 	return w.store.SetCompactMode(scope, enabled)
 }
 
+func (w *AppWorkspace) SetTransparentBackground(scope config.Scope, enabled bool) error {
+	return w.store.SetTransparentBackground(scope, enabled)
+}
+
+func (w *AppWorkspace) SetScrollbar(scope config.Scope, style string) error {
+	return w.store.SetScrollbar(scope, style)
+}
+
+func (w *AppWorkspace) SetNotificationStyle(scope config.Scope, style string) error {
+	return w.store.SetNotificationStyle(scope, style)
+}
+
 func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
 	if err := w.store.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
 		return err

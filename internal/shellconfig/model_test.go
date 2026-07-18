@@ -71,7 +71,7 @@ func TestModelUnset(t *testing.T) {
 	result := loadScript(t, `provider add openai --api-key k
 model add openai/a --name "A"
 model add openai/b --name "B"
-model unset openai/a`)
+model remove openai/a`)
 
 	models := result["providers"].(map[string]any)["openai"].(map[string]any)["models"].([]any)
 	require.Len(t, models, 1)
@@ -111,9 +111,28 @@ func TestProviderUnset(t *testing.T) {
 
 	result := loadScript(t, `provider add openai --api-key k
 provider add anthropic --api-key k
-provider unset openai`)
+provider remove openai`)
 
 	providers := result["providers"].(map[string]any)
 	require.NotContains(t, providers, "openai")
 	require.Contains(t, providers, "anthropic")
+}
+
+// TestRemoveRmAlias verifies that "rm" works as an alias for "remove" on both
+// provider and model.
+func TestRemoveRmAlias(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add openai --api-key k
+provider add anthropic --api-key k
+model add openai/a --name "A"
+model add openai/b --name "B"
+model rm openai/a
+provider rm anthropic`)
+
+	providers := result["providers"].(map[string]any)
+	require.NotContains(t, providers, "anthropic")
+	models := providers["openai"].(map[string]any)["models"].([]any)
+	require.Len(t, models, 1)
+	require.Equal(t, "b", models[0].(map[string]any)["id"])
 }

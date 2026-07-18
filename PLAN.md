@@ -612,7 +612,7 @@ The first implementation accumulated one JSON fragment per builtin call and
 deep-merged them with `jsons.Merge`. That works for purely additive config,
 but a `crush.sh` is an **imperative, ordered** script (statements run top to
 bottom, `source` runs inline), and the fragment approach flattens that order
-away. Every non-additive feature (`option reset`, `provider unset`) then
+away. Every non-additive feature (`option reset`, `provider remove`) then
 needs a marker value plus a post-merge resolver pass to reconstruct intent —
 machinery that grows with each verb.
 
@@ -636,7 +636,7 @@ the builder is last-wins: whatever is applied last overrides earlier state.
     global  →  parent dirs  →  cwd/local        (local applied last, local wins)
 
 This ordering is also what makes cross-file removal work: a local
-`provider unset openai` can only drop what a global config set if local is
+`provider remove openai` can only drop what a global config set if local is
 applied *after* global.
 
 ### Phased path (JSON is slated for retirement)
@@ -673,7 +673,7 @@ provider add <id> [flags]
     --system-prompt-prefix TEXT  Prefix injected into system prompt (json: system_prompt_prefix)
     --extra-header KEY VALUE     Extra HTTP header, repeatable (json: extra_headers[KEY])
 
-provider unset <id>
+provider remove <id>   (alias: rm)
     Remove a provider and all of its children (its custom models).
 ```
 
@@ -692,7 +692,7 @@ model add <provider>/<id> [flags]
     --cost-per-1m-out F          Output cost per 1M tokens (json: cost_per_1m_out)
     --reasoning-effort LEVEL     low|medium|high (json: default_reasoning_effort)
 
-model unset <provider>/<id>
+model remove <provider>/<id>   (alias: rm)
     Remove a custom model from the provider's catalog.
 
 model large [<provider>/<id>] [flags]

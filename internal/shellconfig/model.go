@@ -16,13 +16,13 @@ import (
 //	    [--default-max-tokens N] [--can-reason true|false]
 //	    [--supports-images true|false] [--cost-per-1m-in F]
 //	    [--cost-per-1m-out F] [--reasoning-effort low|medium|high]
-//	model unset <provider>/<id>
+//	model remove <provider>/<id>   (alias: rm)
 //	model large [<provider>/<id>] [--think] [--reasoning-effort L]
 //	    [--max-tokens N] [--temperature F]
 //	model small [<provider>/<id>] [...]
 //
 // "add" registers a model on an existing provider (the provider must have
-// been declared with `provider add` first). "unset" removes it. "large" and
+// been declared with `provider add` first). "remove" removes it. "large" and
 // "small" set the selected model for that slot, or print the current
 // selection as <provider>/<id> when given no argument.
 func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -31,18 +31,18 @@ func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: model add|unset <provider>/<id> | model large|small [<provider>/<id>]")
+		return usage(stderr, "usage: model add|remove <provider>/<id> | model large|small [<provider>/<id>]")
 	}
 
 	switch args[1] {
 	case "add":
 		return modelAdd(b, args, stderr)
-	case "unset":
-		return modelUnset(b, args, stderr)
+	case "remove", "rm":
+		return modelRemove(b, args, stderr)
 	case "large", "small":
 		return modelSelect(b, args, stdout, stderr)
 	default:
-		return usage(stderr, fmt.Sprintf("model: unknown subcommand %q (expected add, unset, large, or small)", args[1]))
+		return usage(stderr, fmt.Sprintf("model: unknown subcommand %q (expected add, remove, large, or small)", args[1]))
 	}
 }
 
@@ -136,13 +136,13 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	return nil
 }
 
-func modelUnset(b *ConfigBuilder, args []string, stderr io.Writer) error {
+func modelRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: model unset <provider>/<id>")
+		return usage(stderr, "usage: model remove <provider>/<id>")
 	}
 	provider, id, ok := splitProviderModel(args[2])
 	if !ok {
-		return usage(stderr, fmt.Sprintf("model unset: expected <provider>/<id>, got %q", args[2]))
+		return usage(stderr, fmt.Sprintf("model remove: expected <provider>/<id>, got %q", args[2]))
 	}
 
 	providers := b.section("providers")

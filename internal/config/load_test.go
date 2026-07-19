@@ -827,6 +827,101 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.False(t, exists)
 	})
 
+	t.Run("custom provider with shell-expanded BaseURL is kept", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "$(echo https://api.custom.com/v1)",
+					Models: []catwalk.Model{{
+						ID: "test-model",
+					}},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		require.NoError(t, err)
+
+		require.Equal(t, 1, cfg.Providers.Len())
+		_, exists := cfg.Providers.Get("custom")
+		require.True(t, exists, "a BaseURL supplied via shell expansion must pass endpoint validation")
+	})
+
+	t.Run("custom provider with env var BaseURL is kept", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "$CUSTOM_API_URL",
+					Models: []catwalk.Model{{
+						ID: "test-model",
+					}},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{
+			"CUSTOM_API_URL": "https://api.custom.com/v1",
+		})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		require.NoError(t, err)
+
+		require.Equal(t, 1, cfg.Providers.Len())
+		_, exists := cfg.Providers.Get("custom")
+		require.True(t, exists, "a BaseURL supplied via an env variable must pass endpoint validation")
+	})
+
+	t.Run("custom provider whose BaseURL resolves to empty is removed", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "$MISSING_API_URL",
+					Models: []catwalk.Model{{
+						ID: "test-model",
+					}},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		require.NoError(t, err)
+
+		require.Equal(t, 0, cfg.Providers.Len())
+		_, exists := cfg.Providers.Get("custom")
+		require.False(t, exists, "a raw-non-empty BaseURL that resolves to empty must be rejected")
+	})
+
+	t.Run("BaseURL resolving to empty with disable_default_providers returns an error", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "$MISSING_API_URL",
+					Models: []catwalk.Model{{
+						ID: "test-model",
+					}},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+		cfg.Options.DisableDefaultProviders = true
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		require.Error(t, err, "the sole custom provider is invalid after resolution, so configuration must fail")
+	})
+
 	t.Run("custom provider with no models attempts discovery and is removed on failure", func(t *testing.T) {
 		cfg := &Config{
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{

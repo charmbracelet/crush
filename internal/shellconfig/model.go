@@ -14,8 +14,9 @@ import (
 //
 //	model add <provider>/<id> [--name NAME] [--context-window N]
 //	    [--default-max-tokens N] [--can-reason true|false]
-//	    [--supports-images true|false] [--cost-per-1m-in F]
-//	    [--cost-per-1m-out F] [--reasoning-effort low|medium|high]
+//	    [--supports-images true|false] [--price-input F]
+//	    [--price-output F] [--price-cache-create F]
+//	    [--price-cache-hit F] [--reasoning-effort low|medium|high]
 //	model remove <provider>/<id>   (alias: rm)
 //	model large [<provider>/<id>] [--think] [--reasoning-effort L]
 //	    [--max-tokens N] [--temperature F]
@@ -58,7 +59,7 @@ func splitProviderModel(s string) (provider, id string, ok bool) {
 
 func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: model add <provider>/<id> [--name NAME] [--context-window N] [--default-max-tokens N] [--can-reason true|false] [--supports-images true|false] [--cost-per-1m-in F] [--cost-per-1m-out F] [--reasoning-effort low|medium|high]")
+		return usage(stderr, "usage: model add <provider>/<id> [--name NAME] [--context-window N] [--default-max-tokens N] [--can-reason true|false] [--supports-images true|false] [--price-input F] [--price-output F] [--price-cache-create F] [--price-cache-hit F] [--reasoning-effort low|medium|high]")
 	}
 	provider, id, ok := splitProviderModel(args[2])
 	if !ok {
@@ -105,18 +106,30 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 				return usage(stderr, err.Error())
 			}
 			model["supports_attachments"] = v
-		case "--cost-per-1m-in":
-			v, err := flagFloat64(args, &i, "cost-per-1m-in")
+		case "--price-input":
+			v, err := flagFloat64(args, &i, "price-input")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
 			model["cost_per_1m_in"] = v
-		case "--cost-per-1m-out":
-			v, err := flagFloat64(args, &i, "cost-per-1m-out")
+		case "--price-output":
+			v, err := flagFloat64(args, &i, "price-output")
 			if err != nil {
 				return usage(stderr, err.Error())
 			}
 			model["cost_per_1m_out"] = v
+		case "--price-cache-create":
+			v, err := flagFloat64(args, &i, "price-cache-create")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			model["cost_per_1m_out_cached"] = v
+		case "--price-cache-hit":
+			v, err := flagFloat64(args, &i, "price-cache-hit")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			model["cost_per_1m_in_cached"] = v
 		case "--reasoning-effort":
 			v, err := flagStr(args, &i, "reasoning-effort")
 			if err != nil {

@@ -14,7 +14,9 @@ func TestShellConfigProviderAddAndModel(t *testing.T) {
   --type openai-compat \
   --base-url "http://localhost:1234/v1" \
   --api-key "sk-test"
-model add myllm/foo-1 --name "Foo 1" --context-window 8000
+model add myllm/foo-1 --name "Foo 1" --context-window 8000 \
+  --price-input 1.25 --price-output 5 \
+  --price-cache-create 2 --price-cache-hit 0.25
 model large myllm/foo-1`)
 
 	cfg := store.Config()
@@ -28,6 +30,11 @@ model large myllm/foo-1`)
 		slices.ContainsFunc(p.Models, func(m catwalk.Model) bool { return m.ID == "foo-1" }),
 		"custom model foo-1 should be in the provider catalog",
 	)
+	model := p.Models[0]
+	require.Equal(t, 1.25, model.CostPer1MIn)
+	require.Equal(t, 5.0, model.CostPer1MOut)
+	require.Equal(t, 2.0, model.CostPer1MOutCached)
+	require.Equal(t, 0.25, model.CostPer1MInCached)
 
 	large := cfg.Models[config.SelectedModelTypeLarge]
 	require.Equal(t, "myllm", large.Provider)

@@ -625,71 +625,38 @@ provider add deepseek --type openai-compat \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "$DEEPSEEK_API_KEY"
 
-model add deepseek/deepseek-chat --name "Deepseek V3" \
-  --context-window 64000 --default-max-tokens 5000 \
-  --cost-per-1m-in 0.27 --cost-per-1m-out 1.1
-# Cached-token costs (cost_per_1m_in_cached, …) don't have flags yet;
-# set those in crush.json if you need them.
-```
-
-```json
-// crush.json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "deepseek": {
-      "type": "openai-compat",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "$DEEPSEEK_API_KEY",
-      "models": [
-        {
-          "id": "deepseek-chat",
-          "name": "Deepseek V3",
-          "cost_per_1m_in": 0.27,
-          "cost_per_1m_out": 1.1,
-          "cost_per_1m_in_cached": 0.07,
-          "cost_per_1m_out_cached": 1.1,
-          "context_window": 64000,
-          "default_max_tokens": 5000
-        }
-      ]
-    }
-  }
-}
+model add deepseek/deepseek-chat \
+  --name "Deepseek V3" \
+  --context-window 64000 \
+  --default-max-tokens 5000 \
+  --price-input 0.27 \
+  --price-output 1.1 \
+  --price-cache-create 1.1 \
+  --price-cache-hit 0.07
 ```
 
 #### Anthropic-Compatible APIs
 
 Custom Anthropic-compatible providers follow this format:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "custom-anthropic": {
-      "type": "anthropic",
-      "base_url": "https://api.anthropic.com/v1",
-      "api_key": "$ANTHROPIC_API_KEY",
-      "extra_headers": {
-        "anthropic-version": "2023-06-01"
-      },
-      "models": [
-        {
-          "id": "claude-sonnet-4-20250514",
-          "name": "Claude Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
+```bash
+# crushrc
+provider add custom-anthropic \
+  --type anthropic \
+  --base-url "https://api.anthropic.com/v1" \
+  --api-key "$ANTHROPIC_API_KEY" \
+  --extra-header anthropic-version 2023-06-01
+
+model add custom-anthropic/claude-sonnet-4-20250514 \
+  --name "Claude Sonnet 4" \
+  --context-window 200000 \
+  --default-max-tokens 50000 \
+  --can-reason true \
+  --supports-images true \
+  --price-input 3 \
+  --price-output 15 \
+  --price-cache-create 3.75 \
+  --price-cache-hit 0.3
 ```
 
 ### Amazon Bedrock
@@ -711,28 +678,20 @@ $ gcloud auth application-default login
 
 To add specific models to the configuration, configure as such:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "vertexai": {
-      "models": [
-        {
-          "id": "claude-sonnet-4@20250514",
-          "name": "VertexAI Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
+```bash
+# crushrc — authentication still comes from gcloud and the VERTEXAI_* env vars.
+provider add vertexai --type google-vertex
+
+model add vertexai/claude-sonnet-4@20250514 \
+  --name "VertexAI Sonnet 4" \
+  --context-window 200000 \
+  --default-max-tokens 50000 \
+  --can-reason true \
+  --supports-images true \
+  --price-input 3 \
+  --price-output 15 \
+  --price-cache-create 3.75 \
+  --price-cache-hit 0.3
 ```
 
 ### Local Models
@@ -766,6 +725,23 @@ precedence over discovered ones, and any fields you set won't be overwritten
 by auto-discovery. Auto discovery will run if the model list is empty for any
 `openai-compat` provider or if you pass `"discover_models": true` it will merge
 the found models with your hand configured ones.
+
+```bash
+# crushrc
+provider add ollama \
+  --name Ollama \
+  --type ollama \
+  --base-url "http://localhost:11434/v1/"
+
+model add ollama/qwen3:30b \
+  --name "Qwen 3 30B" \
+  --context-window 256000 \
+  --default-max-tokens 20000
+```
+
+> [!NOTE]
+> `discover_models: true` does not have a `crushrc` flag yet. Use the JSON form
+> below if you want discovery to merge with models you configure manually.
 
 ```json
 {

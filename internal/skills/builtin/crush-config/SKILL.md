@@ -90,8 +90,9 @@ model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
 - `<provider>/<id>` is the same form `crush models` prints. A missing slash is
   an error. `model add` requires the provider to already exist.
 - `model add` flags: `--name`, `--context-window N`, `--default-max-tokens N`,
-  `--can-reason BOOL`, `--supports-images BOOL`, `--cost-per-1m-in F`,
-  `--cost-per-1m-out F`, `--reasoning-effort low|medium|high`.
+  `--can-reason BOOL`, `--supports-images BOOL`, `--price-input F`,
+  `--price-output F`, `--price-cache-create F`, `--price-cache-hit F`,
+  `--reasoning-effort low|medium|high`.
 - `model large`/`model small` flags: `--think`, `--reasoning-effort`,
   `--max-tokens N`, `--temperature F`.
 - `model large` with no argument prints the current selection as `provider/id`,

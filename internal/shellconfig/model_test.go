@@ -35,6 +35,29 @@ model add openai/gpt-5.6-sol --name "GPT 5.6 Sol" --context-window 200000 --can-
 	require.Equal(t, true, m["can_reason"])
 }
 
+func TestModelAddPricingFlags(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `provider add anthropic --api-key k
+model add anthropic/claude-x --price-input 3 --price-output 15 --price-cache-create 3.75 --price-cache-hit 0.3`)
+
+	model := result["providers"].(map[string]any)["anthropic"].(map[string]any)["models"].([]any)[0].(map[string]any)
+	require.Equal(t, 3.0, model["cost_per_1m_in"])
+	require.Equal(t, 15.0, model["cost_per_1m_out"])
+	require.Equal(t, 3.75, model["cost_per_1m_out_cached"])
+	require.Equal(t, 0.3, model["cost_per_1m_in_cached"])
+}
+
+func TestModelAddRejectsLegacyPricingFlags(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	_, err := LoadShellConfig(path, []byte(`provider add openai --api-key k
+model add openai/gpt-x --cost-per-1m-in 1`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown flag")
+}
+
 func TestModelAddUnknownProvider(t *testing.T) {
 	t.Parallel()
 

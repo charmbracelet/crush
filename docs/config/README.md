@@ -134,8 +134,10 @@ model small [<provider>/<id>]        Set the small slot — or print it if no ar
   --default-max-tokens N        Default max output tokens
   --can-reason BOOL             Model supports reasoning
   --supports-images BOOL        Model accepts image input
-  --cost-per-1m-in F            Input cost per 1M tokens
-  --cost-per-1m-out F           Output cost per 1M tokens
+  --price-input F               Input price per 1M tokens
+  --price-output F              Output price per 1M tokens
+  --price-cache-create F        Cache-creation price per 1M tokens
+  --price-cache-hit F           Cache-hit price per 1M tokens
   --reasoning-effort LEVEL      low | medium | high
 
   # model large / model small

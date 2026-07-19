@@ -751,8 +751,12 @@ model add <provider>/<id> [flags]
     --default-max-tokens N       Default max output tokens (json: default_max_tokens)
     --can-reason BOOL            Model supports reasoning (json: can_reason)
     --supports-images BOOL       Model accepts image input (json: supports_attachments)
-    --cost-per-1m-in F           Input cost per 1M tokens (json: cost_per_1m_in)
-    --cost-per-1m-out F          Output cost per 1M tokens (json: cost_per_1m_out)
+    --price-input F              Input price per 1M tokens (json: cost_per_1m_in)
+    --price-output F             Output price per 1M tokens (json: cost_per_1m_out)
+    --price-cache-create F       Cache-creation price per 1M tokens
+                                 (json: cost_per_1m_out_cached)
+    --price-cache-hit F          Cache-hit price per 1M tokens
+                                 (json: cost_per_1m_in_cached)
     --reasoning-effort LEVEL     low|medium|high (json: default_reasoning_effort)
 
 model remove <provider>/<id>   (alias: rm)

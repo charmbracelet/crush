@@ -573,7 +573,15 @@ initialization.
 ### Attribution Settings
 
 By default, Crush adds attribution information to Git commits and pull requests
-it creates. You can customize this behavior with the `attribution` option:
+it creates. You can customize this behavior with `option` commands:
+
+```bash
+# crushrc
+option attribution-trailer-style co-authored-by
+option attribution-generated-with true
+```
+
+Or with the legacy JSON format:
 
 ```json
 {

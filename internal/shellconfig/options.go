@@ -71,6 +71,38 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		val = args[2]
 	}
 
+	if key == "attribution-trailer-style" {
+		if val == "" {
+			return usage(stderr, "option: attribution-trailer-style requires a value")
+		}
+		switch val {
+		case "none", "co-authored-by", "assisted-by":
+		default:
+			return usage(stderr, fmt.Sprintf("option: attribution-trailer-style expects none, co-authored-by, or assisted-by, got %q", val))
+		}
+		attribution := childMap(o, "attribution")
+		if _, ok := attribution["generated_with"]; !ok {
+			attribution["generated_with"] = true
+		}
+		attribution["trailer_style"] = val
+		slog.Info("Option set in shell config", "key", key, "value", val)
+		return nil
+	}
+
+	if key == "attribution-generated-with" {
+		bv := true
+		if val != "" {
+			parsed, err := parseBool(val)
+			if err != nil {
+				return usage(stderr, fmt.Sprintf("option: attribution-generated-with expects true/false, got %q", val))
+			}
+			bv = parsed
+		}
+		childMap(o, "attribution")["generated_with"] = bv
+		slog.Info("Option set in shell config", "key", key, "value", bv)
+		return nil
+	}
+
 	jsonKey, inverted := optionKeyMap(key)
 	if jsonKey == "" {
 		return usage(stderr, fmt.Sprintf("option: unknown key %q", key))

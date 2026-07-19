@@ -861,6 +861,13 @@ option reset <list-key>
       initialize-as VALUE          (json: initialize_as)
       notification-style VALUE     (json: notification_style)
 
+    Attribution keys:
+      attribution-trailer-style VALUE
+        none | co-authored-by | assisted-by
+        (json: attribution.trailer_style)
+      attribution-generated-with BOOL
+        (json: attribution.generated_with)
+
     List keys (singular; value required; append one value per call):
       context-path VALUE           (json: context_paths)
       global-context-path VALUE    (json: global_context_paths)
@@ -872,6 +879,8 @@ option reset <list-key>
       option progress false
       option metrics false
       option data-directory .crush
+      option attribution-trailer-style assisted-by
+      option attribution-generated-with true
       option context-path .cursorrules
       option reset skill-path
 ```

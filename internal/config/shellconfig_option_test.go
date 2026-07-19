@@ -32,6 +32,38 @@ func TestShellConfigOptionPositiveMetricsBare(t *testing.T) {
 	require.False(t, store.Config().Options.DisableMetrics, "metrics on => disable_metrics false")
 }
 
+func TestShellConfigOptionAttribution(t *testing.T) {
+	store := loadCrushSh(t, `option attribution-trailer-style none
+option attribution-generated-with false`)
+
+	attribution := store.Config().Options.Attribution
+	require.NotNil(t, attribution)
+	require.Equal(t, "none", string(attribution.TrailerStyle))
+	require.False(t, attribution.GeneratedWith)
+}
+
+func TestShellConfigOptionAttributionTrailerStylePreservesGeneratedWithDefault(t *testing.T) {
+	store := loadCrushSh(t, `option attribution-trailer-style co-authored-by`)
+
+	attribution := store.Config().Options.Attribution
+	require.NotNil(t, attribution)
+	require.Equal(t, "co-authored-by", string(attribution.TrailerStyle))
+	require.True(t, attribution.GeneratedWith)
+}
+
+func TestShellConfigOptionAttributionGeneratedWithCaseInsensitive(t *testing.T) {
+	store := loadCrushSh(t, `option attribution-generated-with YES`)
+
+	require.NotNil(t, store.Config().Options.Attribution)
+	require.True(t, store.Config().Options.Attribution.GeneratedWith)
+}
+
+func TestShellConfigOptionAttributionRejectsInvalidStyle(t *testing.T) {
+	_, err := loadCrushShErr(t, `option attribution-trailer-style bogus`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects none, co-authored-by, or assisted-by")
+}
+
 func TestShellConfigOptionListAppends(t *testing.T) {
 	store := loadCrushSh(t, `option disable-skill crush-config
 option disable-skill jq`)

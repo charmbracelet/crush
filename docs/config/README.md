@@ -248,6 +248,10 @@ option reset <list-key>      Clear a list option back to empty
   Strings:
     data-directory, initialize-as, notification-style
 
+  Attribution:
+    attribution-trailer-style     none | co-authored-by | assisted-by
+    attribution-generated-with    true | false (case-insensitive)
+
   Lists (one value per call, repeatable; clear with "option reset <key>"):
     context-path, global-context-path, skill-path, disable-skill
 ```
@@ -256,6 +260,8 @@ option reset <list-key>      Clear a list option back to empty
 option progress false
 option skill-path ./skills
 option disable-skill crush-config
+option attribution-trailer-style assisted-by
+option attribution-generated-with true
 ```
 
 > [!IMPORTANT] These skill paths load by default — you do NOT need `skill-path`
@@ -283,8 +289,7 @@ script or pulled in via `source`. Later lines win, just like a shell.
 Most config has a command, but a handful of advanced knobs don't yet. Put them
 in a `crush.json` next to your `crushrc` (they merge):
 
-- Nested `options.tui` (compact mode, diff mode, transparency) and
-  `options.attribution`.
+- Nested `options.tui` (compact mode, diff mode, transparency).
 - Extra model tuning: `top_p`, `top_k`, `frequency_penalty`, `presence_penalty`,
   `provider_options`.
 - Provider `extra_body`, `provider_options`, `api_endpoint`, `discover_models`.

@@ -173,6 +173,8 @@ option reset <list-key>    # clear a list option back to empty
   `notifications`, `auto-summarize`, `provider-auto-update`,
   `default-providers`. Example: `option metrics false` disables metrics.
 - **String keys**: `data-directory`, `initialize-as`, `notification-style`.
+- **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
+  `assisted-by`) and `attribution-generated-with` (boolean).
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).
@@ -181,6 +183,8 @@ option reset <list-key>    # clear a list option back to empty
 option progress false
 option skill-path ./skills
 option disable-skill crush-config
+option attribution-trailer-style assisted-by
+option attribution-generated-with true
 ```
 
 > [!IMPORTANT] These skill paths are loaded by default and do NOT need
@@ -192,8 +196,7 @@ option disable-skill crush-config
 A few advanced fields have no builtin yet. Put them in a `crush.json` alongside
 your `crushrc` (they merge):
 
-- Nested `options.tui` (`compact_mode`, `diff_mode`, `transparent`) and
-  `options.attribution`.
+- Nested `options.tui` (`compact_mode`, `diff_mode`, `transparent`).
 - Extended model tuning: `top_p`, `top_k`, `frequency_penalty`,
   `presence_penalty`, `provider_options`.
 - Provider `extra_body`, `provider_options`, `api_endpoint`, `discover_models`.
@@ -338,6 +341,8 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
 | `option metrics false`               | `options.disable_metrics = true`                       |
+| `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
+| `option attribution-generated-with false` | `options.attribution.generated_with = false`       |
 
 ### Shell expansion in crush.json
 

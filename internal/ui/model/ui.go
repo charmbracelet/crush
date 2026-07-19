@@ -325,13 +325,21 @@ type UI struct {
 	promptQueueItems     []string
 	promptQueueCheckedAt time.Time
 	promptQueueInFlight  bool
+	// promptQueueGen is bumped by every queue state transition; an
+	// in-flight fetch captures it at dispatch and its result is discarded
+	// if the generation has moved on (see workspace_cache.go).
+	promptQueueGen uint64
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
 	agentBusyCache    ttlCache
 	yoloCache         ttlCache
 	busyFetchInFlight bool
-	pillsView         string
+	// busyFetchGen is bumped by every busy/permission state transition;
+	// like promptQueueGen it lets a stale in-flight probe result be
+	// discarded and re-fetched instead of clobbering newer state.
+	busyFetchGen uint64
+	pillsView    string
 
 	// Todo spinner
 	todoSpinner    spinner.Model
@@ -673,6 +681,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// authoritative busy/queue state to confirm the optimistic values
 		// sendMessage wrote.
 		m.invalidateBusyCaches()
+		m.invalidatePromptQueue()
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -692,6 +701,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// off-thread so the queue pill and esc behavior track the new
 		// session instead of a stale one.
 		m.invalidateBusyCaches()
+		m.invalidatePromptQueue()
 		m.promptQueue = 0
 		m.promptQueueItems = nil
 		m.promptQueueCheckedAt = time.Time{}
@@ -830,6 +840,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// trigger this: during streaming that would put workspace
 			// probes on every token.
 			m.invalidateBusyCaches()
+			m.invalidatePromptQueue()
 			if cmd := m.dispatchBusyRefresh(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -3900,7 +3911,11 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	// either starts a run or is enqueued behind one. This keeps esc pressed
 	// right after enter routing to cancelAgent instead of reading a stale
 	// idle value; the authoritative state arrives via agentRunSubmittedMsg.
+	// Bump the busy/queue generations so any probe started before this
+	// optimistic write is discarded rather than reverting us to idle.
 	m.agentBusyCache.set(true)
+	m.busyFetchGen++
+	m.invalidatePromptQueue()
 	cmds = append(cmds, func() tea.Msg {
 		// AgentRun is fire-and-forget: it returns once the prompt has
 		// been accepted (HTTP 202) or synchronously with a validation
@@ -4058,6 +4073,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.promptQueue = 0
 		m.promptQueueItems = nil
 		m.promptQueueCheckedAt = time.Now()
+		// Bump the queue generation so a fetch started before this clear
+		// cannot land and repopulate the pill we just emptied.
+		m.invalidatePromptQueue()
 		m.updateLayoutAndSize()
 		return nil
 	}
@@ -4355,6 +4373,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	// can re-probe. Drop the memoized busy state and re-fetch it and the
 	// prompt queue off-thread.
 	m.invalidateBusyCaches()
+	m.invalidatePromptQueue()
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -4402,6 +4421,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.promptQueueItems = nil
 	m.promptQueueCheckedAt = time.Now()
 	m.invalidateBusyCaches()
+	m.invalidatePromptQueue()
 	m.pillsView = ""
 	m.historyReset()
 	agenttools.ResetCache()

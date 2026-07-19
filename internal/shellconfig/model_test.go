@@ -10,7 +10,7 @@ import (
 
 func loadScript(t *testing.T, script string) map[string]any {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "crush.sh")
+	path := filepath.Join(t.TempDir(), "crushrc")
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
 	var result map[string]any
@@ -38,7 +38,7 @@ model add openai/gpt-5.6-sol --name "GPT 5.6 Sol" --context-window 200000 --can-
 func TestModelAddUnknownProvider(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "crush.sh")
+	path := filepath.Join(t.TempDir(), "crushrc")
 	_, err := LoadShellConfig(path, []byte(`model add openai/gpt-5.6-sol --name "x"`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not exist")
@@ -47,7 +47,7 @@ func TestModelAddUnknownProvider(t *testing.T) {
 func TestModelAddNoSlash(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "crush.sh")
+	path := filepath.Join(t.TempDir(), "crushrc")
 	_, err := LoadShellConfig(path, []byte(`provider add openai --api-key k
 model add gpt-5.6-sol --name "x"`))
 	require.Error(t, err)

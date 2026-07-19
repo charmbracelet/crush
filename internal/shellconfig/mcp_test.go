@@ -30,7 +30,7 @@ mcp rm github`)
 func TestMCPUnknownSubcommand(t *testing.T) {
 	t.Parallel()
 
-	path := t.TempDir() + "/crush.sh"
+	path := t.TempDir() + "/crushrc"
 	_, err := LoadShellConfig(path, []byte(`mcp github --command npx`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown subcommand")

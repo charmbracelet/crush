@@ -14,7 +14,7 @@ func TestOption_Bool(t *testing.T) {
 	dir := t.TempDir()
 	script := `option debug true
 option progress false`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
@@ -34,7 +34,7 @@ func TestOption_BoolCaseInsensitive(t *testing.T) {
 	script := `option debug TRUE
 option progress False
 option metrics YES`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestOption_String(t *testing.T) {
 	dir := t.TempDir()
 	script := `option data-directory .crush
 option notification-style osc`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestOption_List(t *testing.T) {
 	script := `option context-path .cursorrules
 option context-path CRUSH.md
 option disable-tool bash`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestOption_Reset(t *testing.T) {
 	script := `option skill-path ./a
 option skill-path ./b
 option reset skill-path`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestOption_ResetThenReadd(t *testing.T) {
 option skill-path ./inherited-b
 option reset skill-path
 option skill-path ./mine`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestOption_ResetUnknownKey(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option reset bogus-key`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	_, err := LoadShellConfig(path, []byte(script))
 	require.Error(t, err)
@@ -151,7 +151,7 @@ func TestOption_ResetNonListKey(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option reset debug`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	_, err := LoadShellConfig(path, []byte(script))
 	require.Error(t, err)
@@ -164,7 +164,7 @@ func TestOption_BoolShorthand(t *testing.T) {
 	dir := t.TempDir()
 	script := `option debug
 option metrics`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestOption_InvertedBool(t *testing.T) {
 	dir := t.TempDir()
 	script := `option metrics false
 option notifications true`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestOption_UnknownKey(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option bogus-key value`
-	path := filepath.Join(dir, "crush.sh")
+	path := filepath.Join(dir, "crushrc")
 
 	_, err := LoadShellConfig(path, []byte(script))
 	require.Error(t, err)

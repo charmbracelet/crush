@@ -1515,6 +1515,7 @@ func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.
 	allSkills, activeSkills, states := skills.DiscoverFromConfig(skills.DiscoveryConfig{
 		SkillsPaths:    paths,
 		DisabledSkills: disabled,
+		WorkingDir:     cfg.WorkingDir(),
 		Resolver:       resolver,
 	})
 	logDiscoveryStats(states, paths, allSkills, activeSkills, disabled)

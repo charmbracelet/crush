@@ -60,6 +60,12 @@ func (c *ttlCache) invalidate() {
 
 // busyStateMsg delivers the result of an off-thread busy/permission probe.
 type busyStateMsg struct {
+	// gen is the busy generation captured when the probe was dispatched.
+	// A result whose generation no longer matches m.busyFetchGen started
+	// before a newer state transition (optimistic send, invalidation,
+	// session switch, ...) and is discarded, then re-fetched, so the
+	// authoritative refresh is never lost to an older in-flight request.
+	gen       uint64
 	agentBusy bool
 	yolo      bool
 }
@@ -69,7 +75,11 @@ type promptQueueMsg struct {
 	// forSession is the session the fetch was scoped to; a result that
 	// raced a session switch is discarded and re-fetched.
 	forSession string
-	prompts    []string
+	// gen is the queue generation captured at dispatch; like
+	// busyStateMsg.gen it guards against a stale in-flight result
+	// overwriting newer optimistic or invalidated queue state.
+	gen     uint64
+	prompts []string
 }
 
 // agentRunSubmittedMsg reports that AgentRun accepted a prompt (it either
@@ -85,11 +95,21 @@ func (m *UI) currentSessionID() string {
 	return m.session.ID
 }
 
-// invalidateBusyCaches marks all memoized workspace probe state stale.
-// Called by handlers for events that change agent or permission state.
+// invalidateBusyCaches marks all memoized workspace probe state stale and
+// bumps the busy generation so any in-flight probe result is discarded when
+// it lands. Called by handlers for events that change agent or permission
+// state.
 func (m *UI) invalidateBusyCaches() {
 	m.agentBusyCache.invalidate()
 	m.yoloCache.invalidate()
+	m.busyFetchGen++
+}
+
+// invalidatePromptQueue bumps the prompt-queue generation so any in-flight
+// queue fetch result is discarded when it lands (and re-fetched) instead of
+// overwriting newer optimistic or cleared queue state.
+func (m *UI) invalidatePromptQueue() {
+	m.promptQueueGen++
 }
 
 // dispatchBusyRefresh returns a command that probes the workspace busy and
@@ -103,8 +123,9 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	}
 	m.busyFetchInFlight = true
 	ws := m.com.Workspace
+	gen := m.busyFetchGen
 	return func() tea.Msg {
-		var st busyStateMsg
+		st := busyStateMsg{gen: gen}
 		if ws.AgentIsReady() {
 			st.agentBusy = ws.AgentIsBusy()
 		}
@@ -117,9 +138,27 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 // edges (todo spinner, pills). Runs on the Update goroutine.
 func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	m.busyFetchInFlight = false
+	if msg.gen != m.busyFetchGen {
+		// This probe started before a newer state transition (optimistic
+		// send, invalidation, session switch, ...). Discard its result and
+		// re-dispatch so the required authoritative refresh is not lost
+		// merely because this older request was in flight.
+		if cmd := m.dispatchBusyRefresh(); cmd != nil {
+			return []tea.Cmd{cmd}
+		}
+		return nil
+	}
 	prevBusy := m.isAgentBusy()
+	prevYolo := m.yoloModeCached()
 	m.agentBusyCache.set(msg.agentBusy)
 	m.yoloCache.set(msg.yolo)
+	if prevYolo != msg.yolo {
+		// A remote/async toggle changed yolo mode: update the editor
+		// prompt function so the prompt icon/style tracks the new mode.
+		// The cache is written above and the placeholder is refreshed by
+		// the Update tail.
+		m.setEditorPrompt(msg.yolo)
+	}
 
 	var cmds []tea.Cmd
 	busy := m.isAgentBusy()
@@ -147,6 +186,10 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	if !m.hasSession() {
 		m.promptQueueItems = nil
 		m.promptQueueCheckedAt = time.Now()
+		// Bump the generation so any in-flight fetch scoped to the
+		// now-departed session is discarded rather than repopulating the
+		// queue.
+		m.invalidatePromptQueue()
 		if m.promptQueue != 0 {
 			m.promptQueue = 0
 			m.updateLayoutAndSize()
@@ -156,8 +199,9 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	m.promptQueueInFlight = true
 	ws := m.com.Workspace
 	sessionID := m.session.ID
+	gen := m.promptQueueGen
 	return func() tea.Msg {
-		msg := promptQueueMsg{forSession: sessionID}
+		msg := promptQueueMsg{forSession: sessionID, gen: gen}
 		if ws.AgentIsReady() {
 			msg.prompts = ws.AgentQueuedPromptsList(sessionID)
 		}
@@ -169,7 +213,11 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 // count changed. Runs on the Update goroutine.
 func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	m.promptQueueInFlight = false
-	if msg.forSession != m.currentSessionID() {
+	if msg.forSession != m.currentSessionID() || msg.gen != m.promptQueueGen {
+		// The fetch raced a session switch or a newer queue transition
+		// (submit, clear, invalidation). Discard the stale result and
+		// re-fetch so newer state is not clobbered and the authoritative
+		// refresh is not lost to this older in-flight request.
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			return []tea.Cmd{cmd}
 		}
@@ -218,6 +266,12 @@ func (m *UI) toggleYoloMode() bool {
 	yolo := !m.com.Workspace.PermissionSkipRequests()
 	m.com.Workspace.PermissionSetSkipRequests(yolo)
 	m.yoloCache.set(yolo)
+	// Supersede any in-flight busy/yolo probe: its result carries the old
+	// generation and would otherwise overwrite the value we just wrote.
+	// Bump the generation (rather than invalidateBusyCaches, which would
+	// clear the fresh value) so applyBusyState's guard discards and
+	// re-dispatches the stale probe.
+	m.busyFetchGen++
 	m.setEditorPrompt(yolo)
 	return yolo
 }

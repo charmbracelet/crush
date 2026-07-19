@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
@@ -319,6 +320,35 @@ func TestToggleYoloWritesThroughCache(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 }
 
+// TestLocalYoloToggleSupersedesInFlightProbe pins the generation bump in
+// toggleYoloMode: a busy/yolo probe dispatched before the toggle carries the
+// old generation. Without advancing busyFetchGen its stale result would land
+// with a still-matching generation and clobber the just-toggled value.
+func TestLocalYoloToggleSupersedesInFlightProbe(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, yolo: false}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	// A busy/yolo probe carrying the pre-toggle generation is in flight.
+	m.busyFetchInFlight = true
+	staleGen := m.busyFetchGen
+
+	require.True(t, m.toggleYoloMode())
+	require.NotEqual(t, staleGen, m.busyFetchGen,
+		"toggle must advance the busy generation to supersede in-flight probes")
+	require.True(t, m.yoloModeCached(), "toggle must write the new value through the cache")
+
+	// The stale probe (old generation, old yolo=false) lands.
+	m.busyFetchInFlight = true
+	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, yolo: false})
+	require.True(t, m.yoloModeCached(),
+		"stale probe must not overwrite the freshly toggled value")
+	require.NotEmpty(t, cmds, "stale probe must re-dispatch an authoritative refresh")
+	require.True(t, m.busyFetchInFlight, "re-dispatched refresh must be in flight")
+}
+
 // TestSendMessageSetsOptimisticBusy pins the esc-after-enter behavior:
 // submitting a prompt optimistically marks the agent busy so an immediate
 // esc routes to cancelAgent instead of reading a stale idle value and doing
@@ -398,4 +428,127 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 	// Freshly refreshed caches must not re-dispatch.
 	m.Update(plainMsg{})
 	require.False(t, m.busyFetchInFlight, "fresh caches must not re-dispatch the backstop")
+}
+
+// TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for
+// busy/permission state: a probe started before a newer state transition
+// (here an optimistic busy write) must not overwrite the newer value when it
+// lands, and the authoritative refresh must not be lost merely because the
+// older probe was in flight — the stale result re-dispatches it.
+func TestStaleBusyRefreshDiscardedAndReDispatched(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	// A busy probe is in flight; capture the generation it was dispatched
+	// with, then a newer transition (optimistic send) supersedes it.
+	m.busyFetchInFlight = true
+	staleGen := m.busyFetchGen
+	m.agentBusyCache.set(true) // optimistic busy
+	m.busyFetchGen++           // newer state transition
+
+	// The stale probe (agent reported idle) lands with the old generation.
+	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, agentBusy: false})
+	require.True(t, m.isAgentBusy(),
+		"a stale busy result must not overwrite the newer optimistic busy state")
+	require.NotEmpty(t, cmds,
+		"a stale busy result must re-dispatch the authoritative refresh")
+	require.True(t, m.busyFetchInFlight, "the re-dispatched probe must be in flight")
+
+	// The fresh probe (matching generation) is applied normally.
+	freshGen := m.busyFetchGen
+	m.applyBusyState(busyStateMsg{gen: freshGen, agentBusy: false})
+	require.False(t, m.isAgentBusy(), "a current-generation result must land in the cache")
+}
+
+// TestStalePromptQueueDiscardedAndReDispatched pins the generation guard for
+// the queue: a fetch started before a newer transition (here a queue clear)
+// must not repopulate the cleared queue, and it must re-dispatch the
+// authoritative fetch instead of being applied.
+func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, queued: []string{"real"}}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"real"}
+
+	// A fetch is in flight; capture its generation, then a newer transition
+	// (esc clears the queue) supersedes it.
+	m.promptQueueInFlight = true
+	staleGen := m.promptQueueGen
+	m.invalidatePromptQueue()
+	m.promptQueue = 0
+	m.promptQueueItems = nil
+
+	// The stale fetch (still saw one prompt) lands for the same session.
+	cmds := m.applyPromptQueue(promptQueueMsg{
+		forSession: "s1",
+		gen:        staleGen,
+		prompts:    []string{"stale"},
+	})
+	require.Zero(t, m.promptQueue,
+		"a stale queue result must not repopulate the cleared queue")
+	require.Empty(t, m.promptQueueItems)
+	require.NotEmpty(t, cmds,
+		"a stale queue result must re-dispatch the authoritative fetch")
+	require.True(t, m.promptQueueInFlight, "the re-dispatched fetch must be in flight")
+}
+
+// TestStalePromptQueuePreservesSessionScoping pins that the generation guard
+// does not weaken session scoping: a fetch scoped to a different session is
+// still discarded and re-fetched even when its generation would otherwise
+// match.
+func TestStalePromptQueuePreservesSessionScoping(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws) // active session "s1"
+	warmCaches(m, false)
+	m.promptQueueInFlight = true
+	gen := m.promptQueueGen
+
+	cmds := m.applyPromptQueue(promptQueueMsg{
+		forSession: "other",
+		gen:        gen,
+		prompts:    []string{"from other session"},
+	})
+	require.Zero(t, m.promptQueue,
+		"a result from a different session must never populate the queue")
+	require.NotEmpty(t, cmds, "a session-mismatched result must re-fetch for the current session")
+}
+
+// TestRemoteYoloToggleUpdatesEditorPrompt pins the second fix: when an
+// asynchronous busy-state refresh reports a yolo mode different from the
+// cached one (a remote toggle), applyBusyState must update the textarea
+// prompt function too, not just the cache — otherwise the prompt icon/style
+// keeps rendering the old mode.
+func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.textarea.Focus()
+	m.textarea.SetWidth(40)
+	m.yoloCache.set(false)
+	m.setEditorPrompt(false)
+	normalPrompt := ansi.Strip(m.textarea.View())
+
+	// A remote toggle flips yolo on; delivered via an off-thread refresh.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, yolo: true})
+	require.True(t, m.yoloModeCached(), "the refresh must write the new yolo value through the cache")
+	yoloPrompt := ansi.Strip(m.textarea.View())
+	require.NotEqual(t, normalPrompt, yoloPrompt,
+		"a remote yolo toggle must change the rendered editor prompt")
+	require.Contains(t, yoloPrompt, "Y",
+		"the yolo prompt icon must render after a remote toggle")
+
+	// Flipping back off must restore the normal prompt.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, yolo: false})
+	require.False(t, m.yoloModeCached())
+	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
+		"toggling yolo off must restore the normal editor prompt")
 }

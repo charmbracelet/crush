@@ -43,14 +43,13 @@ provider add my-secret-provider \
   --api-key "$(op read my-secret-key)"
 ```
 
-## By the way
-
-Is this too crazy? The good news is that Crush knows all this already can
-configure itself. Just tell it what you want it to do.
+> [!TIP]
+>
+> Crush can also just configure itself. Just tell it want you want to do.
 
 ## Why Bash?
 
-Why did we do this? Two reasons:
+Two reasons:
 
 1. Crush ships with a first-class Bash interpreter, so we get the logic for
    free.
@@ -83,9 +82,9 @@ don't download random configs without reading them first.
 Crush looks for config in the following places, with the lower numbers taking
 precedence:
 
-1. `./.crushrc` (project-level, hidden — highest priority)
+1. `./.crushrc` (project-level)
 2. `./crushrc` (project-level)
-3. `./.crush.json` / `./crush.json` (project-level JSON)
+3. `./.crush.json` / `./crush.json` (project-level JSON; legacy)
 4. `$XDG_CONFIG_HOME/crush/crushrc` or `~/.config/crush/crushrc` (global)
 
 Everything found is merged, with project settings overriding global ones, and

@@ -55,8 +55,7 @@ func permissionsAllow(b *ConfigBuilder, args []string, stderr io.Writer) error {
 }
 
 // permissionsDeny hides tools from the agent by adding them to
-// options.disabled_tools. It is the inverse of allow and shares the effect of
-// `option disable-tool`.
+// options.disabled_tools. It is the inverse of allow.
 func permissionsDeny(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
 		return usage(stderr, "usage: permissions deny <tool> [<tool> ...]")

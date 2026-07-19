@@ -14,7 +14,7 @@ import (
 // Usage: option <key> <value>
 //
 // Sets a single option field. The key is a kebab-case name; for list fields
-// (context-path, disable-tool, etc.) each call appends to the list.
+// (context-path, disable-skill, etc.) each call appends to the list.
 //
 // "option reset <list-key>" wipes a list back to empty, dropping values set
 // earlier in the script or via source. Values added after the reset are kept.
@@ -172,8 +172,6 @@ func optionKeyMap(key string) (jsonKey string, inverted bool) {
 		return "global_context_paths", false
 	case "skill-path":
 		return "skills_paths", false
-	case "disable-tool":
-		return "disabled_tools", false
 	case "disable-skill":
 		return "disabled_skills", false
 
@@ -199,8 +197,7 @@ func isIntOption(_ string) bool {
 
 func isListOption(jsonKey string) bool {
 	switch jsonKey {
-	case "context_paths", "global_context_paths", "skills_paths",
-		"disabled_tools", "disabled_skills":
+	case "context_paths", "global_context_paths", "skills_paths", "disabled_skills":
 		return true
 	default:
 		return false

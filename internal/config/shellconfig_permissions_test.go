@@ -66,8 +66,7 @@ func TestShellConfigPermissionsAllowRequiresTool(t *testing.T) {
 	require.Contains(t, err.Error(), "usage: permissions allow")
 }
 
-// deny hides tools from the agent — it writes options.disabled_tools, the
-// same effect as `option disable-tool`.
+// deny hides tools from the agent by writing options.disabled_tools.
 func TestShellConfigPermissionsDeny(t *testing.T) {
 	store := loadCrushSh(t, `permissions deny bash sourcegraph
 permissions deny bash`)

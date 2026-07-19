@@ -813,8 +813,7 @@ permissions allow <tool> [<tool> ...]
 
 permissions deny <tool> [<tool> ...]
     Hide one or more tools from the agent entirely. Inverse of allow; writes
-    options.disabled_tools, the same effect as `option disable-tool`.
-    (json: options.disabled_tools)
+    options.disabled_tools. (json: options.disabled_tools)
 ```
 
 ```text
@@ -866,7 +865,6 @@ option reset <list-key>
       context-path VALUE           (json: context_paths)
       global-context-path VALUE    (json: global_context_paths)
       skill-path VALUE             (json: skills_paths)
-      disable-tool VALUE           (json: disabled_tools)
       disable-skill VALUE          (json: disabled_skills)
 
     Examples:

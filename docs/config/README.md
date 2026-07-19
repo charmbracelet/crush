@@ -224,8 +224,8 @@ permissions allow <tool> [<tool> …]   Let these tools skip the approval prompt
 permissions deny <tool> [<tool> …]    Hide these tools from the agent entirely
 ```
 
-`deny` is the inverse of `allow` — it writes `options.disabled_tools` (the same
-as `option disable-tool`), so a denied tool is hidden, not just prompted for.
+`deny` is the inverse of `allow` — it writes `options.disabled_tools`, so a
+denied tool is hidden, not just prompted for.
 
 ```bash
 permissions allow view ls grep edit
@@ -249,13 +249,13 @@ option reset <list-key>      Clear a list option back to empty
     data-directory, initialize-as, notification-style
 
   Lists (one value per call, repeatable; clear with "option reset <key>"):
-    context-path, global-context-path, skill-path, disable-tool, disable-skill
+    context-path, global-context-path, skill-path, disable-skill
 ```
 
 ```bash
 option progress false
 option skill-path ./skills
-option disable-tool bash
+option disable-skill crush-config
 ```
 
 > [!IMPORTANT] These skill paths load by default — you do NOT need `skill-path`

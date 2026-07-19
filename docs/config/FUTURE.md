@@ -121,10 +121,9 @@ Crush currently has three useful tool states across both config formats:
 | Prompted | neither list | neither list | Visible; asks the user before running |
 | Disabled | `permissions deny bash` | `options.disabled_tools` | Hidden from the agent; cannot be called |
 
-`permissions deny` is intentionally sugar for `options.disabled_tools` (the
-same effect as `option disable-tool`). That is a practical hard block: because
-the tool is absent from the agent's tool list, the model cannot attempt to use
-it.
+`permissions deny` writes `options.disabled_tools`. That is a practical hard
+block: because the tool is absent from the agent's tool list, the model cannot
+attempt to use it.
 
 The one state Crush does **not** have is "visible but always rejected": the
 model can see and choose the tool, but the permission engine denies every

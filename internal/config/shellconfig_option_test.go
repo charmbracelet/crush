@@ -33,10 +33,10 @@ func TestShellConfigOptionPositiveMetricsBare(t *testing.T) {
 }
 
 func TestShellConfigOptionListAppends(t *testing.T) {
-	store := loadCrushSh(t, `option disable-tool bash
-option disable-tool sourcegraph`)
+	store := loadCrushSh(t, `option disable-skill crush-config
+option disable-skill jq`)
 
-	require.Subset(t, store.Config().Options.DisabledTools, []string{"bash", "sourcegraph"})
+	require.Subset(t, store.Config().Options.DisabledSkills, []string{"crush-config", "jq"})
 }
 
 // reset wipes values added earlier (or via source) while keeping anything
@@ -55,6 +55,12 @@ option skill-path ./mine`)
 
 func TestShellConfigOptionUnknownKeyFails(t *testing.T) {
 	_, err := loadCrushShErr(t, `option bogus-key value`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown key")
+}
+
+func TestShellConfigOptionDisableToolRemoved(t *testing.T) {
+	_, err := loadCrushShErr(t, `option disable-tool bash`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown key")
 }

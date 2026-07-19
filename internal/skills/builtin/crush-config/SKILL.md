@@ -157,9 +157,8 @@ permissions allow <tool> [<tool> ...]   # tools that skip permission prompts
 permissions deny <tool> [<tool> ...]    # hide tools from the agent entirely
 ```
 
-`deny` is the inverse of `allow`: it writes `options.disabled_tools`, the same
-effect as `option disable-tool`. A denied tool is hidden from the agent, not
-merely prompted for.
+`deny` is the inverse of `allow`: it writes `options.disabled_tools`. A denied
+tool is hidden from the agent, not merely prompted for.
 
 ### options
 
@@ -175,13 +174,12 @@ option reset <list-key>    # clear a list option back to empty
   `default-providers`. Example: `option metrics false` disables metrics.
 - **String keys**: `data-directory`, `initialize-as`, `notification-style`.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
-  `global-context-path`, `skill-path`, `disable-tool`, `disable-skill`. Use
-  `option reset <key>` to wipe inherited values (e.g. after `source`).
+  `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
+  to wipe inherited values (e.g. after `source`).
 
 ```bash
 option progress false
 option skill-path ./skills
-option disable-tool bash
 option disable-skill crush-config
 ```
 

@@ -72,8 +72,7 @@ func TestOption_List(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option context-path .cursorrules
-option context-path CRUSH.md
-option disable-tool bash`
+option context-path CRUSH.md`
 	path := filepath.Join(dir, "crushrc")
 
 	jsonBytes, err := LoadShellConfig(path, []byte(script))
@@ -87,10 +86,6 @@ option disable-tool bash`
 	require.Len(t, paths, 2)
 	require.Equal(t, ".cursorrules", paths[0])
 	require.Equal(t, "CRUSH.md", paths[1])
-
-	tools := opts["disabled_tools"].([]any)
-	require.Len(t, tools, 1)
-	require.Equal(t, "bash", tools[0])
 }
 
 func TestOption_Reset(t *testing.T) {

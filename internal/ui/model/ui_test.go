@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -87,9 +88,37 @@ func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 // testWorkspace is a minimal [workspace.Workspace] stub for unit tests.
 type testWorkspace struct {
 	workspace.Workspace
-	cfg *config.Config
+	cfg       *config.Config
+	mcpStates map[string]mcp.ClientInfo
 }
 
 func (w *testWorkspace) Config() *config.Config {
 	return w.cfg
+}
+
+func (w *testWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
+	return w.mcpStates
+}
+
+// TestRefreshMCPStates verifies that a fast MCP connection whose only
+// EventStateChanged fired before the TUI subscribed still ends up in
+// m.mcpStates once refreshMCPStates re-seeds from the authoritative
+// MCPGetStates(), instead of the sidebar showing "None" forever.
+func TestRefreshMCPStates(t *testing.T) {
+	t.Parallel()
+
+	states := map[string]mcp.ClientInfo{
+		"example": {State: mcp.StateConnected},
+	}
+	ui := &UI{
+		com: &common.Common{
+			Workspace: &testWorkspace{mcpStates: states},
+		},
+	}
+	require.Empty(t, ui.mcpStates, "mcpStates should start empty, as if the connect event was missed")
+
+	msg := ui.refreshMCPStates()()
+	changed, ok := msg.(mcpStateChangedMsg)
+	require.True(t, ok, "refreshMCPStates should return a mcpStateChangedMsg")
+	require.Equal(t, states, changed.states)
 }

@@ -589,6 +589,8 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
+
+	assignIfNil(&c.Options.LSPUnavailableRetryDelay, -1)
 }
 
 // powernapDefaults caches the powernap default LSP server catalog. The

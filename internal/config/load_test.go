@@ -301,6 +301,14 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, filepath.Join(subEval, defaultDataDirectory), gotEval)
 	})
+
+	t.Run("sets default LSP unavailable retry delay to -1", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.setDefaults(t.TempDir(), "")
+
+		require.NotNil(t, cfg.Options.LSPUnavailableRetryDelay)
+		require.Equal(t, -1, *cfg.Options.LSPUnavailableRetryDelay)
+	})
 }
 
 func TestConfig_configureProviders(t *testing.T) {

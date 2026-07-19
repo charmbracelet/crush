@@ -222,10 +222,15 @@ hook add PreToolUse --matcher "^bash$" \
 
 ```text
 permissions allow <tool> [<tool> …]   Let these tools skip the approval prompt
+permissions deny <tool> [<tool> …]    Hide these tools from the agent entirely
 ```
+
+`deny` is the inverse of `allow` — it writes `options.disabled_tools` (the same
+as `option disable-tool`), so a denied tool is hidden, not just prompted for.
 
 ```bash
 permissions allow view ls grep edit
+permissions deny bash
 ```
 
 ### options

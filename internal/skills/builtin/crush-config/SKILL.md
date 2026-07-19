@@ -154,7 +154,12 @@ hook add PreToolUse --matcher "^bash$" --command ".crush/hooks/no-haskell.sh" --
 
 ```bash
 permissions allow <tool> [<tool> ...]   # tools that skip permission prompts
+permissions deny <tool> [<tool> ...]    # hide tools from the agent entirely
 ```
+
+`deny` is the inverse of `allow`: it writes `options.disabled_tools`, the same
+effect as `option disable-tool`. A denied tool is hidden from the agent, not
+merely prompted for.
 
 ### options
 
@@ -332,6 +337,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `lsp add go --command gopls`         | `lsp.go = {"command":"gopls"}`                         |
 | `hook add PreToolUse --command C`    | append to `hooks.PreToolUse[]`                         |
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
+| `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
 | `option metrics false`               | `options.disable_metrics = true`                       |
 

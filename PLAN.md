@@ -810,6 +810,11 @@ lsp remove <name>   (alias: rm)
 permissions allow <tool> [<tool> ...]
     Add one or more tools to the allow-list (tools that skip permission
     prompts). Adding a tool already present is a no-op. (json: allowed_tools)
+
+permissions deny <tool> [<tool> ...]
+    Hide one or more tools from the agent entirely. Inverse of allow; writes
+    options.disabled_tools, the same effect as `option disable-tool`.
+    (json: options.disabled_tools)
 ```
 
 ```text

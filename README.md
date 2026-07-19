@@ -514,6 +514,15 @@ permissions allow view ls grep edit mcp_context7_get-library-doc
 }
 ```
 
+The inverse is `permissions deny`, which hides tools from the agent entirely
+(it's shorthand for `options.disabled_tools`, see
+[Disabling Built-In Tools](#disabling-built-in-tools)):
+
+```bash
+# crushrc
+permissions deny bash sourcegraph
+```
+
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
@@ -521,12 +530,14 @@ You can also skip all permission prompts entirely by running Crush with the
 
 If you'd like to prevent Crush from using certain built-in tools entirely, you
 can disable them via the `options.disabled_tools` list. Disabled tools are
-completely hidden from the agent.
+completely hidden from the agent. (`permissions deny <tool>` is a shorthand for
+this.)
 
 ```bash
 # crushrc
 option disable-tool bash
 option disable-tool sourcegraph
+# equivalently: permissions deny bash sourcegraph
 ```
 
 ```json

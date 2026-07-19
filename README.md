@@ -509,6 +509,44 @@ permissions. Use this with care.
 permissions allow view ls grep edit mcp_context7_get-library-doc
 ```
 
+### Allowing Blocked Commands
+
+The `bash` tool blocks a set of potentially dangerous commands by default (for
+example `ssh`, `curl`, `systemctl`, and various package managers). You can
+selectively remove commands from that blocklist with `options.allowed_commands`:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "allowed_commands": ["ssh", "curl", "scp"]
+  }
+}
+```
+
+The same can be set for a single session via CLI flags or environment variables
+(flags take precedence over the environment variables):
+
+```bash
+# Allow specific commands (repeatable flag, or a comma-separated env var).
+crush --allow-commands ssh --allow-commands curl
+CRUSH_ALLOW_COMMANDS="ssh,curl,scp" crush
+
+# Remove every command restriction (dangerous).
+crush --allow-all-commands
+CRUSH_ALLOW_ALL_COMMANDS=1 crush
+```
+
+Two things to keep in mind:
+
+- `allowed_commands` only removes commands from the exact-command blocklist. It
+  does **not** unlock the package-manager argument blocks (such as `apt install`
+  or `npm -g`); use `allow_all_commands` (or `--allow-all-commands`) to remove
+  those as well.
+- Allowing a command does not auto-approve it. Blocked commands are simply a
+  hard filter in front of the normal permission flow, so an allowed command is
+  still subject to the usual permission prompt unless you also enable `--yolo`.
+
 ### Disabling Built-In Tools
 
 You can also deny tools, hiding then from the agent entirely:

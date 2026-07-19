@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
@@ -629,6 +630,34 @@ func (w *ClientWorkspace) ReadMCPResource(ctx context.Context, name, uri string)
 			MIMEType: c.MIMEType,
 			Text:     c.Text,
 			Blob:     c.Blob,
+		}
+	}
+	return result, nil
+}
+
+func (w *ClientWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error) {
+	prompts, err := w.client.ListMCPPrompts(ctx, w.workspaceID())
+	if err != nil {
+		return nil, err
+	}
+	result := make([]commands.MCPPrompt, len(prompts))
+	for i, prompt := range prompts {
+		arguments := make([]commands.Argument, len(prompt.Arguments))
+		for j, argument := range prompt.Arguments {
+			arguments[j] = commands.Argument{
+				ID:          argument.ID,
+				Title:       argument.Title,
+				Description: argument.Description,
+				Required:    argument.Required,
+			}
+		}
+		result[i] = commands.MCPPrompt{
+			ID:          prompt.ID,
+			Title:       prompt.Title,
+			Description: prompt.Description,
+			PromptID:    prompt.PromptID,
+			ClientID:    prompt.ClientID,
+			Arguments:   arguments,
 		}
 	}
 	return result, nil

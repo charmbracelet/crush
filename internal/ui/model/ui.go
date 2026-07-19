@@ -638,7 +638,7 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 
 // loadMCPrompts loads the MCP prompts asynchronously.
 func (m *UI) loadMCPrompts() tea.Msg {
-	prompts, err := commands.LoadMCPPrompts()
+	prompts, err := m.com.Workspace.ListMCPPrompts(context.Background())
 	if err != nil {
 		slog.Error("Failed to load MCP prompts", "error", err)
 	}

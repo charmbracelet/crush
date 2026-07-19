@@ -701,6 +701,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
+	// Effective bash allow-list: config-file values plus any runtime overrides
+	// from --allow-commands / --allow-all-commands (or their env vars). The
+	// overrides live on the store rather than in Options so they survive the
+	// config reloads triggered by MCP reconnects and model changes.
+	bashOpts := c.cfg.Config().Options
+	bashOverrides := c.cfg.Overrides()
+	allowedCommands := append(append([]string{}, bashOpts.AllowedCommands...), bashOverrides.AllowedCommands...)
+	allowAllCommands := bashOpts.AllowAllCommands || bashOverrides.AllowAllCommands
+
 	// Build hook runner if PreToolUse hooks are configured.
 	var hookRunner *hooks.Runner
 	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
@@ -709,7 +718,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, allowedCommands, allowAllCommands),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),

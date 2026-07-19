@@ -22,6 +22,13 @@ type Workspace struct {
 	ClientID string         `json:"client_id,omitempty"`
 	Config   *config.Config `json:"config,omitempty"`
 	Env      []string       `json:"env,omitempty"`
+	// AllowAllCommands removes every bash-tool command block for this
+	// workspace (from the --allow-all-commands flag or CRUSH_ALLOW_ALL_COMMANDS).
+	AllowAllCommands bool `json:"allow_all_commands,omitempty"`
+	// AllowedCommands lists commands to drop from the bash tool's default
+	// banned list for this workspace (from the --allow-commands flag or
+	// CRUSH_ALLOW_COMMANDS).
+	AllowedCommands []string `json:"allowed_commands,omitempty"`
 	// Skills carries the snapshot of skill discovery state at workspace
 	// creation time. Subsequent updates flow through the SSE event
 	// stream.

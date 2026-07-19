@@ -711,6 +711,14 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			name:   "env",
 			mutate: func(p *proto.Workspace) { p.Env = []string{"NEW=val"} },
 		},
+		{
+			name:   "allow-all-commands",
+			mutate: func(p *proto.Workspace) { p.AllowAllCommands = true },
+		},
+		{
+			name:   "allowed-commands",
+			mutate: func(p *proto.Workspace) { p.AllowedCommands = []string{"ssh"} },
+		},
 	}
 
 	for _, tc := range tests {
@@ -745,6 +753,8 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			// Existing workspace's YOLO and Debug must not change.
 			require.Equal(t, originalYOLO, wsA.Cfg.Overrides().SkipPermissionRequests, "YOLO must be immutable on first-wins")
 			require.Equal(t, originalDebug, wsA.Cfg.Config().Options.Debug, "Debug must be immutable on first-wins")
+			require.False(t, wsA.Cfg.Overrides().AllowAllCommands, "AllowAllCommands must be immutable on first-wins")
+			require.Empty(t, wsA.Cfg.Overrides().AllowedCommands, "AllowedCommands must be immutable on first-wins")
 		})
 	}
 }

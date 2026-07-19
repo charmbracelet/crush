@@ -297,6 +297,19 @@ type Options struct {
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
 	NotificationStyle         string       `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	// AllowedCommands specifies commands that should be removed from the default
+	// banned commands list, allowing the agent to execute them via the bash tool.
+	// This provides a way to selectively enable commands like "ssh" or "curl"
+	// that are blocked by default for security reasons. It only subtracts from
+	// the exact-command block list; package-manager argument blocks such as
+	// "apt install" or "npm -g" are unaffected. Allowed commands are still
+	// subject to the normal permission prompt (they are not auto-approved).
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=List of commands to allow that are normally banned. Only affects the exact-command block list; package-manager argument blocks (e.g. 'apt install') are unaffected. Allowed commands still require permission approval.,example=ssh,example=curl,example=scp"`
+	// AllowAllCommands removes all restrictions from the banned commands list,
+	// allowing the agent to execute any command via the bash tool. Unlike
+	// allowed_commands, this also removes the package-manager argument blocks.
+	// This is a dangerous option and should be used with caution.
+	AllowAllCommands bool `json:"allow_all_commands,omitempty" jsonschema:"description=Remove all command restrictions from the bash tool, including package-manager argument blocks (dangerous). Commands still require permission approval unless yolo mode is enabled.,default=false"`
 }
 
 type MCPs map[string]MCPConfig

@@ -102,6 +102,13 @@ type ReadSkillResponse struct {
 	Result  SkillReadResult `json:"result"`
 }
 
+// ReloadModelDiscoveryResponse is the response for re-running model
+// discovery. Added reports how many models were newly discovered across all
+// providers.
+type ReloadModelDiscoveryResponse struct {
+	Added int `json:"added"`
+}
+
 // SkillReadResult holds metadata about a skill returned alongside its
 // content.
 type SkillReadResult struct {

@@ -317,6 +317,25 @@ func (c *controllerV1) handlePostWorkspaceSkillRead(w http.ResponseWriter, r *ht
 	jsonEncode(w, proto.ReadSkillResponse{Content: content, Result: result})
 }
 
+// handlePostWorkspaceConfigReloadDiscovery re-runs model discovery.
+//
+//	@Summary		Reload model discovery
+//	@Tags			config
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Success		200	{object}	proto.ReloadModelDiscoveryResponse
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/config/reload-discovery [post]
+func (c *controllerV1) handlePostWorkspaceConfigReloadDiscovery(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	added, err := c.backend.ReloadModelDiscovery(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.ReloadModelDiscoveryResponse{Added: added})
+}
+
 // handlePostWorkspaceMCPEnableDocker enables the Docker MCP server.
 //
 //	@Summary		Enable Docker MCP

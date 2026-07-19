@@ -156,6 +156,10 @@ type Workspace interface {
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+	// ReloadModelDiscovery re-runs model discovery for custom providers and
+	// merges any newly found models into the in-memory config. It returns
+	// the number of models added across all providers.
+	ReloadModelDiscovery(ctx context.Context) (int, error)
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo

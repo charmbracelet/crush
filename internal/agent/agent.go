@@ -789,6 +789,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
 	sanitizedToolCalls := make(map[string]bool)
+	malformedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {
@@ -918,6 +919,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolInputStart: func(id string, toolName string) error {
+			if strings.TrimSpace(toolName) == "" {
+				malformedToolCalls[id] = true
+				return nil
+			}
 			toolCall := message.ToolCall{
 				ID:               id,
 				Name:             toolName,
@@ -949,6 +954,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return m.Model
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			if strings.TrimSpace(tc.ToolName) == "" {
+				malformedToolCalls[tc.ToolCallID] = true
+				toolCalls := currentAssistant.ToolCalls()
+				validToolCalls := make([]message.ToolCall, 0, len(toolCalls))
+				for _, toolCall := range toolCalls {
+					if toolCall.ID != tc.ToolCallID {
+						validToolCalls = append(validToolCalls, toolCall)
+					}
+				}
+				currentAssistant.SetToolCalls(validToolCalls)
+				slog.Warn("Ignoring tool call with empty name", "tool_call_id", tc.ToolCallID)
+				return a.messages.Update(ctx, *currentAssistant)
+			}
+			delete(malformedToolCalls, tc.ToolCallID)
 			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
 			if wasSanitized {
 				sanitizedToolCalls[tc.ToolCallID] = true
@@ -966,6 +985,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
+			if malformedToolCalls[result.ToolCallID] {
+				return nil
+			}
 			toolResult := a.convertToToolResult(result)
 			if sanitizedToolCalls[result.ToolCallID] {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
@@ -1006,7 +1028,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					}
 				}
 			}
-			currentAssistant.AddFinish(finishReason, "", "")
+			if len(malformedToolCalls) > 0 {
+				currentAssistant.AddFinish(
+					message.FinishReasonError,
+					"Invalid tool call",
+					"The model returned a tool call without a name. Please try again.",
+				)
+			} else {
+				currentAssistant.AddFinish(finishReason, "", "")
+			}
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
 
@@ -1025,6 +1055,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
+			func(_ []fantasy.StepResult) bool {
+				return len(malformedToolCalls) > 0
+			},
 			func(_ []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize

@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -163,6 +164,7 @@ type Workspace interface {
 	MCPRefreshResources(ctx context.Context, name string)
 	RefreshMCPTools(ctx context.Context, name string)
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
+	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error

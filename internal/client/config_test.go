@@ -99,3 +99,30 @@ func TestSetProviderAPIKeyNilOAuthFailsLocally(t *testing.T) {
 	err := c.SetProviderAPIKey(context.Background(), "ws1", config.ScopeGlobal, "x", tok)
 	require.Error(t, err)
 }
+
+func TestListMCPPrompts(t *testing.T) {
+	t.Parallel()
+
+	want := []proto.MCPPrompt{
+		{
+			ID:          "server:review",
+			Title:       "Review changes",
+			Description: "Review the current changes.",
+			PromptID:    "review",
+			ClientID:    "server",
+			Arguments: []proto.MCPPromptArgument{
+				{ID: "focus", Title: "Focus", Description: "Area to review", Required: true},
+			},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/v1/workspaces/ws1/mcp/prompts", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(want))
+	}))
+	defer srv.Close()
+
+	got, err := captureClient(t, srv).ListMCPPrompts(t.Context(), "ws1")
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}

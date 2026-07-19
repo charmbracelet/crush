@@ -135,6 +135,22 @@ type MCPClientInfo struct {
 	ConnectedAt   time.Time `json:"connected_at"`
 }
 
+type MCPPromptArgument struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+type MCPPrompt struct {
+	ID          string              `json:"id"`
+	Title       string              `json:"title,omitempty"`
+	Description string              `json:"description,omitempty"`
+	PromptID    string              `json:"prompt_id"`
+	ClientID    string              `json:"client_id"`
+	Arguments   []MCPPromptArgument `json:"arguments,omitempty"`
+}
+
 // MarshalJSON implements the [json.Marshaler] interface.
 func (i MCPClientInfo) MarshalJSON() ([]byte, error) {
 	type Alias MCPClientInfo

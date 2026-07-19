@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -236,4 +237,42 @@ func TestTranslateEvent_UpdateAvailable(t *testing.T) {
 	require.Equal(t, "1.0.0", got.CurrentVersion)
 	require.Equal(t, "1.1.0", got.LatestVersion)
 	require.True(t, got.IsDevelopment)
+}
+
+func TestClientWorkspaceListMCPPrompts(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/mcp/prompts", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode([]proto.MCPPrompt{
+			{
+				ID:       "server:review",
+				PromptID: "review",
+				ClientID: "server",
+				Arguments: []proto.MCPPromptArgument{
+					{ID: "focus", Title: "Focus", Required: true},
+				},
+			},
+		}))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	got, err := workspace.ListMCPPrompts(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []commands.MCPPrompt{
+		{
+			ID:       "server:review",
+			PromptID: "review",
+			ClientID: "server",
+			Arguments: []commands.Argument{
+				{ID: "focus", Title: "Focus", Required: true},
+			},
+		},
+	}, got)
 }

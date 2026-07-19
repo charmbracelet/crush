@@ -413,6 +413,15 @@ func (c *controllerV1) handlePostWorkspaceMCPReadResource(w http.ResponseWriter,
 	jsonEncode(w, contents)
 }
 
+func (c *controllerV1) handleGetWorkspaceMCPPrompts(w http.ResponseWriter, r *http.Request) {
+	prompts, err := c.backend.ListMCPPrompts(r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, prompts)
+}
+
 // handlePostWorkspaceMCPGetPrompt retrieves a prompt from an MCP server.
 //
 //	@Summary		Get MCP prompt

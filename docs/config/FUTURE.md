@@ -107,3 +107,33 @@ larger, later increment.
   prints its selection; a broader introspection surface could follow.
 - Should sub-agents be allowed to reconfigure the session, or only the
   top-level agent? Probably top-level only, mirroring how hooks scope.
+
+## Permission-level hard deny
+
+**Status:** not implemented; probably unnecessary until a real use case
+appears.
+
+Crush currently has three useful tool states across both config formats:
+
+| State | `crushrc` | `crush.json` | Behavior |
+|---|---|---|---|
+| Auto-approved | `permissions allow bash` | `permissions.allowed_tools` | Visible; runs without prompting |
+| Prompted | neither list | neither list | Visible; asks the user before running |
+| Disabled | `permissions deny bash` | `options.disabled_tools` | Hidden from the agent; cannot be called |
+
+`permissions deny` is intentionally sugar for `options.disabled_tools` (the
+same effect as `option disable-tool`). That is a practical hard block: because
+the tool is absent from the agent's tool list, the model cannot attempt to use
+it.
+
+The one state Crush does **not** have is "visible but always rejected": the
+model can see and choose the tool, but the permission engine denies every
+request without prompting. Supporting that would require a separate
+permission-level deny list in both the config schema and permission engine.
+
+### Why defer it
+
+A visible-but-unusable tool wastes model attention and tool-call attempts. If
+a tool must never run, hiding it is both stronger and clearer. Add a true deny
+list only if someone has a concrete need for the model to know a tool exists
+while being categorically forbidden from calling it.

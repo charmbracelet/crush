@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"encoding/xml"
 	"fmt"
 	"image"
 	"strings"
@@ -354,6 +355,117 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	return common.Section(a.sty, assistant, width)
 }
 
+// ChannelInfoID returns a stable ID for channel-info items.
+func ChannelInfoID(messageID string) string {
+	return fmt.Sprintf("%s:channel-info", messageID)
+}
+
+// ChannelInfoItem renders sender/channel/timestamp metadata for a
+// channel-originated user message. It is emitted as a separate list item
+// below the message body, mirroring how AssistantInfoItem appears below
+// assistant messages.
+type ChannelInfoItem struct {
+	*list.Versioned
+	*cachedMessageItem
+
+	id      string
+	message *message.Message
+	sty     *styles.Styles
+}
+
+// NewChannelInfoItem creates a new ChannelInfoItem.
+func NewChannelInfoItem(sty *styles.Styles, msg *message.Message) MessageItem {
+	return &ChannelInfoItem{
+		Versioned:         list.NewVersioned(),
+		cachedMessageItem: &cachedMessageItem{},
+		id:                ChannelInfoID(msg.ID),
+		message:           msg,
+		sty:               sty,
+	}
+}
+
+// Finished implements list.Item. Channel metadata is immutable once
+// rendered, so the entry is always safe to freeze.
+func (c *ChannelInfoItem) Finished() bool {
+	return true
+}
+
+// ID implements MessageItem.
+func (c *ChannelInfoItem) ID() string {
+	return c.id
+}
+
+// RawRender implements MessageItem.
+func (c *ChannelInfoItem) RawRender(width int) string {
+	innerWidth := max(0, width-MessageLeftPaddingTotal)
+	content, _, ok := c.getCachedRender(innerWidth)
+	if !ok {
+		content = c.renderContent(innerWidth)
+		height := lipgloss.Height(content)
+		c.setCachedRender(content, innerWidth, height)
+	}
+	return content
+}
+
+// Render implements MessageItem.
+func (c *ChannelInfoItem) Render(width int) string {
+	if cached, ok := c.getCachedPrefixedRender(width, 0); ok {
+		return cached
+	}
+	prefix := c.sty.Messages.SectionHeader.Render()
+	lines := strings.Split(c.RawRender(width), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	out := strings.Join(lines, "\n")
+	c.setCachedPrefixedRender(out, width, 0)
+	return out
+}
+
+func (c *ChannelInfoItem) renderContent(width int) string {
+	raw := strings.TrimSpace(c.message.Content().Text)
+	var ch channelMessage
+	if err := xml.Unmarshal([]byte(raw), &ch); err != nil {
+		return ""
+	}
+
+	parts := make([]string, 0, 3)
+
+	sender := ch.SenderName
+	if sender == "" {
+		sender = ch.Sender
+	}
+	if sender != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoSender.Render(sender))
+	}
+
+	if ch.Source != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoProvider.Render(fmt.Sprintf("via %s", ch.Source)))
+	}
+
+	ts := ch.Time
+	if ts == "" && c.message.CreatedAt > 0 {
+		ts = time.Unix(c.message.CreatedAt, 0).Format(time.TimeOnly)
+	}
+	if ts != "" {
+		parts = append(parts, c.sty.Messages.ChannelInfoTimestamp.Render(fmt.Sprintf("at %s", ts)))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	icon := c.sty.Messages.ChannelInfoIcon.Render(styles.ChannelIcon)
+	metaStr := fmt.Sprintf("%s %s", icon, strings.Join(parts, " "))
+	return common.Section(c.sty, metaStr, width)
+}
+
+// IsChannelMessage reports whether the given message content is a
+// channel-originated message (i.e. starts with the <channel XML tag).
+func IsChannelMessage(msg *message.Message) bool {
+	return strings.HasPrefix(strings.TrimSpace(msg.Content().Text), "<channel")
+}
+
 // cappedMessageWidth returns the maximum width for message content for readability.
 func cappedMessageWidth(availableWidth int) int {
 	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
@@ -385,7 +497,11 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			sty.Attachments.Skill,
 			sty.Attachments.Remove,
 		)
-		return []MessageItem{NewUserMessageItem(sty, msg, r)}
+		items = []MessageItem{NewUserMessageItem(sty, msg, r)}
+		if IsChannelMessage(msg) {
+			items = append(items, NewChannelInfoItem(sty, msg))
+		}
+		return items
 	case message.Assistant:
 		var items []MessageItem
 		if ShouldRenderAssistantMessage(msg) {

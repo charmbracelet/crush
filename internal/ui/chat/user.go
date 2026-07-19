@@ -21,6 +21,17 @@ type skillInvocation struct {
 	Instructions string `xml:"instructions"`
 }
 
+// channelMessage represents the XML structure for a channel-originated
+// message pushed by an MCP channel server.
+type channelMessage struct {
+	XMLName    xml.Name `xml:"channel"`
+	Source     string   `xml:"source,attr"`
+	Sender     string   `xml:"sender,attr"`
+	SenderName string   `xml:"sender_name,attr"`
+	Time       string   `xml:"time,attr"`
+	Content    string   `xml:",chardata"`
+}
+
 // UserMessageItem represents a user message in the chat UI.
 type UserMessageItem struct {
 	*list.Versioned
@@ -73,6 +84,14 @@ func (m *UserMessageItem) RawRender(width int) string {
 		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
+	// Check if this is a channel-originated message.
+	if strings.HasPrefix(msgContent, "<channel") {
+		content = m.renderChannelMessage(msgContent, cappedWidth)
+		height = lipgloss.Height(content)
+		m.setCachedRender(content, cappedWidth, height)
+		return m.renderHighlighted(content, cappedWidth, height)
+	}
+
 	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
 	mu := common.LockMarkdownRenderer(renderer)
 
@@ -119,6 +138,46 @@ func (m *UserMessageItem) renderSkillInvocation(content string, width int) strin
 	}
 
 	return toolOutputSkillContent(m.sty, skill.Name, skill.Description)
+}
+
+// renderChannelMessage parses a <channel source="..." ...>body</channel>
+// element and renders only the body as markdown. The metadata
+// (sender, channel source, timestamp) is rendered separately by
+// ChannelInfoItem so it appears outside the message body, mirroring
+// the assistant info line.
+func (m *UserMessageItem) renderChannelMessage(raw string, width int) string {
+	var ch channelMessage
+	if err := xml.Unmarshal([]byte(raw), &ch); err != nil {
+		return m.fallbackRender(raw, width)
+	}
+
+	body := strings.TrimSpace(ch.Content)
+	if body == "" {
+		return ""
+	}
+
+	renderer := common.MarkdownRenderer(m.sty, width)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	result, err := renderer.Render(body)
+	mu.Unlock()
+	if err != nil {
+		return body
+	}
+	return strings.TrimSuffix(result, "\n")
+}
+
+// fallbackRender renders text as plain markdown when XML parsing fails.
+func (m *UserMessageItem) fallbackRender(content string, width int) string {
+	renderer := common.MarkdownRenderer(m.sty, width)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
+	result, err := renderer.Render(content)
+	mu.Unlock()
+	if err != nil {
+		return content
+	}
+	return strings.TrimSuffix(result, "\n")
 }
 
 // Render implements MessageItem.

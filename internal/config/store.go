@@ -50,6 +50,11 @@ type fileSnapshot struct {
 // the lifetime of the process (or workspace).
 type RuntimeOverrides struct {
 	SkipPermissionRequests bool
+	// EnabledChannels lists the MCP servers opted in as channels for this
+	// session (via the --channels flag). A server present in MCP config only
+	// pushes channel events when it also appears here. Entries may be written
+	// as "server:<name>" or as a bare "<name>".
+	EnabledChannels []string
 }
 
 // ConfigStore is the single entry point for all config access. It owns the

@@ -18,6 +18,7 @@
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
+- **Channel-Ready:** MCP servers can push real-time events into your session via [Claude Channels](https://code.claude.com/docs/en/channels-reference) — CI failures, webhooks, and more, acting on them without you typing a thing
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
 - **Industrial Grade:** built on the Charm ecosystem, powering 25k+ applications, from leading open source projects to business-critical infrastructure
 
@@ -367,10 +368,136 @@ which do expand.
       "headers": {
         "API-Key": "$(echo $API_KEY)"
       }
+    },
+    "signal": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/signal-mcp",
+        "python",
+        "signal_mcp/main.py",
+        "--user-id",
+        "+15551234567",
+        "--channel"
+      ]
     }
   }
 }
 ```
+
+#### Channels (experimental)
+
+An MCP server can also act as a **channel**: instead of only exposing tools it
+calls, it *pushes* events straight into your session so Crush reacts to things
+happening outside the terminal — a webhook, a CI failure, a chat message. See
+the [channels reference](https://code.claude.com/docs/en/channels-reference)
+for the protocol.
+
+A server becomes a channel by declaring the `claude/channel` capability in its
+`initialize` result (`capabilities.experimental["claude/channel"] = {}`) and
+emitting `notifications/claude/channel` events with a `content` body and an
+optional `meta` map. Crush injects each event into the active session as a
+`<channel>` element:
+
+```text
+<channel source="webhook" severity="high" run_id="1234">
+build failed on main: https://ci.example.com/run/1234
+</channel>
+```
+
+Listing a channel server in `mcp` is **not** enough to enable it — pushing is
+gated behind an explicit per-session opt-in, so a server present in config
+stays silent until you ask for it:
+
+```bash
+# Enable one or more configured MCP servers as channels for this session.
+crush --channels server:webhook
+crush --channels server:webhook --channels server:signal
+```
+
+The `source` attribute is always the (trusted) server name. Payloads are
+untrusted, server-initiated input: Crush validates their structure, caps the
+body and attribute sizes, restricts `meta` keys to identifiers
+(`[A-Za-z0-9_]`), escapes all content so a payload cannot break out of the
+`<channel>` element or forge attributes, and drops malformed payloads. A
+server that has not been opted in via `--channels`, or that never declared the
+capability, cannot inject anything.
+
+Channel delivery works in the default in-process `crush` and against a shared
+`crush serve` backend. In-process, an event routes into the session you have
+open, or starts one if none is open, so it is never dropped. Against a
+`crush serve` backend the server routes each event exactly once — into the
+session an attached client is viewing (the most recently updated one when
+clients are viewing different sessions), otherwise into the workspace's most
+recent session, creating one only when none exists. That holds even with no
+clients connected, so a headless server still processes channel pushes;
+attached clients see the injected turn arrive through the normal event
+stream. Servers that are live channels are marked `channel` in the MCP list
+so you can confirm the opt-in took effect.
+
+**Two-way channels.** A channel can also be interactive. Because a channel is a
+regular MCP server, any tool it exposes (a `reply` tool, say) is available to
+the agent through the normal MCP tool path — nothing channel-specific is
+required. Declare `tools` in the server's capabilities, register the tool, and
+use the server's `instructions` string (injected into the system prompt) to
+tell Crush when to call it and which `<channel>` attribute to pass back (like a
+`chat_id`).
+
+For example, [Signal MCP](https://github.com/joestump/signal-mcp) lets Crush
+send and receive Signal messages through a
+[signal-cli](https://github.com/AsamK/signal-cli) daemon:
+
+1. **Start the daemon:** `signal-cli -a +15551234567 daemon --tcp 127.0.0.1:7583 --receive-mode on-start --no-receive-stdout`
+2. **Add to `crush.json`:** Use the example in the [MCPs](#mcps) section above.
+3. **Launch with channel:** `crush --channels server:signal`
+
+Incoming messages arrive as `<channel>` tags; use the `send_message_to_user` tool to reply.
+
+#### Channel reply routing
+
+By default a channel-originated turn only produces terminal output, so a
+person messaging you on Signal never sees the answer unless the model decides
+to call a send tool itself. Adding a `channel_reply` block to a channel
+server's MCP config makes the routing deterministic: when a turn that
+originated from that channel finishes without the model having replied through
+the channel, Crush sends the final assistant response back through the
+configured tool — to the sender for direct messages, or to the group for group
+messages.
+
+```json
+{
+  "mcp": {
+    "signal": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "signal_mcp/main.py", "--operator", "+15551234567", "--channel"],
+      "channel_reply": {
+        "user": { "tool": "send_message_to_user", "target_param": "user_id" },
+        "group": { "tool": "send_message_to_group", "target_param": "group_id" },
+        "suppress_tools": ["send"]
+      }
+    }
+  }
+}
+```
+
+How it routes:
+
+- **Group pushes** (meta carries `group`) go through the `group` route;
+  **direct pushes** (meta carries `sender`) go through the `user` route.
+  `target_meta` overrides which meta attribute supplies the target;
+  `message_param` (default `message`) names the tool argument that receives
+  the reply text.
+- If the model already called a route tool — or any tool listed in
+  `suppress_tools` — during the turn, the automatic reply is skipped, so
+  richer model-driven replies aren't duplicated.
+- Local (non-channel) turns and channels without a `channel_reply` block are
+  unaffected.
+
+The same shape works for any messaging channel (Discord, Slack, …): point the
+routes at that server's send tools and the matching meta attributes.
 
 ### Hooks
 

@@ -185,9 +185,11 @@ func (w *Workspace) Shutdown() {
 	}
 }
 
-// New creates a new [Backend].
+// New creates a new [Backend]. The returned backend routes MCP channel
+// events into hosted workspaces for its lifetime (until ctx is
+// canceled); see [Backend.startChannelRouter].
 func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) *Backend {
-	return &Backend{
+	b := &Backend{
 		workspaces:  csync.NewMap[string, *Workspace](),
 		pathIndex:   make(map[string]string),
 		cfg:         cfg,
@@ -195,6 +197,8 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		shutdownFn:  shutdownFn,
 		createGrace: DefaultCreateGrace,
 	}
+	b.startChannelRouter()
+	return b
 }
 
 // SetCreateGrace overrides the create-grace window. Intended for tests
@@ -272,6 +276,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	cfg.Overrides().SkipPermissionRequests = args.YOLO
+	cfg.Overrides().EnabledChannels = args.Channels
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
@@ -711,14 +716,15 @@ func validateClientID(id string) (string, error) {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	out := proto.Workspace{
-		ID:      ws.ID,
-		Path:    ws.Path,
-		YOLO:    ws.Cfg.Overrides().SkipPermissionRequests,
-		DataDir: cfg.Options.DataDirectory,
-		Debug:   cfg.Options.Debug,
-		Config:  cfg,
-		Env:     ws.Env,
-		Version: version.Version,
+		ID:       ws.ID,
+		Path:     ws.Path,
+		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
+		Channels: ws.Cfg.Overrides().EnabledChannels,
+		DataDir:  cfg.Options.DataDirectory,
+		Debug:    cfg.Options.Debug,
+		Config:   cfg,
+		Env:      ws.Env,
+		Version:  version.Version,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())

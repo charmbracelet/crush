@@ -22,6 +22,9 @@ type Workspace struct {
 	ClientID string         `json:"client_id,omitempty"`
 	Config   *config.Config `json:"config,omitempty"`
 	Env      []string       `json:"env,omitempty"`
+	// Channels lists the MCP servers opted in as channels for this workspace
+	// (from the --channels flag).
+	Channels []string `json:"channels,omitempty"`
 	// Skills carries the snapshot of skill discovery state at workspace
 	// creation time. Subsequent updates flow through the SSE event
 	// stream.
@@ -141,6 +144,7 @@ func (a AgentInfo) IsZero() bool {
 type AgentMessage struct {
 	SessionID   string       `json:"session_id"`
 	RunID       string       `json:"run_id,omitempty"`
+	Channel     string       `json:"channel,omitempty"`
 	Prompt      string       `json:"prompt"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 }

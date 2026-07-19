@@ -84,6 +84,7 @@ type SessionAgentCall struct {
 	// session that may be busy) MUST set it; SessionID alone is
 	// ambiguous when concurrent turns share the same session.
 	RunID            string
+	Channel          string
 	Prompt           string
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
@@ -130,6 +131,28 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
+	// channelMeta holds the attributes of the <channel> element a
+	// channel-originated turn was started with, parsed once at Run
+	// entry. It survives the auto-summarize continuation, whose Prompt
+	// is rewritten and no longer carries the element, so the reply
+	// target is not lost when a long channel turn is summarized.
+	channelMeta map[string]string
+}
+
+func filterToolsForChannel(agentTools []fantasy.AgentTool, channel string, states map[string]mcp.ClientInfo) []fantasy.AgentTool {
+	filtered := make([]fantasy.AgentTool, 0, len(agentTools))
+	for _, agentTool := range agentTools {
+		mcpTool, ok := agentTool.(interface{ MCP() string })
+		if !ok {
+			filtered = append(filtered, agentTool)
+			continue
+		}
+		state, found := states[mcpTool.MCP()]
+		if !found || !state.Channel || channel == mcpTool.MCP() {
+			filtered = append(filtered, agentTool)
+		}
+	}
+	return filtered
 }
 
 type SessionAgent interface {
@@ -164,9 +187,13 @@ type sessionAgent struct {
 	systemPrompt       *csync.Value[string]
 	tools              *csync.Slice[fantasy.AgentTool]
 
-	isSubAgent           bool
-	sessions             session.Service
-	messages             message.Service
+	isSubAgent bool
+	sessions   session.Service
+	messages   message.Service
+	// cfg backs channel reply routing (config lookup + MCP tool
+	// invocation). Nil in tests and sub-agents that never see channel
+	// turns; sendChannelReply treats nil as "routing disabled".
+	cfg                  *config.ConfigStore
 	disableAutoSummarize bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
@@ -223,6 +250,7 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	Cfg                  *config.ConfigStore
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
@@ -239,6 +267,7 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		cfg:                  opts.Cfg,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
@@ -559,95 +588,95 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
-	// genCtx/cancel are the run context and its cancel func. For the
-	// accepted (fire-and-forget) dispatch path they are created under
-	// dispatchMu below so a concurrent Cancel can observe the
-	// activeRequests entry before the assistant message exists. For
-	// the in-process path they stay nil here and are created later,
-	// preserving the original ordering.
+	if call.Channel != "" && call.channelMeta == nil {
+		call.channelMeta, _ = parseChannelMeta(call.Prompt)
+	}
+
+	// genCtx/cancel are the run context and its cancel func, created under
+	// the per-session dispatch mutex below so a concurrent Cancel can observe
+	// the activeRequests entry before the assistant message exists.
 	var (
-		genCtx           context.Context
-		cancel           context.CancelFunc
-		activeRegistered bool
-		userMsgCreated   bool
+		genCtx         context.Context
+		cancel         context.CancelFunc
+		userMsgCreated bool
 	)
 
-	if call.Accepted != nil {
-		// Serialize the accepted -> (cancel-on-entry | queued |
-		// active) transition against a concurrent Cancel. Cancel takes
-		// the same per-session lock, so every cancel observes at least
-		// one of: a cancel mark, an activeRequests entry, or a
-		// messageQueue entry it then clears.
-		mu := a.sessionMu(call.SessionID)
-		mu.Lock()
+	// Serialize the dispatch decision (cancel-on-entry | queued | active)
+	// against a concurrent Cancel. Cancel takes the same per-session lock, so
+	// every cancel observes at least one of: a cancel mark, an activeRequests
+	// entry, or a messageQueue entry it then clears. Holding the lock across
+	// the busy check and the active registration also makes them atomic, so
+	// two concurrent in-process callers — a burst of channel events, or a
+	// channel event racing a typed prompt — cannot both pass the busy check
+	// and start two runs on the same session.
+	sessMu := a.sessionMu(call.SessionID)
+	sessMu.Lock()
 
-		if a.canceledBySeq(call.SessionID, call.Accepted.seq) {
-			// Cancel-on-entry: a cancel arrived while this run was
-			// dispatched but not yet active, and this handle's accept
-			// sequence is at or below the session's cancel mark. The
-			// mark is left in place so sibling handles it also covers
-			// observe the same cancel; release the accept reservation,
-			// drop the lock, and persist a canceled turn without
-			// entering Stream.
-			//
-			// This path returns before the streaming defer that
-			// publishes RunComplete is installed, so emit the terminal
-			// event explicitly. Without it, a caller waiting on
-			// RunComplete for this RunID (e.g. `crush run`, which
-			// ignores message events and blocks on RunComplete) would
-			// hang on an immediately-canceled accepted run.
-			call.Accepted.Close()
-			mu.Unlock()
-			complete := notify.RunComplete{
-				SessionID: call.SessionID,
-				RunID:     call.RunID,
-				Cancelled: true,
-			}
-			if err := a.persistCanceledTurn(ctx, call, false); err != nil {
-				complete.Error = err.Error()
-				a.publishRunComplete(ctx, call, complete)
-				return nil, err
-			}
-			a.publishRunComplete(ctx, call, complete)
-			return nil, nil
-		}
-
-		if a.IsSessionBusy(call.SessionID) {
-			// Busy: an earlier prompt is active. Queue this call and
-			// release the accept reservation. A Cancel arriving after
-			// this point sees the active entry and clears the queue.
-			a.enqueueCall(call)
-			call.Accepted.Close()
-			mu.Unlock()
-			return nil, nil
-		}
-
-		// Idle: become the active run. Register the cancel func before
-		// dropping the lock so a Cancel that arrives between here and
-		// assistant creation is not lost.
-		runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-		genCtx, cancel = context.WithCancel(runCtx)
-		a.activeRequests.Set(call.SessionID, cancel)
-		activeRegistered = true
+	if call.Accepted != nil && a.canceledBySeq(call.SessionID, call.Accepted.seq) {
+		// Cancel-on-entry: a cancel arrived while this accepted run was
+		// dispatched but not yet active, and this handle's accept sequence
+		// is at or below the session's cancel mark. The mark is left in
+		// place so sibling handles it also covers observe the same cancel;
+		// release the accept reservation, drop the lock, and persist a
+		// canceled turn without entering Stream.
+		//
+		// This path returns before the streaming defer that publishes
+		// RunComplete is installed, so emit the terminal event explicitly.
+		// Without it, a caller waiting on RunComplete for this RunID (e.g.
+		// `crush run`, which ignores message events and blocks on
+		// RunComplete) would hang on an immediately-canceled accepted run.
 		call.Accepted.Close()
-		mu.Unlock()
-
-		defer cancel()
-		defer a.activeRequests.Del(call.SessionID)
-	} else if a.IsSessionBusy(call.SessionID) {
-		// Queue the message if busy. Strip OnComplete: the caller that
-		// supplied the hook (typically coordinator.Run) has its own
-		// retry/coalesce scope that ends when it returns, so by the time
-		// the queue drains nobody is left to consume the buffered
-		// terminal event. The recursive Run will fall back to the
-		// default broker publish, which is what existing subscribers
-		// expect for queued turns.
-		a.enqueueCall(call)
+		sessMu.Unlock()
+		complete := notify.RunComplete{
+			SessionID: call.SessionID,
+			RunID:     call.RunID,
+			Cancelled: true,
+		}
+		if err := a.persistCanceledTurn(ctx, call, false); err != nil {
+			complete.Error = err.Error()
+			a.publishRunComplete(ctx, call, complete)
+			return nil, err
+		}
+		a.publishRunComplete(ctx, call, complete)
 		return nil, nil
 	}
 
+	if a.IsSessionBusy(call.SessionID) {
+		// Busy: an earlier prompt is active. Queue this call so it is
+		// folded into (or sequenced after) the active turn, and release any
+		// accept reservation. A Cancel arriving after this point sees the
+		// active entry and clears the queue.
+		//
+		// enqueueCall strips OnComplete: the caller that supplied the hook
+		// (typically coordinator.Run) has its own retry/coalesce scope that
+		// ends when it returns, so by the time the queue drains nobody is
+		// left to consume the buffered terminal event. The queued turn falls
+		// back to the default broker publish, which is what existing
+		// subscribers expect.
+		a.enqueueCall(call)
+		if call.Accepted != nil {
+			call.Accepted.Close()
+		}
+		sessMu.Unlock()
+		return nil, nil
+	}
+
+	// Idle: become the active run. Register the cancel func before dropping
+	// the lock so a Cancel that arrives between here and assistant creation
+	// is not lost.
+	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	genCtx, cancel = context.WithCancel(runCtx)
+	a.activeRequests.Set(call.SessionID, cancel)
+	if call.Accepted != nil {
+		call.Accepted.Close()
+	}
+	sessMu.Unlock()
+
+	defer cancel()
+	defer a.activeRequests.Del(call.SessionID)
+
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
-	agentTools := a.tools.Copy()
+	agentTools := filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
@@ -707,20 +736,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	userMsgCreated = true
 
-	// Add the session to the context.
+	// Add the session to the context. The run context (genCtx) and its
+	// cancel func were already created and registered under the dispatch
+	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-
-	// For the accepted dispatch path the run context and cancel func
-	// were already created and registered under dispatchMu above; reuse
-	// them. For the in-process path create them here, preserving the
-	// original ordering.
-	if !activeRegistered {
-		genCtx, cancel = context.WithCancel(ctx)
-		a.activeRequests.Set(call.SessionID, cancel)
-
-		defer cancel()
-		defer a.activeRequests.Del(call.SessionID)
-	}
 	// skipRunComplete is set just before the queued-recursion path so
 	// the outer Run doesn't publish a RunComplete that would race
 	// with — and be superseded by — the recursive call's own
@@ -789,6 +808,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
 	sanitizedToolCalls := make(map[string]bool)
+	// Full names of tool calls that completed without error this turn.
+	// Written only from the streaming callbacks (which run sequentially)
+	// and read after Stream returns, where sendChannelReply uses it to
+	// tell whether the model already replied on the originating channel.
+	completedToolCalls := make(map[string]struct{})
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {
@@ -813,7 +837,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			// Use latest tools (updated by SetTools when MCP tools change).
-			prepared.Tools = a.tools.Copy()
+			prepared.Tools = filterToolsForChannel(a.tools.Copy(), call.Channel, mcp.GetStates())
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -873,6 +897,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return callContext, prepared, err
 			}
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
+			callContext = context.WithValue(callContext, tools.ChannelContextKey, call.Channel)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
@@ -970,6 +995,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if sanitizedToolCalls[result.ToolCallID] {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
+			}
+			if !toolResult.IsError && toolResult.Name != "" {
+				completedToolCalls[toolResult.Name] = struct{}{}
 			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
@@ -1198,6 +1226,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
 		}
+	}
+
+	// Route the finished turn's response back to the channel it came
+	// from, unless the turn was cut short for summarization with work
+	// still pending — the queued continuation carries the channel and
+	// replies when it actually finishes. Runs before the busy state is
+	// released so a follow-up push queued behind this turn cannot
+	// overtake its reply.
+	if currentAssistant != nil && (!shouldSummarize || len(currentAssistant.ToolCalls()) == 0) {
+		a.sendChannelReply(ctx, call, currentAssistant.Content().String(), completedToolCalls)
 	}
 
 	// Release active request before publishing the notification.

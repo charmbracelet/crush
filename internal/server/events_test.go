@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -49,6 +50,33 @@ func TestMessageToProtoToolResult(t *testing.T) {
 	require.Equal(t, "image/png", tr.MIMEType)
 	require.Equal(t, `{"file_path":"/tmp/x","content":"hi"}`, tr.Metadata)
 	require.False(t, tr.IsError)
+}
+
+// TestMCPChannelEventToProto_RoundTrip verifies that a channel push survives
+// the SSE envelope conversion with its type and rendered <channel> body intact,
+// so client/server sessions receive channel events rather than dropping the
+// payload at the wire.
+func TestMCPChannelEventToProto_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[mcp.Event]{
+		Type: pubsub.CreatedEvent,
+		Payload: mcp.Event{
+			Type:           mcp.EventChannelMessage,
+			Name:           "webhook",
+			ChannelMessage: `<channel source="webhook">build failed</channel>`,
+		},
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypeMCPEvent, env.Type)
+
+	var decoded pubsub.Event[proto.MCPEvent]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, proto.MCPEventChannelMessage, decoded.Payload.Type)
+	require.Equal(t, "webhook", decoded.Payload.Name)
+	require.Equal(t, `<channel source="webhook">build failed</channel>`, decoded.Payload.ChannelMessage)
 }
 
 // TestSkillsEventToProto_RoundTrip verifies that a pubsub.Event[skills.Event]

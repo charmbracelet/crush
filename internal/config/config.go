@@ -204,6 +204,46 @@ type MCPConfig struct {
 	// omitted from the outgoing request rather than sent as
 	// "Header:".
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
+
+	// ChannelReply, when set on a server enabled as a channel, makes Crush
+	// route the final assistant response of every turn that originated from
+	// this channel back through one of the server's own tools, so a message
+	// received on the channel gets a reply on the channel even when the
+	// model only produced terminal output.
+	ChannelReply *MCPChannelReply `json:"channel_reply,omitempty" jsonschema:"description=Automatically route replies for turns originating from this channel back through one of the server's tools"`
+}
+
+// MCPChannelReply configures deterministic reply routing for an MCP server
+// acting as a channel: which of the server's tools deliver a reply for
+// direct and group pushes, and how the reply text and target are mapped
+// onto tool arguments.
+type MCPChannelReply struct {
+	// User routes replies to direct (person-to-person) channel pushes.
+	User *MCPChannelReplyRoute `json:"user,omitempty" jsonschema:"description=Reply route for direct messages"`
+	// Group routes replies to group channel pushes. It is preferred over
+	// User when the push carries the group route's meta attribute.
+	Group *MCPChannelReplyRoute `json:"group,omitempty" jsonschema:"description=Reply route for group messages"`
+	// MessageParam is the tool argument that receives the reply text.
+	MessageParam string `json:"message_param,omitempty" jsonschema:"description=Tool argument name that receives the reply text,default=message"`
+	// SuppressTools lists additional tool names (beyond the two route
+	// tools) that count as the model having already replied on the channel
+	// during the turn, e.g. an operator-shortcut send tool.
+	SuppressTools []string `json:"suppress_tools,omitempty" jsonschema:"description=Additional tool names that suppress the automatic reply when the model already called one of them during the turn,example=send"`
+}
+
+// MCPChannelReplyRoute maps one kind of inbound channel push onto the MCP
+// tool call that delivers a reply to it.
+type MCPChannelReplyRoute struct {
+	// Tool is the MCP tool (bare name, without the mcp_<server>_ prefix)
+	// invoked to deliver the reply.
+	Tool string `json:"tool" jsonschema:"required,description=MCP tool name that sends the reply,example=send_message_to_user"`
+	// TargetParam is the tool argument that receives the reply target
+	// (recipient or group ID).
+	TargetParam string `json:"target_param" jsonschema:"required,description=Tool argument name that receives the reply target,example=user_id"`
+	// TargetMeta is the <channel> meta attribute whose value identifies
+	// the reply target. Defaults to "sender" for the user route and
+	// "group" for the group route.
+	TargetMeta string `json:"target_meta,omitempty" jsonschema:"description=Channel meta attribute carrying the reply target; defaults to sender (user route) or group (group route)"`
 }
 
 type LSPConfig struct {

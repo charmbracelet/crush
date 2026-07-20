@@ -16,8 +16,12 @@ Crush supports two config formats:
 Both are discovered together and deep-merged. Priority (highest to lowest):
 
 1. `.crushrc` / `crushrc` / `.crush.json` / `crush.json` (project-local,
-   closer-to-cwd wins)
-2. `$XDG_CONFIG_HOME/crush/` or `$HOME/.config/crush/` (global)
+   closer-to-cwd wins; Windows uses `.\.crushrc` / `.\crushrc`)
+2. `$XDG_DATA_HOME/crush/crushrc` or `~/.local/share/crush/crushrc`
+   (`%LOCALAPPDATA%\crush\crushrc` on Windows)
+3. `$XDG_CONFIG_HOME/crush/crushrc` or `~/.config/crush/crushrc`
+   (`%XDG_CONFIG_HOME%\crush\crushrc` or
+   `%USERPROFILE%\.config\crush\crushrc` on Windows)
 
 If a directory has both `crushrc` and `crush.json`, they merge (`crushrc` wins
 on conflicts) and Crush logs a warning.

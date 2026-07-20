@@ -241,17 +241,26 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 > Crush ships with a builtin skill for configuring itself. Most of the time
 > you can just tell what you want it to configure and it will get the job done.
 
-Who needs config? Crush runs great with no configuration. That said, if you do
+Crush runs great with no configuration. That said, if you do
 need or want to customize Crush, configuration can be added either local to the
 project itself, or globally, with the following priority:
 
-1. `./.crushrc` (project-level)
-2. `./crushrc` (project-level)
-3. `$XDG_CONFIG_HOME/crush/crushrc` (global)
-4. `~/.config/crush/crushrc` (global)
+| Priority | Unix-like                      | Windows                               |
+| -------- | ------------------------------ | ------------------------------------- |
+| 1        | `./.crushrc`                   | `.\.crushrc`                          |
+| 2        | `./crushrc`                    | `.\crushrc`                           |
+| 3        | `~/.local/share/crush/crushrc` | `%LOCALAPPDATA%\crush\crushrc`        |
+| 4        | `~/.config/crush/crushrc`      | `%USERPROFILE%\.config\crush\crushrc` |
 
-A `crushrc` is just Bash with some Crush-specific builtins. It’s a lot like a
-`.bashrc`, just for your Crush.
+(Crush respects the [XDG Base Directory Specification][xdg], so your paths
+may differ depending on your XDG__CONFIG_HOME and XDG_DATA_HOME values.)
+
+[xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+
+A `crushrc` is just Bash with some Crush-specific builtins. It’s a lot like
+a `.bashrc`, just for your Crush. Because Crush has a native, built-in Bash
+interpreter, Bash-based config works identically across all platforms, including
+Windows.
 
 ```bash
 # Add Ollama.

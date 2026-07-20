@@ -3,9 +3,19 @@
 > [!NOTE]
 > This document was designed for both humans and agents.
 
-Crush is configured with Bash via set a set of crush-specific builtin
-commands. By default it lives in `~/.config/crush/crushrc` and works like
-a `.bashrc`. It runs when Crush starts and configures the agent.
+> [!TIP]
+>
+> Crush can configure itself via a builtin config skill. That is to say,
+> can generally just tell Crush want you want to configure using natural
+> language.
+>
+> If you're migrating from the old JSON format, you can also ask Crush to
+> convert the config for you.
+
+Crush is configured with Bash via a set of Crush-specific builtin commands. By
+default, global config lives at `~/.config/crush/crushrc` on Unix-like systems
+and `%USERPROFILE%\.config\crush\crushrc` on Windows. It works like a `.bashrc`:
+it runs when Crush starts and configures the agent.
 
 ```bash
 # Add Ollama.
@@ -43,11 +53,6 @@ provider add my-secret-provider \
   --api-key "$(op read my-secret-key)"
 ```
 
-> [!TIP]
->
-> Crush can also just configure itself via a builtin config skill. Just tell
-> Crush want you want to do.
-
 ## Why Bash?
 
 Two reasons:
@@ -80,17 +85,20 @@ don't download random configs without reading them first.
 
 ## Where config lives
 
-Crush looks for config in the following places, with the lower numbers taking
+Crush looks for config in the following places, with lower numbers taking
 precedence:
 
-1. `./.crushrc` (project-level)
-2. `./crushrc` (project-level)
-3. `./.crush.json` / `./crush.json` (project-level JSON; legacy)
-4. `$XDG_CONFIG_HOME/crush/crushrc` or `~/.config/crush/crushrc` (global)
+| Priority | Unix-like                        | Windows                           |
+| -------- | -------------------------------- | --------------------------------- |
+| 1        | `./.crushrc`                     | `.\.crushrc`                      |
+| 2        | `./crushrc`                      | `.\crushrc`                       |
+| 3        | `$XDG_DATA_HOME/crush/crushrc`   | `%LOCALAPPDATA%\crush\crushrc`    |
+| 4        | `$XDG_CONFIG_HOME/crush/crushrc` | `%XDG_CONFIG_HOME%\crush\crushrc` |
 
-Everything found is merged, with project settings overriding global ones, and
-`crushrc` overriding `crush.json` in the same directory. If a folder has both,
-they merge and Crush logs a warning.
+Legacy JSON uses `.crush.json`/`crush.json` in in the same directories as the
+above. Everything found is merged, with project settings overriding global ones
+and `crushrc` overriding JSON in the same directory. If a folder has both, they
+merge and Crush logs a warning.
 
 ## Command Reference
 
@@ -520,7 +528,8 @@ option ui completions-max-items 200
 Because it's Bash, a shared base config is just a `source`:
 
 ```bash
-# ~/.config/crush/crushrc
+# Unix-like: ~/.config/crush/crushrc
+# Windows:   %USERPROFILE%\.config\crush\crushrc
 source ~/team/crush-base.sh    # sets up providers, a few skills
 
 # …but on this machine, drop a skill path the base added and add my own.
@@ -558,3 +567,25 @@ it's all just Bash.
 
 Both formats are trusted code: they run with your shell privileges before the UI
 appears. Don't launch Crush in a directory whose config you haven't read.
+
+---
+
+## Whatcha think?
+
+We'd love to hear your thoughts on this project. Need help? We gotchu. You can
+find us on:
+
+- [Twitter](https://twitter.com/charmcli)
+- [Slack](https://charm.land/slack)
+- [Discord](https://charm.land/discord)
+- [The Fediverse](https://mastodon.social/@charmcli)
+- [Bluesky](https://bsky.app/profile/charm.land)
+
+---
+
+Part of [Charm](https://charm.land).
+
+<a href="https://charm.land/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-softy.jpg" /></a>
+
+<!--prettier-ignore-->
+Charm热爱开源 • Charm loves open source

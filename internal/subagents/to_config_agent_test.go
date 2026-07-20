@@ -111,7 +111,13 @@ func TestToConfigAgent(t *testing.T) {
 			},
 			check: func(t *testing.T, result config.Agent) {
 				t.Helper()
-				require.Nil(t, result.AllowedMCP)
+				// No mcp_servers: frontmatter must lock the subagent out of
+				// every MCP server (secure by default), not grant it
+				// unrestricted access — AllowedMCP == nil means "no
+				// restrictions" to buildTools, so it must be a non-nil empty
+				// map here, matching the built-in task agent.
+				require.NotNil(t, result.AllowedMCP)
+				require.Empty(t, result.AllowedMCP)
 			},
 		},
 		{

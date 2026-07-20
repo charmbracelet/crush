@@ -157,13 +157,13 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 		pool = filtered
 	}
 
-	// Build AllowedMCP only when MCP servers are specified.
-	var allowedMCP map[string][]string
-	if len(s.MCPServers) > 0 {
-		allowedMCP = make(map[string][]string, len(s.MCPServers))
-		for _, srv := range s.MCPServers {
-			allowedMCP[srv] = nil
-		}
+	// AllowedMCP nil means "no restrictions configured" (full access to every
+	// MCP server) to config.Agent's consumer; a subagent with no mcp_servers:
+	// frontmatter must default to the locked-down empty map instead, matching
+	// the built-in task agent's secure-by-default AllowedMCP.
+	allowedMCP := make(map[string][]string, len(s.MCPServers))
+	for _, srv := range s.MCPServers {
+		allowedMCP[srv] = nil
 	}
 
 	return config.Agent{

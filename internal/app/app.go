@@ -123,6 +123,15 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Skills:      skillsMgr,
 		Subagents:   subagentsMgr,
 
+		// Created eagerly (rather than lazily in initCoderAgent) so
+		// Subscribe's one-time nil check always finds a live Runtime: on an
+		// unconfigured install, New returns before InitCoderAgent runs, and
+		// Subscribe (already running by the time onboarding finishes and
+		// InitCoderAgent runs for the first time) would otherwise never wire
+		// up the subagent-events forwarding goroutine for the rest of the
+		// process.
+		SubagentRuntime: subagents.NewRuntime(),
+
 		globalCtx: ctx,
 
 		config: store,
@@ -642,9 +651,6 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
-	}
-	if app.SubagentRuntime == nil {
-		app.SubagentRuntime = subagents.NewRuntime()
 	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{

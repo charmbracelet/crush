@@ -5,9 +5,9 @@ go 1.26.5
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
-	charm.land/catwalk v0.49.25
+	charm.land/catwalk v0.49.28
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.38.0
+	charm.land/fantasy v0.38.1
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.5
 	charm.land/log/v2 v2.0.0
@@ -45,13 +45,13 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/jordanella/go-ansi-paintbrush v0.0.0-20240728195301-b7ad996ecf3d
 	github.com/lucasb-eyer/go-colorful v1.4.0
-	github.com/mattn/go-isatty v0.0.22
+	github.com/mattn/go-isatty v0.0.23
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/ncruces/go-sqlite3 v0.35.2
 	github.com/nxadm/tail v1.4.11
-	github.com/openai/openai-go/v3 v3.43.0
+	github.com/openai/openai-go/v3 v3.44.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.17.5
+	github.com/posthog/posthog-go v1.19.0
 	github.com/pressly/goose/v3 v3.27.2
 	github.com/qjebbs/go-jsons v1.0.0-alpha.6
 	github.com/rivo/uniseg v0.4.7

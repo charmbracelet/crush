@@ -93,27 +93,55 @@ they merge and Crush logs a warning.
 
 ## Command Reference
 
-All the entity commands read the same way: `<thing> add …` to create,
-`<thing> remove …` (or `rm`) to delete. Booleans accept `true/false/1/0/yes/no`,
-any case.
-
-### providers
+The sections below read like CLI help. Entity commands use `add` to create or
+update something and `remove` (or `rm`) to delete it. Booleans accept
+`true/false/1/0/yes/no`, in any case.
 
 ```text
-provider add <id> [flags]        Define or update a provider (repeat to merge)
-provider remove <id>             Remove it (and its custom models); alias: rm
+Available Commands:
+  provider      Manage model providers
+  model         Manage models and model selection
+  mcp           Manage MCP servers
+  lsp           Manage language servers
+  hook          Manage hooks
+  permissions   Configure tool permissions
+  option        Configure general Crush behavior
+```
 
-  --name NAME                    Display name
-  --type TYPE                    openai | openai-compat | anthropic | ollama | …
-  --api-key KEY                  API key (quote it; expand env with "$VAR")
-  --base-url URL                 API base URL
-  --disable BOOL                 Turn the provider off without deleting it
-  --flat-rate BOOL               Flat-rate billing
-  --discover-models BOOL         Auto-discover and merge provider models
-  --system-prompt-prefix TEXT    Text prepended to the system prompt
-  --extra-header KEY VALUE       Add an HTTP header (repeatable)
-  --extra-body JSON              Merge a JSON object into request bodies
-  --provider-options JSON        Merge a provider-specific JSON object
+### provider
+
+Manage model providers.
+
+```text
+Usage:
+  provider [command]
+
+Available Commands:
+  add       Add or update a provider
+  remove    Remove a provider and its custom models
+  rm        Alias for remove
+```
+
+#### `provider add`
+
+Add a provider, or update an existing provider with the same ID.
+
+```text
+Usage:
+  provider add <id> [flags]
+
+Flags:
+      --name string                 display name
+      --type string                 provider type (openai, openai-compat, anthropic, ollama, …)
+      --api-key string              API key
+      --base-url string             API base URL
+      --disable bool                disable without removing
+      --flat-rate bool              use flat-rate billing
+      --discover-models bool        auto-discover and merge provider models
+      --system-prompt-prefix string text prepended to the system prompt
+      --extra-header key value      add an HTTP header (repeatable)
+      --extra-body JSON             merge a JSON object into request bodies
+      --provider-options JSON       merge a provider-specific JSON object
 ```
 
 ```bash
@@ -123,41 +151,85 @@ provider add deepseek \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
 
-### models
+#### `provider remove`
+
+Remove a provider and all custom models registered on it.
 
 ```text
-model add <provider>/<id> [flags]    Register a custom model on a provider
-model remove <provider>/<id>         Remove it; alias: rm
-model large [<provider>/<id>]        Set the large slot — or print it if no arg
-model small [<provider>/<id>]        Set the small slot — or print it if no arg
-
-  # model add
-  --name NAME                   Display name
-  --context-window N            Context window in tokens
-  --default-max-tokens N        Default max output tokens
-  --can-reason BOOL             Model supports reasoning
-  --supports-images BOOL        Model accepts image input
-  --price-input F               Input price per 1M tokens
-  --price-output F              Output price per 1M tokens
-  --price-cache-create F        Cache-creation price per 1M tokens
-  --price-cache-hit F           Cache-hit price per 1M tokens
-  --reasoning-effort LEVEL      low | medium | high
-
-  # model large / model small
-  --think                       Enable thinking mode
-  --reasoning-effort LEVEL      low | medium | high
-  --max-tokens N                Max output tokens
-  --temperature F               Sampling temperature
-  --top-p F                     Top-p sampling (0–1)
-  --top-k N                     Top-k sampling
-  --frequency-penalty F         Frequency penalty
-  --presence-penalty F          Presence penalty
-  --provider-options JSON       Merge a provider-specific JSON object
+Usage:
+  provider remove <id>
+  provider rm <id>
 ```
 
-The `<provider>/<id>` form is exactly what `crush models` prints. `large` is
-your primary coding model; `small` is used for summaries. `model add` needs the
-provider to exist first.
+### model
+
+Manage custom models and the large/small model slots. Model references use the
+same `<provider>/<id>` form printed by `crush models`.
+
+```text
+Usage:
+  model [command]
+
+Available Commands:
+  add       Register a custom model on an existing provider
+  remove    Remove a custom model
+  rm        Alias for remove
+  large     Set or print the large model
+  small     Set or print the small model
+```
+
+#### `model add`
+
+Register a custom model on an existing provider.
+
+```text
+Usage:
+  model add <provider>/<id> [flags]
+
+Flags:
+      --name string                 display name
+      --context-window int          context window in tokens
+      --default-max-tokens int      default maximum output tokens
+      --can-reason bool             model supports reasoning
+      --supports-images bool        model accepts image input
+      --price-input float           input price per 1M tokens
+      --price-output float          output price per 1M tokens
+      --price-cache-create float    cache-creation price per 1M tokens
+      --price-cache-hit float       cache-hit price per 1M tokens
+      --reasoning-effort string     low, medium, or high
+```
+
+#### `model remove`
+
+Remove a custom model from its provider.
+
+```text
+Usage:
+  model remove <provider>/<id>
+  model rm <provider>/<id>
+```
+
+#### `model large`, `model small`
+
+Set the large or small model slot. With no model argument, print the current
+selection.
+
+```text
+Usage:
+  model large [<provider>/<id>] [flags]
+  model small [<provider>/<id>] [flags]
+
+Flags:
+      --think                       enable thinking mode
+      --reasoning-effort string     low, medium, or high
+      --max-tokens int              maximum output tokens
+      --temperature float           sampling temperature
+      --top-p float                 top-p sampling (0–1)
+      --top-k int                   top-k sampling
+      --frequency-penalty float     frequency penalty
+      --presence-penalty float      presence penalty
+      --provider-options JSON       merge a provider-specific JSON object
+```
 
 ```bash
 model large openai/gpt-4o --think
@@ -166,19 +238,37 @@ echo "coding with: $(model large)"   # prints: openai/gpt-4o
 
 ### mcp
 
-```text
-mcp add <name> --type stdio|sse|http [flags]   Add an MCP server (default: stdio)
-mcp remove <name>                              Remove it; alias: rm
+Manage Model Context Protocol servers.
 
-  --command CMD                 Executable for stdio servers
-  --args ARG                    Command argument (repeatable)
-  --env KEY VALUE               Environment variable (repeatable)
-  --url URL                     URL for sse/http servers
-  --header KEY VALUE            HTTP header (repeatable)
-  --timeout N                   Startup timeout in seconds
-  --disabled BOOL               Turn it off without deleting
-  --disabled-tools TOOL         Deny a tool from this server (repeatable)
-  --enabled-tools TOOL          Allow only these tools (repeatable)
+```text
+Usage:
+  mcp [command]
+
+Available Commands:
+  add       Add or update an MCP server
+  remove    Remove an MCP server
+  rm        Alias for remove
+```
+
+#### `mcp add`
+
+Add an MCP server, or update an existing server with the same name.
+
+```text
+Usage:
+  mcp add <name> [flags]
+
+Flags:
+      --type string              stdio, sse, or http (default "stdio")
+      --command string           executable for stdio servers
+      --args string              command argument (repeatable)
+      --env key value            environment variable (repeatable)
+      --url string               URL for HTTP/SSE servers
+      --header key value         HTTP header (repeatable)
+      --timeout int              startup timeout in seconds
+      --disabled bool            disable without removing
+      --disabled-tools string    deny a server tool (repeatable)
+      --enabled-tools string     allow only these server tools (repeatable)
 ```
 
 ```bash
@@ -187,99 +277,216 @@ mcp add github --type http \
   --header Authorization "Bearer $GH_PAT"
 ```
 
-### lsp
+#### `mcp remove`
+
+Remove an MCP server.
 
 ```text
-lsp add <name> --command CMD [flags]    Add a language server
-lsp remove <name>                       Remove it; alias: rm
+Usage:
+  mcp remove <name>
+  mcp rm <name>
+```
 
-  --args ARG                    Command argument (repeatable)
-  --env KEY VALUE               Environment variable (repeatable)
-  --filetypes TYPE              File type to attach to (repeatable)
-  --root-markers MARKER         Root marker file (repeatable)
-  --timeout N                   Startup timeout in seconds
-  --disabled BOOL               Turn it off without deleting
-  --init-options JSON           Initialization options (JSON string)
-  --options JSON                Server options (JSON string)
+### lsp
+
+Manage language servers.
+
+```text
+Usage:
+  lsp [command]
+
+Available Commands:
+  add       Add or update a language server
+  remove    Remove a language server
+  rm        Alias for remove
+```
+
+#### `lsp add`
+
+Add a language server, or update an existing server with the same name.
+
+```text
+Usage:
+  lsp add <name> --command <command> [flags]
+
+Flags:
+      --args string              command argument (repeatable)
+      --env key value            environment variable (repeatable)
+      --filetypes string         file type to attach to (repeatable)
+      --root-markers string      root marker file (repeatable)
+      --timeout int              startup timeout in seconds
+      --disabled bool            disable without removing
+      --init-options JSON        initialization options
+      --options JSON             server settings
 ```
 
 ```bash
 lsp add go --command gopls --env GOPATH "$HOME/go"
 ```
 
-### hooks
+#### `lsp remove`
+
+Remove a language server.
 
 ```text
-hook add <event> --command CMD [flags]   Add a hook to an event
-hook remove <event> [--name NAME]        Remove a named hook, or clear the event
-
-  --command CMD                 Shell command to run (required)
-  --name NAME                   Name it (needed if you want to remove it later)
-  --matcher REGEX               Regex tested against the tool name
-  --timeout N                   Timeout in seconds (default 30)
+Usage:
+  lsp remove <name>
+  lsp rm <name>
 ```
 
-Hooks are a whole topic of their own — see the [hooks docs](../hooks/) for what
-they can do and how they run.
+### hook
+
+Manage hooks. See the [hooks docs](../hooks/) for what they can do and how
+they run.
+
+```text
+Usage:
+  hook [command]
+
+Available Commands:
+  add       Add a hook to an event
+  remove    Remove a named hook, or clear an event
+  rm        Alias for remove
+```
+
+#### `hook add`
+
+Add a shell command that runs when the given hook event fires.
+
+```text
+Usage:
+  hook add <event> --command <command> [flags]
+
+Flags:
+      --command string           shell command to run (required)
+      --name string              name used for later removal
+      --matcher string           regex tested against the tool name
+      --timeout int              timeout in seconds (default 30)
+```
 
 ```bash
 hook add PreToolUse --matcher "^bash$" \
   --command "./hooks/no-haskell.sh" --name no-haskell
 ```
 
-### permissions
+#### `hook remove`
+
+Remove hooks from an event. Without `--name`, remove every hook for the event.
 
 ```text
-permissions allow <tool> [<tool> …]   Let these tools skip the approval prompt
-permissions deny <tool> [<tool> …]    Hide these tools from the agent entirely
+Usage:
+  hook remove <event> [--name <name>]
+  hook rm <event> [--name <name>]
+
+Flags:
+      --name string              remove hooks with this name
 ```
 
-`deny` is the inverse of `allow` — it writes `options.disabled_tools`, so a
-denied tool is hidden, not just prompted for.
+### permissions
+
+Configure tool permissions. `allow` skips approval prompts; `deny` hides tools
+from the agent entirely.
+
+```text
+Usage:
+  permissions [command]
+
+Available Commands:
+  allow     Allow tools without prompting
+  deny      Hide tools from the agent
+```
+
+#### `permissions allow`
+
+Allow one or more tools to run without prompting.
+
+```text
+Usage:
+  permissions allow <tool> [<tool> ...]
+```
+
+#### `permissions deny`
+
+Hide one or more tools from the agent so they cannot be called.
+
+```text
+Usage:
+  permissions deny <tool> [<tool> ...]
+```
 
 ```bash
 permissions allow view ls grep edit
 permissions deny bash
 ```
 
-### options
+### option
+
+Configure general Crush behavior.
 
 ```text
-option <key> [value]         Set a single option
-option reset <list-key>      Clear a list option back to empty
+Usage:
+  option <key> [value]
+  option [command]
 
-  Booleans (value optional, defaults true):
-    debug, debug-lsp, auto-lsp, progress
+Available Commands:
+  reset     Clear a list option
+  ui        Configure terminal UI behavior
 
-  Booleans phrased positively (e.g. "option metrics false" turns metrics off):
-    metrics, notifications, auto-summarize, provider-auto-update,
-    default-providers
+Boolean Keys (value optional; default true):
+  debug                       enable debug logging
+  debug-lsp                   enable LSP debug logging
+  auto-lsp                    automatically configure LSPs
+  progress                    show progress indicators
+  metrics                     send anonymous metrics
+  notifications               enable desktop notifications
+  auto-summarize              enable automatic summarization
+  provider-auto-update        update the provider catalog automatically
+  default-providers           include built-in providers
 
-  Strings:
-    data-directory, initialize-as, notification-style
+String Keys:
+  data-directory string
+  initialize-as string
+  notification-style auto|native|osc|bell|disabled
+  attribution-trailer-style none|co-authored-by|assisted-by
 
-  Attribution:
-    attribution-trailer-style     none | co-authored-by | assisted-by
-    attribution-generated-with    true | false (case-insensitive)
+Other Keys:
+  attribution-generated-with bool
+  context-path string            append a context path
+  global-context-path string     append a global context path
+  skill-path string              append a skill path
+  disable-skill string           hide a skill
+```
 
-  UI:
-    option ui compact BOOL
-    option ui diff unified|split
-    option ui transparent BOOL
-    option ui scrollbar default|always|never
-    option ui completions-max-depth N
-    option ui completions-max-items N
+#### `option reset`
 
-  Lists (one value per call, repeatable; clear with "option reset <key>"):
-    context-path, global-context-path, skill-path, disable-skill
+Clear every value previously added to a list option.
+
+```text
+Usage:
+  option reset <context-path|global-context-path|skill-path|disable-skill>
+```
+
+#### `option ui`
+
+Configure terminal UI behavior.
+
+```text
+Usage:
+  option ui <key> <value>
+
+Keys:
+  compact bool
+  diff unified|split
+  transparent bool
+  scrollbar default|always|never
+  completions-max-depth int
+  completions-max-items int
 ```
 
 ```bash
 option progress false
 option skill-path ./skills
-option disable-skill crush-config
 option attribution-trailer-style assisted-by
-option attribution-generated-with true
 option ui compact true
 option ui diff unified
 ```

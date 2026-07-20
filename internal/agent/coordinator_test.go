@@ -929,6 +929,73 @@ func TestCancel_StopsRunningSubagent(t *testing.T) {
 	require.Empty(t, rt.List(parentSession.ID))
 }
 
+// TestCancelAll_StopsRunningSubagents verifies that CancelAll reaches
+// dispatched subagents through the subagentCancels registry, not just the
+// coder agent's own activeRequests — subagents run on ad-hoc SessionAgents
+// invisible to currentAgent, so App.Shutdown calling CancelAll must not leave
+// them running past shutdown.
+func TestCancelAll_StopsRunningSubagents(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	// Blocks until its context is cancelled, like a real in-flight run.
+	subAgent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	coderMock := newMockAgent(providerID, 4096, nil)
+
+	coord := &coordinator{
+		cfg:             cfg,
+		sessions:        env.sessions,
+		runtime:         rt,
+		currentAgent:    coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		resp, _ := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          subAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "long running work",
+			SessionTitle:   "CancelAll Target",
+			AgentName:      "worker",
+			AgentColor:     "blue",
+		})
+		done <- resp
+	}()
+
+	require.Eventually(t, func() bool {
+		return len(rt.List(parentSession.ID)) > 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	coord.CancelAll()
+
+	select {
+	case resp := <-done:
+		require.True(t, resp.IsError)
+		require.Equal(t, "Subagent cancelled by user", resp.Content)
+	case <-time.After(5 * time.Second):
+		t.Fatal("subagent run did not stop after CancelAll()")
+	}
+
+	require.Empty(t, rt.List(parentSession.ID))
+}
+
 // TestCancel_UnknownSessionFallsThroughToCoder verifies that Cancel for a
 // session with no registry entry still reaches the coder agent (the
 // pre-existing behavior for parent sessions).

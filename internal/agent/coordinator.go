@@ -1322,6 +1322,17 @@ func (c *coordinator) Cancel(sessionID string) {
 }
 
 func (c *coordinator) CancelAll() {
+	// Running subagents live on ad-hoc SessionAgents, invisible to
+	// currentAgent's activeRequests — cancel each one via the registry (a
+	// snapshot, so this is safe against concurrent Del calls from finishing
+	// runs) before falling through to the coder agent's own bookkeeping.
+	if c.subagentCancels != nil {
+		for cancel := range c.subagentCancels.Seq() {
+			if cancel != nil {
+				cancel()
+			}
+		}
+	}
 	c.currentAgent.CancelAll()
 }
 

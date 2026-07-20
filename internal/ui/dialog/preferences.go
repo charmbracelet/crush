@@ -209,8 +209,10 @@ func (c *Preferences) setItems() {
 	}
 
 	c.list.SetItems(items...)
-	c.list.SetSelected(0)
-	c.list.ScrollToTop()
+	if c.list.Selected() == -1 {
+		c.list.SetSelected(0)
+		c.list.ScrollToTop()
+	}
 }
 
 // RefreshItems rebuilds the menu items to reflect current config state.

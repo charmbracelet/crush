@@ -17,11 +17,13 @@ Both are discovered together and deep-merged. Priority (highest to lowest):
 
 1. `.crushrc` / `crushrc` / `.crush.json` / `crush.json` (project-local,
    closer-to-cwd wins; Windows uses `.\.crushrc` / `.\crushrc`)
-2. `$XDG_DATA_HOME/crush/crushrc` or `~/.local/share/crush/crushrc`
-   (`%LOCALAPPDATA%\crush\crushrc` on Windows)
-3. `$XDG_CONFIG_HOME/crush/crushrc` or `~/.config/crush/crushrc`
+2. `$XDG_CONFIG_HOME/crush/crushrc` or `~/.config/crush/crushrc`
    (`%XDG_CONFIG_HOME%\crush\crushrc` or
    `%USERPROFILE%\.config\crush\crushrc` on Windows)
+
+Data directories (`~/.local/share/crush` and `%LOCALAPPDATA%\crush`) contain
+machine-owned JSON state only; Crush does not discover or execute a `crushrc`
+from those locations.
 
 If a directory has both `crushrc` and `crush.json`, they merge (`crushrc` wins
 on conflicts) and Crush logs a warning.

@@ -252,7 +252,9 @@ project itself, or globally, with the following priority:
 | 3        | `~/.config/crush/crushrc` | `%USERPROFILE%\.config\crush\crushrc` |
 
 (Crush respects the [XDG Base Directory Specification][xdg], so your paths
-may differ depending on your XDG__CONFIG_HOME and XDG_DATA_HOME values.)
+may differ depending on your `XDG_CONFIG_HOME` value. Data directories such as
+`~/.local/share/crush` and `%LOCALAPPDATA%\crush` contain JSON state only; Crush
+does not execute a `crushrc` from them.)
 
 [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 

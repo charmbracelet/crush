@@ -871,16 +871,14 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 // up. Global user-level config locations are always included
 // regardless of the boundary.
 func lookupConfigs(cwd string) []string {
-	// Prepend default config paths. Each global location contributes both a
-	// JSON and a shell config, so a global crushrc (e.g. in ~/.config/crush/)
-	// is discovered just like a project-level one. The crushrc sibling is
-	// listed after the JSON so it wins on conflicts, matching the
-	// same-directory precedence rule. Missing files are skipped when loaded.
+	// Prepend global user config and machine-owned data JSON. Only the user
+	// config directory contributes a crushrc; the data directory is writable
+	// machine state and must never be executed as Bash. Missing files are
+	// skipped when loaded.
 	configPaths := []string{
 		GlobalConfig(),
 		shellConfigSibling(GlobalConfig()),
 		GlobalConfigData(),
-		shellConfigSibling(GlobalConfigData()),
 	}
 
 	// Ordered high-to-low priority within a directory. LookupBounded returns

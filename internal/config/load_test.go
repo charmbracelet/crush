@@ -46,8 +46,9 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	// control so they can be present in the result without polluting
 	// the developer's real config.
 	globalDir := t.TempDir()
+	dataDir := t.TempDir()
 	t.Setenv("CRUSH_GLOBAL_CONFIG", globalDir)
-	t.Setenv("CRUSH_GLOBAL_DATA", globalDir)
+	t.Setenv("CRUSH_GLOBAL_DATA", dataDir)
 
 	t.Run("does not pick up crush.json above non-git project", func(t *testing.T) {
 		parent := t.TempDir()
@@ -136,10 +137,10 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		project := t.TempDir()
 
 		got := lookupConfigs(project)
-		// A global crushrc must be discoverable alongside crush.json,
-		// otherwise ~/.config/crush/crushrc would silently never load.
+		// A global crushrc is discovered only beside the user config. The data
+		// directory is machine-owned state and must never execute a crushrc.
 		require.Contains(t, got, shellConfigSibling(GlobalConfig()))
-		require.Contains(t, got, shellConfigSibling(GlobalConfigData()))
+		require.NotContains(t, got, shellConfigSibling(GlobalConfigData()))
 	})
 
 	t.Run("project crushrc and .crushrc are discovered", func(t *testing.T) {

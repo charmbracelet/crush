@@ -1345,6 +1345,16 @@ func (c *coordinator) IsBusy() bool {
 }
 
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
+	// Running subagents live on ad-hoc SessionAgents, invisible to
+	// currentAgent's own request tracking — check the registry first,
+	// mirroring Cancel's per-session lookup, so a caller polling a child
+	// session's busy state (e.g. Backend.GetAgentSession) doesn't see it
+	// reported idle while the subagent is still running.
+	if c.subagentCancels != nil {
+		if _, ok := c.subagentCancels.Get(sessionID); ok {
+			return true
+		}
+	}
 	return c.currentAgent.IsSessionBusy(sessionID)
 }
 

@@ -996,6 +996,75 @@ func TestCancelAll_StopsRunningSubagents(t *testing.T) {
 	require.Empty(t, rt.List(parentSession.ID))
 }
 
+// TestIsSessionBusy_TrueForRunningSubagent verifies that IsSessionBusy
+// reports a dispatched subagent's child session as busy while it runs, even
+// though the coder agent's own IsSessionBusy has no record of it (subagents
+// run on ad-hoc SessionAgents, invisible to currentAgent).
+func TestIsSessionBusy_TrueForRunningSubagent(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	runStarted := make(chan struct{})
+	subAgent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		close(runStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	coderMock := newMockAgent(providerID, 4096, nil)
+
+	coord := &coordinator{
+		cfg:             cfg,
+		sessions:        env.sessions,
+		runtime:         rt,
+		currentAgent:    coderMock,
+		subagentCancels: csync.NewMap[string, context.CancelFunc](),
+	}
+
+	done := make(chan fantasy.ToolResponse, 1)
+	go func() {
+		resp, _ := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          subAgent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "long running work",
+			SessionTitle:   "Busy Target",
+			AgentName:      "worker",
+			AgentColor:     "blue",
+		})
+		done <- resp
+	}()
+	<-runStarted
+
+	var childID string
+	require.Eventually(t, func() bool {
+		entries := rt.List(parentSession.ID)
+		if len(entries) == 0 {
+			return false
+		}
+		childID = entries[0].ChildSessionID
+		return true
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.True(t, coord.IsSessionBusy(childID), "child session must be reported busy while its subagent runs")
+
+	coord.Cancel(childID)
+	<-done
+
+	require.False(t, coord.IsSessionBusy(childID), "child session must be reported idle once the subagent finishes")
+}
+
 // TestCancel_UnknownSessionFallsThroughToCoder verifies that Cancel for a
 // session with no registry entry still reaches the coder agent (the
 // pre-existing behavior for parent sessions).

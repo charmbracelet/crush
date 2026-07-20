@@ -324,6 +324,27 @@ func TestSessionSwitchDropsAndRefreshesRunningSubagents(t *testing.T) {
 		"the new session's own running subagents must be fetched and applied")
 }
 
+// TestStaleRunningSubagentsFetchDiscarded is the regression test for a
+// runningSubagentsMsg racing a session switch: a fetch dispatched for a
+// session the user has since navigated away from must not clobber the
+// newly-loaded session's list with stale data.
+func TestStaleRunningSubagentsFetchDiscarded(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s2"}
+	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "s2-current"}}
+
+	// A fetch dispatched while the user was still on s1, resolving after
+	// they've already switched to s2, must be discarded rather than applied.
+	stale := runningSubagentsMsg{forSession: "s1", list: []workspace.RunningSubagentInfo{{Name: "s1-stale"}}}
+	m.Update(stale)
+
+	require.Equal(t, []workspace.RunningSubagentInfo{{Name: "s2-current"}}, m.runningSubagents,
+		"a runningSubagentsMsg scoped to a departed session must not overwrite the current session's list")
+}
+
 // TestToggleYoloWritesThroughCache: both yolo toggle paths share
 // toggleYoloMode, which must write the known new value through the cache —
 // no invalidation, no re-probe.

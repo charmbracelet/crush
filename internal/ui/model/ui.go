@@ -186,7 +186,12 @@ type (
 	// runningSubagentsMsg carries the refreshed running-subagent list,
 	// resolved off the Update path to keep DB IO out of the message loop.
 	runningSubagentsMsg struct {
-		list []workspace.RunningSubagentInfo
+		// forSession is the session the fetch was scoped to; a result that
+		// raced a session switch (the user navigated away before this
+		// resolved) is discarded rather than applied, mirroring
+		// promptQueueMsg.forSession.
+		forSession string
+		list       []workspace.RunningSubagentInfo
 	}
 )
 
@@ -956,7 +961,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case runningSubagentsMsg:
-		m.runningSubagents = msg.list
+		// Discard a fetch that raced a session switch: the user navigated
+		// away from forSession before it resolved, so applying it here would
+		// clobber the newly-loaded session's (possibly already-refreshed)
+		// list with a stale one.
+		if msg.forSession == m.currentSessionID() {
+			m.runningSubagents = msg.list
+		}
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention
 		// caches so removed subagents stop being offered without a restart.

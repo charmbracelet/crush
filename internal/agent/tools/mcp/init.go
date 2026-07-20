@@ -614,10 +614,19 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 				headers: headers,
 			},
 		}
-		return &mcp.StreamableClientTransport{
+		transport := &mcp.StreamableClientTransport{
 			Endpoint:   url,
 			HTTPClient: client,
-		}, nil
+		}
+		// Enable OAuth for HTTP servers that don't have a static
+		// Authorization header. This allows browser-based OAuth flows
+		// (e.g. Cairn, other MCP servers using OIDC) to work
+		// automatically: on 401, the SDK opens a browser for the user
+		// to authenticate, captures the callback, and retries.
+		if !hasAuthHeader(headers) {
+			transport.OAuthHandler = newMCPOAuthHandler(url)
+		}
+		return transport, nil
 	case config.MCPSSE:
 		url, err := m.ResolvedURL(resolver)
 		if err != nil {
@@ -646,6 +655,18 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 
 type headerRoundTripper struct {
 	headers map[string]string
+}
+
+// hasAuthHeader reports whether the headers map contains an
+// Authorization key (case-insensitive). When true, the server is
+// using static bearer-token auth and the OAuth handler is skipped.
+func hasAuthHeader(headers map[string]string) bool {
+	for k := range headers {
+		if strings.EqualFold(k, "Authorization") {
+			return true
+		}
+	}
+	return false
 }
 
 func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {

@@ -674,7 +674,15 @@ func (c *coordinator) findModelProvider(modelID, providerOverride string) (confi
 		}
 		return p, m, true
 	}
-	for p := range c.cfg.Config().Providers.Seq() {
+	// Providers is a csync.Map backed by a native Go map, whose iteration
+	// order is randomized — sort by ID first so that when more than one
+	// configured provider offers the same model id, the one picked is
+	// deterministic across dispatches instead of varying run to run.
+	providers := slices.Collect(c.cfg.Config().Providers.Seq())
+	slices.SortFunc(providers, func(a, b config.ProviderConfig) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	for _, p := range providers {
 		if m, ok := findCatwalkModel(p, modelID); ok {
 			return p, m, true
 		}

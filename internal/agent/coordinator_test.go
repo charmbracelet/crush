@@ -758,13 +758,20 @@ func TestFindModelProvider_TwoProvidersSameModelID(t *testing.T) {
 
 	coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
-	t.Run("no_override_returns_one_result_no_panic", func(t *testing.T) {
+	t.Run("no_override_deterministically_picks_lowest_id", func(t *testing.T) {
 		t.Parallel()
 
-		pc, m, ok := coord.findModelProvider("shared-model", "")
-		require.True(t, ok, "must find shared-model in at least one provider")
-		require.Equal(t, "shared-model", m.ID)
-		require.NotEmpty(t, pc.ID)
+		// Providers is a csync.Map backed by a native Go map, whose
+		// iteration order is randomized — findModelProvider must sort by ID
+		// before searching so the same provider is picked every time,
+		// instead of varying across dispatches. Repeat several times since a
+		// single call wouldn't catch map-order flakiness.
+		for range 20 {
+			pc, m, ok := coord.findModelProvider("shared-model", "")
+			require.True(t, ok, "must find shared-model in at least one provider")
+			require.Equal(t, "shared-model", m.ID)
+			require.Equal(t, "provider-a", pc.ID, "must deterministically pick the lowest-ID provider")
+		}
 	})
 
 	t.Run("override_selects_specific_provider", func(t *testing.T) {

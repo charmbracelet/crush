@@ -45,6 +45,10 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	key := args[1]
 	o := b.section("options")
 
+	if key == "ui" {
+		return optionUI(o, args, stderr)
+	}
+
 	// "option reset <key>" wipes a list back to empty. Because the builder
 	// applies operations in execution order, this is just an assignment:
 	// values added after the reset are kept, earlier ones are dropped.
@@ -165,6 +169,54 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 // inverted before storing: several config fields are phrased negatively
 // (disable_metrics), but users set the positive sense (metrics false).
 // Returns an empty jsonKey for unknown keys.
+func optionUI(options map[string]any, args []string, stderr io.Writer) error {
+	if len(args) != 4 {
+		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|completions-max-depth|completions-max-items> <value>")
+	}
+
+	key := args[2]
+	value := args[3]
+	ui := childMap(options, "tui")
+
+	switch key {
+	case "compact", "transparent":
+		parsed, err := parseBool(value)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option ui %s expects true/false, got %q", key, value))
+		}
+		jsonKey := "compact_mode"
+		if key == "transparent" {
+			jsonKey = "transparent"
+		}
+		ui[jsonKey] = parsed
+	case "diff":
+		if value != "unified" && value != "split" {
+			return usage(stderr, fmt.Sprintf("option ui diff expects unified or split, got %q", value))
+		}
+		ui["diff_mode"] = value
+	case "scrollbar":
+		if value != "default" && value != "always" && value != "never" {
+			return usage(stderr, fmt.Sprintf("option ui scrollbar expects default, always, or never, got %q", value))
+		}
+		ui["scrollbar"] = value
+	case "completions-max-depth", "completions-max-items":
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			return usage(stderr, fmt.Sprintf("option ui %s expects a non-negative integer, got %q", key, value))
+		}
+		jsonKey := "max_depth"
+		if key == "completions-max-items" {
+			jsonKey = "max_items"
+		}
+		childMap(ui, "completions")[jsonKey] = parsed
+	default:
+		return usage(stderr, fmt.Sprintf("option ui: unknown key %q", key))
+	}
+
+	slog.Info("UI option set in shell config", "key", key, "value", value)
+	return nil
+}
+
 func optionKeyMap(key string) (jsonKey string, inverted bool) {
 	switch key {
 	// Boolean fields (stored as-is).

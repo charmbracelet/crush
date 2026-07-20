@@ -19,7 +19,9 @@ import (
 //	    [--price-cache-hit F] [--reasoning-effort low|medium|high]
 //	model remove <provider>/<id>   (alias: rm)
 //	model large [<provider>/<id>] [--think] [--reasoning-effort L]
-//	    [--max-tokens N] [--temperature F]
+//	    [--max-tokens N] [--temperature F] [--top-p F] [--top-k N]
+//	    [--frequency-penalty F] [--presence-penalty F]
+//	    [--provider-options JSON]
 //	model small [<provider>/<id>] [...]
 //
 // "add" registers a model on an existing provider (the provider must have
@@ -228,6 +230,39 @@ func modelSelect(b *ConfigBuilder, args []string, stdout, stderr io.Writer) erro
 				return usage(stderr, err.Error())
 			}
 			sel["temperature"] = v
+		case "--top-p":
+			v, err := flagFloat64(args, &i, "top-p")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			if v < 0 || v > 1 {
+				return usage(stderr, fmt.Sprintf("model %s: --top-p expects a value between 0 and 1, got %v", slot, v))
+			}
+			sel["top_p"] = v
+		case "--top-k":
+			v, err := flagInt(args, &i, "top-k")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			sel["top_k"] = v
+		case "--frequency-penalty":
+			v, err := flagFloat64(args, &i, "frequency-penalty")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			sel["frequency_penalty"] = v
+		case "--presence-penalty":
+			v, err := flagFloat64(args, &i, "presence-penalty")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			sel["presence_penalty"] = v
+		case "--provider-options":
+			v, err := flagJSONObject(args, &i, "provider-options")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			mergeMap(childMap(sel, "provider_options"), v)
 		default:
 			return usage(stderr, fmt.Sprintf("model %s: unknown flag %s", slot, args[i]))
 		}

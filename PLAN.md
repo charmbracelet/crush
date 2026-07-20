@@ -733,8 +733,11 @@ provider add <id> [flags]
     --base-url URL               Base URL (json: base_url)
     --disable BOOL               Disable the provider (json: disable)
     --flat-rate BOOL             Flat-rate billing (json: flat_rate)
+    --discover-models BOOL       Auto-discover/merge models (json: discover_models)
     --system-prompt-prefix TEXT  Prefix injected into system prompt (json: system_prompt_prefix)
     --extra-header KEY VALUE     Extra HTTP header, repeatable (json: extra_headers[KEY])
+    --extra-body JSON            Merge a JSON object (json: extra_body)
+    --provider-options JSON      Merge a JSON object (json: provider_options)
 
 provider remove <id>   (alias: rm)
     Remove a provider and all of its children (its custom models).
@@ -771,6 +774,11 @@ model small [<provider>/<id>] [flags]
     --reasoning-effort LEVEL     low|medium|high (json: reasoning_effort)
     --max-tokens N               Max output tokens (json: max_tokens)
     --temperature F              Sampling temperature (json: temperature)
+    --top-p F                    Top-p sampling, 0–1 (json: top_p)
+    --top-k N                    Top-k sampling (json: top_k)
+    --frequency-penalty F        Frequency penalty (json: frequency_penalty)
+    --presence-penalty F         Presence penalty (json: presence_penalty)
+    --provider-options JSON      Merge a JSON object (json: provider_options)
 ```
 
 ```text
@@ -872,6 +880,15 @@ option reset <list-key>
       attribution-generated-with BOOL
         (json: attribution.generated_with)
 
+    UI keys:
+      option ui compact BOOL               (json: tui.compact_mode)
+      option ui diff unified|split         (json: tui.diff_mode)
+      option ui transparent BOOL           (json: tui.transparent)
+      option ui scrollbar default|always|never
+                                             (json: tui.scrollbar)
+      option ui completions-max-depth N    (json: tui.completions.max_depth)
+      option ui completions-max-items N    (json: tui.completions.max_items)
+
     List keys (singular; value required; append one value per call):
       context-path VALUE           (json: context_paths)
       global-context-path VALUE    (json: global_context_paths)
@@ -885,6 +902,8 @@ option reset <list-key>
       option data-directory .crush
       option attribution-trailer-style assisted-by
       option attribution-generated-with true
+      option ui compact true
+      option ui diff unified
       option context-path .cursorrules
       option reset skill-path
 ```

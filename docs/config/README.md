@@ -109,8 +109,11 @@ provider remove <id>             Remove it (and its custom models); alias: rm
   --base-url URL                 API base URL
   --disable BOOL                 Turn the provider off without deleting it
   --flat-rate BOOL               Flat-rate billing
+  --discover-models BOOL         Auto-discover and merge provider models
   --system-prompt-prefix TEXT    Text prepended to the system prompt
   --extra-header KEY VALUE       Add an HTTP header (repeatable)
+  --extra-body JSON              Merge a JSON object into request bodies
+  --provider-options JSON        Merge a provider-specific JSON object
 ```
 
 ```bash
@@ -145,6 +148,11 @@ model small [<provider>/<id>]        Set the small slot — or print it if no ar
   --reasoning-effort LEVEL      low | medium | high
   --max-tokens N                Max output tokens
   --temperature F               Sampling temperature
+  --top-p F                     Top-p sampling (0–1)
+  --top-k N                     Top-k sampling
+  --frequency-penalty F         Frequency penalty
+  --presence-penalty F          Presence penalty
+  --provider-options JSON       Merge a provider-specific JSON object
 ```
 
 The `<provider>/<id>` form is exactly what `crush models` prints. `large` is
@@ -254,6 +262,14 @@ option reset <list-key>      Clear a list option back to empty
     attribution-trailer-style     none | co-authored-by | assisted-by
     attribution-generated-with    true | false (case-insensitive)
 
+  UI:
+    option ui compact BOOL
+    option ui diff unified|split
+    option ui transparent BOOL
+    option ui scrollbar default|always|never
+    option ui completions-max-depth N
+    option ui completions-max-items N
+
   Lists (one value per call, repeatable; clear with "option reset <key>"):
     context-path, global-context-path, skill-path, disable-skill
 ```
@@ -264,6 +280,8 @@ option skill-path ./skills
 option disable-skill crush-config
 option attribution-trailer-style assisted-by
 option attribution-generated-with true
+option ui compact true
+option ui diff unified
 ```
 
 > [!IMPORTANT] These skill paths load by default — you do NOT need `skill-path`
@@ -285,16 +303,6 @@ option skill-path ~/my/skills
 
 `remove`, `rm`, and `option reset` all act on whatever was set earlier in the
 script or pulled in via `source`. Later lines win, just like a shell.
-
-## A few things still live in JSON
-
-Most config has a command, but a handful of advanced knobs don't yet. Put them
-in a `crush.json` next to your `crushrc` (they merge):
-
-- Nested `options.tui` (compact mode, diff mode, transparency).
-- Extra model tuning: `top_p`, `top_k`, `frequency_penalty`, `presence_penalty`,
-  `provider_options`.
-- Provider `extra_body`, `provider_options`, `api_endpoint`, `discover_models`.
 
 ## Legacy JSON
 

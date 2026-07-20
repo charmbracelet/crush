@@ -32,6 +32,33 @@ func TestShellConfigOptionPositiveMetricsBare(t *testing.T) {
 	require.False(t, store.Config().Options.DisableMetrics, "metrics on => disable_metrics false")
 }
 
+func TestShellConfigOptionUI(t *testing.T) {
+	store := loadCrushSh(t, `option ui compact true
+option ui diff split
+option ui transparent false
+option ui scrollbar always
+option ui completions-max-depth 4
+option ui completions-max-items 200`)
+
+	ui := store.Config().Options.TUI
+	require.NotNil(t, ui)
+	require.True(t, ui.CompactMode)
+	require.Equal(t, "split", ui.DiffMode)
+	require.NotNil(t, ui.Transparent)
+	require.False(t, *ui.Transparent)
+	require.Equal(t, "always", ui.Scrollbar)
+	require.NotNil(t, ui.Completions.MaxDepth)
+	require.Equal(t, 4, *ui.Completions.MaxDepth)
+	require.NotNil(t, ui.Completions.MaxItems)
+	require.Equal(t, 200, *ui.Completions.MaxItems)
+}
+
+func TestShellConfigOptionUIRejectsInvalidValue(t *testing.T) {
+	_, err := loadCrushShErr(t, `option ui diff side-by-side`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects unified or split")
+}
+
 func TestShellConfigOptionAttribution(t *testing.T) {
 	store := loadCrushSh(t, `option attribution-trailer-style none
 option attribution-generated-with false`)

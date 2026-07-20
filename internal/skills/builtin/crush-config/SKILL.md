@@ -68,8 +68,9 @@ provider remove <id>         # alias: rm — removes the provider and its models
 
 Flags: `--name`, `--type` (`openai`, `openai-compat`, `anthropic`, or a local
 type like `ollama`, `lmstudio`, `llamacpp`), `--api-key`, `--base-url`,
-`--disable BOOL`, `--flat-rate BOOL`, `--system-prompt-prefix TEXT`,
-`--extra-header KEY VALUE` (repeatable).
+`--disable BOOL`, `--flat-rate BOOL`, `--discover-models BOOL`,
+`--system-prompt-prefix TEXT`, `--extra-header KEY VALUE` (repeatable),
+`--extra-body JSON`, `--provider-options JSON`.
 
 ```bash
 provider add deepseek \
@@ -94,7 +95,8 @@ model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
   `--price-output F`, `--price-cache-create F`, `--price-cache-hit F`,
   `--reasoning-effort low|medium|high`.
 - `model large`/`model small` flags: `--think`, `--reasoning-effort`,
-  `--max-tokens N`, `--temperature F`.
+  `--max-tokens N`, `--temperature F`, `--top-p F`, `--top-k N`,
+  `--frequency-penalty F`, `--presence-penalty F`, `--provider-options JSON`.
 - `model large` with no argument prints the current selection as `provider/id`,
   usable in `$(model large)`.
 
@@ -176,6 +178,9 @@ option reset <list-key>    # clear a list option back to empty
 - **String keys**: `data-directory`, `initialize-as`, `notification-style`.
 - **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
   `assisted-by`) and `attribution-generated-with` (boolean).
+- **UI settings**: `option ui compact BOOL`, `option ui diff unified|split`,
+  `option ui transparent BOOL`, `option ui scrollbar default|always|never`,
+  `option ui completions-max-depth N`, `option ui completions-max-items N`.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).
@@ -186,21 +191,13 @@ option skill-path ./skills
 option disable-skill crush-config
 option attribution-trailer-style assisted-by
 option attribution-generated-with true
+option ui compact true
+option ui diff unified
 ```
 
 > [!IMPORTANT] These skill paths are loaded by default and do NOT need
 > `skill-path`: `.agents/skills`, `.crush/skills`, `.claude/skills`,
 > `.cursor/skills`.
-
-### Fields not yet expressible in crushrc
-
-A few advanced fields have no builtin yet. Put them in a `crush.json` alongside
-your `crushrc` (they merge):
-
-- Nested `options.tui` (`compact_mode`, `diff_mode`, `transparent`).
-- Extended model tuning: `top_p`, `top_k`, `frequency_penalty`,
-  `presence_penalty`, `provider_options`.
-- Provider `extra_body`, `provider_options`, `api_endpoint`, `discover_models`.
 
 ## Hooks runtime
 

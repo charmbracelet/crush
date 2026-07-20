@@ -372,6 +372,15 @@ func TestLoadShellConfig_NoBuiltins(t *testing.T) {
 	require.Nil(t, jsonBytes)
 }
 
+func TestLoadShellConfig_ProviderJSONFlagsRequireObjects(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	_, err := LoadShellConfig(path, []byte(`provider add custom --extra-body '[]'`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects a JSON object")
+}
+
 // TestLoadShellConfig_ExtraHeader verifies the --extra-header flag.
 func TestLoadShellConfig_ExtraHeader(t *testing.T) {
 	t.Parallel()

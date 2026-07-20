@@ -58,6 +58,24 @@ model add openai/gpt-x --cost-per-1m-in 1`))
 	require.Contains(t, err.Error(), "unknown flag")
 }
 
+func TestModelSelectRejectsInvalidTopP(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	_, err := LoadShellConfig(path, []byte(`model large openai/gpt-x --top-p 1.5`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "between 0 and 1")
+}
+
+func TestModelSelectRejectsNonObjectProviderOptions(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	_, err := LoadShellConfig(path, []byte(`model large openai/gpt-x --provider-options '[]'`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects a JSON object")
+}
+
 func TestModelAddUnknownProvider(t *testing.T) {
 	t.Parallel()
 

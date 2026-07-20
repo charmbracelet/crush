@@ -790,6 +790,9 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if largeModelSelected.PresencePenalty != nil {
 				large.PresencePenalty = largeModelSelected.PresencePenalty
 			}
+			if largeModelSelected.ProviderOptions != nil {
+				large.ProviderOptions = maps.Clone(largeModelSelected.ProviderOptions)
+			}
 		}
 	}
 	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
@@ -830,6 +833,9 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			}
 			if smallModelSelected.PresencePenalty != nil {
 				small.PresencePenalty = smallModelSelected.PresencePenalty
+			}
+			if smallModelSelected.ProviderOptions != nil {
+				small.ProviderOptions = maps.Clone(smallModelSelected.ProviderOptions)
 			}
 			small.Think = smallModelSelected.Think
 		}

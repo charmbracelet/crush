@@ -731,7 +731,8 @@ the found models with your hand configured ones.
 provider add ollama \
   --name Ollama \
   --type ollama \
-  --base-url "http://localhost:11434/v1/"
+  --base-url "http://localhost:11434/v1/" \
+  --discover-models true
 
 model add ollama/qwen3:30b \
   --name "Qwen 3 30B" \
@@ -739,30 +740,8 @@ model add ollama/qwen3:30b \
   --default-max-tokens 20000
 ```
 
-> [!NOTE]
-> `discover_models: true` does not have a `crushrc` flag yet. Use the JSON form
-> below if you want discovery to merge with models you configure manually.
-
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "base_url": "http://localhost:11434/v1/",
-      "type": "ollama",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen3:30b",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ],
-      "discover_models": true
-    }
-  }
-}
-```
+The `--discover-models true` flag merges discovered models with the one above;
+your explicit model fields win on conflicts.
 
 ## Logging
 

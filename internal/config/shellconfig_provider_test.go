@@ -13,11 +13,21 @@ func TestShellConfigProviderAddAndModel(t *testing.T) {
 	store := loadCrushSh(t, `provider add myllm \
   --type openai-compat \
   --base-url "http://localhost:1234/v1" \
-  --api-key "sk-test"
+  --api-key "sk-test" \
+  --discover-models false \
+  --extra-body '{"service_tier":"flex"}' \
+  --provider-options '{"region":"local"}'
+provider add myllm \
+  --extra-body '{"stream":true}' \
+  --provider-options '{"mode":"test"}'
 model add myllm/foo-1 --name "Foo 1" --context-window 8000 \
   --price-input 1.25 --price-output 5 \
   --price-cache-create 2 --price-cache-hit 0.25
-model large myllm/foo-1`)
+model large myllm/foo-1 \
+  --top-p 0.9 --top-k 40 \
+  --frequency-penalty 0.2 --presence-penalty 0.1 \
+  --provider-options '{"routing":{"tier":"fast"}}'
+model large myllm/foo-1 --provider-options '{"timeout":30}'`)
 
 	cfg := store.Config()
 
@@ -25,6 +35,12 @@ model large myllm/foo-1`)
 	require.True(t, ok, "myllm provider should be configured")
 	require.Equal(t, "sk-test", p.APIKey)
 	require.Equal(t, "http://localhost:1234/v1", p.BaseURL)
+	require.NotNil(t, p.AutoDiscoverModels)
+	require.False(t, *p.AutoDiscoverModels)
+	require.Equal(t, "flex", p.ExtraBody["service_tier"])
+	require.Equal(t, true, p.ExtraBody["stream"])
+	require.Equal(t, "local", p.ProviderOptions["region"])
+	require.Equal(t, "test", p.ProviderOptions["mode"])
 	require.True(
 		t,
 		slices.ContainsFunc(p.Models, func(m catwalk.Model) bool { return m.ID == "foo-1" }),
@@ -39,6 +55,18 @@ model large myllm/foo-1`)
 	large := cfg.Models[config.SelectedModelTypeLarge]
 	require.Equal(t, "myllm", large.Provider)
 	require.Equal(t, "foo-1", large.Model)
+	require.NotNil(t, large.TopP)
+	require.Equal(t, 0.9, *large.TopP)
+	require.NotNil(t, large.TopK)
+	require.Equal(t, int64(40), *large.TopK)
+	require.NotNil(t, large.FrequencyPenalty)
+	require.Equal(t, 0.2, *large.FrequencyPenalty)
+	require.NotNil(t, large.PresencePenalty)
+	require.Equal(t, 0.1, *large.PresencePenalty)
+	require.Equal(t, map[string]any{
+		"routing": map[string]any{"tier": "fast"},
+		"timeout": float64(30),
+	}, large.ProviderOptions)
 }
 
 func TestShellConfigProviderRemove(t *testing.T) {

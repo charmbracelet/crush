@@ -153,6 +153,15 @@ func TestOption_ResetNonListKey(t *testing.T) {
 	require.Contains(t, err.Error(), "not one")
 }
 
+func TestOption_UIUnknownKey(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	_, err := LoadShellConfig(path, []byte(`option ui bogus true`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown key")
+}
+
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 

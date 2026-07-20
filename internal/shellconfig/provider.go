@@ -13,7 +13,9 @@ import (
 //
 //	provider add <id> [--name NAME] [--type TYPE] [--api-key KEY]
 //	    [--base-url URL] [--disable true|false] [--flat-rate true|false]
-//	    [--system-prompt-prefix TEXT] [--extra-header KEY VALUE]
+//	    [--discover-models true|false] [--system-prompt-prefix TEXT]
+//	    [--extra-header KEY VALUE] [--extra-body JSON]
+//	    [--provider-options JSON]
 //	provider remove <id>   (alias: rm)
 //
 // "add" defines or updates a provider; repeated calls with the same <id>
@@ -39,7 +41,7 @@ func handleProvider(ctx context.Context, args []string, stdin io.Reader, stdout,
 
 func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE]")
+		return usage(stderr, "usage: provider add <id> [--name NAME] [--type TYPE] [--api-key KEY] [--base-url URL] [--disable true|false] [--flat-rate true|false] [--discover-models true|false] [--system-prompt-prefix TEXT] [--extra-header KEY VALUE] [--extra-body JSON] [--provider-options JSON]")
 	}
 	id := args[2]
 	slog.Info("Provider defined in shell config", "provider", id)
@@ -84,6 +86,12 @@ func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 				return usage(stderr, err.Error())
 			}
 			p["flat_rate"] = v
+		case "--discover-models":
+			v, err := flagBool(args, &i, "discover-models")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			p["discover_models"] = v
 		case "--system-prompt-prefix":
 			v, err := flagStr(args, &i, "system-prompt-prefix")
 			if err != nil {
@@ -96,6 +104,18 @@ func providerAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 				return usage(stderr, err.Error())
 			}
 			childMap(p, "extra_headers")[k] = v
+		case "--extra-body":
+			v, err := flagJSONObject(args, &i, "extra-body")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			mergeMap(childMap(p, "extra_body"), v)
+		case "--provider-options":
+			v, err := flagJSONObject(args, &i, "provider-options")
+			if err != nil {
+				return usage(stderr, err.Error())
+			}
+			mergeMap(childMap(p, "provider_options"), v)
 		default:
 			return usage(stderr, fmt.Sprintf("provider add: unknown flag %s", args[i]))
 		}

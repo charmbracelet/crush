@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -99,6 +100,22 @@ func flagKeyValue(args []string, i *int, flag string) (string, string, error) {
 // accept JSON string flags (e.g. --init-options).
 func jsonUnmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
+}
+
+func flagJSONObject(args []string, i *int, flag string) (map[string]any, error) {
+	value, err := flagStr(args, i, flag)
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(value), &object); err != nil || object == nil {
+		return nil, fmt.Errorf("%s: --%s expects a JSON object, got %q", args[0], flag, value)
+	}
+	return object, nil
+}
+
+func mergeMap(target map[string]any, source map[string]any) {
+	maps.Copy(target, source)
 }
 
 // usage prints a usage message to stderr and returns an error.

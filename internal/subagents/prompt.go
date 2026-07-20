@@ -3,13 +3,9 @@ package subagents
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/crush/internal/stringext"
 )
-
-var promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
-
-func escape(s string) string {
-	return promptReplacer.Replace(s)
-}
 
 // ToPromptXML generates XML for injection into the coder system prompt so the
 // model can proactively notice a matching subagent before deciding how to
@@ -22,8 +18,8 @@ func ToPromptXML(active []*Subagent) string {
 	sb.WriteString("<available_subagents>\n")
 	for _, sa := range active {
 		sb.WriteString("  <subagent>\n")
-		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(sa.Name))
-		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(sa.Description))
+		fmt.Fprintf(&sb, "    <name>%s</name>\n", stringext.EscapeXML(sa.Name))
+		fmt.Fprintf(&sb, "    <description>%s</description>\n", stringext.EscapeXML(sa.Description))
 		sb.WriteString("  </subagent>\n")
 	}
 	sb.WriteString("</available_subagents>")

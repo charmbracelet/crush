@@ -28,10 +28,11 @@ import (
 type countingWorkspace struct {
 	workspace.Workspace
 
-	ready     bool
-	agentBusy bool
-	yolo      bool
-	queued    []string
+	ready           bool
+	agentBusy       bool
+	yolo            bool
+	queued          []string
+	runningSubagent []workspace.RunningSubagentInfo
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -75,6 +76,10 @@ func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message
 }
 
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
+
+func (w *countingWorkspace) RunningSubagents(string) []workspace.RunningSubagentInfo {
+	return w.runningSubagent
+}
 
 func (w *countingWorkspace) Config() *config.Config { return nil }
 
@@ -143,7 +148,7 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmds(m, c)
 		}
-	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg:
+	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, runningSubagentsMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	}
@@ -293,6 +298,30 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	runCmds(m, cmd)
 	require.Equal(t, 2, m.promptQueue, "the new session's queue must be fetched")
 	require.Equal(t, []string{"a", "b"}, m.promptQueueItems)
+}
+
+// TestSessionSwitchDropsAndRefreshesRunningSubagents is the regression test
+// for the sidebar showing a stale "Active subagents" panel after a session
+// switch: runningSubagents was otherwise only refreshed by a live
+// RuntimeEvent for the current session's parent, never on session load, so
+// switching to a session with no subagent activity of its own kept showing
+// the previous session's list indefinitely.
+func TestSessionSwitchDropsAndRefreshesRunningSubagents(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:           true,
+		runningSubagent: []workspace.RunningSubagentInfo{{Name: "s2-active-agent"}},
+	}
+	m := newBusyUI(ws)
+	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "stale-from-s1"}}
+
+	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
+	require.Empty(t, m.runningSubagents, "switching sessions must drop the old session's subagent list immediately")
+
+	runCmds(m, cmd)
+	require.Equal(t, []workspace.RunningSubagentInfo{{Name: "s2-active-agent"}}, m.runningSubagents,
+		"the new session's own running subagents must be fetched and applied")
 }
 
 // TestToggleYoloWritesThroughCache: both yolo toggle paths share

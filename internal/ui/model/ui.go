@@ -754,6 +754,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.parentTitle = ""
 		m.subagentColor = ""
 		m.knownChildSessionIDs = nil
+		// runningSubagents is otherwise only refreshed by a live RuntimeEvent
+		// for the current session's parent — drop the previous session's
+		// list and re-fetch for the new one so the sidebar doesn't keep
+		// showing a stale "Active subagents" panel until one happens to
+		// arrive (or never, if nothing is dispatched under the new session).
+		m.runningSubagents = nil
+		cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {

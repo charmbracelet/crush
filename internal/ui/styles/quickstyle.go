@@ -11,6 +11,7 @@ import (
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -98,6 +99,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.WorkingGradFromColor = o.primary
 	s.WorkingGradToColor = o.secondary
 	s.WorkingLabelColor = o.fgMostSubtle
+	s.WorkingTimerColor = o.fgMostSubtle
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{
@@ -713,6 +715,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Buttons
 	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
 	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
+	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.fgMostSubtle)
+	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
@@ -725,10 +729,52 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.PromptBangIconBlurred = s.Editor.PromptBangIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
 	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptQuestionIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgBase).Background(o.primary).Bold(true).SetString(" ? ")
+	s.Editor.PromptQuestionIconBlurred = s.Editor.PromptQuestionIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.QuestionSelected = lipgloss.NewStyle().Foreground(o.secondary).Bold(true)
+	s.Editor.QuestionUnselected = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Editor.QuestionBody = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Editor.QuestionConfirm = lipgloss.NewStyle().Foreground(o.primary).Bold(true)
+	s.Editor.QuestionNote = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Editor.QuestionCursorBar = lipgloss.NewStyle().Foreground(o.secondary)
+	s.Editor.QuestionRadioOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
+	s.Editor.QuestionRadioOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
+	s.Editor.QuestionCheckOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
+	s.Editor.QuestionCheckOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 	s.Radio.Label = lipgloss.NewStyle().Foreground(o.fgSubtle)
+
+	// Tabs for batch question forms. All borders use charple
+	// (primary). Active tab has an open bottom that merges with
+	// the content area; inactive tabs have a closed bottom. First
+	// tab gets a right-angle bottom-left corner at draw time.
+	borderColor := uv.Style{Fg: o.primary}
+	inactiveBorder := uv.RoundedBorder().Style(borderColor)
+	inactiveBorder.BottomLeft = uv.Side{Content: "┴", Style: borderColor}
+	inactiveBorder.BottomRight = uv.Side{Content: "┴", Style: borderColor}
+	activeBorder := uv.RoundedBorder().Style(borderColor)
+	activeBorder.Bottom = uv.Side{Content: " ", Style: borderColor}
+	activeBorder.BottomLeft = uv.Side{Content: "┘", Style: borderColor}
+	activeBorder.BottomRight = uv.Side{Content: "└", Style: borderColor}
+
+	s.Tab.ActiveBorder = activeBorder
+	s.Tab.InactiveBorder = inactiveBorder
+
+	blurredBorderColor := uv.Style{Fg: o.fgMoreSubtle}
+	inactiveBorderBlurred := uv.RoundedBorder().Style(blurredBorderColor)
+	inactiveBorderBlurred.BottomLeft = uv.Side{Content: "┴", Style: blurredBorderColor}
+	inactiveBorderBlurred.BottomRight = uv.Side{Content: "┴", Style: blurredBorderColor}
+	activeBorderBlurred := uv.RoundedBorder().Style(blurredBorderColor)
+	activeBorderBlurred.Bottom = uv.Side{Content: " ", Style: blurredBorderColor}
+	activeBorderBlurred.BottomLeft = uv.Side{Content: "┘", Style: blurredBorderColor}
+	activeBorderBlurred.BottomRight = uv.Side{Content: "└", Style: blurredBorderColor}
+	s.Tab.ActiveBorderBlurred = activeBorderBlurred
+	s.Tab.InactiveBorderBlurred = inactiveBorderBlurred
+
+	s.Tab.ActiveStyle = uv.Style{Fg: o.fgBase}
+	s.Tab.InactiveStyle = uv.Style{Fg: o.fgMoreSubtle}
 
 	// Logo
 	s.Logo.FieldColor = o.primary
@@ -858,7 +904,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
-	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
+	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
 
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
@@ -878,8 +924,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.TitleGradFromColor = o.primary
 	s.Dialog.TitleGradToColor = o.secondary
 
-	// Dialog.ListItem (commands, reasoning, models)
-	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgBase)
+	// Dialog.ListItem (commands, reasoning, models). The info column holds
+	// secondary hints like keybind shortcuts, so mute it when blurred and
+	// keep it readable on the focused row.
+	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	// Dialog.Models
@@ -982,13 +1030,18 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Attachments.Image = attachmentIconStyle.SetString(ImageIcon)
 	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
 	s.Attachments.Skill = attachmentIconStyle.SetString(SkillIcon)
-	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(o.fgMoreSubtle).Foreground(o.fgBase)
-	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
+	s.Attachments.Normal = base.Padding(0, 1).Background(o.fgMoreSubtle).Foreground(o.fgBase)
+	// Remove and Deleting share the same slot on the right side of a chip
+	// and must keep the same geometry so toggling delete-mode doesn't
+	// shift the chips. Padding(0, 1) puts a colored cell on each side of the
+	// glyph so it isn't flush against the box edge, while MarginRight(1)
+	// keeps a transparent gap between adjacent chips.
+	s.Attachments.Remove = base.Padding(0, 1).MarginRight(1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
+	s.Attachments.Deleting = base.Padding(0, 1).MarginRight(1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
 
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)
 	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(o.bgMostVisible)
-	s.Pills.Blurred = base.Padding(0, 1).BorderStyle(lipgloss.HiddenBorder())
 	s.Pills.QueueItemPrefix = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("  •")
 	s.Pills.QueueItemText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Pills.QueueLabel = lipgloss.NewStyle().Foreground(o.fgBase)

@@ -154,9 +154,6 @@ func SmallRender(t *styles.Styles, width int, o Opts) string {
 		name = "HYPERCRUSH"
 	}
 	charm := "Charm™"
-	if !o.Hyper {
-		charm = " " + charm
-	}
 	title := t.Logo.SmallCharm.Render(charm)
 	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, name, t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor))
 	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after the name

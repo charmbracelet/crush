@@ -1,7 +1,9 @@
 package oauth
 
 import (
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -54,4 +56,25 @@ func (t *Token) IsExpired() bool {
 // SetExpiresIn calculates and sets the ExpiresIn field based on the ExpiresAt field.
 func (t *Token) SetExpiresIn() {
 	t.ExpiresIn = int(time.Until(time.Unix(t.ExpiresAt, 0)).Seconds())
+}
+
+// TokenExchangeError represents a failed OAuth token exchange. It carries
+// the HTTP status code and response body so callers can distinguish between
+// recoverable failures (e.g. temporary server error) and terminal ones
+// (e.g. revoked refresh token).
+type TokenExchangeError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *TokenExchangeError) Error() string {
+	return fmt.Sprintf("token exchange failed: status %d body %q", e.StatusCode, e.Body)
+}
+
+// IsRefreshTokenRevoked reports whether the exchange failed because the
+// refresh token was revoked or invalidated by the provider. This indicates
+// that interactive re-authentication is required.
+func (e *TokenExchangeError) IsRefreshTokenRevoked() bool {
+	return strings.Contains(e.Body, "revoked") ||
+		strings.Contains(e.Body, "invalid_grant")
 }

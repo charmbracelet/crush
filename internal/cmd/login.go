@@ -8,7 +8,6 @@ import (
 	"os/signal"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -16,7 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	openaioauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	xaioauth "github.com/charmbracelet/crush/internal/oauth/xai"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -56,17 +55,11 @@ crush login -f copilot
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c, ws, cleanup, err := connectToServer(cmd)
+		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
-
-		progressEnabled := ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
-		if progressEnabled && supportsProgressBar() {
-			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
-			defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
-		}
 
 		provider := "hyper"
 		if len(args) > 0 {
@@ -75,13 +68,13 @@ crush login -f copilot
 		force, _ := cmd.Flags().GetBool("force")
 		switch provider {
 		case "hyper":
-			return loginHyper(c, ws.ID, force)
+			return loginHyper(ws, force)
 		case "copilot", "github", "github-copilot":
-			return loginCopilot(c, ws.ID, force)
+			return loginCopilot(ws, force)
 		case "openai", "chatgpt":
-			return loginOpenAI(c, ws.ID, force)
+			return loginOpenAI(ws, force)
 		case "xai", "grok":
-			return loginXAI(c, ws.ID, force)
+			return loginXAI(ws, force)
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
@@ -92,12 +85,12 @@ func init() {
 	loginCmd.Flags().BoolP("force", "f", false, "Force re-authentication even if already logged in")
 }
 
-func loginHyper(c *client.Client, wsID string, force bool) error {
+func loginHyper(ws workspace.Workspace, force bool) error {
 	ctx := getLoginContext()
 
 	if !force {
-		cfg, err := c.GetConfig(ctx, wsID)
-		if err == nil && cfg != nil {
+		cfg := ws.Config()
+		if cfg != nil {
 			if pc, ok := cfg.Providers.Get("hyper"); ok && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to Hyper.")
 				fmt.Println("Use --force to re-authenticate.")
@@ -115,11 +108,11 @@ func loginHyper(c *client.Client, wsID string, force bool) error {
 	fmt.Println("The following code should be on clipboard already:")
 
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Render(resp.UserCode))
+	lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(resp.UserCode))
 	fmt.Println()
 	fmt.Println("Press enter to open this URL, and then paste it there:")
 	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Hyperlink(resp.VerificationURL, "id=hyper").Render(resp.VerificationURL))
+	lipgloss.Println(lipgloss.NewStyle().Hyperlink(resp.VerificationURL, "id=hyper").Render(resp.VerificationURL))
 	fmt.Println()
 	waitEnter()
 	if err := browser.OpenURL(resp.VerificationURL); err != nil {
@@ -148,8 +141,8 @@ func loginHyper(c *client.Client, wsID string, force bool) error {
 	}
 
 	if err := cmp.Or(
-		c.SetConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.api_key", token.AccessToken),
-		c.SetConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.oauth", token),
+		ws.SetConfigField(config.ScopeGlobal, "providers.hyper.api_key", token.AccessToken),
+		ws.SetConfigField(config.ScopeGlobal, "providers.hyper.oauth", token),
 	); err != nil {
 		return err
 	}
@@ -159,12 +152,12 @@ func loginHyper(c *client.Client, wsID string, force bool) error {
 	return nil
 }
 
-func loginCopilot(c *client.Client, wsID string, force bool) error {
+func loginCopilot(ws workspace.Workspace, force bool) error {
 	loginCtx := getLoginContext()
 
 	if !force {
-		cfg, err := c.GetConfig(loginCtx, wsID)
-		if err == nil && cfg != nil {
+		cfg := ws.Config()
+		if cfg != nil {
 			if pc, ok := cfg.Providers.Get("copilot"); ok && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to GitHub Copilot.")
 				fmt.Println("Use --force to re-authenticate.")
@@ -192,13 +185,21 @@ func loginCopilot(c *client.Client, wsID string, force bool) error {
 			return err
 		}
 
+		clipboard.WriteText(dc.UserCode)
 		fmt.Println()
-		fmt.Println("Open the following URL and follow the instructions to authenticate with GitHub Copilot:")
+		fmt.Println("The following code should be on clipboard already:")
 		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
+		lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
 		fmt.Println()
-		fmt.Println("Code:", lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
+		fmt.Println("Press enter to open this URL and authenticate with GitHub Copilot:")
 		fmt.Println()
+		lipgloss.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
+		fmt.Println()
+		waitEnter()
+		if err := browser.OpenURL(dc.VerificationURI); err != nil {
+			fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
+		}
+
 		fmt.Println("Waiting for authorization...")
 
 		t, err := copilot.PollForToken(loginCtx, dc)
@@ -206,11 +207,11 @@ func loginCopilot(c *client.Client, wsID string, force bool) error {
 			fmt.Println()
 			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
 			fmt.Println()
-			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
+			lipgloss.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
 			fmt.Println()
 			fmt.Println("You may be able to request free access if eligible. For more information, see:")
 			fmt.Println()
-			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
+			lipgloss.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
 		}
 		if err != nil {
 			return err
@@ -219,8 +220,8 @@ func loginCopilot(c *client.Client, wsID string, force bool) error {
 	}
 
 	if err := cmp.Or(
-		c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.copilot.api_key", token.AccessToken),
-		c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.copilot.oauth", token),
+		ws.SetConfigField(config.ScopeGlobal, "providers.copilot.api_key", token.AccessToken),
+		ws.SetConfigField(config.ScopeGlobal, "providers.copilot.oauth", token),
 	); err != nil {
 		return err
 	}
@@ -230,12 +231,12 @@ func loginCopilot(c *client.Client, wsID string, force bool) error {
 	return nil
 }
 
-func loginOpenAI(c *client.Client, wsID string, force bool) error {
+func loginOpenAI(ws workspace.Workspace, force bool) error {
 	loginCtx := getLoginContext()
 
 	if !force {
-		cfg, err := c.GetConfig(loginCtx, wsID)
-		if err == nil && cfg != nil {
+		cfg := ws.Config()
+		if cfg != nil {
 			if pc, ok := cfg.Providers.Get("openai"); ok && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to OpenAI (ChatGPT).")
 				fmt.Println("Use --force to re-authenticate.")
@@ -266,14 +267,14 @@ func loginOpenAI(c *client.Client, wsID string, force bool) error {
 	}
 
 	if err := cmp.Or(
-		c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.openai.api_key", token.AccessToken),
-		c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.openai.oauth", token),
+		ws.SetConfigField(config.ScopeGlobal, "providers.openai.api_key", token.AccessToken),
+		ws.SetConfigField(config.ScopeGlobal, "providers.openai.oauth", token),
 	); err != nil {
 		return err
 	}
 
 	if accountID := openaioauth.ChatGPTAccountID(token.AccessToken); accountID != "" {
-		if err := c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.openai.extra_headers.ChatGPT-Account-ID", accountID); err != nil {
+		if err := ws.SetConfigField(config.ScopeGlobal, "providers.openai.extra_headers.ChatGPT-Account-ID", accountID); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to save ChatGPT account ID: %v\n", err)
 		}
 	}
@@ -283,12 +284,12 @@ func loginOpenAI(c *client.Client, wsID string, force bool) error {
 	return nil
 }
 
-func loginXAI(c *client.Client, wsID string, force bool) error {
+func loginXAI(ws workspace.Workspace, force bool) error {
 	loginCtx := getLoginContext()
 
 	if !force {
-		cfg, err := c.GetConfig(loginCtx, wsID)
-		if err == nil && cfg != nil {
+		cfg := ws.Config()
+		if cfg != nil {
 			if pc, ok := cfg.Providers.Get("xai"); ok && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to xAI.")
 				fmt.Println("Use --force to re-authenticate.")
@@ -318,8 +319,8 @@ func loginXAI(c *client.Client, wsID string, force bool) error {
 	}
 
 	if err := cmp.Or(
-		c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.xai.api_key", token.AccessToken),
-		c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.xai.oauth", token),
+		ws.SetConfigField(config.ScopeGlobal, "providers.xai.api_key", token.AccessToken),
+		ws.SetConfigField(config.ScopeGlobal, "providers.xai.oauth", token),
 	); err != nil {
 		return err
 	}

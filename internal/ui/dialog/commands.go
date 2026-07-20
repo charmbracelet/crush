@@ -289,10 +289,12 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	c.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
+	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
 
-	c.list.SetSize(innerWidth, height-heightOffset)
-	c.help.SetWidth(innerWidth)
+	c.list.SetSize(innerWidth, max(0, height-heightOffset))
+
+	// Hide the shortcut hints uniformly when the widest would crowd names.
+	applyInfoColumnVisibility(c.list.FilteredItems(), innerWidth, commandInfoMaxPercent)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
@@ -301,10 +303,10 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(inputView)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	rc.AddPart(listView)
-	rc.Help = c.help.View(c)
+	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
 
 	if c.loading {
-		rc.Help = c.spinner.View() + " Generating Prompt..."
+		rc.Help = t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt...")
 	}
 
 	view := rc.Render()

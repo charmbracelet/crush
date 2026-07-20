@@ -43,9 +43,12 @@ type Client struct {
 	// Configuration for this LSP client
 	config config.LSPConfig
 
-	// Original context and resolver for recreating the client
-	ctx      context.Context
-	resolver config.VariableResolver
+	// Long-lived context for the client's lifetime, independent of any
+	// request-scoped context. Used for restart and other operations that
+	// must survive beyond the initial tool call that created the client.
+	ctx       context.Context
+	cancelCtx context.CancelFunc
+	resolver  config.VariableResolver
 
 	// Diagnostic change callback
 	onDiagnosticsChanged func(name string, count int)
@@ -67,20 +70,24 @@ type Client struct {
 
 // New creates a new LSP client using the powernap implementation.
 func New(
-	ctx context.Context,
 	name string,
 	cfg config.LSPConfig,
 	resolver config.VariableResolver,
 	cwd string,
 	debug bool,
 ) (*Client, error) {
+	// Use a long-lived context independent of the caller's request context.
+	// The caller's context may be canceled when the tool call completes,
+	// but the LSP client must survive across multiple requests and restarts.
+	clientCtx, cancelCtx := context.WithCancel(context.Background())
 	client := &Client{
 		name:        name,
 		fileTypes:   cfg.FileTypes,
 		diagnostics: csync.NewVersionedMap[protocol.DocumentURI, []protocol.Diagnostic](),
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 		config:      cfg,
-		ctx:         ctx,
+		ctx:         clientCtx,
+		cancelCtx:   cancelCtx,
 		debug:       debug,
 		resolver:    resolver,
 		cwd:         cwd,
@@ -130,6 +137,19 @@ const closeTimeout = 5 * time.Second
 
 // Kill kills the client without doing anything else.
 func (c *Client) Kill() { c.client.Kill() }
+
+// Shutdown permanently cancels the client's long-lived context and kills the
+// underlying process. Unlike Restart, this is terminal: the client cannot be
+// reused after Shutdown.
+func (c *Client) Shutdown() {
+	c.cancelCtx()
+	c.client.Kill()
+}
+
+// GetOffsetEncoding returns the negotiated offset encoding for this client.
+func (c *Client) GetOffsetEncoding() powernap.OffsetEncoding {
+	return c.client.GetOffsetEncoding()
+}
 
 // Close closes all open files in the client, then shuts down gracefully.
 // If shutdown takes longer than closeTimeout, it falls back to Kill().
@@ -223,6 +243,11 @@ func (c *Client) Restart() error {
 	for uri := range c.openFiles.Seq2() {
 		openFiles = append(openFiles, string(uri))
 	}
+
+	// Cancel the old long-lived context and create a fresh one so that
+	// reinitialization is not affected by any prior cancellation.
+	c.cancelCtx()
+	c.ctx, c.cancelCtx = context.WithCancel(context.Background())
 
 	closeCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer cancel()
@@ -668,4 +693,68 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
 	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
+}
+
+// Rename renames the symbol at the given position across all files.
+func (c *Client) Rename(ctx context.Context, filepath string, line, character int, newName string) (*protocol.WorkspaceEdit, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	return c.client.RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
+}
+
+// DocumentSymbols returns the document symbols for the given file.
+func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protocol.DocumentSymbolResult, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	return c.client.RequestDocumentSymbols(ctx, filepath) //nolint:wrapcheck
+}
+
+// Definition finds the definition of the symbol at the given position.
+func (c *Client) Definition(ctx context.Context, filepath string, line, character int) ([]protocol.Location, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	return c.client.RequestDefinition(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+}
+
+// PrepareCallHierarchy prepares a call hierarchy item at the given position.
+func (c *Client) PrepareCallHierarchy(ctx context.Context, filepath string, line, character int) ([]protocol.CallHierarchyItem, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	return c.client.PrepareCallHierarchy(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+}
+
+// IncomingCalls returns all callers of the given call hierarchy item.
+func (c *Client) IncomingCalls(ctx context.Context, item protocol.CallHierarchyItem) ([]protocol.CallHierarchyIncomingCall, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	return c.client.IncomingCalls(ctx, item) //nolint:wrapcheck
+}
+
+// OutgoingCalls returns all callees of the given call hierarchy item.
+func (c *Client) OutgoingCalls(ctx context.Context, item protocol.CallHierarchyItem) ([]protocol.CallHierarchyOutgoingCall, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	return c.client.OutgoingCalls(ctx, item) //nolint:wrapcheck
 }

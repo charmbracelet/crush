@@ -345,6 +345,30 @@ func TestStaleRunningSubagentsFetchDiscarded(t *testing.T) {
 		"a runningSubagentsMsg scoped to a departed session must not overwrite the current session's list")
 }
 
+// TestStaleParentTitleFetchDiscarded is the regression test for a
+// parentTitleMsg racing a session switch: a fetch dispatched for a child
+// session the user has since navigated away from must not overwrite the
+// newly-loaded session's breadcrumb with a stale one.
+func TestStaleParentTitleFetchDiscarded(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s2"}
+	m.parentTitle = "Current Parent"
+	m.subagentColor = "green"
+
+	// A fetch dispatched while the user was still viewing s1 (a child
+	// session), resolving after they've already switched to s2, must be
+	// discarded rather than applied.
+	stale := parentTitleMsg{forSession: "s1", title: "Stale Parent", color: "purple"}
+	m.Update(stale)
+
+	require.Equal(t, "Current Parent", m.parentTitle,
+		"a parentTitleMsg scoped to a departed session must not overwrite the current breadcrumb")
+	require.Equal(t, "green", m.subagentColor)
+}
+
 // TestToggleYoloWritesThroughCache: both yolo toggle paths share
 // toggleYoloMode, which must write the known new value through the cache —
 // no invalidation, no re-probe.

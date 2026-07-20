@@ -179,8 +179,13 @@ type (
 	// parentTitleMsg is sent when the parent session metadata has been
 	// fetched: the title for the breadcrumb and this child's subagent color.
 	parentTitleMsg struct {
-		title string
-		color string
+		// forSession is the child session the fetch was scoped to; a result
+		// that raced a session switch (the user navigated away before it
+		// resolved) is discarded rather than applied, mirroring
+		// promptQueueMsg.forSession.
+		forSession string
+		title      string
+		color      string
 	}
 
 	// runningSubagentsMsg carries the refreshed running-subagent list,
@@ -801,8 +806,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateLayoutAndSize()
 
 	case parentTitleMsg:
-		m.parentTitle = msg.title
-		m.subagentColor = msg.color
+		// Discard a fetch that raced a session switch: the user navigated
+		// away from forSession before it resolved, so applying it here would
+		// show a breadcrumb that belongs to a different (departed) session.
+		if msg.forSession == m.currentSessionID() {
+			m.parentTitle = msg.title
+			m.subagentColor = msg.color
+		}
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles

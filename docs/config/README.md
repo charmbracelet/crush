@@ -45,7 +45,8 @@ provider add my-secret-provider \
 
 > [!TIP]
 >
-> Crush can also just configure itself. Just tell it want you want to do.
+> Crush can also just configure itself via a builtin config skill. Just tell
+> Crush want you want to do.
 
 ## Why Bash?
 
@@ -421,7 +422,8 @@ permissions deny bash
 
 ### option
 
-Configure general Crush behavior.
+Configure general Crush behavior, paths, attribution, and the terminal UI.
+Boolean values are optional and default to `true`.
 
 ```text
 Usage:
@@ -429,69 +431,87 @@ Usage:
   option [command]
 
 Available Commands:
-  reset     Clear a list option
+  reset     Clear every value from a list option
   ui        Configure terminal UI behavior
 
-Boolean Keys (value optional; default true):
-  debug                       enable debug logging
-  debug-lsp                   enable LSP debug logging
-  auto-lsp                    automatically configure LSPs
-  progress                    show progress indicators
-  metrics                     send anonymous metrics
-  notifications               enable desktop notifications
-  auto-summarize              enable automatic summarization
-  provider-auto-update        update the provider catalog automatically
-  default-providers           include built-in providers
+Boolean Keys:
+  debug                          enable debug logging
+  debug-lsp                      enable LSP debug logging
+  auto-lsp                       automatically configure language servers
+  progress                       show progress indicators
+  metrics                        send anonymous usage metrics
+  notifications                  enable desktop notifications (deprecated)
+  auto-summarize                 automatically summarize long conversations
+  provider-auto-update           update the provider catalog automatically
+  default-providers              include built-in providers
+  attribution-generated-with     add the Generated with Crush line
 
 String Keys:
-  data-directory string
-  initialize-as string
-  notification-style auto|native|osc|bell|disabled
-  attribution-trailer-style none|co-authored-by|assisted-by
+  data-directory string           directory for project data and state
+  initialize-as string             context filename created by crush init
+  notification-style string        notification style: auto, native, osc, bell,
+                                   or disabled
+  attribution-trailer-style string attribution trailer: none, co-authored-by,
+                                   or assisted-by
 
-Other Keys:
-  attribution-generated-with bool
-  context-path string            append a context path
-  global-context-path string     append a global context path
-  skill-path string              append a skill path
-  disable-skill string           hide a skill
-```
-
-#### `option reset`
-
-Clear every value previously added to a list option.
-
-```text
-Usage:
-  option reset <context-path|global-context-path|skill-path|disable-skill>
-```
-
-#### `option ui`
-
-Configure terminal UI behavior.
-
-```text
-Usage:
-  option ui <key> <value>
-
-Keys:
-  compact bool
-  diff unified|split
-  transparent bool
-  scrollbar default|always|never
-  completions-max-depth int
-  completions-max-items int
+List Keys:
+  context-path string             append a project context path
+  global-context-path string      append a global context path
+  skill-path string               append a skill directory
+  disable-skill string            hide a skill from the agent
 ```
 
 ```bash
 option progress false
 option skill-path ./skills
 option attribution-trailer-style assisted-by
-option ui compact true
-option ui diff unified
 ```
 
-> [!IMPORTANT] These skill paths load by default — you do NOT need `skill-path`
+#### `option reset`
+
+Clear every value previously added to a list option. Values added after the
+reset are kept.
+
+```text
+Usage:
+  option reset <key>
+
+Available Keys:
+  context-path          clear project context paths
+  global-context-path   clear global context paths
+  skill-path            clear additional skill directories
+  disable-skill         clear disabled skill names
+```
+
+#### `option ui`
+
+Configure terminal UI presentation and completion-list limits.
+
+```text
+Usage:
+  option ui <key> <value>
+
+Available Keys:
+  compact bool                  use the compact chat layout
+  diff unified|split            choose unified or side-by-side diffs
+  transparent bool              use the terminal background
+  scrollbar string              control chat scrollbar visibility: default,
+                                always, or never
+  completions-max-depth int     maximum directory depth shown by completions
+  completions-max-items int     maximum items returned to completions
+```
+
+```bash
+option ui compact true
+option ui diff unified
+option ui transparent true
+option ui scrollbar always
+option ui completions-max-depth 4
+option ui completions-max-items 200
+```
+
+> [!IMPORTANT]
+> These skill paths load by default — you do NOT need `skill-path`
 > for them: `.agents/skills`, `.crush/skills`, `.claude/skills`,
 > `.cursor/skills`.
 
@@ -513,8 +533,9 @@ script or pulled in via `source`. Later lines win, just like a shell.
 
 ## Legacy JSON
 
-`crush.json` is the original format and isn't going anywhere yet. Same concepts,
-just static:
+`crush.json` is the original format and is now deprecated. We plan to support
+it for the forseeable future, but new configuration options will only be added
+to Bash-based config.
 
 ```jsonc
 {
@@ -528,6 +549,8 @@ just static:
   "permissions": { "allowed_tools": ["view", "ls", "grep"] },
 }
 ```
+
+For a full reference, See the [JSON schema](../../schema.json).
 
 In JSON, only selected string fields (API keys, URLs, MCP/LSP commands and args,
 headers) are shell-expanded at load time. In `crushrc` there's no such list —

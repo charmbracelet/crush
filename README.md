@@ -389,19 +389,15 @@ these are personal additions to the system prompt.
   probably only care about this if you use multiple agentic coding tools and
   want to share instructions between them.
 
-You can customize these paths using the `global_context_paths` option in your
-configuration:
+You can customize these paths with `option global-context-path`. Repeat the
+command to add multiple paths:
 
-```jsonc
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "global_context_paths": [
-      "~/path/to/custom/context/file.md",
-      "/full/path/to/folder/of/files/", // recursively load all .md files in folder
-    ],
-  },
-}
+```bash
+# Load a single markdown file.
+option global-context-path "~/path/to/custom/context/file.md"
+
+# Recursively load all Markdown files in the folder.
+option global-context-path "/full/path/to/folder/of/files/"
 ```
 
 ### Ignoring Files
@@ -421,7 +417,6 @@ you'd like, you can allow tools to be executed without prompting you for
 permissions. Use this with care.
 
 ```bash
-# crushrc
 permissions allow view ls grep edit mcp_context7_get-library-doc
 ```
 
@@ -430,7 +425,6 @@ permissions allow view ls grep edit mcp_context7_get-library-doc
 You can also deny tools, hiding then from the agent entirely:
 
 ```bash
-# crushrc
 permissions deny bash sourcegraph
 ```
 
@@ -448,7 +442,6 @@ hidden from the agent, including builtin skills and skills discovered from
 disk.
 
 ```bash
-# crushrc
 option disable-skill crush-config
 ```
 
@@ -544,31 +537,29 @@ the agent finishes its turn. They're only sent when the terminal window isn't
 focused _and_ your terminal supports reporting the focus state.
 
 ```bash
-# Disable notifications
-options notifications false
+# Choose auto, native, osc, bell, or disabled.
+option notification-style disabled
 ```
+
+`auto` uses native notifications locally and OSC notifications over SSH when
+supported.
 
 ### Initialization
 
 When you initialize a project, Crush analyzes your codebase and creates
-a context file that helps it work more effectively in future sessions.
-By default, this file is named `AGENTS.md`, but you can customize the
-name and location with the `initialize_as` option:
+a context file that helps it work more effectively in future sessions. By
+default, this file is named `AGENTS.md`, but you can customize the name and
+location with the `initialize-as` option:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "initialize_as": "AGENTS.md"
-  }
-}
+```bash
+# crushrc
+option initialize-as AGENTS.md
 ```
 
-This is useful if you prefer a different naming convention or want to
-place the file in a specific directory (e.g., `CRUSH.md` or
-`docs/LLMs.md`). Crush will fill the file with project-specific context
-like build commands, code patterns, and conventions it discovered during
-initialization.
+This is useful if you prefer a different naming convention or want to place the
+file in a specific directory (e.g., `CRUSH.md` or `docs/LLMs.md`). Crush will
+fill the file with project-specific context like build commands, code patterns,
+and conventions it discovered during initialization.
 
 ### Attribution Settings
 
@@ -576,23 +567,8 @@ By default, Crush adds attribution information to Git commits and pull requests
 it creates. You can customize this behavior with `option` commands:
 
 ```bash
-# crushrc
 option attribution-trailer-style co-authored-by
 option attribution-generated-with true
-```
-
-Or with the legacy JSON format:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "attribution": {
-      "trailer_style": "co-authored-by",
-      "generated_with": true
-    }
-  }
-}
 ```
 
 - `trailer_style`: Controls the attribution trailer added to commit messages
@@ -640,7 +616,6 @@ model add deepseek/deepseek-chat \
 Custom Anthropic-compatible providers follow this format:
 
 ```bash
-# crushrc
 provider add custom-anthropic \
   --type anthropic \
   --base-url "https://api.anthropic.com/v1" \
@@ -761,17 +736,13 @@ crush logs --tail 500
 crush logs --follow
 ```
 
-Want more logging? Run `crush` with the `--debug` flag, or enable it in the
-config:
+Want more logging? Run `crush` with the `--debug` flag, or enable it in your
+`crushrc`:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "debug": true,
-    "debug_lsp": true
-  }
-}
+```bash
+# crushrc
+option debug true
+option debug-lsp true
 ```
 
 ## Provider Auto-Updates
@@ -788,16 +759,10 @@ For those with restricted internet access, or those who prefer to work in
 air-gapped environments, this might not be want you want, and this feature can
 be disabled.
 
-To disable automatic provider updates, set `disable_provider_auto_update` into
-your `crush.json` config:
+To disable automatic provider updates in your `crushrc`:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "disable_provider_auto_update": true
-  }
-}
+```bash
+option provider-auto-update false
 ```
 
 Or set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
@@ -843,16 +808,6 @@ variable by setting the following in your environment:
 
 ```bash
 export CRUSH_DISABLE_METRICS=1
-```
-
-Or by setting the following in your config:
-
-```json
-{
-  "options": {
-    "disable_metrics": true
-  }
-}
 ```
 
 Crush also respects the [`DO_NOT_TRACK`](https://donottrack.sh/) convention

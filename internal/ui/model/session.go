@@ -117,10 +117,12 @@ func (m *UI) fetchParentMeta(parentSessionID, childSessionID string) tea.Cmd {
 
 // refreshRunningSubagents resolves the running-subagent list for sessionID off
 // the Update path (RunningSubagents hits the DB to enrich token counts) and
-// delivers it as a runningSubagentsMsg.
+// delivers it as a runningSubagentsMsg. The closure captures only locals
+// (never m) so it is safe off-thread.
 func (m *UI) refreshRunningSubagents(sessionID string) tea.Cmd {
+	ws := m.com.Workspace
 	return func() tea.Msg {
-		return runningSubagentsMsg{list: m.com.Workspace.RunningSubagents(sessionID)}
+		return runningSubagentsMsg{forSession: sessionID, list: ws.RunningSubagents(sessionID)}
 	}
 }
 

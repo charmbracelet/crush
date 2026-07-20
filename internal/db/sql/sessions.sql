@@ -75,6 +75,13 @@ SET
     updated_at = strftime('%s', 'now')
 WHERE id = ?;
 
+-- name: AddSessionCost :execrows
+UPDATE sessions
+SET
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
+WHERE id = ?;
+
 
 -- name: RenameSession :exec
 UPDATE sessions

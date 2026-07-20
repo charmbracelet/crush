@@ -97,21 +97,24 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 
 // fetchParentMeta fetches the parent session title (for the breadcrumb) and
 // this child's subagent color (from the in-memory runtime). Both lookups run
-// off the Update path. childSessionID may be empty when only the title matters.
+// off the Update path. childSessionID may be empty when only the title
+// matters. The closure captures only locals (never m) so it is safe
+// off-thread.
 func (m *UI) fetchParentMeta(parentSessionID, childSessionID string) tea.Cmd {
+	ws := m.com.Workspace
 	return func() tea.Msg {
-		sess, err := m.com.Workspace.GetSession(context.Background(), parentSessionID)
+		sess, err := ws.GetSession(context.Background(), parentSessionID)
 		if err != nil {
 			return nil
 		}
 		var color string
-		for _, entry := range m.com.Workspace.RunningSubagents(parentSessionID) {
+		for _, entry := range ws.RunningSubagents(parentSessionID) {
 			if entry.ChildSessionID == childSessionID {
 				color = entry.Color
 				break
 			}
 		}
-		return parentTitleMsg{title: sess.Title, color: color}
+		return parentTitleMsg{forSession: childSessionID, title: sess.Title, color: color}
 	}
 }
 

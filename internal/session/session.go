@@ -76,6 +76,11 @@ type Service interface {
 	ListChildSessions(ctx context.Context, parentSessionID string) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
+	// AddCost atomically adds delta to a session's cost, e.g. accumulating a
+	// completed subagent's cost onto its parent session, without a
+	// fetch-modify-save race against other concurrent updates to that
+	// session (title, tokens, todos).
+	AddCost(ctx context.Context, sessionID string, delta float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
 
@@ -235,6 +240,25 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 		Cost:             cost,
 	}); err != nil {
 		return err
+	}
+	s.publishSessionUpdate(ctx, sessionID)
+	return nil
+}
+
+// AddCost atomically adds delta to a session's cost, leaving title, tokens,
+// and todos untouched. This is safer than fetching, modifying, and saving the
+// entire session, which would race against and clobber other concurrent
+// updates to those other fields.
+func (s *service) AddCost(ctx context.Context, sessionID string, delta float64) error {
+	rows, err := s.q.AddSessionCost(ctx, db.AddSessionCostParams{
+		ID:   sessionID,
+		Cost: delta,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
 	}
 	s.publishSessionUpdate(ctx, sessionID)
 	return nil

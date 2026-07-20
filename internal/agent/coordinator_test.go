@@ -296,6 +296,55 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Contains(t, err.Error(), "model provider not configured")
 	})
 
+	// TestRunSubAgent_ProviderNotConfigured_ReportsFailedStatus is the
+	// regression test for the "provider not configured" early return
+	// reporting StatusCompleted instead of StatusFailed to the runtime
+	// tracker (finalStatus was declared right after Register but never
+	// updated on this path before the deferred Finish call). A subagent that
+	// never ran would otherwise show as a success in the Running tab and
+	// produce a "Subagent completed" notification despite the tool call
+	// having errored.
+	t.Run("provider not configured reports failed status to runtime", func(t *testing.T) {
+		env := testEnv(t)
+		cfg, err := config.Init(env.workingDir, "", false)
+		require.NoError(t, err)
+
+		rt := subagents.NewRuntime()
+		t.Cleanup(rt.Shutdown)
+		coord := &coordinator{cfg: cfg, sessions: env.sessions, runtime: rt}
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		events := rt.Subscribe(t.Context())
+
+		// Agent references a provider that doesn't exist in config.
+		agent := newMockAgent("unknown-provider", 4096, nil)
+		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.Error(t, err)
+
+		// Register publishes its own event first (Finished == nil); skip past
+		// it to the terminal event from the deferred Finish call.
+		var finished *subagents.RunningEntry
+		for finished == nil {
+			select {
+			case ev := <-events:
+				finished = ev.Payload.Finished
+			case <-time.After(2 * time.Second):
+				t.Fatal("Finish did not publish a RuntimeEvent")
+			}
+		}
+		assert.Equal(t, subagents.StatusFailed, finished.Status,
+			"a subagent that never ran must be reported failed, not completed")
+	})
+
 	t.Run("agent run error returns error response", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)

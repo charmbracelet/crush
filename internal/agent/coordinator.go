@@ -1669,6 +1669,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
+		finalStatus = subagents.StatusFailed
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
 	}
 

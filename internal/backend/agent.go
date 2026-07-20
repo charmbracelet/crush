@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
@@ -302,5 +303,42 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 	return proto.ShellCommandResponse{
 		Output:   result.Output,
 		ExitCode: result.ExitCode,
+	}, nil
+}
+
+// SideQuestion answers an ephemeral side question about a session.
+func (b *Backend) SideQuestion(ctx context.Context, workspaceID string, req proto.SideQuestionRequest) (*proto.SideQuestionResponse, error) {
+	if strings.TrimSpace(req.Question) == "" {
+		return nil, agent.ErrEmptySideQuestion
+	}
+
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	if ws.AgentCoordinator == nil {
+		return nil, ErrAgentNotInitialized
+	}
+
+	exchanges := make([]agent.SideQuestionExchange, 0, len(req.Exchanges))
+	for _, ex := range req.Exchanges {
+		exchanges = append(exchanges, agent.SideQuestionExchange{
+			Question: ex.Question,
+			Answer:   ex.Answer,
+		})
+	}
+
+	result, err := ws.AgentCoordinator.SideQuestion(ctx, req.SessionID, req.Question, exchanges)
+	if err != nil {
+		return nil, err
+	}
+
+	return &proto.SideQuestionResponse{
+		Answer:           result.Answer,
+		Model:            result.Model,
+		Provider:         result.Provider,
+		PromptTokens:     result.PromptTokens,
+		CompletionTokens: result.CompletionTokens,
 	}, nil
 }

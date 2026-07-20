@@ -67,6 +67,9 @@ var titlePrompt []byte
 //go:embed templates/summary.md
 var summaryPrompt []byte
 
+//go:embed templates/btw.md
+var sideQuestionPrompt []byte
+
 // Used to remove <think> tags from generated titles.
 var (
 	thinkTagRegex       = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -142,6 +145,23 @@ type SessionAgent interface {
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
+	SideQuestion(ctx context.Context, sessionID, question string, exchanges []SideQuestionExchange) (SideQuestionResult, error)
+}
+
+// SideQuestionExchange is one prior question/answer pair from the same
+// ephemeral side conversation.
+type SideQuestionExchange struct {
+	Question string
+	Answer   string
+}
+
+// SideQuestionResult is the answer to an ephemeral side question.
+type SideQuestionResult struct {
+	Answer           string
+	Model            string
+	Provider         string
+	PromptTokens     int64
+	CompletionTokens int64
 }
 
 type Model struct {
@@ -1678,6 +1698,112 @@ func hasUserTextMessage(msgs []message.Message) bool {
 		}
 	}
 	return false
+}
+
+// sideQuestionAttempts returns the ordered model attempts for a side
+// question. Prefer the small model when session usage fits under 80% of
+// its context window; otherwise try only the large model. Nil models are
+// skipped by the caller.
+func sideQuestionAttempts(small, large Model, promptTokens, completionTokens int64) []Model {
+	used := promptTokens + completionTokens
+	if small.Model != nil {
+		if cw := int64(small.CatwalkCfg.ContextWindow); cw <= 0 || used <= (cw*8)/10 {
+			attempts := []Model{small}
+			if large.Model != nil {
+				attempts = append(attempts, large)
+			}
+			return attempts
+		}
+	}
+	if large.Model != nil {
+		return []Model{large}
+	}
+	if small.Model != nil {
+		return []Model{small}
+	}
+	return nil
+}
+
+// SideQuestion answers an ephemeral side question using session history
+// as context. It persists nothing: no messages, no session updates.
+func (a *sessionAgent) SideQuestion(ctx context.Context, sessionID, question string, exchanges []SideQuestionExchange) (SideQuestionResult, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return SideQuestionResult{}, ErrEmptySideQuestion
+	}
+	if sessionID == "" {
+		return SideQuestionResult{}, ErrSessionMissing
+	}
+
+	sess, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return SideQuestionResult{}, fmt.Errorf("failed to get session: %w", err)
+	}
+
+	if err := a.messages.FlushAll(ctx); err != nil {
+		return SideQuestionResult{}, fmt.Errorf("failed to flush messages: %w", err)
+	}
+
+	msgs, err := a.getSessionMessages(ctx, sess)
+	if err != nil {
+		return SideQuestionResult{}, err
+	}
+
+	small := a.smallModel.Get()
+	large := a.largeModel.Get()
+	attempts := sideQuestionAttempts(small, large, sess.PromptTokens, sess.CompletionTokens)
+	if len(attempts) == 0 {
+		return SideQuestionResult{}, fmt.Errorf("no model available for side question")
+	}
+
+	var lastErr error
+	for i, chosen := range attempts {
+		aiMsgs, _ := a.preparePrompt(msgs, chosen.CatwalkCfg.SupportsImages)
+		for _, ex := range exchanges {
+			q := strings.TrimSpace(ex.Question)
+			ans := strings.TrimSpace(ex.Answer)
+			if q == "" || ans == "" {
+				continue
+			}
+			aiMsgs = append(aiMsgs, fantasy.NewUserMessage(q))
+			aiMsgs = append(aiMsgs, fantasy.Message{
+				Role:    fantasy.MessageRoleAssistant,
+				Content: []fantasy.MessagePart{fantasy.TextPart{Text: ans}},
+			})
+		}
+
+		sideAgent := fantasy.NewAgent(
+			chosen.Model,
+			fantasy.WithSystemPrompt(string(sideQuestionPrompt)),
+			fantasy.WithMaxOutputTokens(2048),
+			fantasy.WithUserAgent(userAgent),
+		)
+		res, err := sideAgent.Generate(ctx, fantasy.AgentCall{
+			Prompt:   question,
+			Messages: aiMsgs,
+			Headers:  sessionHeaders(sessionID),
+		})
+		if err != nil {
+			lastErr = err
+			name := "large"
+			if i == 0 && chosen.ModelCfg.Model == small.ModelCfg.Model {
+				name = "small"
+			}
+			slog.Error("Side question failed with "+name+" model", "error", err)
+			continue
+		}
+
+		promptTokens := res.TotalUsage.InputTokens + res.TotalUsage.CacheCreationTokens
+		completionTokens := res.TotalUsage.OutputTokens
+		return SideQuestionResult{
+			Answer:           strings.TrimSpace(res.Response.Content.Text()),
+			Model:            chosen.ModelCfg.Model,
+			Provider:         chosen.ModelCfg.Provider,
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+		}, nil
+	}
+	return SideQuestionResult{}, lastErr
 }
 
 // GenerateTitle generates a session title based on the initial prompt.

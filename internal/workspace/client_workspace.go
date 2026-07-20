@@ -261,6 +261,14 @@ func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) 
 	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID)
 }
 
+func (w *ClientWorkspace) SideQuestion(ctx context.Context, sessionID, question string, exchanges []proto.SideQuestionExchange) (*proto.SideQuestionResponse, error) {
+	return w.client.SideQuestion(ctx, w.workspaceID(), sessionID, proto.SideQuestionRequest{
+		SessionID: sessionID,
+		Question:  question,
+		Exchanges: exchanges,
+	})
+}
+
 func (w *ClientWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.client.UpdateAgent(ctx, w.workspaceID())
 }

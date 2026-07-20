@@ -705,6 +705,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			commands.SetCustomCommands(m.customCommands)
 		}
 
+	case dialog.SideQuestionResultMsg:
+		// Deliver directly to the btw dialog: another dialog (e.g. a
+		// permission request from the busy agent) may have stacked on top
+		// of it while the answer was in flight, and the overlay's default
+		// routing only reaches the front dialog.
+		if dia := m.dialog.Dialog(dialog.BtwID); dia != nil {
+			dia.HandleMsg(msg)
+		}
+
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
 	case mcpPromptsLoadedMsg:
@@ -1656,6 +1665,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		if cmd := m.newSession(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRenameSession:
+		if cmd := m.openSessionsDialogWithMode(true); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -3859,11 +3873,29 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openRevertPickerDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.BtwID:
+		if cmd := m.openBtwDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
 	}
 	return tea.Batch(cmds...)
+}
+
+// openBtwDialog opens the ephemeral side-question dialog.
+func (m *UI) openBtwDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.BtwID) {
+		m.dialog.BringToFront(dialog.BtwID)
+		return nil
+	}
+	if !m.hasSession() {
+		return util.ReportWarn("No active session")
+	}
+	btwDialog := dialog.NewBtw(m.com, m.session.ID)
+	m.dialog.OpenDialog(btwDialog)
+	return nil
 }
 
 // openQuitDialog opens the quit confirmation dialog.
@@ -3982,8 +4014,16 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 // it brings it to the front. Otherwise, it will list all the sessions and open
 // the dialog.
 func (m *UI) openSessionsDialog() tea.Cmd {
+	return m.openSessionsDialogWithMode(false)
+}
+
+// openSessionsDialogWithMode opens the sessions dialog, optionally entering
+// rename mode immediately.
+func (m *UI) openSessionsDialogWithMode(startInRenameMode bool) tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SessionsID) {
-		// Bring to front
+		// Bring to front.
+		// TODO: if startInRenameMode is true, this silently ignores it.
+		// We should close and reopen the dialog in rename mode instead.
 		m.dialog.BringToFront(dialog.SessionsID)
 		return nil
 	}
@@ -3993,7 +4033,7 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		selectedSessionID = m.session.ID
 	}
 
-	dialog, err := dialog.NewSessions(m.com, selectedSessionID)
+	dialog, err := dialog.NewSessions(m.com, selectedSessionID, startInRenameMode)
 	if err != nil {
 		return util.ReportError(err)
 	}

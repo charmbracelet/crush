@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -20,15 +21,17 @@ import (
 // entered so tests can observe the dispatched goroutine. Every other
 // method returns a zero value.
 type blockingCoordinator struct {
-	entered  chan struct{}
-	release  chan struct{}
-	runCount atomic.Int32
+	entered            chan struct{}
+	release            chan struct{}
+	permissionPolicies chan permission.RequestPolicy
+	runCount           atomic.Int32
 }
 
 func newBlockingCoordinator() *blockingCoordinator {
 	return &blockingCoordinator{
-		entered: make(chan struct{}, 1),
-		release: make(chan struct{}),
+		entered:            make(chan struct{}, 1),
+		release:            make(chan struct{}),
+		permissionPolicies: make(chan permission.RequestPolicy, 1),
 	}
 }
 
@@ -38,6 +41,10 @@ func (c *blockingCoordinator) Run(ctx context.Context, sessionID, prompt string,
 
 func (c *blockingCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	c.runCount.Add(1)
+	select {
+	case c.permissionPolicies <- permission.RequestPolicyFromContext(ctx):
+	default:
+	}
 	select {
 	case c.entered <- struct{}{}:
 	default:
@@ -109,6 +116,68 @@ func TestSendMessage_SessionMissing(t *testing.T) {
 	ws := insertAgentWorkspace(t, b, newBlockingCoordinator())
 	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "", Prompt: "hi"})
 	require.ErrorIs(t, err, agent.ErrSessionMissing)
+}
+
+func TestSendMessage_RejectsInvalidPermissionPolicy(t *testing.T) {
+	t.Parallel()
+
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	defer close(coord.release)
+	ws := insertAgentWorkspace(t, b, coord)
+
+	err := b.SendMessage(ws.ID, proto.AgentMessage{
+		SessionID:        "S1",
+		Prompt:           "hi",
+		PermissionPolicy: proto.PermissionRequestPolicy("invalid"),
+	})
+	require.ErrorIs(t, err, ErrInvalidPermissionPolicy)
+	require.Equal(t, int32(0), coord.runCount.Load())
+}
+
+func TestSendMessage_PropagatesPermissionPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		wire proto.PermissionRequestPolicy
+		want permission.RequestPolicy
+	}{
+		{
+			name: "omitted policy prompts",
+			wire: proto.PermissionRequestPolicyPrompt,
+			want: permission.RequestPolicyPrompt,
+		},
+		{
+			name: "auto approval reaches coordinator",
+			wire: proto.PermissionRequestPolicyAutoApprove,
+			want: permission.RequestPolicyAutoApprove,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			b, _ := newTestBackend(t)
+			coord := newBlockingCoordinator()
+			defer close(coord.release)
+			ws := insertAgentWorkspace(t, b, coord)
+
+			require.NoError(t, b.SendMessage(ws.ID, proto.AgentMessage{
+				SessionID:        "S1",
+				Prompt:           "hi",
+				PermissionPolicy: test.wire,
+			}))
+
+			select {
+			case got := <-coord.permissionPolicies:
+				require.Equal(t, test.want, got)
+			case <-time.After(2 * time.Second):
+				t.Fatal("dispatched run did not report its permission policy")
+			}
+		})
+	}
 }
 
 func TestSendMessage_WorkspaceClosing(t *testing.T) {

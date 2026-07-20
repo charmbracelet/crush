@@ -568,8 +568,17 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, dir)
 		}
 	}
-	// Project specific subagents dirs.
-	c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, ProjectSubagentsDir(workingDir)...)
+	// Project specific subagents dirs. Guarded like the global loop above:
+	// setDefaults runs twice per config reload (ConfigStore.reloadFromDiskLocked
+	// calls it once on the freshly-loaded config and again after merging
+	// workspace-scope overrides), so an unconditional append would duplicate
+	// these entries on every reload and grow SubagentsPaths unbounded over a
+	// session.
+	for _, dir := range ProjectSubagentsDir(workingDir) {
+		if !slices.Contains(c.Options.SubagentsPaths, dir) {
+			c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, dir)
+		}
+	}
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)

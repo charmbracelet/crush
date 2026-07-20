@@ -168,6 +168,36 @@ func TestSetDefaults_SubagentsPathsNotDuplicated(t *testing.T) {
 		preexisting, count)
 }
 
+// TestSetDefaults_ProjectSubagentsDirNotDuplicated is the regression test for
+// the auto-added project/global dirs specifically (as opposed to a
+// pre-existing custom path above): setDefaults runs twice per config reload
+// (ConfigStore.reloadFromDiskLocked calls it once on the freshly-loaded
+// config and again after merging workspace overrides), and unlike the global
+// dirs loop, the project dirs append was unguarded, so every reload duplicated
+// them.
+func TestSetDefaults_ProjectSubagentsDirNotDuplicated(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	cfg := &Config{Options: &Options{}}
+
+	cfg.setDefaults(workingDir, "")
+	firstLen := len(cfg.Options.SubagentsPaths)
+	require.NotEmpty(t, firstLen)
+
+	cfg.setDefaults(workingDir, "")
+	require.Len(t, cfg.Options.SubagentsPaths, firstLen,
+		"a second setDefaults call must not grow SubagentsPaths")
+
+	seen := make(map[string]int)
+	for _, p := range cfg.Options.SubagentsPaths {
+		seen[p]++
+	}
+	for p, count := range seen {
+		require.Equal(t, 1, count, "path %q appeared %d times; expected exactly 1", p, count)
+	}
+}
+
 func TestOptions_SubagentsPaths_JSONRoundtrip(t *testing.T) {
 	t.Parallel()
 

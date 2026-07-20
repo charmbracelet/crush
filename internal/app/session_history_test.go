@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/db"
@@ -52,6 +53,41 @@ func TestApp_ListSessionHistory_AggregatesDirectChildFiles(t *testing.T) {
 
 	paths := []string{files[0].Path, files[1].Path}
 	require.ElementsMatch(t, []string{parentFile.Path, childFile.Path}, paths)
+}
+
+// TestApp_ListSessionHistory_AggregatesMultipleChildren exercises the exact
+// shape the N+1 fix targets: several subagent dispatches under one parent.
+// ListSessionHistory must aggregate every child's files via the single
+// ListFilesBySessionWithChildren query rather than one round trip per child.
+func TestApp_ListSessionHistory_AggregatesMultipleChildren(t *testing.T) {
+	app := newTestAppWithHistory(t)
+
+	parent, err := app.Sessions.Create(t.Context(), "parent title")
+	require.NoError(t, err)
+
+	var wantPaths []string
+	parentFile, err := app.History.Create(t.Context(), parent.ID, "parent.go", "parent content")
+	require.NoError(t, err)
+	wantPaths = append(wantPaths, parentFile.Path)
+
+	const numChildren = 5
+	for i := range numChildren {
+		child, err := app.Sessions.CreateTaskSession(t.Context(), fmt.Sprintf("tool-call-%d", i), parent.ID, "child title")
+		require.NoError(t, err)
+		f, err := app.History.Create(t.Context(), child.ID, fmt.Sprintf("child-%d.go", i), "child content")
+		require.NoError(t, err)
+		wantPaths = append(wantPaths, f.Path)
+	}
+
+	files, err := app.ListSessionHistory(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Len(t, files, numChildren+1)
+
+	var gotPaths []string
+	for _, f := range files {
+		gotPaths = append(gotPaths, f.Path)
+	}
+	require.ElementsMatch(t, wantPaths, gotPaths)
 }
 
 func TestApp_ListSessionHistory_NoChildren(t *testing.T) {

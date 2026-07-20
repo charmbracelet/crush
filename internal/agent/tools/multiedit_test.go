@@ -67,6 +67,10 @@ func (m *mockHistoryService) ListBySession(ctx context.Context, sessionID string
 	return nil, nil
 }
 
+func (m *mockHistoryService) ListBySessionWithChildren(ctx context.Context, sessionID string) ([]history.File, error) {
+	return nil, nil
+}
+
 func (m *mockHistoryService) ListLatestSessionFiles(ctx context.Context, sessionID string) ([]history.File, error) {
 	return nil, nil
 }

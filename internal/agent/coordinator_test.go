@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -468,7 +469,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 		err = coord.updateParentSessionCost(t.Context(), child.ID, "non-existent")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "get parent session")
+		assert.Contains(t, err.Error(), "add cost to parent session")
 	})
 
 	t.Run("zero cost handled correctly", func(t *testing.T) {
@@ -488,6 +489,42 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		updated, err := env.sessions.Get(t.Context(), parent.ID)
 		require.NoError(t, err)
 		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
+	})
+
+	t.Run("concurrent updates never lose an increment", func(t *testing.T) {
+		env := testEnv(t)
+		cfg, err := config.Init(env.workingDir, "", false)
+		require.NoError(t, err)
+		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+
+		parent, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		const n = 20
+		children := make([]string, n)
+		for i := range n {
+			child, err := env.sessions.CreateTaskSession(t.Context(), fmt.Sprintf("tool-%d", i), parent.ID, "Child")
+			require.NoError(t, err)
+			child.Cost = 0.01
+			_, err = env.sessions.Save(t.Context(), child)
+			require.NoError(t, err)
+			children[i] = child.ID
+		}
+
+		// Mirrors the dispatcher tool's Parallel: true dispatch: several
+		// subagents finishing at once must each call updateParentSessionCost
+		// concurrently without losing an increment to a lost-update race.
+		var wg errgroup.Group
+		for _, childID := range children {
+			wg.Go(func() error {
+				return coord.updateParentSessionCost(t.Context(), childID, parent.ID)
+			})
+		}
+		require.NoError(t, wg.Wait())
+
+		updated, err := env.sessions.Get(t.Context(), parent.ID)
+		require.NoError(t, err)
+		assert.InDelta(t, 0.01*n, updated.Cost, 1e-9)
 	})
 }
 

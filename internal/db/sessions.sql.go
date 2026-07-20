@@ -10,6 +10,27 @@ import (
 	"database/sql"
 )
 
+const addSessionCost = `-- name: AddSessionCost :execrows
+UPDATE sessions
+SET
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
+WHERE id = ?
+`
+
+type AddSessionCostParams struct {
+	Cost float64 `json:"cost"`
+	ID   string  `json:"id"`
+}
+
+func (q *Queries) AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error) {
+	result, err := q.exec(ctx, q.addSessionCostStmt, addSessionCost, arg.Cost, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
     id,

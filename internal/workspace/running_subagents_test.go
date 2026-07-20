@@ -69,6 +69,10 @@ func (s *stubSessionService) UpdateTitleAndUsage(context.Context, string, string
 	return nil
 }
 
+func (s *stubSessionService) AddCost(context.Context, string, float64) error {
+	return nil
+}
+
 func (s *stubSessionService) Rename(context.Context, string, string) error { return nil }
 
 func (s *stubSessionService) Delete(context.Context, string) error { return nil }

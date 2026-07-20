@@ -68,6 +68,10 @@ func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string
 	return nil
 }
 
+func (m *mockSessionService) AddCost(context.Context, string, float64) error {
+	return nil
+}
+
 func (m *mockSessionService) Rename(context.Context, string, string) error {
 	return nil
 }

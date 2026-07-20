@@ -1183,6 +1183,54 @@ func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, 
 	jsonEncode(w, proto.PermissionSkipRequest{Skip: skip})
 }
 
+// handlePostWorkspacePermissionsPlan sets whether plan mode is enabled.
+//
+//	@Summary		Set plan mode
+//	@Tags			permissions
+//	@Accept			json
+//	@Param			id		path	string							true	"Workspace ID"
+//	@Param			request	body	proto.PermissionPlanModeRequest	true	"Permission plan mode request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/plan [post]
+func (c *controllerV1) handlePostWorkspacePermissionsPlan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.PermissionPlanModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SetPermissionsPlanMode(id, req.Enabled); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+}
+
+// handleGetWorkspacePermissionsPlan returns whether plan mode is enabled.
+//
+//	@Summary		Get plan mode status
+//	@Tags			permissions
+//	@Produce		json
+//	@Param			id	path		string							true	"Workspace ID"
+//	@Success		200	{object}	proto.PermissionPlanModeRequest
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/plan [get]
+func (c *controllerV1) handleGetWorkspacePermissionsPlan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	enabled, err := c.backend.GetPermissionsPlanMode(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.PermissionPlanModeRequest{Enabled: enabled})
+}
+
 // handlePostWorkspaceSessionBTW answers an ephemeral side question.
 //
 //	@Summary		Ask a side question

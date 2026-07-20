@@ -349,11 +349,12 @@ type UI struct {
 	// in-flight fetch captures it at dispatch and its result is discarded
 	// if the generation has moved on (see workspace_cache.go).
 	promptQueueGen uint64
-	// agentBusyCache / yoloCache memoize the workspace busy and permission
+	// agentBusyCache / yoloCache / planCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
 	agentBusyCache    ttlCache
 	yoloCache         ttlCache
+	planCache         ttlCache
 	busyFetchInFlight bool
 	// busyFetchGen is bumped by every busy/permission state transition;
 	// like promptQueueGen it lets a stale in-flight probe result be
@@ -464,7 +465,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// fresh by write-through toggles and off-thread refreshes so Update
 	// and View never probe the workspace synchronously.
 	yolo := com.Workspace.PermissionSkipRequests()
+	plan := com.Workspace.PermissionPlanMode()
 	ui.yoloCache.set(yolo)
+	ui.planCache.set(plan)
 	ui.setEditorPrompt(yolo)
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
@@ -926,7 +929,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[permission.PermissionNotification]:
-		m.handlePermissionNotification(msg.Payload)
+		if cmd := m.handlePermissionNotification(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
 		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -1406,7 +1411,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if !m.bangMode && m.yoloModeCached() {
+		if !m.bangMode && m.planModeCached() {
+			m.textarea.Placeholder = "Plan mode"
+		} else if !m.bangMode && m.yoloModeCached() {
 			m.textarea.Placeholder = "Yolo mode!"
 		}
 	}
@@ -1865,6 +1872,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleYoloMode:
 		m.toggleYoloMode()
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionTogglePlanMode:
+		plan := m.togglePlanMode()
+		m.dialog.CloseDialog(dialog.CommandsID)
+		status := "off"
+		if plan {
+			status = "on"
+		}
+		cmds = append(cmds, util.ReportInfo("Plan mode "+status))
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -2381,6 +2396,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				status = "enabled"
 			}
 			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
+			return true
+		case key.Matches(msg, m.keyMap.TogglePlan):
+			plan := m.togglePlanMode()
+			status := "off"
+			if plan {
+				status = "on"
+			}
+			cmds = append(cmds, util.ReportInfo("Plan mode "+status))
 			return true
 		}
 		// Revert works from both editor and chat focus.
@@ -3191,6 +3214,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.Models,
 			k.Sessions,
 			k.ToggleYolo,
+			k.TogglePlan,
 		)
 		if hasSession {
 			mainBinds = append(mainBinds, k.Chat.NewSession)
@@ -3268,6 +3292,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Models,
 					k.Sessions,
 					k.ToggleYolo,
+					k.TogglePlan,
 				},
 			)
 			editorBinds := []key.Binding{
@@ -3684,11 +3709,16 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	})
 }
 
-// setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode or bang mode is enabled.
+// setEditorPrompt configures the textarea prompt function. Priority is
+// bang > plan > yolo > normal. The yolo argument is the cached skip-requests
+// flag so View/Update paths never probe the workspace synchronously.
 func (m *UI) setEditorPrompt(yolo bool) {
 	if m.bangMode {
 		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
+		return
+	}
+	if m.planModeCached() {
+		m.textarea.SetPromptFunc(4, m.planPromptFunc)
 		return
 	}
 	if yolo {
@@ -3729,6 +3759,22 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.Editor.PromptYoloDotsFocused.Render()
 	}
 	return t.Editor.PromptYoloDotsBlurred.Render()
+}
+
+// planPromptFunc returns the plan mode editor prompt style with info-colored
+// icon and dots.
+func (m *UI) planPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptPlanIconFocused.Render()
+		}
+		return t.Editor.PromptPlanIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.Editor.PromptPlanDotsFocused.Render()
+	}
+	return t.Editor.PromptPlanDotsBlurred.Render()
 }
 
 // bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
@@ -4536,11 +4582,13 @@ func (m *UI) shouldCollapseQuestion(qf *dialog.QuestionForm) bool {
 }
 
 // handlePermissionNotification updates tool items when permission state changes.
-func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
+func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) tea.Cmd {
 	if toolItem := m.chat.MessageItem(notification.ToolCallID); toolItem != nil {
 		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
 			if notification.Granted {
 				permItem.SetStatus(chat.ToolStatusRunning)
+			} else if notification.Denied {
+				permItem.SetStatus(chat.ToolStatusError)
 			} else {
 				permItem.SetStatus(chat.ToolStatusAwaitingPermission)
 			}
@@ -4551,13 +4599,20 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	// dismiss any open permissions dialog whose tool call ID matches. This
 	// covers the case where another client resolved the request remotely.
 	if !notification.Granted && !notification.Denied {
-		return
+		return nil
 	}
+	var cmd tea.Cmd
 	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
 		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
+			if notification.Granted && perm.ToolName() == agenttools.ExitPlanModeToolName {
+				m.setEditorPrompt(m.yoloModeCached())
+				m.planCache.set(false)
+				cmd = util.ReportInfo("Plan approved — plan mode off")
+			}
 			m.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
+	return cmd
 }
 
 // handleAgentNotification translates domain agent events into desktop

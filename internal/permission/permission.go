@@ -81,6 +81,10 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	// SetPlanMode enables or disables plan mode. Enabling plan mode
+	// disables YOLO mode; the two are mutually exclusive.
+	SetPlanMode(enabled bool)
+	PlanMode() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -102,6 +106,7 @@ type permissionService struct {
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
+	planMode              atomic.Bool
 	allowedTools          []string
 
 	// used to make sure we only process one request at a time
@@ -181,6 +186,17 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
 	if s.skip.Load() {
 		return true, nil
+	}
+
+	// Plan mode denies mutating actions before allowlists or hooks can
+	// bypass the restriction. Publish a denied notification so the UI and
+	// audit subscribers see the outcome (no request dialog is shown).
+	if s.planMode.Load() && planModeDeniedActions[opts.Action] {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			ToolCallID: opts.ToolCallID,
+			Denied:     true,
+		})
+		return false, nil
 	}
 
 	// Check if the tool/action combination is in the allowlist
@@ -288,11 +304,33 @@ func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan p
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {
+	if skip {
+		s.planMode.Store(false)
+	}
 	s.skip.Store(skip)
 }
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
+}
+
+// planModeDeniedActions are the permission actions that are auto-denied
+// while plan mode is active. Everything else follows the normal flow.
+var planModeDeniedActions = map[string]bool{
+	"write":    true,
+	"execute":  true,
+	"download": true,
+}
+
+func (s *permissionService) SetPlanMode(enabled bool) {
+	if enabled {
+		s.skip.Store(false)
+	}
+	s.planMode.Store(enabled)
+}
+
+func (s *permissionService) PlanMode() bool {
+	return s.planMode.Load()
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {

@@ -265,6 +265,11 @@ type PermissionSkipRequest struct {
 	Skip bool `json:"skip"`
 }
 
+// PermissionPlanModeRequest represents a request to set plan mode.
+type PermissionPlanModeRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
 // LSPEventType represents the type of LSP event.
 type LSPEventType string
 

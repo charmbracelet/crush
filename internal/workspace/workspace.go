@@ -114,6 +114,8 @@ type Workspace interface {
 	PermissionDeny(perm permission.PermissionRequest) bool
 	PermissionSkipRequests() bool
 	PermissionSetSkipRequests(skip bool)
+	PermissionPlanMode() bool
+	PermissionSetPlanMode(enabled bool)
 
 	// Questions
 	//

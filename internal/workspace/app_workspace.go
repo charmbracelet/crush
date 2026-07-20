@@ -282,6 +282,14 @@ func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.app.Permissions.SetSkipRequests(skip)
 }
 
+func (w *AppWorkspace) PermissionPlanMode() bool {
+	return w.app.Permissions.PlanMode()
+}
+
+func (w *AppWorkspace) PermissionSetPlanMode(enabled bool) {
+	w.app.Permissions.SetPlanMode(enabled)
+}
+
 // -- Questions --
 
 func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {

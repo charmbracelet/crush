@@ -68,6 +68,7 @@ type busyStateMsg struct {
 	gen       uint64
 	agentBusy bool
 	yolo      bool
+	plan      bool
 }
 
 // promptQueueMsg delivers the queued prompts fetched off-thread.
@@ -102,6 +103,7 @@ func (m *UI) currentSessionID() string {
 func (m *UI) invalidateBusyCaches() {
 	m.agentBusyCache.invalidate()
 	m.yoloCache.invalidate()
+	m.planCache.invalidate()
 	m.busyFetchGen++
 }
 
@@ -130,6 +132,7 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 			st.agentBusy = ws.AgentIsBusy()
 		}
 		st.yolo = ws.PermissionSkipRequests()
+		st.plan = ws.PermissionPlanMode()
 		return st
 	}
 }
@@ -150,13 +153,15 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 	prevBusy := m.isAgentBusy()
 	prevYolo := m.yoloModeCached()
+	prevPlan := m.planModeCached()
 	m.agentBusyCache.set(msg.agentBusy)
 	m.yoloCache.set(msg.yolo)
-	if prevYolo != msg.yolo {
-		// A remote/async toggle changed yolo mode: update the editor
-		// prompt function so the prompt icon/style tracks the new mode.
-		// The cache is written above and the placeholder is refreshed by
-		// the Update tail.
+	m.planCache.set(msg.plan)
+	if prevYolo != msg.yolo || prevPlan != msg.plan {
+		// A remote/async toggle changed yolo or plan mode: update the
+		// editor prompt so the icon/style tracks the new mode. The cache
+		// is written above and the placeholder is refreshed by the Update
+		// tail.
 		m.setEditorPrompt(msg.yolo)
 	}
 
@@ -245,7 +250,7 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
-	if !m.agentBusyCache.fresh(busyCacheTTL) || !m.yoloCache.fresh(busyCacheTTL) {
+	if !m.agentBusyCache.fresh(busyCacheTTL) || !m.yoloCache.fresh(busyCacheTTL) || !m.planCache.fresh(busyCacheTTL) {
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -266,8 +271,12 @@ func (m *UI) toggleYoloMode() bool {
 	yolo := !m.com.Workspace.PermissionSkipRequests()
 	m.com.Workspace.PermissionSetSkipRequests(yolo)
 	m.yoloCache.set(yolo)
-	// Supersede any in-flight busy/yolo probe: its result carries the old
-	// generation and would otherwise overwrite the value we just wrote.
+	// YOLO clears plan mode server-side; keep the local cache in sync.
+	if yolo {
+		m.planCache.set(false)
+	}
+	// Supersede any in-flight busy/yolo/plan probe: its result carries the
+	// old generation and would otherwise overwrite the value we just wrote.
 	// Bump the generation (rather than invalidateBusyCaches, which would
 	// clear the fresh value) so applyBusyState's guard discards and
 	// re-dispatches the stale probe.
@@ -281,4 +290,24 @@ func (m *UI) toggleYoloMode() bool {
 // otherwise.
 func (m *UI) yoloModeCached() bool {
 	return m.yoloCache.val
+}
+
+// togglePlanMode flips plan mode and writes through the plan/yolo caches.
+// Enabling plan clears YOLO server-side; keep the local caches aligned.
+func (m *UI) togglePlanMode() bool {
+	plan := !m.com.Workspace.PermissionPlanMode()
+	m.com.Workspace.PermissionSetPlanMode(plan)
+	m.planCache.set(plan)
+	if plan {
+		m.yoloCache.set(false)
+	}
+	m.busyFetchGen++
+	m.setEditorPrompt(m.yoloModeCached())
+	return plan
+}
+
+// planModeCached reports the memoized plan-mode flag. Toggles write through
+// the cache; the Update-tail backstop keeps it bounded-stale otherwise.
+func (m *UI) planModeCached() bool {
+	return m.planCache.val
 }

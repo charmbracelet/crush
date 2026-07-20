@@ -20,6 +20,10 @@ func (historyWorkspace) PermissionSkipRequests() bool {
 	return false
 }
 
+func (historyWorkspace) PermissionPlanMode() bool {
+	return false
+}
+
 func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {
 	t.Parallel()
 

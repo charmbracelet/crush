@@ -355,6 +355,18 @@ func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
 	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
 }
 
+func (w *ClientWorkspace) PermissionPlanMode() bool {
+	enabled, err := w.client.GetPermissionsPlanMode(context.Background(), w.workspaceID())
+	if err != nil {
+		return false
+	}
+	return enabled
+}
+
+func (w *ClientWorkspace) PermissionSetPlanMode(enabled bool) {
+	_ = w.client.SetPermissionsPlanMode(context.Background(), w.workspaceID(), enabled)
+}
+
 // -- Questions --
 
 // QuestionAnswer submits answers for a question via the client SDK.
@@ -388,6 +400,7 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 	}
 	return cancelled
 }
+
 
 // -- FileTracker --
 

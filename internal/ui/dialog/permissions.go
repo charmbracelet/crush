@@ -230,6 +230,11 @@ func (p *Permissions) ToolCallID() string {
 	return p.permission.ToolCallID
 }
 
+// ToolName returns the tool name for this dialog's permission request.
+func (p *Permissions) ToolName() string {
+	return p.permission.ToolName
+}
+
 // HandleMsg implements [Dialog].
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -559,6 +564,8 @@ func (p *Permissions) renderContent(width int) string {
 		return p.renderViewContent(width)
 	case tools.LSToolName:
 		return p.renderLSContent(width)
+	case tools.ExitPlanModeToolName:
+		return p.renderExitPlanModeContent(width)
 	default:
 		return p.renderDefaultContent(width)
 	}
@@ -571,6 +578,14 @@ func (p *Permissions) renderBashContent(width int) string {
 	}
 
 	return p.renderContentPanel(params.Command, width)
+}
+
+func (p *Permissions) renderExitPlanModeContent(width int) string {
+	params, ok := p.permission.Params.(tools.ExitPlanModePermissionsParams)
+	if !ok {
+		return ""
+	}
+	return p.renderContentPanel(params.Plan, width)
 }
 
 func (p *Permissions) renderEditContent(contentWidth int) string {

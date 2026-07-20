@@ -114,6 +114,123 @@ func TestPermissionService_SkipMode(t *testing.T) {
 	}
 }
 
+func TestPermissionService_PlanMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("denies mutating actions without publishing a request", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		for _, action := range []string{"write", "execute", "download"} {
+			service.SetPlanMode(true)
+			granted, err := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "s1",
+				ToolCallID: "call-" + action,
+				ToolName:   "tool",
+				Action:     action,
+				Path:       "/tmp",
+			})
+			require.NoError(t, err)
+			assert.False(t, granted, "plan mode should deny %s", action)
+		}
+
+		select {
+		case ev := <-events:
+			t.Fatalf("plan mode must not publish a permission request, got %#v", ev.Payload)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+
+	t.Run("allows non-mutating actions to reach normal flow", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		service.SetPlanMode(true)
+		var (
+			wg      sync.WaitGroup
+			granted bool
+			err     error
+		)
+		wg.Go(func() {
+			granted, err = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "s1",
+				ToolCallID: "call-read",
+				ToolName:   "view",
+				Action:     "read",
+				Path:       "/tmp",
+			})
+		})
+
+		event := <-events
+		assert.Equal(t, "read", event.Payload.Action)
+		service.Grant(event.Payload)
+		wg.Wait()
+		require.NoError(t, err)
+		assert.True(t, granted)
+	})
+
+	t.Run("allows plan action for exit_plan_mode", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		service.SetPlanMode(true)
+		var (
+			wg      sync.WaitGroup
+			granted bool
+			err     error
+		)
+		wg.Go(func() {
+			granted, err = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "s1",
+				ToolCallID: "call-plan",
+				ToolName:   "exit_plan_mode",
+				Action:     "plan",
+				Path:       "/tmp",
+			})
+		})
+
+		event := <-events
+		assert.Equal(t, "plan", event.Payload.Action)
+		service.Deny(event.Payload)
+		wg.Wait()
+		require.NoError(t, err)
+		assert.False(t, granted)
+	})
+
+	t.Run("denies even when tool is allowlisted", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, []string{"bash", "write", "bash:execute"})
+		service.SetPlanMode(true)
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID: "s1",
+			ToolName:  "bash",
+			Action:    "execute",
+			Path:      "/tmp",
+		})
+		require.NoError(t, err)
+		assert.False(t, granted)
+	})
+
+	t.Run("mutual exclusion with skip mode", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		service.SetSkipRequests(true)
+		assert.True(t, service.SkipRequests())
+		service.SetPlanMode(true)
+		assert.True(t, service.PlanMode())
+		assert.False(t, service.SkipRequests(), "enabling plan mode must clear YOLO")
+
+		service.SetSkipRequests(true)
+		assert.True(t, service.SkipRequests())
+		assert.False(t, service.PlanMode(), "enabling YOLO must clear plan mode")
+	})
+}
+
 func TestPermissionService_HookApproval(t *testing.T) {
 	t.Parallel()
 

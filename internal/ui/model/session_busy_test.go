@@ -31,6 +31,7 @@ type countingWorkspace struct {
 	ready     bool
 	agentBusy bool
 	yolo      bool
+	plan      bool
 	queued    []string
 
 	readyCalls      int
@@ -61,6 +62,19 @@ func (w *countingWorkspace) PermissionSkipRequests() bool { w.permCalls++; retur
 func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.permSetCalls++
 	w.yolo = skip
+	if skip {
+		w.plan = false
+	}
+}
+
+func (w *countingWorkspace) PermissionPlanMode() bool { w.permCalls++; return w.plan }
+
+func (w *countingWorkspace) PermissionSetPlanMode(enabled bool) {
+	w.permSetCalls++
+	w.plan = enabled
+	if enabled {
+		w.yolo = false
+	}
 }
 
 func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
@@ -128,6 +142,7 @@ func pinTTLs(t *testing.T) {
 func warmCaches(m *UI, busy bool) {
 	m.agentBusyCache.set(busy)
 	m.yoloCache.set(false)
+	m.planCache.set(false)
 	m.promptQueueCheckedAt = time.Now()
 }
 
@@ -187,6 +202,7 @@ func TestReadsNeverProbeWorkspace(t *testing.T) {
 	for range 10 {
 		m.isAgentBusy()
 		m.yoloModeCached()
+		m.planModeCached()
 	}
 	require.Zero(t, ws.syncProbes(), "cache reads must never probe the workspace")
 }

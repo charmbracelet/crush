@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/lsp/util"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -109,7 +110,7 @@ func collectAffectedFiles(edit *protocol.WorkspaceEdit) []string {
 	var files []string
 
 	for uri := range edit.Changes {
-		path, err := uri.Path()
+		path, err := util.PathFromURI(uri)
 		if err != nil {
 			continue
 		}
@@ -120,7 +121,7 @@ func collectAffectedFiles(edit *protocol.WorkspaceEdit) []string {
 	}
 
 	addURI := func(uri protocol.DocumentURI) {
-		path, err := uri.Path()
+		path, err := util.PathFromURI(uri)
 		if err != nil {
 			return
 		}

@@ -122,6 +122,49 @@ func UpdateHyper(pathOrURL string) error {
 	return nil
 }
 
+const atlasCloudProviderID catwalk.InferenceProvider = "atlascloud"
+
+func atlasCloudProvider() catwalk.Provider {
+	return catwalk.Provider{
+		Name:                "Atlas Cloud",
+		ID:                  atlasCloudProviderID,
+		APIKey:              "$ATLASCLOUD_API_KEY",
+		APIEndpoint:         "https://api.atlascloud.ai/v1",
+		Type:                catwalk.TypeOpenAICompat,
+		DefaultLargeModelID: "deepseek-ai/deepseek-v4-pro",
+		DefaultSmallModelID: "qwen/qwen3.5-flash",
+		Models: []catwalk.Model{
+			{
+				ID:               "deepseek-ai/deepseek-v4-pro",
+				Name:             "DeepSeek V4 Pro",
+				CostPer1MIn:      1.68,
+				CostPer1MOut:     3.38,
+				ContextWindow:    1048576,
+				DefaultMaxTokens: 4096,
+				CanReason:        true,
+			},
+			{
+				ID:               "qwen/qwen3.5-flash",
+				Name:             "Qwen3.5 Flash",
+				CostPer1MIn:      0.1,
+				CostPer1MOut:     0.4,
+				ContextWindow:    1000000,
+				DefaultMaxTokens: 4096,
+				SupportsImages:   true,
+			},
+		},
+	}
+}
+
+func appendAtlasCloudProvider(providers []catwalk.Provider) []catwalk.Provider {
+	if slices.ContainsFunc(providers, func(p catwalk.Provider) bool {
+		return p.ID == atlasCloudProviderID
+	}) {
+		return providers
+	}
+	return append(providers, atlasCloudProvider())
+}
+
 var (
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer   = &hyperSync{}
@@ -190,6 +233,9 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 			providerList = append([]catwalk.Provider{hyperProvider}, slices.Collect(providers.Seq())...)
 		} else {
 			providerList = slices.Collect(providers.Seq())
+		}
+		if !customProvidersOnly {
+			providerList = appendAtlasCloudProvider(providerList)
 		}
 		providerErr = errors.Join(errs...)
 	})

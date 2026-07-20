@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,6 +20,25 @@ func resetProviderState() {
 	providerErr = nil
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer = &hyperSync{}
+}
+
+func requireAtlasCloudProvider(t *testing.T, providers []catwalk.Provider) {
+	t.Helper()
+
+	for _, provider := range providers {
+		if provider.ID == atlasCloudProviderID {
+			require.Equal(t, "Atlas Cloud", provider.Name)
+			require.Equal(t, "$ATLASCLOUD_API_KEY", provider.APIKey)
+			require.Equal(t, "https://api.atlascloud.ai/v1", provider.APIEndpoint)
+			require.Equal(t, catwalk.TypeOpenAICompat, provider.Type)
+			require.Equal(t, "deepseek-ai/deepseek-v4-pro", provider.DefaultLargeModelID)
+			require.Equal(t, "qwen/qwen3.5-flash", provider.DefaultSmallModelID)
+			require.Len(t, provider.Models, 2)
+			return
+		}
+	}
+
+	require.Fail(t, "Atlas Cloud provider not found")
 }
 
 func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {
@@ -50,6 +72,72 @@ func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, providers)
 	require.Greater(t, len(providers), 5, "Expected embedded providers")
+	requireAtlasCloudProvider(t, providers)
+}
+
+func TestAtlasCloudProvider(t *testing.T) {
+	provider := atlasCloudProvider()
+
+	require.Equal(t, catwalk.InferenceProvider("atlascloud"), provider.ID)
+	require.Equal(t, "Atlas Cloud", provider.Name)
+	require.Equal(t, "$ATLASCLOUD_API_KEY", provider.APIKey)
+	require.Equal(t, "https://api.atlascloud.ai/v1", provider.APIEndpoint)
+	require.Equal(t, catwalk.TypeOpenAICompat, provider.Type)
+	require.Equal(t, "deepseek-ai/deepseek-v4-pro", provider.DefaultLargeModelID)
+	require.Equal(t, "qwen/qwen3.5-flash", provider.DefaultSmallModelID)
+	require.Len(t, provider.Models, 2)
+	require.Equal(t, "deepseek-ai/deepseek-v4-pro", provider.Models[0].ID)
+	require.Equal(t, "qwen/qwen3.5-flash", provider.Models[1].ID)
+}
+
+func TestAppendAtlasCloudProviderDedupes(t *testing.T) {
+	providers := []catwalk.Provider{{ID: "openai"}, atlasCloudProvider()}
+
+	got := appendAtlasCloudProvider(providers)
+
+	require.Len(t, got, len(providers))
+	require.Equal(t, providers, got)
+}
+
+func TestProvidersDisableDefaultProvidersOmitsAtlasCloud(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	resetProviderState()
+	defer resetProviderState()
+
+	cfg := &Config{
+		Options: &Options{
+			DisableDefaultProviders: true,
+		},
+	}
+
+	providers, err := Providers(cfg)
+	require.NoError(t, err)
+	require.Empty(t, providers)
+}
+
+func TestConfigConfigureProvidersAtlasCloudFromEnv(t *testing.T) {
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+	}
+	cfg.setDefaults("/tmp", "")
+
+	env := env.NewFromMap(map[string]string{
+		"ATLASCLOUD_API_KEY": "test-key",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{atlasCloudProvider()})
+	require.NoError(t, err)
+
+	provider, exists := cfg.Providers.Get("atlascloud")
+	require.True(t, exists)
+	require.Equal(t, "Atlas Cloud", provider.Name)
+	require.Equal(t, "test-key", provider.APIKey)
+	require.Equal(t, "$ATLASCLOUD_API_KEY", provider.APIKeyTemplate)
+	require.Equal(t, "https://api.atlascloud.ai/v1", provider.BaseURL)
+	require.Equal(t, catwalk.TypeOpenAICompat, provider.Type)
+	require.Len(t, provider.Models, 2)
 }
 
 func TestProviders_Integration_WithMockClients(t *testing.T) {

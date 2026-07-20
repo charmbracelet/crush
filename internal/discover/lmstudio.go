@@ -79,15 +79,15 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 			continue
 		}
 
-		// Context window: prefer loaded instance config, fall back
-		// to the model-level max.
-		if models[i].ContextWindow == 0 {
-			if len(meta.LoadedInstances) > 0 && meta.LoadedInstances[0].Config.ContextLength > 0 {
-				models[i].ContextWindow = meta.LoadedInstances[0].Config.ContextLength
-			} else if meta.MaxContextLength > 0 {
-				models[i].ContextWindow = meta.MaxContextLength
-			}
+		// Use the smallest known limit. A configured value may intentionally
+		// restrict the model, but it cannot expand the loaded instance or the
+		// model's maximum context length.
+		contextWindow := models[i].ContextWindow
+		contextWindow = minPositive(contextWindow, meta.MaxContextLength)
+		for _, instance := range meta.LoadedInstances {
+			contextWindow = minPositive(contextWindow, instance.Config.ContextLength)
 		}
+		models[i].ContextWindow = contextWindow
 
 		// Display name if not already set by user.
 		if models[i].Name == models[i].ID && meta.DisplayName != "" {
@@ -99,4 +99,14 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 	}
 
 	return models, nil
+}
+
+func minPositive(values ...int64) int64 {
+	var result int64
+	for _, value := range values {
+		if value > 0 && (result == 0 || value < result) {
+			result = value
+		}
+	}
+	return result
 }

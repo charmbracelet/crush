@@ -108,6 +108,187 @@ larger, later increment.
 - Should sub-agents be allowed to reconfigure the session, or only the
   top-level agent? Probably top-level only, mirroring how hooks scope.
 
+## Separate machine state from user configuration
+
+**Status:** planned for a later phase; not implemented.
+
+### Motivation
+
+Crush currently uses JSON files in data directories as both persisted machine
+state and high-priority configuration:
+
+```text
+~/.local/share/crush/crush.json
+.crush/crush.json
+```
+
+These files hold mutable choices such as preferred/recent models, UI settings,
+workspace overrides, and some credentials. Treating them as ordinary config
+means state enters the same generic JSON merge/reload path as user-authored
+`crushrc` and legacy `crush.json` files.
+
+The goal is to make the roles explicit:
+
+| Role | Format |
+|---|---|
+| User-authored executable configuration | `crushrc` / `.crushrc` |
+| Legacy user-authored static configuration | `crush.json` / `.crush.json` |
+| Crush-owned persistent preferences and history | versioned `state.json` |
+| Session-only changes | memory |
+| Credentials/OAuth tokens | dedicated secure storage |
+
+JSON remains a good state format: it is standard-library supported, readable,
+easy to debug, easy to attach to bug reports, and straightforward to migrate.
+The problem is not JSON serialization itself; it is state pretending to be
+config and being deep-merged through the config pipeline.
+
+### Proposed files
+
+```text
+~/.config/crush/crushrc             global user config
+~/.local/share/crush/state.json     global machine state
+./crushrc / ./.crushrc              project user config
+.crush/state.json                   workspace machine state
+```
+
+State files should be machine-owned, written with `0600`, protected by the
+existing process/file locks, and updated with atomic temp-file renames. They
+should include a format version and an explicit generated-file notice.
+
+```json
+{
+  "version": 1,
+  "recent_models": {
+    "large": [
+      {"provider": "openai", "model": "gpt-5"}
+    ]
+  },
+  "preferred_models": {
+    "large": {"provider": "openai", "model": "gpt-5"}
+  },
+  "ui": {
+    "compact_mode": true
+  }
+}
+```
+
+Use typed state structs with pointer fields where `false` must be
+distinguishable from "not remembered". Avoid arbitrary dotted JSON paths and
+avoid decoding state into the full `config.Config` shape.
+
+### Load precedence
+
+Explicit user configuration should beat remembered state:
+
+```text
+built-in defaults
+→ global state defaults
+→ workspace state defaults
+→ global legacy crush.json
+→ global crushrc
+→ project legacy crush.json
+→ project crushrc
+→ project .crush.json
+→ project .crushrc
+→ runtime-only overrides
+```
+
+Recent models are metadata, not defaults, so they can be attached after config
+building without participating in precedence.
+
+### Legacy JSON compatibility
+
+User-authored JSON remains a supported config input during this work:
+
+```text
+~/.config/crush/crush.json
+./crush.json
+./.crush.json
+```
+
+It must be decoded as configuration, never migrated as state. Only the
+machine-owned files in data/workspace directories are migrated. The role is
+determined by path, not guessed from content.
+
+If user JSON is retired later:
+
+1. Keep reading it for a compatibility period.
+2. Warn only when a user-authored JSON config is loaded.
+3. Provide an explicit conversion command (for example,
+   `crush config convert crush.json > crushrc`).
+4. Never rewrite user config automatically.
+
+Using JSON internally for state is independent of deprecating JSON as a user
+configuration language.
+
+### State store API
+
+Introduce a narrow typed store rather than generic config-field mutation:
+
+```go
+type StateStore interface {
+    Load(context.Context) (State, error)
+    Update(context.Context, func(*State) error) error
+}
+```
+
+An update should lock, read/migrate, mutate, validate, marshal with indentation,
+write atomically, and quarantine corrupt files. It should not trigger a full
+config reload.
+
+Typed config mutators then update live config and the corresponding state
+field:
+
+```go
+func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
+    s.mutateInMemory(func(c *Config) {
+        c.ensureTUI().CompactMode = enabled
+    })
+
+    return s.stateStore(scope).Update(func(st *State) error {
+        st.UI.CompactMode = ptr.To(enabled)
+        return nil
+    })
+}
+```
+
+Real-time commands run through the Bash tool remain session-only and do not
+write state, preserving the shell/`.bashrc` mental model.
+
+### Typed crushrc builder
+
+This is related but separate. Today the Bash path is:
+
+```text
+crushrc → map[string]any → JSON → Config
+```
+
+A later typed-builder phase should become:
+
+```text
+crushrc → typed ConfigBuilder → Config
+state.json → typed StateStore ───────┘
+```
+
+Legacy `crush.json` would decode into a typed config patch and apply to the same
+builder. This may require moving pure config data types into a dependency-neutral
+package to avoid import cycles.
+
+### Migration plan
+
+1. Add a versioned `State` type and atomic JSON state store.
+2. Migrate recent/preferred models.
+3. Migrate remembered UI settings.
+4. Stop merging global/workspace data JSON as config.
+5. Move provider credentials and OAuth tokens to dedicated secure storage.
+6. Remove generic state callers of `SetConfigField` / dotted JSON paths.
+7. Replace the `crushrc` map/JSON bridge with a typed config builder.
+
+Migration must preserve unknown legacy fields or warn and leave the original
+file untouched. Successfully migrated files can be renamed to
+`crush.json.migrated`; corrupt files should be quarantined as timestamped
+`state.json.corrupt-*` files and replaced with defaults.
+
 ## Permission-level hard deny
 
 **Status:** not implemented; probably unnecessary until a real use case

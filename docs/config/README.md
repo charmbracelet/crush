@@ -92,13 +92,17 @@ precedence:
 | -------- | -------------------------------- | --------------------------------- |
 | 1        | `./.crushrc`                     | `.\.crushrc`                      |
 | 2        | `./crushrc`                      | `.\crushrc`                       |
-| 3        | `$XDG_DATA_HOME/crush/crushrc`   | `%LOCALAPPDATA%\crush\crushrc`    |
-| 4        | `$XDG_CONFIG_HOME/crush/crushrc` | `%XDG_CONFIG_HOME%\crush\crushrc` |
+| 3        | `$XDG_CONFIG_HOME/crush/crushrc` | `%XDG_CONFIG_HOME%\crush\crushrc` |
 
 Legacy JSON uses `.crush.json`/`crush.json` in in the same directories as the
 above. Everything found is merged, with project settings overriding global ones
 and `crushrc` overriding JSON in the same directory. If a folder has both, they
 merge and Crush logs a warning.
+
+> [!NOTE]
+> Crush also stores state data in `$XDG_DATA_HOME/crush`
+> (`%LOCALAPPDATA%\crush` on Windows). This is application state, and should
+> not be edited by hand.
 
 ## Command Reference
 

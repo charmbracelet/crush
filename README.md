@@ -245,12 +245,11 @@ Crush runs great with no configuration. That said, if you do
 need or want to customize Crush, configuration can be added either local to the
 project itself, or globally, with the following priority:
 
-| Priority | Unix-like                      | Windows                               |
-| -------- | ------------------------------ | ------------------------------------- |
-| 1        | `./.crushrc`                   | `.\.crushrc`                          |
-| 2        | `./crushrc`                    | `.\crushrc`                           |
-| 3        | `~/.local/share/crush/crushrc` | `%LOCALAPPDATA%\crush\crushrc`        |
-| 4        | `~/.config/crush/crushrc`      | `%USERPROFILE%\.config\crush\crushrc` |
+| Priority | Unix-like                 | Windows                               |
+| -------- | ------------------------- | ------------------------------------- |
+| 1        | `./.crushrc`              | `.\.crushrc`                          |
+| 2        | `./crushrc`               | `.\crushrc`                           |
+| 3        | `~/.config/crush/crushrc` | `%USERPROFILE%\.config\crush\crushrc` |
 
 (Crush respects the [XDG Base Directory Specification][xdg], so your paths
 may differ depending on your XDG__CONFIG_HOME and XDG_DATA_HOME values.)
@@ -287,8 +286,15 @@ mcp add github \
 What about the old JSON format? It’s still supported, but deprecated. See:
 [the config docs](./docs/config/) for details.
 
+> [!TIP]
+> You can override the user and data config locations by setting:
+>
+> - `CRUSH_GLOBAL_CONFIG`
+> - `CRUSH_GLOBAL_DATA`
+
 As an additional note, Crush also stores ephemeral data, such as application
-state, in one additional location:
+state, in one additional location. This is state and should not be edited by
+hand, nor should it be considered configuration.
 
 ```bash
 # Unix
@@ -297,12 +303,6 @@ $HOME/.local/share/crush/crush.json
 # Windows
 %LOCALAPPDATA%\crush\crush.json
 ```
-
-> [!TIP]
-> You can override the user and data config locations by setting:
->
-> - `CRUSH_GLOBAL_CONFIG`
-> - `CRUSH_GLOBAL_DATA`
 
 #### A note on security
 

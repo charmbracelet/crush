@@ -160,7 +160,21 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		c.dockerMCPAvailable = &msg.available
 		c.dockerMCPCheckInFlight = false
 		if c.selected == SystemCommands {
+			// Preserve the current selection across the rebuild to avoid reset when the list is rebuilt.
+			var prevID string
+			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
+				prevID = item.id
+			}
 			c.setCommandItems(c.selected)
+			if prevID != "" {
+				for i, it := range c.list.FilteredItems() {
+					if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
+						c.list.SetSelected(i)
+						c.list.ScrollToSelected()
+						break
+					}
+				}
+			}
 		}
 		return nil
 	case spinner.TickMsg:
@@ -556,15 +570,15 @@ func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
 }
 
 // StartLoading implements [LoadingDialog].
-func (a *Commands) StartLoading() tea.Cmd {
-	if a.loading {
+func (c *Commands) StartLoading() tea.Cmd {
+	if c.loading {
 		return nil
 	}
-	a.loading = true
-	return a.spinner.Tick
+	c.loading = true
+	return c.spinner.Tick
 }
 
 // StopLoading implements [LoadingDialog].
-func (a *Commands) StopLoading() {
-	a.loading = false
+func (c *Commands) StopLoading() {
+	c.loading = false
 }

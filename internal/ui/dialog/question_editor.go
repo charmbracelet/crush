@@ -225,12 +225,6 @@ func (e *questionEditor) noteCursor(screenRow, areaMinX, prefixWidth int) *tea.C
 	return tc
 }
 
-// hasNote reports whether a note exists for the given key.
-func (e *questionEditor) hasNote(key string) bool {
-	_, ok := e.notes[key]
-	return ok
-}
-
 // drawStandaloneNote draws a note editor or saved note directly
 // onto the screen (not via line list). Used by YesNo which doesn't
 // use the line-list model. Returns the cursor or nil.

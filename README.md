@@ -785,6 +785,9 @@ credential error, Crush runs the command, then retries the request in place
   "providers": {
     "bedrock": {
       "aws_auth_refresh": "aws sso login --profile my-sso-profile"
+    },
+    "bedrock-europe": {
+      "aws_auth_refresh": "aws sso login --profile my-eu-sso-profile"
     }
   }
 }

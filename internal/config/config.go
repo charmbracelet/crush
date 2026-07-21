@@ -204,6 +204,21 @@ type MCPConfig struct {
 	// omitted from the outgoing request rather than sent as
 	// "Header:".
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
+
+	// OAuthClientID configures a pre-registered ("static") public OAuth
+	// client for HTTP/SSE MCP servers whose authorization server does
+	// not support RFC 7591 dynamic client registration. When set, Crush
+	// skips dynamic registration and authenticates as this client
+	// directly. Value runs through shell expansion at MCP startup, so
+	// $VAR and $(cmd) work.
+	OAuthClientID string `json:"oauth_client_id,omitempty" jsonschema:"description=Pre-registered OAuth client ID for authorization servers that do not support dynamic client registration"`
+
+	// OAuthRedirectPort fixes the local port used for the OAuth
+	// callback (http://localhost:<port>/callback) so the redirect URI
+	// is stable across runs and can be pre-registered with the
+	// authorization server ahead of time. Required when OAuthClientID
+	// is set, since an ephemeral port can't be pre-registered.
+	OAuthRedirectPort int `json:"oauth_redirect_port,omitempty" jsonschema:"description=Fixed local port for the OAuth callback redirect URI\\, required when oauth_client_id is set,example=51536"`
 }
 
 type LSPConfig struct {
@@ -399,6 +414,23 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 	v, err := r.ResolveValue(m.URL)
 	if err != nil {
 		return "", fmt.Errorf("url: %w", err)
+	}
+	return v, nil
+}
+
+// ResolvedOAuthClientID returns m.OAuthClientID expanded through the
+// given resolver. The receiver is not mutated. Errors from the
+// resolver are already sanitized by ResolveValue and are wrapped with
+// %w for errors.Is/As.
+//
+// See ResolvedEnv for guidance on picking a resolver.
+func (m MCPConfig) ResolvedOAuthClientID(r VariableResolver) (string, error) {
+	if m.OAuthClientID == "" {
+		return "", nil
+	}
+	v, err := r.ResolveValue(m.OAuthClientID)
+	if err != nil {
+		return "", fmt.Errorf("oauth_client_id: %w", err)
 	}
 	return v, nil
 }

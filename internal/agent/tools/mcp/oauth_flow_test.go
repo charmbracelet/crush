@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -161,6 +162,34 @@ func TestDiscoverAndRegister(t *testing.T) {
 		_, err := h.discoverAndRegister(t.Context(), "http://localhost:1/callback")
 		require.Error(t, err)
 	})
+
+	t.Run("static client ID skips dynamic registration", func(t *testing.T) {
+		t.Parallel()
+		base, mcpURL := newOAuthTestServer(t, oauthServerOpts{
+			servePRM: true, serveASM: true, registrationEndpoint: false,
+		})
+		h := &mcpOAuthHandler{serverURL: mcpURL, staticClientID: "preregistered-client-id"}
+		reg, err := h.discoverAndRegister(t.Context(), "http://localhost:1/callback")
+		require.NoError(t, err)
+		require.Equal(t, "preregistered-client-id", reg.clientID)
+		require.Empty(t, reg.clientSecret)
+		require.Equal(t, base+"/authorize", reg.authURL)
+		require.Equal(t, base+"/token", reg.tokenURL)
+		require.Equal(t, oauth2.AuthStyleInParams, reg.authStyle)
+	})
+
+	t.Run("static client ID does not require a registration endpoint", func(t *testing.T) {
+		t.Parallel()
+		// Same server as "auth server without registration endpoint" above,
+		// which fails for dynamic registration — but a static client ID
+		// should succeed against it.
+		_, mcpURL := newOAuthTestServer(t, oauthServerOpts{
+			servePRM: true, serveASM: true, registrationEndpoint: false,
+		})
+		h := &mcpOAuthHandler{serverURL: mcpURL, staticClientID: "static-id"}
+		_, err := h.discoverAndRegister(t.Context(), "http://localhost:1/callback")
+		require.NoError(t, err)
+	})
 }
 
 // TestAuthorize_EndToEnd drives the entire authorization-code flow against a
@@ -203,7 +232,7 @@ func TestAuthorize_EndToEnd(t *testing.T) {
 	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
 
 	stopped := false
-	h := newMCPOAuthHandler(mcpURL, func() { stopped = true })
+	h := newMCPOAuthHandler(mcpURL, func() { stopped = true }, "", 0)
 	h.openURL = simulateBrowser
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, mcpURL, nil)
@@ -223,7 +252,7 @@ func TestAuthorize_EndToEnd(t *testing.T) {
 
 	// And persisted with the registered client ID so refresh works after a
 	// restart. A brand-new handler restores it without any browser.
-	h2 := newMCPOAuthHandler(mcpURL, nil)
+	h2 := newMCPOAuthHandler(mcpURL, nil, "", 0)
 	saved, ok := h2.store.get(mcpURL)
 	require.True(t, ok, "token must be persisted")
 	require.Equal(t, "e2e-client-id", saved.ClientID, "the registered client ID must be persisted for refresh")
@@ -404,7 +433,7 @@ func TestOpenBrowserAndCapture(t *testing.T) {
 			t.Parallel()
 			open := func(string) error { return tt.openErr }
 
-			port, err := allocateCallbackPort(t.Context())
+			port, err := allocateCallbackPort(t.Context(), 0)
 			require.NoError(t, err)
 
 			type outcome struct {
@@ -439,7 +468,7 @@ func TestOpenBrowserAndCapture(t *testing.T) {
 
 func TestOpenBrowserAndCapture_ContextCancelled(t *testing.T) {
 	t.Parallel()
-	port, err := allocateCallbackPort(context.Background())
+	port, err := allocateCallbackPort(context.Background(), 0)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -450,6 +479,30 @@ func TestOpenBrowserAndCapture_ContextCancelled(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, res)
+}
+
+// TestAllocateCallbackPort_Preferred proves a preferred port is honoured
+// exactly (needed so a static OAuth client's pre-registered redirect URI
+// stays valid across runs), and that a second attempt to bind the same port
+// while it's held fails loudly instead of silently falling back.
+func TestAllocateCallbackPort_Preferred(t *testing.T) {
+	t.Parallel()
+
+	port, err := allocateCallbackPort(t.Context(), 0)
+	require.NoError(t, err)
+
+	got, err := allocateCallbackPort(t.Context(), port)
+	require.NoError(t, err)
+	require.Equal(t, port, got)
+
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	require.NoError(t, err)
+	defer ln.Close()
+
+	_, err = allocateCallbackPort(t.Context(), port)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "oauth_redirect_port")
 }
 
 // TestTokenStore_SaveMergesConcurrentDiskWrites proves save() preserves entries

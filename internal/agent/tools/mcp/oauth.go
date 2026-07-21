@@ -141,6 +141,17 @@ type mcpOAuthHandler struct {
 	// openURL opens a URL in the user's browser. Injected so tests can
 	// simulate a headless environment or drive the callback directly.
 	openURL func(string) error
+	// staticClientID, when non-empty, is a pre-registered OAuth client ID
+	// (config: mcp.<name>.oauth_client_id). When set, discoverAndRegister
+	// skips RFC 7591 dynamic client registration and authenticates as
+	// this client directly, for authorization servers that only accept
+	// clients registered out-of-band.
+	staticClientID string
+	// redirectPort, when non-zero, fixes the local callback port instead
+	// of allocating an ephemeral one. Required alongside staticClientID
+	// so the redirect URI (http://localhost:<port>/callback) is stable
+	// and can be pre-registered with the authorization server.
+	redirectPort int
 
 	mu       sync.Mutex
 	tokenSrc oauth2.TokenSource
@@ -148,13 +159,15 @@ type mcpOAuthHandler struct {
 
 var _ auth.OAuthHandler = (*mcpOAuthHandler)(nil)
 
-func newMCPOAuthHandler(serverURL string, stopConnTimeout func()) *mcpOAuthHandler {
+func newMCPOAuthHandler(serverURL string, stopConnTimeout func(), staticClientID string, redirectPort int) *mcpOAuthHandler {
 	store := sharedTokenStore()
 	h := &mcpOAuthHandler{
 		serverURL:       serverURL,
 		store:           store,
 		stopConnTimeout: stopConnTimeout,
 		openURL:         browser.OpenURL,
+		staticClientID:  staticClientID,
+		redirectPort:    redirectPort,
 	}
 	// Restore any saved token so we can skip the browser flow on
 	// subsequent startups. The client ID, secret and endpoints are
@@ -219,7 +232,7 @@ func (h *mcpOAuthHandler) Authorize(ctx context.Context, req *http.Request, resp
 	authCtx, cancel := context.WithTimeout(ctx, oauthInteractiveTimeout)
 	defer cancel()
 
-	port, err := allocateCallbackPort(authCtx)
+	port, err := allocateCallbackPort(authCtx, h.redirectPort)
 	if err != nil {
 		resp.Body.Close()
 		return err
@@ -292,14 +305,29 @@ func (h *mcpOAuthHandler) buildInner(reg *clientRegistration, port int, redirect
 	return auth.NewAuthorizationCodeHandler(cfg)
 }
 
-// discoverAndRegister discovers the authorization server for the MCP server and
-// dynamically registers a client with it, returning the client credentials and
-// endpoints needed to complete and later refresh the flow.
+// discoverAndRegister discovers the authorization server for the MCP server
+// and either registers a client dynamically with it or, when a static client
+// ID was configured (mcp.<name>.oauth_client_id), uses that client directly.
+// It returns the client credentials and endpoints needed to complete and
+// later refresh the flow.
 func (h *mcpOAuthHandler) discoverAndRegister(ctx context.Context, redirectURL string) (*clientRegistration, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	asm, err := h.discoverAuthServer(ctx, client)
 	if err != nil {
 		return nil, err
+	}
+	if h.staticClientID != "" {
+		// The authorization server doesn't need to support RFC 7591 dynamic
+		// client registration; the client was pre-registered out-of-band
+		// (e.g. in the provider's developer console) with a redirect URI
+		// matching redirectURL. No client secret: this path is for public
+		// clients using PKCE.
+		return &clientRegistration{
+			clientID:  h.staticClientID,
+			authURL:   asm.AuthorizationEndpoint,
+			tokenURL:  asm.TokenEndpoint,
+			authStyle: oauth2.AuthStyleInParams,
+		}, nil
 	}
 	if asm.RegistrationEndpoint == "" {
 		return nil, fmt.Errorf("authorization server %q does not support dynamic client registration", asm.Issuer)
@@ -401,13 +429,19 @@ func authStyleForRegistration(reg *oauthex.ClientRegistrationResponse, asm *oaut
 	return oauth2.AuthStyleAutoDetect
 }
 
-// allocateCallbackPort reserves a free localhost port for the OAuth callback
-// server. The listener is closed immediately; the callback server re-listens on
-// the same port.
-func allocateCallbackPort(ctx context.Context) (int, error) {
+// allocateCallbackPort reserves a localhost port for the OAuth callback
+// server. The listener is closed immediately; the callback server re-listens
+// on the same port. If preferredPort is non-zero, that exact port is
+// reserved (failing if it's already in use) instead of an ephemeral one —
+// used when a static OAuth client's redirect URI was pre-registered with a
+// fixed port.
+func allocateCallbackPort(ctx context.Context, preferredPort int) (int, error) {
 	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	ln, err := lc.Listen(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", preferredPort))
 	if err != nil {
+		if preferredPort != 0 {
+			return 0, fmt.Errorf("failed to bind configured oauth_redirect_port %d: %w", preferredPort, err)
+		}
 		return 0, fmt.Errorf("failed to allocate callback port: %w", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port

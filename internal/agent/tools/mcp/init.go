@@ -632,7 +632,11 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 			if connTimeout != nil {
 				stopConnTimeout = func() { connTimeout.Stop() }
 			}
-			transport.OAuthHandler = newMCPOAuthHandler(url, stopConnTimeout)
+			oauthClientID, err := m.ResolvedOAuthClientID(resolver)
+			if err != nil {
+				return nil, err
+			}
+			transport.OAuthHandler = newMCPOAuthHandler(url, stopConnTimeout, oauthClientID, m.OAuthRedirectPort)
 		}
 		return transport, nil
 	case config.MCPSSE:

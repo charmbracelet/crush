@@ -103,7 +103,7 @@ func TestMCPOAuthHandler_TokenSourceEmptyByDefault(t *testing.T) {
 	// token source, which tells the transport to send requests without
 	// an Authorization header (triggering the 401 → Authorize flow).
 	t.Setenv("CRUSH_GLOBAL_CONFIG", t.TempDir())
-	h := newMCPOAuthHandler("https://mcp.example.com/mcp", nil)
+	h := newMCPOAuthHandler("https://mcp.example.com/mcp", nil, "", 0)
 	ts, err := h.TokenSource(t.Context())
 	require.NoError(t, err)
 	require.Nil(t, ts)
@@ -163,7 +163,7 @@ func TestMCPOAuthHandler_RestoresSavedToken(t *testing.T) {
 	saved.Endpoints.TokenURL = "https://auth.example.com/token"
 	seed.save(serverURL, saved)
 
-	h := newMCPOAuthHandler(serverURL, nil)
+	h := newMCPOAuthHandler(serverURL, nil, "", 0)
 	ts, err := h.TokenSource(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, ts, "a saved token should produce a non-nil token source")
@@ -213,7 +213,7 @@ func TestMCPOAuthHandler_RestoredTokenRefreshes(t *testing.T) {
 	saved.Endpoints.TokenURL = tokenSrv.URL
 	seed.save(serverURL, saved)
 
-	h := newMCPOAuthHandler(serverURL, nil)
+	h := newMCPOAuthHandler(serverURL, nil, "", 0)
 	ts, err := h.TokenSource(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, ts)
@@ -243,7 +243,7 @@ func TestMCPOAuthHandler_ForbiddenPreservesToken(t *testing.T) {
 	saved.Endpoints.TokenURL = "https://auth.example.com/token"
 	seed.save(serverURL, saved)
 
-	h := newMCPOAuthHandler(serverURL, nil)
+	h := newMCPOAuthHandler(serverURL, nil, "", 0)
 
 	resp := &http.Response{
 		StatusCode: http.StatusForbidden,

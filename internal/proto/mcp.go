@@ -63,6 +63,7 @@ const (
 	MCPEventToolsListChanged     MCPEventType = "tools_list_changed"
 	MCPEventPromptsListChanged   MCPEventType = "prompts_list_changed"
 	MCPEventResourcesListChanged MCPEventType = "resources_list_changed"
+	MCPEventChannelMessage       MCPEventType = "channel_message"
 )
 
 // MarshalText implements the [encoding.TextMarshaler] interface.
@@ -85,6 +86,10 @@ type MCPEvent struct {
 	ToolCount     int          `json:"tool_count,omitempty"`
 	PromptCount   int          `json:"prompt_count,omitempty"`
 	ResourceCount int          `json:"resource_count,omitempty"`
+	// ChannelMessage carries the rendered <channel> element for
+	// MCPEventChannelMessage events so channel pushes reach client/server
+	// sessions over the wire.
+	ChannelMessage string `json:"channel_message,omitempty"`
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.
@@ -133,6 +138,8 @@ type MCPClientInfo struct {
 	PromptCount   int       `json:"prompt_count,omitempty"`
 	ResourceCount int       `json:"resource_count,omitempty"`
 	ConnectedAt   time.Time `json:"connected_at"`
+	// Channel reports whether this server is an active channel.
+	Channel bool `json:"channel,omitempty"`
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

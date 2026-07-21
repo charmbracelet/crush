@@ -40,7 +40,7 @@ func TestMCPSession_CancelOnClose(t *testing.T) {
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	require.NoError(t, err)
 
-	sess := &ClientSession{clientSession, cancel}
+	sess := &ClientSession{ClientSession: clientSession, cancel: cancel}
 
 	// Verify the context is not cancelled before close.
 	require.NoError(t, ctx.Err())
@@ -510,7 +510,7 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 			states.Del(tc.mcpName)
 			t.Cleanup(func() { states.Del(tc.mcpName) })
 
-			sess, err := createSession(t.Context(), tc.mcpName, tc.cfg, r)
+			sess, err := createSession(t.Context(), tc.mcpName, tc.cfg, r, false)
 			require.Error(t, err)
 			require.Nil(t, sess)
 			require.Contains(t, err.Error(), tc.wantErrContains)

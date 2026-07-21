@@ -283,6 +283,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			RunID:            runID,
+			Channel:          ChannelFromContext(ctx),
 			Prompt:           prompt,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
@@ -622,6 +623,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Cfg:                  c.cfg,
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,

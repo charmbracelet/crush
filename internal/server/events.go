@@ -41,11 +41,12 @@ func wrapEvent(ev any) *pubsub.Payload {
 		return envelope(pubsub.PayloadTypeMCPEvent, pubsub.Event[proto.MCPEvent]{
 			Type: e.Type,
 			Payload: proto.MCPEvent{
-				Type:      mcpEventTypeToProto(e.Payload.Type),
-				Name:      e.Payload.Name,
-				State:     proto.MCPState(e.Payload.State),
-				Error:     e.Payload.Error,
-				ToolCount: e.Payload.Counts.Tools,
+				Type:           mcpEventTypeToProto(e.Payload.Type),
+				Name:           e.Payload.Name,
+				State:          proto.MCPState(e.Payload.State),
+				Error:          e.Payload.Error,
+				ToolCount:      e.Payload.Counts.Tools,
+				ChannelMessage: e.Payload.ChannelMessage,
 			},
 		})
 	case pubsub.Event[permission.PermissionRequest]:
@@ -178,6 +179,8 @@ func mcpEventTypeToProto(t mcp.EventType) proto.MCPEventType {
 		return proto.MCPEventPromptsListChanged
 	case mcp.EventResourcesListChanged:
 		return proto.MCPEventResourcesListChanged
+	case mcp.EventChannelMessage:
+		return proto.MCPEventChannelMessage
 	default:
 		return proto.MCPEventStateChanged
 	}
@@ -194,6 +197,7 @@ func sessionToProto(s session.Session) proto.Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            todosToProto(s.Todos),
+		Channel:          s.Channel,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}

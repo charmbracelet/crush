@@ -376,6 +376,48 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	require.Equal(t, "Updated", pc.Models[0].Name)
 }
 
+func TestConfig_configureProvidersWithProviderOptions(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models: []catwalk.Model{{
+				ID: "test-model",
+			}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+	}
+	cfg.Providers.Set("openai", ProviderConfig{
+		ProviderOptions: map[string]any{
+			"include_usage": false,
+			"reasoning": map[string]any{
+				"max_tokens": float64(2000),
+			},
+		},
+	})
+	cfg.setDefaults("/tmp", "")
+
+	env := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("openai")
+	require.True(t, ok)
+	require.Equal(t, map[string]any{
+		"include_usage": false,
+		"reasoning": map[string]any{
+			"max_tokens": float64(2000),
+		},
+	}, pc.ProviderOptions)
+}
+
 func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

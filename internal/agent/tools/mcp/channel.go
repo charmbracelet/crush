@@ -175,14 +175,17 @@ func channelEnabled(enabled []string, name string) bool {
 }
 
 // publishChannelMessage validates and renders a payload, then publishes it as
-// an EventChannelMessage. Malformed payloads are dropped (fail closed).
-func publishChannelMessage(name string, raw json.RawMessage) {
+// an EventChannelMessage via must-deliver semantics. Channel notifications
+// represent ordered inbound messages (chat, alerts) rather than disposable UI
+// updates, so a stalled subscriber must not permanently lose them the way
+// lossy Publish would. Malformed payloads are dropped (fail closed).
+func publishChannelMessage(ctx context.Context, name string, raw json.RawMessage) {
 	p, ok := parseChannelParams(raw)
 	if !ok {
 		slog.Warn("Dropping malformed channel notification", "server", name)
 		return
 	}
-	broker.Publish(pubsub.CreatedEvent, Event{
+	broker.PublishMustDeliver(ctx, pubsub.CreatedEvent, Event{
 		Type:           EventChannelMessage,
 		Name:           name,
 		ChannelMessage: renderChannel(name, p),
@@ -231,7 +234,7 @@ func (c *channelConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 			return msg, nil
 		}
 		if c.gate.Load() {
-			publishChannelMessage(c.name, req.Params)
+			publishChannelMessage(ctx, c.name, req.Params)
 		}
 	}
 }

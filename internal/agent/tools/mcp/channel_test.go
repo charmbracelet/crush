@@ -434,3 +434,60 @@ func TestChannelConnMalformedPayloadDropped(t *testing.T) {
 		t.Fatal("malformed payload should not publish an event")
 	}
 }
+
+// TestPublishChannelMessageUsesMustDeliver proves channel messages are
+// published through the must-deliver path, not the lossy Publish path.
+// A small-buffer broker is saturated; a lossy publish would drop the channel
+// event, but must-deliver blocks (bounded) and delivers it.
+func TestPublishChannelMessageUsesMustDeliver(t *testing.T) {
+	// Temporarily swap the package-level broker for a tiny one so we can
+	// saturate it.
+	small := pubsub.NewBrokerWithOptions[Event](1)
+	prev := broker
+	broker = small
+	t.Cleanup(func() { broker = prev })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sub := broker.Subscribe(ctx)
+
+	// Fill the buffer with one event so the next publish must block-deliver.
+	broker.Publish(pubsub.CreatedEvent, Event{Type: EventStateChanged})
+
+	// Start draining in the background so the must-deliver send can complete.
+	type received struct {
+		ev  Event
+		ok  bool
+	}
+	done := make(chan received)
+	go func() {
+		select {
+		case ev := <-sub:
+			done <- received{ev: ev.Payload, ok: true}
+		case <-ctx.Done():
+			done <- received{}
+		}
+	}()
+
+	raw, _ := json.Marshal(channelParams{Content: "channel msg"})
+	publishChannelMessage(ctx, "webhook", raw)
+
+	// The first drain picks up the fill event; the channel event is now in
+	// the buffer. Read it.
+	r1 := <-done
+	if r1.ok && r1.ev.Type == EventChannelMessage {
+		return // got it on the first read
+	}
+
+	select {
+	case ev := <-sub:
+		if ev.Payload.Type != EventChannelMessage {
+			t.Errorf("expected EventChannelMessage, got %v", ev.Payload.Type)
+		}
+		if !strings.Contains(ev.Payload.ChannelMessage, "channel msg") {
+			t.Errorf("unexpected channel message: %q", ev.Payload.ChannelMessage)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel event was dropped — publish is not using must-deliver")
+	}
+}

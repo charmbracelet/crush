@@ -456,8 +456,8 @@ func TestPublishChannelMessageUsesMustDeliver(t *testing.T) {
 
 	// Start draining in the background so the must-deliver send can complete.
 	type received struct {
-		ev  Event
-		ok  bool
+		ev Event
+		ok bool
 	}
 	done := make(chan received)
 	go func() {

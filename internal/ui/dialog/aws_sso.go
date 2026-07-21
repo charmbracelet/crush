@@ -232,13 +232,14 @@ func (m *AWSSSO) innerDialogContent() string {
 		}
 
 		// No URL yet; still waiting for command output.
-		return statusTextStyle.
+		spinnerLine := statusTextStyle.
 			Width(innerWidth).
-			Align(lipgloss.Center).
+			Padding(0, 1).
 			Render(
 				successStyle.Render(m.spinner.View()) +
 					statusTextStyle.Render("Starting "+m.command+"..."),
 			)
+		return lipgloss.JoinVertical(lipgloss.Left, "", spinnerLine, "")
 
 	case awsSSOStateSuccess:
 		return successStyle.
@@ -250,7 +251,6 @@ func (m *AWSSSO) innerDialogContent() string {
 		header := errorStyle.
 			Width(innerWidth).
 			Padding(0, 1).
-			Align(lipgloss.Center).
 			Render("Authentication failed.")
 
 		if m.errMsg == "" {

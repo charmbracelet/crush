@@ -413,6 +413,16 @@ func (c *controllerV1) handlePostWorkspaceMCPReadResource(w http.ResponseWriter,
 	jsonEncode(w, contents)
 }
 
+// handleGetWorkspaceMCPPrompts returns the available MCP prompts for a workspace.
+//
+//	@Summary		Get MCP prompts
+//	@Tags			mcp
+//	@Produce		json
+//	@Param			id	path		string			true	"Workspace ID"
+//	@Success		200	{array}		proto.MCPPrompt
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/prompts [get]
 func (c *controllerV1) handleGetWorkspaceMCPPrompts(w http.ResponseWriter, r *http.Request) {
 	prompts, err := c.backend.ListMCPPrompts(r.PathValue("id"))
 	if err != nil {

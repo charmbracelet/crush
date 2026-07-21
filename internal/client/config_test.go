@@ -126,3 +126,31 @@ func TestListMCPPrompts(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
+
+func TestListMCPPromptsNonOKStatus(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	_, err := c.ListMCPPrompts(t.Context(), "ws1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 500")
+}
+
+func TestListMCPPromptsMalformedBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	_, err := c.ListMCPPrompts(t.Context(), "ws1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to decode MCP prompts")
+}

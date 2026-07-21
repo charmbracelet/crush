@@ -276,3 +276,22 @@ func TestClientWorkspaceListMCPPrompts(t *testing.T) {
 		},
 	}, got)
 }
+
+func TestClientWorkspaceListMCPPromptsServerError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	_, err = workspace.ListMCPPrompts(t.Context())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 500")
+}

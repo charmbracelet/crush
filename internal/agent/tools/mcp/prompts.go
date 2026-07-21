@@ -35,12 +35,22 @@ func GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName,
 
 	var messages []string
 	for _, msg := range result.Messages {
-		if msg.Role != "user" {
+		// MCP prompts may seed either side of the conversation (the spec
+		// allows both user and assistant roles); include text from every
+		// message rather than only user-role ones, otherwise server-authored
+		// context in assistant turns is silently dropped.
+		if msg == nil {
 			continue
 		}
 		if textContent, ok := msg.Content.(*mcp.TextContent); ok {
 			messages = append(messages, textContent.Text)
+			continue
 		}
+		// Non-text content (image, audio, embedded resources) has no string
+		// form for the agent tool. Log it at debug rather than silently
+		// swallowing the whole message so the skip is diagnosable, mirroring
+		// read_mcp_resource's handling of mixed content.
+		slog.Debug("MCP prompt message has non-text content, skipping", "prompt", promptName, "role", msg.Role)
 	}
 	return messages, nil
 }
@@ -73,6 +83,14 @@ func getPrompts(ctx context.Context, c *ClientSession) ([]*Prompt, error) {
 	}
 	result, err := c.ListPrompts(ctx, &mcp.ListPromptsParams{})
 	if err != nil {
+		// Handle "Method not found" errors from MCP servers that advertise
+		// the prompts capability but reject prompts/list at call time
+		// (partial implementations, proxies, older SDK versions). Degrade to
+		// "no prompts" rather than bubbling the error, mirroring getResources.
+		if isMethodNotFoundError(err) {
+			slog.Warn("MCP server does not support prompts/list", "error", err)
+			return nil, nil
+		}
 		return nil, err
 	}
 	return result.Prompts, nil

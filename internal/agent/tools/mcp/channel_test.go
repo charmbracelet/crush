@@ -73,6 +73,27 @@ func TestParseChannelParams(t *testing.T) {
 			content: "hi",
 			meta:    map[string]string{"keep": "1"},
 		},
+		{
+			name:    "meta key starting with digit dropped",
+			raw:     `{"content":"hi","meta":{"1chat":"dropped","chat":"kept"}}`,
+			wantOK:  true,
+			content: "hi",
+			meta:    map[string]string{"chat": "kept"},
+		},
+		{
+			name:    "xmlns meta key dropped",
+			raw:     `{"content":"hi","meta":{"xmlns":"http://evil","keep":"1"}}`,
+			wantOK:  true,
+			content: "hi",
+			meta:    map[string]string{"keep": "1"},
+		},
+		{
+			name:    "xml meta key dropped",
+			raw:     `{"content":"hi","meta":{"xml":"http://evil","keep":"1"}}`,
+			wantOK:  true,
+			content: "hi",
+			meta:    map[string]string{"keep": "1"},
+		},
 	}
 
 	for _, tt := range tests {

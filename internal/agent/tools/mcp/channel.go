@@ -47,16 +47,20 @@ const (
 	maxChannelMetaValueBytes = 1024
 )
 
-// metaKeyPattern restricts meta attribute keys to identifiers: letters,
-// digits, and underscores only. Keys with hyphens or any other character are
-// silently dropped so they cannot be used to forge structural attributes on
-// the <channel> tag.
-var metaKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+// metaKeyPattern restricts meta attribute keys to valid XML names: a letter
+// or underscore followed by letters, digits, and underscores. Keys starting
+// with a digit (e.g. "1chat") are not valid XML names and are dropped so
+// they cannot produce structurally altered output. Hyphens and other
+// characters are also rejected, preventing forged structural attributes.
+var metaKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // reservedMetaKeys are attribute names the client controls; a server must not
-// be able to override them via meta.
+// be able to override them via meta. This includes the XML namespace family
+// (xmlns, xml) which encoding/xml would emit as namespace declarations.
 var reservedMetaKeys = map[string]struct{}{
 	"source": {},
+	"xmlns":  {},
+	"xml":    {},
 }
 
 // channelParams is the wire shape of notifications/claude/channel params.

@@ -386,15 +386,22 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 		m := config.MCPConfig{
 			Type:    config.MCPSSE,
 			URL:     "https://mcp.example.com/events",
-			Headers: map[string]string{"Authorization": "$MISSING_TOKEN"},
+			Headers: map[string]string{"X-API-Key": "$MISSING_TOKEN"},
 		}
 		tr, err := createTransport(t.Context(), m, r, nil)
 		require.NoError(t, err)
 		sse, ok := tr.(*mcp.SSEClientTransport)
 		require.True(t, ok)
-		rt, ok := sse.HTTPClient.Transport.(*headerRoundTripper)
+		// SSE auto-detects OAuth when no Authorization header is present and
+		// wraps the transport in oauthRoundTripper. Unwrap to get the
+		// underlying headerRoundTripper.
+		base := sse.HTTPClient.Transport
+		if oa, ok := base.(*oauthRoundTripper); ok {
+			base = oa.base
+		}
+		rt, ok := base.(*headerRoundTripper)
 		require.True(t, ok)
-		require.NotContains(t, rt.headers, "Authorization")
+		require.NotContains(t, rt.headers, "X-API-Key")
 	})
 }
 

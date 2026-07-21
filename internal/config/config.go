@@ -204,6 +204,39 @@ type MCPConfig struct {
 	// omitted from the outgoing request rather than sent as
 	// "Header:".
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
+
+	// OAuth configures dynamic OAuth 2.1 token acquisition for
+	// HTTP/SSE MCP servers. When set, Crush performs the MCP
+	// authorization-code flow (metadata discovery, PKCE, optional
+	// client registration) and injects bearer tokens automatically.
+	// When not set, Crush auto-detects OAuth capability when no
+	// static Authorization header is present.
+	OAuth *MCPOAuthConfig `json:"oauth,omitempty" jsonschema:"description=OAuth 2.1 configuration for dynamic token acquisition"`
+}
+
+// MCPOAuthConfig configures the OAuth 2.1 authorization-code flow
+// for an MCP server, as defined by the MCP specification. At least
+// one client registration method must be configured:
+// ClientIDMetadataURL or pre-registered client credentials. If
+// neither is set, dynamic client registration (RFC 7591) is used.
+type MCPOAuthConfig struct {
+	// ClientIDMetadataURL is the client ID metadata document URL
+	// (SEP-991 style). When set and the authorization server
+	// supports it, this is used as the client identifier.
+	ClientIDMetadataURL string `json:"client_id_metadata_url,omitempty" jsonschema:"description=Client ID metadata document URL (SEP-991)"`
+
+	// ClientID is the pre-registered client identifier. Must be
+	// used together with ClientSecret (for confidential clients)
+	// or alone (for public clients).
+	ClientID string `json:"client_id,omitempty" jsonschema:"description=Pre-registered OAuth client ID"`
+
+	// ClientSecret is the pre-registered client secret for
+	// confidential clients. Leave empty for public clients.
+	ClientSecret string `json:"client_secret,omitempty" jsonschema:"description=Pre-registered OAuth client secret"`
+
+	// CallbackPort is the TCP port for the local redirect server.
+	// Defaults to a random ephemeral port if 0 or unset.
+	CallbackPort int `json:"callback_port,omitempty" jsonschema:"description=Local TCP port for OAuth callback server,default=0"`
 }
 
 type LSPConfig struct {

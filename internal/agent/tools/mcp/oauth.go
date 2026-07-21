@@ -1,9 +1,12 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -480,4 +483,369 @@ func openBrowserAndCapture(ctx context.Context, authURL string, port int, server
 // config file. The token store lives alongside it.
 func globalConfigPath() string {
 	return filepath.Dir(config.GlobalConfig())
+}
+
+// buildExplicitOAuthHandler creates an auth.OAuthHandler using the
+// explicit OAuth configuration from the user's crush.json. It supports
+// three registration methods: client ID metadata URL, pre-registered
+// client credentials, or dynamic client registration.
+func buildExplicitOAuthHandler(serverName string, serverURL string, cfg *config.MCPOAuthConfig) (auth.OAuthHandler, error) {
+	cs := &callbackServer{
+		resultCh: make(chan callbackResult, 1),
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback", cs.handleCallback)
+
+	port := cfg.CallbackPort
+	if port == 0 {
+		var err error
+		port, err = allocateCallbackPort(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("oauth callback server: %w", err)
+		}
+	}
+
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return nil, fmt.Errorf("listen on port %d: %w", port, err)
+	}
+
+	listenPort := ln.Addr().(*net.TCPAddr).Port
+	cs.srv = &http.Server{Handler: mux}
+
+	go func() {
+		if err := cs.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			slog.Warn("MCP OAuth callback server error", "error", err)
+		}
+	}()
+
+	redirectURL := fmt.Sprintf("http://localhost:%d/callback", listenPort)
+
+	handlerCfg := &auth.AuthorizationCodeHandlerConfig{
+		RedirectURL: redirectURL,
+		AuthorizationCodeFetcher: func(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
+			authURL := stripResourceParam(args.URL)
+			slog.Info("Opening browser for MCP OAuth authorization", "url", authURL)
+			if err := browser.OpenURL(authURL); err != nil {
+				slog.Warn("Failed to open browser for OAuth, please open the URL manually", "url", authURL, "error", err)
+			}
+			select {
+			case result := <-cs.resultCh:
+				cs.shutdown()
+				if result.err != nil {
+					return nil, result.err
+				}
+				return &auth.AuthorizationResult{Code: result.code, State: result.state}, nil
+			case <-ctx.Done():
+				cs.shutdown()
+				return nil, ctx.Err()
+			}
+		},
+		Client: &http.Client{
+			Transport: newMetadataFixupRoundTripper(http.DefaultTransport),
+		},
+	}
+
+	switch {
+	case cfg.ClientIDMetadataURL != "":
+		handlerCfg.ClientIDMetadataDocumentConfig = &auth.ClientIDMetadataDocumentConfig{
+			URL: cfg.ClientIDMetadataURL,
+		}
+	case cfg.ClientID != "":
+		creds := &oauthex.ClientCredentials{ClientID: cfg.ClientID}
+		if cfg.ClientSecret != "" {
+			creds.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: cfg.ClientSecret}
+		}
+		handlerCfg.PreregisteredClient = creds
+	default:
+		handlerCfg.DynamicClientRegistrationConfig = &auth.DynamicClientRegistrationConfig{
+			Metadata: &oauthex.ClientRegistrationMetadata{
+				ClientName:              "Crush MCP Client",
+				RedirectURIs:            []string{redirectURL},
+				TokenEndpointAuthMethod: "none",
+				GrantTypes:              []string{"authorization_code", "refresh_token"},
+				ResponseTypes:           []string{"code"},
+			},
+		}
+	}
+
+	inner, err := auth.NewAuthorizationCodeHandler(handlerCfg)
+	if err != nil {
+		return nil, fmt.Errorf("oauth handler: %w", err)
+	}
+
+	store := sharedTokenStore()
+
+	return &explicitOAuthHandler{
+		inner:     inner,
+		store:     store,
+		serverURL: serverURL,
+	}, nil
+}
+
+// explicitOAuthHandler wraps the SDK's AuthorizationCodeHandler for
+// usage with explicit OAuth configuration from crush.json.
+type explicitOAuthHandler struct {
+	inner     *auth.AuthorizationCodeHandler
+	store     *tokenStore
+	serverURL string
+
+	mu     sync.Mutex
+	source oauth2.TokenSource
+}
+
+func (h *explicitOAuthHandler) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.source != nil {
+		return h.source, nil
+	}
+
+	if saved, ok := h.store.get(h.serverURL); ok && saved.Token != nil && saved.Token.Valid() {
+		h.source = oauth2.StaticTokenSource(saved.Token)
+		return h.source, nil
+	}
+
+	return nil, nil
+}
+
+func (h *explicitOAuthHandler) Authorize(ctx context.Context, req *http.Request, resp *http.Response) error {
+	if err := h.inner.Authorize(ctx, req, resp); err != nil {
+		return err
+	}
+
+	ts, err := h.inner.TokenSource(ctx)
+	if err != nil || ts == nil {
+		return nil
+	}
+
+	token, err := ts.Token()
+	if err != nil || token == nil {
+		return nil
+	}
+
+	h.mu.Lock()
+	h.source = &persistingTokenSource{base: ts, save: func(t *oauth2.Token) error {
+		h.store.save(h.serverURL, mcptoken{Token: t})
+		return nil
+	}}
+	h.mu.Unlock()
+
+	h.store.save(h.serverURL, mcptoken{Token: token})
+	return nil
+}
+
+// persistingTokenSource wraps an oauth2.TokenSource and saves the
+// token whenever a new one is obtained (i.e. after a refresh).
+type persistingTokenSource struct {
+	base      oauth2.TokenSource
+	save      func(*oauth2.Token) error
+	lastToken *oauth2.Token
+	saveMu    sync.Mutex
+}
+
+func (s *persistingTokenSource) Token() (*oauth2.Token, error) {
+	token, err := s.base.Token()
+	if err != nil {
+		return nil, err
+	}
+
+	s.saveMu.Lock()
+	if s.lastToken == nil || token.AccessToken != s.lastToken.AccessToken {
+		s.lastToken = token
+		if saveErr := s.save(token); saveErr != nil {
+			slog.Warn("Failed to save refreshed MCP OAuth token", "error", saveErr)
+		}
+	}
+	s.saveMu.Unlock()
+
+	return token, nil
+}
+
+// callbackServer runs a local HTTP server that receives the OAuth
+// redirect after the user authorizes in their browser.
+type callbackServer struct {
+	resultCh chan callbackResult
+	srv      *http.Server
+}
+
+// callbackResult is sent from the HTTP handler to the waiting fetcher.
+type callbackResult struct {
+	code  string
+	state string
+	err   error
+}
+
+func (cs *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	code := query.Get("code")
+	state := query.Get("state")
+
+	if errParam := query.Get("error"); errParam != "" {
+		errorDesc := query.Get("error_description")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "<h1>Authorization failed</h1><p>%s: %s</p>", html.EscapeString(errParam), html.EscapeString(errorDesc))
+		cs.resultCh <- callbackResult{err: fmt.Errorf("%s: %s", errParam, errorDesc)}
+		return
+	}
+
+	if code == "" {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(w, "<h1>Missing authorization code</h1>")
+		cs.resultCh <- callbackResult{err: fmt.Errorf("missing authorization code")}
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "<h1>Authorization successful</h1><p>You can close this tab and return to Crush.</p>")
+
+	cs.resultCh <- callbackResult{code: code, state: state}
+}
+
+func (cs *callbackServer) shutdown() {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = cs.srv.Shutdown(shutdownCtx)
+}
+
+// oauthRoundTripper injects a bearer token from an OAuth token source
+// into outgoing requests. Used for SSE transports that don't support
+// the OAuthHandler interface natively.
+type oauthRoundTripper struct {
+	base    http.RoundTripper
+	handler auth.OAuthHandler
+}
+
+func newOAuthRoundTripperWithBase(handler auth.OAuthHandler, base http.RoundTripper) *oauthRoundTripper {
+	return &oauthRoundTripper{base: base, handler: handler}
+}
+
+func (rt *oauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx := req.Context()
+
+	resp, err := rt.doRequestWithToken(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if authErr := rt.handler.Authorize(ctx, req, resp); authErr != nil {
+			return resp, nil
+		}
+		resp.Body.Close()
+
+		return rt.doRequestWithToken(ctx, req.Clone(ctx))
+	}
+
+	return resp, nil
+}
+
+func (rt *oauthRoundTripper) doRequestWithToken(ctx context.Context, req *http.Request) (*http.Response, error) {
+	ts, err := rt.handler.TokenSource(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("oauth token source: %w", err)
+	}
+
+	if ts != nil {
+		token, err := ts.Token()
+		if err == nil && token != nil {
+			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+		}
+	}
+
+	return rt.base.RoundTrip(req)
+}
+
+// metadataFixupRoundTripper intercepts responses from OAuth metadata
+// endpoints (/.well-known/oauth-authorization-server and
+// /.well-known/oauth-protected-resource) and normalizes the "issuer"
+// field to strip trailing slashes. Some OAuth servers return an issuer
+// with a trailing slash that doesn't match the URL the metadata was
+// fetched from, causing the SDK's strict RFC 8414 validation to fail.
+type metadataFixupRoundTripper struct {
+	base http.RoundTripper
+}
+
+func newMetadataFixupRoundTripper(base http.RoundTripper) *metadataFixupRoundTripper {
+	return &metadataFixupRoundTripper{base: base}
+}
+
+func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := rt.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isMetadataEndpoint(req.URL.Path) {
+		return resp, nil
+	}
+
+	if resp.StatusCode != http.StatusOK || resp.Body == nil {
+		return resp, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read metadata response: %w", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
+	changed := false
+	if issuer, ok := raw["issuer"].(string); ok && strings.HasSuffix(issuer, "/") {
+		raw["issuer"] = strings.TrimSuffix(issuer, "/")
+		changed = true
+	}
+
+	if !changed {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
+	fixed, err := json.Marshal(raw)
+	if err != nil {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
+	slog.Debug("Normalized OAuth metadata issuer trailing slash", "url", req.URL.String())
+	resp.Body = io.NopCloser(bytes.NewReader(fixed))
+	resp.ContentLength = int64(len(fixed))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(fixed)))
+	return resp, nil
+}
+
+func isMetadataEndpoint(path string) bool {
+	return strings.Contains(path, "/.well-known/oauth-authorization-server") ||
+		strings.Contains(path, "/.well-known/oauth-protected-resource")
+}
+
+// stripResourceParam removes the "resource" query parameter from an
+// authorization URL. Some authorization servers reject the "resource"
+// parameter (RFC 8707) in the authorization request with server_error.
+// However, they DO support it in the token exchange, which is needed
+// to scope the access token to the correct resource. So we strip it
+// from the authorization URL only.
+func stripResourceParam(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	if q.Has("resource") {
+		q.Del("resource")
+		u.RawQuery = q.Encode()
+		slog.Debug("Stripped resource parameter from authorization URL")
+	}
+	return u.String()
 }

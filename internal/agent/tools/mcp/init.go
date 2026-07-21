@@ -618,16 +618,27 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 			Endpoint:   url,
 			HTTPClient: client,
 		}
-		// Enable OAuth for HTTP servers that don't have a static
-		// Authorization header. This allows browser-based OAuth flows
-		// (e.g. Cairn, other MCP servers using OIDC) to work
-		// automatically: on 401, the SDK opens a browser for the user
-		// to authenticate, captures the callback, and retries.
-		//
-		// The interactive flow can take far longer than the connection
-		// timeout, so hand the handler a way to suspend that timeout once
-		// authorization actually begins.
-		if !hasAuthHeader(headers) {
+		if m.OAuth != nil {
+			// Normalize the URL by stripping any trailing slash for
+			// Protected Resource Metadata (PRM) discovery. The PRM
+			// "resource" field typically does not have a trailing
+			// slash, and the SDK performs a strict string comparison.
+			normalizedURL := strings.TrimSuffix(url, "/")
+			handler, err := buildExplicitOAuthHandler(normalizedURL, normalizedURL, m.OAuth)
+			if err != nil {
+				return nil, fmt.Errorf("mcp oauth: %w", err)
+			}
+			transport.OAuthHandler = handler
+		} else if !hasAuthHeader(headers) {
+			// Enable OAuth for HTTP servers that don't have a static
+			// Authorization header. This allows browser-based OAuth flows
+			// (e.g. Cairn, other MCP servers using OIDC) to work
+			// automatically: on 401, the SDK opens a browser for the user
+			// to authenticate, captures the callback, and retries.
+			//
+			// The interactive flow can take far longer than the connection
+			// timeout, so hand the handler a way to suspend that timeout once
+			// authorization actually begins.
 			var stopConnTimeout func()
 			if connTimeout != nil {
 				stopConnTimeout = func() { connTimeout.Stop() }
@@ -647,10 +658,27 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if err != nil {
 			return nil, err
 		}
+		var transport http.RoundTripper = &headerRoundTripper{headers: headers}
+		if m.OAuth != nil {
+			// Normalize URL for PRM discovery (see HTTP case above).
+			normalizedURL := strings.TrimSuffix(url, "/")
+			handler, err := buildExplicitOAuthHandler(normalizedURL, normalizedURL, m.OAuth)
+			if err != nil {
+				return nil, fmt.Errorf("mcp oauth: %w", err)
+			}
+			transport = newOAuthRoundTripperWithBase(handler, transport)
+		} else if !hasAuthHeader(headers) {
+			// Auto-detect OAuth: SSE doesn't support OAuthHandler natively,
+			// so wrap the transport with our own round-tripper.
+			var stopConnTimeout func()
+			if connTimeout != nil {
+				stopConnTimeout = func() { connTimeout.Stop() }
+			}
+			handler := newMCPOAuthHandler(url, stopConnTimeout)
+			transport = newOAuthRoundTripperWithBase(handler, transport)
+		}
 		client := &http.Client{
-			Transport: &headerRoundTripper{
-				headers: headers,
-			},
+			Transport: transport,
 		}
 		return &mcp.SSEClientTransport{
 			Endpoint:   url,

@@ -294,6 +294,10 @@
           },
           "type": "object",
           "description": "HTTP headers for HTTP/SSE MCP servers"
+        },
+        "oauth": {
+          "$ref": "#/$defs/MCPOAuthConfig",
+          "description": "OAuth 2.1 configuration for dynamic token acquisition"
         }
       },
       "additionalProperties": false,
@@ -301,6 +305,29 @@
       "required": [
         "type"
       ]
+    },
+    "MCPOAuthConfig": {
+      "properties": {
+        "client_id_metadata_url": {
+          "type": "string",
+          "description": "Client ID metadata document URL (SEP-991)"
+        },
+        "client_id": {
+          "type": "string",
+          "description": "Pre-registered OAuth client ID"
+        },
+        "client_secret": {
+          "type": "string",
+          "description": "Pre-registered OAuth client secret"
+        },
+        "callback_port": {
+          "type": "integer",
+          "description": "Local TCP port for OAuth callback server",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     },
     "MCPs": {
       "additionalProperties": {

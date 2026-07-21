@@ -85,6 +85,42 @@ func TestOverlay_GracePeriodBurstExtendsQuietWindow(t *testing.T) {
 	require.Len(t, d.received, 1, "key after max delay should reach dialog even during burst")
 }
 
+// TestOverlay_NaturalTypingPauseArmsMidSentence reproduces the bug in
+// #3383: a permission dialog opens while the user is composing a message,
+// and an ordinary pause between words or thoughts — well short of the
+// 1.5s graceMaxDelay ceiling exercised by
+// TestOverlay_GracePeriodBurstExtendsQuietWindow — is enough to arm the
+// dialog. The very next keystroke the user types (still mid-sentence,
+// still aimed at the editor) then reaches the dialog instead of being
+// absorbed, letting an ordinary letter or arrow key act on the prompt.
+func TestOverlay_NaturalTypingPauseArmsMidSentence(t *testing.T) {
+	t.Parallel()
+
+	d := &stubDialog{id: "test"}
+	o := NewOverlay()
+	o.OpenDialogWithGrace(d)
+
+	// Type the first few characters of a sentence at a normal cadence
+	// (well under graceQuietPeriod between keys).
+	for range 5 {
+		o.graceLastInputAt = time.Now().Add(-60 * time.Millisecond)
+		o.Update(keyMsg('a'))
+	}
+	require.Empty(t, d.received, "keys typed at normal cadence should be absorbed")
+
+	// A brief, completely ordinary pause to think of the next word — a
+	// few hundred ms, far short of graceMaxDelay (1.5s) and nothing like
+	// a "stuck" or auto-repeating key.
+	o.graceLastInputAt = time.Now().Add(-400 * time.Millisecond)
+
+	// The user resumes typing the same sentence. This keystroke should
+	// still be absorbed — the user never stopped composing their
+	// message — but the short quiet period has already armed the dialog.
+	o.Update(keyMsg('b'))
+	require.Empty(t, d.received,
+		"a keystroke resuming mid-sentence after a normal thinking pause should not reach the dialog")
+}
+
 // TestOverlay_OpenDialogWithoutGraceHasNoGuard verifies that dialogs
 // opened via OpenDialog (without grace) receive keys immediately.
 func TestOverlay_OpenDialogWithoutGraceHasNoGuard(t *testing.T) {

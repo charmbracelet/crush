@@ -157,6 +157,15 @@ type Model struct {
 	FlatRate   bool
 }
 
+// activeCancel wraps a context.CancelFunc with a unique pointer identity.
+// The pointer is used for compare-and-delete in the dispatch completion path:
+// when a finishing run's deferred cleanup fires, it must only remove its own
+// entry — not a newer run's entry that was installed in the window between
+// the explicit Del and the function return.
+type activeCancel struct {
+	cancel context.CancelFunc
+}
+
 type sessionAgent struct {
 	largeModel         *csync.Value[Model]
 	smallModel         *csync.Value[Model]
@@ -173,7 +182,7 @@ type sessionAgent struct {
 	runComplete          pubsub.Publisher[notify.RunComplete]
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
-	activeRequests *csync.Map[string, context.CancelFunc]
+	activeRequests *csync.Map[string, *activeCancel]
 
 	// dispatchMu holds a per-session mutex that serializes the
 	// accepted -> (cancel-on-entry | queued | active) transition in
@@ -245,7 +254,7 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:       csync.NewMap[string, context.CancelFunc](),
+		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
@@ -633,14 +642,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// is not lost.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 	genCtx, cancel = context.WithCancel(runCtx)
-	a.activeRequests.Set(call.SessionID, cancel)
+	ac := &activeCancel{cancel: cancel}
+	a.activeRequests.Set(call.SessionID, ac)
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}
 	sessMu.Unlock()
 
 	defer cancel()
-	defer a.activeRequests.Del(call.SessionID)
+	// Conditional cleanup: only remove our entry if it hasn't been replaced
+	// by a newer run. Without this guard, the deferred Del fires after a
+	// concurrent run registers in the completion window, silently wiping
+	// the new run's cancel and breaking cancellation.
+	defer a.activeRequests.CompareAndDelete(call.SessionID, ac)
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
@@ -1331,8 +1345,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
 
 	genCtx, cancel := context.WithCancel(ctx)
-	a.activeRequests.Set(sessionID, cancel)
-	defer a.activeRequests.Del(sessionID)
+	ac := &activeCancel{cancel: cancel}
+	a.activeRequests.Set(sessionID, ac)
+	defer a.activeRequests.CompareAndDelete(sessionID, ac)
 	defer cancel()
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
@@ -1942,15 +1957,15 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	// remain in activeRequests so IsBusy() returns true until the goroutine
 	// fully completes (including error handling that may access the DB).
 	// The defer in processRequest will clean up the entry.
-	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
+	if ac, ok := a.activeRequests.Get(sessionID); ok && ac != nil {
 		slog.Debug("Request cancellation initiated", "session_id", sessionID)
-		cancel()
+		ac.cancel()
 	}
 
 	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
+	if ac, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && ac != nil {
 		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
-		cancel()
+		ac.cancel()
 	}
 
 	// Record a pending cancel only when a dispatched-but-not-yet-active
@@ -2011,8 +2026,8 @@ func (a *sessionAgent) CancelAll() {
 
 func (a *sessionAgent) IsBusy() bool {
 	var busy bool
-	for cancelFunc := range a.activeRequests.Seq() {
-		if cancelFunc != nil {
+	for ac := range a.activeRequests.Seq() {
+		if ac != nil {
 			busy = true
 			break
 		}

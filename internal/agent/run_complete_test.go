@@ -30,7 +30,7 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	const sessionID = "queued-session"
 	// Mark the session as busy so Run takes the queue branch
 	// without needing a real model.
-	a.activeRequests.Set(sessionID, func() {})
+	a.activeRequests.Set(sessionID, &activeCancel{cancel: func() {}})
 
 	var called bool
 	hook := func(notify.RunComplete) { called = true }

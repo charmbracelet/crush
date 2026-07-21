@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"io"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -344,8 +343,8 @@ func TestChannelConnGateOpenInjects(t *testing.T) {
 	defer cancel()
 	sub := broker.Subscribe(ctx)
 
-	gate := &atomic.Bool{}
-	gate.Store(true)
+	gate := newChannelGate()
+	gate.resolve(true)
 	passthrough := &jsonrpc.Request{Method: "notifications/other"}
 	conn := &channelConn{
 		Connection: &fakeConn{msgs: []jsonrpc.Message{
@@ -386,7 +385,8 @@ func TestChannelConnGateClosedDropsEvents(t *testing.T) {
 	defer cancel()
 	sub := broker.Subscribe(ctx)
 
-	gate := &atomic.Bool{} // closed: not opted in / not a channel
+	gate := newChannelGate()
+	gate.resolve(false) // closed: not opted in / not a channel
 	passthrough := &jsonrpc.Request{Method: "notifications/other"}
 	conn := &channelConn{
 		Connection: &fakeConn{msgs: []jsonrpc.Message{
@@ -415,8 +415,8 @@ func TestChannelConnMalformedPayloadDropped(t *testing.T) {
 	defer cancel()
 	sub := broker.Subscribe(ctx)
 
-	gate := &atomic.Bool{}
-	gate.Store(true)
+	gate := newChannelGate()
+	gate.resolve(true)
 	bad := &jsonrpc.Request{Method: channelNotificationMethod, Params: json.RawMessage(`{"content":`)}
 	conn := &channelConn{
 		Connection: &fakeConn{msgs: []jsonrpc.Message{
@@ -489,5 +489,95 @@ func TestPublishChannelMessageUsesMustDeliver(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("channel event was dropped — publish is not using must-deliver")
+	}
+}
+
+// TestChannelConnBuffersDuringUndecidedGate proves that a channel notification
+// received while the gate is undecided (during capability negotiation) is not
+// lost. Before the fix, the SDK read loop started inside Connect, but the gate
+// was opened only after Connect returned — a fast server's events were
+// silently swallowed.
+//
+// The test sends a notification while the gate is undecided (simulating the
+// Connect window), then resolves the gate to open and verifies the buffered
+// message is published.
+func TestChannelConnBuffersDuringUndecidedGate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := broker.Subscribe(ctx)
+
+	gate := newChannelGate() // starts undecided
+	conn := &channelConn{
+		Connection: &fakeConn{msgs: []jsonrpc.Message{
+			channelNotification(t, "buffered event"),
+			&jsonrpc.Request{Method: "notifications/other"},
+		}},
+		name: "webhook",
+		gate: gate,
+	}
+
+	// Read while gate is undecided. The channel notification is intercepted
+	// (removed from the SDK stream) and buffered — not published yet.
+	msg, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read err = %v", err)
+	}
+	if got, ok := msg.(*jsonrpc.Request); !ok || got.Method != "notifications/other" {
+		t.Fatalf("expected passthrough, got %#v", msg)
+	}
+
+	// No event published yet — the notification is buffered.
+	if _, ok := waitForEvent(t, sub); ok {
+		t.Fatal("no event should be published while gate is undecided")
+	}
+
+	// Resolve the gate to open — buffered messages are returned for delivery.
+	buffered := gate.resolve(true)
+	if len(buffered) != 1 {
+		t.Fatalf("expected 1 buffered message, got %d", len(buffered))
+	}
+	publishChannelMessage(ctx, "webhook", buffered[0])
+
+	got, ok := waitForEvent(t, sub)
+	if !ok {
+		t.Fatal("buffered event should be published after gate opens")
+	}
+	if got.Type != EventChannelMessage {
+		t.Errorf("event type = %v, want EventChannelMessage", got.Type)
+	}
+	if !strings.Contains(got.ChannelMessage, "buffered event") {
+		t.Errorf("unexpected rendered message: %q", got.ChannelMessage)
+	}
+}
+
+// TestChannelConnDiscardsBufferOnClosedGate verifies that buffered messages
+// are discarded (not published) when the gate resolves to closed — a
+// non-opted-in or non-capable server must never deliver its events.
+func TestChannelConnDiscardsBufferOnClosedGate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := broker.Subscribe(ctx)
+
+	gate := newChannelGate()
+	conn := &channelConn{
+		Connection: &fakeConn{msgs: []jsonrpc.Message{
+			channelNotification(t, "should be discarded"),
+			&jsonrpc.Request{Method: "notifications/other"},
+		}},
+		name: "webhook",
+		gate: gate,
+	}
+
+	if _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("Read err = %v", err)
+	}
+
+	// Resolve closed — buffered messages must be discarded.
+	buffered := gate.resolve(false)
+	if buffered != nil {
+		t.Fatalf("expected no buffered messages on close, got %d", len(buffered))
+	}
+	if _, ok := waitForEvent(t, sub); ok {
+		t.Fatal("no event should be published when gate resolves closed")
 	}
 }

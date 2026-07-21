@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,7 +70,7 @@ func TestChannelEndToEnd(t *testing.T) {
 	}
 	defer serverSession.Close()
 
-	gate := &atomic.Bool{}
+	gate := newChannelGate()
 	client := mcp.NewClient(&mcp.Implementation{Name: "crush", Version: "test"}, nil)
 	session, err := client.Connect(ctx, &channelTransport{inner: clientT, name: "chan", gate: gate}, nil)
 	if err != nil {
@@ -84,7 +83,12 @@ func TestChannelEndToEnd(t *testing.T) {
 		t.Fatal("expected claude/channel capability to be detected from the handshake")
 	}
 	if channelEnabled([]string{"chan"}, "chan") && hasChannelCapability(session.InitializeResult()) {
-		gate.Store(true)
+		buffered := gate.resolve(true)
+		for _, raw := range buffered {
+			publishChannelMessage(ctx, "chan", raw)
+		}
+	} else {
+		gate.resolve(false)
 	}
 
 	// Two-way reply: the reply tool is exposed as an ordinary MCP tool.

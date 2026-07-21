@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -192,6 +193,87 @@ func publishChannelMessage(ctx context.Context, name string, raw json.RawMessage
 	})
 }
 
+// channelGateState is the lifecycle state of a channel gate.
+//
+// The gate starts in stateGateUndecided: notifications that arrive during
+// MCP capability negotiation (between Connect and the gate resolution) are
+// buffered, because a capable, opted-in server may push events immediately
+// after initialize. Once negotiation completes, the gate transitions to
+// stateGateOpen (publish + drain buffer) or stateGateClosed (discard
+// buffer + drop).
+type channelGateState int32
+
+const (
+	stateGateUndecided channelGateState = iota
+	stateGateOpen
+	stateGateClosed
+)
+
+// channelGate controls whether channel notifications are published, dropped,
+// or buffered. During capability negotiation the gate is undecided and
+// messages are buffered; once resolved, the buffer is drained or discarded.
+type channelGate struct {
+	state   atomic.Int32 // channelGateState
+	mu      sync.Mutex
+	pending []json.RawMessage
+}
+
+func newChannelGate() *channelGate {
+	g := &channelGate{}
+	g.state.Store(int32(stateGateUndecided))
+	return g
+}
+
+// isOpen reports whether the gate has been resolved to open.
+func (g *channelGate) isOpen() bool {
+	return channelGateState(g.state.Load()) == stateGateOpen
+}
+
+// resolve transitions the gate from undecided to its final state. If open,
+// buffered messages are returned for the caller to publish; if closed, the
+// buffer is discarded. Calling resolve on an already-resolved gate is a
+// no-op.
+func (g *channelGate) resolve(open bool) []json.RawMessage {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if channelGateState(g.state.Load()) != stateGateUndecided {
+		return nil
+	}
+	buffered := g.pending
+	g.pending = nil
+	if open {
+		g.state.Store(int32(stateGateOpen))
+		return buffered // drain the buffer for the caller to publish
+	}
+	g.state.Store(int32(stateGateClosed))
+	return nil // discard the buffer
+}
+
+// accept handles a channel notification according to the gate state.
+// Returns the params if the message should be published now, or nil if it
+// was buffered or dropped.
+func (g *channelGate) accept(raw json.RawMessage) json.RawMessage {
+	switch channelGateState(g.state.Load()) {
+	case stateGateOpen:
+		return raw
+	case stateGateClosed:
+		return nil
+	default: // undecided
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		// Re-check under the lock in case resolve ran between the load and
+		// the lock acquisition.
+		switch channelGateState(g.state.Load()) {
+		case stateGateOpen:
+			return raw
+		case stateGateClosed:
+			return nil
+		}
+		g.pending = append(g.pending, raw)
+		return nil
+	}
+}
+
 // channelTransport wraps an mcp.Transport so the client can intercept
 // notifications/claude/channel messages. The go-sdk rejects unknown JSON-RPC
 // methods before any client-side handler or middleware runs, so the only place
@@ -199,7 +281,7 @@ func publishChannelMessage(ctx context.Context, name string, raw json.RawMessage
 type channelTransport struct {
 	inner mcp.Transport
 	name  string
-	gate  *atomic.Bool
+	gate  *channelGate
 }
 
 // Connect implements mcp.Transport.
@@ -216,13 +298,14 @@ func (t *channelTransport) Connect(ctx context.Context) (mcp.Connection, error) 
 type channelConn struct {
 	mcp.Connection
 	name string
-	gate *atomic.Bool
+	gate *channelGate
 }
 
 // Read intercepts notifications/claude/channel. Such messages are always
 // removed from the stream handed to the SDK (which would otherwise reject the
-// unknown method); they are only acted on when this server is a confirmed,
-// opted-in channel (gate set), and dropped otherwise (fail closed).
+// unknown method). During capability negotiation (gate undecided) they are
+// buffered; once the gate is resolved they are published (open) or dropped
+// (closed, fail closed).
 func (c *channelConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 	for {
 		msg, err := c.Connection.Read(ctx)
@@ -233,8 +316,8 @@ func (c *channelConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 		if !ok || req.IsCall() || req.Method != channelNotificationMethod {
 			return msg, nil
 		}
-		if c.gate.Load() {
-			publishChannelMessage(ctx, c.name, req.Params)
+		if raw := c.gate.accept(req.Params); raw != nil {
+			publishChannelMessage(ctx, c.name, raw)
 		}
 	}
 }

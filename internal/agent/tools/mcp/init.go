@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -501,11 +500,13 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 		return nil, err
 	}
 
-	// Wrap the transport so channel notifications can be intercepted. The gate
-	// starts closed and is only opened below once the server is confirmed to
-	// declare the channel capability and to have been opted in via --channels,
-	// so a non-channel or non-enabled server can never inject content.
-	channelGate := &atomic.Bool{}
+	// Wrap the transport so channel notifications can be intercepted. The
+	// gate starts undecided: notifications that arrive during capability
+	// negotiation are buffered. After Connect resolves, the gate is opened
+	// (and the buffer drained) only when the server declares the channel
+	// capability AND was opted in via --channels; otherwise it is closed
+	// (buffer discarded). This prevents early notifications from being lost.
+	channelGate := newChannelGate()
 	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
 	client := mcp.NewClient(
@@ -553,12 +554,19 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	cancelTimer.Stop()
 	slog.Debug("MCP client initialized", "name", name)
 
-	// Open the channel gate only for a server that both declares the
-	// claude/channel capability and was opted in via --channels. Listed in MCP
-	// config is not enough; this enforces the "listed is not enabled" model.
+	// Resolve the channel gate: open only for a server that both declares
+	// the claude/channel capability and was opted in via --channels.
+	// Otherwise close it (fail closed). Resolving drains buffered messages
+	// that arrived during negotiation so a fast server does not lose early
+	// events.
 	if channelOptIn && hasChannelCapability(session.InitializeResult()) {
-		channelGate.Store(true)
-		slog.Info("MCP channel enabled", "name", name)
+		buffered := channelGate.resolve(true)
+		for _, raw := range buffered {
+			publishChannelMessage(mcpCtx, name, raw)
+		}
+		slog.Info("MCP channel enabled", "name", name, "buffered", len(buffered))
+	} else {
+		channelGate.resolve(false)
 	}
 
 	return &ClientSession{session, cancel}, nil

@@ -166,9 +166,31 @@ type ClientInfo struct {
 	ConnectedAt time.Time
 }
 
-// SubscribeEvents returns a channel for MCP events
+// SubscribeEvents returns a channel for MCP events.
+//
+// Channel message events (EventChannelMessage) are excluded: they carry no
+// workspace or session identity, and the MCP broker is process-global. Without
+// this filter, every workspace that calls SubscribeEvents would receive every
+// other workspace's channel events — a cross-workspace injection path. Channel
+// delivery requires workspace-scoped routing, which is deferred to a later PR;
+// until then, channel events must not flow through the shared event fan-out.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
-	return broker.Subscribe(ctx)
+	raw := broker.Subscribe(ctx)
+	filtered := make(chan pubsub.Event[Event], 64)
+	go func() {
+		defer close(filtered)
+		for ev := range raw {
+			if ev.Payload.Type == EventChannelMessage {
+				continue
+			}
+			select {
+			case filtered <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return filtered
 }
 
 // GetStates returns the current state of all MCP clients

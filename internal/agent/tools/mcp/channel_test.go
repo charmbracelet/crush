@@ -581,3 +581,49 @@ func TestChannelConnDiscardsBufferOnClosedGate(t *testing.T) {
 		t.Fatal("no event should be published when gate resolves closed")
 	}
 }
+
+// TestSubscribeEventsFiltersChannelMessages verifies that SubscribeEvents
+// strips EventChannelMessage events from the stream. The MCP broker is
+// process-global and channel events carry no workspace/session identity, so
+// forwarding them to every workspace's app event stream would be a
+// cross-workspace injection path. Channel delivery requires workspace-scoped
+// routing (deferred to a later PR); until then, SubscribeEvents must not
+// forward channel events.
+func TestSubscribeEventsFiltersChannelMessages(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	filtered := SubscribeEvents(ctx)
+
+	// Publish a state change (should pass through) and a channel message
+	// (should be filtered out).
+	broker.Publish(pubsub.UpdatedEvent, Event{
+		Type: EventStateChanged,
+		Name: "srv",
+	})
+	broker.Publish(pubsub.CreatedEvent, Event{
+		Type:           EventChannelMessage,
+		Name:           "webhook",
+		ChannelMessage: `<channel source="webhook">leak?</channel>`,
+	})
+
+	// We should receive the state change but NOT the channel message.
+	gotState := false
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case ev := <-filtered:
+			if ev.Payload.Type == EventChannelMessage {
+				t.Fatal("EventChannelMessage leaked through SubscribeEvents filter")
+			}
+			if ev.Payload.Type == EventStateChanged {
+				gotState = true
+			}
+		case <-deadline:
+			if !gotState {
+				t.Fatal("state change event was not received")
+			}
+			return
+		}
+	}
+}

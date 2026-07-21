@@ -425,6 +425,14 @@ description: Should not be discovered.
 # Dup Skill
 `), 0o644))
 
+	// Create a hidden skill file inside a visible directory — should be skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, ".SKILL.md"), []byte(`---
+name: hidden-file-skill
+description: Should not be discovered.
+---
+# Hidden File Skill
+`), 0o644))
+
 	skills, states := DiscoverWithStates([]string{tmpDir})
 
 	require.Len(t, skills, 1)
@@ -433,6 +441,8 @@ description: Should not be discovered.
 	for _, s := range states {
 		require.NotContains(t, s.Path, ".hidden-agents",
 			"hidden directory skill should not appear in states")
+		require.NotContains(t, s.Path, ".SKILL.md",
+			"hidden skill file should not appear in states")
 	}
 }
 

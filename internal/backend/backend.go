@@ -740,10 +740,12 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	existingCfg := existing.Cfg.Config()
 	existingYOLO := existing.Cfg.Overrides().SkipPermissionRequests
+	existingChannels := existing.Cfg.Overrides().EnabledChannels
 	if existingYOLO == args.YOLO &&
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
-		stringSlicesEqual(existing.Env, args.Env) {
+		stringSlicesEqual(existing.Env, args.Env) &&
+		stringSlicesEqual(existingChannels, args.Channels) {
 		return
 	}
 	slog.Debug(
@@ -758,6 +760,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"requested_data_dir", args.DataDir,
 		"existing_env", existing.Env,
 		"requested_env", args.Env,
+		"existing_channels", existingChannels,
+		"requested_channels", args.Channels,
 	)
 }
 

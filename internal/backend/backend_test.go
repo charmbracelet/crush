@@ -711,6 +711,10 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			name:   "env",
 			mutate: func(p *proto.Workspace) { p.Env = []string{"NEW=val"} },
 		},
+		{
+			name:   "channels",
+			mutate: func(p *proto.Workspace) { p.Channels = []string{"server:webhook"} },
+		},
 	}
 
 	for _, tc := range tests {

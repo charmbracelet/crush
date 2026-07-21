@@ -484,7 +484,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
 
-	transport, err := createTransport(mcpCtx, m, resolver)
+	transport, err := createTransport(mcpCtx, m, resolver, cancelTimer)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		slog.Error("Error creating MCP client", "error", err, "name", name)
@@ -568,7 +568,7 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 	return err
 }
 
-func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
+func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver, connTimeout *time.Timer) (mcp.Transport, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		command, err := resolver.ResolveValue(m.Command)
@@ -614,10 +614,27 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 				headers: headers,
 			},
 		}
-		return &mcp.StreamableClientTransport{
+		transport := &mcp.StreamableClientTransport{
 			Endpoint:   url,
 			HTTPClient: client,
-		}, nil
+		}
+		// Enable OAuth for HTTP servers that don't have a static
+		// Authorization header. This allows browser-based OAuth flows
+		// (e.g. Cairn, other MCP servers using OIDC) to work
+		// automatically: on 401, the SDK opens a browser for the user
+		// to authenticate, captures the callback, and retries.
+		//
+		// The interactive flow can take far longer than the connection
+		// timeout, so hand the handler a way to suspend that timeout once
+		// authorization actually begins.
+		if !hasAuthHeader(headers) {
+			var stopConnTimeout func()
+			if connTimeout != nil {
+				stopConnTimeout = func() { connTimeout.Stop() }
+			}
+			transport.OAuthHandler = newMCPOAuthHandler(url, stopConnTimeout)
+		}
+		return transport, nil
 	case config.MCPSSE:
 		url, err := m.ResolvedURL(resolver)
 		if err != nil {
@@ -646,6 +663,18 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 
 type headerRoundTripper struct {
 	headers map[string]string
+}
+
+// hasAuthHeader reports whether the headers map contains an
+// Authorization key (case-insensitive). When true, the server is
+// using static bearer-token auth and the OAuth handler is skipped.
+func hasAuthHeader(headers map[string]string) bool {
+	for k := range headers {
+		if strings.EqualFold(k, "Authorization") {
+			return true
+		}
+	}
+	return false
 }
 
 func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {

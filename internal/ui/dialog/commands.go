@@ -160,7 +160,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		c.dockerMCPAvailable = &msg.available
 		c.dockerMCPCheckInFlight = false
 		if c.selected == SystemCommands {
-			// Preserve the current selection across the rebuild to avoid reset when the list is rebuilt.
+			// Preserve the current selection across the rebuild to avoid reset
 			var prevID string
 			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
 				prevID = item.id

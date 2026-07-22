@@ -1086,6 +1086,35 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// timeout bounds the cleanup writes.
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cleanupCancel()
+		// A failed request (e.g. a context-length-exceeded rejection) never
+		// reaches OnStepFinish, so the session's usage counters are left at
+		// whatever the last *successful* step reported, understating the
+		// actual size of the request that just failed. Record what was
+		// actually attempted so the context-window indicator reflects
+		// reality instead of a stale, smaller number (#3384). Prefer the
+		// provider's own reported token count (parsed from the error body
+		// by providers/{anthropic,openai,google} in charm.land/fantasy) over
+		// a local estimate, since it's the exact figure the provider
+		// rejected the request for. Always pass estimated=true regardless
+		// of the source: the request was never billed, so this must never
+		// add phantom cost or fire a usage-telemetry event.
+		if !isCancelErr && len(stepMessages) > 0 {
+			sessionLock.Lock()
+			if failedSession, getErr := a.sessions.Get(cleanupCtx, call.SessionID); getErr == nil {
+				var promptTokens int64
+				var providerErr *fantasy.ProviderError
+				if errors.As(err, &providerErr) && providerErr.IsContextTooLarge() && providerErr.ContextUsedTokens > 0 {
+					promptTokens = int64(providerErr.ContextUsedTokens)
+				} else {
+					promptTokens = estimateMessageTokens(stepMessages)
+				}
+				a.updateSessionUsage(largeModel, &failedSession, fantasy.Usage{InputTokens: promptTokens}, nil, true)
+				if _, saveErr := a.sessions.Save(cleanupCtx, failedSession); saveErr == nil {
+					currentSession = failedSession
+				}
+			}
+			sessionLock.Unlock()
+		}
 		// Ensure we finish thinking on error to close the reasoning state.
 		currentAssistant.FinishThinking()
 		toolCalls := currentAssistant.ToolCalls()

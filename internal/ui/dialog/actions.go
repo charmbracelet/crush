@@ -96,6 +96,10 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionReloadModelDiscovery triggers model re-discovery for custom
+	// providers from the model selection dialog, picking up models that
+	// appeared after startup (e.g. an `ollama pull`) without a restart.
+	ActionReloadModelDiscovery struct{}
 )
 
 // Messages for API key input dialog.

@@ -207,6 +207,17 @@ func (b *Backend) ListSkills(workspaceID string) ([]proto.SkillInfo, error) {
 	return result, nil
 }
 
+// ReloadModelDiscovery re-runs model discovery for a workspace's custom
+// providers and merges any newly found models into the in-memory config. It
+// returns the number of models added across all providers.
+func (b *Backend) ReloadModelDiscovery(ctx context.Context, workspaceID string) (int, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return ws.Cfg.ReloadModelDiscovery(ctx)
+}
+
 // EnableDockerMCP validates Docker MCP availability, stages the
 // configuration, starts the MCP client, and persists the config.
 func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error {

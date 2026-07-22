@@ -86,6 +86,21 @@ type ConfigStore struct {
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
 
+	// userConfiguredModels records, per custom provider, the models the
+	// user explicitly listed in config, captured by configureProviders
+	// before load-time discovery merges endpoint models into the live
+	// provider config. ReloadModelDiscovery seeds re-discovery from this
+	// set so endpoint-removed models get pruned while user-specified
+	// models survive. Guarded by writeMu.
+	userConfiguredModels map[string][]catwalk.Model
+
+	// failedDiscoveryProviders records custom providers dropped during
+	// configureProviders because model discovery failed (or found
+	// nothing) and they had no user-specified models to fall back on.
+	// ReloadModelDiscovery retries them and resurrects any that succeed.
+	// Guarded by writeMu.
+	failedDiscoveryProviders map[string]ProviderConfig
+
 	// configMu guards the config pointer field against concurrent
 	// readers (Config) and the writeMu-serialised swap (setConfig). It
 	// protects the pointer word only; the pointed-to Config is treated

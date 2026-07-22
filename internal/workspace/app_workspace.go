@@ -392,6 +392,10 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
 }
 
+func (w *AppWorkspace) ReloadModelDiscovery(ctx context.Context) (int, error) {
+	return w.store.ReloadModelDiscovery(ctx)
+}
+
 // -- MCP operations --
 
 func (w *AppWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {

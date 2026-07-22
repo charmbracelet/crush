@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
@@ -194,20 +193,21 @@ func PushPopCrushEnv() func() {
 }
 
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
-	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
 
 	// When disable_default_providers is enabled, skip all default/embedded
 	// providers entirely. Users must fully specify any providers they want.
 	// We skip to the custom provider validation loop which handles all
-	// user-configured providers uniformly.
+	// user-configured providers uniformly. knownProviderNameSet mirrors
+	// this policy so the interactive discovery reload agrees with load on
+	// which providers count as custom.
+	knownProviderNames := knownProviderNameSet(knownProviders, c.Options.DisableDefaultProviders)
 	if c.Options.DisableDefaultProviders {
 		knownProviders = nil
 	}
 
 	for _, p := range knownProviders {
-		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
 		// if the user configured a known provider we need to allow it to override a couple of parameters
 		if configExists {
@@ -365,50 +365,27 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	// Discover models concurrently for custom providers that need it.
 	// A provider needs discovery when discover_models is explicitly true,
 	// or when the models list is empty (auto-trigger, unless opted out).
-	type discoveryResult struct {
-		models []catwalk.Model
-		err    error
-	}
-
-	discoveryResults := make(map[string]discoveryResult)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	discoverCtx, discoverCancel := context.WithTimeout(ctx, 3*time.Second)
-	for id, pc := range c.Providers.Seq2() {
+	// The same helper backs the interactive reload; see discovery.go.
+	//
+	// Record each custom provider's user-configured models first, before
+	// discovery merges endpoint models into the live config: the reload
+	// seeds re-discovery from this set so endpoint-removed models get
+	// pruned while user-specified ones survive.
+	store.userConfiguredModels = make(map[string][]catwalk.Model)
+	store.failedDiscoveryProviders = make(map[string]ProviderConfig)
+	candidates := maps.Collect(c.Providers.Seq2())
+	for id, pc := range candidates {
 		if knownProviderNames[id] {
 			continue
 		}
-		if pc.Disable || pc.BaseURL == "" {
-			continue
-		}
-		wantsDiscovery := pc.AutoDiscoverModels != nil && *pc.AutoDiscoverModels
-		autoTrigger := len(pc.Models) == 0 && (pc.AutoDiscoverModels == nil || *pc.AutoDiscoverModels)
-		if !wantsDiscovery && !autoTrigger {
-			continue
-		}
-		providerID := cmp.Or(pc.ID, id)
-		cfg := discover.Config{
-			ID:             providerID,
-			BaseURL:        pc.BaseURL,
-			APIKey:         pc.APIKey,
-			ExtraHeaders:   pc.ExtraHeaders,
-			ExistingModels: pc.Models,
-		}
-		providerType := cmp.Or(pc.Type, catwalk.TypeOpenAICompat)
-		wg.Go(func() {
-			models, err := discover.DiscoverModels(discoverCtx, cfg, resolver)
-			if err == nil && len(models) > 0 {
-				if enricher := discover.GetEnricher(string(providerType)); enricher != nil {
-					models, _ = enricher.EnrichModels(discoverCtx, cfg, resolver, models)
-				}
-			}
-			mu.Lock()
-			discoveryResults[id] = discoveryResult{models: models, err: err}
-			mu.Unlock()
-		})
+		store.userConfiguredModels[id] = slices.Clone(pc.Models)
 	}
-	wg.Wait()
+
+	// Per-provider errors are logged by the helper; providers that fail
+	// with no user models to fall back on are recorded below so the
+	// interactive reload can retry them.
+	discoverCtx, discoverCancel := context.WithTimeout(ctx, loadModelDiscoveryTimeout)
+	discoveryResults, _ := discoverProviderModels(discoverCtx, candidates, knownProviderNames, resolver)
 	discoverCancel()
 
 	// Validate the custom providers.
@@ -444,22 +421,23 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			continue
 		}
 
-		// Apply discovery results if available.
-		if result, ok := discoveryResults[id]; ok {
-			if result.err != nil {
-				slog.Warn("Model discovery failed", "provider", id, "error", result.err)
-				if len(providerConfig.Models) == 0 {
-					slog.Warn("Skipping provider with no models after failed discovery", "provider", id)
-					c.Providers.Del(id)
-					continue
-				}
-			} else if len(result.models) > 0 {
-				providerConfig.Models = result.models
-				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
-			}
+		// Apply discovery results if available. discoverProviderModels
+		// returns entries only for providers whose discovery succeeded;
+		// failures (and empty results) fall through to the no-models
+		// check below, which drops the provider when it has no
+		// user-specified models to fall back on.
+		if models, ok := discoveryResults[id]; ok && len(models) > 0 {
+			providerConfig.Models = models
+			slog.Info("Discovered models for provider", "provider", id, "count", len(models))
 		}
 
 		if len(providerConfig.Models) == 0 {
+			// Remember discovery-eligible providers dropped here so an
+			// interactive reload can resurrect them once their endpoint
+			// comes up (e.g. Crush started before Ollama was running).
+			if providerWantsDiscovery(providerConfig, store.userConfiguredModels[id]) {
+				store.failedDiscoveryProviders[id] = providerConfig
+			}
 			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
 			c.Providers.Del(id)
 			continue

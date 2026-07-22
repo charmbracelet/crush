@@ -144,6 +144,7 @@ crush --continue
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
 		}
+		printSessionResume(model)
 		return nil
 	},
 }
@@ -161,6 +162,25 @@ var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
        ▀▀██████████▀▀
            ▀▀▀▀▀▀
 `)
+
+// printSessionResume prints the session title and resume hint to stdout after
+// the TUI exits, so the user can resume the session with `crush -s <id>`.
+// Nothing is printed when there is no active session.
+func printSessionResume(model *ui.UI) {
+	sess := model.CurrentSession()
+	if sess == nil || sess.ID == "" {
+		return
+	}
+	out := colorprofile.NewWriter(os.Stdout, os.Environ())
+
+	labelStyle := lipgloss.NewStyle().Foreground(charmtone.Damson).Bold(true)
+	valueStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
+	hash := session.HashID(sess.ID)[:7]
+	title := strings.ReplaceAll(sess.Title, "\n", " ")
+
+	fmt.Fprintln(out, labelStyle.Render("Session  ")+valueStyle.Render(title))
+	fmt.Fprintln(out, labelStyle.Render("Continue ")+valueStyle.Render("crush -s "+hash))
+}
 
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}

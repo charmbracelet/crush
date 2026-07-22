@@ -24,6 +24,7 @@ import (
 	fang "charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
@@ -59,6 +60,8 @@ func init() {
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	rootCmd.Flags().StringSlice("allow-commands", nil, "Allow specific commands from the default bash blocklist (repeatable); does not affect package-manager argument blocks like 'apt install'. Env: CRUSH_ALLOW_COMMANDS (comma-separated)")
+	rootCmd.Flags().Bool("allow-all-commands", false, "Remove all bash blocklist restrictions, including package-manager blocks (dangerous). Env: CRUSH_ALLOW_ALL_COMMANDS")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
 
 	rootCmd.AddCommand(
@@ -245,11 +248,49 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	return setupLocalWorkspace(cmd)
 }
 
+// resolveAllowCommands returns the bash allow-command settings from flags,
+// falling back to the CRUSH_ALLOW_COMMANDS / CRUSH_ALLOW_ALL_COMMANDS
+// environment variables for 12-factor compliance. CLI flags take precedence
+// over env vars. Comma-separated env entries are trimmed and empties dropped.
+func resolveAllowCommands(cmd *cobra.Command) (allowCommands []string, allowAllCommands bool) {
+	allowCommands, _ = cmd.Flags().GetStringSlice("allow-commands")
+	allowAllCommands, _ = cmd.Flags().GetBool("allow-all-commands")
+
+	if !allowAllCommands {
+		if v := os.Getenv("CRUSH_ALLOW_ALL_COMMANDS"); v != "" {
+			allowAllCommands = strings.EqualFold(v, "true") || v == "1"
+		}
+	}
+	if len(allowCommands) == 0 {
+		if v := os.Getenv("CRUSH_ALLOW_COMMANDS"); v != "" {
+			for _, c := range strings.Split(v, ",") {
+				if c = strings.TrimSpace(c); c != "" {
+					allowCommands = append(allowCommands, c)
+				}
+			}
+		}
+	}
+	return allowCommands, allowAllCommands
+}
+
+// warnUnknownAllowedCommands logs a startup warning for allow-command entries
+// (from config and flags/env) that aren't in the default banned list, since
+// they subtract nothing and usually indicate a typo.
+func warnUnknownAllowedCommands(configAllowed, flagAllowed []string) {
+	combined := make([]string, 0, len(configAllowed)+len(flagAllowed))
+	combined = append(combined, configAllowed...)
+	combined = append(combined, flagAllowed...)
+	if unknown := tools.UnknownAllowedCommands(combined); len(unknown) > 0 {
+		slog.Warn("Ignoring allow-commands entries not in the default banned list", "commands", unknown)
+	}
+}
+
 // setupLocalWorkspace creates an in-process app.App and wraps it in an
 // AppWorkspace.
 func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	allowCommands, allowAllCommands := resolveAllowCommands(cmd)
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -265,6 +306,11 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 
 	cfg := store.Config()
 	store.Overrides().SkipPermissionRequests = yolo
+	// Held as runtime overrides (not written into Options) so they survive the
+	// config reloads triggered by MCP reconnects and model changes.
+	store.Overrides().AllowAllCommands = allowAllCommands
+	store.Overrides().AllowedCommands = allowCommands
+	warnUnknownAllowedCommands(cfg.Options.AllowedCommands, allowCommands)
 
 	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("failed to create data directory: %q %w", cfg.Options.DataDirectory, err)
@@ -372,6 +418,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	allowCommands, allowAllCommands := resolveAllowCommands(cmd)
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -386,12 +433,14 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	}
 
 	wsReq := proto.Workspace{
-		Path:    cwd,
-		DataDir: dataDir,
-		Debug:   debug,
-		YOLO:    yolo,
-		Version: version.Version,
-		Env:     os.Environ(),
+		Path:             cwd,
+		DataDir:          dataDir,
+		Debug:            debug,
+		YOLO:             yolo,
+		AllowAllCommands: allowAllCommands,
+		AllowedCommands:  allowCommands,
+		Version:          version.Version,
+		Env:              os.Environ(),
 	}
 
 	ws, err := c.CreateWorkspace(ctx, wsReq)

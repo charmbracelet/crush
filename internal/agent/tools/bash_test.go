@@ -117,7 +117,7 @@ func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context)
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model")
+	return NewBashTool(permissions, workingDir, attribution, "test-model", nil, false)
 }
 
 func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.AgentTool, *recordingPermissionService) {
@@ -126,7 +126,7 @@ func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.Agent
 		allow:  allow,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(perms, workingDir, attribution, "test-model"), perms
+	return NewBashTool(perms, workingDir, attribution, "test-model", nil, false), perms
 }
 
 func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
@@ -210,4 +210,55 @@ func TestTruncateOutputEmoji(t *testing.T) {
 	out := TruncateOutput(content)
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
 	require.Contains(t, out, "lines truncated")
+}
+
+func TestEffectiveBannedCommands(t *testing.T) {
+	t.Parallel()
+
+	// No allowances: the effective list matches the defaults exactly.
+	require.Equal(t, bannedCommands, effectiveBannedCommands(nil))
+
+	// Allowing a banned command removes it while preserving order and the
+	// rest of the list.
+	effective := effectiveBannedCommands([]string{"ssh", "curl"})
+	require.NotContains(t, effective, "ssh")
+	require.NotContains(t, effective, "curl")
+	require.Contains(t, effective, "systemctl")
+	require.Len(t, effective, len(bannedCommands)-2)
+
+	// Unknown allowances subtract nothing.
+	require.Equal(t, bannedCommands, effectiveBannedCommands([]string{"definitely-not-banned"}))
+}
+
+func TestUnknownAllowedCommands(t *testing.T) {
+	t.Parallel()
+
+	require.Empty(t, UnknownAllowedCommands(nil))
+	require.Empty(t, UnknownAllowedCommands([]string{"ssh", "curl"}))
+	require.Equal(t, []string{"shh"}, UnknownAllowedCommands([]string{"ssh", "shh"}))
+}
+
+func TestBlockFuncs_AllowedCommandNotBlocked(t *testing.T) {
+	t.Parallel()
+
+	// By default, ssh is blocked by the first (commands) blocker.
+	require.True(t, blockFuncs(nil, false)[0]([]string{"ssh"}))
+
+	// Allowing ssh unblocks it, but a still-banned command stays blocked.
+	allowed := blockFuncs([]string{"ssh"}, false)
+	require.False(t, allowed[0]([]string{"ssh"}))
+	require.True(t, allowed[0]([]string{"systemctl"}))
+
+	// Allowing ssh does not touch the argument-level blockers (apt install).
+	stillBlocksAptInstall := false
+	for _, fn := range allowed {
+		if fn([]string{"apt", "install", "cowsay"}) {
+			stillBlocksAptInstall = true
+			break
+		}
+	}
+	require.True(t, stillBlocksAptInstall, "allowed_commands must not unlock package-manager argument blocks")
+
+	// allowAllCommands drops every blocker, including argument-level ones.
+	require.Empty(t, blockFuncs(nil, true))
 }

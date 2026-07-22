@@ -531,6 +531,23 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "ssh",
+              "curl",
+              "scp"
+            ]
+          },
+          "type": "array",
+          "description": "List of commands to allow that are normally banned. Only affects the exact-command block list; package-manager argument blocks (e.g. 'apt install') are unaffected. Allowed commands still require permission approval."
+        },
+        "allow_all_commands": {
+          "type": "boolean",
+          "description": "Remove all command restrictions from the bash tool",
+          "default": false
         }
       },
       "additionalProperties": false,

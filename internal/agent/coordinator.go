@@ -105,6 +105,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	ReloadSkills(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
 
@@ -128,6 +129,7 @@ type coordinator struct {
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
+	skillsMgr    *skills.Manager
 
 	readyWg errgroup.Group
 }
@@ -151,17 +153,7 @@ type CoordinatorOptions struct {
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
-	// Skills are pre-discovered by the caller (see app.New /
-	// backend.CreateWorkspace) and passed in via the manager. If no
-	// manager was provided (legacy callers), fall back to an in-line
-	// discovery so the coordinator still works.
-	var allSkills, activeSkills []*skills.Skill
-	if opts.Skills != nil {
-		allSkills = opts.Skills.AllSkills()
-		activeSkills = opts.Skills.ActiveSkills()
-	} else {
-		allSkills, activeSkills = discoverSkills(opts.Config)
-	}
+	allSkills, activeSkills := opts.Skills.SkillSnapshot()
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
@@ -179,8 +171,11 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
+		skillsMgr:    opts.Skills,
 		interactive:  opts.Interactive,
 	}
+
+	logPromptSkillStats(activeSkills)
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -188,7 +183,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	prompt, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithSkills(c.activeSkills),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1222,6 +1220,59 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	return nil
 }
 
+// ReloadSkills re-runs skill discovery and propagates the updated
+// skills to the system prompt, tools, and tracker. This lets users
+// pick up skill changes (new files, edits, deletions) without
+// restarting the session.
+func (c *coordinator) ReloadSkills(ctx context.Context) error {
+	if c.skillsMgr == nil {
+		return errors.New("skill reload requires a skills manager")
+	}
+
+	allSkills, activeSkills, err := c.skillsMgr.Reload(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Build everything that can fail BEFORE swapping coordinator state,
+	// so a mid-reload error leaves the agent on the old skills.
+	large, _, err := c.buildAgentModels(ctx, false)
+	if err != nil {
+		return err
+	}
+
+	p, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithSkills(activeSkills),
+	)
+	if err != nil {
+		return err
+	}
+	systemPrompt, err := p.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+	if err != nil {
+		return err
+	}
+
+	// All builds succeeded — commit the new skill state, then rebuild
+	// tools (which capture the slices by value at construction time).
+	c.allSkills = allSkills
+	c.activeSkills = activeSkills
+	c.skillTracker = skills.NewTracker(activeSkills)
+	logPromptSkillStats(activeSkills)
+	c.currentAgent.SetSystemPrompt(systemPrompt)
+
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		return errCoderAgentNotConfigured
+	}
+	tools, err := c.buildTools(ctx, agentCfg, false)
+	if err != nil {
+		return err
+	}
+	c.currentAgent.SetTools(tools)
+	return nil
+}
+
 func (c *coordinator) QueuedPrompts(sessionID string) int {
 	return c.currentAgent.QueuedPrompts(sessionID)
 }
@@ -1493,34 +1544,6 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 	return nil
 }
 
-// discoverSkills is a thin fallback wrapper used only when no
-// skills.Manager has been threaded through to the coordinator. All
-// production call sites (backend.CreateWorkspace, setupLocalWorkspace)
-// run discovery in advance and pass the results via the manager;
-// reaching this path means a caller bypassed both. It deliberately does
-// NOT publish to the package-level broker — there are no subscribers in
-// that case, so doing so would be misleading without delivering the
-// snapshot anywhere useful.
-func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
-	opts := cfg.Config().Options
-	var paths, disabled []string
-	if opts != nil {
-		paths = opts.SkillsPaths
-		disabled = opts.DisabledSkills
-	}
-	var resolver func(string) (string, error)
-	if r := cfg.Resolver(); r != nil {
-		resolver = r.ResolveValue
-	}
-	allSkills, activeSkills, states := skills.DiscoverFromConfig(skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		Resolver:       resolver,
-	})
-	logDiscoveryStats(states, paths, allSkills, activeSkills, disabled)
-	return allSkills, activeSkills
-}
-
 // logTurnSkillUsage emits a per-turn diagnostic line showing which skills
 // (if any) were loaded during this turn and which looked relevant based on
 // a cheap keyword match against the user prompt. The goal is to surface
@@ -1563,51 +1586,20 @@ func logTurnSkillUsage(
 	)
 }
 
-// logDiscoveryStats emits a single structured log line summarising skill
-// discovery for the current session. It is intentionally low-volume: one
-// line per session start. Builtin vs user counts are derived from the
-// SkillState.Path — builtin states use the "builtin/" embed prefix.
-func logDiscoveryStats(
-	states []*skills.SkillState,
-	userPaths []string,
-	allSkills, activeSkills []*skills.Skill,
-	disabled []string,
-) {
-	var builtinOK, builtinErr, userOK, userErr int
-	for _, s := range states {
-		isBuiltin := strings.HasPrefix(s.Path, "builtin/")
-		switch {
-		case isBuiltin && s.State == skills.StateNormal:
-			builtinOK++
-		case isBuiltin && s.State == skills.StateError:
-			builtinErr++
-		case !isBuiltin && s.State == skills.StateNormal:
-			userOK++
-		case !isBuiltin && s.State == skills.StateError:
-			userErr++
-		}
-	}
-
-	activeNames := make([]string, 0, len(activeSkills))
-	for _, s := range activeSkills {
-		activeNames = append(activeNames, s.Name)
-	}
-
+// logPromptSkillStats logs the prompt-injection size of the active
+// skills XML — the only discovery metric that is coordinator-specific
+// (depends on the active set AND the XML encoder).
+func logPromptSkillStats(activeSkills []*skills.Skill) {
 	xml := skills.ToPromptXML(activeSkills)
-
-	slog.Info(
-		"Skill discovery complete",
+	activeNames := make([]string, len(activeSkills))
+	for i, s := range activeSkills {
+		activeNames[i] = s.Name
+	}
+	slog.Info("Skill prompt stats",
 		"component", "skills",
-		"builtin_ok", builtinOK,
-		"builtin_errors", builtinErr,
-		"user_ok", userOK,
-		"user_errors", userErr,
-		"user_paths", len(userPaths),
-		"deduped_total", len(allSkills),
 		"active", len(activeSkills),
-		"disabled", len(disabled),
+		"active_names", activeNames,
 		"prompt_bytes", len(xml),
 		"prompt_tok_est", skills.ApproxTokenCount(xml),
-		"active_names", activeNames,
 	)
 }

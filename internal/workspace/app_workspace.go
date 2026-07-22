@@ -223,6 +223,10 @@ func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.app.UpdateAgentModel(ctx)
 }
 
+func (w *AppWorkspace) ReloadSkills(ctx context.Context) error {
+	return w.app.ReloadSkills(ctx)
+}
+
 func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
 }
@@ -379,7 +383,11 @@ func (w *AppWorkspace) MarkProjectInitialized() error {
 }
 
 func (w *AppWorkspace) InitializePrompt() (string, error) {
-	return agent.InitializePrompt(w.store)
+	var active []*skills.Skill
+	if w.app.Skills != nil {
+		active = w.app.Skills.ActiveSkills()
+	}
+	return agent.InitializePrompt(w.store, active)
 }
 
 func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, error) {
@@ -390,6 +398,13 @@ func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, err
 func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
 	mgr := w.app.Skills
 	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
+}
+
+func (w *AppWorkspace) GetSkillStates() []*skills.SkillState {
+	if w.app.Skills == nil {
+		return nil
+	}
+	return w.app.Skills.States()
 }
 
 // -- MCP operations --

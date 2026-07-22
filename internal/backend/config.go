@@ -160,7 +160,11 @@ func (b *Backend) InitializePrompt(workspaceID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return agent.InitializePrompt(ws.Cfg)
+	var active []*skills.Skill
+	if ws.Skills != nil {
+		active = ws.Skills.ActiveSkills()
+	}
+	return agent.InitializePrompt(ws.Cfg, active)
 }
 
 // ReadSkill reads a skill's content by ID.

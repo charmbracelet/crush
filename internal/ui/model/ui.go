@@ -1885,6 +1885,21 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSkillToggle:
+		cmds = append(cmds, m.toggleSkill(msg.SkillName))
+		m.dialog.CloseDialog(dialog.SkillsID)
+
+	case dialog.ActionReloadSkills:
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := m.com.Workspace.ReloadSkills(ctx); err != nil {
+				return util.NewErrorMsg(fmt.Errorf("failed to reload skills: %w", err))
+			}
+			return util.NewInfoMsg("Skills reloaded")
+		})
+		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.SkillsID)
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
@@ -4129,6 +4144,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SkillsID:
+		if cmd := m.openSkillsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
@@ -4146,6 +4165,18 @@ func (m *UI) openQuitDialog() tea.Cmd {
 
 	quitDialog := dialog.NewQuit(m.com)
 	m.dialog.OpenDialog(quitDialog)
+	return nil
+}
+
+// openSkillsDialog opens the skills management dialog.
+func (m *UI) openSkillsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SkillsID) {
+		m.dialog.BringToFront(dialog.SkillsID)
+		return nil
+	}
+
+	skillsDialog := dialog.NewSkills(m.com, m.com.Workspace)
+	m.dialog.OpenDialog(skillsDialog)
 	return nil
 }
 
@@ -4813,6 +4844,47 @@ func (m *UI) disableDockerMCP() tea.Msg {
 	}
 
 	return util.NewInfoMsg("Docker MCP disabled successfully")
+}
+
+// toggleSkill toggles a skill's enabled/disabled state by updating
+// options.disabled_skills in the config and reloading skills so the
+// change takes effect immediately.
+func (m *UI) toggleSkill(skillName string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := m.com.Config()
+		if cfg == nil || cfg.Options == nil {
+			return util.NewErrorMsg(fmt.Errorf("no config available"))
+		}
+
+		disabled := cfg.Options.DisabledSkills
+		found := false
+		var newList []string
+		for _, name := range disabled {
+			if name == skillName {
+				found = true
+				continue
+			}
+			newList = append(newList, name)
+		}
+
+		action := "enabled"
+		if !found {
+			newList = append(newList, skillName)
+			action = "disabled"
+		}
+
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.disabled_skills", newList); err != nil {
+			return util.ReportError(err)()
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := m.com.Workspace.ReloadSkills(ctx); err != nil {
+			return util.ReportError(err)()
+		}
+
+		return util.NewInfoMsg(fmt.Sprintf("Skill %q %s", skillName, action))
+	}
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

@@ -58,7 +58,12 @@ type (
 	}
 	ActionToggleTransparentBackground struct{}
 	ActionInitializeProject           struct{}
-	ActionSummarize                   struct {
+	ActionReloadSkills                struct{}
+	// ActionSkillToggle toggles a skill's enabled/disabled state.
+	ActionSkillToggle struct {
+		SkillName string
+	}
+	ActionSummarize struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

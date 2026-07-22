@@ -35,6 +35,7 @@ var (
 	ErrInvalidClientID         = errors.New("invalid client_id")
 	ErrClientNotAttached       = errors.New("client not attached")
 	ErrWorkspaceClosing        = errors.New("workspace closing")
+	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
 )
 
 // DefaultCreateGrace is the window in which a client must open an SSE
@@ -254,6 +255,10 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// return cannot be torn out from under us
 			// between lookup and registerClient. Lock order
 			// here is b.mu -> ws.clientsMu.
+			if !stringSlicesEqual(ws.Cfg.Overrides().EnabledChannels, args.Channels) {
+				b.mu.Unlock()
+				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+			}
 			logFirstWinsMismatch(ws, args)
 			b.registerClient(ws, clientID)
 			b.mu.Unlock()
@@ -322,6 +327,11 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// Register under b.mu so teardown cannot run
 			// between lookup and registerClient. Lock order
 			// is b.mu -> ws.clientsMu.
+			if !stringSlicesEqual(existing.Cfg.Overrides().EnabledChannels, args.Channels) {
+				b.mu.Unlock()
+				ws.invokeShutdown()
+				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+			}
 			logFirstWinsMismatch(existing, args)
 			b.registerClient(existing, clientID)
 			b.mu.Unlock()

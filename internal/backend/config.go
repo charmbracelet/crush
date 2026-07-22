@@ -101,6 +101,9 @@ func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, prov
 	if err := ws.Cfg.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
 		return err
 	}
+	// SetProviderAPIKey signals auth completion in the store, which unblocks
+	// any server-side coordinator waiting on interactive re-auth for this
+	// provider — the piece that makes OAuth re-auth retry in server mode.
 	publishConfigChanged(ws)
 	return nil
 }

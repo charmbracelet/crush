@@ -504,6 +504,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	if exists {
 		setKeyOrToken()
 		cfg.Providers.Set(providerID, providerConfig)
+		s.SignalAuthComplete(providerID)
 		return nil
 	}
 
@@ -531,6 +532,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
 	}
 	cfg.Providers.Set(providerID, providerConfig)
+	s.SignalAuthComplete(providerID)
 	return nil
 }
 
@@ -659,25 +661,19 @@ func (s *ConfigStore) WaitForTokenChange(ctx context.Context, providerID string)
 }
 
 // SignalAuthComplete unblocks any goroutine waiting in WaitForTokenChange
-// for the given provider. If no waiter exists yet, it pre-creates and
-// immediately closes the channel so a subsequent WaitForTokenChange
-// returns without blocking. This eliminates the race where the signal
-// fires before the waiter registers.
+// for the given provider. It is a no-op when nothing is waiting: every
+// WaitForTokenChange caller publishes its re-auth request and registers the
+// waiter long before a human can complete authentication and trigger a
+// signal, so a signal with no waiter genuinely means nothing needs
+// unblocking. (Pre-creating a closed channel here would persist — nothing
+// deletes it on the wait side — and make a later, unrelated re-auth wait for
+// the same provider return immediately.)
 func (s *ConfigStore) SignalAuthComplete(providerID string) {
 	s.authSignalMu.Lock()
 	defer s.authSignalMu.Unlock()
 	if ch, ok := s.authSignals[providerID]; ok {
 		close(ch)
 		delete(s.authSignals, providerID)
-	} else {
-		// No waiter yet. Pre-create a closed channel so the next
-		// WaitForTokenChange returns immediately.
-		if s.authSignals == nil {
-			s.authSignals = make(map[string]chan struct{})
-		}
-		ch := make(chan struct{})
-		close(ch)
-		s.authSignals[providerID] = ch
 	}
 }
 
@@ -1043,6 +1039,11 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// Reconfigure providers
 	env := env.New()
 	resolver := NewShellVariableResolver(env)
+
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
+	cfg.applyEnv(resolver)
+
 	providers, err := Providers(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to load providers during reload: %w", err)

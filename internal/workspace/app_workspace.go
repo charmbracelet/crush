@@ -345,11 +345,9 @@ func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 }
 
 func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
-	if err := w.store.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
-		return err
-	}
-	w.store.SignalAuthComplete(providerID)
-	return nil
+	// SetProviderAPIKey signals auth completion in the store, unblocking any
+	// coordinator waiting on interactive re-auth for this provider.
+	return w.store.SetProviderAPIKey(scope, providerID, apiKey)
 }
 
 func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {

@@ -131,6 +131,10 @@ const (
 	EventToolsListChanged
 	EventPromptsListChanged
 	EventResourcesListChanged
+	// EventChannelMessage is published when a channel server pushes a
+	// notifications/claude/channel event. ChannelMessage carries the rendered,
+	// escaped <channel> element ready for injection into the session.
+	EventChannelMessage
 )
 
 // Event represents an event in the MCP system
@@ -140,6 +144,9 @@ type Event struct {
 	State  State
 	Error  error
 	Counts Counts
+	// ChannelMessage is set only for EventChannelMessage: the fully rendered
+	// and escaped <channel>...</channel> element to inject into the session.
+	ChannelMessage string
 }
 
 // Counts number of available tools, prompts, etc.
@@ -159,9 +166,31 @@ type ClientInfo struct {
 	ConnectedAt time.Time
 }
 
-// SubscribeEvents returns a channel for MCP events
+// SubscribeEvents returns a channel for MCP events.
+//
+// Channel message events (EventChannelMessage) are excluded: they carry no
+// workspace or session identity, and the MCP broker is process-global. Without
+// this filter, every workspace that calls SubscribeEvents would receive every
+// other workspace's channel events — a cross-workspace injection path. Channel
+// delivery requires workspace-scoped routing, which is deferred to a later PR;
+// until then, channel events must not flow through the shared event fan-out.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
-	return broker.Subscribe(ctx)
+	raw := broker.Subscribe(ctx)
+	filtered := make(chan pubsub.Event[Event], 64)
+	go func() {
+		defer close(filtered)
+		for ev := range raw {
+			if ev.Payload.Type == EventChannelMessage {
+				continue
+			}
+			select {
+			case filtered <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return filtered
 }
 
 // GetStates returns the current state of all MCP clients
@@ -284,7 +313,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	updateState(name, StateStarting, nil, nil, Counts{})
 
 	// createSession handles its own timeout internally.
-	session, err := createSession(ctx, name, m, resolver)
+	session, err := createSession(ctx, name, m, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return err
 	}
@@ -376,7 +405,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	// resources from the registry.
 	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), nil, state.Counts)
 
-	newSess, err := newSession(ctx, name, m, cfg.Resolver())
+	newSess, err := newSession(ctx, name, m, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +508,7 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	})
 }
 
-func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
+func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
@@ -492,6 +521,15 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 		cancelTimer.Stop()
 		return nil, err
 	}
+
+	// Wrap the transport so channel notifications can be intercepted. The
+	// gate starts undecided: notifications that arrive during capability
+	// negotiation are buffered. After Connect resolves, the gate is opened
+	// (and the buffer drained) only when the server declares the channel
+	// capability AND was opted in via --channels; otherwise it is closed
+	// (buffer discarded). This prevents early notifications from being lost.
+	channelGate := newChannelGate()
+	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
 	client := mcp.NewClient(
 		&mcp.Implementation{
@@ -537,6 +575,22 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 
 	cancelTimer.Stop()
 	slog.Debug("MCP client initialized", "name", name)
+
+	// Resolve the channel gate: open only for a server that both declares
+	// the claude/channel capability and was opted in via --channels.
+	// Otherwise close it (fail closed). Resolving drains buffered messages
+	// that arrived during negotiation so a fast server does not lose early
+	// events.
+	if channelOptIn && hasChannelCapability(session.InitializeResult()) {
+		buffered := channelGate.resolve(true)
+		for _, raw := range buffered {
+			publishChannelMessage(mcpCtx, name, raw)
+		}
+		slog.Info("MCP channel enabled", "name", name, "buffered", len(buffered))
+	} else {
+		channelGate.resolve(false)
+	}
+
 	return &ClientSession{session, cancel}, nil
 }
 

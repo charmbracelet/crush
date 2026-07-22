@@ -35,6 +35,7 @@ var (
 	ErrInvalidClientID         = errors.New("invalid client_id")
 	ErrClientNotAttached       = errors.New("client not attached")
 	ErrWorkspaceClosing        = errors.New("workspace closing")
+	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
 )
 
 // DefaultCreateGrace is the window in which a client must open an SSE
@@ -254,6 +255,10 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// return cannot be torn out from under us
 			// between lookup and registerClient. Lock order
 			// here is b.mu -> ws.clientsMu.
+			if !stringSlicesEqual(ws.Cfg.Overrides().EnabledChannels, args.Channels) {
+				b.mu.Unlock()
+				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+			}
 			logFirstWinsMismatch(ws, args)
 			b.registerClient(ws, clientID)
 			b.mu.Unlock()
@@ -272,6 +277,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	cfg.Overrides().SkipPermissionRequests = args.YOLO
+	cfg.Overrides().EnabledChannels = args.Channels
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
@@ -321,6 +327,11 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// Register under b.mu so teardown cannot run
 			// between lookup and registerClient. Lock order
 			// is b.mu -> ws.clientsMu.
+			if !stringSlicesEqual(existing.Cfg.Overrides().EnabledChannels, args.Channels) {
+				b.mu.Unlock()
+				ws.invokeShutdown()
+				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+			}
 			logFirstWinsMismatch(existing, args)
 			b.registerClient(existing, clientID)
 			b.mu.Unlock()
@@ -711,14 +722,15 @@ func validateClientID(id string) (string, error) {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	out := proto.Workspace{
-		ID:      ws.ID,
-		Path:    ws.Path,
-		YOLO:    ws.Cfg.Overrides().SkipPermissionRequests,
-		DataDir: cfg.Options.DataDirectory,
-		Debug:   cfg.Options.Debug,
-		Config:  cfg,
-		Env:     ws.Env,
-		Version: version.Version,
+		ID:       ws.ID,
+		Path:     ws.Path,
+		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
+		Channels: ws.Cfg.Overrides().EnabledChannels,
+		DataDir:  cfg.Options.DataDirectory,
+		Debug:    cfg.Options.Debug,
+		Config:   cfg,
+		Env:      ws.Env,
+		Version:  version.Version,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())
@@ -738,10 +750,12 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	existingCfg := existing.Cfg.Config()
 	existingYOLO := existing.Cfg.Overrides().SkipPermissionRequests
+	existingChannels := existing.Cfg.Overrides().EnabledChannels
 	if existingYOLO == args.YOLO &&
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
-		stringSlicesEqual(existing.Env, args.Env) {
+		stringSlicesEqual(existing.Env, args.Env) &&
+		stringSlicesEqual(existingChannels, args.Channels) {
 		return
 	}
 	slog.Debug(
@@ -756,6 +770,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"requested_data_dir", args.DataDir,
 		"existing_env", existing.Env,
 		"requested_env", args.Env,
+		"existing_channels", existingChannels,
+		"requested_channels", args.Channels,
 	)
 }
 

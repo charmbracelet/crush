@@ -776,6 +776,84 @@ func TestFirstWinsMismatch_NoLogWhenIdentical(t *testing.T) {
 		"identical args must not log a mismatch: %s", buf.String())
 }
 
+// TestChannelOptInBoundary_DuplicateCreate verifies that channels are
+// an explicit opt-in that is never shared across a duplicate create at
+// the same path. A second client whose requested channels differ from
+// the existing workspace (including a client that did not opt in at
+// all) is rejected rather than silently inheriting the existing
+// workspace's channels.
+func TestChannelOptInBoundary_DuplicateCreate(t *testing.T) {
+	tests := []struct {
+		name            string
+		firstChannels   []string
+		secondChannels  []string
+		wantMismatchErr bool
+	}{
+		{
+			name:            "second omits opt-in",
+			firstChannels:   []string{"server:webhook"},
+			secondChannels:  nil,
+			wantMismatchErr: true,
+		},
+		{
+			name:            "second opts into extra channel",
+			firstChannels:   nil,
+			secondChannels:  []string{"server:webhook"},
+			wantMismatchErr: true,
+		},
+		{
+			name:            "different channels",
+			firstChannels:   []string{"server:webhook"},
+			secondChannels:  []string{"server:events"},
+			wantMismatchErr: true,
+		},
+		{
+			name:            "identical channels shared",
+			firstChannels:   []string{"server:webhook"},
+			secondChannels:  []string{"server:webhook"},
+			wantMismatchErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			xdgIsolated(t)
+			cwd := t.TempDir()
+			dataDir := t.TempDir()
+
+			b := New(context.Background(), nil, func() {})
+			b.SetCreateGrace(2 * time.Second)
+			t.Cleanup(func() { drainBackend(t, b) })
+
+			argsA := protoWS(cwd, dataDir, uuid.New().String())
+			argsA.Channels = tc.firstChannels
+			wsA, _, err := b.CreateWorkspace(argsA)
+			require.NoError(t, err)
+
+			argsB := protoWS(cwd, dataDir, uuid.New().String())
+			argsB.Channels = tc.secondChannels
+			wsB, protoB, err := b.CreateWorkspace(argsB)
+
+			if tc.wantMismatchErr {
+				require.ErrorIs(t, err, ErrChannelOptInMismatch)
+				require.Nil(t, wsB)
+				// The existing workspace must not be mutated
+				// and must not register the rejected client.
+				require.Equal(t, tc.firstChannels, wsA.Cfg.Overrides().EnabledChannels,
+					"existing channels must be immutable on rejection")
+				wsA.clientsMu.Lock()
+				require.Len(t, wsA.clients, 1, "rejected client must not be registered")
+				wsA.clientsMu.Unlock()
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, wsA.ID, protoB.ID)
+			require.Equal(t, tc.firstChannels, protoB.Channels)
+		})
+	}
+}
+
 // TestRaceTwoClientsAttachOneDetaches exercises the PLAN-required
 // race scenario: two clients attach concurrently, then one detaches.
 // The workspace must remain alive with refcount==1 and the clients

@@ -18,7 +18,7 @@ func TestCreateTransport_StdioProcessGroup(t *testing.T) {
 	t.Parallel()
 
 	m := config.MCPConfig{Type: config.MCPStdio, Command: "echo", Args: []string{"hi"}}
-	tr, err := createTransport(t.Context(), m, shellResolverWithPath(t, nil), nil)
+	tr, err := createTransport(t.Context(), m, shellResolverWithPath(t, nil))
 	require.NoError(t, err)
 
 	ct, ok := tr.(*mcp.CommandTransport)

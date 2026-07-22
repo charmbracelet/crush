@@ -1714,6 +1714,18 @@ func hasUserTextMessage(msgs []message.Message) bool {
 	return false
 }
 
+// shouldRetryTitleWithLargerBudget reports whether a title-generation
+// attempt that hit the token limit should be retried with a larger output
+// budget: canReason is false (so the small 40-token budget was used, not
+// the model's larger DefaultMaxTokens) but the model produced reasoning
+// content anyway, meaning it reasons by its own template default
+// regardless of what its config declares. A model that hit the limit
+// without producing any reasoning content just needs a different fix
+// (or model), not a bigger budget, so this reports false for that case.
+func shouldRetryTitleWithLargerBudget(canReason bool, finishReason fantasy.FinishReason, reasoningText string) bool {
+	return !canReason && finishReason == fantasy.FinishReasonLength && reasoningText != ""
+}
+
 // GenerateTitle generates a session title based on the initial prompt.
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
@@ -1780,6 +1792,29 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
+
+		// A model whose reasoning capability isn't declared in its config
+		// (common for a hand-configured custom/local provider, e.g. a
+		// local llama.cpp server) still emits reasoning content if its own
+		// chat template does so by default -- the "/no_think" prompt hack
+		// above only works for templates that respect it. If the tiny
+		// 40-token budget was entirely consumed by hidden reasoning, that's
+		// a strong, template-agnostic signal this model needs the larger
+		// budget regardless of what CatwalkCfg.CanReason says. Retry once
+		// with it before giving up on this model -- otherwise a thinking
+		// model whose config never marked it as reasoning-capable burns
+		// the whole budget on reasoning, produces no title text, and every
+		// attempt falls through to the "Untitled Session" fallback.
+		if err == nil && shouldRetryTitleWithLargerBudget(attempt.model.CatwalkCfg.CanReason, resp.Response.FinishReason, resp.Response.Content.ReasoningText()) {
+			biggerTok := attempt.model.CatwalkCfg.DefaultMaxTokens
+			if biggerTok <= tok {
+				biggerTok = 2000
+			}
+			slog.Debug("Title generation hit token limit but model was reasoning; retrying with a larger budget", "model", attempt.name)
+			agent = newAgent(attempt.model.Model, titlePrompt, biggerTok)
+			resp, err = agent.Stream(ctx, streamCall)
+		}
+
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model
 			slog.Debug("Generated title with " + attempt.name + " model")

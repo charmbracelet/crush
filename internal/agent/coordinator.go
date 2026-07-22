@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -25,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
@@ -40,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -129,6 +132,32 @@ type coordinator struct {
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
 
+	// Subagents discovery. subagentsMgr is the live source of truth (its
+	// snapshot changes when the Library reloads); activeSubagents is a
+	// fallback snapshot used only when no manager was supplied (e.g. tests).
+	subagentsMgr    *subagents.Manager
+	activeSubagents []*subagents.Subagent
+
+	// runtime tracks which sub-agents are currently running.
+	runtime *subagents.Runtime
+
+	// subagentModelCache memoizes resolveModelByID results within a config
+	// generation. Cleared by UpdateModels to avoid reusing stale clients.
+	subagentModelCache *csync.Map[subagentModelKey, Model]
+
+	// subagentCancels maps a running subagent's child session ID to the cancel
+	// func for its run. Dispatched subagents run on ad-hoc SessionAgents whose
+	// activeRequests are invisible to currentAgent, so Cancel consults this
+	// registry to reach them.
+	subagentCancels *csync.Map[string, context.CancelFunc]
+
+	// subagentPromptXML is the <available_subagents> XML currently baked into
+	// the coder system prompt. refreshCoderSystemPrompt compares against it
+	// each turn so Library reloads reach the prompt without a rebuild when
+	// nothing changed. Guarded by subagentPromptXMLMu.
+	subagentPromptXML   string
+	subagentPromptXMLMu sync.Mutex
+
 	readyWg errgroup.Group
 }
 
@@ -136,18 +165,20 @@ type coordinator struct {
 // struct keeps the constructor self-documenting and avoids a long
 // positional parameter list.
 type CoordinatorOptions struct {
-	Config      *config.ConfigStore
-	Sessions    session.Service
-	Messages    message.Service
-	Permissions permission.Service
-	Questions   question.Service
-	History     history.Service
-	FileTracker filetracker.Service
-	LSPManager  *lsp.Manager
-	Notify      pubsub.Publisher[notify.Notification]
-	RunComplete pubsub.Publisher[notify.RunComplete]
-	Skills      *skills.Manager
-	Interactive bool
+	Config       *config.ConfigStore
+	Sessions     session.Service
+	Messages     message.Service
+	Permissions  permission.Service
+	Questions    question.Service
+	History      history.Service
+	FileTracker  filetracker.Service
+	LSPManager   *lsp.Manager
+	Notify       pubsub.Publisher[notify.Notification]
+	RunComplete  pubsub.Publisher[notify.RunComplete]
+	Skills       *skills.Manager
+	SubagentsMgr *subagents.Manager
+	Runtime      *subagents.Runtime
+	Interactive  bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -165,22 +196,30 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          opts.Config,
-		sessions:     opts.Sessions,
-		messages:     opts.Messages,
-		permissions:  opts.Permissions,
-		questions:    opts.Questions,
-		history:      opts.History,
-		filetracker:  opts.FileTracker,
-		lspManager:   opts.LSPManager,
-		notify:       opts.Notify,
-		runComplete:  opts.RunComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
-		interactive:  opts.Interactive,
+		cfg:                opts.Config,
+		sessions:           opts.Sessions,
+		messages:           opts.Messages,
+		permissions:        opts.Permissions,
+		questions:          opts.Questions,
+		history:            opts.History,
+		filetracker:        opts.FileTracker,
+		lspManager:         opts.LSPManager,
+		notify:             opts.Notify,
+		runComplete:        opts.RunComplete,
+		agents:             make(map[string]SessionAgent),
+		allSkills:          allSkills,
+		activeSkills:       activeSkills,
+		skillTracker:       skillTracker,
+		interactive:        opts.Interactive,
+		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
+		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 	}
+
+	c.subagentsMgr = opts.SubagentsMgr
+	if opts.SubagentsMgr != nil {
+		c.activeSubagents = opts.SubagentsMgr.ActiveSubagents()
+	}
+	c.runtime = opts.Runtime
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -188,12 +227,17 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	subagentXML := subagents.ToPromptXML(c.activeSubagentsList())
+	c.subagentPromptXML = subagentXML
+	prompt, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithAvailableSubagentsXML(subagentXML),
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
+	agent, err := c.buildAgent(ctx, prompt, agentCfg, false, subagentModel{}, &c.readyWg)
 	if err != nil {
 		return nil, err
 	}
@@ -605,17 +649,178 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
-	large, small, err := c.buildAgentModels(ctx, isSubAgent)
+// activeSubagentsList returns the current active subagents. It reads the live
+// manager snapshot when available (so Library reloads are reflected without a
+// restart) and falls back to the construction-time snapshot otherwise.
+func (c *coordinator) activeSubagentsList() []*subagents.Subagent {
+	if c.subagentsMgr != nil {
+		return c.subagentsMgr.ActiveSubagents()
+	}
+	return c.activeSubagents
+}
+
+// findModelProvider returns the provider config and catwalk model for the
+// provider that offers modelID. When providerOverride is non-empty only that
+// provider is searched. ok is false when no matching provider/model is found.
+func (c *coordinator) findModelProvider(modelID, providerOverride string) (config.ProviderConfig, catwalk.Model, bool) {
+	if providerOverride != "" {
+		p, ok := c.cfg.Config().Providers.Get(providerOverride)
+		if !ok {
+			return config.ProviderConfig{}, catwalk.Model{}, false
+		}
+		m, ok := findCatwalkModel(p, modelID)
+		if !ok {
+			return config.ProviderConfig{}, catwalk.Model{}, false
+		}
+		return p, m, true
+	}
+	// Providers is a csync.Map backed by a native Go map, whose iteration
+	// order is randomized — sort by ID first so that when more than one
+	// configured provider offers the same model id, the one picked is
+	// deterministic across dispatches instead of varying run to run.
+	providers := slices.Collect(c.cfg.Config().Providers.Seq())
+	slices.SortFunc(providers, func(a, b config.ProviderConfig) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	for _, p := range providers {
+		if m, ok := findCatwalkModel(p, modelID); ok {
+			return p, m, true
+		}
+	}
+	return config.ProviderConfig{}, catwalk.Model{}, false
+}
+
+// findCatwalkModel returns the catwalk model with the given id from a provider.
+func findCatwalkModel(providerCfg config.ProviderConfig, modelID string) (catwalk.Model, bool) {
+	for _, m := range providerCfg.Models {
+		if m.ID == modelID {
+			return m, true
+		}
+	}
+	return catwalk.Model{}, false
+}
+
+// buildModel constructs a Model from an already-resolved provider, selected
+// model, and catwalk model. Shared by buildNamedModel and resolveModelByID.
+func (c *coordinator) buildModel(ctx context.Context, providerCfg config.ProviderConfig, selModel config.SelectedModel, catwalkModel catwalk.Model, isSubAgent bool) (Model, error) {
+	provider, err := c.buildProvider(providerCfg, selModel, isSubAgent)
+	if err != nil {
+		return Model{}, err
+	}
+	modelID := selModel.Model
+	if providerCfg.ID == openrouter.Name && isExactoSupported(modelID) {
+		modelID += ":exacto"
+	}
+	lm, err := provider.LanguageModel(ctx, modelID)
+	if err != nil {
+		return Model{}, err
+	}
+	return Model{Model: lm, CatwalkCfg: catwalkModel, ModelCfg: selModel, FlatRate: providerCfg.FlatRate}, nil
+}
+
+// buildNamedModel builds the large or small model selected in config. Errors
+// distinguish the two so callers and tests can tell which model failed.
+func (c *coordinator) buildNamedModel(ctx context.Context, modelType config.SelectedModelType, isSubAgent bool) (Model, error) {
+	isSmall := modelType == config.SelectedModelTypeSmall
+	selModel, ok := c.cfg.Config().Models[modelType]
+	if !ok {
+		if isSmall {
+			return Model{}, errSmallModelNotSelected
+		}
+		return Model{}, errLargeModelNotSelected
+	}
+	providerCfg, ok := c.cfg.Config().Providers.Get(selModel.Provider)
+	if !ok {
+		if isSmall {
+			return Model{}, errSmallModelProviderNotConfigured
+		}
+		return Model{}, errLargeModelProviderNotConfigured
+	}
+	catwalkModel, ok := findCatwalkModel(providerCfg, selModel.Model)
+	if !ok {
+		if isSmall {
+			return Model{}, errSmallModelNotFound
+		}
+		return Model{}, errLargeModelNotFound
+	}
+	return c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
+}
+
+// resolveModelByID finds the provider that offers modelID and builds a Model
+// for it. It lets a subagent run on the specific model named in its `model:`
+// frontmatter (validated at discovery via Config.IsKnownModel). When
+// providerOverride is non-empty only that provider is searched.
+//
+// Results are memoized in subagentModelCache for the lifetime of the current
+// config generation. UpdateModels clears the cache on config reload.
+func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
+	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent}
+
+	if c.subagentModelCache != nil {
+		if m, ok := c.subagentModelCache.Get(key); ok {
+			return m, nil
+		}
+	}
+
+	providerCfg, catwalkModel, ok := c.findModelProvider(modelID, providerOverride)
+	if !ok {
+		return Model{}, fmt.Errorf("model %q not found in any configured provider", modelID)
+	}
+	selModel := config.SelectedModel{Provider: providerCfg.ID, Model: modelID}
+	m, err := c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
+	if err != nil {
+		return Model{}, err
+	}
+
+	if c.subagentModelCache != nil {
+		c.subagentModelCache.Set(key, m)
+	}
+	return m, nil
+}
+
+// buildAgent constructs a SessionAgent. sm carries the model-selection fields
+// from subagent frontmatter (zero value for the coder/task agents): sm.Model is
+// "" or "large" (global large), "small" (global small), or a specific model id
+// resolved via resolveModelByID. sm.Effort is applied to the resolved primary,
+// which is also the only large/specific model built — small always backs
+// titles/summaries, so it is built unconditionally.
+//
+// The system prompt and tool set are built asynchronously on wg. Construction
+// paths pass &c.readyWg (waited at the start of every run); dispatch-time
+// callers must pass a local group and Wait on it before running the returned
+// agent — both so the agent doesn't run promptless/toolless, and so a build
+// failure surfaces to that caller instead of poisoning the coordinator-wide
+// errgroup (whose error is sticky and would fail every subsequent turn).
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel, wg *errgroup.Group) (SessionAgent, error) {
+	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
 		return nil, err
 	}
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	var primary Model
+	switch sm.Model {
+	case "small":
+		primary = small
+	case "", "large":
+		primary, err = c.buildNamedModel(ctx, config.SelectedModelTypeLarge, isSubAgent)
+	default:
+		primary, err = c.resolveModelByID(ctx, sm.Model, sm.Provider, isSubAgent)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if subagents.EffortIgnored(sm.Effort, primary.CatwalkCfg) {
+		slog.Warn("Subagent effort ignored: model does not support reasoning",
+			"model", primary.ModelCfg.Model, "effort", sm.Effort)
+	}
+	primary.ModelCfg = subagents.ApplyEffortToModel(sm.Effort, primary.ModelCfg, primary.CatwalkCfg)
+
+	primaryProviderCfg, _ := c.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           large,
+		LargeModel:           primary,
 		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
@@ -645,8 +850,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// completes.
 	initCtx := context.WithoutCancel(ctx)
 
-	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
+	wg.Go(func() error {
+		systemPrompt, err := prompt.Build(initCtx, primary.Model.Provider(), primary.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
@@ -654,7 +859,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil
 	})
 
-	c.readyWg.Go(func() error {
+	wg.Go(func() error {
 		// Wait for MCP servers to finish registering their tools before
 		// building the initial tool list. This ensures the first tool set
 		// (used if anything reads it before run() rebuilds) includes all
@@ -662,7 +867,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		if err := mcp.WaitForInit(initCtx); err != nil {
 			return err
 		}
-		tools, err := c.buildTools(initCtx, agent, isSubAgent)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent, primary.CatwalkCfg.ID)
 		if err != nil {
 			return err
 		}
@@ -673,9 +878,22 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	return result, nil
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
+// shouldExposeDispatcher reports whether the dispatcher agent tool should be
+// included for an agent. Sub-agents never receive it — that prevents recursive
+// delegation regardless of what their AllowedTools list contains.
+func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
+	if isSubAgent {
+		return false
+	}
+	return slices.Contains(allowed, AgentToolName)
+}
+
+// buildTools assembles the agent's tool set. modelID is the catwalk id of the
+// model the agent actually runs on (the resolved primary), used for
+// model-specific tool guidance such as the bash tool description.
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, modelID string) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
-	if slices.Contains(agent.AllowedTools, AgentToolName) {
+	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
 		agentTool, err := c.agentTool(ctx)
 		if err != nil {
 			return nil, err
@@ -689,14 +907,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			return nil, err
 		}
 		allTools = append(allTools, agenticFetchTool)
-	}
-
-	// Get the model name for the agent
-	modelID := ""
-	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
-		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
-			modelID = model.ID
-		}
 	}
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
@@ -734,7 +944,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(allTools,
+		allTools = append(
+			allTools,
 			tools.NewDiagnosticsTool(c.lspManager),
 			tools.NewReferencesTool(c.lspManager),
 			tools.NewLSPRestartTool(c.lspManager),
@@ -800,88 +1011,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
-	if !ok {
-		return Model{}, Model{}, errLargeModelNotSelected
-	}
-	smallModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeSmall]
-	if !ok {
-		return Model{}, Model{}, errSmallModelNotSelected
-	}
-
-	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errLargeModelProviderNotConfigured
-	}
-
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
+	large, err := c.buildNamedModel(ctx, config.SelectedModelTypeLarge, isSubAgent)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
-
-	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errSmallModelProviderNotConfigured
-	}
-
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
+	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
-
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
-		}
-	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
-	}
-
-	if largeCatwalkModel == nil {
-		return Model{}, Model{}, errLargeModelNotFound
-	}
-
-	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errSmallModelNotFound
-	}
-
-	largeModelID := largeModelCfg.Model
-	smallModelID := smallModelCfg.Model
-
-	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
-		largeModelID += ":exacto"
-	}
-
-	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
-		smallModelID += ":exacto"
-	}
-
-	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
-	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+	return large, small, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -1178,10 +1316,31 @@ func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
 }
 
 func (c *coordinator) Cancel(sessionID string) {
+	// Running subagents live on ad-hoc SessionAgents, invisible to
+	// currentAgent's activeRequests — cancel them via the registry keyed by
+	// child session ID. A child session has no queued or accepted state on
+	// the coder agent, so there is nothing further to do for it.
+	if c.subagentCancels != nil {
+		if cancel, ok := c.subagentCancels.Get(sessionID); ok && cancel != nil {
+			cancel()
+			return
+		}
+	}
 	c.currentAgent.Cancel(sessionID)
 }
 
 func (c *coordinator) CancelAll() {
+	// Running subagents live on ad-hoc SessionAgents, invisible to
+	// currentAgent's activeRequests — cancel each one via the registry (a
+	// snapshot, so this is safe against concurrent Del calls from finishing
+	// runs) before falling through to the coder agent's own bookkeeping.
+	if c.subagentCancels != nil {
+		for cancel := range c.subagentCancels.Seq() {
+			if cancel != nil {
+				cancel()
+			}
+		}
+	}
 	c.currentAgent.CancelAll()
 }
 
@@ -1194,6 +1353,16 @@ func (c *coordinator) IsBusy() bool {
 }
 
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
+	// Running subagents live on ad-hoc SessionAgents, invisible to
+	// currentAgent's own request tracking — check the registry first,
+	// mirroring Cancel's per-session lookup, so a caller polling a child
+	// session's busy state (e.g. Backend.GetAgentSession) doesn't see it
+	// reported idle while the subagent is still running.
+	if c.subagentCancels != nil {
+		if _, ok := c.subagentCancels.Get(sessionID); ok {
+			return true
+		}
+	}
 	return c.currentAgent.IsSessionBusy(sessionID)
 }
 
@@ -1202,6 +1371,12 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
+	// Clear the subagent model cache so that any stale LanguageModel instances
+	// (built against the old config) are not reused after a config reload.
+	if c.subagentModelCache != nil {
+		c.subagentModelCache.Reset(make(map[subagentModelKey]Model))
+	}
+
 	// build the models again so we make sure we get the latest config
 	large, small, err := c.buildAgentModels(ctx, false)
 	if err != nil {
@@ -1214,12 +1389,51 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errCoderAgentNotConfigured
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false)
+	tools, err := c.buildTools(ctx, agentCfg, false, large.CatwalkCfg.ID)
 	if err != nil {
 		return err
 	}
 	c.currentAgent.SetTools(tools)
+
+	c.refreshCoderSystemPrompt(ctx, large)
 	return nil
+}
+
+// refreshCoderSystemPrompt rebuilds the coder system prompt when the active
+// subagent set changed since the prompt was last built, so the
+// <available_subagents> block tracks Library reloads like the subagent_type
+// enum (rebuilt by buildTools above) and the dispatch lookup already do.
+// UpdateModels runs at the start of every turn, and the rebuild is skipped
+// when nothing changed, so the steady-state cost is one string compare. A
+// rebuild failure keeps the previous prompt and only logs — matching the
+// pre-refresh behavior of serving a stale snapshot.
+func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model) {
+	xml := subagents.ToPromptXML(c.activeSubagentsList())
+	c.subagentPromptXMLMu.Lock()
+	unchanged := xml == c.subagentPromptXML
+	c.subagentPromptXMLMu.Unlock()
+	if unchanged {
+		return
+	}
+
+	pr, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithAvailableSubagentsXML(xml),
+	)
+	if err != nil {
+		slog.Warn("Failed to rebuild coder prompt after subagent reload", "error", err)
+		return
+	}
+	systemPrompt, err := pr.Build(ctx, model.Model.Provider(), model.Model.Model(), c.cfg)
+	if err != nil {
+		slog.Warn("Failed to rebuild coder system prompt after subagent reload", "error", err)
+		return
+	}
+	c.currentAgent.SetSystemPrompt(systemPrompt)
+
+	c.subagentPromptXMLMu.Lock()
+	c.subagentPromptXML = xml
+	c.subagentPromptXMLMu.Unlock()
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {
@@ -1268,11 +1482,15 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 // attempts to refresh credentials and re-runs fn once. Returns the
 // final error: from the retry if a retry was attempted, otherwise from
 // the original run. Callers that need to notify the user on persistent
-// failure should check isUnauthorized on the returned error.
-func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg config.ProviderConfig, fn func() error) error {
+// failure should check isUnauthorized on the returned error. The optional
+// onRetry callback is invoked once just before the retry attempt.
+func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg config.ProviderConfig, fn func() error, onRetry ...func()) error {
 	err := fn()
 	if err != nil && c.isUnauthorized(err) {
 		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
+			for _, cb := range onRetry {
+				cb()
+			}
 			return fn()
 		}
 	}
@@ -1378,6 +1596,21 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	return nil
 }
 
+// subagentModel carries the model-selection fields from subagent frontmatter.
+// The zero value selects the global large model.
+type subagentModel struct {
+	Effort   string
+	Model    string
+	Provider string
+}
+
+// subagentModelKey is the cache key for resolveModelByID results.
+type subagentModelKey struct {
+	modelID    string
+	provider   string
+	isSubAgent bool
+}
+
 // subAgentParams holds the parameters for running a sub-agent.
 type subAgentParams struct {
 	Agent          SessionAgent
@@ -1386,6 +1619,9 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
+	AgentName      string
+	AgentColor     string
+	AgentModel     string
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -1407,6 +1643,23 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		params.SessionSetup(session.ID)
 	}
 
+	// Make this run individually cancellable by child session ID (see
+	// coordinator.Cancel): cancelling runCtx stops only this subagent while
+	// the parent turn keeps running. Registered before the runtime announces
+	// the child session so anyone who learns the ID can cancel immediately.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	if c.subagentCancels != nil {
+		c.subagentCancels.Set(session.ID, cancelRun)
+		defer c.subagentCancels.Del(session.ID)
+	}
+
+	// Register with the runtime tracker and finish on return. finalStatus is
+	// captured by the deferred call and updated below based on the outcome.
+	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
+	finalStatus := subagents.StatusCompleted
+	defer func() { c.runtime.Finish(session.ID, finalStatus) }()
+
 	// Get model configuration
 	model := params.Agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
@@ -1416,12 +1669,13 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
+		finalStatus = subagents.StatusFailed
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
 	}
 
 	// Run the agent
 	run := func() (*fantasy.AgentResult, error) {
-		return params.Agent.Run(ctx, SessionAgentCall{
+		return params.Agent.Run(runCtx, SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
 			MaxOutputTokens:  maxTokens,
@@ -1435,7 +1689,14 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
-	result, err := run()
+	var result *fantasy.AgentResult
+	err = c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
+		var runErr error
+		result, runErr = run()
+		return runErr
+	}, func() {
+		c.runtime.SetStatus(session.ID, subagents.StatusRetrying)
+	})
 	// Notify only if still unauthorized after retry.
 	if err != nil && c.isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
@@ -1444,6 +1705,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		})
 	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			finalStatus = subagents.StatusCancelled
+			return fantasy.NewTextErrorResponse("Subagent cancelled by user"), nil
+		}
+		finalStatus = subagents.StatusFailed
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}
 
@@ -1472,22 +1738,21 @@ func subAgentOutput(result *fantasy.AgentResult) string {
 	return result.Response.Content.Text()
 }
 
-// updateParentSessionCost accumulates the cost from a child session to its parent session.
+// updateParentSessionCost accumulates the cost from a child session to its
+// parent session. Uses the atomic AddCost update rather than a
+// Get-then-Save round trip: the dispatcher tool is Parallel: true, so
+// multiple subagents can finish and call this concurrently, and a
+// fetch-modify-save of the whole parent Session would race with both those
+// concurrent calls and with the parent turn's own in-flight session save
+// (title/tokens/todos), silently losing whichever update saved last.
 func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionID, parentSessionID string) error {
 	childSession, err := c.sessions.Get(ctx, childSessionID)
 	if err != nil {
 		return fmt.Errorf("get child session: %w", err)
 	}
 
-	parentSession, err := c.sessions.Get(ctx, parentSessionID)
-	if err != nil {
-		return fmt.Errorf("get parent session: %w", err)
-	}
-
-	parentSession.Cost += childSession.Cost
-
-	if _, err := c.sessions.Save(ctx, parentSession); err != nil {
-		return fmt.Errorf("save parent session: %w", err)
+	if err := c.sessions.AddCost(ctx, parentSessionID, childSession.Cost); err != nil {
+		return fmt.Errorf("add cost to parent session: %w", err)
 	}
 
 	return nil

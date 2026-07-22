@@ -38,3 +38,13 @@ func IsValidBase64(s string) bool {
 	// leniencies that DecodeString silently accepts.
 	return base64.StdEncoding.EncodeToString(decoded) == s
 }
+
+// xmlEscaper replaces the five characters that are not valid unescaped in
+// XML text content or attribute values.
+var xmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+
+// EscapeXML escapes s for safe inclusion in generated XML, e.g. the
+// <available_skills>/<available_subagents> prompt blocks.
+func EscapeXML(s string) string {
+	return xmlEscaper.Replace(s)
+}

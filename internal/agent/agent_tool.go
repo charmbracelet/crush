@@ -3,44 +3,181 @@ package agent
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"charm.land/fantasy"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/subagents"
 )
 
 //go:embed templates/agent_tool.md
 var agentToolDescription string
 
+// AgentParams is the shape consumed by UI tool-call renderers when displaying
+// historical agent tool invocations. New tool-call inputs decode with
+// AgentDispatchParams; AgentParams stays wire-compatible so older inputs still
+// decode cleanly.
 type AgentParams struct {
-	Prompt string `json:"prompt" description:"The task for the agent to perform"`
+	SubagentType string `json:"subagent_type,omitempty"`
+	Prompt       string `json:"prompt" description:"The task for the agent to perform"`
+}
+
+// AgentDispatchParams is the input to the dispatcher agent tool.
+type AgentDispatchParams struct {
+	SubagentType string `json:"subagent_type,omitempty"`
+	Prompt       string `json:"prompt"`
 }
 
 const (
 	AgentToolName = "agent"
 )
 
+// dispatcherTool implements fantasy.AgentTool with a dynamically-built schema.
+type dispatcherTool struct {
+	info         fantasy.ToolInfo
+	dispatch     func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error)
+	providerOpts fantasy.ProviderOptions
+}
+
+func (d *dispatcherTool) Info() fantasy.ToolInfo                          { return d.info }
+func (d *dispatcherTool) ProviderOptions() fantasy.ProviderOptions        { return d.providerOpts }
+func (d *dispatcherTool) SetProviderOptions(opts fantasy.ProviderOptions) { d.providerOpts = opts }
+func (d *dispatcherTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	var params AgentDispatchParams
+	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
+		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
+	}
+	return d.dispatch(ctx, params, call)
+}
+
+// findSubagentByName returns the active subagent with the given name, or nil
+// when none matches.
+func findSubagentByName(active []*subagents.Subagent, name string) *subagents.Subagent {
+	for _, sa := range active {
+		if sa.Name == name {
+			return sa
+		}
+	}
+	return nil
+}
+
+// subagentSessionSetup returns a SessionSetup callback that applies the
+// subagent's permission mode to the freshly-created sub-session. Returns
+// nil when no setup is needed.
+func (c *coordinator) subagentSessionSetup(sa *subagents.Subagent) func(sessionID string) {
+	if sa.PermissionMode != subagents.PermissionModeBypassPermissions {
+		return nil
+	}
+	return func(sessionID string) {
+		c.permissions.AutoApproveSession(sessionID)
+	}
+}
+
+// confirmBypassPermissions gates permissionMode: bypassPermissions behind an
+// explicit user confirmation for every dispatch of a subagent that is not
+// user-scoped. A repository can ship a subagent definition with a description
+// crafted to get auto-dispatched, so repo-provided bypass must never
+// auto-approve a whole child session without the user seeing it. Returns
+// (zero, true) when dispatch may proceed and (denial response, false)
+// otherwise. Yolo mode and the standard allowlist/auto-approve paths are
+// honored by the permission service itself.
+func (c *coordinator) confirmBypassPermissions(ctx context.Context, sa *subagents.Subagent, sessionID, toolCallID string) (fantasy.ToolResponse, bool) {
+	if sa.PermissionMode != subagents.PermissionModeBypassPermissions || subagents.InGlobalDir(sa.FilePath) {
+		return fantasy.ToolResponse{}, true
+	}
+	granted, err := c.permissions.Request(ctx, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		ToolCallID:  toolCallID,
+		ToolName:    AgentToolName,
+		Description: fmt.Sprintf("Subagent %q is defined in this project and requests bypassPermissions: it would run with every tool call auto-approved.", sa.Name),
+		Action:      "bypass_permissions:" + sa.Name,
+		Path:        sa.FilePath,
+	})
+	if err != nil || !granted {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("subagent %q requests bypassPermissions and the user did not approve it", sa.Name)), false
+	}
+	return fantasy.ToolResponse{}, true
+}
+
+// buildAgentDispatchInfo builds the ToolInfo for the agent dispatcher tool with
+// a dynamic subagent_type enum derived from the currently active subagents.
+func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolInfo {
+	enumValues := []string{"task"}
+	for _, sa := range activeSubagents {
+		enumValues = append(enumValues, sa.Name)
+	}
+
+	typeDesc := `The type of agent to use. Use "task" for general search and research tasks.`
+	if len(activeSubagents) > 0 {
+		lines := make([]string, 0, len(activeSubagents))
+		for _, sa := range activeSubagents {
+			lines = append(lines, fmt.Sprintf("- %s: %s", sa.Name, sa.Description))
+		}
+		typeDesc += "\n\nAvailable specialized agents:\n" + strings.Join(lines, "\n")
+	}
+
+	return fantasy.ToolInfo{
+		Name:        AgentToolName,
+		Description: agentToolDescription,
+		Parameters: map[string]any{
+			"subagent_type": map[string]any{
+				"type":        "string",
+				"enum":        enumValues,
+				"description": typeDesc,
+			},
+			"prompt": map[string]any{
+				"type":        "string",
+				"description": "The task for the agent to perform",
+			},
+		},
+		Required: []string{"prompt"},
+		Parallel: true,
+	}
+}
+
 func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
+	taskCfg, ok := c.cfg.Config().Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
 	}
-	prompt, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	coderCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		return nil, errors.New("coder agent not configured")
+	}
+	taskPr, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	if err != nil {
+		return nil, err
+	}
+	// The task agent's async prompt/tool builds go on a dispatcher-local
+	// group, not c.readyWg: UpdateModels rebuilds this tool at the start of
+	// every turn — after that turn's readyWg.Wait — so a readyWg-spawned
+	// build could still be pending when a task dispatch runs (starting the
+	// agent promptless/toolless), and a build failure would stick in readyWg,
+	// failing every later turn. The dispatch closure waits lazily on the task
+	// path, so turn start pays nothing.
+	taskBuildWg := &errgroup.Group{}
+	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, taskBuildWg)
 	if err != nil {
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, true)
-	if err != nil {
-		return nil, err
-	}
-	return fantasy.NewParallelAgentTool(
-		AgentToolName,
-		agentToolDescription,
-		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	// The subagent_type enum is a point-in-time snapshot baked into the tool
+	// schema; a Library reload won't refresh it. Dispatch lookups use the live
+	// list (activeSubagentsList) so a since-removed name fails cleanly and a
+	// newly added one still resolves — the enum is advisory only.
+	info := buildAgentDispatchInfo(c.activeSubagentsList())
+
+	return &dispatcherTool{
+		info: info,
+		dispatch: func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
@@ -49,10 +186,58 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
-
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
+			}
+
+			subagentType := params.SubagentType
+			if subagentType == "" || subagentType == config.AgentTask {
+				if err := taskBuildWg.Wait(); err != nil {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("build task agent: %v", err)), nil
+				}
+				return c.runSubAgent(ctx, subAgentParams{
+					Agent:          taskAgent,
+					SessionID:      sessionID,
+					AgentMessageID: agentMessageID,
+					ToolCallID:     call.ID,
+					Prompt:         params.Prompt,
+					SessionTitle:   "New Agent Session",
+					AgentName:      config.AgentTask,
+					AgentColor:     subagents.AutoColor(config.AgentTask),
+					AgentModel:     taskAgent.Model().ModelCfg.Model,
+				})
+			}
+
+			sa := findSubagentByName(c.activeSubagentsList(), subagentType)
+			if sa == nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
+			}
+
+			if resp, ok := c.confirmBypassPermissions(ctx, sa, sessionID, call.ID); !ok {
+				return resp, nil
+			}
+
+			agentCfg := sa.ToConfigAgent(coderCfg)
+			// Config-driven setup failures (prompt build, model/provider that
+			// passed discovery but fails at build) are surfaced as tool-error
+			// responses so the parent agent can report them and continue; a
+			// bare error would abort the whole turn.
+			subPr, err := subagentPrompt(sa, c.activeSkills, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+			if err != nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent prompt %q: %v", sa.Name, err)), nil
+			}
+			// Build on a local group and wait before running: the agent must
+			// not start promptless/toolless, and a build failure must land
+			// here as a tool error rather than in the coordinator-wide
+			// readyWg, whose sticky error would fail every subsequent turn.
+			var buildWg errgroup.Group
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}, &buildWg)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
+			}
+			if err := buildWg.Wait(); err != nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
 			}
 
 			return c.runSubAgent(ctx, subAgentParams{
@@ -61,8 +246,12 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				AgentMessageID: agentMessageID,
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
-				SessionTitle:   "New Agent Session",
+				SessionTitle:   sa.Name + " Agent Session",
+				SessionSetup:   c.subagentSessionSetup(sa),
+				AgentName:      sa.Name,
+				AgentColor:     sa.ResolvedColor(),
+				AgentModel:     agent.Model().ModelCfg.Model,
 			})
 		},
-	), nil
+	}, nil
 }

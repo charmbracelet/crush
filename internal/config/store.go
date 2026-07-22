@@ -819,6 +819,15 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 	}
 }
 
+// NewTestStoreWithWorkingDir creates a ConfigStore for testing purposes with
+// an explicit working directory set. This is required for scope-detection
+// tests in the workspace package.
+func NewTestStoreWithWorkingDir(cfg *Config, workingDir string, loadedPaths ...string) *ConfigStore {
+	s := NewTestStore(cfg, loadedPaths...)
+	s.workingDir = workingDir
+	return s
+}
+
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
 func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	if s.HasConfigField(ScopeGlobal, "providers.copilot.api_key") || s.HasConfigField(ScopeGlobal, "providers.copilot.oauth") {

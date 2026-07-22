@@ -562,6 +562,24 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	// Project specific skills dirs.
 	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
 
+	// Add the default subagents directories if not already present.
+	for _, dir := range GlobalSubagentsDirs() {
+		if !slices.Contains(c.Options.SubagentsPaths, dir) {
+			c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, dir)
+		}
+	}
+	// Project specific subagents dirs. Guarded like the global loop above:
+	// setDefaults runs twice per config reload (ConfigStore.reloadFromDiskLocked
+	// calls it once on the freshly-loaded config and again after merging
+	// workspace-scope overrides), so an unconditional append would duplicate
+	// these entries on every reload and grow SubagentsPaths unbounded over a
+	// session.
+	for _, dir := range ProjectSubagentsDir(workingDir) {
+		if !slices.Contains(c.Options.SubagentsPaths, dir) {
+			c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, dir)
+		}
+	}
+
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
@@ -1230,6 +1248,70 @@ func ProjectSkillsDir(workingDir string) []string {
 		for _, sub := range projectSkillSubdirs {
 			dirs = append(dirs, filepath.Join(root, sub))
 		}
+	}
+
+	return dirs
+}
+
+// GlobalSubagentsDirs returns the default global directories for subagent
+// definitions. The CRUSH_SUBAGENTS_DIR environment variable, when set to a
+// non-empty value, overrides the default list entirely.
+func GlobalSubagentsDirs() []string {
+	if crushSubagents := os.Getenv("CRUSH_SUBAGENTS_DIR"); crushSubagents != "" {
+		return []string{crushSubagents}
+	}
+
+	paths := []string{
+		filepath.Join(home.Config(), appName, "subagents"),
+		filepath.Join(home.Config(), "agents", "subagents"),
+		filepath.Join(home.Dir(), ".agents", "subagents"),
+	}
+	if runtime.GOOS == "windows" {
+		appData := cmp.Or(
+			os.Getenv("LOCALAPPDATA"),
+			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
+		)
+		paths = append(
+			paths,
+			filepath.Join(appData, appName, "subagents"),
+			filepath.Join(appData, "agents", "subagents"),
+		)
+	}
+	return paths
+}
+
+// projectSubagentSubdirs lists the conventional subdirectories where
+// project-level subagents are discovered. Shared across working-dir and
+// git-root lookups to prevent drift when a new convention is added.
+var projectSubagentSubdirs = []string{
+	".agents/subagents",
+	".crush/subagents",
+}
+
+// ProjectSubagentsDir returns the default project directories in which
+// Crush looks for subagent definitions. In addition to the working
+// directory, it also checks the git working tree root so that
+// monorepo-level subagents are discovered when the user is inside a
+// subdirectory.
+//
+// Unlike ProjectSkillsDir, repository-root paths come first and
+// working-directory paths come last. subagents.Deduplicate keeps the last
+// occurrence of a given name, so listing the working directory last means
+// a working-directory subagent definition overrides a monorepo-root
+// definition with the same name.
+func ProjectSubagentsDir(workingDir string) []string {
+	dirs := make([]string, 0, len(projectSubagentSubdirs)*2)
+
+	// When the working directory is inside a git repository, also look at
+	// the repository root so monorepo-level .agents/subagents are found.
+	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
+		for _, sub := range projectSubagentSubdirs {
+			dirs = append(dirs, filepath.Join(root, sub))
+		}
+	}
+
+	for _, sub := range projectSubagentSubdirs {
+		dirs = append(dirs, filepath.Join(workingDir, sub))
 	}
 
 	return dirs

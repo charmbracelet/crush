@@ -28,10 +28,11 @@ import (
 type countingWorkspace struct {
 	workspace.Workspace
 
-	ready     bool
-	agentBusy bool
-	yolo      bool
-	queued    []string
+	ready           bool
+	agentBusy       bool
+	yolo            bool
+	queued          []string
+	runningSubagent []workspace.RunningSubagentInfo
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -75,6 +76,10 @@ func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message
 }
 
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
+
+func (w *countingWorkspace) RunningSubagents(string) []workspace.RunningSubagentInfo {
+	return w.runningSubagent
+}
 
 func (w *countingWorkspace) Config() *config.Config { return nil }
 
@@ -143,7 +148,7 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmds(m, c)
 		}
-	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg:
+	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, runningSubagentsMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	}
@@ -293,6 +298,75 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	runCmds(m, cmd)
 	require.Equal(t, 2, m.promptQueue, "the new session's queue must be fetched")
 	require.Equal(t, []string{"a", "b"}, m.promptQueueItems)
+}
+
+// TestSessionSwitchDropsAndRefreshesRunningSubagents is the regression test
+// for the sidebar showing a stale "Active subagents" panel after a session
+// switch: runningSubagents was otherwise only refreshed by a live
+// RuntimeEvent for the current session's parent, never on session load, so
+// switching to a session with no subagent activity of its own kept showing
+// the previous session's list indefinitely.
+func TestSessionSwitchDropsAndRefreshesRunningSubagents(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:           true,
+		runningSubagent: []workspace.RunningSubagentInfo{{Name: "s2-active-agent"}},
+	}
+	m := newBusyUI(ws)
+	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "stale-from-s1"}}
+
+	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
+	require.Empty(t, m.runningSubagents, "switching sessions must drop the old session's subagent list immediately")
+
+	runCmds(m, cmd)
+	require.Equal(t, []workspace.RunningSubagentInfo{{Name: "s2-active-agent"}}, m.runningSubagents,
+		"the new session's own running subagents must be fetched and applied")
+}
+
+// TestStaleRunningSubagentsFetchDiscarded is the regression test for a
+// runningSubagentsMsg racing a session switch: a fetch dispatched for a
+// session the user has since navigated away from must not clobber the
+// newly-loaded session's list with stale data.
+func TestStaleRunningSubagentsFetchDiscarded(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s2"}
+	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "s2-current"}}
+
+	// A fetch dispatched while the user was still on s1, resolving after
+	// they've already switched to s2, must be discarded rather than applied.
+	stale := runningSubagentsMsg{forSession: "s1", list: []workspace.RunningSubagentInfo{{Name: "s1-stale"}}}
+	m.Update(stale)
+
+	require.Equal(t, []workspace.RunningSubagentInfo{{Name: "s2-current"}}, m.runningSubagents,
+		"a runningSubagentsMsg scoped to a departed session must not overwrite the current session's list")
+}
+
+// TestStaleParentTitleFetchDiscarded is the regression test for a
+// parentTitleMsg racing a session switch: a fetch dispatched for a child
+// session the user has since navigated away from must not overwrite the
+// newly-loaded session's breadcrumb with a stale one.
+func TestStaleParentTitleFetchDiscarded(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s2"}
+	m.parentTitle = "Current Parent"
+	m.subagentColor = "green"
+
+	// A fetch dispatched while the user was still viewing s1 (a child
+	// session), resolving after they've already switched to s2, must be
+	// discarded rather than applied.
+	stale := parentTitleMsg{forSession: "s1", title: "Stale Parent", color: "purple"}
+	m.Update(stale)
+
+	require.Equal(t, "Current Parent", m.parentTitle,
+		"a parentTitleMsg scoped to a departed session must not overwrite the current breadcrumb")
+	require.Equal(t, "green", m.subagentColor)
 }
 
 // TestToggleYoloWritesThroughCache: both yolo toggle paths share

@@ -63,17 +63,21 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	}
 
 	// Arm the MCP init gate so buildAgent's readiness goroutine blocks in
-	// WaitForInit. We never complete init, so the goroutine stays parked; the
-	// agent package's TestMain does not enforce goleak and no other test in it
-	// builds a coordinator, so the parked goroutine is harmless.
+	// WaitForInit. We never complete init, so the goroutine that observes this
+	// specific call stays parked; the agent package's TestMain does not
+	// enforce goleak, so that one leaked goroutine is harmless. The armed flag
+	// itself is reset in cleanup so it doesn't leak into other tests in this
+	// package that build a coordinator and would otherwise block forever on a
+	// gate this test never completes.
 	mcp.ArmInit()
+	t.Cleanup(mcp.ResetInitStateForTests)
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 
 	ctx, cancel := context.WithCancel(context.Background())
-	_, err = coord.buildAgent(ctx, p, agentCfg, false)
+	_, err = coord.buildAgent(ctx, p, agentCfg, false, subagentModel{}, &coord.readyWg)
 	require.NoError(t, err)
 
 	// The caller goes away, mirroring an HTTP handler returning and canceling

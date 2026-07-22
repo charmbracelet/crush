@@ -85,6 +85,17 @@ func ArmInit() {
 	initMu.Unlock()
 }
 
+// ResetInitStateForTests clears the init-armed flag. Test-only: exported so
+// packages outside mcp that call ArmInit to simulate slow initialization
+// (without ever closing initDone) can undo it in t.Cleanup. Without this, the
+// armed flag leaks for the rest of the test binary process and blocks
+// WaitForInit in every later test that builds a coordinator.
+func ResetInitStateForTests() {
+	initMu.Lock()
+	initStarted = false
+	initMu.Unlock()
+}
+
 // renewLock returns the per-server mutex used to serialize session renewals,
 // creating it on first use.
 func renewLock(name string) *sync.Mutex {

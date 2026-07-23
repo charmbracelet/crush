@@ -46,6 +46,14 @@ type countingWorkspace struct {
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
 
+func (w *countingWorkspace) AgentReadyErr() error {
+	w.readyCalls++
+	if w.ready {
+		return nil
+	}
+	return workspace.ErrAgentNotInitialized
+}
+
 func (w *countingWorkspace) AgentQueuedPrompts(string) int {
 	w.queuedCalls++
 	return len(w.queued)

@@ -3885,8 +3885,8 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
-	if !m.com.Workspace.AgentIsReady() {
-		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
+	if err := m.com.Workspace.AgentReadyErr(); err != nil {
+		return util.ReportError(err)
 	}
 
 	// Start the turn timer.

@@ -6,6 +6,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,6 +23,19 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+)
+
+// Reasons the coder agent may be unavailable, returned by
+// Workspace.AgentReadyErr so callers can tell a genuinely
+// uninitialized agent apart from a lost server connection.
+var (
+	// ErrAgentNotInitialized means the workspace exists but its coder
+	// agent has not been configured/initialized (e.g. no model set).
+	ErrAgentNotInitialized = errors.New("coder agent is not initialized")
+	// ErrServerUnreachable means the client could not reach the server
+	// to determine the agent's status (server down, or the workspace was
+	// torn down out from under the client).
+	ErrServerUnreachable = errors.New("lost connection to the crush server")
 )
 
 // LSPClientInfo holds information about an LSP client's state. This is
@@ -91,6 +105,13 @@ type Workspace interface {
 	AgentIsSessionBusy(sessionID string) bool
 	AgentModel() AgentModel
 	AgentIsReady() bool
+	// AgentReadyErr reports nil when the coder agent is ready to accept
+	// work, or a descriptive error otherwise: ErrAgentNotInitialized
+	// when the agent simply isn't set up, or ErrServerUnreachable
+	// (wrapped) when the client could not reach the server to find out.
+	// It lets the UI show an actionable message instead of collapsing
+	// both cases into "agent offline".
+	AgentReadyErr() error
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)

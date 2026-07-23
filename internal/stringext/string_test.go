@@ -7,6 +7,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNormalizeSpace(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "crlf", input: "a\r\nb", expected: "a\nb"},
+		{name: "bare cr", input: "Rebasing (1/5)\rRebasing (2/5)\r", expected: "Rebasing (1/5)\nRebasing (2/5)"},
+		{name: "tabs", input: "a\tb", expected: "a    b"},
+		{name: "mixed", input: "a\r\nb\rc\td ", expected: "a\nb\nc    d"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.expected, NormalizeSpace(tt.input))
+		})
+	}
+}
+
 func TestIsValidBase64(t *testing.T) {
 	t.Parallel()
 

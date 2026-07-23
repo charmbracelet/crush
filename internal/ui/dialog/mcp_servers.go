@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -20,8 +19,11 @@ import (
 const (
 	// MCPServersID is the identifier for the MCP servers dialog.
 	MCPServersID              = "mcp_servers"
-	mcpServersDialogMaxWidth  = 60
-	mcpServersDialogMaxHeight = 20
+	mcpServersDialogMaxWidth  = 45
+	mcpServersDialogMaxHeight = 12
+	// rcGapHeight is the vertical gap (in lines) between the dialog title
+	// and the list content.
+	rcGapHeight = 1
 )
 
 // MCPServerItem represents a single MCP server in the list.
@@ -38,10 +40,9 @@ type MCPServerItem struct {
 
 // MCPServers represents a dialog for toggling MCP servers on/off.
 type MCPServers struct {
-	com   *common.Common
-	help  help.Model
-	list  *list.FilterableList
-	input textinput.Model
+	com  *common.Common
+	help help.Model
+	list *list.FilterableList
 
 	keyMap struct {
 		Toggle   key.Binding
@@ -67,12 +68,6 @@ func NewMCPServers(com *common.Common) (*MCPServers, error) {
 
 	r.list = list.NewFilterableList()
 	r.list.Focus()
-
-	r.input = textinput.New()
-	r.input.SetVirtualCursor(false)
-	r.input.Placeholder = "Type to filter"
-	r.input.SetStyles(com.Styles.TextInput)
-	r.input.Focus()
 
 	r.keyMap.Toggle = key.NewBinding(
 		key.WithKeys("space", "enter"),
@@ -143,20 +138,12 @@ func (r *MCPServers) HandleMsg(msg tea.Msg) Action {
 			if !ok {
 				break
 			}
-			// Ignore toggle while a server is starting or already
-			// in a transitional state to prevent duplicate sessions.
+			// Ignore toggle while a server is starting to prevent
+			// duplicate sessions.
 			if mcpItem.state == mcp.StateStarting {
 				break
 			}
 			return ActionToggleMCP{Name: mcpItem.name, Enable: !mcpItem.connected}
-		default:
-			var cmd tea.Cmd
-			r.input, cmd = r.input.Update(msg)
-			value := r.input.Value()
-			r.list.SetFilter(value)
-			r.list.ScrollToTop()
-			r.list.SetSelected(0)
-			return ActionCmd{cmd}
 		}
 	}
 	return nil
@@ -164,7 +151,7 @@ func (r *MCPServers) HandleMsg(msg tea.Msg) Action {
 
 // Cursor returns the cursor position relative to the dialog.
 func (r *MCPServers) Cursor() *tea.Cursor {
-	return InputCursor(r.com.Styles, r.input.Cursor())
+	return nil
 }
 
 // Draw implements [Dialog].
@@ -174,17 +161,14 @@ func (r *MCPServers) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	height := max(0, min(mcpServersDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalBorderSize()
+		t.Dialog.View.GetVerticalBorderSize() + rcGapHeight
 
-	r.input.SetWidth(dialogInputTextWidth(t, r.input, innerWidth))
 	r.list.SetSize(innerWidth, max(0, height-heightOffset))
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "MCP Servers"
-	inputView := t.Dialog.InputPrompt.Render(r.input.View())
-	rc.AddPart(inputView)
+	rc.Gap = rcGapHeight
 
 	visibleCount := len(r.list.FilteredItems())
 	if r.list.Height() >= visibleCount {
@@ -198,10 +182,8 @@ func (r *MCPServers) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = renderDialogHelp(t, &r.help, r, innerWidth)
 
 	view := rc.Render()
-
-	cur := r.Cursor()
-	DrawCenterCursor(scr, area, view, cur)
-	return cur
+	DrawCenterCursor(scr, area, view, nil)
+	return nil
 }
 
 // ShortHelp implements [help.KeyMap].
@@ -335,7 +317,7 @@ func (i *MCPServerItem) Render(width int) string {
 
 	lineWidth := max(0, width-style.GetHorizontalFrameSize())
 
-	// Build status indicator.
+	// Build status indicator using the same colored dots as the sidebar.
 	var iconStyle lipgloss.Style
 	var statusText string
 	switch i.state {
@@ -356,7 +338,7 @@ func (i *MCPServerItem) Render(width int) string {
 		statusText = "off"
 	}
 	toggleColor := iconStyle.GetForeground()
-	toggleText := lipgloss.NewStyle().Foreground(toggleColor).Render("● " + statusText)
+	toggleText := lipgloss.NewStyle().Foreground(toggleColor).Render(statusText + " ●")
 
 	toggleWidth := lipgloss.Width(toggleText)
 

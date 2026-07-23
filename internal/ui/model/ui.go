@@ -774,7 +774,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if mcpDialog, ok := dia.(*dialog.MCPServers); ok {
 				mcpDialog.Refresh()
 			}
-    }
+		}
 		// Auto-open the MCP auth dialog if any servers need authentication.
 		if cmd := m.openMCPAuthDialog(); cmd != nil {
 			cmds = append(cmds, cmd)

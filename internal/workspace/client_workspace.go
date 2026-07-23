@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
@@ -41,10 +42,23 @@ type ClientWorkspace struct {
 	ws     proto.Workspace
 	skills *skills.Manager
 
+	// subCtx bounds the lifetime of the event subscription (and its
+	// reconnect loop). Shutdown cancels it so Subscribe stops
+	// reconnecting instead of racing the teardown.
+	subCtx    context.Context
+	subCancel context.CancelFunc
+
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
 }
+
+// SSE reconnect backoff bounds for the workspace event stream. Declared
+// as vars (not consts) so tests can shrink the delays.
+var (
+	sseReconnectInitialBackoff = 250 * time.Millisecond
+	sseReconnectMaxBackoff     = 10 * time.Second
+)
 
 // NewClientWorkspace creates a new ClientWorkspace that proxies all
 // operations through the given client SDK. The ws parameter is the
@@ -60,10 +74,13 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	}
 	states := protoToSkillStates(ws.Skills)
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
+	subCtx, subCancel := context.WithCancel(context.Background())
 	return &ClientWorkspace{
 		client:      c,
 		ws:          ws,
 		skills:      mgr,
+		subCtx:      subCtx,
+		subCancel:   subCancel,
 		herdrClient: herdr.Init(),
 	}
 }
@@ -231,11 +248,21 @@ func (w *ClientWorkspace) AgentModel() AgentModel {
 }
 
 func (w *ClientWorkspace) AgentIsReady() bool {
+	return w.AgentReadyErr() == nil
+}
+
+func (w *ClientWorkspace) AgentReadyErr() error {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {
-		return false
+		// The workspace/server could not be reached. This is distinct
+		// from an initialized-but-not-ready agent: the server may have
+		// torn the workspace down or restarted underneath us.
+		return fmt.Errorf("%w: %v", ErrServerUnreachable, err)
 	}
-	return info.IsReady
+	if !info.IsReady {
+		return ErrAgentNotInitialized
+	}
+	return nil
 }
 
 func (w *ClientWorkspace) AgentQueuedPrompts(sessionID string) int {
@@ -634,6 +661,34 @@ func (w *ClientWorkspace) ReadMCPResource(ctx context.Context, name, uri string)
 	return result, nil
 }
 
+func (w *ClientWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error) {
+	prompts, err := w.client.ListMCPPrompts(ctx, w.workspaceID())
+	if err != nil {
+		return nil, err
+	}
+	result := make([]commands.MCPPrompt, len(prompts))
+	for i, prompt := range prompts {
+		arguments := make([]commands.Argument, len(prompt.Arguments))
+		for j, argument := range prompt.Arguments {
+			arguments[j] = commands.Argument{
+				ID:          argument.ID,
+				Title:       argument.Title,
+				Description: argument.Description,
+				Required:    argument.Required,
+			}
+		}
+		result[i] = commands.MCPPrompt{
+			ID:          prompt.ID,
+			Title:       prompt.Title,
+			Description: prompt.Description,
+			PromptID:    prompt.PromptID,
+			ClientID:    prompt.ClientID,
+			Arguments:   arguments,
+		}
+	}
+	return result, nil
+}
+
 func (w *ClientWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
 	return w.client.GetMCPPrompt(context.Background(), w.workspaceID(), clientID, promptID, args)
 }
@@ -654,6 +709,21 @@ func (w *ClientWorkspace) MCPDisable(name string) error {
 	return w.client.MCPDisable(context.Background(), w.workspaceID(), name)
 }
 
+func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
+	// OAuth authentication requires local browser interaction and
+	// cannot be proxied through the server. Return an error so the
+	// caller knows to handle it differently in client mode.
+	return fmt.Errorf("MCP OAuth authentication is not supported in client mode")
+}
+
+func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
+	return nil
+}
+
+func (w *ClientWorkspace) MCPAuthURL(_ string) string {
+	return ""
+}
+
 // -- Lifecycle --
 
 func (w *ClientWorkspace) Subscribe(program *tea.Program) {
@@ -662,13 +732,68 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 		program.Quit()
 	})
 
-	evc, err := w.client.SubscribeEvents(context.Background(), w.workspaceID())
-	if err != nil {
-		slog.Error("Failed to subscribe to events", "error", err)
-		return
-	}
+	w.runSubscription(program.Send)
+}
 
-	w.consumeEvents(evc, program.Send)
+// runSubscription subscribes to the workspace event stream and forwards
+// translated events to send, reconnecting with capped exponential
+// backoff whenever the stream drops. It returns only when the
+// subscription context is cancelled (via Shutdown). Split out from
+// Subscribe so it can be tested without a real *tea.Program.
+func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
+	backoff := sseReconnectInitialBackoff
+	for {
+		if w.subCtx.Err() != nil {
+			return
+		}
+
+		evc, err := w.client.SubscribeEvents(w.subCtx, w.workspaceID())
+		if err != nil {
+			if w.subCtx.Err() != nil {
+				return
+			}
+			slog.Error("Failed to subscribe to workspace events; retrying",
+				"error", err, "retry_in", backoff)
+			if !w.sleepOrDone(backoff) {
+				return
+			}
+			backoff = min(backoff*2, sseReconnectMaxBackoff)
+			continue
+		}
+
+		// Connected: reset the backoff and pump events until the
+		// stream drops.
+		backoff = sseReconnectInitialBackoff
+		w.consumeEvents(evc, send)
+
+		// The event channel closed: the server restarted, the stream
+		// was interrupted, or the workspace briefly went away.
+		// Reconnect after a short delay instead of leaving the TUI
+		// permanently orphaned, which is what surfaced as a stuck
+		// "coder agent is offline".
+		if w.subCtx.Err() != nil {
+			return
+		}
+		slog.Warn("Workspace event stream closed; reconnecting", "retry_in", backoff)
+		if !w.sleepOrDone(backoff) {
+			return
+		}
+		backoff = min(backoff*2, sseReconnectMaxBackoff)
+	}
+}
+
+// sleepOrDone waits for d or until the subscription context is
+// cancelled. It reports false when the context was cancelled, signalling
+// the caller to stop reconnecting.
+func (w *ClientWorkspace) sleepOrDone(d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-w.subCtx.Done():
+		return false
+	}
 }
 
 // consumeEvents drives the workspace event loop. It is split out from
@@ -694,6 +819,11 @@ func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 }
 
 func (w *ClientWorkspace) Shutdown() {
+	// Stop the event subscription's reconnect loop before releasing the
+	// workspace so it doesn't race to re-subscribe during teardown.
+	if w.subCancel != nil {
+		w.subCancel()
+	}
 	w.herdrClient.Close()
 	_ = w.client.DeleteWorkspace(context.Background(), w.workspaceID())
 }

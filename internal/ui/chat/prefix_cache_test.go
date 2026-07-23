@@ -117,6 +117,7 @@ func TestUserMessageItemRender_PrefixCacheFocusBlur(t *testing.T) {
 		sty.Attachments.Image,
 		sty.Attachments.Text,
 		sty.Attachments.Skill,
+		sty.Attachments.Remove,
 	)
 	item := NewUserMessageItem(&sty, msg, r).(*UserMessageItem)
 

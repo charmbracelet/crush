@@ -28,6 +28,47 @@ func dialogInputTextWidth(t *styles.Styles, input textinput.Model, contentWidth 
 		cursorPadding)
 }
 
+// sizer is satisfied by any list type that can report its total content
+// height and accept a viewport size. Both *list.List and *list.FilterableList
+// (and wrappers embedding them) implement this.
+type sizer interface {
+	TotalHeight() int
+	SetSize(width, height int)
+}
+
+// sizeDialogList computes the list dimensions within a dialog and calls
+// l.SetSize. It accounts for the title, input, help, and view frame sizes
+// so callers don't have to repeat the arithmetic. The scrollbar column is
+// reserved only when content overflows the viewport.
+//
+// Returns listHeight, listTotalHeight, and listWidth for callers that need
+// them (e.g. to pass to joinScrollbar or applyInfoColumnVisibility).
+//
+// Parameters:
+//   - t: styles for frame/border measurements.
+//   - l: the list to size.
+//   - innerWidth: dialog content width (total minus View horizontal frame).
+//   - dialogHeight: total dialog content height (already clamped).
+func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (listHeight, listTotalHeight, listWidth int) {
+	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
+		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		t.Dialog.HelpView.GetVerticalFrameSize() +
+		t.Dialog.View.GetVerticalFrameSize()
+
+	listHeight = max(0, dialogHeight-heightOffset)
+	listTotalHeight = l.TotalHeight()
+
+	// Reserve one column for the scrollbar only when it will actually
+	// show, so the list otherwise spans the full content width.
+	scrollbarWidth := 0
+	if listTotalHeight > listHeight {
+		scrollbarWidth = 1
+	}
+	listWidth = max(0, innerWidth-scrollbarWidth)
+	l.SetSize(listWidth, listHeight)
+	return listHeight, listTotalHeight, listWidth
+}
+
 // joinScrollbar appends a vertical scrollbar to the right of view when the
 // content overflows its viewport, and returns view unchanged otherwise.
 // contentSize is the total content height, viewportSize the visible height,

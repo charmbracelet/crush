@@ -192,6 +192,13 @@ func (w *AppWorkspace) AgentIsReady() bool {
 	return w.app.AgentCoordinator != nil
 }
 
+func (w *AppWorkspace) AgentReadyErr() error {
+	if w.app.AgentCoordinator == nil {
+		return ErrAgentNotInitialized
+	}
+	return nil
+}
+
 func (w *AppWorkspace) AgentQueuedPrompts(sessionID string) int {
 	if w.app.AgentCoordinator == nil {
 		return 0
@@ -427,6 +434,10 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 	return result, nil
 }
 
+func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, error) {
+	return commands.LoadMCPPrompts()
+}
+
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
 	return commands.GetMCPPrompt(w.store, clientID, promptID, args)
 }
@@ -467,6 +478,18 @@ func (w *AppWorkspace) MCPEnable(ctx context.Context, name string) error {
 func (w *AppWorkspace) MCPDisable(name string) error {
 	w.store.SetMCPDisabledInMemory(name, true)
 	return mcptools.DisableSingle(w.store, name)
+}
+
+func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
+	return mcptools.AuthenticateMCP(ctx, w.store, name)
+}
+
+func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
+	return mcptools.PendingAuthMCPs(w.store)
+}
+
+func (w *AppWorkspace) MCPAuthURL(name string) string {
+	return mcptools.MCPAuthURL(name)
 }
 
 // -- Lifecycle --

@@ -195,7 +195,7 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 
 	var created atomic.Int32
 	origNewSession := newSession
-	newSession = func(context.Context, string, config.MCPConfig, config.VariableResolver) (*ClientSession, error) {
+	newSession = func(context.Context, *config.ConfigStore, string, config.MCPConfig, config.VariableResolver, bool) (*ClientSession, error) {
 		created.Add(1)
 		return <-replacements, nil
 	}
@@ -324,7 +324,7 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 
 	replacement := liveSessionWithCapabilities(t, "send_message", "a_prompt", "res://thing")
 	origNewSession := newSession
-	newSession = func(context.Context, string, config.MCPConfig, config.VariableResolver) (*ClientSession, error) {
+	newSession = func(context.Context, *config.ConfigStore, string, config.MCPConfig, config.VariableResolver, bool) (*ClientSession, error) {
 		return replacement, nil
 	}
 	t.Cleanup(func() { newSession = origNewSession })

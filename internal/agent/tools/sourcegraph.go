@@ -144,7 +144,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
 
-			formattedResults, err := formatSourcegraphResults(result, params.ContextWindow)
+			formattedResults, err := formatSourcegraphResults(result, params.ContextWindow, params.Count)
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to format results: " + err.Error()), nil
 			}
@@ -154,48 +154,19 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	)
 }
 
-func formatSourcegraphResults(result map[string]any, contextWindow int) (string, error) {
+func formatSourcegraphResults(result map[string]any, contextWindow, maxResults int) (string, error) {
 	var buffer strings.Builder
 
-	if errors, ok := result["errors"].([]any); ok && len(errors) > 0 {
-		buffer.WriteString("## Sourcegraph API Error\n\n")
-		for _, err := range errors {
-			if errMap, ok := err.(map[string]any); ok {
-				if message, ok := errMap["message"].(string); ok {
-					fmt.Fprintf(&buffer, "- %s\n", message)
-				}
-			}
-		}
+	if writeSourcegraphErrors(&buffer, result) {
 		return buffer.String(), nil
 	}
 
-	data, ok := result["data"].(map[string]any)
-	if !ok {
-		return "", fmt.Errorf("invalid response format: missing data field")
+	searchResults, err := sourcegraphSearchResults(result)
+	if err != nil {
+		return "", err
 	}
 
-	search, ok := data["search"].(map[string]any)
-	if !ok {
-		return "", fmt.Errorf("invalid response format: missing search field")
-	}
-
-	searchResults, ok := search["results"].(map[string]any)
-	if !ok {
-		return "", fmt.Errorf("invalid response format: missing results field")
-	}
-
-	matchCount, _ := searchResults["matchCount"].(float64)
-	resultCount, _ := searchResults["resultCount"].(float64)
-	limitHit, _ := searchResults["limitHit"].(bool)
-
-	buffer.WriteString("# Sourcegraph Search Results\n\n")
-	fmt.Fprintf(&buffer, "Found %d matches across %d results\n", int(matchCount), int(resultCount))
-
-	if limitHit {
-		buffer.WriteString("(Result limit reached, try a more specific query)\n")
-	}
-
-	buffer.WriteString("\n")
+	writeSourcegraphHeader(&buffer, searchResults)
 
 	results, ok := searchResults["results"].([]any)
 	if !ok || len(results) == 0 {
@@ -203,83 +174,138 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 		return buffer.String(), nil
 	}
 
-	maxResults := 10
 	if len(results) > maxResults {
 		results = results[:maxResults]
 	}
 
 	for i, res := range results {
-		fileMatch, ok := res.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		typeName, _ := fileMatch["__typename"].(string)
-		if typeName != "FileMatch" {
-			continue
-		}
-
-		repo, _ := fileMatch["repository"].(map[string]any)
-		file, _ := fileMatch["file"].(map[string]any)
-		lineMatches, _ := fileMatch["lineMatches"].([]any)
-
-		if repo == nil || file == nil {
-			continue
-		}
-
-		repoName, _ := repo["name"].(string)
-		filePath, _ := file["path"].(string)
-		fileURL, _ := file["url"].(string)
-		fileContent, _ := file["content"].(string)
-
-		fmt.Fprintf(&buffer, "## Result %d: %s/%s\n\n", i+1, repoName, filePath)
-
-		if fileURL != "" {
-			fmt.Fprintf(&buffer, "URL: %s\n\n", fileURL)
-		}
-
-		if len(lineMatches) > 0 {
-			for _, lm := range lineMatches {
-				lineMatch, ok := lm.(map[string]any)
-				if !ok {
-					continue
-				}
-
-				lineNumber, _ := lineMatch["lineNumber"].(float64)
-				preview, _ := lineMatch["preview"].(string)
-
-				if fileContent != "" {
-					lines := strings.Split(fileContent, "\n")
-
-					buffer.WriteString("```\n")
-
-					startLine := max(1, int(lineNumber)-contextWindow)
-
-					for j := startLine - 1; j < int(lineNumber)-1 && j < len(lines); j++ {
-						if j >= 0 {
-							fmt.Fprintf(&buffer, "%d| %s\n", j+1, lines[j])
-						}
-					}
-
-					fmt.Fprintf(&buffer, "%d|  %s\n", int(lineNumber), preview)
-
-					endLine := int(lineNumber) + contextWindow
-
-					for j := int(lineNumber); j < endLine && j < len(lines); j++ {
-						if j < len(lines) {
-							fmt.Fprintf(&buffer, "%d| %s\n", j+1, lines[j])
-						}
-					}
-
-					buffer.WriteString("```\n\n")
-				} else {
-					buffer.WriteString("```\n")
-					fmt.Fprintf(&buffer, "%d| %s\n", int(lineNumber), preview)
-					buffer.WriteString("```\n\n")
-				}
-			}
-		}
+		formatSourcegraphResult(&buffer, i, res, contextWindow)
 	}
 
 	return buffer.String(), nil
+}
+
+func writeSourcegraphErrors(buffer *strings.Builder, result map[string]any) bool {
+	errors, ok := result["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		return false
+	}
+
+	buffer.WriteString("## Sourcegraph API Error\n\n")
+	for _, err := range errors {
+		errMap, ok := err.(map[string]any)
+		if !ok {
+			continue
+		}
+		message, ok := errMap["message"].(string)
+		if ok {
+			fmt.Fprintf(buffer, "- %s\n", message)
+		}
+	}
+	return true
+}
+
+func sourcegraphSearchResults(result map[string]any) (map[string]any, error) {
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid response format: missing data field")
+	}
+
+	search, ok := data["search"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid response format: missing search field")
+	}
+
+	searchResults, ok := search["results"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid response format: missing results field")
+	}
+	return searchResults, nil
+}
+
+func writeSourcegraphHeader(buffer *strings.Builder, searchResults map[string]any) {
+	matchCount, _ := searchResults["matchCount"].(float64)
+	resultCount, _ := searchResults["resultCount"].(float64)
+	limitHit, _ := searchResults["limitHit"].(bool)
+
+	buffer.WriteString("# Sourcegraph Search Results\n\n")
+	fmt.Fprintf(buffer, "Found %d matches across %d results\n", int(matchCount), int(resultCount))
+
+	if limitHit {
+		buffer.WriteString("(Result limit reached, try a more specific query)\n")
+	}
+
+	buffer.WriteString("\n")
+}
+
+func formatSourcegraphResult(buffer *strings.Builder, index int, res any, contextWindow int) {
+	fileMatch, ok := res.(map[string]any)
+	if !ok {
+		return
+	}
+
+	typeName, _ := fileMatch["__typename"].(string)
+	if typeName != "FileMatch" {
+		return
+	}
+
+	repo, _ := fileMatch["repository"].(map[string]any)
+	file, _ := fileMatch["file"].(map[string]any)
+	lineMatches, _ := fileMatch["lineMatches"].([]any)
+
+	if repo == nil || file == nil {
+		return
+	}
+
+	repoName, _ := repo["name"].(string)
+	filePath, _ := file["path"].(string)
+	fileURL, _ := file["url"].(string)
+	fileContent, _ := file["content"].(string)
+
+	fmt.Fprintf(buffer, "## Result %d: %s/%s\n\n", index+1, repoName, filePath)
+
+	if fileURL != "" {
+		fmt.Fprintf(buffer, "URL: %s\n\n", fileURL)
+	}
+
+	formatSourcegraphLineMatches(buffer, lineMatches, fileContent, contextWindow)
+}
+
+func formatSourcegraphLineMatches(buffer *strings.Builder, lineMatches []any, fileContent string, contextWindow int) {
+	for _, lm := range lineMatches {
+		lineMatch, ok := lm.(map[string]any)
+		if !ok {
+			continue
+		}
+		formatSourcegraphLineMatch(buffer, lineMatch, fileContent, contextWindow)
+	}
+}
+
+func formatSourcegraphLineMatch(buffer *strings.Builder, lineMatch map[string]any, fileContent string, contextWindow int) {
+	lineNumber, _ := lineMatch["lineNumber"].(float64)
+	preview, _ := lineMatch["preview"].(string)
+	line := int(lineNumber)
+
+	buffer.WriteString("```\n")
+	if fileContent == "" {
+		fmt.Fprintf(buffer, "%d| %s\n", line, preview)
+		buffer.WriteString("```\n\n")
+		return
+	}
+
+	lines := strings.Split(fileContent, "\n")
+	startLine := max(1, line-contextWindow)
+	for j := startLine - 1; j < line-1 && j < len(lines); j++ {
+		if j >= 0 {
+			fmt.Fprintf(buffer, "%d| %s\n", j+1, lines[j])
+		}
+	}
+
+	fmt.Fprintf(buffer, "%d|  %s\n", line, preview)
+
+	endLine := line + contextWindow
+	for j := line; j < endLine && j < len(lines); j++ {
+		fmt.Fprintf(buffer, "%d| %s\n", j+1, lines[j])
+	}
+	buffer.WriteString("```\n\n")
 }

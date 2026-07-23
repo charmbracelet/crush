@@ -204,6 +204,34 @@ type MCPConfig struct {
 	// omitted from the outgoing request rather than sent as
 	// "Header:".
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
+
+	// OAuth enables the MCP OAuth 2.1 authorization flow for HTTP
+	// transport servers. When true, the client uses dynamic client
+	// registration and opens a browser for the user to authorize.
+	// Tokens are persisted automatically. Only supported for type=http.
+	OAuth bool `json:"oauth,omitempty" jsonschema:"description=Enable OAuth 2.1 authorization flow for this MCP server (HTTP transport only),default=false"`
+
+	// OAuthClientID is an optional pre-registered OAuth client ID. Set
+	// it for servers that do not support dynamic client registration
+	// (e.g. GitHub, Slack) and instead issue client credentials when you
+	// register an OAuth app. Values run through shell expansion, so
+	// $VAR and $(cmd) work.
+	OAuthClientID string `json:"oauth_client_id,omitempty" jsonschema:"description=Pre-registered OAuth client ID for servers without dynamic client registration"`
+
+	// OAuthClientSecret is the optional secret paired with
+	// OAuthClientID for confidential clients. Values run through shell
+	// expansion, so $VAR and $(cmd) work.
+	OAuthClientSecret string `json:"oauth_client_secret,omitempty" jsonschema:"description=Pre-registered OAuth client secret paired with oauth_client_id"`
+
+	// OAuthCallbackPort pins the localhost port used for the OAuth
+	// redirect listener. Set this when the OAuth provider requires an
+	// exact-match callback URL (e.g. GitHub OAuth Apps). When omitted,
+	// Crush picks the first free port from its default range.
+	OAuthCallbackPort int `json:"oauth_callback_port,omitempty" jsonschema:"description=Fixed localhost port for the OAuth callback, required by providers that enforce exact-match redirect URIs"`
+
+	// OAuthToken is the persisted OAuth token for this server. It is
+	// managed internally and stored in the global data config.
+	OAuthToken *oauth.Token `json:"oauth_token,omitempty" jsonschema:"-"`
 }
 
 type LSPConfig struct {
@@ -743,6 +771,11 @@ func allToolNames() []string {
 		"lsp_diagnostics",
 		"lsp_references",
 		"lsp_restart",
+		"lsp_symbols",
+		"lsp_definition",
+		"lsp_call_hierarchy",
+		"lsp_rename",
+		"lsp_replace_symbol",
 		"fetch",
 		"agentic_fetch",
 		"glob",
@@ -767,7 +800,7 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
+	readOnlyTools := []string{"glob", "grep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "sourcegraph", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }

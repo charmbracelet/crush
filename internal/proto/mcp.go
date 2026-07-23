@@ -15,6 +15,7 @@ const (
 	MCPStateStarting
 	MCPStateConnected
 	MCPStateError
+	MCPStateNeedsAuth
 )
 
 // MarshalText implements the [encoding.TextMarshaler] interface.
@@ -33,6 +34,8 @@ func (s *MCPState) UnmarshalText(data []byte) error {
 		*s = MCPStateConnected
 	case "error":
 		*s = MCPStateError
+	case "needs auth":
+		*s = MCPStateNeedsAuth
 	default:
 		return fmt.Errorf("unknown mcp state: %s", data)
 	}
@@ -50,6 +53,8 @@ func (s MCPState) String() string {
 		return "connected"
 	case MCPStateError:
 		return "error"
+	case MCPStateNeedsAuth:
+		return "needs auth"
 	default:
 		return "unknown"
 	}
@@ -133,6 +138,22 @@ type MCPClientInfo struct {
 	PromptCount   int       `json:"prompt_count,omitempty"`
 	ResourceCount int       `json:"resource_count,omitempty"`
 	ConnectedAt   time.Time `json:"connected_at"`
+}
+
+type MCPPromptArgument struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+type MCPPrompt struct {
+	ID          string              `json:"id"`
+	Title       string              `json:"title,omitempty"`
+	Description string              `json:"description,omitempty"`
+	PromptID    string              `json:"prompt_id"`
+	ClientID    string              `json:"client_id"`
+	Arguments   []MCPPromptArgument `json:"arguments,omitempty"`
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

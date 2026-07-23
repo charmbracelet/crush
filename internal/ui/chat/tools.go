@@ -198,9 +198,6 @@ func newBaseToolMessageItem(
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
-		Suffix: func() string {
-			return common.Elapsed()
-		},
 	})
 
 	return t
@@ -262,6 +259,16 @@ func NewToolMessageItem(
 		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ReferencesToolName:
 		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
+	case tools.DefinitionToolName:
+		item = NewDefinitionToolMessageItem(sty, toolCall, result, canceled)
+	case tools.RenameToolName:
+		item = NewRenameToolMessageItem(sty, toolCall, result, canceled)
+	case tools.ReplaceSymbolToolName:
+		item = NewReplaceSymbolToolMessageItem(sty, toolCall, result, canceled)
+	case tools.CallHierarchyToolName:
+		item = NewCallHierarchyToolMessageItem(sty, toolCall, result, canceled)
+	case tools.SymbolsToolName:
+		item = NewSymbolsToolMessageItem(sty, toolCall, result, canceled)
 	case tools.LSPRestartToolName:
 		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
 	default:

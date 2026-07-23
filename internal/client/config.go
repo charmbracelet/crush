@@ -352,6 +352,22 @@ func (c *Client) ReadMCPResource(ctx context.Context, id, name, uri string) ([]M
 	return contents, nil
 }
 
+func (c *Client) ListMCPPrompts(ctx context.Context, id string) ([]proto.MCPPrompt, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/mcp/prompts", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list MCP prompts: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list MCP prompts: status code %d", rsp.StatusCode)
+	}
+	var prompts []proto.MCPPrompt
+	if err := json.NewDecoder(rsp.Body).Decode(&prompts); err != nil {
+		return nil, fmt.Errorf("failed to decode MCP prompts: %w", err)
+	}
+	return prompts, nil
+}
+
 // GetMCPPrompt retrieves a prompt from a named MCP server.
 func (c *Client) GetMCPPrompt(ctx context.Context, id, clientID, promptID string, args map[string]string) (string, error) {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/get-prompt", id), nil, jsonBody(struct {

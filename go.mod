@@ -5,9 +5,9 @@ go 1.26.5
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
-	charm.land/catwalk v0.49.25
+	charm.land/catwalk v0.49.28
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.38.0
+	charm.land/fantasy v0.38.1
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.5
 	charm.land/log/v2 v2.0.0
@@ -45,13 +45,13 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/jordanella/go-ansi-paintbrush v0.0.0-20240728195301-b7ad996ecf3d
 	github.com/lucasb-eyer/go-colorful v1.4.0
-	github.com/mattn/go-isatty v0.0.22
-	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/mattn/go-isatty v0.0.23
+	github.com/modelcontextprotocol/go-sdk v1.7.0-pre.3
 	github.com/ncruces/go-sqlite3 v0.35.2
 	github.com/nxadm/tail v1.4.11
-	github.com/openai/openai-go/v3 v3.43.0
+	github.com/openai/openai-go/v3 v3.44.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.17.5
+	github.com/posthog/posthog-go v1.19.0
 	github.com/pressly/goose/v3 v3.27.2
 	github.com/qjebbs/go-jsons v1.0.0-alpha.6
 	github.com/rivo/uniseg v0.4.7
@@ -67,6 +67,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	golang.design/x/clipboard v0.8.0
 	golang.org/x/net v0.57.0
+	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.40.0
@@ -202,7 +203,6 @@ require (
 	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/mobile v0.0.0-20250606033058-a2a15c67f36f // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect

@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -35,12 +37,25 @@ var (
 	ErrInvalidClientID         = errors.New("invalid client_id")
 	ErrClientNotAttached       = errors.New("client not attached")
 	ErrWorkspaceClosing        = errors.New("workspace closing")
+	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
 )
 
 // DefaultCreateGrace is the window in which a client must open an SSE
 // stream after creating a workspace before its creation hold is
 // released. Exposed as a package variable so tests can shorten it.
 var DefaultCreateGrace = 30 * time.Second
+
+// DefaultIdleShutdownDelay is how long the server stays alive after its
+// last workspace is released before it shuts itself down. The delay
+// exists so a client that closes one session and opens another moments
+// later (the same directory or a different one) reuses the still-running
+// server instead of racing its shutdown: with an immediate shutdown the
+// new client can attach to — or create a workspace on — a server that is
+// already tearing down, and then observe its coder agent as "offline".
+// Any workspace create within the window cancels the pending shutdown.
+// Overridable via CRUSH_SERVER_IDLE_TIMEOUT (seconds; 0 restores the
+// old shut-down-immediately behavior).
+var DefaultIdleShutdownDelay = 60 * time.Second
 
 // ShutdownFunc is called when the backend needs to trigger a server
 // shutdown (e.g. when the last workspace is removed).
@@ -65,12 +80,27 @@ type Backend struct {
 	// concurrent CreateWorkspace calls at the same path deduplicate
 	// deterministically.
 	pathIndex map[string]string
-	mu        sync.Mutex
+	// pending counts CreateWorkspace calls that have committed to the
+	// slow initialization path (config/db/app setup) but have not yet
+	// registered their workspace in the map. It is guarded by mu.
+	// teardown must observe pending == 0 in addition to an empty
+	// workspace map before triggering server shutdown: otherwise a
+	// teardown of the last live workspace could race ahead of a
+	// concurrent create — which releases mu during its slow init — and
+	// shut the whole server down out from under the workspace being
+	// born.
+	pending int
+	// shutdownTimer, when non-nil, is an armed idle-shutdown timer
+	// waiting out lingerDelay before it shuts the server down. It is
+	// guarded by mu and cancelled the moment a new create arrives.
+	shutdownTimer *time.Timer
+	mu            sync.Mutex
 
 	cfg         *config.ConfigStore
 	ctx         context.Context
 	shutdownFn  ShutdownFunc
 	createGrace time.Duration
+	lingerDelay time.Duration
 }
 
 // clientState tracks one client's claim on a workspace.
@@ -194,7 +224,19 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		ctx:         ctx,
 		shutdownFn:  shutdownFn,
 		createGrace: DefaultCreateGrace,
+		lingerDelay: idleShutdownDelayFromEnv(),
 	}
+}
+
+// idleShutdownDelayFromEnv returns the idle-shutdown delay, honoring a
+// CRUSH_SERVER_IDLE_TIMEOUT override (in seconds; 0 disables lingering).
+func idleShutdownDelayFromEnv() time.Duration {
+	if v := os.Getenv("CRUSH_SERVER_IDLE_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return DefaultIdleShutdownDelay
 }
 
 // SetCreateGrace overrides the create-grace window. Intended for tests
@@ -203,6 +245,15 @@ func (b *Backend) SetCreateGrace(d time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.createGrace = d
+}
+
+// SetIdleShutdownDelay overrides how long the server lingers after its
+// last workspace is released before shutting down. A value <= 0 restores
+// the shut-down-immediately behavior. Intended for tests.
+func (b *Backend) SetIdleShutdownDelay(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lingerDelay = d
 }
 
 // GetWorkspace retrieves a workspace by ID.
@@ -246,6 +297,9 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	b.mu.Lock()
+	// A client is arriving: cancel any pending idle shutdown so we never
+	// hand back a workspace on a server that is about to tear itself down.
+	b.cancelShutdownLocked()
 	if existingID, ok := b.pathIndex[key]; ok {
 		if ws, found := b.workspaces.Get(existingID); found {
 			// Hold b.mu while registering: teardown also
@@ -254,6 +308,10 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// return cannot be torn out from under us
 			// between lookup and registerClient. Lock order
 			// here is b.mu -> ws.clientsMu.
+			if !stringSlicesEqual(ws.Cfg.Overrides().EnabledChannels, args.Channels) {
+				b.mu.Unlock()
+				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+			}
 			logFirstWinsMismatch(ws, args)
 			b.registerClient(ws, clientID)
 			b.mu.Unlock()
@@ -263,7 +321,30 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		// removed; clean the stale entry and fall through.
 		delete(b.pathIndex, key)
 	}
+	// Commit to the slow creation path. Mark this create as pending
+	// while mu is still held so a teardown that runs during the
+	// unlocked init below cannot observe an empty backend and shut the
+	// server down. The deferred decrement runs after the workspace has
+	// been registered (or the create has failed), keeping the invariant
+	// that pending only drops once the workspace is visible in the map.
+	b.pending++
 	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.pending--
+		// If this create ended up registering nothing (it failed, or
+		// deduped onto an existing workspace that has since gone) and
+		// it was holding the last teardown back, the server may now be
+		// idle with no pending work. Arm the idle-shutdown timer here so
+		// a failed create racing the last teardown does not leak an
+		// empty server that a plain teardown already declined to reap.
+		shutdownNow := b.scheduleShutdownIfIdleLocked()
+		b.mu.Unlock()
+		if shutdownNow {
+			slog.Info("No workspaces remain after create settled, shutting down server...")
+			b.shutdownFn()
+		}
+	}()
 
 	id := uuid.New().String()
 	cfg, err := config.Init(args.Path, args.DataDir, args.Debug)
@@ -272,6 +353,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	cfg.Overrides().SkipPermissionRequests = args.YOLO
+	cfg.Overrides().EnabledChannels = args.Channels
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
@@ -321,6 +403,11 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// Register under b.mu so teardown cannot run
 			// between lookup and registerClient. Lock order
 			// is b.mu -> ws.clientsMu.
+			if !stringSlicesEqual(existing.Cfg.Overrides().EnabledChannels, args.Channels) {
+				b.mu.Unlock()
+				ws.invokeShutdown()
+				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+			}
 			logFirstWinsMismatch(existing, args)
 			b.registerClient(existing, clientID)
 			b.mu.Unlock()
@@ -567,14 +654,72 @@ func (b *Backend) teardown(ws *Workspace) {
 		delete(b.pathIndex, ws.resolvedPath)
 	}
 	b.workspaces.Del(ws.ID)
-	remaining := b.workspaces.Len()
+	// Arm (or, with lingering disabled, request) the idle shutdown. It
+	// only proceeds once there is genuinely nothing left: no live
+	// workspaces AND no create in flight. Deferring via the linger lets a
+	// client returning moments later reuse this server instead of racing
+	// its shutdown.
+	shutdownNow := b.scheduleShutdownIfIdleLocked()
 	b.mu.Unlock()
 
 	ws.invokeShutdown()
 
-	if remaining == 0 && b.shutdownFn != nil {
+	if shutdownNow {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
+	}
+}
+
+// scheduleShutdownIfIdleLocked decides what to do about server shutdown
+// after a workspace count or pending-create change. It must be called
+// with b.mu held.
+//
+// It returns true only when the caller should shut the server down
+// synchronously (after releasing b.mu) — that is, when the server is idle
+// and lingering is disabled (lingerDelay <= 0). When lingering is enabled
+// it instead arms a one-shot timer that re-checks idleness after
+// lingerDelay and shuts down then, and returns false. When the server is
+// not idle (a workspace is live or a create is in flight) it does
+// nothing and returns false.
+func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
+	if b.shutdownFn == nil {
+		return false
+	}
+	if b.workspaces.Len() != 0 || b.pending != 0 {
+		return false
+	}
+	if b.lingerDelay <= 0 {
+		return true
+	}
+	if b.shutdownTimer == nil {
+		b.shutdownTimer = time.AfterFunc(b.lingerDelay, b.maybeShutdown)
+	}
+	return false
+}
+
+// cancelShutdownLocked stops any armed idle-shutdown timer. It must be
+// called with b.mu held.
+func (b *Backend) cancelShutdownLocked() {
+	if b.shutdownTimer != nil {
+		b.shutdownTimer.Stop()
+		b.shutdownTimer = nil
+	}
+}
+
+// maybeShutdown is the idle-shutdown timer callback. It shuts the server
+// down only if it is still idle when the linger window elapses; any
+// create that arrived in the meantime cancelled the timer (or bumped
+// pending / the workspace count), so this re-check makes the linger
+// race-free.
+func (b *Backend) maybeShutdown() {
+	b.mu.Lock()
+	b.shutdownTimer = nil
+	idle := b.workspaces.Len() == 0 && b.pending == 0
+	fn := b.shutdownFn
+	b.mu.Unlock()
+	if idle && fn != nil {
+		slog.Info("Server idle, shutting down...")
+		fn()
 	}
 }
 
@@ -711,14 +856,15 @@ func validateClientID(id string) (string, error) {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	out := proto.Workspace{
-		ID:      ws.ID,
-		Path:    ws.Path,
-		YOLO:    ws.Cfg.Overrides().SkipPermissionRequests,
-		DataDir: cfg.Options.DataDirectory,
-		Debug:   cfg.Options.Debug,
-		Config:  cfg,
-		Env:     ws.Env,
-		Version: version.Version,
+		ID:       ws.ID,
+		Path:     ws.Path,
+		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
+		Channels: ws.Cfg.Overrides().EnabledChannels,
+		DataDir:  cfg.Options.DataDirectory,
+		Debug:    cfg.Options.Debug,
+		Config:   cfg,
+		Env:      ws.Env,
+		Version:  version.Version,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())
@@ -738,10 +884,12 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	existingCfg := existing.Cfg.Config()
 	existingYOLO := existing.Cfg.Overrides().SkipPermissionRequests
+	existingChannels := existing.Cfg.Overrides().EnabledChannels
 	if existingYOLO == args.YOLO &&
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
-		stringSlicesEqual(existing.Env, args.Env) {
+		stringSlicesEqual(existing.Env, args.Env) &&
+		stringSlicesEqual(existingChannels, args.Channels) {
 		return
 	}
 	slog.Debug(
@@ -756,6 +904,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"requested_data_dir", args.DataDir,
 		"existing_env", existing.Env,
 		"requested_env", args.Env,
+		"existing_channels", existingChannels,
+		"requested_channels", args.Channels,
 	)
 }
 

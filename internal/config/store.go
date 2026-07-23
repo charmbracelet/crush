@@ -50,6 +50,11 @@ type fileSnapshot struct {
 // the lifetime of the process (or workspace).
 type RuntimeOverrides struct {
 	SkipPermissionRequests bool
+	// EnabledChannels lists the MCP servers opted in as channels for this
+	// session (via the --channels flag). A server present in MCP config only
+	// pushes channel events when it also appears here. Entries may be written
+	// as "server:<name>" or as a bare "<name>".
+	EnabledChannels []string
 }
 
 // ConfigStore is the single entry point for all config access. It owns the
@@ -88,8 +93,8 @@ type ConfigStore struct {
 	// build a fresh Config rather than mutating the live one.
 	configMu sync.RWMutex
 
-	mu      sync.Mutex // serialises config file writes
-	writeMu sync.Mutex // serialises in-memory config production (mutators + reload)
+	mu      sync.Mutex   // serialises config file writes
+	writeMu sync.RWMutex // serialises in-memory config production (mutators + reload); RLock for readers
 
 	// refreshSF collapses concurrent in-process OAuth refreshes for the
 	// same provider into a single attempt. Combined with the per-provider
@@ -140,19 +145,26 @@ func (s *ConfigStore) WorkingDir() string {
 
 // Resolver returns the variable resolver.
 func (s *ConfigStore) Resolver() VariableResolver {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	return s.resolver
 }
 
 // Resolve resolves a variable reference using the configured resolver.
 func (s *ConfigStore) Resolve(key string) (string, error) {
-	if s.resolver == nil {
+	s.writeMu.RLock()
+	r := s.resolver
+	s.writeMu.RUnlock()
+	if r == nil {
 		return "", fmt.Errorf("no variable resolver configured")
 	}
-	return s.resolver.ResolveValue(key)
+	return r.ResolveValue(key)
 }
 
 // KnownProviders returns the list of known providers.
 func (s *ConfigStore) KnownProviders() []catwalk.Provider {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	return s.knownProviders
 }
 
@@ -163,11 +175,15 @@ func (s *ConfigStore) SetupAgents() {
 
 // Overrides returns the runtime overrides for this store.
 func (s *ConfigStore) Overrides() *RuntimeOverrides {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	return &s.overrides
 }
 
 // LoadedPaths returns the config file paths that were successfully loaded.
 func (s *ConfigStore) LoadedPaths() []string {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	return slices.Clone(s.loadedPaths)
 }
 
@@ -651,6 +667,14 @@ func (s *ConfigStore) WaitForTokenChange(ctx context.Context, providerID string)
 
 	select {
 	case <-ch:
+		// Remove the consumed signal so a subsequent
+		// SignalAuthComplete does not close an already-closed
+		// channel.
+		s.authSignalMu.Lock()
+		if s.authSignals[providerID] == ch {
+			delete(s.authSignals, providerID)
+		}
+		s.authSignalMu.Unlock()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -666,8 +690,13 @@ func (s *ConfigStore) SignalAuthComplete(providerID string) {
 	s.authSignalMu.Lock()
 	defer s.authSignalMu.Unlock()
 	if ch, ok := s.authSignals[providerID]; ok {
-		close(ch)
 		delete(s.authSignals, providerID)
+		select {
+		case <-ch:
+			// Already closed by a previous signal; nothing to do.
+		default:
+			close(ch)
+		}
 	} else {
 		// No waiter yet. Pre-create a closed channel so the next
 		// WaitForTokenChange returns immediately.

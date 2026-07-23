@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -100,6 +101,29 @@ type (
 	ActionToggleMCP struct {
 		Name   string
 		Enable bool
+	}
+)
+
+// Messages for MCP OAuth authentication dialog.
+type (
+	// ActionMCPAuthStarted is sent when the user approves authentication
+	// for an MCP server. The UI should initiate the actual auth flow
+	// using the provided context, which the dialog will cancel if the
+	// user closes it.
+	ActionMCPAuthStarted struct {
+		Name string
+		Ctx  context.Context
+	}
+
+	// ActionMCPAuthComplete is sent when MCP authentication succeeds.
+	ActionMCPAuthComplete struct {
+		Name string
+	}
+
+	// ActionMCPAuthErrored is sent when MCP authentication fails.
+	ActionMCPAuthErrored struct {
+		Name  string
+		Error error
 	}
 )
 

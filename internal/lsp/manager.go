@@ -81,11 +81,12 @@ func (s *Manager) SetCallback(cb func(name string, client *Client)) {
 	s.callback = cb
 }
 
-// TrackConfigured will callback the user-configured LSPs, but will not create
-// any clients.
-func (s *Manager) TrackConfigured() {
+// TrackConfigured notifies the UI about user-configured LSP servers without
+// starting them. Servers start on demand via Start().
+func (s *Manager) TrackConfigured(ctx context.Context) {
 	var wg sync.WaitGroup
-	for name := range s.manager.GetServers() {
+	servers := s.manager.GetServers()
+	for name := range servers {
 		if !s.isUserConfigured(name) {
 			continue
 		}
@@ -99,6 +100,9 @@ func (s *Manager) TrackConfigured() {
 // Start starts an LSP server that can handle the given file path.
 // If an appropriate LSP is already running, this is a no-op.
 func (s *Manager) Start(ctx context.Context, path string) {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	if !fsext.HasPrefix(path, s.cfg.WorkingDir()) {
 		return
 	}
@@ -106,7 +110,7 @@ func (s *Manager) Start(ctx context.Context, path string) {
 	var wg sync.WaitGroup
 	for name, server := range s.manager.GetServers() {
 		wg.Go(func() {
-			s.startServer(ctx, name, path, server)
+			s.startServer(name, path, server)
 		})
 	}
 	wg.Wait()
@@ -144,7 +148,7 @@ var skipAutoStartCommands = map[string]bool{
 	"tflint":  true,
 }
 
-func (s *Manager) startServer(ctx context.Context, name, filepath string, server *powernapconfig.ServerConfig) {
+func (s *Manager) startServer(name, filepath string, server *powernapconfig.ServerConfig) {
 	var (
 		isUserConfigured = s.isUserConfigured(name)
 		autoLSP          = s.cfg.Config().Options.AutoLSP
@@ -200,7 +204,6 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	}
 
 	client, err := New(
-		ctx,
 		name,
 		cfg,
 		s.cfg.Resolver(),
@@ -216,7 +219,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	if existing, ok := s.clients.Get(name); ok {
 		switch existing.GetServerState() {
 		case StateReady, StateStarting, StateDisabled:
-			_ = client.Close(ctx)
+			client.Shutdown()
 			s.callback(name, existing)
 			return
 		}
@@ -234,12 +237,17 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 
 	client.serverState.Store(StateStarting)
 
-	initCtx, cancel := context.WithTimeout(ctx, time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
+	// Use an independent context for initialization so that the LSP server
+	// startup is not tied to the caller's request context. The caller's
+	// context may have a short timeout or be canceled when the tool call
+	// completes, but LSP initialization can take several seconds and the
+	// server must persist beyond any single request.
+	initCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
 	defer cancel()
 
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
-		_ = client.Close(ctx)
+		client.Shutdown()
 		s.clients.Del(name)
 		return
 	}
@@ -361,7 +369,7 @@ func (s *Manager) KillAll(context.Context) {
 	for name, client := range s.clients.Seq2() {
 		wg.Go(func() {
 			defer func() { s.callback(name, client) }()
-			client.client.Kill()
+			client.Shutdown()
 			client.SetServerState(StateStopped)
 			s.clients.Del(name)
 			slog.Debug("Killed LSP client", "name", name)
@@ -383,6 +391,7 @@ func (s *Manager) StopAll(ctx context.Context) {
 				err.Error() != "signal: killed" {
 				slog.Warn("Failed to stop LSP client", "name", name, "error", err)
 			}
+			client.cancelCtx()
 			client.SetServerState(StateStopped)
 			s.clients.Del(name)
 			slog.Debug("Stopped LSP client", "name", name)

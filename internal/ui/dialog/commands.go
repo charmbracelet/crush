@@ -500,6 +500,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "Disable Docker MCP Catalog", "", ActionDisableDockerMCP{}))
 	}
 
+	// Add MCP servers toggle dialog if any MCP servers are configured.
+	if cfg != nil && len(cfg.MCP) > 0 {
+		commands = append(commands, NewCommandItem(c.com.Styles, "mcp_servers", "Toggle MCP Servers", "", ActionOpenDialog{DialogID: MCPServersID}))
+	}
+
 	if c.hasTodos || c.hasQueue {
 		var label string
 		switch {

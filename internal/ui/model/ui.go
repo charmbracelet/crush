@@ -769,6 +769,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
+		// Refresh the MCP servers dialog if it's open.
+		if dia := m.dialog.Dialog(dialog.MCPServersID); dia != nil {
+			if mcpDialog, ok := dia.(*dialog.MCPServers); ok {
+				mcpDialog.Refresh()
+			}
+		}
 		// Auto-open the MCP auth dialog if any servers need authentication.
 		if cmd := m.openMCPAuthDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1891,6 +1897,22 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.disableDockerMCP)
+	case dialog.ActionToggleMCP:
+		name := msg.Name
+		enable := msg.Enable
+		cmds = append(cmds, func() tea.Msg {
+			ctx := context.Background()
+			if enable {
+				if err := m.com.Workspace.MCPEnable(ctx, name); err != nil {
+					return util.ReportError(err)()
+				}
+				return util.NewInfoMsg("MCP server \"" + name + "\" enabled")
+			}
+			if err := m.com.Workspace.MCPDisable(name); err != nil {
+				return util.ReportError(err)()
+			}
+			return util.NewInfoMsg("MCP server \"" + name + "\" disabled")
+		})
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -4138,6 +4160,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.MCPServersID:
+		if cmd := m.openMCPServersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4220,6 +4246,22 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(reasoningDialog)
+	return nil
+}
+
+// openMCPServersDialog opens the MCP servers toggle dialog.
+func (m *UI) openMCPServersDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MCPServersID) {
+		m.dialog.BringToFront(dialog.MCPServersID)
+		return nil
+	}
+
+	mcpDialog, err := dialog.NewMCPServers(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(mcpDialog)
 	return nil
 }
 

@@ -2809,7 +2809,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Add status and help layer
 	m.status.SetHideHelp(isOnboarding)
-	m.status.Draw(scr, layout.status)
+	if !isOnboarding {
+		m.status.Draw(scr, layout.status)
+	}
 
 	// Draw completions popup if open
 	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
@@ -2845,7 +2847,17 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// the full screen bounds because the dialogs will position themselves
 	// accordingly.
 	if m.dialog.HasDialogs() {
-		return m.dialog.Draw(scr, scr.Bounds())
+		cur := m.dialog.Draw(scr, scr.Bounds())
+		if isOnboarding {
+			// Keep copy confirmations and update notices visible above the
+			// bottom-aligned onboarding dialog.
+			m.status.Draw(scr, layout.status)
+		}
+		return cur
+	}
+
+	if isOnboarding {
+		m.status.Draw(scr, layout.status)
 	}
 
 	switch m.focus {

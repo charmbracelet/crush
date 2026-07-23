@@ -71,6 +71,10 @@ func NewEditTool(
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
 
+			if resp, ignored := ignoredPathResponse(workingDir, params.FilePath); ignored {
+				return resp, nil
+			}
+
 			var response fantasy.ToolResponse
 			var err error
 

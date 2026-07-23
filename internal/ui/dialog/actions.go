@@ -57,9 +57,17 @@ type (
 	ActionSelectNotificationStyle struct {
 		Style string
 	}
+	ActionSelectScrollbarStyle struct {
+		Style string
+	}
 	ActionToggleTransparentBackground struct{}
-	ActionInitializeProject           struct{}
-	ActionSummarize                   struct {
+	// ActionSendTestNotification sends a test notification using the given
+	// style so the user can preview how it looks and sounds.
+	ActionSendTestNotification struct {
+		Style string
+	}
+	ActionInitializeProject struct{}
+	ActionSummarize         struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

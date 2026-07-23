@@ -34,6 +34,20 @@ type ConfigCompactRequest struct {
 	Enabled bool         `json:"enabled"`
 }
 
+// ConfigTransparentRequest represents a request to set the transparent
+// background.
+type ConfigTransparentRequest struct {
+	Scope   config.Scope `json:"scope"`
+	Enabled bool         `json:"enabled"`
+}
+
+// ConfigStyleRequest represents a request to set a string-valued style
+// option, such as the scrollbar or notification style.
+type ConfigStyleRequest struct {
+	Scope config.Scope `json:"scope"`
+	Style string       `json:"style"`
+}
+
 // APIKeyKind discriminates the kind of credential carried in a
 // ConfigProviderKeyRequest. JSON's `any` loses Go type information, so
 // the wire format names the kind explicitly and the server decodes

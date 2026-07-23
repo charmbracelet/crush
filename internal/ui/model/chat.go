@@ -180,6 +180,11 @@ func NewChat(com *common.Common, scrollbarMode string) *Chat {
 	return c
 }
 
+// SetScrollbarMode updates the scrollbar visibility mode at runtime.
+func (m *Chat) SetScrollbarMode(mode string) {
+	m.scrollbarMode = mode
+}
+
 // Height returns the height of the chat view port.
 func (m *Chat) Height() int {
 	return m.list.Height()

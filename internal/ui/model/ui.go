@@ -541,26 +541,35 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 // function that should be called once during initialization or when capabilities
 // change.
 func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
-	// Check for explicit user preference first.
-	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
-		switch cfg.Options.NotificationStyle {
-		case "native":
-			slog.Debug("Using native backend (user preference)")
-			return notification.NewNativeBackend(notification.Icon)
-		case "osc":
-			slog.Debug("Using OSC backend (user preference)", "osc99_supported", caps.OSC99Notifications)
-			return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
-		case "bell":
-			slog.Debug("Using bell backend (user preference)")
-			return notification.NewBellBackend()
-		case "disabled":
-			slog.Debug("Notifications disabled (user preference)")
-			return notification.NoopBackend{}
-		case "auto":
-			// Fall through to auto-detection below.
-		default:
-			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.NotificationStyle)
-		}
+	style := ""
+	if cfg != nil && cfg.Options != nil {
+		style = cfg.Options.NotificationStyle
+	}
+	return notificationBackendForStyle(caps, style)
+}
+
+// notificationBackendForStyle builds a notification backend for an explicit
+// style. An empty style or "auto" auto-detects based on environment and
+// capabilities. This lets callers preview a specific style without mutating
+// config.
+func notificationBackendForStyle(caps common.Capabilities, style string) notification.Backend {
+	switch style {
+	case "native":
+		slog.Debug("Using native backend (user preference)")
+		return notification.NewNativeBackend(notification.Icon)
+	case "osc":
+		slog.Debug("Using OSC backend (user preference)", "osc99_supported", caps.OSC99Notifications)
+		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+	case "bell":
+		slog.Debug("Using bell backend (user preference)")
+		return notification.NewBellBackend()
+	case "disabled":
+		slog.Debug("Notifications disabled (user preference)")
+		return notification.NoopBackend{}
+	case "", "auto":
+		// Fall through to auto-detection below.
+	default:
+		slog.Warn("Unknown notification style, using auto", "style", style)
 	}
 
 	// Auto-detect based on environment and capabilities.
@@ -1784,15 +1793,40 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
 			cfg.Options.NotificationStyle = msg.Style
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notification_style", msg.Style); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			} else {
-				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
-			}
-			// Reinitialize notification backend with new style.
+			// Reinitialize notification backend so the new style takes
+			// effect immediately.
 			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 		}
+		if err := m.com.Workspace.SetNotificationStyle(config.ScopeGlobal, msg.Style); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		} else {
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
+		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
+	case dialog.ActionSendTestNotification:
+		// Preview the highlighted style directly, bypassing focus/config
+		// gating since the user explicitly asked to test it. Keep the dialog
+		// open so they can try other styles.
+		backend := notificationBackendForStyle(m.caps, msg.Style)
+		cmds = append(cmds, backend.Send(notification.Notification{
+			Title:   "Crush",
+			Message: "This is a test notification.",
+		}))
+	case dialog.ActionSelectScrollbarStyle:
+		cfg := m.com.Config()
+		if cfg != nil && cfg.Options != nil {
+			if cfg.Options.TUI == nil {
+				cfg.Options.TUI = &config.TUIOptions{}
+			}
+			cfg.Options.TUI.Scrollbar = msg.Style
+			m.chat.SetScrollbarMode(msg.Style)
+		}
+		if err := m.com.Workspace.SetScrollbar(config.ScopeGlobal, msg.Style); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		} else {
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Scrollbar set to: "+msg.Style)))
+		}
+		m.dialog.CloseDialog(dialog.ScrollbarID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
@@ -1863,25 +1897,25 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
-		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent
-			newValue := !isTransparent
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
-				return util.ReportError(err)()
-			}
+		newValue := !m.isTransparent
+		if err := m.com.Workspace.SetTransparentBackground(config.ScopeGlobal, newValue); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		} else {
 			m.isTransparent = newValue
-
+			// Refresh the preferences label to match the new state.
+			if m.dialog.ContainsDialog(dialog.PreferencesID) {
+				if dlg := m.dialog.Dialog(dialog.PreferencesID); dlg != nil {
+					if prefs, ok := dlg.(*dialog.Preferences); ok {
+						prefs.RefreshItems()
+					}
+				}
+			}
 			status := "disabled"
 			if newValue {
 				status = "enabled"
 			}
-			return util.NewInfoMsg("Transparent background " + status)
-		})
+			cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Transparent background "+status)))
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
@@ -4134,6 +4168,14 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ScrollbarID:
+		if cmd := m.openScrollbarDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.PreferencesID:
+		if cmd := m.openPreferencesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4232,6 +4274,30 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
+	return nil
+}
+
+// openScrollbarDialog opens the scrollbar style picker dialog.
+func (m *UI) openScrollbarDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ScrollbarID) {
+		m.dialog.BringToFront(dialog.ScrollbarID)
+		return nil
+	}
+
+	scrollbarDialog := dialog.NewScrollbar(m.com)
+	m.dialog.OpenDialog(scrollbarDialog)
+	return nil
+}
+
+// openPreferencesDialog opens the customization submenu dialog.
+func (m *UI) openPreferencesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.PreferencesID) {
+		m.dialog.BringToFront(dialog.PreferencesID)
+		return nil
+	}
+
+	customizationDialog := dialog.NewPreferences(m.com)
+	m.dialog.OpenDialog(customizationDialog)
 	return nil
 }
 

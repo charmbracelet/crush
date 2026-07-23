@@ -552,3 +552,39 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "enabled", thinking["type"])
 }
+
+func TestBuildProviderSurfacesResolveErrors(t *testing.T) {
+	const providerID = "test-provider"
+	model := config.SelectedModel{Provider: providerID}
+
+	t.Run("api_key resolution failure is returned, not silently dropped", func(t *testing.T) {
+		env := testEnv(t)
+		providerCfg := config.ProviderConfig{
+			ID:     providerID,
+			Type:   catwalk.Type(openaicompat.Name),
+			APIKey: "${CRUSH_TEST_MISSING_VAR_3011:?required for test}",
+		}
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		_, err := coord.buildProvider(providerCfg, model, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "api_key")
+		assert.Contains(t, err.Error(), providerID)
+	})
+
+	t.Run("base_url resolution failure is returned, not silently dropped", func(t *testing.T) {
+		env := testEnv(t)
+		providerCfg := config.ProviderConfig{
+			ID:      providerID,
+			Type:    catwalk.Type(openaicompat.Name),
+			APIKey:  "test-key",
+			BaseURL: "${CRUSH_TEST_MISSING_VAR_3011:?required for test}",
+		}
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		_, err := coord.buildProvider(providerCfg, model, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "base_url")
+		assert.Contains(t, err.Error(), providerID)
+	})
+}

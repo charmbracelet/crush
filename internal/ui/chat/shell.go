@@ -34,7 +34,7 @@ type ShellItem struct {
 
 	id              string
 	command         string
-	output          string
+	output          strings.Builder
 	exitCode        int
 	expandedContent bool
 	xOffset         int
@@ -54,17 +54,18 @@ var (
 // NewShellItem creates a new ShellItem for displaying bang-mode results.
 func NewShellItem(sty *styles.Styles, command, output string, exitCode int) MessageItem {
 	v := list.NewVersioned()
-	return &ShellItem{
+	s := &ShellItem{
 		Versioned:                v,
 		highlightableMessageItem: defaultHighlighter(sty, v),
 		cachedMessageItem:        &cachedMessageItem{},
 		focusableMessageItem:     newFocusableMessageItem(v),
 		id:                       fmt.Sprintf("shell-%d-%s", shellSeq.Add(1), command),
 		command:                  command,
-		output:                   output,
 		exitCode:                 exitCode,
 		sty:                      sty,
 	}
+	s.replaceOutput(output)
+	return s
 }
 
 // NewPendingShellItem creates a ShellItem in a pending/running state that
@@ -95,7 +96,7 @@ func NewPendingShellItem(sty *styles.Styles, command string) *ShellItem {
 
 // Complete transitions a pending ShellItem to a finished state with output.
 func (s *ShellItem) Complete(output string, exitCode int) {
-	s.output = output
+	s.replaceOutput(output)
 	s.exitCode = exitCode
 	s.pending = false
 	s.Bump()
@@ -103,8 +104,17 @@ func (s *ShellItem) Complete(output string, exitCode int) {
 
 // AppendOutput appends incremental output to a pending ShellItem.
 func (s *ShellItem) AppendOutput(chunk string) {
-	s.output += chunk
+	if !s.pending {
+		return
+	}
+	s.output.WriteString(chunk)
 	s.Bump()
+}
+
+func (s *ShellItem) replaceOutput(output string) {
+	s.output.Reset()
+	s.output.Grow(len(output))
+	s.output.WriteString(output)
 }
 
 func (s *ShellItem) ID() string          { return s.id }
@@ -156,7 +166,7 @@ func (s *ShellItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 func (s *ShellItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 	switch k := key.String(); k {
 	case "c", "y":
-		text := "$ " + s.command + "\n" + ansi.Strip(s.output)
+		text := "$ " + s.command + "\n" + ansi.Strip(s.output.String())
 		return true, common.CopyToClipboard(text, "Shell output copied to clipboard")
 	case "shift+left", "H":
 		if s.xOffset > 0 {
@@ -205,7 +215,7 @@ func (s *ShellItem) RawRender(width int) string {
 	header := prompt + " " + highlighted
 
 	if s.pending {
-		if s.output == "" {
+		if s.output.Len() == 0 {
 			// Nothing streamed yet: show the spinner under the header.
 			return header + "\n" + s.anim.Render()
 		}
@@ -213,7 +223,7 @@ func (s *ShellItem) RawRender(width int) string {
 		header += " " + s.sty.Messages.ShellExitCode.Render(fmt.Sprintf("(exit %d)", s.exitCode))
 	}
 
-	if s.output == "" {
+	if s.output.Len() == 0 {
 		return header
 	}
 
@@ -224,7 +234,8 @@ func (s *ShellItem) RawRender(width int) string {
 	// Programs like `task` emit "\x1b[0m\n" after their last line of
 	// output; trimming only "\n" misses these because the reset bytes
 	// sit between the content and the newline.
-	raw := s.output
+	fullOutput := s.output.String()
+	raw := fullOutput
 	for {
 		trimmed := strings.TrimRight(raw, " \t\r\n")
 		trimmed = strings.TrimSuffix(trimmed, "\x1b[0m")
@@ -233,31 +244,29 @@ func (s *ShellItem) RawRender(width int) string {
 		}
 		raw = trimmed
 	}
+	if raw == "" {
+		return header
+	}
+
+	// Count lines from the trimmed output directly so truncation
+	// logic cannot drift from the trimming loop above.
+	totalLines := strings.Count(raw, "\n") + 1
+	truncatedCount := 0
+	if !s.expandedContent && totalLines > shellMaxCollapsedLines {
+		truncatedCount = totalLines - shellMaxCollapsedLines
+		if s.pending {
+			raw = lastLines(raw, shellMaxCollapsedLines)
+		} else {
+			raw = firstLines(raw, shellMaxCollapsedLines)
+		}
+	}
+
 	output := common.RemapANSI16(raw, s.sty.ANSI)
 	lines := strings.Split(output, "\n")
 
-	// While streaming, show the tail of the output so the most recent
-	// lines stay visible without forcing the user to expand.
-	maxLines := shellMaxCollapsedLines
-	if s.expandedContent {
-		maxLines = len(lines)
-	}
-
-	displayLines := lines
-	truncatedCount := 0
-	if len(lines) > maxLines {
-		if s.pending {
-			// Show the most recent lines while still running.
-			displayLines = lines[len(lines)-maxLines:]
-		} else {
-			displayLines = lines[:maxLines]
-		}
-		truncatedCount = len(lines) - maxLines
-	}
-
 	// Compute max line width for scroll clamping.
 	maxW := 0
-	for _, ln := range displayLines {
+	for _, ln := range lines {
 		w := ansi.StringWidth(ln)
 		if w > maxW {
 			maxW = w
@@ -276,7 +285,7 @@ func (s *ShellItem) RawRender(width int) string {
 		body.WriteString("\n")
 	}
 
-	for _, ln := range displayLines {
+	for _, ln := range lines {
 		scrolled := ansi.GraphemeWidth.Cut(ln, s.xOffset, len(ln))
 		truncated := ansi.Truncate(scrolled, cappedWidth, "…")
 		if s.xOffset > 0 && strings.TrimSpace(truncated) != "" {
@@ -302,4 +311,38 @@ func (s *ShellItem) RawRender(width int) string {
 	}
 
 	return result
+}
+
+func firstLines(s string, count int) string {
+	if count <= 0 {
+		return ""
+	}
+	end := 0
+	for i := range count {
+		next := strings.IndexByte(s[end:], '\n')
+		if next < 0 {
+			return s
+		}
+		end += next
+		if i == count-1 {
+			return s[:end]
+		}
+		end++
+	}
+	return s
+}
+
+func lastLines(s string, count int) string {
+	if count <= 0 {
+		return ""
+	}
+	start := len(s)
+	for range count {
+		previous := strings.LastIndexByte(s[:start], '\n')
+		if previous < 0 {
+			return s
+		}
+		start = previous
+	}
+	return s[start+1:]
 }

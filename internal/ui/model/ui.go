@@ -1885,6 +1885,20 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
+	case dialog.ActionInsertSnippet:
+		m.dialog.CloseDialog(dialog.SnippetID)
+		snippet := "```\n" + msg.Content + "\n```"
+		prevHeight := m.textarea.Height()
+		existing := m.textarea.Value()
+		if existing != "" {
+			snippet = "\n" + snippet
+		}
+		m.textarea.InsertString(snippet)
+		if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		cmds = append(cmds, m.textarea.Focus())
+
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.enableDockerMCP)
@@ -2374,6 +2388,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				cmds = append(cmds, m.pasteImageFromClipboard)
+
+			case key.Matches(msg, m.keyMap.Editor.PasteSnippet):
+				if cmd := m.openSnippetDialog(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				prevHeight := m.textarea.Height()
@@ -3071,6 +3090,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.Newline,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
+				k.Editor.PasteSnippet,
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
@@ -4273,6 +4293,16 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	event.FilePickerOpened()
 
 	return cmd
+}
+
+// openSnippetDialog opens the snippet paste dialog.
+func (m *UI) openSnippetDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SnippetID) {
+		m.dialog.BringToFront(dialog.SnippetID)
+		return nil
+	}
+	m.dialog.OpenDialog(dialog.NewSnippet(m.com))
+	return nil
 }
 
 // openPermissionsDialog opens the permissions dialog for a permission request.

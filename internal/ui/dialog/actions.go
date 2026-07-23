@@ -97,6 +97,12 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionInsertSnippet is sent when the user confirms a code snippet in the
+	// snippet dialog. Content is the raw text; the caller wraps it in a fenced
+	// code block before inserting into the editor.
+	ActionInsertSnippet struct {
+		Content string
+	}
 )
 
 // Messages for MCP OAuth authentication dialog.

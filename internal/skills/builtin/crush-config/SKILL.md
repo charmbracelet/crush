@@ -130,6 +130,23 @@ reviewed.
 }
 ```
 
+For multi-model OpenAI-compatible gateways with a custom base URL, use the same
+`openai-compat` shape. Model IDs are account-specific; prefer `discover_models`
+or the gateway `/models` list over hard-coding public sample IDs.
+
+```json
+{
+  "providers": {
+    "daoxe": {
+      "type": "openai-compat",
+      "base_url": "https://daoxe.com/v1",
+      "api_key": "$DAOXE_API_KEY",
+      "discover_models": true
+    }
+  }
+}
+```
+
 - `type` (required): `openai`, `openai-compat`, `anthropic`, or a local provider type (`llamacpp`, `omlx`, `lmstudio`, `litellm`, `ollama`)
 - `api_key`, `base_url`, `api_endpoint`, and `extra_headers` are shell-expanded (see [Shell Expansion](#shell-expansion)).
 - `extra_body` is a JSON passthrough and is **not** expanded.

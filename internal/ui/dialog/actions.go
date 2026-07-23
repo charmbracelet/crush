@@ -59,6 +59,7 @@ type (
 	}
 	ActionToggleTransparentBackground struct{}
 	ActionInitializeProject           struct{}
+	ActionReloadSkills                struct{}
 	ActionSummarize                   struct {
 		SessionID string
 	}

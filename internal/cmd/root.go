@@ -302,6 +302,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	skillsMgr := skills.NewManager(
 		allSkills, activeSkills, skillStates,
 		skills.WithGlobalMirror(),
+		skills.WithDiscoveryConfig(discoveryCfg),
 		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)

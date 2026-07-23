@@ -400,6 +400,52 @@ func TestParseContent_NoFrontmatter(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestDiscoverSkipsHiddenDirectories(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a valid skill in a normal directory.
+	skillDir := filepath.Join(tmpDir, "my-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: my-skill
+description: A visible skill.
+---
+# My Skill
+`), 0o644))
+
+	// Create a skill inside a hidden directory — should be skipped.
+	hiddenDir := filepath.Join(tmpDir, ".hidden-agents", "dup-skill")
+	require.NoError(t, os.MkdirAll(hiddenDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(hiddenDir, "SKILL.md"), []byte(`---
+name: dup-skill
+description: Should not be discovered.
+---
+# Dup Skill
+`), 0o644))
+
+	// Create a hidden skill file inside a visible directory — should be skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, ".SKILL.md"), []byte(`---
+name: hidden-file-skill
+description: Should not be discovered.
+---
+# Hidden File Skill
+`), 0o644))
+
+	skills, states := DiscoverWithStates([]string{tmpDir})
+
+	require.Len(t, skills, 1)
+	require.Equal(t, "my-skill", skills[0].Name)
+
+	for _, s := range states {
+		require.NotContains(t, s.Path, ".hidden-agents",
+			"hidden directory skill should not appear in states")
+		require.NotContains(t, s.Path, ".SKILL.md",
+			"hidden skill file should not appear in states")
+	}
+}
+
 func TestDiscoverBuiltin(t *testing.T) {
 	t.Parallel()
 

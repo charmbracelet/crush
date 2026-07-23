@@ -17,6 +17,7 @@ func Capitalize(text string) string {
 // converts tabs to four spaces, and trims leading and trailing whitespace.
 func NormalizeSpace(content string) string {
 	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
 	content = strings.ReplaceAll(content, "\t", "    ")
 	content = strings.TrimSpace(content)
 	return content

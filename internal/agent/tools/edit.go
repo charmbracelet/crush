@@ -35,10 +35,11 @@ type EditPermissionsParams struct {
 }
 
 type EditResponseMetadata struct {
-	Additions  int    `json:"additions"`
-	Removals   int    `json:"removals"`
+	FilePath   string `json:"file_path"`
 	OldContent string `json:"old_content,omitempty"`
 	NewContent string `json:"new_content,omitempty"`
+	Additions  int    `json:"additions"`
+	Removals   int    `json:"removals"`
 }
 
 const EditToolName = "edit"
@@ -183,6 +184,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
 		EditResponseMetadata{
+			FilePath:   filePath,
 			OldContent: "",
 			NewContent: content,
 			Additions:  additions,
@@ -348,6 +350,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content deleted from file: "+filePath),
 		EditResponseMetadata{
+			FilePath:   filePath,
 			OldContent: oldContent,
 			NewContent: writeContent,
 			Additions:  additions,
@@ -421,6 +424,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content replaced in file: "+filePath),
 		EditResponseMetadata{
+			FilePath:   filePath,
 			OldContent: oldContent,
 			NewContent: writeContent,
 			Additions:  additions,

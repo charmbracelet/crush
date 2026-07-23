@@ -72,6 +72,7 @@ func init() {
 		logoutCmd,
 		schemaCmd,
 		loginCmd,
+		acpCmd,
 		statsCmd,
 		sessionCmd,
 	)

@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -187,6 +188,231 @@ func TestPermissionService_HookApproval(t *testing.T) {
 		event := <-notifications
 		assert.Equal(t, "call-99", event.Payload.ToolCallID)
 		assert.True(t, event.Payload.Granted, "subscribers should see a granted notification")
+	})
+}
+
+func TestPermissionService_AutoApproveRequestsContext(t *testing.T) {
+	t.Run("prompt policy overrides inherited auto approval", func(t *testing.T) {
+		service := NewPermissionService(t.TempDir(), false, nil)
+		requests := service.Subscribe(t.Context())
+		ctx := WithRequestPolicy(WithAutoApproveRequests(t.Context()), RequestPolicyPrompt)
+		assert.Equal(t, RequestPolicyPrompt, RequestPolicyFromContext(ctx))
+		assert.Equal(t, RequestPolicyPrompt, RequestPolicyFromContext(t.Context()))
+
+		type requestResult struct {
+			granted bool
+			err     error
+		}
+		result := make(chan requestResult, 1)
+		go func() {
+			granted, err := service.Request(ctx, CreatePermissionRequest{
+				SessionID:  "interactive-session",
+				ToolCallID: "interactive-call",
+				ToolName:   "ls",
+				Action:     "list",
+				Path:       t.TempDir(),
+			})
+			result <- requestResult{granted: granted, err: err}
+		}()
+
+		select {
+		case event := <-requests:
+			assert.True(t, service.Deny(event.Payload))
+		case <-time.After(2 * time.Second):
+			t.Fatal("prompt policy inherited auto-approval")
+		}
+
+		select {
+		case got := <-result:
+			require.NoError(t, got.err)
+			assert.False(t, got.granted)
+		case <-time.After(2 * time.Second):
+			t.Fatal("prompt request did not return after denial")
+		}
+	})
+
+	t.Run("approval is scoped to one context tree", func(t *testing.T) {
+		service := NewPermissionService(t.TempDir(), false, nil)
+		requests := service.Subscribe(t.Context())
+		notifications := service.SubscribeNotifications(t.Context())
+		opts := CreatePermissionRequest{
+			SessionID:  "shared-session",
+			ToolCallID: "auto-call",
+			ToolName:   "ls",
+			Action:     "list",
+			Path:       t.TempDir(),
+		}
+
+		granted, err := service.Request(WithAutoApproveRequests(t.Context()), opts)
+		require.NoError(t, err)
+		assert.True(t, granted)
+		assert.Equal(t, 0, service.(*permissionService).pendingRequests.Len())
+
+		select {
+		case event := <-notifications:
+			assert.Equal(t, opts.ToolCallID, event.Payload.ToolCallID)
+			assert.True(t, event.Payload.Granted)
+			assert.False(t, event.Payload.Denied)
+		case <-time.After(2 * time.Second):
+			t.Fatal("auto-approved request did not publish a notification")
+		}
+
+		type requestResult struct {
+			granted bool
+			err     error
+		}
+		plainResult := make(chan requestResult, 1)
+		opts.ToolCallID = "plain-call"
+		go func() {
+			granted, err := service.Request(t.Context(), opts)
+			plainResult <- requestResult{granted: granted, err: err}
+		}()
+
+		select {
+		case event := <-requests:
+			assert.Equal(t, opts.SessionID, event.Payload.SessionID)
+			assert.True(t, service.Deny(event.Payload))
+		case <-time.After(2 * time.Second):
+			t.Fatal("plain context inherited auto-approval")
+		}
+
+		select {
+		case result := <-plainResult:
+			require.NoError(t, result.err)
+			assert.False(t, result.granted)
+		case <-time.After(2 * time.Second):
+			t.Fatal("plain request did not return after denial")
+		}
+	})
+
+	t.Run("approved request bypasses pending interactive request", func(t *testing.T) {
+		service := NewPermissionService(t.TempDir(), false, nil)
+		requests := service.Subscribe(t.Context())
+		interactivePath := t.TempDir()
+		autoApprovedPath := t.TempDir()
+
+		type requestResult struct {
+			granted bool
+			err     error
+		}
+		interactiveResult := make(chan requestResult, 1)
+		go func() {
+			granted, err := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "interactive-session",
+				ToolCallID: "interactive-call",
+				ToolName:   "ls",
+				Action:     "list",
+				Path:       interactivePath,
+			})
+			interactiveResult <- requestResult{granted: granted, err: err}
+		}()
+
+		var pending PermissionRequest
+		select {
+		case event := <-requests:
+			pending = event.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("interactive request was never published")
+		}
+		defer service.Deny(pending)
+
+		autoResult := make(chan requestResult, 1)
+		go func() {
+			granted, err := service.Request(WithAutoApproveRequests(t.Context()), CreatePermissionRequest{
+				SessionID:  "noninteractive-session",
+				ToolCallID: "auto-call",
+				ToolName:   "ls",
+				Action:     "list",
+				Path:       autoApprovedPath,
+			})
+			autoResult <- requestResult{granted: granted, err: err}
+		}()
+
+		select {
+		case result := <-autoResult:
+			require.NoError(t, result.err)
+			assert.True(t, result.granted)
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("auto-approved request blocked behind an interactive request")
+		}
+
+		assert.True(t, service.Deny(pending))
+		select {
+		case result := <-interactiveResult:
+			require.NoError(t, result.err)
+			assert.False(t, result.granted)
+		case <-time.After(2 * time.Second):
+			t.Fatal("interactive request did not return after denial")
+		}
+	})
+
+	t.Run("cancellation removes pending request and releases serialization", func(t *testing.T) {
+		service := NewPermissionService(t.TempDir(), false, nil)
+		requests := service.Subscribe(t.Context())
+		permissionService := service.(*permissionService)
+		cancelledPath := t.TempDir()
+		followupPath := t.TempDir()
+
+		type requestResult struct {
+			granted bool
+			err     error
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		result := make(chan requestResult, 1)
+		go func() {
+			granted, err := service.Request(ctx, CreatePermissionRequest{
+				SessionID:  "cancelled-session",
+				ToolCallID: "cancelled-call",
+				ToolName:   "ls",
+				Action:     "list",
+				Path:       cancelledPath,
+			})
+			result <- requestResult{granted: granted, err: err}
+		}()
+
+		select {
+		case <-requests:
+			cancel()
+		case <-time.After(2 * time.Second):
+			cancel()
+			t.Fatal("cancellable request was never published")
+		}
+
+		select {
+		case got := <-result:
+			assert.False(t, got.granted)
+			require.ErrorIs(t, got.err, context.Canceled)
+		case <-time.After(2 * time.Second):
+			t.Fatal("permission request did not return after cancellation")
+		}
+		assert.Equal(t, 0, permissionService.pendingRequests.Len())
+
+		followupResult := make(chan requestResult, 1)
+		go func() {
+			granted, err := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "followup-session",
+				ToolCallID: "followup-call",
+				ToolName:   "ls",
+				Action:     "list",
+				Path:       followupPath,
+			})
+			followupResult <- requestResult{granted: granted, err: err}
+		}()
+
+		select {
+		case event := <-requests:
+			assert.True(t, service.Deny(event.Payload))
+		case <-time.After(2 * time.Second):
+			t.Fatal("follow-up request remained blocked after cancellation")
+		}
+
+		select {
+		case got := <-followupResult:
+			require.NoError(t, got.err)
+			assert.False(t, got.granted)
+		case <-time.After(2 * time.Second):
+			t.Fatal("follow-up request did not return after denial")
+		}
 	})
 }
 

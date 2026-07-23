@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -94,6 +95,9 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+	// PermissionPolicy is the permission behavior for this turn. Unlike the
+	// caller's context, it is retained when the turn is queued.
+	PermissionPolicy permission.RequestPolicy
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -389,19 +393,18 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // carry a RunID are returned in canceledWithRunID so the caller can
 // publish their terminal cancelled RunComplete (a caller waiting on that
 // RunID, e.g. `crush run`, would otherwise hang). Uncanceled calls without
-// a RunID are returned in fold to be folded into the active turn,
-// preserving the existing follow-up behavior. Uncanceled calls that carry
-// a RunID are left in the queue so each runs as its own turn via the
-// recursive run path and publishes its own RunComplete, giving every
-// RunID-bearing prompt an explicit lifecycle instead of being silently
-// absorbed into another turn. fold is processed by the caller without the
-// lock held.
-func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
+// a RunID and the same permission policy as the active turn are returned in
+// fold until a surviving call cannot be folded. That call and all later
+// survivors are left in the queue, preserving submission order while each
+// runs with its own lifecycle and permission behavior. fold is processed by
+// the caller without the lock held.
+func (a *sessionAgent) drainQueueForStep(sessionID string, activePolicy permission.RequestPolicy) (fold, canceledWithRunID []SessionAgentCall) {
 	dispatchLock := a.sessionMu(sessionID)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 	queuedCalls, _ := a.messageQueue.Get(sessionID)
 	var keep []SessionAgentCall
+	var queueBarrier bool
 	for _, queued := range queuedCalls {
 		if a.canceledBySeq(sessionID, queued.acceptSeq) {
 			if queued.RunID != "" {
@@ -409,7 +412,8 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 			}
 			continue
 		}
-		if queued.RunID != "" {
+		if queueBarrier || queued.PermissionPolicy != activePolicy || queued.RunID != "" {
+			queueBarrier = true
 			keep = append(keep, queued)
 			continue
 		}
@@ -567,6 +571,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err := ValidateCall(call); err != nil {
 		return nil, err
 	}
+	ctx = permission.WithRequestPolicy(ctx, call.PermissionPolicy)
 
 	// genCtx/cancel are the run context and its cancel func, created under
 	// the per-session dispatch mutex below so a concurrent Cancel can observe
@@ -822,11 +827,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// sequence so a follow-up queued after the cancel (higher seq)
 			// is not dropped. A dropped prompt carrying a RunID still gets
 			// its terminal cancelled RunComplete so a caller waiting on it
-			// does not hang. Uncanceled prompts without a RunID are folded
-			// into this turn; uncanceled prompts with a RunID are left
-			// queued so each runs as its own turn (with its own
-			// RunComplete) via the recursive run path below.
-			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
+			// does not hang. Uncanceled prompts without a RunID and with the
+			// same permission policy are folded into this turn; prompts with
+			// a RunID or a different policy are left queued so each runs as
+			// its own turn via the recursive run path below.
+			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID, call.PermissionPolicy)
 			a.publishCanceledQueueDrops(canceledRunIDs)
 			for _, queued := range fold {
 				userMessage, createErr := a.createUserMessage(callContext, queued)

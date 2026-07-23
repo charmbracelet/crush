@@ -31,8 +31,6 @@ func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionReq
 	return true
 }
 
-func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
-
 func (m *mockBashPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockBashPermissionService) SkipRequests() bool {
@@ -101,8 +99,6 @@ func (m *recordingPermissionService) Deny(req permission.PermissionRequest) bool
 func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
 	return true
 }
-
-func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
 
 func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
 

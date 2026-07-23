@@ -733,6 +733,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
+	// pendingThoughtSigs buffers Google Gemini per-tool-call thought
+	// signatures keyed by tool call ID. The provider emits a tool call's
+	// signature (via OnReasoningEnd with a ToolID) BEFORE the tool call
+	// itself arrives, so we stash it here and attach it once OnToolCall
+	// creates the tool call. Each signature must be replayed verbatim on its
+	// own tool call or Gemini rejects the request with "Corrupted thought
+	// signature".
+	pendingThoughtSigs := make(map[string]string)
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -876,6 +884,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
+			clear(pendingThoughtSigs)
 			return callContext, prepared, err
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -895,7 +904,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 			if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
 				if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
-					currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+					// A signature bound to a tool call (ToolID set) must travel
+					// with that specific tool call, not be concatenated onto the
+					// shared reasoning block. Buffer it until OnToolCall creates
+					// the tool call. Signatures without a ToolID belong to the
+					// final text answer and stay on the reasoning content.
+					if reasoning.ToolID != "" {
+						pendingThoughtSigs[reasoning.ToolID] = reasoning.Signature
+					} else {
+						currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+					}
 				}
 			}
 			if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
@@ -959,6 +977,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Input:            input,
 				ProviderExecuted: false,
 				Finished:         true,
+				// Attach the buffered Google thought signature (if any) so it
+				// is persisted and replayed verbatim with this tool call.
+				ThoughtSignature: pendingThoughtSigs[tc.ToolCallID],
 			}
 			currentAssistant.AddToolCall(toolCall)
 			// Use parent ctx instead of genCtx to ensure the update succeeds

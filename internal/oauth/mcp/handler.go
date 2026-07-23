@@ -1,12 +1,16 @@
 package mcpoauth
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -166,6 +170,12 @@ func NewHandler(
 		AuthorizationCodeFetcher: receiver.fetchAuthorizationCode,
 		RequestRefreshToken:      true,
 		NewTokenSource:           newTokenSource,
+		// Use a metadata-fixing HTTP client so trailing-slash issuers in
+		// OAuth metadata responses don't trip the SDK's strict RFC 8414
+		// validation. Based on Bruno Krugel's fix from PR #3396.
+		Client: &http.Client{
+			Transport: newMetadataFixupRoundTripper(http.DefaultTransport),
+		},
 		DynamicClientRegistrationConfig: &auth.DynamicClientRegistrationConfig{
 			Metadata: &oauthex.ClientRegistrationMetadata{
 				ClientName:   "Crush",
@@ -385,19 +395,23 @@ func (r *callbackReceiver) serve(listener net.Listener) {
 }
 
 func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
+	// Some authorization servers reject the "resource" query parameter in
+	// the authorization URL (RFC 8707) but accept it during token exchange.
+	// Strip it from the browser URL to avoid server_error responses.
+	authURL := stripResourceParam(args.URL)
 	slog.Info("Opening browser for MCP OAuth authorization")
 
 	r.handler.mu.Lock()
-	r.handler.authURL = args.URL
+	r.handler.authURL = authURL
 	open := r.handler.openURL
 	r.handler.mu.Unlock()
 
-	if err := open(args.URL); err != nil {
+	if err := open(authURL); err != nil {
 		// If the browser can't be opened (headless, remote SSH), keep
 		// the callback listener running and tell the user to open the
 		// URL manually.
 		slog.Warn("Failed to open browser automatically", "error", err)
-		slog.Info("Please open the following URL in your browser to authorize", "url", args.URL)
+		slog.Info("Please open the following URL in your browser to authorize", "url", authURL)
 	}
 
 	select {
@@ -419,4 +433,81 @@ func (r *callbackReceiver) close() {
 	if r.server != nil {
 		_ = r.server.Close()
 	}
+}
+
+// metadataFixupRoundTripper normalizes trailing-slash issuers in OAuth
+// metadata responses. Some servers return an issuer with a trailing slash
+// that doesn't match the URL the metadata was fetched from, causing the
+// SDK's strict RFC 8414 validation to reject it. Based on Bruno Krugel's
+// fix from PR #3396.
+type metadataFixupRoundTripper struct {
+	base http.RoundTripper
+}
+
+func newMetadataFixupRoundTripper(base http.RoundTripper) *metadataFixupRoundTripper {
+	return &metadataFixupRoundTripper{base: base}
+}
+
+func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := rt.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	if !isMetadataEndpoint(req.URL.Path) || resp.StatusCode != http.StatusOK || resp.Body == nil {
+		return resp, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read metadata response: %w", err)
+	}
+
+	var raw map[string]any
+	if json.Unmarshal(body, &raw) != nil {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
+	issuer, ok := raw["issuer"].(string)
+	if !ok || !strings.HasSuffix(issuer, "/") {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
+	raw["issuer"] = strings.TrimSuffix(issuer, "/")
+	fixed, err := json.Marshal(raw)
+	if err != nil {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
+	slog.Debug("Normalized OAuth metadata issuer trailing slash", "url", req.URL.String())
+	resp.Body = io.NopCloser(bytes.NewReader(fixed))
+	resp.ContentLength = int64(len(fixed))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(fixed)))
+	return resp, nil
+}
+
+func isMetadataEndpoint(path string) bool {
+	return strings.Contains(path, "/.well-known/oauth-authorization-server") ||
+		strings.Contains(path, "/.well-known/oauth-protected-resource")
+}
+
+// stripResourceParam removes the "resource" query parameter from an
+// authorization URL. Some authorization servers reject it in the
+// authorize request but accept it during token exchange. Based on Bruno
+// Krugel's fix from PR #3396.
+func stripResourceParam(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	if q.Has("resource") {
+		q.Del("resource")
+		u.RawQuery = q.Encode()
+		slog.Debug("Stripped resource parameter from authorization URL")
+	}
+	return u.String()
 }

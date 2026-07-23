@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
 )
@@ -828,7 +829,9 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 				}
 			}
 
-			oauthHandler, oauthErr := mcpoauth.NewHandler(name, url, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
+			// Normalize trailing slash for PRM discovery compatibility.
+			normalizedURL := strings.TrimSuffix(url, "/")
+			oauthHandler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
 			if oauthErr != nil {
 				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
 			}
@@ -864,15 +867,55 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 		if err != nil {
 			return nil, nil, err
 		}
-		client := &http.Client{
-			Transport: &headerRoundTripper{
-				headers: headers,
-			},
+
+		var transport http.RoundTripper = &headerRoundTripper{headers: headers}
+		var oauthHandler *mcpoauth.Handler
+
+		// SSE transports don't support the SDK's OAuthHandler natively,
+		// so we wrap the HTTP transport with our own round-tripper that
+		// injects bearer tokens and handles 401-triggered authorization.
+		// Based on Bruno Krugel's oauthRoundTripper from PR #3396.
+		if m.OAuth {
+			tokenSaver := func(tok *oauth.Token) {
+				if err := cfg.SetConfigField(config.ScopeGlobal, fmt.Sprintf("mcp.%s.oauth_token", name), tok); err != nil {
+					slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
+				} else {
+					slog.Info("Persisted MCP OAuth token", "name", name)
+				}
+			}
+
+			var preregistered *oauth.OAuthClient
+			if strings.TrimSpace(m.OAuthClientID) != "" {
+				clientID, err := resolver.ResolveValue(m.OAuthClientID)
+				if err != nil {
+					return nil, nil, fmt.Errorf("oauth_client_id: %w", err)
+				}
+				clientSecret, err := resolver.ResolveValue(m.OAuthClientSecret)
+				if err != nil {
+					return nil, nil, fmt.Errorf("oauth_client_secret: %w", err)
+				}
+				preregistered = &oauth.OAuthClient{
+					ClientID:     strings.TrimSpace(clientID),
+					ClientSecret: strings.TrimSpace(clientSecret),
+				}
+			}
+
+			// Normalize trailing slash for PRM discovery compatibility.
+			normalizedURL := strings.TrimSuffix(url, "/")
+			handler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
+			if oauthErr != nil {
+				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
+			}
+			oauthHandler = handler
+			authURLs.Set(name, handler)
+			transport = newOAuthRoundTripper(handler, transport)
 		}
+
+		client := &http.Client{Transport: transport}
 		return &mcp.SSEClientTransport{
 			Endpoint:   url,
 			HTTPClient: client,
-		}, nil, nil
+		}, oauthHandler, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported mcp type: %s", m.Type)
 	}
@@ -887,6 +930,50 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		req.Header.Set(k, v)
 	}
 	return http.DefaultTransport.RoundTrip(req)
+}
+
+// oauthRoundTripper wraps an HTTP transport with OAuth bearer token
+// injection and 401-triggered authorization. Used for SSE transports
+// that don't support the SDK's OAuthHandler natively. Based on Bruno
+// Krugel's implementation from PR #3396.
+type oauthRoundTripper struct {
+	base    http.RoundTripper
+	handler auth.OAuthHandler
+}
+
+func newOAuthRoundTripper(handler auth.OAuthHandler, base http.RoundTripper) *oauthRoundTripper {
+	return &oauthRoundTripper{base: base, handler: handler}
+}
+
+func (rt *oauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := rt.doRequestWithToken(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if authErr := rt.handler.Authorize(req.Context(), req, resp); authErr != nil {
+			return resp, nil
+		}
+		resp.Body.Close()
+		return rt.doRequestWithToken(req.Clone(req.Context()))
+	}
+
+	return resp, nil
+}
+
+func (rt *oauthRoundTripper) doRequestWithToken(req *http.Request) (*http.Response, error) {
+	ts, err := rt.handler.TokenSource(req.Context())
+	if err != nil {
+		return nil, fmt.Errorf("oauth token source: %w", err)
+	}
+	if ts != nil {
+		token, err := ts.Token()
+		if err == nil && token != nil {
+			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+		}
+	}
+	return rt.base.RoundTrip(req)
 }
 
 func mcpTimeout(m config.MCPConfig) time.Duration {

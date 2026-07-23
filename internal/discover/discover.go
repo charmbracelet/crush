@@ -90,13 +90,39 @@ type Resolver interface {
 	ResolveValue(val string) (string, error)
 }
 
+// modelEntry represents a single model from the /models listing response.
+type modelEntry struct {
+	ID            string         `json:"id"`
+	Object        string         `json:"object"`
+	Created       int64          `json:"created"`
+	OwnedBy       string         `json:"owned_by"`
+	ContextLength int64          `json:"context_length,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+}
+
 type modelsResponse struct {
-	Data []struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		OwnedBy string `json:"owned_by"`
-	} `json:"data"`
+	Data []modelEntry `json:"data"`
+}
+
+// contextWindowFromEntry extracts the context window from a model entry,
+// trying several common field names that providers use.
+func contextWindowFromEntry(e modelEntry) int64 {
+	if e.ContextLength > 0 {
+		return e.ContextLength
+	}
+	// vLLM, Ollama, and others put it in metadata.max_model_len
+	if v, ok := e.Metadata["max_model_len"]; ok {
+		if f, ok := v.(float64); ok {
+			return int64(f)
+		}
+	}
+	// Some providers use max_context_length in metadata
+	if v, ok := e.Metadata["max_context_length"]; ok {
+		if f, ok := v.(float64); ok {
+			return int64(f)
+		}
+	}
+	return 0
 }
 
 // DiscoverModels fetches available models from the provider's /models endpoint.
@@ -136,8 +162,9 @@ func DiscoverModels(ctx context.Context, cfg Config, resolver Resolver) ([]catwa
 			continue
 		}
 		result = append(result, catwalk.Model{
-			ID:   e.ID,
-			Name: e.ID,
+			ID:            e.ID,
+			Name:          e.ID,
+			ContextWindow: contextWindowFromEntry(e),
 		})
 	}
 

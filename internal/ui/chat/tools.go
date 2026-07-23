@@ -778,6 +778,15 @@ func toolOutputHookIndicator(sty *styles.Styles, metadata string, width int) str
 		return ""
 	}
 
+	// A tool call can trigger several hooks, each printing its own "OK"
+	// line; when nothing interesting happened this is pure noise that
+	// crowds out the tool's actual output. Collapse to a one-line summary
+	// unless a hook denied the call or rewrote its input, since that's
+	// the kind of result a user actually needs to see.
+	if allHooksClean(h.Hooks) {
+		return renderHookSummary(sty, len(h.Hooks))
+	}
+
 	// Sanitize names (replace newlines with ¶) and compute max widths
 	// for the name, matcher, and detail columns so they align. The name
 	// column is capped at maxHookNameWidth characters.
@@ -830,6 +839,32 @@ func toolOutputHookIndicator(sty *styles.Styles, metadata string, width int) str
 		lines = append(lines, renderHookLine(sty, hi, name, details[i], maxNameWidth, maxMatcherWidth))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// allHooksClean reports whether every hook in the list simply passed —
+// no denial, no input rewrite — meaning per-hook detail has nothing
+// worth showing.
+func allHooksClean(his []hooks.HookInfo) bool {
+	for _, hi := range his {
+		if hi.Decision == "deny" || hi.InputRewrite {
+			return false
+		}
+	}
+	return true
+}
+
+// renderHookSummary renders the collapsed one-line summary shown when
+// every hook that ran simply passed.
+func renderHookSummary(sty *styles.Styles, count int) string {
+	noun := "hook"
+	if count != 1 {
+		noun = "hooks"
+	}
+	return fmt.Sprintf(
+		"%s %s",
+		sty.Tool.HookLabel.Render(fmt.Sprintf("%d %s ran, all", count, noun)),
+		sty.Tool.HookOK.Render("OK"),
+	)
 }
 
 // truncateHookName truncates a hook name to fit within maxWidth cells,

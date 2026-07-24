@@ -49,11 +49,11 @@ func (b *Backend) startChannelRouter() {
 // enabled the channel.
 func (b *Backend) routeChannelMessage(ev mcptools.Event) {
 	for _, ws := range b.workspaces.Seq2() {
-		cfg := ws.Cfg.Config()
-		if _, declared := cfg.MCP[ev.Name]; !declared {
+		mcpCfg, declared := ws.Cfg.Config().MCP[ev.Name]
+		if !declared {
 			continue
 		}
-		if !mcptools.ChannelEnabled(ws.Cfg.Overrides().EnabledChannels, ev.Name) {
+		if !mcptools.ChannelOptIn(mcpCfg, ws.Cfg.Overrides().EnabledChannels, ev.Name) {
 			continue
 		}
 		b.injectChannelMessage(ws, ev.Name, ev.ChannelMessage)

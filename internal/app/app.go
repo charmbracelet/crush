@@ -622,10 +622,11 @@ func (app *App) subscribeScopedChannelEvents(ctx context.Context) <-chan pubsub.
 	go func() {
 		defer close(scoped)
 		for ev := range raw {
-			if _, declared := app.config.Config().MCP[ev.Payload.Name]; !declared {
+			mcpCfg, declared := app.config.Config().MCP[ev.Payload.Name]
+			if !declared {
 				continue
 			}
-			if !mcp.ChannelEnabled(app.config.Overrides().EnabledChannels, ev.Payload.Name) {
+			if !mcp.ChannelOptIn(mcpCfg, app.config.Overrides().EnabledChannels, ev.Payload.Name) {
 				continue
 			}
 			select {

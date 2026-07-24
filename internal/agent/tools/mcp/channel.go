@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -175,6 +176,16 @@ func ChannelEnabled(enabled []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// ChannelOptIn reports whether server `name` should be treated as a channel,
+// considering both enablement sources: persistently via crush.json
+// (m.ChannelEnabled) or per-launch via the --channels overrides list. Every
+// site that gates channel behaviour — session creation, session renewal, and
+// message routing — must use this so the two sources are always ORed together
+// and no site drifts out of sync.
+func ChannelOptIn(m config.MCPConfig, enabled []string, name string) bool {
+	return m.ChannelEnabled || ChannelEnabled(enabled, name)
 }
 
 // publishChannelMessage validates and renders a payload, then publishes it as

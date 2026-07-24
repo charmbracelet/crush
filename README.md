@@ -238,28 +238,65 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 ## Configuration
 
 > [!TIP]
-> Crush ships with a builtin `crush-config` skill for configuring itself. In
-> many cases you can simply ask Crush to configure itself.
+> Crush ships with a builtin skill for configuring itself. Most of the time
+> you can just tell what you want it to configure and it will get the job done.
 
-Crush runs great with no configuration. That said, if you do need or want to
-customize Crush, configuration can be added either local to the project itself,
-or globally, with the following priority:
+Crush runs great with no configuration. That said, if you do
+need or want to customize Crush, configuration can be added either local to the
+project itself, or globally, with the following priority:
 
-1. `.crush.json`
-2. `crush.json`
-3. `$HOME/.config/crush/crush.json`
+| Priority | Unix-like                 | Windows                               |
+| -------- | ------------------------- | ------------------------------------- |
+| 1        | `./.crushrc`              | `.\.crushrc`                          |
+| 2        | `./crushrc`               | `.\crushrc`                           |
+| 3        | `~/.config/crush/crushrc` | `%USERPROFILE%\.config\crush\crushrc` |
 
-Configuration itself is stored as a JSON object:
+(Crush respects the [XDG Base Directory Specification][xdg], so your paths
+may differ depending on your `XDG_CONFIG_HOME` value. Data directories such as
+`~/.local/share/crush` and `%LOCALAPPDATA%\crush` contain JSON state only; Crush
+does not execute a `crushrc` from them.)
 
-```json
-{
-  "this-setting": { "this": "that" },
-  "that-setting": ["ceci", "cela"]
-}
+[xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+
+A `crushrc` is just Bash with some Crush-specific builtins. It’s a lot like
+a `.bashrc`, just for your Crush. Because Crush has a native, built-in Bash
+interpreter, Bash-based config works identically across all platforms, including
+Windows.
+
+```bash
+# Add Ollama.
+provider add ollama --type ollama --base-url "http://localhost:11434/v1"
+
+# Register a model on Ollama.
+model add ollama/llama3.3 --name "Llama 3.3" --context-window 128000
+
+# Auto-approve some tools.
+permissions allow view edit
+
+# Include some other file on a specific machine.
+if [[ $HOSTNAME == "babysquid" ]]; then
+    source ~/my-stuff/babysquid.sh
+fi
+
+# Add an MCP server, with a GitHub API token stored in 1password.
+mcp add github \
+  --type http \
+  --url "https://api.githubcopilot.com/mcp/" \
+  --header Authorization "Bearer $(op read 'op://my-secret-key')"
 ```
 
+What about the old JSON format? It’s still supported, but deprecated. See:
+[the config docs](./docs/config/) for details.
+
+> [!TIP]
+> You can override the user and data config locations by setting:
+>
+> - `CRUSH_GLOBAL_CONFIG`
+> - `CRUSH_GLOBAL_DATA`
+
 As an additional note, Crush also stores ephemeral data, such as application
-state, in one additional location:
+state, in one additional location. This is state and should not be edited by
+hand, nor should it be considered configuration.
 
 ```bash
 # Unix
@@ -269,36 +306,23 @@ $HOME/.local/share/crush/crush.json
 %LOCALAPPDATA%\crush\crush.json
 ```
 
-> [!TIP]
-> You can override the user and data config locations by setting:
->
-> - `CRUSH_GLOBAL_CONFIG`
-> - `CRUSH_GLOBAL_DATA`
+#### A note on security
+
+Config (both `crushrc` and `crush.json`) is trusted code. Both `crushrc` run in
+a full shell. Don't launch Crush in a directory whose config you haven't
+reviewed, and don't randomly `source` files from the internet into your config.
 
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just
 like you would. LSPs can be added manually like so:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "lsp": {
-    "go": {
-      "command": "gopls",
-      "env": {
-        "GOTOOLCHAIN": "go1.24.5"
-      }
-    },
-    "typescript": {
-      "command": "typescript-language-server",
-      "args": ["--stdio"]
-    },
-    "nix": {
-      "command": "nil"
-    }
-  }
-}
+```bash
+# crushrc
+
+lsp add go --command "gopls" --env "GOTOOLCHAIN go1.24.5"
+lsp add typescript --command "typescript-language-server" --args --stdio
+lsp add nix --command "nil"
 ```
 
 ### MCPs
@@ -307,69 +331,21 @@ Crush also supports Model Context Protocol (MCP) servers through three transport
 types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse`
 for Server-Sent Events.
 
-Shell-style value expansion (`$VAR`, `${VAR:-default}`, `$(command)`, quoting,
-nesting) works in `command`, `args`, `env`, `headers`, and `url`, so
-file-based secrets work out of the box. You can use values like `"$TOKEN"`
-or `"$(cat /path/to/secret/token)"`. Expansion runs through Crush's embedded
-shell, so the same syntax works on every supported system, Windows included.
+```bash
+# crushrc
 
-Unset variables expand to the empty string by default, matching bash. For
-required credentials, use `${VAR:?message}` so an unset variable fails loudly
-at load time with `message` instead of silently resolving to empty:
+# Add a local MCP server that runs a Node.js script.
+mcp add filesystem --command node --args /path/to/mcp-server.js \
+  --timeout 120 --disabled-tools some-tool-name --env NODE_ENV production
 
-```json
-{ "api_key": "${CODEBERG_TOKEN:?set CODEBERG_TOKEN}" }
-```
+# Add a GitHub MCP server that uses an API token.
+mcp add github --type http --url "https://api.githubcopilot.com/mcp/" \
+  --timeout 120 --header Authorization "Bearer $GH_PAT" \
+  --disabled-tools create_issue --disabled-tools create_pull_request
 
-Headers (both MCP `headers` and provider `extra_headers`) whose value
-resolves to the empty string are dropped from the outgoing request rather
-than sent as `Header:`. That keeps optional env-gated headers like
-`"OpenAI-Organization": "$OPENAI_ORG_ID"` clean when the variable is unset.
-
-Provider `extra_body` is a non-expanding JSON passthrough; put env-driven
-values in `extra_headers` or the provider's `api_key` / `base_url`, all of
-which do expand.
-
-> **Security note:** `crush.json` is trusted code. Any `$(...)` in it runs at
-> load time with your shell's privileges, before the UI appears. Don't launch
-> Crush in a directory whose `crush.json` you haven't reviewed.
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "mcp": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/mcp-server.js"],
-      "timeout": 120,
-      "disabled": false,
-      "disabled_tools": ["some-tool-name"],
-      "env": {
-        "NODE_ENV": "production"
-      }
-    },
-    "github": {
-      "type": "http",
-      "url": "https://api.githubcopilot.com/mcp/",
-      "timeout": 120,
-      "disabled": false,
-      "disabled_tools": ["create_issue", "create_pull_request"],
-      "headers": {
-        "Authorization": "Bearer $GH_PAT"
-      }
-    },
-    "streaming-service": {
-      "type": "sse",
-      "url": "https://example.com/mcp/sse",
-      "timeout": 120,
-      "disabled": false,
-      "headers": {
-        "API-Key": "$(echo $API_KEY)"
-      }
-    }
-  }
-}
+# Add a streaming MCP server that uses SSE.
+mcp add streaming-service --type sse --url "https://example.com/mcp/sse" \
+  --timeout 120 --header API-Key "$API_KEY"
 ```
 
 #### MCP OAuth
@@ -457,7 +433,8 @@ does not get reaped before it can attach.
 
 ### Global context files
 
-Crush automatically includes two files for cross-project instructions.
+Crush automatically includes two files for cross-project instructions. Think of
+these are personal additions to the system prompt.
 
 - `~/.config/crush/CRUSH.md`: Crush-specific rules that would confuse other
   agentic coding tools. If you only use Crush, this is the only one you need to
@@ -467,19 +444,15 @@ Crush automatically includes two files for cross-project instructions.
   probably only care about this if you use multiple agentic coding tools and
   want to share instructions between them.
 
-You can customize these paths using the `global_context_paths` option in your
-configuration:
+You can customize these paths with `option global-context-path`. Repeat the
+command to add multiple paths:
 
-```jsonc
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "global_context_paths": [
-      "~/path/to/custom/context/file.md",
-      "/full/path/to/folder/of/files/" // recursively load all .md files in folder
-    ]
-  }
-}
+```bash
+# Load a single markdown file.
+option global-context-path "~/path/to/custom/context/file.md"
+
+# Recursively load all Markdown files in the folder.
+option global-context-path "/full/path/to/folder/of/files/"
 ```
 
 ### Ignoring Files
@@ -498,54 +471,33 @@ By default, Crush will ask you for permission before running tool calls. If
 you'd like, you can allow tools to be executed without prompting you for
 permissions. Use this with care.
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "permissions": {
-    "allowed_tools": [
-      "view",
-      "ls",
-      "grep",
-      "edit",
-      "mcp_context7_get-library-doc"
-    ]
-  }
-}
+```bash
+permissions allow view ls grep edit mcp_context7_get-library-doc
 ```
-
-You can also skip all permission prompts entirely by running Crush with the
-`--yolo` flag. Be very, very careful with this feature.
 
 ### Disabling Built-In Tools
 
-If you'd like to prevent Crush from using certain built-in tools entirely, you
-can disable them via the `options.disabled_tools` list. Disabled tools are
-completely hidden from the agent.
+You can also deny tools, hiding then from the agent entirely:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "disabled_tools": ["bash", "sourcegraph"]
-  }
-}
+```bash
+permissions deny bash sourcegraph
 ```
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).
 
+### You only live once
+
+You can also skip all permission prompts completely by running Crush with the
+`--yolo` flag. Be very, very careful with this feature.
+
 ### Disabling Skills
 
-If you'd like to prevent Crush from using certain skills entirely, you can
-disable them via the `options.disabled_skills` list. Disabled skills are hidden
-from the agent, including builtin skills and skills discovered from disk.
+You can prevent Crush from using certain skills entirely. Disabled skills are
+hidden from the agent, including builtin skills and skills discovered from
+disk.
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "disabled_skills": ["crush-config"]
-  }
-}
+```bash
+option disable-skill crush-config
 ```
 
 ### Agent Skills
@@ -557,34 +509,28 @@ activate on demand.
 
 The global paths we looks for skills are:
 
-* `$CRUSH_SKILLS_DIR`
-* `$XDG_CONFIG_HOME/agents/skills` or `~/.config/agents/skills/`
-* `$XDG_CONFIG_HOME/crush/skills` or `~/.config/crush/skills/`
-* `~/.agents/skills/`
-* `~/.claude/skills/`
-* On Windows, we _also_ look at
-  * `%LOCALAPPDATA%\agents\skills\` or `%USERPROFILE%\AppData\Local\agents\skills\`
-  * `%LOCALAPPDATA%\crush\skills\` or `%USERPROFILE%\AppData\Local\crush\skills\`
-* Additional paths configured via `options.skills_paths`
+- `$CRUSH_SKILLS_DIR`
+- `$XDG_CONFIG_HOME/agents/skills` or `~/.config/agents/skills/`
+- `$XDG_CONFIG_HOME/crush/skills` or `~/.config/crush/skills/`
+- `~/.agents/skills/`
+- `~/.claude/skills/`
+- On Windows, we _also_ look at
+  - `%LOCALAPPDATA%\agents\skills\` or `%USERPROFILE%\AppData\Local\agents\skills\`
+  - `%LOCALAPPDATA%\crush\skills\` or `%USERPROFILE%\AppData\Local\crush\skills\`
+- Additional paths configured via `options.skills_paths`
 
 On top of that, we _also_ load skills in your project from the following
 relative paths:
 
-* `.agents/skills`
-* `.crush/skills`
-* `.claude/skills`
-* `.cursor/skills`
+- `.agents/skills`
+- `.crush/skills`
+- `.claude/skills`
+- `.cursor/skills`
 
-```jsonc
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "skills_paths": [
-      "~/.config/crush/skills", // Windows: "%LOCALAPPDATA%\\crush\\skills",
-      "./project-skills",
-    ],
-  },
-}
+Or load directories of skills specifically in your config:
+
+```bash
+option skill-path "$HOME/squid-skills" "./other-skills"
 ```
 
 You can get started with example skills from [anthropics/skills](https://github.com/anthropics/skills):
@@ -607,17 +553,20 @@ mv _temp/skills/* . ; rm -r -force _temp
 
 #### User-Invocable Skills
 
-Skills can be made invocable as commands from the commands palette (Ctrl+P). Add `user-invocable: true` to the skill's YAML frontmatter:
+Skills can be made invocable as commands from the commands palette
+(<kbd>ctrl+p</kbd>). Add `user-invocable: true` to the skill's YAML
+frontmatter:
 
 ```yaml
 ---
-name: my-skill
+name: my-hot-skill
 description: A skill that can be invoked as a command.
 user-invocable: true
 ---
 ```
 
 User-invocable skills appear in the commands palette with a `user:` or `project:` prefix:
+
 - Skills from global directories show as `user:skill-name`
 - Skills from project directories show as `project:skill-name`
 
@@ -642,56 +591,39 @@ Crush sends desktop notifications when a tool call requires permission and when
 the agent finishes its turn. They're only sent when the terminal window isn't
 focused _and_ your terminal supports reporting the focus state.
 
-```jsonc
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "disable_notifications": false, // default
-  },
-}
+```bash
+# Choose auto, native, osc, bell, or disabled.
+option notification-style disabled
 ```
 
-To disable desktop notifications, set `disable_notifications` to `true` in your
-configuration. On macOS, notifications currently lack icons due to platform
-limitations.
+`auto` uses native notifications locally and OSC notifications over SSH when
+supported.
 
 ### Initialization
 
 When you initialize a project, Crush analyzes your codebase and creates
-a context file that helps it work more effectively in future sessions.
-By default, this file is named `AGENTS.md`, but you can customize the
-name and location with the `initialize_as` option:
+a context file that helps it work more effectively in future sessions. By
+default, this file is named `AGENTS.md`, but you can customize the name and
+location with the `initialize-as` option:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "initialize_as": "AGENTS.md"
-  }
-}
+```bash
+# crushrc
+option initialize-as AGENTS.md
 ```
 
-This is useful if you prefer a different naming convention or want to
-place the file in a specific directory (e.g., `CRUSH.md` or
-`docs/LLMs.md`). Crush will fill the file with project-specific context
-like build commands, code patterns, and conventions it discovered during
-initialization.
+This is useful if you prefer a different naming convention or want to place the
+file in a specific directory (e.g., `CRUSH.md` or `docs/LLMs.md`). Crush will
+fill the file with project-specific context like build commands, code patterns,
+and conventions it discovered during initialization.
 
 ### Attribution Settings
 
 By default, Crush adds attribution information to Git commits and pull requests
-it creates. You can customize this behavior with the `attribution` option:
+it creates. You can customize this behavior with `option` commands:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "attribution": {
-      "trailer_style": "co-authored-by",
-      "generated_with": true
-    }
-  }
-}
+```bash
+option attribution-trailer-style co-authored-by
+option attribution-generated-with true
 ```
 
 - `trailer_style`: Controls the attribution trailer added to commit messages
@@ -719,63 +651,42 @@ Anthropic-compatible APIs.
 Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
 API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "deepseek": {
-      "type": "openai-compat",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "$DEEPSEEK_API_KEY",
-      "models": [
-        {
-          "id": "deepseek-chat",
-          "name": "Deepseek V3",
-          "cost_per_1m_in": 0.27,
-          "cost_per_1m_out": 1.1,
-          "cost_per_1m_in_cached": 0.07,
-          "cost_per_1m_out_cached": 1.1,
-          "context_window": 64000,
-          "default_max_tokens": 5000
-        }
-      ]
-    }
-  }
-}
+```bash
+provider add deepseek --type openai-compat \
+  --base-url "https://api.deepseek.com/v1" \
+  --api-key "$DEEPSEEK_API_KEY"
+
+model add deepseek/deepseek-chat \
+  --name "Deepseek V3" \
+  --context-window 64000 \
+  --default-max-tokens 5000 \
+  --price-input 0.27 \
+  --price-output 1.1 \
+  --price-cache-create 1.1 \
+  --price-cache-hit 0.07
 ```
 
 #### Anthropic-Compatible APIs
 
 Custom Anthropic-compatible providers follow this format:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "custom-anthropic": {
-      "type": "anthropic",
-      "base_url": "https://api.anthropic.com/v1",
-      "api_key": "$ANTHROPIC_API_KEY",
-      "extra_headers": {
-        "anthropic-version": "2023-06-01"
-      },
-      "models": [
-        {
-          "id": "claude-sonnet-4-20250514",
-          "name": "Claude Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
+```bash
+provider add custom-anthropic \
+  --type anthropic \
+  --base-url "https://api.anthropic.com/v1" \
+  --api-key "$ANTHROPIC_API_KEY" \
+  --extra-header anthropic-version 2023-06-01
+
+model add custom-anthropic/claude-sonnet-4-20250514 \
+  --name "Claude Sonnet 4" \
+  --context-window 200000 \
+  --default-max-tokens 50000 \
+  --can-reason true \
+  --supports-images true \
+  --price-input 3 \
+  --price-output 15 \
+  --price-cache-create 3.75 \
+  --price-cache-hit 0.3
 ```
 
 ### Amazon Bedrock
@@ -792,33 +703,25 @@ Crush currently supports running Anthropic models through Bedrock, with caching 
 Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
 
 ```bash
-gcloud auth application-default login
+$ gcloud auth application-default login
 ```
 
 To add specific models to the configuration, configure as such:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "vertexai": {
-      "models": [
-        {
-          "id": "claude-sonnet-4@20250514",
-          "name": "VertexAI Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
+```bash
+# crushrc — authentication still comes from gcloud and the VERTEXAI_* env vars.
+provider add vertexai --type google-vertex
+
+model add vertexai/claude-sonnet-4@20250514 \
+  --name "VertexAI Sonnet 4" \
+  --context-window 200000 \
+  --default-max-tokens 50000 \
+  --can-reason true \
+  --supports-images true \
+  --price-input 3 \
+  --price-output 15 \
+  --price-cache-create 3.75 \
+  --price-cache-hit 0.3
 ```
 
 ### Local Models
@@ -828,30 +731,21 @@ with `type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama`
 and leave out the models list. Crush will populate the model list
 automatically.
 
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "base_url": "http://localhost:11434/v1/",
-      "type": "ollama"
-    }
-  }
-}
+```bash
+# Piece of cake.
+provider add ollama \
+  --name Ollama \
+  --type ollama \
+  --base-url "http://localhost:11434/v1/"
 ```
 
 For llama.cpp (`llama-server`), point at the server's base URL:
 
-```json
-{
-  "providers": {
-    "llamacpp": {
-      "name": "llama.cpp",
-      "base_url": "http://localhost:2222",
-      "type": "llamacpp"
-    }
-  }
-}
+```bash
+provider add llamacpp \
+  --name "llama.cpp" \
+  --type llamacpp \
+  --base-url "http://localhost:2222"
 ```
 
 #### Manual Model Configuration
@@ -860,28 +754,24 @@ You can still list models explicitly. User-defined models always take
 precedence over discovered ones, and any fields you set won't be overwritten
 by auto-discovery. Auto discovery will run if the model list is empty for any
 `openai-compat` provider or if you pass `"discover_models": true` it will merge
- the found models with your hand configured ones.
+the found models with your hand configured ones.
 
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "base_url": "http://localhost:11434/v1/",
-      "type": "ollama",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen3:30b",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ],
-      "discover_models": true
-    }
-  }
-}
+```bash
+# crushrc
+provider add ollama \
+  --name Ollama \
+  --type ollama \
+  --base-url "http://localhost:11434/v1/" \
+  --discover-models true
+
+model add ollama/qwen3:30b \
+  --name "Qwen 3 30B" \
+  --context-window 256000 \
+  --default-max-tokens 20000
 ```
+
+The `--discover-models true` flag merges discovered models with the one above;
+your explicit model fields win on conflicts.
 
 ## Logging
 
@@ -901,17 +791,13 @@ crush logs --tail 500
 crush logs --follow
 ```
 
-Want more logging? Run `crush` with the `--debug` flag, or enable it in the
-config:
+Want more logging? Run `crush` with the `--debug` flag, or enable it in your
+`crushrc`:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "debug": true,
-    "debug_lsp": true
-  }
-}
+```bash
+# crushrc
+option debug true
+option debug-lsp true
 ```
 
 ## Provider Auto-Updates
@@ -928,16 +814,10 @@ For those with restricted internet access, or those who prefer to work in
 air-gapped environments, this might not be want you want, and this feature can
 be disabled.
 
-To disable automatic provider updates, set `disable_provider_auto_update` into
-your `crush.json` config:
+To disable automatic provider updates in your `crushrc`:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "disable_provider_auto_update": true
-  }
-}
+```bash
+option provider-auto-update false
 ```
 
 Or set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
@@ -983,16 +863,6 @@ variable by setting the following in your environment:
 
 ```bash
 export CRUSH_DISABLE_METRICS=1
-```
-
-Or by setting the following in your config:
-
-```json
-{
-  "options": {
-    "disable_metrics": true
-  }
-}
 ```
 
 Crush also respects the [`DO_NOT_TRACK`](https://donottrack.sh/) convention

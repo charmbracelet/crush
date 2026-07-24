@@ -144,23 +144,28 @@ func TestSystemMessageSuppression(t *testing.T) {
 func newSystemMessagesUI(t *testing.T, contextWindow int64, mode permission.PermissionMode) *UI {
 	t.Helper()
 	sty := styles.CharmtonePantera()
-	com := &common.Common{
-		Styles: &sty,
-		Workspace: &sysTestWorkspace{
-			cfg:  &config.Config{Options: &config.Options{}},
-			mode: mode,
-			model: workspace.AgentModel{
-				CatwalkCfg: catwalk.Model{Name: "Test Model", ContextWindow: contextWindow},
-				ModelCfg:   config.SelectedModel{Provider: "test"},
-			},
+	ws := &sysTestWorkspace{
+		cfg:  &config.Config{Options: &config.Options{}},
+		mode: mode,
+		model: workspace.AgentModel{
+			CatwalkCfg: catwalk.Model{Name: "Test Model", ContextWindow: contextWindow},
+			ModelCfg:   config.SelectedModel{Provider: "test"},
 		},
 	}
-	return &UI{
+	com := &common.Common{
+		Styles:    &sty,
+		Workspace: ws,
+	}
+	ui := &UI{
 		com:                      com,
 		chat:                     NewChat(com, config.ScrollbarDefault),
 		keyMap:                   DefaultKeyMap(),
 		suppressedSystemMessages: make(map[chat.SystemMessageKind]bool),
 	}
+	ui.permModeCache.set(mode)
+	ui.agentReady = true
+	ui.agentModel = ws.model
+	return ui
 }
 
 // sysTestWorkspace is a workspace stub exposing just enough for the

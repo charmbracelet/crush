@@ -58,8 +58,9 @@ func (m *UI) activeSystemMessageKinds() []chat.SystemMessageKind {
 		}
 	}
 
-	// Super yolo (sysadmin) mode warning.
-	if m.com.Workspace.PermissionMode() == permission.PermissionModeSysadmin {
+	// Super yolo (sysadmin) mode warning. Uses the cached mode so advisory
+	// recomputes never probe the workspace synchronously.
+	if m.permModeCached() == permission.PermissionModeSysadmin {
 		kinds = append(kinds, chat.SystemMessageSuperYolo)
 	}
 

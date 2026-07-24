@@ -741,6 +741,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.QuestionRadioOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 	s.Editor.QuestionCheckOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
 	s.Editor.QuestionCheckOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
+	// Sysadmin
+	s.Editor.PromptSysadminIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.destructive).Bold(true).SetString(" # ")
+	s.Editor.PromptSysadminIconBlurred = s.Editor.PromptSysadminIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptSysadminDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.destructive).SetString(":::")
+	s.Editor.PromptSysadminDotsBlurred = s.Editor.PromptSysadminDotsFocused.Foreground(o.fgMoreSubtle)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
@@ -905,6 +910,14 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
+
+	// System message (ephemeral Crush advisories) styles.
+	s.Messages.SystemBadge = lipgloss.NewStyle().Padding(0, 1).Background(o.busy).Foreground(o.bgBase).Bold(true)
+	s.Messages.SystemTitle = base.Foreground(o.busy).Bold(true)
+	s.Messages.SystemBody = base.Foreground(o.fgBase)
+	s.Messages.SystemAccent = base.Foreground(o.success)
+	s.Messages.SystemFooterIcon = subtle
+	s.Messages.SystemFooterLabel = subtle
 
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)

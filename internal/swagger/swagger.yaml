@@ -72,6 +72,10 @@ definitions:
         description: Regex pattern tested against the tool name. Empty means match
           all.
         type: string
+      name:
+        description: Friendly display name shown in the TUI. Falls back to Command
+          when empty.
+        type: string
       timeout:
         description: Timeout in seconds. Default 30.
         type: integer
@@ -172,14 +176,6 @@ definitions:
           type: string
         type: array
     type: object
-  config.Scope:
-    enum:
-    - 0
-    - 1
-    type: integer
-    x-enum-varnames:
-    - ScopeGlobal
-    - ScopeWorkspace
   config.SelectedModel:
     properties:
       frequency_penalty:
@@ -234,8 +230,15 @@ definitions:
         $ref: '#/definitions/config.Completions'
       diff_mode:
         type: string
+      scrollbar:
+        type: string
       transparent:
         type: boolean
+    type: object
+  config.ToolGlob:
+    properties:
+      timeout:
+        $ref: '#/definitions/time.Duration'
     type: object
   config.ToolGrep:
     properties:
@@ -251,6 +254,8 @@ definitions:
     type: object
   config.Tools:
     properties:
+      glob:
+        $ref: '#/definitions/config.ToolGlob'
       grep:
         $ref: '#/definitions/config.ToolGrep'
       ls:
@@ -344,7 +349,13 @@ definitions:
         items:
           type: string
         type: array
+      global_context_paths:
+        items:
+          type: string
+        type: array
       initialize_as:
+        type: string
+      notification_style:
         type: string
       progress:
         type: boolean
@@ -355,6 +366,14 @@ definitions:
       tui:
         $ref: '#/definitions/config.TUIOptions'
     type: object
+  github_com_charmbracelet_crush_internal_config.Scope:
+    enum:
+    - 0
+    - 1
+    type: integer
+    x-enum-varnames:
+    - ScopeGlobal
+    - ScopeWorkspace
   github_com_charmbracelet_crush_internal_proto.Message:
     properties:
       created_at:
@@ -418,11 +437,15 @@ definitions:
         type: array
       prompt:
         type: string
+      run_id:
+        type: string
       session_id:
         type: string
     type: object
   proto.AgentSession:
     properties:
+      attached_clients:
+        type: integer
       completion_tokens:
         type: integer
       cost:
@@ -443,6 +466,10 @@ definitions:
         type: string
       title:
         type: string
+      todos:
+        items:
+          $ref: '#/definitions/proto.Todo'
+        type: array
       updated_at:
         type: integer
     type: object
@@ -464,7 +491,7 @@ definitions:
       enabled:
         type: boolean
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigModelRequest:
     properties:
@@ -473,7 +500,7 @@ definitions:
       model_type:
         $ref: '#/definitions/config.SelectedModelType'
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigProviderKeyRequest:
     properties:
@@ -486,29 +513,34 @@ definitions:
       provider_id:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigRefreshOAuthRequest:
     properties:
       provider_id:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigRemoveRequest:
     properties:
       key:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigSetRequest:
     properties:
       key:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
       value: {}
+    type: object
+  proto.CurrentSession:
+    properties:
+      session_id:
+        type: string
     type: object
   proto.Error:
     properties:
@@ -647,10 +679,17 @@ definitions:
       permission:
         $ref: '#/definitions/proto.PermissionRequest'
     type: object
+  proto.PermissionGrantResponse:
+    properties:
+      resolved:
+        type: boolean
+    type: object
   proto.PermissionRequest:
     properties:
       action:
         type: string
+      dangerous:
+        type: boolean
       description:
         type: string
       id:
@@ -665,10 +704,10 @@ definitions:
       tool_name:
         type: string
     type: object
-  proto.PermissionSkipRequest:
+  proto.PermissionSetModeRequest:
     properties:
-      skip:
-        type: boolean
+      mode:
+        $ref: '#/definitions/proto.WorkspacePermissionMode'
     type: object
   proto.ProjectInitPromptResponse:
     properties:
@@ -680,6 +719,51 @@ definitions:
       needs_init:
         type: boolean
     type: object
+  proto.QuestionAnswer:
+    properties:
+      batch_request_id:
+        type: string
+      responses:
+        items:
+          $ref: '#/definitions/proto.QuestionResponse'
+        type: array
+    type: object
+  proto.QuestionAnswerResponse:
+    properties:
+      resolved:
+        type: boolean
+    type: object
+  proto.QuestionResponse:
+    properties:
+      fill_in_text:
+        type: string
+      notes:
+        additionalProperties:
+          type: string
+        type: object
+      request_id:
+        type: string
+      selected_ids:
+        items:
+          type: string
+        type: array
+      "yes":
+        type: boolean
+    type: object
+  proto.ReadSkillRequest:
+    properties:
+      skill_id:
+        type: string
+    type: object
+  proto.ReadSkillResponse:
+    properties:
+      content:
+        items:
+          type: integer
+        type: array
+      result:
+        $ref: '#/definitions/proto.SkillReadResult'
+    type: object
   proto.ServerControl:
     properties:
       command:
@@ -687,6 +771,8 @@ definitions:
     type: object
   proto.Session:
     properties:
+      attached_clients:
+        type: integer
       completion_tokens:
         type: integer
       cost:
@@ -695,6 +781,8 @@ definitions:
         type: integer
       id:
         type: string
+      is_busy:
+        type: boolean
       message_count:
         type: integer
       parent_session_id:
@@ -705,8 +793,82 @@ definitions:
         type: string
       title:
         type: string
+      todos:
+        items:
+          $ref: '#/definitions/proto.Todo'
+        type: array
       updated_at:
         type: integer
+    type: object
+  proto.ShellCommandRequest:
+    properties:
+      command:
+        type: string
+      session_id:
+        type: string
+      term_width:
+        type: integer
+    type: object
+  proto.ShellCommandResponse:
+    properties:
+      exit_code:
+        type: integer
+      output:
+        type: string
+    type: object
+  proto.SkillDiscoveryState:
+    enum:
+    - 0
+    - 1
+    type: integer
+    x-enum-varnames:
+    - SkillStateNormal
+    - SkillStateError
+  proto.SkillInfo:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      label:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
+      user_invocable:
+        type: boolean
+    type: object
+  proto.SkillReadResult:
+    properties:
+      builtin:
+        type: boolean
+      description:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
+    type: object
+  proto.SkillState:
+    properties:
+      error:
+        type: string
+      name:
+        type: string
+      path:
+        type: string
+      state:
+        $ref: '#/definitions/proto.SkillDiscoveryState'
+    type: object
+  proto.Todo:
+    properties:
+      active_form:
+        type: string
+      content:
+        type: string
+      status:
+        type: string
     type: object
   proto.VersionInfo:
     properties:
@@ -723,6 +885,8 @@ definitions:
     type: object
   proto.Workspace:
     properties:
+      client_id:
+        type: string
       config:
         $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Config'
       data_dir:
@@ -737,11 +901,29 @@ definitions:
         type: string
       path:
         type: string
+      permission_mode:
+        $ref: '#/definitions/proto.WorkspacePermissionMode'
+      skills:
+        description: |-
+          Skills carries the snapshot of skill discovery state at workspace
+          creation time. Subsequent updates flow through the SSE event
+          stream.
+        items:
+          $ref: '#/definitions/proto.SkillState'
+        type: array
       version:
         type: string
-      yolo:
-        type: boolean
     type: object
+  proto.WorkspacePermissionMode:
+    enum:
+    - normal
+    - yolo
+    - sysadmin
+    type: string
+    x-enum-varnames:
+    - WorkspacePermissionModeNormal
+    - WorkspacePermissionModeYolo
+    - WorkspacePermissionModeSysadmin
   time.Duration:
     enum:
     - -9223372036854775808
@@ -956,14 +1138,18 @@ paths:
         schema:
           $ref: '#/definitions/proto.AgentMessage'
       responses:
-        "200":
-          description: OK
+        "202":
+          description: Accepted
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/proto.Error'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/proto.Error'
         "500":
@@ -1172,6 +1358,49 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Get queued prompt status
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}/shell:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      - description: Shell command
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ShellCommandRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.ShellCommandResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Run shell command
       tags:
       - agent
   /workspaces/{id}/agent/sessions/{sid}/summarize:
@@ -1479,6 +1708,43 @@ paths:
       summary: Set a config field
       tags:
       - config
+  /workspaces/{id}/current-session:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Client ID (UUID)
+        in: query
+        name: client_id
+        required: true
+        type: string
+      - description: Current session selection
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.CurrentSession'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Set current session for a client
+      tags:
+      - workspaces
   /workspaces/{id}/events:
     get:
       parameters:
@@ -1984,6 +2250,8 @@ paths:
       responses:
         "200":
           description: OK
+          schema:
+            $ref: '#/definitions/proto.PermissionGrantResponse'
         "400":
           description: Bad Request
           schema:
@@ -1999,32 +2267,7 @@ paths:
       summary: Grant permission
       tags:
       - permissions
-  /workspaces/{id}/permissions/skip:
-    get:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/proto.PermissionSkipRequest'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Get skip permissions status
-      tags:
-      - permissions
+  /workspaces/{id}/permissions/mode:
     post:
       consumes:
       - application/json
@@ -2034,12 +2277,12 @@ paths:
         name: id
         required: true
         type: string
-      - description: Permission skip request
+      - description: Permission mode request
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/proto.PermissionSkipRequest'
+          $ref: '#/definitions/proto.PermissionSetModeRequest'
       responses:
         "200":
           description: OK
@@ -2055,7 +2298,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Set skip permissions
+      summary: Set permission mode
       tags:
       - permissions
   /workspaces/{id}/project/init:
@@ -2158,6 +2401,70 @@ paths:
       summary: Get workspace providers
       tags:
       - workspaces
+  /workspaces/{id}/questions/answer:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Question batch answer
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.QuestionAnswer'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.QuestionAnswerResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Answer question batch
+      tags:
+      - questions
+  /workspaces/{id}/questions/cancel:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.QuestionAnswerResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Cancel question batch
+      tags:
+      - questions
   /workspaces/{id}/sessions:
     get:
       parameters:
@@ -2454,4 +2761,70 @@ paths:
       summary: Get user messages for session
       tags:
       - sessions
+  /workspaces/{id}/skills:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.SkillInfo'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List visible skills
+      tags:
+      - skills
+  /workspaces/{id}/skills/read:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Read skill request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ReadSkillRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.ReadSkillResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Read skill content
+      tags:
+      - skills
 swagger: "2.0"

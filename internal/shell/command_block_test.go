@@ -240,6 +240,42 @@ func TestArgumentsBlocker(t *testing.T) {
 			input:       []string{"go", "test", "-exec", "bash -c 'echo hello'"},
 			shouldBlock: true,
 		},
+		// Command name with a leading path must still match.
+		{
+			name:        "block path-qualified command",
+			cmd:         "pacman",
+			args:        nil,
+			flags:       []string{"-S"},
+			input:       []string{"/usr/bin/pacman", "-S", "package"},
+			shouldBlock: true,
+		},
+		// A short flag inside a cluster must still match.
+		{
+			name:        "block clustered short flag",
+			cmd:         "pacman",
+			args:        nil,
+			flags:       []string{"-S"},
+			input:       []string{"pacman", "-Syu", "package"},
+			shouldBlock: true,
+		},
+		// A single-dash long flag must not be split into short flags.
+		{
+			name:        "go test exec is not split",
+			cmd:         "go",
+			args:        []string{"test"},
+			flags:       []string{"-exec"},
+			input:       []string{"go", "test", "-exec", "./mal"},
+			shouldBlock: true,
+		},
+		// Args after "--" are positional, not flags.
+		{
+			name:        "double dash ends flags",
+			cmd:         "pacman",
+			args:        nil,
+			flags:       []string{"-S"},
+			input:       []string{"pacman", "--", "-S"},
+			shouldBlock: false,
+		},
 		{
 			name:        "go test exec",
 			cmd:         "go",
@@ -350,7 +386,7 @@ func TestSplitArgsFlags(t *testing.T) {
 			name:      "flag with equals sign",
 			input:     []string{"-exec=bash", "package"},
 			wantArgs:  []string{"package"},
-			wantFlags: []string{"-exec"},
+			wantFlags: []string{"-exec", "-e", "-x", "-e", "-c"},
 		},
 		{
 			name:      "long flag with equals sign",
@@ -362,7 +398,25 @@ func TestSplitArgsFlags(t *testing.T) {
 			name:      "flag with complex value",
 			input:     []string{`-exec="bash -c 'echo hello'"`, "test"},
 			wantArgs:  []string{"test"},
-			wantFlags: []string{"-exec"},
+			wantFlags: []string{"-exec", "-e", "-x", "-e", "-c"},
+		},
+		{
+			name:      "clustered short flags expand",
+			input:     []string{"-Syu", "package"},
+			wantArgs:  []string{"package"},
+			wantFlags: []string{"-Syu", "-S", "-y", "-u"},
+		},
+		{
+			name:      "double dash ends flag parsing",
+			input:     []string{"-g", "--", "-f", "file"},
+			wantArgs:  []string{"-f", "file"},
+			wantFlags: []string{"-g"},
+		},
+		{
+			name:      "bare dash is a positional arg",
+			input:     []string{"-"},
+			wantArgs:  []string{"-"},
+			wantFlags: []string{},
 		},
 	}
 

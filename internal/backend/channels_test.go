@@ -183,13 +183,23 @@ func (f *fullFakeSessions) List(ctx context.Context) ([]session.Session, error) 
 // declares an MCP server named srvName, opted in as a channel iff
 // enabled is true, mirroring the fields the channel router reads.
 func insertChannelWorkspace(t *testing.T, b *Backend, srvName string, enabled bool, coord agent.Coordinator, sessions session.Service) *Workspace {
+	return insertChannelWorkspaceCfg(t, b, srvName, enabled, false, coord, sessions)
+}
+
+// insertChannelWorkspaceCfg is insertChannelWorkspace with control over both
+// enablement sources: `enabled` opts the server in via the --channels
+// override, `configEnabled` writes channel_enabled: true into the workspace's
+// crush.json.
+func insertChannelWorkspaceCfg(t *testing.T, b *Backend, srvName string, enabled, configEnabled bool, coord agent.Coordinator, sessions session.Service) *Workspace {
 	t.Helper()
 
 	wd := t.TempDir()
+	mcpEntry := map[string]any{"type": "http", "url": "http://127.0.0.1:0/mcp"}
+	if configEnabled {
+		mcpEntry["channel_enabled"] = true
+	}
 	cfgJSON, err := json.Marshal(map[string]any{
-		"mcp": map[string]any{
-			srvName: map[string]any{"type": "http", "url": "http://127.0.0.1:0/mcp"},
-		},
+		"mcp": map[string]any{srvName: mcpEntry},
 	})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(wd, "crush.json"), cfgJSON, 0o644))
@@ -284,6 +294,35 @@ func TestRouteChannelMessage_PrefersViewedSession(t *testing.T) {
 		require.Equal(t, "viewed", run[0])
 	case <-time.After(5 * time.Second):
 		t.Fatal("expected an injection into the viewed session")
+	}
+	ws.runWG.Wait()
+}
+
+// TestRouteChannelMessage_ConfigEnabled verifies that a server with
+// channel_enabled: true in crush.json receives channel pushes without
+// needing --channels on the CLI.
+func TestRouteChannelMessage_ConfigEnabled(t *testing.T) {
+	xdgIsolated(t)
+	b, _ := newTestBackend(t)
+
+	coord := newRecordingCoordinator()
+	sessions := &fullFakeSessions{fakeChannelSessions: &fakeChannelSessions{listed: []session.Session{{ID: "recent"}}}}
+	// channel_enabled in config, deliberately no --channels override.
+	ws := insertChannelWorkspaceCfg(t, b, "webhook", false, true, coord, sessions)
+
+	const content = `<channel source="webhook">config-enabled push</channel>`
+	b.routeChannelMessage(mcptools.Event{
+		Type:           mcptools.EventChannelMessage,
+		Name:           "webhook",
+		ChannelMessage: content,
+	})
+
+	select {
+	case run := <-coord.runs:
+		require.Equal(t, "recent", run[0])
+		require.Equal(t, content, run[1])
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the config-enabled workspace to receive the channel push")
 	}
 	ws.runWG.Wait()
 }

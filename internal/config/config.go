@@ -250,6 +250,12 @@ type MCPConfig struct {
 	// managed internally and stored in the global data config.
 	OAuthToken *oauth.Token `json:"oauth_token,omitempty" jsonschema:"-"`
 
+	// ChannelEnabled enables an MCP server as a channel directly from config,
+	// equivalent to passing its name via --channels on the CLI. This lets
+	// channels be declared persistently in crush.json without needing a CLI
+	// flag on every launch.
+	ChannelEnabled bool `json:"channel_enabled,omitempty" jsonschema:"description=Enable this MCP server as a channel (equivalent to --channels),default=false"`
+
 	// ChannelReply, when set on a server enabled as a channel, makes Crush
 	// route the final assistant response of every turn that originated from
 	// this channel back through one of the server's own tools, so a message

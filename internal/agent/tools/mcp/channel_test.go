@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -325,6 +326,33 @@ func TestChannelEnabled(t *testing.T) {
 		if got := ChannelEnabled(tt.enabled, tt.name); got != tt.want {
 			t.Errorf("ChannelEnabled(%v, %q) = %v, want %v", tt.enabled, tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestChannelOptIn(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		cfgEnabled bool
+		overrides  []string
+		server     string
+		want       bool
+	}{
+		{"neither source", false, nil, "webhook", false},
+		{"config only", true, nil, "webhook", true},
+		{"override only", false, []string{"webhook"}, "webhook", true},
+		{"both sources", true, []string{"webhook"}, "webhook", true},
+		{"override for a different server", false, []string{"other"}, "webhook", false},
+		{"config-enabled with unrelated override", true, []string{"server:other"}, "webhook", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := config.MCPConfig{ChannelEnabled: tt.cfgEnabled}
+			if got := ChannelOptIn(m, tt.overrides, tt.server); got != tt.want {
+				t.Errorf("ChannelOptIn(%+v, %v, %q) = %v, want %v", m, tt.overrides, tt.server, got, tt.want)
+			}
+		})
 	}
 }
 

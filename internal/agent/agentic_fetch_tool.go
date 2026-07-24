@@ -174,33 +174,34 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			}
 
 			// Sub-agent tools run without hook interception. The top-level
-			// `agentic_fetch` call itself is already wrapped from the coder's
-			// side; firing hooks again for every inner tool call would run
-			// the user's hooks N times per delegated turn.
+				// `agentic_fetch` call itself is already wrapped from the coder's
+				// side; firing hooks again for every inner tool call would run
+				// the user's hooks N times per delegated turn.
 
-			agent := NewSessionAgent(SessionAgentOptions{
-				LargeModel:           small, // Use small model for both (fetch doesn't need large)
-				SmallModel:           small,
-				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
-				SystemPrompt:         systemPrompt,
-				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
-				IsYolo:               c.permissions.SkipRequests(),
-				Sessions:             c.sessions,
-				Messages:             c.messages,
-				Tools:                fetchTools,
-			})
+				agent := NewSessionAgent(SessionAgentOptions{
+					LargeModel:           small, // Use small model for both (fetch doesn't need large)
+					SmallModel:           small,
+					SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
+					SystemPrompt:         systemPrompt,
+					DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+					IsYolo:               c.permissions.SkipRequests(),
+					Sessions:             c.sessions,
+					Messages:             c.messages,
+					Tools:                fetchTools,
+					Config:               c.cfg,
+				})
 
-			return c.runSubAgent(ctx, subAgentParams{
-				Agent:          agent,
-				SessionID:      validationResult.SessionID,
-				AgentMessageID: validationResult.AgentMessageID,
-				ToolCallID:     call.ID,
-				Prompt:         fullPrompt,
-				SessionTitle:   "Fetch Analysis",
-				SessionSetup: func(sessionID string) {
-					c.permissions.AutoApproveSession(sessionID)
-				},
-			})
+				return c.runSubAgent(ctx, subAgentParams{
+					Agent:          agent,
+					SessionID:      validationResult.SessionID,
+					AgentMessageID: validationResult.AgentMessageID,
+					ToolCallID:     call.ID,
+					Prompt:         fullPrompt,
+					SessionTitle:   "Fetch Analysis",
+					SessionSetup: func(sessionID string) {
+						c.permissions.AutoApproveSession(sessionID)
+					},
+				})
 		},
 	), nil
 }

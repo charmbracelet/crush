@@ -180,6 +180,7 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	config               *config.ConfigStore
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -235,6 +236,7 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	Config               *config.ConfigStore
 }
 
 func NewSessionAgent(
@@ -253,6 +255,7 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		config:               opts.Config,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -1357,7 +1360,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		fantasy.WithSystemPrompt(a.loadTemplate("summary.md", summaryPrompt)),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1769,6 +1772,8 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		{"large", largeModel},
 	}
 
+	titlePromptStr := a.loadTemplate("title.md", titlePrompt)
+
 	var resp *fantasy.AgentResult
 	var err error
 	var model Model
@@ -1778,7 +1783,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		if attempt.model.CatwalkCfg.CanReason {
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
-		agent := newAgent(attempt.model.Model, titlePrompt, tok)
+		agent := newAgent(attempt.model.Model, []byte(titlePromptStr), tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model
@@ -2274,4 +2279,18 @@ func sanitizeToolInput(toolName, toolCallID, input string) (string, bool) {
 		return "{}", true
 	}
 	return input, false
+}
+
+// loadTemplate loads a template from the configured template path if available,
+// otherwise falls back to the provided embedded template.
+func (a *sessionAgent) loadTemplate(name string, embedded []byte) string {
+	if a.config == nil {
+		return string(embedded)
+	}
+	loader := NewTemplateLoader(a.config)
+	s, err := loader.LoadTemplateString(name, embedded)
+	if err != nil {
+		return string(embedded)
+	}
+	return s
 }

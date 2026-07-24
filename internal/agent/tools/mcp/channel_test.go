@@ -19,8 +19,8 @@ func TestPublishChannelMessagePreservesMetadata(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	events := SubscribeEvents(ctx)
-	publishChannelMessage("signal", json.RawMessage(`{"content":"hello","meta":{"sender":"123"}}`))
+	events := SubscribeChannelEvents(ctx)
+	publishChannelMessage(ctx, "signal", json.RawMessage(`{"content":"hello","meta":{"sender":"123"}}`))
 
 	select {
 	case event := <-events:

@@ -31,10 +31,10 @@ type channelSessionStore interface {
 // their arrival order and the init/inject sequence per event does not
 // race with itself.
 func (b *Backend) startChannelRouter() {
-	events := mcptools.SubscribeEvents(b.ctx)
+	events := mcptools.SubscribeChannelEvents(b.ctx)
 	go func() {
 		for ev := range events {
-			if ev.Payload.Type != mcptools.EventChannelMessage || ev.Payload.ChannelMessage == "" {
+			if ev.Payload.ChannelMessage == "" {
 				continue
 			}
 			b.routeChannelMessage(ev.Payload)

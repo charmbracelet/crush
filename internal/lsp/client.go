@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/lsp/util"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
@@ -584,7 +585,7 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 		return
 	}
 	for uri, info := range c.openFiles.Seq2() {
-		path, err := protocol.DocumentURI(uri).Path()
+		path, err := util.PathFromURI(protocol.DocumentURI(uri))
 		if err != nil {
 			slog.Warn("Failed to convert URI to path", "uri", uri, "error", err)
 			continue

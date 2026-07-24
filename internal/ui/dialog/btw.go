@@ -260,7 +260,11 @@ func (d *Btw) submit() Action {
 func (d *Btw) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s := d.com.Styles
 	frameW := s.Dialog.View.GetHorizontalFrameSize()
-	width := min(btwMaxWidth, max(btwMinWidth, area.Dx()-4-frameW))
+	avail := max(0, area.Dx()-frameW)
+	// btwMinWidth is a floor, not a guarantee: on a narrow terminal it
+	// must still lose to the space actually available, otherwise the
+	// dialog (and the cursor placed relative to it) runs off screen.
+	width := min(avail, min(btwMaxWidth, max(btwMinWidth, avail-4)))
 	titleWidth := max(0, width-s.Dialog.Title.GetHorizontalFrameSize())
 
 	title := common.DialogTitle(s, "btw", titleWidth, s.Dialog.TitleGradFromColor, s.Dialog.TitleGradToColor)
@@ -270,7 +274,7 @@ func (d *Btw) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	var cur *tea.Cursor
 	switch d.state {
 	case btwStateInput:
-		d.question.SetWidth(max(10, width-s.Dialog.InputPrompt.GetHorizontalFrameSize()-1))
+		d.question.SetWidth(dialogInputTextWidth(s, d.question, width))
 		body = s.Dialog.InputPrompt.Render(d.question.View())
 		cur = InputCursor(s, d.question.Cursor())
 	case btwStateLoading:
@@ -360,7 +364,9 @@ func (d *Btw) renderContent(contentWidth int) string {
 func (d *Btw) helpLine() string {
 	switch d.state {
 	case btwStateLoading:
-		return d.spinner.View() + " answering · esc close"
+		// The body already renders the spinner; a second copy here just
+		// puts two of them on screen.
+		return "esc close"
 	case btwStateAnswer:
 		usage := ""
 		if d.promptTokens+d.completionTokens > 0 {

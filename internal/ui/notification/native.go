@@ -4,11 +4,14 @@ import (
 	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/gen2brain/beeep"
 )
 
 // NativeBackend sends desktop notifications using the native OS notification
-// system via beeep.
+// system. The actual delivery function is supplied per-platform via
+// defaultNotifyFunc; on illumos/solaris (where beeep's dbus dependency does
+// not build) it is a no-op. Selection logic avoids this backend there and
+// uses a terminal-based backend instead, so this is only a safety net. See
+// NativeSupported.
 type NativeBackend struct {
 	// icon is the notification icon data (PNG bytes).
 	icon []byte
@@ -18,10 +21,9 @@ type NativeBackend struct {
 
 // NewNativeBackend creates a new native notification backend.
 func NewNativeBackend(icon []byte) *NativeBackend {
-	beeep.AppName = "Crush"
 	return &NativeBackend{
 		icon:       icon,
-		notifyFunc: beeep.Notify,
+		notifyFunc: defaultNotifyFunc,
 	}
 }
 
@@ -48,5 +50,5 @@ func (b *NativeBackend) SetNotifyFunc(fn func(title, message string, icon any) e
 
 // ResetNotifyFunc resets the notification function to the default.
 func (b *NativeBackend) ResetNotifyFunc() {
-	b.notifyFunc = beeep.Notify
+	b.notifyFunc = defaultNotifyFunc
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -130,6 +131,18 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		// even when no project file exists.
 		require.Contains(t, got, GlobalConfig())
 		require.Contains(t, got, GlobalConfigData())
+	})
+
+	t.Run("system config is loaded first", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("system config not supported on Windows")
+		}
+
+		got := lookupConfigs(t.TempDir())
+		require.NotEmpty(t, got)
+		// The system-wide config must be first so it has the lowest
+		// priority when configs are merged.
+		require.Equal(t, "/etc/crush/crush.json", got[0])
 	})
 }
 

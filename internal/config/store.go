@@ -52,6 +52,11 @@ type fileSnapshot struct {
 // the lifetime of the process (or workspace).
 type RuntimeOverrides struct {
 	SkipPermissionRequests bool
+	// EnabledChannels lists the MCP servers opted in as channels for this
+	// session (via the --channels flag). A server present in MCP config only
+	// pushes channel events when it also appears here. Entries may be written
+	// as "server:<name>" or as a bare "<name>".
+	EnabledChannels []string
 }
 
 // ConfigStore is the single entry point for all config access. It owns the
@@ -654,6 +659,14 @@ func (s *ConfigStore) WaitForTokenChange(ctx context.Context, providerID string)
 
 	select {
 	case <-ch:
+		// Remove the consumed signal so a subsequent
+		// SignalAuthComplete does not close an already-closed
+		// channel.
+		s.authSignalMu.Lock()
+		if s.authSignals[providerID] == ch {
+			delete(s.authSignals, providerID)
+		}
+		s.authSignalMu.Unlock()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -669,8 +682,13 @@ func (s *ConfigStore) SignalAuthComplete(providerID string) {
 	s.authSignalMu.Lock()
 	defer s.authSignalMu.Unlock()
 	if ch, ok := s.authSignals[providerID]; ok {
-		close(ch)
 		delete(s.authSignals, providerID)
+		select {
+		case <-ch:
+			// Already closed by a previous signal; nothing to do.
+		default:
+			close(ch)
+		}
 	} else {
 		// No waiter yet. Pre-create a closed channel so the next
 		// WaitForTokenChange returns immediately.

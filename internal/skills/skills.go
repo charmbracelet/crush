@@ -49,6 +49,82 @@ type Skill struct {
 	Builtin                bool              `yaml:"-" json:"builtin"`
 }
 
+// UnmarshalYAML decodes a skill's frontmatter. It mirrors the standard Skill
+// field mapping but routes the metadata field through [metadataMap], which
+// tolerates non-string values by coercing them to strings. This matches the
+// reference Agent Skills parser (skills-ref), which stringifies metadata
+// values rather than rejecting nested maps. Popular skill packs (e.g.
+// samber/cc-skills-golang) embed per-client config blocks under metadata;
+// without coercion the entire skill is silently dropped during discovery.
+func (s *Skill) UnmarshalYAML(value *yaml.Node) error {
+	type raw struct {
+		Name                   string      `yaml:"name"`
+		Description            string      `yaml:"description"`
+		UserInvocable          bool        `yaml:"user-invocable"`
+		DisableModelInvocation bool        `yaml:"disable-model-invocation"`
+		License                string      `yaml:"license,omitempty"`
+		Compatibility          string      `yaml:"compatibility,omitempty"`
+		Metadata               metadataMap `yaml:"metadata,omitempty"`
+	}
+	var r raw
+	if err := value.Decode(&r); err != nil {
+		return err
+	}
+	s.Name = r.Name
+	s.Description = r.Description
+	s.UserInvocable = r.UserInvocable
+	s.DisableModelInvocation = r.DisableModelInvocation
+	s.License = r.License
+	s.Compatibility = r.Compatibility
+	s.Metadata = map[string]string(r.Metadata)
+	return nil
+}
+
+// metadataMap is a [map[string]string] that coerces non-string YAML values
+// to their string representation when decoding. The Agent Skills spec types
+// metadata as map[string]string, but real-world skill packs nest maps under
+// it. Stringifying those values preserves the strict contract without
+// discarding an otherwise valid skill. Scalars use their literal text;
+// mappings and sequences are re-encoded as YAML so nothing is lost.
+type metadataMap map[string]string
+
+func (m *metadataMap) UnmarshalYAML(value *yaml.Node) error {
+	// A null or empty value (e.g. "metadata:") leaves the map untouched.
+	if value.Kind == yaml.ScalarNode && value.Value == "" {
+		return nil
+	}
+	var nodes map[string]yaml.Node
+	if err := value.Decode(&nodes); err != nil {
+		return err
+	}
+	*m = make(metadataMap, len(nodes))
+	for k, n := range nodes {
+		coerced, err := nodeToCoercedString(&n)
+		if err != nil {
+			return fmt.Errorf("coercing metadata value %q: %w", k, err)
+		}
+		(*m)[k] = coerced
+	}
+	return nil
+}
+
+// nodeToCoercedString returns the string form of a YAML node. Scalars become
+// their literal text; aliases, mappings, and sequences are re-encoded as
+// YAML and trimmed.
+func nodeToCoercedString(node *yaml.Node) (string, error) {
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = node.Alias
+	}
+	if node.Kind == yaml.ScalarNode {
+		return node.Value, nil
+	}
+	out, err := yaml.Marshal(node)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // DiscoveryState represents the outcome of discovering a single skill file.
 type DiscoveryState int
 

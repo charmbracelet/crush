@@ -234,9 +234,10 @@ type ClientInfo struct {
 // Channel message events (EventChannelMessage) are excluded: they carry no
 // workspace or session identity, and the MCP broker is process-global. Without
 // this filter, every workspace that calls SubscribeEvents would receive every
-// other workspace's channel events — a cross-workspace injection path. Channel
-// delivery requires workspace-scoped routing, which is deferred to a later PR;
-// until then, channel events must not flow through the shared event fan-out.
+// other workspace's channel events — a cross-workspace injection path.
+// Consumers that deliver channel messages use SubscribeChannelEvents and are
+// responsible for scoping each event to the workspaces that declared and
+// opted in the originating server.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	raw := broker.Subscribe(ctx)
 	filtered := make(chan pubsub.Event[Event], 64)
@@ -254,6 +255,32 @@ func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 		}
 	}()
 	return filtered
+}
+
+// SubscribeChannelEvents returns a channel carrying only channel message
+// events (EventChannelMessage). The MCP broker is process-global, so these
+// events are not scoped to any workspace: every consumer must check that the
+// originating server is declared in the target workspace's MCP config and
+// opted in (ChannelEnabled) before delivering, otherwise one workspace's
+// channel messages leak into another — the injection path SubscribeEvents
+// filters out.
+func SubscribeChannelEvents(ctx context.Context) <-chan pubsub.Event[Event] {
+	raw := broker.Subscribe(ctx)
+	channelOnly := make(chan pubsub.Event[Event], 64)
+	go func() {
+		defer close(channelOnly)
+		for ev := range raw {
+			if ev.Payload.Type != EventChannelMessage {
+				continue
+			}
+			select {
+			case channelOnly <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return channelOnly
 }
 
 // GetStates returns the current state of all MCP clients

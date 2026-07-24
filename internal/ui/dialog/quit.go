@@ -95,8 +95,15 @@ func (q *Quit) HandleMsg(msg tea.Msg) Action {
 
 // Draw implements [Dialog].
 func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	const question = "Are you sure you want to quit?"
-	baseStyle := q.com.Styles.Dialog.Quit.Content
+	const (
+		question    = "Are you sure you want to quit?"
+		hintLineOne = "To quit without confirmation"
+		hintLineTwo = "press ctrl+c twice."
+	)
+	var (
+		baseStyle = q.com.Styles.Dialog.Quit.Content
+		hintStyle = q.com.Styles.Dialog.Quit.Hint
+	)
 	buttonOpts := []common.ButtonOpts{
 		{Text: "Yep!", Selected: !q.selectedNo, Padding: 3},
 		{Text: "Nope", Selected: q.selectedNo, Padding: 3},
@@ -108,6 +115,9 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			question,
 			"",
 			buttons,
+			"",
+			hintStyle.Render(hintLineOne),
+			hintStyle.Render(hintLineTwo),
 		),
 	)
 

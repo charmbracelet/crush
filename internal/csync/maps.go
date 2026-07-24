@@ -60,6 +60,25 @@ func (m *Map[K, V]) Del(key K) {
 	delete(m.inner, key)
 }
 
+// CompareAndDelete deletes the key only if the current value matches the
+// expected pointer. Returns true if the deletion occurred. This is the
+// ABA-safe cleanup primitive: it prevents a deferred cleanup from removing
+// a value that was replaced by a newer writer in the window between the
+// explicit Del and the deferred Del.
+func (m *Map[K, V]) CompareAndDelete(key K, expected any) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.inner[key]
+	if !ok {
+		return false
+	}
+	if any(current) != expected {
+		return false
+	}
+	delete(m.inner, key)
+	return true
+}
+
 // Get gets the value for the specified key from the map.
 func (m *Map[K, V]) Get(key K) (V, bool) {
 	m.mu.RLock()

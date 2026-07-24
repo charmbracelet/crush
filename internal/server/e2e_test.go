@@ -567,10 +567,14 @@ func TestE2E_KillingClientASSEDoesNotBreakClientB(t *testing.T) {
 
 // TestE2E_ShutdownCallbackFiresWhenLastClientLeaves covers PLAN
 // item 6 scenario 4: once both clients disconnect, the backend
-// runs its "last workspace removed -> server shutdown" path.
+// runs its "last workspace removed -> server shutdown" path — now
+// after the idle-linger window rather than immediately.
 func TestE2E_ShutdownCallbackFiresWhenLastClientLeaves(t *testing.T) {
 	t.Parallel()
 	h := newE2EHarness(t)
+	// Shorten the idle linger so the test doesn't wait out the
+	// production window; the callback still fires, just after the delay.
+	h.backend.SetIdleShutdownDelay(200 * time.Millisecond)
 
 	ctxA, cancelA := context.WithCancel(t.Context())
 	ctxB, cancelB := context.WithCancel(t.Context())
@@ -599,7 +603,7 @@ func TestE2E_ShutdownCallbackFiresWhenLastClientLeaves(t *testing.T) {
 	killB()
 	require.Eventually(t, h.shutdownHit.Load,
 		3*time.Second, 10*time.Millisecond,
-		"shutdown callback must fire once the last client disconnects")
+		"shutdown callback must fire once the last client disconnects (after the idle linger)")
 
 	// Workspace must be gone from the index.
 	_, err := h.backend.GetWorkspace(h.workspace.ID)

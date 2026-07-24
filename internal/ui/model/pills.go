@@ -328,9 +328,11 @@ func (m *UI) renderPills() {
 		if todosFocused && hasIncomplete {
 			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
 		} else if queueFocused && hasQueue {
-			if m.com != nil && m.com.Workspace != nil && m.com.Workspace.AgentIsReady() {
-				queueItems := m.com.Workspace.AgentQueuedPromptsList(m.session.ID)
-				expandedList = queueList(queueItems, t)
+			// Render from the memoized queue (fetched off-thread, see
+			// workspace_cache.go): renderPills runs on the Update/View
+			// path and must never block on a workspace round-trip.
+			if len(m.promptQueueItems) > 0 {
+				expandedList = queueList(m.promptQueueItems, t)
 			}
 		}
 	}

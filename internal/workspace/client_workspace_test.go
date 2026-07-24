@@ -6,10 +6,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -236,4 +241,205 @@ func TestTranslateEvent_UpdateAvailable(t *testing.T) {
 	require.Equal(t, "1.0.0", got.CurrentVersion)
 	require.Equal(t, "1.1.0", got.LatestVersion)
 	require.True(t, got.IsDevelopment)
+}
+
+func TestClientWorkspaceListMCPPrompts(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/mcp/prompts", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode([]proto.MCPPrompt{
+			{
+				ID:       "server:review",
+				PromptID: "review",
+				ClientID: "server",
+				Arguments: []proto.MCPPromptArgument{
+					{ID: "focus", Title: "Focus", Required: true},
+				},
+			},
+		}))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	got, err := workspace.ListMCPPrompts(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []commands.MCPPrompt{
+		{
+			ID:       "server:review",
+			PromptID: "review",
+			ClientID: "server",
+			Arguments: []commands.Argument{
+				{ID: "focus", Title: "Focus", Required: true},
+			},
+		},
+	}, got)
+}
+
+func TestClientWorkspaceListMCPPromptsServerError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	workspace := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	_, err = workspace.ListMCPPrompts(t.Context())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 500")
+}
+
+// TestClientWorkspace_ReconnectsOnStreamDrop verifies that the event
+// subscription loop reconnects after the SSE stream drops instead of
+// leaving the TUI permanently orphaned (which surfaced as a stuck
+// "coder agent is offline"), and that Shutdown stops the loop.
+func TestClientWorkspace_ReconnectsOnStreamDrop(t *testing.T) {
+	// Shrink the backoff so several reconnects happen quickly.
+	origInitial, origMax := sseReconnectInitialBackoff, sseReconnectMaxBackoff
+	sseReconnectInitialBackoff = 5 * time.Millisecond
+	sseReconnectMaxBackoff = 20 * time.Millisecond
+	t.Cleanup(func() {
+		sseReconnectInitialBackoff = origInitial
+		sseReconnectMaxBackoff = origMax
+	})
+
+	var subscribes atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/events") {
+			// Any other bookkeeping call (e.g. GetWorkspace) just
+			// gets an empty OK; the test only cares about the stream.
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		subscribes.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		// Drop the stream immediately so the client must reconnect.
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(func(tea.Msg) {})
+		close(done)
+	}()
+
+	// The loop must reconnect several times as the server keeps
+	// dropping the stream.
+	require.Eventually(t, func() bool { return subscribes.Load() >= 3 },
+		2*time.Second, 5*time.Millisecond,
+		"subscription loop should reconnect after the stream drops")
+
+	// Shutdown cancels the subscription context; the loop must return.
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown")
+	}
+}
+
+// TestClientWorkspace_SubscriptionStopsWhenServerDown verifies the
+// reconnect loop does not spin forever after Shutdown even when it can
+// never connect (server unreachable).
+func TestClientWorkspace_SubscriptionStopsWhenServerDown(t *testing.T) {
+	origInitial, origMax := sseReconnectInitialBackoff, sseReconnectMaxBackoff
+	sseReconnectInitialBackoff = 5 * time.Millisecond
+	sseReconnectMaxBackoff = 20 * time.Millisecond
+	t.Cleanup(func() {
+		sseReconnectInitialBackoff = origInitial
+		sseReconnectMaxBackoff = origMax
+	})
+
+	// Port 1 is not listening: SubscribeEvents fails on every attempt.
+	c, err := client.NewClient(t.TempDir(), "tcp", "127.0.0.1:1")
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	done := make(chan struct{})
+	go func() {
+		ws.runSubscription(func(tea.Msg) {})
+		close(done)
+	}()
+
+	// Let it retry a few times, then shut down.
+	time.Sleep(30 * time.Millisecond)
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runSubscription did not return after Shutdown while server was down")
+	}
+}
+
+// TestClientWorkspace_AgentReadyErr distinguishes a server that reports
+// an uninitialized agent from a server that cannot be reached, so the UI
+// can show an actionable message instead of a blanket "agent offline".
+func TestClientWorkspace_AgentReadyErr(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ready", func(t *testing.T) {
+		t.Parallel()
+		ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: true})
+		require.NoError(t, ws.AgentReadyErr())
+		require.True(t, ws.AgentIsReady())
+	})
+
+	t.Run("not initialized", func(t *testing.T) {
+		t.Parallel()
+		ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: false})
+		err := ws.AgentReadyErr()
+		require.ErrorIs(t, err, ErrAgentNotInitialized)
+		require.NotErrorIs(t, err, ErrServerUnreachable)
+		require.False(t, ws.AgentIsReady())
+	})
+
+	t.Run("server unreachable", func(t *testing.T) {
+		t.Parallel()
+		c, err := client.NewClient(t.TempDir(), "tcp", "127.0.0.1:1")
+		require.NoError(t, err)
+		ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+		readyErr := ws.AgentReadyErr()
+		require.ErrorIs(t, readyErr, ErrServerUnreachable)
+		require.NotErrorIs(t, readyErr, ErrAgentNotInitialized)
+		require.False(t, ws.AgentIsReady())
+	})
+}
+
+// agentInfoWorkspace returns a ClientWorkspace whose server answers the
+// agent-info endpoint with the given info.
+func agentInfoWorkspace(t *testing.T, info proto.AgentInfo) *ClientWorkspace {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/agent", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(info))
+	}))
+	t.Cleanup(srv.Close)
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	return NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
 }

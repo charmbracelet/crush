@@ -172,10 +172,10 @@ func NewHandler(
 		NewTokenSource:           newTokenSource,
 		// Use a metadata-fixing HTTP client so trailing-slash issuers in
 		// OAuth metadata responses don't trip the SDK's strict RFC 8414
-		// validation. Based on Bruno Krugel's fix from PR #3396.
-		Client: &http.Client{
-			Transport: newMetadataFixupRoundTripper(http.DefaultTransport),
-		},
+		// validation. Also rewrite internal-cluster redirects back to the
+		// external hostname so the flow works outside the cluster.
+		// Based on Bruno Krugel's fix from PR #3396.
+		Client: newOAuthMetadataClient(http.DefaultTransport, serverURL),
 		DynamicClientRegistrationConfig: &auth.DynamicClientRegistrationConfig{
 			Metadata: &oauthex.ClientRegistrationMetadata{
 				ClientName:   "Crush",
@@ -487,6 +487,36 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	resp.ContentLength = int64(len(fixed))
 	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(fixed)))
 	return resp, nil
+}
+
+// newOAuthMetadataClient creates an HTTP client that fixes two OAuth
+// metadata issues:
+//  1. Trailing-slash issuers: normalized via metadataFixupRoundTripper.
+//  2. Host-changing redirects: when a redirect sends the client to a
+//     different host (e.g. an internal cluster address behind a proxy),
+//     the target is rewritten to the original MCP server hostname, so
+//     the flow stays reachable.
+func newOAuthMetadataClient(base http.RoundTripper, serverURL string) *http.Client {
+	originalHost := ""
+	originalScheme := "https"
+	if u, err := url.Parse(serverURL); err == nil {
+		originalHost = u.Host
+		originalScheme = u.Scheme
+	}
+	return &http.Client{
+		Transport: newMetadataFixupRoundTripper(base),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if originalHost != "" && req.URL.Host != originalHost {
+				req.URL.Host = originalHost
+				req.URL.Scheme = originalScheme
+				req.Host = originalHost
+			}
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
 }
 
 func isMetadataEndpoint(path string) bool {

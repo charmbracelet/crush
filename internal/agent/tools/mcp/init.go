@@ -253,6 +253,22 @@ func Close(ctx context.Context) error {
 func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
 	ArmInit()
 	slog.Info("Initializing MCP clients")
+
+	// Clean up orphaned OAuth tokens: when a user removes an MCP from
+	// their crush.json, the persisted OAuth token in the data config
+	// still lingers and gets merged back as a phantom MCP entry with
+	// no type or URL. Remove those before they cause errors.
+	var orphans []string
+	for name, m := range cfg.Config().MCP {
+		if m.Type == "" && m.OAuthToken != nil {
+			orphans = append(orphans, name)
+		}
+	}
+	for _, name := range orphans {
+		slog.Info("Cleaning up orphaned MCP OAuth token", "name", name)
+		clearOAuthToken(cfg, name)
+	}
+
 	var wg sync.WaitGroup
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.Config().MCP {

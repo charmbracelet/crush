@@ -43,6 +43,9 @@ func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) 
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
+func (m *mockBashPermissionService) SetLifecycleHooks(_ permission.LifecycleHookRunner) {
+}
+
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	workingDir := t.TempDir()
 	tool := newBashToolForTest(workingDir)
@@ -112,6 +115,9 @@ func (m *recordingPermissionService) SkipRequests() bool {
 
 func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
+}
+
+func (m *recordingPermissionService) SetLifecycleHooks(_ permission.LifecycleHookRunner) {
 }
 
 func newBashToolForTest(workingDir string) fantasy.AgentTool {

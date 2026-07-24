@@ -254,27 +254,9 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	ArmInit()
 	slog.Info("Initializing MCP clients")
 
-	// Clean up orphaned MCP entries: when a user removes an MCP from
-	// their crush.json, the persisted data config still has the MCP
-	// entry (e.g. an OAuth token), which gets merged back as a phantom
-	// MCP with no type or URL. Remove the entire entry before iterating.
-	var orphans []string
-	for name, m := range cfg.Config().MCP {
-		if m.Type == "" {
-			orphans = append(orphans, name)
-		}
-	}
-	for _, name := range orphans {
-		slog.Info("Cleaning up orphaned MCP config entry", "name", name)
-		removeMCPCfgEntry(cfg, name)
-	}
-
 	var wg sync.WaitGroup
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.Config().MCP {
-		if m.Type == "" {
-			continue
-		}
 		if m.Disabled {
 			updateState(name, StateDisabled, nil, nil, Counts{})
 			slog.Debug("Skipping disabled MCP", "name", name)
@@ -1032,17 +1014,6 @@ func isOAuthInitErr(err error) bool {
 	return strings.Contains(msg, "invalid_grant") ||
 		strings.Contains(msg, "invalid_client") ||
 		strings.Contains(msg, "no token available")
-}
-
-// removeMCPCfgEntry removes the entire mcp.<name> entry from the
-// global data config. This is used to clean up orphaned MCP entries
-// that have no type or URL (left behind when a user removes an MCP
-// from their crush.json but the persisted data config still has it).
-func removeMCPCfgEntry(cfg *config.ConfigStore, name string) {
-	key := fmt.Sprintf("mcp.%s", name)
-	if err := cfg.RemoveConfigField(config.ScopeGlobal, key); err != nil {
-		slog.Warn("Failed to remove orphaned MCP config entry", "name", name, "error", err)
-	}
 }
 
 // clearOAuthToken removes the persisted OAuth token for a named MCP

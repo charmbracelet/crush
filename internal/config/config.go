@@ -234,6 +234,12 @@ type MCPConfig struct {
 	OAuthToken *oauth.Token `json:"oauth_token,omitempty" jsonschema:"-"`
 }
 
+// isOrphanedToken reports whether this entry is a leftover OAuth token
+// with no real server config.
+func (m MCPConfig) isOrphanedToken() bool {
+	return m.Type == "" && m.Command == "" && m.URL == "" && m.OAuthToken != nil
+}
+
 type LSPConfig struct {
 	Disabled    bool              `json:"disabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
 	Command     string            `json:"command,omitempty" jsonschema:"description=Command to execute for the LSP server,example=gopls"`

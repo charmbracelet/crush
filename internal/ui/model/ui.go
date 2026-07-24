@@ -1380,8 +1380,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case modelChangedMsg:
-		// The agent model has finished updating. Switching models is a fresh
-		// trigger, so re-surface the context advisory.
+		// The agent model has finished updating. Invalidate the cache so
+		// the next busy refresh picks up the new model, then re-surface
+		// the context advisory.
+		m.invalidateBusyCaches()
 		m.retriggerSystemMessage(chat.SystemMessageContextWarning)
 		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg(msg.info)))
 	case app.UpdateAvailableMsg:

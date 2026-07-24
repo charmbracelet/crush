@@ -240,7 +240,8 @@ func NewHandler(
 	}
 	h.inner = inner
 
-	slog.Info("MCP OAuth handler created",
+	slog.Info(
+		"MCP OAuth handler created",
 		"name", serverName,
 		"redirect_url", redirectURL,
 		"restored_token", h.cachedToken != nil,
@@ -435,11 +436,16 @@ func (r *callbackReceiver) close() {
 	}
 }
 
-// metadataFixupRoundTripper normalizes trailing-slash issuers in OAuth
-// metadata responses. Some servers return an issuer with a trailing slash
-// that doesn't match the URL the metadata was fetched from, causing the
-// SDK's strict RFC 8414 validation to reject it. Based on Bruno Krugel's
-// fix from PR #3396.
+// metadataFixupRoundTripper normalizes issuers in OAuth metadata responses
+// so they pass the SDK's strict RFC 8414 validation. It handles two cases:
+//
+//  1. Trailing-slash issuers that don't match the discovery URL.
+//  2. Multi-tenant issuers: some providers (e.g., Atlassian) use a
+//     tenant-specific path for discovery but return a shared, top-level
+//     issuer in the metadata. The round tripper rewrites the issuer to
+//     match the discovery URL when they share the same origin.
+//
+// Based on Bruno Krugel's fix from PR #3396.
 type metadataFixupRoundTripper struct {
 	base http.RoundTripper
 }
@@ -453,36 +459,82 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	if err != nil {
 		return nil, err
 	}
-	if !isMetadataEndpoint(req.URL.Path) || resp.StatusCode != http.StatusOK || resp.Body == nil {
+	if !isIssuerMetadataEndpoint(req.URL.Path) || resp.StatusCode != http.StatusOK || resp.Body == nil {
 		return resp, nil
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	// Cap the read to match the SDK's own metadata size limit (1 MiB) so
+	// a misbehaving server can't exhaust memory here. Oversized bodies
+	// are passed through untouched; the SDK will reject them.
+	const maxMetadataSize = 1 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMetadataSize+1))
 	if err != nil {
+		resp.Body.Close()
 		return nil, fmt.Errorf("read metadata response: %w", err)
 	}
+	if len(body) > maxMetadataSize {
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
+		return resp, nil
+	}
+	resp.Body.Close()
 
+	// Decode with json.Number so re-marshaling doesn't mangle large
+	// integers into scientific notation.
 	var raw map[string]any
-	if json.Unmarshal(body, &raw) != nil {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if dec.Decode(&raw) != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return resp, nil
 	}
 
 	issuer, ok := raw["issuer"].(string)
-	if !ok || !strings.HasSuffix(issuer, "/") {
+	if !ok {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return resp, nil
 	}
 
-	raw["issuer"] = strings.TrimSuffix(issuer, "/")
+	changed := false
+
+	// Normalize trailing-slash issuers so they pass strict RFC 8414
+	// validation.
+	if strings.HasSuffix(issuer, "/") {
+		issuer = strings.TrimSuffix(issuer, "/")
+		raw["issuer"] = issuer
+		changed = true
+		slog.Debug("Normalized OAuth metadata issuer trailing slash", "url", req.URL.String())
+	}
+
+	// Rewrite the issuer for multi-tenant authorization servers. Some
+	// providers (e.g., Atlassian) use a tenant-specific path for
+	// discovery but return a shared, top-level issuer in the metadata.
+	// The SDK rejects this because the issuer doesn't match the
+	// discovery URL. When the metadata issuer shares the same origin
+	// as the discovery URL and is an ancestor path of it, rewrite the
+	// issuer to match the discovery URL.
+	if expected := issuerFromMetadataURL(req.URL.String()); expected != "" && issuer != expected {
+		if sameOrigin(issuer, expected) && isAncestorPath(issuer, expected) {
+			raw["issuer"] = expected
+			changed = true
+			slog.Debug("Rewrote OAuth metadata issuer for multi-tenant provider",
+				"original", issuer, "rewritten", expected, "url", req.URL.String())
+		}
+	}
+
+	if !changed {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
 	fixed, err := json.Marshal(raw)
 	if err != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return resp, nil
 	}
 
-	slog.Debug("Normalized OAuth metadata issuer trailing slash", "url", req.URL.String())
 	resp.Body = io.NopCloser(bytes.NewReader(fixed))
 	resp.ContentLength = int64(len(fixed))
 	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(fixed)))
@@ -490,9 +542,10 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 }
 
 // newOAuthMetadataClient creates an HTTP client for the OAuth flow that
-// smooths over two nonstandard behaviors seen behind corporate proxies:
+// smooths over nonstandard behaviors seen in the wild:
 //
-//  1. Trailing-slash issuers in metadata responses, normalized by
+//  1. Issuer mismatches in metadata responses (trailing slashes and
+//     multi-tenant shared issuers), normalized by
 //     metadataFixupRoundTripper so they pass the SDK's strict RFC 8414
 //     validation.
 //  2. Metadata discovery requests that get 3xx-redirected to an
@@ -529,9 +582,106 @@ func newOAuthMetadataClient(base http.RoundTripper, serverURL string) *http.Clie
 	}
 }
 
+// isMetadataEndpoint reports whether path is a metadata discovery endpoint
+// subject to the redirect rewrite in newOAuthMetadataClient.
 func isMetadataEndpoint(path string) bool {
 	return strings.Contains(path, "/.well-known/oauth-authorization-server") ||
 		strings.Contains(path, "/.well-known/oauth-protected-resource")
+}
+
+// isIssuerMetadataEndpoint reports whether path is an authorization server
+// metadata discovery endpoint, i.e. one whose response carries an "issuer"
+// field validated by the SDK. Protected resource metadata is excluded: it
+// has no issuer and must not be rewritten.
+func isIssuerMetadataEndpoint(path string) bool {
+	return strings.Contains(path, "/.well-known/oauth-authorization-server") ||
+		strings.Contains(path, "/.well-known/openid-configuration")
+}
+
+// issuerFromMetadataURL reverses the SDK's metadata-URL construction to
+// recover the issuer URL that the SDK will compare against the metadata's
+// "issuer" field. The SDK builds discovery URLs from the issuer URL using
+// these patterns (see authorizationServerMetadataURLs in the go-sdk):
+//
+//	issuer "https://x.com"           → "https://x.com/.well-known/oauth-authorization-server"
+//	issuer "https://x.com/tenant"   → "https://x.com/.well-known/oauth-authorization-server/tenant"
+//	issuer "https://x.com/tenant"   → "https://x.com/.well-known/openid-configuration/tenant"
+//	issuer "https://x.com/tenant"   → "https://x.com/tenant/.well-known/openid-configuration"
+//
+// Given any of those discovery URLs, this function returns the original
+// issuer URL. Returns "" if the path doesn't look like a metadata URL.
+func issuerFromMetadataURL(metadataURL string) string {
+	u, err := url.Parse(metadataURL)
+	if err != nil {
+		return ""
+	}
+	path := strings.TrimRight(u.Path, "/")
+
+	// Path-insertion variant:
+	//   /.well-known/oauth-authorization-server[/tenant]
+	//   /.well-known/openid-configuration[/tenant]
+	for _, prefix := range []string{
+		"/.well-known/oauth-authorization-server",
+		"/.well-known/openid-configuration",
+	} {
+		if path == prefix {
+			u.Path = ""
+			return u.String()
+		}
+		if strings.HasPrefix(path, prefix+"/") {
+			u.Path = "/" + strings.TrimPrefix(path, prefix+"/")
+			return u.String()
+		}
+	}
+
+	// Path-appending variant:
+	//   /tenant/.well-known/openid-configuration
+	if idx := strings.LastIndex(path, "/.well-known/openid-configuration"); idx >= 0 {
+		tenant := path[:idx]
+		u.Path = tenant
+		if u.Path == "/" || u.Path == "" {
+			u.Path = ""
+		}
+		return u.String()
+	}
+
+	return ""
+}
+
+// sameOrigin reports whether two URLs share the same scheme and host.
+func sameOrigin(a, b string) bool {
+	ua, erra := url.Parse(a)
+	ub, errb := url.Parse(b)
+	if erra != nil || errb != nil {
+		return false
+	}
+	return ua.Scheme == ub.Scheme && ua.Host == ub.Host
+}
+
+// isAncestorPath reports whether ancestor is a path ancestor of descendant:
+// "https://x.com" is an ancestor of "https://x.com/tenant1", and
+// "https://x.com/a" is an ancestor of "https://x.com/a/b", but
+// "https://x.com/a" is NOT an ancestor of "https://x.com/ab".
+// Both URLs must share the same scheme and host.
+func isAncestorPath(ancestor, descendant string) bool {
+	ua, erra := url.Parse(ancestor)
+	ud, errd := url.Parse(descendant)
+	if erra != nil || errd != nil {
+		return false
+	}
+	if ua.Scheme != ud.Scheme || ua.Host != ud.Host {
+		return false
+	}
+	ap := strings.TrimSuffix(ua.Path, "/")
+	dp := strings.TrimSuffix(ud.Path, "/")
+	if ap == dp {
+		return true
+	}
+	if ap == "" {
+		// Root ancestor: any non-empty path on the same host is a descendant.
+		return dp != ""
+	}
+	return strings.HasPrefix(dp, ap+"/")
 }
 
 // stripResourceParam removes the "resource" query parameter from an

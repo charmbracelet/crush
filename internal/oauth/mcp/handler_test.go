@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -399,4 +400,301 @@ func TestHandler_BackgroundAuthorizeRefused(t *testing.T) {
 
 	err = authorizeWith401(t, h, base, mcpURL)
 	require.ErrorIs(t, err, ErrInteractiveAuthRequired)
+}
+
+// newFakeMultiTenantAS starts an httptest server that simulates a
+// multi-tenant authorization server like Atlassian's: the protected resource
+// metadata points to a tenant-specific auth server URL, but the metadata at
+// that URL returns a shared, top-level issuer. Without the
+// metadataFixupRoundTripper's issuer rewrite, the SDK's strict RFC 8414
+// validation rejects the mismatch.
+func newFakeMultiTenantAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
+	t.Helper()
+	var baseURL string
+	writeJSON := func(w http.ResponseWriter, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(v)
+	}
+
+	expiresIn := opts.tokenExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 3600
+	}
+
+	mux := http.NewServeMux()
+	// The protected resource metadata advertises a tenant-specific auth
+	// server URL.
+	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"resource":              baseURL + "/mcp",
+			"authorization_servers": []string{baseURL + "/tenant123"},
+		})
+	})
+	// The authorization server metadata is served at the tenant-specific
+	// path but returns a shared, top-level issuer.
+	mux.HandleFunc("/.well-known/oauth-authorization-server/tenant123", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"issuer":                           baseURL, // shared issuer, no tenant path
+			"authorization_endpoint":           baseURL + "/authorize",
+			"token_endpoint":                   baseURL + "/token",
+			"registration_endpoint":            baseURL + "/register",
+			"code_challenge_methods_supported": []string{"S256"},
+			"scopes_supported":                 []string{"offline_access"},
+		})
+	})
+	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		if opts.failRegister {
+			http.Error(w, "registration not supported", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"client_id":                  opts.clientID,
+			"token_endpoint_auth_method": "none",
+		})
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		access := opts.accessToken
+		if r.Form.Get("grant_type") == "refresh_token" && opts.refreshedToken != "" {
+			access = opts.refreshedToken
+		}
+		writeJSON(w, map[string]any{
+			"access_token":  access,
+			"refresh_token": opts.refreshToken,
+			"token_type":    "Bearer",
+			"expires_in":    expiresIn,
+		})
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	baseURL = srv.URL
+	return srv.URL, srv.URL + "/mcp"
+}
+
+// TestHandler_MultiTenantIssuerRewrite proves the metadataFixupRoundTripper
+// rewrites the issuer in a multi-tenant authorization server's metadata so
+// it matches the tenant-specific discovery URL. Without the rewrite, the
+// SDK's strict RFC 8414 issuer validation rejects Atlassian-style providers
+// whose shared issuer differs from the tenant-specific discovery URL.
+func TestHandler_MultiTenantIssuerRewrite(t *testing.T) {
+	base, mcpURL := newFakeMultiTenantAS(t, fakeASOpts{
+		clientID:     "mt-client",
+		accessToken:  "mt-access",
+		refreshToken: "mt-refresh",
+	})
+
+	var (
+		mu    sync.Mutex
+		saved *oauth.Token
+	)
+	h, err := NewHandler("test", mcpURL, nil, nil, func(tok *oauth.Token) {
+		mu.Lock()
+		saved = tok
+		mu.Unlock()
+	}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+	h.openURL = browserRedirect("mt-code")
+
+	require.NoError(t, authorizeWith401(t, h, base, mcpURL))
+
+	ts, err := h.TokenSource(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, ts)
+	tok, err := ts.Token()
+	require.NoError(t, err)
+	require.Equal(t, "mt-access", tok.AccessToken)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.NotNil(t, saved, "token must be persisted via the saver")
+	require.Equal(t, "mt-access", saved.AccessToken)
+}
+
+func TestIssuerFromMetadataURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"no path - oauth", "https://x.com/.well-known/oauth-authorization-server", "https://x.com"},
+		{"no path - oidc", "https://x.com/.well-known/openid-configuration", "https://x.com"},
+		{"tenant path-insertion - oauth", "https://auth.atlassian.com/.well-known/oauth-authorization-server/VCeDs123", "https://auth.atlassian.com/VCeDs123"},
+		{"tenant path-insertion - oidc", "https://auth.atlassian.com/.well-known/openid-configuration/VCeDs123", "https://auth.atlassian.com/VCeDs123"},
+		{"tenant path-appending - oidc", "https://auth.atlassian.com/VCeDs123/.well-known/openid-configuration", "https://auth.atlassian.com/VCeDs123"},
+		{"non-metadata path", "https://x.com/token", ""},
+		{"invalid url", "://bad", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := issuerFromMetadataURL(tt.url)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestSameOrigin(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"same", "https://x.com", "https://x.com", true},
+		{"same diff path", "https://x.com/a", "https://x.com/b", true},
+		{"diff scheme", "http://x.com", "https://x.com", false},
+		{"diff host", "https://x.com", "https://y.com", false},
+		{"invalid a", "://bad", "https://x.com", false},
+		{"invalid b", "https://x.com", "://bad", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, sameOrigin(tt.a, tt.b))
+		})
+	}
+}
+
+func TestIsAncestorPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                 string
+		ancestor, descendant string
+		want                 bool
+	}{
+		{"root to tenant", "https://x.com", "https://x.com/tenant1", true},
+		{"parent to child", "https://x.com/a", "https://x.com/a/b", true},
+		{"equal", "https://x.com/a", "https://x.com/a", true},
+		{"not ancestor - prefix", "https://x.com/a", "https://x.com/ab", false},
+		{"diff host", "https://x.com", "https://y.com/tenant1", false},
+		{"diff scheme", "http://x.com", "https://x.com/tenant1", false},
+		{"invalid ancestor", "://bad", "https://x.com/tenant1", false},
+		{"invalid descendant", "https://x.com", "://bad", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, isAncestorPath(tt.ancestor, tt.descendant))
+		})
+	}
+}
+
+// staticResponseTripper returns a canned JSON response for any request,
+// letting us exercise the metadataFixupRoundTripper in isolation.
+type staticResponseTripper struct {
+	body   string
+	status int
+}
+
+func (s staticResponseTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: s.status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(s.body)),
+	}, nil
+}
+
+// roundTripIssuer sends a request for metadataURL through the fixup round
+// tripper with the given canned body and returns the issuer from the
+// (possibly rewritten) response.
+func roundTripIssuer(t *testing.T, metadataURL, body string) string {
+	t.Helper()
+	rt := newMetadataFixupRoundTripper(staticResponseTripper{body: body, status: http.StatusOK})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, metadataURL, nil)
+	require.NoError(t, err)
+	resp, err := rt.RoundTrip(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(raw, &meta))
+	issuer, _ := meta["issuer"].(string)
+	return issuer
+}
+
+// TestMetadataFixup_RewritesSameOriginAncestor proves the multi-tenant
+// rewrite fires only in the intended case.
+func TestMetadataFixup_RewritesSameOriginAncestor(t *testing.T) {
+	t.Parallel()
+	got := roundTripIssuer(
+		t,
+		"https://auth.atlassian.com/.well-known/oauth-authorization-server/tenant1",
+		`{"issuer":"https://auth.atlassian.com"}`,
+	)
+	require.Equal(t, "https://auth.atlassian.com/tenant1", got)
+}
+
+// TestMetadataFixup_SecurityBoundaries proves the issuer rewrite never
+// fires when it would let a server impersonate a different issuer: a
+// cross-host issuer, a cross-scheme issuer, or a non-ancestor path must
+// all pass through untouched so the SDK's strict validation rejects them.
+func TestMetadataFixup_SecurityBoundaries(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		metadataURL string
+		issuer      string
+	}{
+		{
+			"cross-host issuer is not rewritten",
+			"https://auth.atlassian.com/.well-known/oauth-authorization-server/tenant1",
+			"https://evil.example.com",
+		},
+		{
+			"cross-scheme issuer is not rewritten",
+			"https://auth.atlassian.com/.well-known/oauth-authorization-server/tenant1",
+			"http://auth.atlassian.com",
+		},
+		{
+			"non-ancestor path is not rewritten",
+			"https://auth.atlassian.com/.well-known/oauth-authorization-server/tenant1",
+			"https://auth.atlassian.com/other",
+		},
+		{
+			"descendant issuer is not rewritten",
+			"https://auth.atlassian.com/.well-known/oauth-authorization-server/tenant1",
+			"https://auth.atlassian.com/tenant1/deeper",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := roundTripIssuer(t, tt.metadataURL, `{"issuer":"`+tt.issuer+`"}`)
+			require.Equal(t, tt.issuer, got, "issuer must pass through unmodified")
+		})
+	}
+}
+
+// TestMetadataFixup_ProtectedResourceUntouched proves protected resource
+// metadata responses are never modified even if they contain an issuer-like
+// field.
+func TestMetadataFixup_ProtectedResourceUntouched(t *testing.T) {
+	t.Parallel()
+	body := `{"resource":"https://x.com/mcp","issuer":"https://elsewhere.com/"}`
+	rt := newMetadataFixupRoundTripper(staticResponseTripper{body: body, status: http.StatusOK})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+		"https://x.com/.well-known/oauth-protected-resource/mcp", nil)
+	require.NoError(t, err)
+	resp, err := rt.RoundTrip(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.JSONEq(t, body, string(raw), "protected resource metadata must pass through byte-identical")
+}
+
+// TestMetadataFixup_TrailingSlashStillNormalized guards the pre-existing
+// trailing-slash normalization behavior.
+func TestMetadataFixup_TrailingSlashStillNormalized(t *testing.T) {
+	t.Parallel()
+	got := roundTripIssuer(
+		t,
+		"https://x.com/.well-known/oauth-authorization-server",
+		`{"issuer":"https://x.com/"}`,
+	)
+	require.Equal(t, "https://x.com", got)
 }

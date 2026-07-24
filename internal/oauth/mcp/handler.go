@@ -489,16 +489,22 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	return resp, nil
 }
 
-// newOAuthMetadataClient creates an HTTP client that fixes two OAuth
-// metadata issues:
-//  1. Trailing-slash issuers: normalized via metadataFixupRoundTripper.
-//  2. Host-changing redirects: when a redirect sends the client to a
-//     different host (e.g. an internal cluster address behind a proxy),
-//     the target is rewritten to the original MCP server hostname, so
-//     the flow stays reachable.
+// newOAuthMetadataClient creates an HTTP client for the OAuth flow that
+// smooths over two nonstandard behaviors seen behind corporate proxies:
+//
+//  1. Trailing-slash issuers in metadata responses, normalized by
+//     metadataFixupRoundTripper so they pass the SDK's strict RFC 8414
+//     validation.
+//  2. Metadata discovery requests that get 3xx-redirected to an
+//     unreachable internal host (e.g. a cluster address behind a proxy).
+//     Well-known discovery is never supposed to hop hosts via redirects
+//     (the authorization server location comes from the metadata body,
+//     not a Location header), so for metadata endpoints we rewrite the
+//     redirect back to the original MCP host. Token, registration, and
+//     authorize requests are left untouched, so a separately hosted
+//     identity provider keeps working.
 func newOAuthMetadataClient(base http.RoundTripper, serverURL string) *http.Client {
-	originalHost := ""
-	originalScheme := "https"
+	var originalHost, originalScheme string
 	if u, err := url.Parse(serverURL); err == nil {
 		originalHost = u.Host
 		originalScheme = u.Scheme
@@ -506,13 +512,17 @@ func newOAuthMetadataClient(base http.RoundTripper, serverURL string) *http.Clie
 	return &http.Client{
 		Transport: newMetadataFixupRoundTripper(base),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if originalHost != "" && req.URL.Host != originalHost {
+			// Supplying CheckRedirect replaces net/http's default, so
+			// re-enforce its 10-redirect cap here.
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			if originalHost != "" && isMetadataEndpoint(req.URL.Path) && req.URL.Host != originalHost {
+				slog.Debug("Rewriting OAuth metadata redirect back to original host",
+					"from", req.URL.Host, "to", originalHost)
 				req.URL.Host = originalHost
 				req.URL.Scheme = originalScheme
 				req.Host = originalHost
-			}
-			if len(via) >= 10 {
-				return fmt.Errorf("too many redirects")
 			}
 			return nil
 		},

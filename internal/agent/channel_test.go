@@ -62,9 +62,10 @@ func (*channelTestTool) SetProviderOptions(fantasy.ProviderOptions) {}
 func TestSyncSessionChannelLifecycle(t *testing.T) {
 	t.Parallel()
 	dataDir := t.TempDir()
+	// Release only this test's pooled connection; a global db.ResetPool()
+	// here would close the databases of tests still running in parallel.
 	t.Cleanup(func() {
 		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
 	})
 
 	conn, err := db.Connect(t.Context(), dataDir)

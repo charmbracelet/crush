@@ -46,11 +46,18 @@ func IsInteractive(ctx context.Context) bool {
 }
 
 // callbackPorts are the localhost ports tried, in order, for the OAuth
-// redirect listener. The first available one is used.
+// redirect listener. The first available one is used. They match the
+// redirect URIs declared in the Client ID Metadata Document.
 var callbackPorts = []int{
 	40704, 40705, 40706, 40707, 40708,
 	40709, 40710, 40711, 40712, 40713,
 }
+
+// cimdURL is the Client ID Metadata Document URL offered to authorization
+// servers that support CIMD. When used, this URL serves as the client ID.
+//
+// TODO: host this at a stable charm.land URL before relying on it.
+const cimdURL = "https://raw.githubusercontent.com/charmbracelet/crush/refs/heads/mcp-oauth/oauth-client-metadata.json"
 
 // Handler implements auth.OAuthHandler for MCP HTTP servers. It wraps
 // the go-sdk AuthorizationCodeHandler and persists the token (plus the
@@ -175,6 +182,12 @@ func NewHandler(
 		// validation. Based on Bruno Krugel's fix from PR #3396.
 		Client: &http.Client{
 			Transport: newMetadataFixupRoundTripper(http.DefaultTransport),
+		},
+		// The SDK tries CIMD, then a pre-registered client, then dynamic
+		// registration. Offering CIMD first lets servers that support it
+		// identify Crush by its published metadata; others fall back to DCR.
+		ClientIDMetadataDocumentConfig: &auth.ClientIDMetadataDocumentConfig{
+			URL: cimdURL,
 		},
 		DynamicClientRegistrationConfig: &auth.DynamicClientRegistrationConfig{
 			Metadata: &oauthex.ClientRegistrationMetadata{

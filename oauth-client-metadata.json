@@ -1,0 +1,17 @@
+{
+  "client_id": "https://raw.githubusercontent.com/charmbracelet/crush/refs/heads/mcp-oauth/oauth-client-metadata.json",
+  "client_name": "Crush",
+  "client_uri": "https://github.com/charmbracelet/crush",
+  "redirect_uris": [
+    "http://localhost:40704/callback",
+    "http://localhost:40705/callback",
+    "http://localhost:40706/callback",
+    "http://localhost:40707/callback",
+    "http://localhost:40708/callback",
+    "http://localhost:40709/callback",
+    "http://localhost:40710/callback",
+    "http://localhost:40711/callback",
+    "http://localhost:40712/callback",
+    "http://localhost:40713/callback"
+  ]
+}

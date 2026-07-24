@@ -68,7 +68,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	// builds a coordinator, so the parked goroutine is harmless.
 	mcp.ArmInit()
 
-	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
+	p, err := coderPrompt(cfg, prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 

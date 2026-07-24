@@ -31,7 +31,6 @@ type Manager struct {
 	manager     *powernapconfig.Manager
 	callback    func(name string, client *Client)
 	now         func() time.Time
-	lookPath    func(string) (string, error)
 }
 
 // NewManager creates a new LSP manager service.
@@ -68,7 +67,6 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		manager:     manager,
 		callback:    func(string, *Client) {}, // default no-op callback
 		now:         time.Now,
-		lookPath:    exec.LookPath,
 	}
 }
 
@@ -269,7 +267,7 @@ func (s *Manager) canAutoStart(
 	if s.recentlyUnavailable(name) {
 		return false
 	}
-	if _, err := s.lookPath(server.Command); err != nil {
+	if _, err := exec.LookPath(server.Command); err != nil {
 		slog.Debug("LSP server not installed, skipping", "name", name, "command", server.Command)
 		s.markUnavailable(name)
 		return false

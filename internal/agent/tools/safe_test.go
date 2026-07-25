@@ -36,6 +36,14 @@ func TestIsSafeReadOnly_Allowed(t *testing.T) {
 		{"git tag bare", "git tag"},
 		{"git tag --list", "git tag -l"},
 		{"git remote -v", "git remote -v"},
+		// Filter flags take a commit-ish operand; the flag is what
+		// separates these from the branch/tag creation forms.
+		{"git branch --contains", "git branch --contains abc123"},
+		{"git branch --merged", "git branch --merged main"},
+		{"git tag --points-at", "git tag --points-at HEAD"},
+		{"git tag --contains", "git tag --contains abc123"},
+		{"git remote show", "git remote show origin"},
+		{"git remote get-url", "git remote get-url origin"},
 		{"multiple safe statements on separate lines", "ls\npwd"},
 		// A sequence of read-only statements is itself read-only, and a
 		// newline and a semicolon are the same thing to the parser.
@@ -93,6 +101,9 @@ func TestIsSafeReadOnly_Denied(t *testing.T) {
 		{"git tag create via operand", "git tag v9.9.9"},
 		{"git remote add", "git remote add evil https://evil.example/x.git"},
 		{"git remote set-url", "git remote set-url origin https://evil.example/x.git"},
+		{"git remote remove", "git remote remove origin"},
+		{"git remote rename", "git remote rename origin upstream"},
+		{"git remote prune", "git remote prune origin"},
 		{"git config --get-urlmatch", "git config --get-urlmatch http://x http://x"},
 		{"git config set", "git config user.name attacker"},
 		{"git external diff driver", "git diff --ext-diff"},

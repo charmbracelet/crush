@@ -141,12 +141,34 @@ var safeCommands = []safeCommand{
 		},
 		allowOperands: false,
 	},
+	// The filter flags above take a commit-ish operand. Requiring one of
+	// them to be present is what keeps `git branch <name>` (creates) and
+	// `git tag <name>` (creates) out, since those carry an operand and no
+	// flag.
+	{
+		argv:          []string{"git", "branch"},
+		restrictFlags: true,
+		allowFlags:    []string{"--contains", "--no-contains", "--merged", "--no-merged", "--points-at"},
+		requireFlag:   true,
+		allowOperands: true,
+	},
+	{
+		argv:          []string{"git", "tag"},
+		restrictFlags: true,
+		allowFlags:    []string{"--contains", "--no-contains", "--merged", "--no-merged", "--points-at"},
+		requireFlag:   true,
+		allowOperands: true,
+	},
 	{
 		argv:          []string{"git", "remote"},
 		restrictFlags: true,
 		allowFlags:    []string{"-v", "--verbose"},
 		allowOperands: false,
 	},
+	// Read-only remote subcommands, spelled out so the mutating siblings
+	// (add, remove, rename, set-url, prune) stay off the list.
+	{argv: []string{"git", "remote", "show"}, allowOperands: true},
+	{argv: []string{"git", "remote", "get-url"}, allowOperands: true},
 	// `git config --get <key>` reads one key; the bare `--get` prefix used
 	// to also admit --get-urlmatch and friends, so the flag is matched
 	// exactly here.

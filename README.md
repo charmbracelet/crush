@@ -553,7 +553,7 @@ crush --allow-all-commands
 CRUSH_ALLOW_ALL_COMMANDS=1 crush
 ```
 
-Two things to keep in mind:
+Three things to keep in mind:
 
 - `allowed_commands` only removes commands from the exact-command blocklist. It
   does **not** unlock the package-manager argument blocks (such as `apt install`
@@ -562,6 +562,13 @@ Two things to keep in mind:
 - Allowing a command does not auto-approve it. Blocked commands are simply a
   hard filter in front of the normal permission flow, so an allowed command is
   still subject to the usual permission prompt unless you also enable `--yolo`.
+- The blocklist is a guardrail, not a sandbox. It matches the command name of
+  each command the shell actually runs, so chained and substituted commands
+  (`cd /tmp && curl …`, `CMD=curl; $CMD …`) are matched correctly — but anything
+  that reaches a binary through another program (`sh -c "curl …"`, `python -c`,
+  `make`, `find -exec`) is out of its reach by construction. Treat it as
+  protection against a model casually reaching for the wrong tool, not as a
+  security boundary around an untrusted one.
 
 ### Disabling Built-In Tools
 

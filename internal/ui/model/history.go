@@ -48,6 +48,21 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 // handleHistoryUp handles up arrow for history navigation.
 func (m *UI) handleHistoryUp(msg tea.Msg) tea.Cmd {
 	prevHeight := m.textarea.Height()
+	// If the user has a queued prompt pending, popping it back into the
+	// editor takes precedence over history navigation. This makes the
+	// up arrow a single-keystroke way to recall the queued message
+	// (Fixes #3104): the prompt comes back to the editor and is removed
+	// from the queue, matching the behavior of the Esc clear-queue
+	// binding for any siblings.
+	if m.textarea.Length() == 0 && m.hasSession() && m.promptQueue > 0 {
+		if prompt, ok := m.com.Workspace.AgentPopQueuedPrompt(m.session.ID); ok {
+			m.textarea.SetValue(prompt)
+			m.textarea.MoveToEnd()
+			m.promptQueue = 0
+			m.updateLayoutAndSize()
+			return m.updateTextareaWithPrevHeight(nil, prevHeight)
+		}
+	}
 	// Navigate to older history entry from cursor position (0,0).
 	if m.textarea.Length() == 0 || m.isAtEditorStart() {
 		if m.historyPrev() {

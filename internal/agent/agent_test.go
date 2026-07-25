@@ -16,6 +16,7 @@ import (
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
@@ -1061,5 +1062,40 @@ func TestProviderRetryLogFields(t *testing.T) {
 			"retry_delay", "1s",
 			"status_code", 503,
 		}, fields)
+	})
+}
+
+func TestPopQueuedPrompt(t *testing.T) {
+	t.Parallel()
+	t.Run("returns false when queue is empty", func(t *testing.T) {
+		t.Parallel()
+		a := &sessionAgent{messageQueue: csync.NewMap[string, []SessionAgentCall]()}
+		prompt, ok := a.PopQueuedPrompt("missing")
+		require.False(t, ok)
+		require.Empty(t, prompt)
+	})
+
+	t.Run("returns oldest and shrinks queue", func(t *testing.T) {
+		t.Parallel()
+		a := &sessionAgent{messageQueue: csync.NewMap[string, []SessionAgentCall]()}
+		a.messageQueue.Set("s1", []SessionAgentCall{
+			{Prompt: "first"},
+			{Prompt: "second"},
+			{Prompt: "third"},
+		})
+		prompt, ok := a.PopQueuedPrompt("s1")
+		require.True(t, ok)
+		require.Equal(t, "first", prompt)
+		require.Equal(t, []string{"second", "third"}, a.QueuedPromptsList("s1"))
+		// Second pop returns the next entry.
+		prompt, ok = a.PopQueuedPrompt("s1")
+		require.True(t, ok)
+		require.Equal(t, "second", prompt)
+		require.Equal(t, []string{"third"}, a.QueuedPromptsList("s1"))
+		// Final pop empties the queue.
+		_, ok = a.PopQueuedPrompt("s1")
+		require.True(t, ok)
+		_, ok = a.PopQueuedPrompt("s1")
+		require.False(t, ok)
 	})
 }

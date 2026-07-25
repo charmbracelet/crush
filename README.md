@@ -516,6 +516,13 @@ permissions. Use this with care.
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
+The `bash` tool additionally runs a small set of read-only commands (`ls`,
+`pwd`, `git status`, `git log`, …) without prompting. Crush parses the command
+to decide, so it applies only when the whole command is provably inert: a
+redirection, a variable assignment, a command substitution, a pipeline, or an
+argument that mutates state (`git branch -D`, `git remote set-url`) all fall
+back to the normal permission prompt.
+
 ### Disabling Built-In Tools
 
 If you'd like to prevent Crush from using certain built-in tools entirely, you

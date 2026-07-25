@@ -185,7 +185,12 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 	s.blockFuncs = blockFuncs
 }
 
-// CommandsBlocker creates a BlockFunc that blocks exact command matches
+// CommandsBlocker creates a BlockFunc that blocks exact command matches.
+//
+// Matching is on the command basename, so an absolute or relative invocation
+// (/usr/bin/curl, ./curl) is blocked by the same entry as the bare name
+// (curl). Without this, a path prefix was a one-token bypass of the block
+// list.
 func CommandsBlocker(cmds []string) BlockFunc {
 	bannedSet := make(map[string]struct{})
 	for _, cmd := range cmds {
@@ -196,15 +201,18 @@ func CommandsBlocker(cmds []string) BlockFunc {
 		if len(args) == 0 {
 			return false
 		}
-		_, ok := bannedSet[args[0]]
+		_, ok := bannedSet[baseName(args[0])]
 		return ok
 	}
 }
 
-// ArgumentsBlocker creates a BlockFunc that blocks specific subcommand
+// ArgumentsBlocker creates a BlockFunc that blocks specific subcommand.
+//
+// The command name is matched on its basename, so a path-prefixed invocation
+// (/usr/bin/apt, ./npm) is matched by the same entry as the bare name.
 func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
 	return func(parts []string) bool {
-		if len(parts) == 0 || parts[0] != cmd {
+		if len(parts) == 0 || baseName(parts[0]) != cmd {
 			return false
 		}
 

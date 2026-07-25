@@ -328,16 +328,39 @@ func builtinHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 // blockHandler returns middleware that rejects commands matched by any of
 // the provided [BlockFunc]s before they reach the underlying exec path.
 // A nil or empty blockFuncs slice is a no-op.
+//
+// Each block func is applied to the command as written and, when argv[0] is a
+// recognized exec wrapper (nohup, env, timeout, nice, xargs, ...; see
+// unwrapCommand), to the inner command the wrapper would exec — peeling one
+// wrapper at a time and re-running the same block funcs against each layer.
+// This is the same re-dispatch idea scriptDispatchHandler already uses for
+// path-prefixed scripts: rather than maintain a parallel list of "dangerous
+// behind a wrapper" commands, the existing block funcs are re-applied to the
+// argv that actually runs. It closes the wrapper-prefix bypass — "nohup curl",
+// "env wget", "timeout 5 nc", "nohup sudo rm -rf /" — by which a banned
+// command was exec'd as a child of an un-banned wrapper, out of the
+// interpreter's reach. The diagnostic names the command that actually runs
+// (its basename: "curl", not "nohup" or "/usr/bin/curl").
 func blockHandler(blockFuncs []BlockFunc) func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			if len(args) == 0 {
 				return next(ctx, args)
 			}
-			for _, blockFunc := range blockFuncs {
-				if blockFunc(args) {
-					return fmt.Errorf("command is not allowed for security reasons: %q", args[0])
+			// Bound the loop defensively; real nesting is shallow and each
+			// iteration strips at least the wrapper token, so this is just a
+			// guard against a pathological self-referential argv.
+			for layer, depth := args, 0; len(layer) > 0 && depth < len(args)+1; depth++ {
+				for _, blockFunc := range blockFuncs {
+					if blockFunc(layer) {
+						return fmt.Errorf("command is not allowed for security reasons: %q", baseName(layer[0]))
+					}
 				}
+				inner, ok := unwrapCommand(layer)
+				if !ok {
+					break
+				}
+				layer = inner
 			}
 			return next(ctx, args)
 		}

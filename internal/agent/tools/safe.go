@@ -399,7 +399,10 @@ func isAssignment(tok string) bool {
 	for i, r := range name {
 		isAlpha := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 		isDigit := r >= '0' && r <= '9'
-		if !isAlpha && !(isDigit && i > 0) {
+		// A name is letters, digits and underscores, and cannot lead
+		// with a digit.
+		valid := isAlpha || (isDigit && i > 0)
+		if !valid {
 			return false
 		}
 	}

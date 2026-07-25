@@ -470,6 +470,22 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 	})
 }
 
+// SetScrollbar sets the chat scrollbar visibility and persists it.
+func (s *ConfigStore) SetScrollbar(scope Scope, style string) error {
+	return s.update(scope, func(c *Config) map[string]any {
+		c.ensureTUI().Scrollbar = style
+		return map[string]any{"options.tui.scrollbar": style}
+	})
+}
+
+// SetNotificationStyle sets the notification style and persists it.
+func (s *ConfigStore) SetNotificationStyle(scope Scope, style string) error {
+	return s.update(scope, func(c *Config) map[string]any {
+		c.ensureOptions().NotificationStyle = style
+		return map[string]any{"options.notification_style": style}
+	})
+}
+
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig

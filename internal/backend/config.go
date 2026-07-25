@@ -92,6 +92,45 @@ func (b *Backend) SetCompactMode(workspaceID string, scope config.Scope, enabled
 	return nil
 }
 
+// SetTransparentBackground sets the transparent background and persists it.
+func (b *Backend) SetTransparentBackground(workspaceID string, scope config.Scope, enabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := ws.Cfg.SetTransparentBackground(scope, enabled); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
+}
+
+// SetScrollbar sets the scrollbar style and persists it.
+func (b *Backend) SetScrollbar(workspaceID string, scope config.Scope, style string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := ws.Cfg.SetScrollbar(scope, style); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
+}
+
+// SetNotificationStyle sets the notification style and persists it.
+func (b *Backend) SetNotificationStyle(workspaceID string, scope config.Scope, style string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := ws.Cfg.SetNotificationStyle(scope, style); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
+}
+
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, providerID string, apiKey any) error {
 	ws, err := b.GetWorkspace(workspaceID)

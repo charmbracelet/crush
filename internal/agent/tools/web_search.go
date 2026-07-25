@@ -20,7 +20,7 @@ var webSearchDescriptionTpl = template.Must(
 )
 
 // NewWebSearchTool creates a web search tool for sub-agents (no permissions needed).
-func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
+func NewWebSearchTool(client *http.Client, baseURL string) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
@@ -50,7 +50,7 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 			}
 
 			maybeDelaySearch()
-			results, err := searchDuckDuckGo(ctx, client, params.Query, maxResults)
+			results, err := searchDuckDuckGo(ctx, client, params.Query, maxResults, baseURL)
 			slog.Debug("Web search completed", "query", params.Query, "results", len(results), "err", err)
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to search: " + err.Error()), nil

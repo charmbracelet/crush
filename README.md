@@ -166,6 +166,15 @@ Or just install it with Go:
 go install github.com/charmbracelet/crush@latest
 ```
 
+On illumos (OpenIndiana, OmniOS), the command above works as-is. Only native
+OS notifications are unavailable there; terminal-based notifications (OSC) and
+the terminal bell still work. On Oracle Solaris, add `-tags sqlite3_dotlk` so
+the local database uses dot-file locking:
+
+```
+go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
+```
+
 > [!WARNING]
 > Productivity may increase when using Crush and you may find yourself nerd
 > sniped when first using the application. If the symptoms persist, join the

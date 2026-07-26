@@ -261,6 +261,7 @@ func (s *ShellItem) RawRender(width int) string {
 		}
 	}
 
+	raw = common.StripCursorControl(raw)
 	output := common.RemapANSI16(raw, s.sty.ANSI)
 	lines := strings.Split(output, "\n")
 

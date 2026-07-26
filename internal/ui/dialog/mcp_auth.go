@@ -295,7 +295,8 @@ func (m *MCPAuth) innerContent() string {
 			enterStyle.Render("enter") +
 			instructionStyle.Render(" to open your browser.") +
 			statusStyle.Render(progress)
-		return lipgloss.JoinVertical(lipgloss.Left,
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
 			"",
 			block(instructions),
 			"",
@@ -306,7 +307,8 @@ func (m *MCPAuth) innerContent() string {
 	case MCPAuthStateAuthenticating:
 		waiting := successStyle.Render(m.spinner.View()) +
 			statusStyle.Render(" Waiting for authorization...")
-		return lipgloss.JoinVertical(lipgloss.Left,
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
 			"",
 			block(waiting),
 			"",

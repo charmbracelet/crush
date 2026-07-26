@@ -9,12 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -131,6 +133,18 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.Contains(t, got, GlobalConfig())
 		require.Contains(t, got, GlobalConfigData())
 	})
+
+	t.Run("system config is loaded first", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("system config not supported on Windows")
+		}
+
+		got := lookupConfigs(t.TempDir())
+		require.NotEmpty(t, got)
+		// The system-wide config must be first so it has the lowest
+		// priority when configs are merged.
+		require.Equal(t, "/etc/crush/crush.json", got[0])
+	})
 }
 
 func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
@@ -189,6 +203,24 @@ func TestConfig_setDefaults(t *testing.T) {
 		for _, path := range defaultContextPaths {
 			require.Contains(t, cfg.Options.ContextPaths, path)
 		}
+	})
+
+	t.Run("prunes orphaned OAuth token MCP entries but keeps real ones", func(t *testing.T) {
+		cfg := &Config{
+			MCP: map[string]MCPConfig{
+				"orphan":     {OAuthToken: &oauth.Token{AccessToken: "stale"}},
+				"real-http":  {Type: MCPHttp, URL: "https://example.com/mcp", OAuthToken: &oauth.Token{AccessToken: "live"}},
+				"real-stdio": {Type: MCPStdio, Command: "npx"},
+				"malformed":  {Command: "npx"}, // missing type but has a command: surface the error, don't prune
+			},
+		}
+
+		cfg.setDefaults(t.TempDir(), "")
+
+		require.NotContains(t, cfg.MCP, "orphan", "orphaned token entry should be pruned")
+		require.Contains(t, cfg.MCP, "real-http")
+		require.Contains(t, cfg.MCP, "real-stdio")
+		require.Contains(t, cfg.MCP, "malformed", "malformed entry should survive so its error surfaces")
 	})
 
 	t.Run("resolves relative configured data directory from working directory", func(t *testing.T) {

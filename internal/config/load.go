@@ -539,6 +539,13 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
 	}
+	// Drop orphaned OAuth token entries left behind when a user removes
+	// an MCP from crush.json. See MCPConfig.isOrphanedToken.
+	for name, m := range c.MCP {
+		if m.isOrphanedToken() {
+			delete(c.MCP, name)
+		}
+	}
 	if c.LSP == nil {
 		c.LSP = make(map[string]LSPConfig)
 	}
@@ -866,6 +873,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 func lookupConfigs(cwd string) []string {
 	// prepend default config paths
 	configPaths := []string{
+		systemConfigPath,
 		GlobalConfig(),
 		GlobalConfigData(),
 	}

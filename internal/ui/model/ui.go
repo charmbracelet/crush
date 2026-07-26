@@ -545,6 +545,10 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
 		switch cfg.Options.NotificationStyle {
 		case "native":
+			if !notification.NativeSupported {
+				slog.Debug("Native notifications unavailable on this platform; using OSC backend", "osc99_supported", caps.OSC99Notifications)
+				return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+			}
 			slog.Debug("Using native backend (user preference)")
 			return notification.NewNativeBackend(notification.Icon)
 		case "osc":
@@ -574,9 +578,10 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 
 	// Local sessions: prefer OSC on macOS because the native backend (beeep)
 	// uses terminal-notifier or AppleScript, which is slow and doesn't display
-	// icons properly. OSC 99 provides a more polished experience with icon support.
-	if runtime.GOOS == "darwin" {
-		slog.Debug("Selected OSCBackend for local macOS session", "osc99_supported", caps.OSC99Notifications)
+	// icons properly. Also prefer OSC where native notifications are unavailable
+	// (illumos/solaris). OSC 99 provides a polished experience with icon support.
+	if runtime.GOOS == "darwin" || !notification.NativeSupported {
+		slog.Debug("Selected OSCBackend for local session", "osc99_supported", caps.OSC99Notifications, "native_supported", notification.NativeSupported)
 		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
 	}
 

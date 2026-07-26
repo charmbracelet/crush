@@ -253,6 +253,7 @@ func Close(ctx context.Context) error {
 func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
 	ArmInit()
 	slog.Info("Initializing MCP clients")
+
 	var wg sync.WaitGroup
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.Config().MCP {

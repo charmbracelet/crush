@@ -75,6 +75,9 @@ var copilotResponsesModels = map[string]bool{
 	"gpt-5.4-mini":  true,
 	"gpt-5.5":       true,
 	"gpt-5-mini":    true,
+	"gpt-5.6-luna":  true,
+	"gpt-5.6-terra": true,
+	"gpt-5.6-sol":   true,
 }
 
 // OpenCode models that user Anthropic Messages API instead of Chat Completions.
@@ -734,7 +737,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(allTools,
+		allTools = append(
+			allTools,
 			tools.NewDiagnosticsTool(c.lspManager),
 			tools.NewReferencesTool(c.lspManager),
 			tools.NewLSPRestartTool(c.lspManager),

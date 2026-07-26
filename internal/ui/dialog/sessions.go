@@ -37,7 +37,7 @@ type Session struct {
 	selectedSessionInx int
 	sessions           []session.Session
 
-	sessionsMode sessionsMode
+	sessionsMode      sessionsMode
 	startInRenameMode bool // If true, enter rename mode immediately on open
 
 	keyMap struct {

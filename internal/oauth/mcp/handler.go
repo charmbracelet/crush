@@ -240,7 +240,8 @@ func NewHandler(
 	}
 	h.inner = inner
 
-	slog.Info("MCP OAuth handler created",
+	slog.Info(
+		"MCP OAuth handler created",
 		"name", serverName,
 		"redirect_url", redirectURL,
 		"restored_token", h.cachedToken != nil,

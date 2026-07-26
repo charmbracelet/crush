@@ -428,7 +428,6 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 	return cancelled
 }
 
-
 // -- FileTracker --
 
 func (w *ClientWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {

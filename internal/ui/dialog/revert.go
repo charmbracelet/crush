@@ -1,8 +1,6 @@
 package dialog
 
 import (
-	"fmt"
-
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -119,7 +117,7 @@ func (r *Revert) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	buttonRow := common.ButtonGroup(r.com.Styles, buttons, " ")
 
-	hint := baseStyle.Render(fmt.Sprintf("  ← → to choose, enter to confirm"))
+	hint := baseStyle.Render("  ← → to choose, enter to confirm")
 	content := lipgloss.JoinVertical(
 		lipgloss.Center,
 		questionStyle.Render(question),

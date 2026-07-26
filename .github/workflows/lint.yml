@@ -4,6 +4,13 @@ on:
     branches: [main]
   pull_request:
 
+# Caller must grant what charmbracelet/meta lint.yml requests; otherwise the
+# reusable workflow fails at startup when the repo defaults GITHUB_TOKEN to read.
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
 jobs:
   lint:
     uses: charmbracelet/meta/.github/workflows/lint.yml@main

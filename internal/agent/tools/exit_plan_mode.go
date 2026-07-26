@@ -41,9 +41,7 @@ func NewExitPlanModeTool(permissions permission.Service) fantasy.AgentTool {
 					ToolName:    ExitPlanModeToolName,
 					Action:      "plan",
 					Description: "Approve the implementation plan and exit plan mode",
-					Params: ExitPlanModePermissionsParams{
-						Plan: params.Plan,
-					},
+					Params:      ExitPlanModePermissionsParams(params),
 				},
 			)
 			if err != nil {

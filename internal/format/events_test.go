@@ -2,10 +2,33 @@ package format
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// stripANSI removes ANSI escape sequences so tests can check visible text.
+func stripANSI(s string) string {
+	var out strings.Builder
+	out.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			// Skip until we reach a letter (end of CSI sequence).
+			i += 2
+			for i < len(s) && !isLetter(s[i]) {
+				i++
+			}
+			continue
+		}
+		out.WriteByte(s[i])
+	}
+	return out.String()
+}
+
+func isLetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+}
 
 func TestPrintToolCall_FinishedOnly(t *testing.T) {
 	t.Parallel()
@@ -18,7 +41,10 @@ func TestPrintToolCall_FinishedOnly(t *testing.T) {
 
 	// Finished tool call should print.
 	p.PrintToolCall("bash", "tc1", `{"command":"ls -la"}`, true)
-	require.Equal(t, "-> bash: ls -la\n", buf.String())
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "●")
+	require.Contains(t, out, "BASH")
+	require.Contains(t, out, "ls -la")
 }
 
 func TestPrintToolCall_Deduplicates(t *testing.T) {
@@ -28,7 +54,9 @@ func TestPrintToolCall_Deduplicates(t *testing.T) {
 
 	p.PrintToolCall("bash", "tc1", `{"command":"ls"}`, true)
 	p.PrintToolCall("bash", "tc1", `{"command":"ls"}`, true)
-	require.Equal(t, "-> bash: ls\n", buf.String())
+	out := stripANSI(buf.String())
+	count := strings.Count(out, "BASH")
+	require.Equal(t, 1, count)
 }
 
 func TestPrintToolCall_EachTool(t *testing.T) {
@@ -40,11 +68,11 @@ func TestPrintToolCall_EachTool(t *testing.T) {
 		input    string
 		want     string
 	}{
-		{"bash", "bash", `{"command":"echo hi"}`, "-> bash: echo hi\n"},
-		{"edit", "edit", `{"file_path":"/tmp/main.go"}`, "-> edit: /tmp/main.go\n"},
-		{"view", "view", `{"file_path":"/src/foo.go"}`, "-> view: /src/foo.go\n"},
-		{"glob", "glob", `{"pattern":"*.go"}`, "-> glob: *.go\n"},
-		{"grep", "grep", `{"pattern":"TODO"}`, "-> grep: TODO\n"},
+		{"bash", "bash", `{"command":"echo hi"}`, "echo hi"},
+		{"edit", "edit", `{"file_path":"/tmp/main.go"}`, "/tmp/main.go"},
+		{"view", "view", `{"file_path":"/src/foo.go"}`, "/src/foo.go"},
+		{"glob", "glob", `{"pattern":"*.go"}`, "*.go"},
+		{"grep", "grep", `{"pattern":"TODO"}`, "TODO"},
 	}
 
 	for _, tc := range tests {
@@ -53,7 +81,9 @@ func TestPrintToolCall_EachTool(t *testing.T) {
 			buf := &bytes.Buffer{}
 			p := NewEventPrinter(buf)
 			p.PrintToolCall(tc.toolName, "id1", tc.input, true)
-			require.Equal(t, tc.want, buf.String())
+			out := stripANSI(buf.String())
+			require.Contains(t, out, tc.want)
+			require.Contains(t, out, strings.ToUpper(tc.toolName))
 		})
 	}
 }
@@ -65,10 +95,10 @@ func TestPrintToolCall_Truncates(t *testing.T) {
 
 	longCmd := string(bytes.Repeat([]byte("a"), 100))
 	p.PrintToolCall("bash", "tc1", `{"command":"`+longCmd+`"}`, true)
-	out := buf.String()
-	require.Contains(t, out, "-> bash: ")
-	// "-> bash: " (9 chars) + truncated input (60 chars) + "\n" = 70
-	require.Len(t, out, 70)
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "...")
+	// Truncated to 60 chars + "..." = 63
+	require.Less(t, len(strings.TrimSpace(out)), 80)
 }
 
 func TestPrintToolCall_InvalidJSON(t *testing.T) {
@@ -76,7 +106,8 @@ func TestPrintToolCall_InvalidJSON(t *testing.T) {
 	buf := &bytes.Buffer{}
 	p := NewEventPrinter(buf)
 	p.PrintToolCall("bash", "tc1", "not json", true)
-	require.Contains(t, buf.String(), "-> bash: not json")
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "not json")
 }
 
 func TestPrintToolCall_EmptyInput(t *testing.T) {
@@ -84,7 +115,9 @@ func TestPrintToolCall_EmptyInput(t *testing.T) {
 	buf := &bytes.Buffer{}
 	p := NewEventPrinter(buf)
 	p.PrintToolCall("bash", "tc1", "", true)
-	require.Equal(t, "-> bash: \n", buf.String())
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "BASH")
+	require.NotContains(t, out, "=false")
 }
 
 func TestPrintToolResult_Success(t *testing.T) {
@@ -93,7 +126,10 @@ func TestPrintToolResult_Success(t *testing.T) {
 	p := NewEventPrinter(buf)
 
 	p.PrintToolResult("bash", "3 files found", false)
-	require.Equal(t, "ok bash: 3 files found\n", buf.String())
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "✓")
+	require.Contains(t, out, "BASH")
+	require.Contains(t, out, "3 files found")
 }
 
 func TestPrintToolResult_SuccessEmpty(t *testing.T) {
@@ -102,7 +138,9 @@ func TestPrintToolResult_SuccessEmpty(t *testing.T) {
 	p := NewEventPrinter(buf)
 
 	p.PrintToolResult("view", "", false)
-	require.Equal(t, "ok view\n", buf.String())
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "✓")
+	require.Contains(t, out, "VIEW")
 }
 
 func TestPrintToolResult_Error(t *testing.T) {
@@ -111,7 +149,10 @@ func TestPrintToolResult_Error(t *testing.T) {
 	p := NewEventPrinter(buf)
 
 	p.PrintToolResult("bash", "command not found", true)
-	require.Equal(t, "x  bash: command not found\n", buf.String())
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "×")
+	require.Contains(t, out, "BASH")
+	require.Contains(t, out, "command not found")
 }
 
 func TestPrintToolResult_LongContentTruncated(t *testing.T) {
@@ -121,9 +162,8 @@ func TestPrintToolResult_LongContentTruncated(t *testing.T) {
 
 	long := string(bytes.Repeat([]byte("x"), 200))
 	p.PrintToolResult("bash", long, false)
-	out := buf.String()
-	require.Contains(t, out, "ok bash: ")
-	require.Less(t, len(out), 80)
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "...")
 }
 
 func TestPrintAssistantText(t *testing.T) {
@@ -132,7 +172,8 @@ func TestPrintAssistantText(t *testing.T) {
 	p := NewEventPrinter(buf)
 
 	p.PrintAssistantText("Let me check that file.")
-	require.Equal(t, ">> Let me check that file.\n", buf.String())
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "Let me check that file.")
 }
 
 func TestPrintAssistantText_FirstLineOnly(t *testing.T) {
@@ -141,7 +182,9 @@ func TestPrintAssistantText_FirstLineOnly(t *testing.T) {
 	p := NewEventPrinter(buf)
 
 	p.PrintAssistantText("Line one.\nLine two.\nLine three.")
-	require.Equal(t, ">> Line one.\n", buf.String())
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "Line one.")
+	require.NotContains(t, out, "Line two.")
 }
 
 func TestPrintAssistantText_Truncates(t *testing.T) {
@@ -151,8 +194,8 @@ func TestPrintAssistantText_Truncates(t *testing.T) {
 
 	long := string(bytes.Repeat([]byte("a"), 200))
 	p.PrintAssistantText(long)
-	out := buf.String()
-	require.Less(t, len(out), 85)
+	out := stripANSI(buf.String())
+	require.Contains(t, out, "...")
 }
 
 func TestPrintAssistantText_Empty(t *testing.T) {

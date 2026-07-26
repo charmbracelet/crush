@@ -453,7 +453,8 @@ func TestRunStream_ShowEventsPrintsToolCall(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, done)
 	require.Empty(t, stdout.String(), "stdout must stay clean when RunID is set")
-	require.Contains(t, stderr.String(), "-> bash: ls -la")
+	require.Contains(t, stderr.String(), "BASH")
+	require.Contains(t, stderr.String(), "ls -la")
 }
 
 // TestRunStream_ShowEventsPrintsToolResult verifies that tool results
@@ -489,7 +490,8 @@ func TestRunStream_ShowEventsPrintsToolResult(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, done)
 	require.Empty(t, stdout.String(), "tool messages must not write to stdout")
-	require.Contains(t, stderr.String(), "ok bash: 3 files found")
+	require.Contains(t, stderr.String(), "BASH")
+	require.Contains(t, stderr.String(), "3 files found")
 }
 
 // TestRunStream_ShowEventsPrintsToolError verifies that errored tool
@@ -522,7 +524,8 @@ func TestRunStream_ShowEventsPrintsToolError(t *testing.T) {
 	}}, nil)
 	require.NoError(t, err)
 	require.False(t, done)
-	require.Contains(t, stderr.String(), "x  bash: command not found")
+	require.Contains(t, stderr.String(), "BASH")
+	require.Contains(t, stderr.String(), "command not found")
 }
 
 // TestRunStream_ShowEventsOffSkipsToolMessages verifies that when

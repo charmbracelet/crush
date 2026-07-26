@@ -5,22 +5,79 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 // EventPrinter writes compact one-line event summaries to an io.Writer.
 // It is designed for non-interactive mode (`crush run --show-events`)
 // where tool calls, results, and assistant text are printed as single
 // lines to stderr while the full assistant text streams to stdout.
+//
+// Styling mirrors the TUI's tool-call rendering: uppercase tool names
+// with background colors per event type, and the same status icons
+// (● pending, ✓ success, × error).
 type EventPrinter struct {
 	w           io.Writer
 	seenToolIDs map[string]bool
+
+	// Styles (initialized from charmtone palette to match the TUI).
+	iconPending  lipgloss.Style
+	iconSuccess  lipgloss.Style
+	iconError    lipgloss.Style
+	toolName     lipgloss.Style
+	toolNameErr  lipgloss.Style
+	toolNameOk   lipgloss.Style
+	params       lipgloss.Style
+	resultText   lipgloss.Style
+	errorText    lipgloss.Style
+	assistantTag lipgloss.Style
+	assistantTxt lipgloss.Style
 }
 
 // NewEventPrinter creates an EventPrinter that writes to w.
 func NewEventPrinter(w io.Writer) *EventPrinter {
+	base := lipgloss.NewStyle()
+
 	return &EventPrinter{
 		w:           w,
 		seenToolIDs: make(map[string]bool),
+
+		// Icons matching the TUI: ● (pending), ✓ (success), × (error).
+		iconPending: base.Foreground(charmtone.Guac).SetString("●"),
+		iconSuccess: base.Foreground(charmtone.Julep).SetString("✓"),
+		iconError:   base.Foreground(charmtone.Sriracha).SetString("×"),
+
+		// Tool name: uppercase, padded, with background color per status.
+		toolName: base.
+			Background(charmtone.Iron).
+			Foreground(charmtone.Salt).
+			Bold(true).
+			Padding(0, 1),
+		toolNameOk: base.
+			Background(charmtone.BBQ).
+			Foreground(charmtone.Julep).
+			Bold(true).
+			Padding(0, 1),
+		toolNameErr: base.
+			Background(charmtone.Coral).
+			Foreground(charmtone.Butter).
+			Bold(true).
+			Padding(0, 1),
+
+		// Parameters / result text.
+		params:     base.Foreground(charmtone.Smoke),
+		resultText: base.Foreground(charmtone.Smoke),
+		errorText:  base.Foreground(charmtone.Sriracha),
+
+		// Assistant text summary.
+		assistantTag: base.
+			Background(charmtone.Charple).
+			Foreground(charmtone.Butter).
+			Bold(true).
+			Padding(0, 1),
+		assistantTxt: base.Foreground(charmtone.Sash),
 	}
 }
 
@@ -36,21 +93,44 @@ func (p *EventPrinter) PrintToolCall(name, id, input string, finished bool) {
 		return
 	}
 	p.seenToolIDs[id] = true
-	fmt.Fprintf(p.w, "-> %s: %s\n", name, briefToolInput(name, input))
+
+	summary := briefToolInput(name, input)
+	if summary != "" {
+		fmt.Fprintf(
+			p.w, "%s %s %s\n",
+			p.iconPending.String(),
+			p.toolName.Render(strings.ToUpper(name)),
+			p.params.Render(summary),
+		)
+	} else {
+		fmt.Fprintf(
+			p.w, "%s %s\n",
+			p.iconPending.String(),
+			p.toolName.Render(strings.ToUpper(name)),
+		)
+	}
 }
 
 // PrintToolResult emits a one-line summary of a tool result.
 func (p *EventPrinter) PrintToolResult(name, content string, isError bool) {
-	if isError {
-		fmt.Fprintf(p.w, "x  %s: %s\n", name, firstLine(content, 80))
-		return
-	}
 	summary := firstLine(content, 60)
-	if summary == "" {
-		fmt.Fprintf(p.w, "ok %s\n", name)
+	if isError {
+		icon := p.iconError
+		nm := p.toolNameErr.Render(strings.ToUpper(name))
+		if summary != "" {
+			fmt.Fprintf(p.w, "%s %s %s\n", icon.String(), nm, p.errorText.Render(summary))
+		} else {
+			fmt.Fprintf(p.w, "%s %s\n", icon.String(), nm)
+		}
 		return
 	}
-	fmt.Fprintf(p.w, "ok %s: %s\n", name, summary)
+	icon := p.iconSuccess
+	nm := p.toolNameOk.Render(strings.ToUpper(name))
+	if summary != "" {
+		fmt.Fprintf(p.w, "%s %s %s\n", icon.String(), nm, p.resultText.Render(summary))
+	} else {
+		fmt.Fprintf(p.w, "%s %s\n", icon.String(), nm)
+	}
 }
 
 // PrintAssistantText emits the first line of an assistant text block,
@@ -60,7 +140,11 @@ func (p *EventPrinter) PrintAssistantText(text string) {
 	if line == "" {
 		return
 	}
-	fmt.Fprintf(p.w, ">> %s\n", line)
+	fmt.Fprintf(
+		p.w, "%s %s\n",
+		p.assistantTag.Render("AI"),
+		p.assistantTxt.Render(line),
+	)
 }
 
 // briefToolInput extracts a short human-readable summary from a tool

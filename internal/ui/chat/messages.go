@@ -249,6 +249,13 @@ func newFocusableMessageItem(v *list.Versioned) *focusableMessageItem {
 	return &focusableMessageItem{version: v}
 }
 
+// isFocused reports the current focus state. It tolerates a nil receiver
+// so helpers can query partially-constructed items (tests build them
+// without the focus rail).
+func (f *focusableMessageItem) isFocused() bool {
+	return f != nil && f.focused
+}
+
 // SetFocused implements MessageItem.
 func (f *focusableMessageItem) SetFocused(focused bool) {
 	if f.focused == focused {

@@ -62,6 +62,7 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
+	a2uievent "github.com/joestump-agent/a2tea/event"
 )
 
 // Compact mode breakpoints.
@@ -736,6 +737,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
+
+	case a2uievent.ButtonClicked:
+		// A button on a live A2UI surface was activated (#45): retire the
+		// surface and, unless the button reads as a cancel, turn the
+		// submission into a new agent turn.
+		if cmd := m.handleA2UIButtonClicked(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
@@ -2515,6 +2524,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case uiFocusMain:
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
+				// A selected live A2UI surface consumes Tab for its own
+				// focus ring (#44); pane switching applies only when no
+				// item claims the key.
+				if ok, cmd := m.chat.HandleKeyMsg(msg); ok {
+					cmds = append(cmds, cmd)
+					break
+				}
 				if m.isCompact {
 					m.focus = uiFocusEditor
 					cmds = append(cmds, m.textarea.Focus())
@@ -3866,6 +3882,26 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return agentRunSubmittedMsg{}
 	})
 	return tea.Batch(cmds...)
+}
+
+// handleA2UIButtonClicked turns an activated A2UI button into an agent turn
+// (#45). The surface that emitted the event is retired first — its field
+// values are read and it stops accepting focus and keys, so the form cannot
+// be re-submitted. A button that reads as a cancel (see
+// chat.A2UIButtonIsCancel) only dismisses; any other button starts a new
+// turn carrying the button and the gathered field values, through the same
+// prompt path a typed message uses (sendMessage → AgentRun, which enqueues
+// behind a running turn).
+//
+// The retire lookup may miss — e.g. the message content was rescanned and
+// the surface rebuilt without an ID — in which case the submission still
+// goes out with just the button identity rather than being dropped.
+func (m *UI) handleA2UIButtonClicked(clicked a2uievent.ButtonClicked) tea.Cmd {
+	values, _ := m.chat.RetireA2UISurface(clicked.SurfaceID)
+	if chat.A2UIButtonIsCancel(clicked) {
+		return nil
+	}
+	return m.sendMessage(chat.A2UISubmissionPrompt(clicked, values))
 }
 
 // handleChannelMessage injects a channel event pushed by an MCP server into a

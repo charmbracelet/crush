@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/joestump-agent/a2tea/render"
 )
 
 // assistantMessageTruncateFormat is the text shown when an assistant message is
@@ -151,6 +152,32 @@ type AssistantMessageItem struct {
 	// thinking text, which burns CPU and starves the terminal emulator
 	// during long reasoning traces.
 	streamingThinking streamingMarkdown
+
+	// a2uiSurfaces holds the live a2tea models for the A2UI surfaces in
+	// this message so they can receive focus and key input instead of
+	// being frozen to a rendered string (#44). The slice is indexed by
+	// scan-part: parts without a renderable surface hold nil. See
+	// syncA2UISurfaces in a2ui.go.
+	a2uiSurfaces []render.Model
+	// a2uiSurfaceIDs holds the A2UI surface ID for each entry of
+	// a2uiSurfaces (empty where the part has no renderable surface), so a
+	// ButtonClicked event's SurfaceID can be routed back to the model
+	// that emitted it (#45).
+	a2uiSurfaceIDs []string
+	// a2uiRetired marks surfaces (by A2UI surface ID) that were
+	// submitted or dismissed: they still render, but no longer receive
+	// focus or keys, so a form cannot be re-submitted (#45). Keyed by ID
+	// rather than index so the mark survives streaming rebuilds of the
+	// models.
+	a2uiRetired map[string]bool
+	// a2uiSrcHash fingerprints the scanned source the surfaces were
+	// built from, so streaming deltas rebuild them while pure re-renders
+	// (width changes, key events) reuse the same models and keep their
+	// interaction state.
+	a2uiSrcHash uint64
+	// a2uiScanned disambiguates "never scanned" from a source that
+	// hashes to zero.
+	a2uiScanned bool
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -241,9 +268,11 @@ func (a *AssistantMessageItem) Render(width int) string {
 	// per-section srcHash/extra so that any sub-cache change
 	// invalidates this prefix cache without requiring an explicit
 	// drop. Bypass the cache while spinning (RawRender's spinner
-	// suffix changes every animation frame) or while a highlight
-	// range is active (selection drag).
-	useCache := !a.isSpinning() && !a.isHighlighted()
+	// suffix changes every animation frame), while a highlight
+	// range is active (selection drag), or while a live A2UI surface
+	// is present (its focus ring and edits mutate the render without
+	// touching any hashed source text).
+	useCache := !a.isSpinning() && !a.isHighlighted() && !a.hasLiveA2UISurfaces()
 	cappedWidth := cappedMessageWidth(width)
 	key := a.prefixCacheKey(cappedWidth)
 	if useCache {
@@ -434,7 +463,11 @@ func (a *AssistantMessageItem) cachedThinking(width int) string {
 // cachedContent returns the rendered content section.
 func (a *AssistantMessageItem) cachedContent(width int) string {
 	srcHash, extra := a.contentKey()
-	if a.contentSec.hit(width, srcHash, extra) {
+	// A live A2UI surface renders from mutable model state (focus ring,
+	// edited values) that the content hash cannot see — bypass the cache
+	// while one is present so interaction is never served a frozen frame.
+	// Pure-text messages keep the cache (#44).
+	if !a.hasLiveA2UISurfaces() && a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
 	}
 	text := a.message.Content().Text
@@ -446,9 +479,14 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 	} else if a.message.IsFinished() && contentHasUnclosedA2UI(text) {
 		// Generation was truncated mid-block: an <a2ui-json> tag never got
 		// its closing partner. Show the alert instead of raw partial JSON.
+		a.dropA2UISurfaces()
 		out = a.renderTruncatedA2UI(text, width)
 	} else {
+		a.dropA2UISurfaces()
 		out = a.renderMarkdown(text, width)
+	}
+	if a.hasLiveA2UISurfaces() {
+		return out
 	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out
@@ -686,8 +724,28 @@ func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 	return a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight
 }
 
-// HandleKeyEvent implements KeyEventHandler.
+// SetFocused implements list.Focusable. Besides the base focus bookkeeping
+// it routes focus into any live A2UI surface — a2tea's focus ring (Tab
+// cycling, Enter activation) only engages while the surface model holds
+// focus, so surface focus follows item selection (#44).
+func (a *AssistantMessageItem) SetFocused(focused bool) {
+	a.focusableMessageItem.SetFocused(focused)
+	if focused {
+		a.focusA2UISurfaces()
+	} else {
+		a.blurA2UISurfaces()
+	}
+}
+
+// HandleKeyEvent implements KeyEventHandler. A focused live A2UI surface
+// gets first claim on the keys it understands (Tab/Shift+Tab cycle its
+// focus ring, Enter activates — see a2uiSurfaceWantsKey); every other key
+// falls through, so the copy shortcut keeps working whenever no surface
+// consumes the key.
 func (a *AssistantMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
+	if idx := a.focusedA2UISurfaceIndex(); idx >= 0 && a2uiSurfaceWantsKey(a.a2uiSurfaces[idx], key) {
+		return true, a.updateA2UISurface(idx, key)
+	}
 	if k := key.String(); k == "c" || k == "y" {
 		text := a.message.Content().Text
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")

@@ -703,6 +703,23 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 	return item
 }
 
+// RetireA2UISurface finds the assistant message holding the live A2UI
+// surface with the given ID, reads its current field values, and retires the
+// surface so the form cannot be re-submitted (#45). It reports the gathered
+// values and whether a matching surface was found.
+func (m *Chat) RetireA2UISurface(surfaceID string) (map[string]any, bool) {
+	for i := range m.list.Len() {
+		item, ok := m.list.ItemAt(i).(*chat.AssistantMessageItem)
+		if !ok {
+			continue
+		}
+		if values, ok := item.RetireA2UISurface(surfaceID); ok {
+			return values, true
+		}
+	}
+	return nil, false
+}
+
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {

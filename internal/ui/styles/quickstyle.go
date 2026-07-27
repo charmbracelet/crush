@@ -872,6 +872,14 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ThinkingFooterTitle = muted
 	s.Messages.ThinkingFooterDuration = subtle
 
+	// A2UI surface container. a2tea renders its chrome with terminal
+	// defaults, so a subtle themed frame makes surfaces read as part of
+	// the chat (like the thinking box) rather than plain output.
+	s.Messages.A2UISurface = base.
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(o.bgMostVisible).
+		Padding(0, 1)
+
 	// Text selection.
 	s.TextSelection = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.primary)
 

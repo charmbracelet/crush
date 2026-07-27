@@ -71,11 +71,11 @@ These components render beautifully with full styling and layout:
 - `Row`: Lays out children horizontally. Expects a `children` array of IDs.
 - `List`: Lays out children as a list. Expects a `children` array of IDs.
 - `Divider`: A horizontal rule.
-- `Button`: Focusable button. Its label comes from a single `child` ID pointing at a `Text` component (there is no `label` field). Pressing Enter emits a click event to the host.
+- `Button`: Focusable button. Its label comes from a single `child` ID pointing at a `Text` component (there is no `label` field). When the user presses it, you receive a new message naming the pressed button and carrying the surface's current field values — a button whose id reads as a cancel (e.g. `btn-cancel`, `dismiss`, `close`) just dismisses the form instead.
 
-### Input Components (Read-Only Visuals)
+### Input Components (Editable)
 
-These components will render their current values, but currently do not allow the user to interactively edit them or send input back to the agent:
+These components render their current values and the user can edit them; their values (keyed by component `id`) are sent back to you when a button on the surface is pressed:
 - `TextField`
 - `CheckBox`
 - `ChoicePicker`
@@ -101,7 +101,7 @@ These are errors that models frequently make. Read carefully.
 
 ### Buttons do NOT have a `text` or `label` field
 
-The A2UI spec has **no** `text`, `label`, or `name` field on `Button`. The label comes exclusively from a `child` Text component.
+**NEVER put `text` or `label` on a `Button`** — the A2UI spec has **no** `text`, `label`, or `name` field on `Button` in any schema version. A button's label comes exclusively from its `child` ID pointing at a separate `Text` component. A stray `text`/`label` key is dropped at parse time and the button renders unlabeled.
 
 **Wrong — the label will be empty:**
 ```json
@@ -134,6 +134,28 @@ The `"text"` key is silently ignored and the button renders with no visible labe
   "id": "btn-label",
   "text": "Submit"
 }
+```
+
+**Complete form template — copy this shape.** Two inputs and two buttons; note how *each* button gets its own child `Text` for its label:
+
+```json
+<a2ui-json>{
+  "version": "v0.9",
+  "updateComponents": {
+    "surfaceId": "form",
+    "components": [
+      {"component": "Card", "id": "root", "child": "col"},
+      {"component": "Column", "id": "col", "children": ["name", "email", "actions"]},
+      {"component": "TextField", "id": "name", "label": "Name"},
+      {"component": "TextField", "id": "email", "label": "Email"},
+      {"component": "Row", "id": "actions", "children": ["btn-send", "btn-cancel"]},
+      {"component": "Button", "id": "btn-send", "child": "btn-send-label"},
+      {"component": "Text", "id": "btn-send-label", "text": "Send"},
+      {"component": "Button", "id": "btn-cancel", "child": "btn-cancel-label"},
+      {"component": "Text", "id": "btn-cancel-label", "text": "Cancel"}
+    ]
+  }
+}</a2ui-json>
 ```
 
 ### Every `child` / `children` ID must exist in the components array

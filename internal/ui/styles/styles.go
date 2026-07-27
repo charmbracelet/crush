@@ -288,6 +288,9 @@ type Styles struct {
 		ChannelInfoSender    lipgloss.Style // Sender name in channel metadata line
 		ChannelInfoProvider  lipgloss.Style // "via <channel>" text
 		ChannelInfoTimestamp lipgloss.Style // "at <timestamp>" text
+
+		// A2UISurface - themed container around rendered A2UI surfaces
+		A2UISurface lipgloss.Style
 	}
 
 	// Tool - styles for tool call rendering

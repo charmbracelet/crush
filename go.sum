@@ -256,8 +256,8 @@ github.com/jackmordaunt/icns/v3 v3.0.1 h1:xxot6aNuGrU+lNgxz5I5H0qSeCjNKp8uTXB1j8
 github.com/jackmordaunt/icns/v3 v3.0.1/go.mod h1:5sHL59nqTd2ynTnowxB/MDQFhKNqkK8X687uKNygaSQ=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 h1:BQSFePA1RWJOlocH6Fxy8MmwDt+yVQYULKfN0RoTN8A=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99/go.mod h1:1lJo3i6rXxKeerYnT8Nvf0QmHCRC1n8sfWVwXF2Frvo=
-github.com/joestump-agent/a2tea v0.0.0-20260717194424-347a52e05f08 h1:bB5h3QxxxnqYGJQoA8K5i7PjP7idMdzFBqD6MFgjuFI=
-github.com/joestump-agent/a2tea v0.0.0-20260717194424-347a52e05f08/go.mod h1:pg6ATa4oTrJfhPmfQ9a/Y/5xU9DTXZ8rGVvLj3NpEaE=
+github.com/joestump-agent/a2tea v0.0.0-20260718201420-b797da386eaf h1:Yw8XzyZXewOiewpHLd4SQPhu7CeWlFeqjpz7uE7f5as=
+github.com/joestump-agent/a2tea v0.0.0-20260718201420-b797da386eaf/go.mod h1:pg6ATa4oTrJfhPmfQ9a/Y/5xU9DTXZ8rGVvLj3NpEaE=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
 github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
 github.com/jordanella/go-ansi-paintbrush v0.0.0-20240728195301-b7ad996ecf3d h1:on25kP+Sx7sxUMRQiA8gdcToAGet4DK/EIA30mXre+4=

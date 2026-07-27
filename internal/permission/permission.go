@@ -2,11 +2,13 @@ package permission
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -108,6 +110,11 @@ type permissionService struct {
 	skip                  atomic.Bool
 	planMode              atomic.Bool
 	allowedTools          []string
+
+	// waitLogInterval is how often a still-unanswered request is logged.
+	// Per-instance rather than a package var so tests can shorten it without
+	// racing another test's service.
+	waitLogInterval time.Duration
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -217,7 +224,17 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	s.requestMu.Lock()
+	// requestMu serialises requests so only one dialog is live at a time. It is
+	// held across the wait for the user's answer, so anything arriving while a
+	// prompt is unanswered blocks HERE -- before it can publish -- and is
+	// invisible to the UI until the first is resolved. Log the queueing so that
+	// is diagnosable instead of looking like a hang.
+	if !s.requestMu.TryLock() {
+		slog.Info("Permission request queued behind an unanswered prompt",
+			"tool", opts.ToolName, "action", opts.Action, "path", opts.Path,
+			"session_id", opts.SessionID, "tool_call_id", opts.ToolCallID)
+		s.requestMu.Lock()
+	}
 	defer s.requestMu.Unlock()
 
 	// tell the UI that a permission was requested
@@ -285,11 +302,38 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
 
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case granted := <-respCh:
-		return granted, nil
+	slog.Info("Permission requested; waiting for the user",
+		"tool", permission.ToolName, "action", permission.Action,
+		"path", permission.Path, "session_id", permission.SessionID,
+		"tool_call_id", permission.ToolCallID, "permission_id", permission.ID)
+
+	// There is no timeout here by design: only the user or ctx cancellation ends
+	// the wait. Without periodic logging an unnoticed prompt is indistinguishable
+	// from a wedged agent -- nothing else writes a line while we block.
+	started := time.Now()
+	ticker := time.NewTicker(s.waitLogInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("Permission request cancelled",
+				"tool", permission.ToolName, "path", permission.Path,
+				"tool_call_id", permission.ToolCallID,
+				"waited", time.Since(started).Round(time.Millisecond))
+			return false, ctx.Err()
+		case granted := <-respCh:
+			slog.Info("Permission request resolved",
+				"tool", permission.ToolName, "path", permission.Path,
+				"tool_call_id", permission.ToolCallID, "granted", granted,
+				"waited", time.Since(started).Round(time.Millisecond))
+			return granted, nil
+		case <-ticker.C:
+			slog.Warn("Permission request still unanswered; the agent is blocked",
+				"tool", permission.ToolName, "action", permission.Action,
+				"path", permission.Path, "tool_call_id", permission.ToolCallID,
+				"waiting_for", time.Since(started).Round(time.Second))
+		}
 	}
 }
 
@@ -333,6 +377,10 @@ func (s *permissionService) PlanMode() bool {
 	return s.planMode.Load()
 }
 
+// defaultWaitLogInterval is how often an unanswered permission request is
+// logged. Long enough not to spam a user who is simply reading the diff.
+const defaultWaitLogInterval = 30 * time.Second
+
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
 	svc := &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
@@ -342,6 +390,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		autoApproveSessions: make(map[string]bool),
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
+		waitLogInterval:     defaultWaitLogInterval,
 	}
 	svc.skip.Store(skip)
 	return svc

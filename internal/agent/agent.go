@@ -1545,7 +1545,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		}
 	}
 
-	for _, m := range msgs {
+	for _, m := range orderToolResultsAfterCalls(msgs) {
 		if len(m.Parts) == 0 {
 			continue
 		}
@@ -1606,6 +1606,72 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 		filtered = append(filtered, part)
 	}
 	return filtered
+}
+
+// orderToolResultsAfterCalls returns the history with every tool message moved
+// to directly after the assistant message holding the tool call it answers,
+// pushing anything recorded in between after it.
+//
+// Providers require the results answering a tool call to be the first thing in
+// the turn following it, so anything persisted while that call is still in
+// flight breaks the request: consecutive same-role messages are merged into a
+// single turn, so an interleaved user message does not just sit between the
+// two, it pulls the results in behind its own content. Since the history is
+// replayed on every turn the request keeps failing, leaving the session
+// permanently unusable. Bang-mode shell command output is the case seen in the
+// wild, but the reordering is deliberately blind to what was interleaved.
+//
+// Tool messages whose call is not in the history are left where they are, for
+// filterOrphanedToolResults to report and drop.
+func orderToolResultsAfterCalls(msgs []message.Message) []message.Message {
+	callingMessage := make(map[string]string)
+	for _, m := range msgs {
+		if m.Role != message.Assistant {
+			continue
+		}
+		for _, tc := range m.ToolCalls() {
+			callingMessage[tc.ID] = m.ID
+		}
+	}
+
+	// The assistant message a tool message belongs behind, if its call is in
+	// the history at all.
+	answers := func(m message.Message) (string, bool) {
+		if m.Role != message.Tool {
+			return "", false
+		}
+		results := m.ToolResults()
+		if len(results) == 0 {
+			return "", false
+		}
+		// Every result in a tool message answers the same assistant turn:
+		// results are persisted per turn, so keying on the first is enough
+		// to find the message they all belong behind.
+		id, ok := callingMessage[results[0].ToolCallID]
+		return id, ok
+	}
+
+	resultsFor := make(map[string][]message.Message)
+	for _, m := range msgs {
+		if id, ok := answers(m); ok {
+			resultsFor[id] = append(resultsFor[id], m)
+		}
+	}
+	if len(resultsFor) == 0 {
+		return msgs
+	}
+
+	ordered := make([]message.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if _, ok := answers(m); ok {
+			continue
+		}
+		ordered = append(ordered, m)
+		if m.Role == message.Assistant {
+			ordered = append(ordered, resultsFor[m.ID]...)
+		}
+	}
+	return ordered
 }
 
 // filterOrphanedToolResults converts a tool message to a fantasy.Message,

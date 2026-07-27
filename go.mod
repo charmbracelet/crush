@@ -63,6 +63,7 @@ require (
 	github.com/swaggo/swag v1.16.6
 	github.com/tidwall/gjson v1.19.0
 	github.com/tidwall/sjson v1.2.5
+	github.com/yuin/gopher-lua v1.1.2
 	github.com/zeebo/xxh3 v1.1.0
 	go.uber.org/goleak v1.3.0
 	golang.design/x/clipboard v0.8.0

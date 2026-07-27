@@ -26,6 +26,21 @@ const (
 	TypeRetry Type = "retry"
 )
 
+// TypeWorkflowProgress indicates the workflow engine has new live progress.
+const TypeWorkflowProgress Type = "workflow_progress"
+
+// WorkflowProgress carries live progress for a running workflow tool.
+type WorkflowProgress struct {
+	ToolCallID string
+	Kind       string // "log" | "agent_start" | "agent_done" | "agent_error"
+	Index      int
+	Label      string
+	Message    string
+	Running    int
+	Completed  int
+	Total      int
+}
+
 // Notification represents a domain event published by the agent.
 type Notification struct {
 	SessionID    string
@@ -41,6 +56,9 @@ type Notification struct {
 	// Message carries the error text for TypeAgentError, or a short
 	// reason for TypeRetry (e.g. provider error title).
 	Message string
+	// WorkflowProgress carries live progress for a running workflow tool.
+	// Only populated when Type is TypeWorkflowProgress.
+	WorkflowProgress *WorkflowProgress
 	// RetryDelay is how long the agent will wait before the next
 	// attempt when Type is TypeRetry.
 	RetryDelay time.Duration

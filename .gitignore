@@ -45,6 +45,13 @@ Thumbs.db
 # Nix/direnv
 .direnv/
 
+# Local planning/working docs — authored per-feature, never shipped in PRs.
+# Intentional feature docs can still be tracked with `git add -f`.
+docs/notes/*-plan.md
+docs/notes/plan-template.md
+docs/notes/claude-code-parity.md
+docs/known-issues.md
+
 **/.crush/**
 
 /crush

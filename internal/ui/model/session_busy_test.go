@@ -638,6 +638,37 @@ func TestAgentModelChangedRefreshesModel(t *testing.T) {
 		"the refreshed model must land in the cache")
 }
 
+// TestMCPStateChangedRefreshesModel pins the fourth UpdateAgentModel call
+// site: an MCP state change rebuilds the agent, which can change the
+// effective model, so the memoized ready/model state must be re-fetched
+// off-thread afterwards — the edge the updateAgentModelCmd helper exists to
+// make unforgettable.
+func TestMCPStateChangedRefreshesModel(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready: true,
+		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "post-mcp-model"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.agentModel = workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "pre-mcp-model"}}
+	ws.resetCounters()
+
+	// handleStateChanged sequences the rebuild with agentModelChangedCmd;
+	// tea.Sequence's wrapper msg is unexported, so drive the two steps the
+	// way the runtime would: run the cmd (the stub records the call), then
+	// deliver the invalidation message.
+	_ = m.handleStateChanged()()
+	_, cmd := m.Update(agentModelChangedMsg{})
+	require.True(t, m.busyFetchInFlight, "an MCP state change must schedule a ready/model refresh")
+	runCmds(m, cmd)
+
+	require.True(t, m.agentReady)
+	require.Equal(t, "post-mcp-model", m.agentModel.ModelCfg.Model,
+		"an MCP state change must refresh the memoized model")
+}
+
 // TestLSPEventRefreshIsOffThreadAndDeduped pins the LSP side of the
 // invariant: an LSP event must not fetch states synchronously in Update
 // (LSPGetStates + per-server LSPGetDiagnosticCounts are HTTP round-trips in

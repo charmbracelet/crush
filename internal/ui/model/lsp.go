@@ -19,7 +19,10 @@ import (
 // lspStatesTTL bounds how long the memoized LSP state may go without a
 // re-probe being scheduled; LSP events normally refresh it much sooner. The
 // backstop covers events missed across SSE reconnects in client/server
-// mode. Package var so tests can pin it.
+// mode, so it can be an order of magnitude looser than the busy/permission
+// TTL (which drives interactive affordances like the spinner and queue
+// pill): a few seconds of stale LSP counts is invisible, a few seconds of
+// stale busy state is not. Package var so tests can pin it.
 var lspStatesTTL = 5 * time.Second
 
 // lspStatesMsg delivers LSP states and per-server diagnostic counts fetched

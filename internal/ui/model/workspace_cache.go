@@ -6,7 +6,9 @@ package model
 // queued prompts, agent readiness/model, LSP state) is a synchronous HTTP
 // round-trip, and the Update goroutine is the render loop — blocking it
 // freezes typing. The UI therefore never probes the workspace synchronously
-// from Update or View:
+// from Update or View. (The constructor is the one carve-out: New seeds the
+// yolo and ready/model caches synchronously so the first frame has values to
+// render; Init then refreshes them off-thread.)
 //
 //   - Reads (isAgentBusy, yoloModeCached, promptQueue, selectedLargeModel,
 //     lspInfo) always return the memoized value, stale or not.
@@ -103,6 +105,8 @@ type agentModelChangedMsg struct{}
 
 // agentModelChangedCmd is sequenced after cmds that call UpdateAgentModel so
 // the refresh probes the coordinator only once the update has completed.
+// Callers should reach for updateAgentModelCmd rather than sequencing this
+// by hand.
 func agentModelChangedCmd() tea.Msg { return agentModelChangedMsg{} }
 
 // currentSessionID returns the active session's ID, or "" when none.
@@ -152,6 +156,16 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 		st.yolo = ws.PermissionSkipRequests()
 		return st
 	}
+}
+
+// updateAgentModelCmd sequences a coordinator model rebuild
+// (UpdateAgentModel) with the invalidation of the memoized ready/model
+// state. Callers wrap their pre-work in pre; the memoized model must only
+// be re-probed after the rebuild lands (a synchronous HTTP round-trip in
+// client/server mode), so the message drives the refresh instead of each
+// call site remembering to.
+func (m *UI) updateAgentModelCmd(pre tea.Cmd) tea.Cmd {
+	return tea.Sequence(pre, agentModelChangedCmd)
 }
 
 // applyBusyState stores an off-thread probe result and reacts to busy

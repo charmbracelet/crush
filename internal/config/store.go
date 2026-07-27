@@ -394,6 +394,21 @@ func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model 
 	})
 }
 
+// SetMCPDisabledInMemory toggles the Disabled flag on a named MCP server in
+// the in-memory config via copy-on-write, without persisting to disk. This
+// allows session-scoped enable/disable of MCP servers regardless of their
+// persisted config state.
+func (s *ConfigStore) SetMCPDisabledInMemory(name string, disabled bool) {
+	s.mutateInMemory(func(c *Config) {
+		m, ok := c.MCP[name]
+		if !ok {
+			return
+		}
+		m.Disabled = disabled
+		c.MCP[name] = m
+	})
+}
+
 // RemoveConfigField removes a key from the config file for the given scope.
 // After a successful write, it automatically reloads config to keep in-memory
 // state fresh.

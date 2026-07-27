@@ -273,6 +273,14 @@ type UI struct {
 	readyPlaceholder   string
 	workingPlaceholder string
 
+	// retryStatus tracks an in-flight provider retry backoff so the
+	// status bar and assistant spinner can show a live countdown.
+	// retrySeq invalidates stale tick commands when a newer retry
+	// starts or the run ends.
+	retryStatus notify.Notification
+	retryUntil  time.Time
+	retrySeq    int
+
 	// Completions state
 	completions              *completions.Completions
 	completionsOpen          bool
@@ -697,6 +705,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case retryTickMsg:
+		if cmd := m.handleRetryTick(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case busyStateMsg:
 		cmds = append(cmds, m.applyBusyState(msg)...)
 	case promptQueueMsg:
@@ -721,6 +733,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.session = msg.session
 		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
+		// A retry countdown belongs to the previous session; drop it.
+		m.clearRetryCountdown()
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
@@ -1673,6 +1687,11 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if existingItem != nil {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
+			// A successful retry starts streaming again; drop the
+			// countdown so the spinner returns to Thinking/Working.
+			if m.retryStatus.Type == notify.TypeRetry && assistantHasStreamedOutput(msg) {
+				m.clearRetryCountdown()
+			}
 			// SetMessage returns a StartAnimation Cmd when the message
 			// transitions back to spinning (e.g. its streamed content was
 			// reset for a retry). Propagate it so the spinner re-arms
@@ -4628,12 +4647,32 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	return cmd
 }
 
+// retryTickMsg drives the live retry countdown in the status bar and
+// on the assistant working spinner. seq must match m.retrySeq or the
+// tick is stale and ignored.
+type retryTickMsg struct {
+	seq int
+}
+
 // handleAgentNotification translates domain agent events into desktop
 // notifications using the UI notification backend.
 func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
+	case notify.TypeRetry:
+		// The countdown paints the visible chat's spinner and the status
+		// bar, so it belongs to the session on screen. A retry on a
+		// background session (another turn, GenerateTitle, Summarize)
+		// must not hijack it. Only this branch is session-scoped: the
+		// terminal edges below drive the desktop notification and the
+		// busy/queue refresh for *any* session and must keep firing when
+		// the user is looking elsewhere.
+		if n.SessionID != "" && (m.session == nil || n.SessionID != m.session.ID) {
+			return nil
+		}
+		return m.beginRetryCountdown(n)
 	case notify.TypeAgentFinished:
+		m.clearRetryCountdownFor(n.SessionID)
 		common.StopTurn()
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
@@ -4645,6 +4684,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
 		// busy/queue refresh below.
+		m.clearRetryCountdownFor(n.SessionID)
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	default:
@@ -4663,6 +4703,110 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
+}
+
+// beginRetryCountdown starts (or replaces) the live provider-retry
+// countdown shown in the status bar and on the assistant spinner.
+func (m *UI) beginRetryCountdown(n notify.Notification) tea.Cmd {
+	m.retrySeq++
+	m.retryStatus = n
+	m.retryUntil = time.Now().Add(n.RetryDelay)
+	m.applyRetryCountdown()
+	return m.scheduleRetryTick(m.retrySeq)
+}
+
+// clearRetryCountdownFor stops the countdown only when it belongs to the
+// given session. A background session reaching its terminal edge must
+// not wipe the countdown the user is watching on the visible session.
+func (m *UI) clearRetryCountdownFor(sessionID string) {
+	if m.retryStatus.Type != notify.TypeRetry || m.retryStatus.SessionID != sessionID {
+		return
+	}
+	m.clearRetryCountdown()
+}
+
+// clearRetryCountdown stops any in-flight retry countdown and restores
+// the default working spinner label.
+func (m *UI) clearRetryCountdown() {
+	// Only a live countdown may be cleared. This runs on every agent
+	// finish/error, so a looser guard (e.g. "retrySeq != 0") would wipe
+	// an unrelated status message on every turn after the session's
+	// first retry.
+	if m.retryStatus.Type != notify.TypeRetry {
+		return
+	}
+	m.retrySeq++
+	m.retryStatus = notify.Notification{}
+	m.retryUntil = time.Time{}
+	if item := m.chat.LastAssistantMessageItem(); item != nil {
+		item.SetWorkingLabel("")
+	}
+	m.status.ClearInfoMsg()
+}
+
+// applyRetryCountdown refreshes the status bar and spinner label from
+// the current remaining backoff. No-op when no retry is active.
+func (m *UI) applyRetryCountdown() {
+	if m.retryStatus.Type != notify.TypeRetry {
+		return
+	}
+	remaining := time.Until(m.retryUntil)
+	if remaining < 0 {
+		remaining = 0
+	}
+	text := notify.FormatRetryStatus(m.retryStatus, remaining)
+	m.status.SetInfoMsg(util.InfoMsg{
+		Type: util.InfoTypeWarn,
+		Msg:  text,
+		// Keep the message until clearRetryCountdown; the tick loop
+		// refreshes it each second so a short TTL would flash clear.
+		TTL: 24 * time.Hour,
+	})
+	if item := m.chat.LastAssistantMessageItem(); item != nil {
+		// Spinner label is short; drop the reason so it stays readable.
+		label := fmt.Sprintf("Retrying in %ds", max(1, int((remaining+time.Second-1)/time.Second)))
+		item.SetWorkingLabel(label)
+	}
+}
+
+// scheduleRetryTick returns a command that fires after one second to
+// refresh the countdown, or nil when the backoff has already elapsed.
+func (m *UI) scheduleRetryTick(seq int) tea.Cmd {
+	if m.retryStatus.Type != notify.TypeRetry || time.Now().After(m.retryUntil) {
+		return nil
+	}
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return retryTickMsg{seq: seq}
+	})
+}
+
+// handleRetryTick advances the live countdown for the matching retry
+// sequence. Stale ticks (from a previous retry or after clear) are ignored.
+func (m *UI) handleRetryTick(msg retryTickMsg) tea.Cmd {
+	if msg.seq != m.retrySeq || m.retryStatus.Type != notify.TypeRetry {
+		return nil
+	}
+	if time.Now().After(m.retryUntil) {
+		// Backoff elapsed; keep the last frame until the next attempt
+		// either streams content (cleared in updateSessionMessage) or
+		// fails again (a new TypeRetry replaces this countdown).
+		m.applyRetryCountdown()
+		return nil
+	}
+	m.applyRetryCountdown()
+	return m.scheduleRetryTick(msg.seq)
+}
+
+// assistantHasStreamedOutput reports whether the assistant message has
+// any visible output, used to detect that a retried request resumed.
+func assistantHasStreamedOutput(msg message.Message) bool {
+	if strings.TrimSpace(msg.Content().Text) != "" {
+		return true
+	}
+	if strings.TrimSpace(msg.ReasoningContent().Thinking) != "" {
+		return true
+	}
+	return len(msg.ToolCalls()) > 0
 }
 
 func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {

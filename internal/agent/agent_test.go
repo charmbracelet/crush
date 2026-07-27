@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
@@ -8,15 +9,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -691,7 +695,7 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 
 	// When supportsImages is false, image attachments should be stripped
 	// from history AND from the files list.
-	history, files := agent.preparePrompt(msgs, false, imageAtt)
+	history, files := agent.preparePrompt(msgs, false, nil, imageAtt)
 	// First message is the system reminder, second is the user message.
 	require.Len(t, history, 2)
 	require.Len(t, history[1].Content, 1)
@@ -703,7 +707,7 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 
 	// When supportsImages is true, image attachments should remain in
 	// history and be included in the files list.
-	history, files = agent.preparePrompt(msgs, true, imageAtt)
+	history, files = agent.preparePrompt(msgs, true, nil, imageAtt)
 	require.Len(t, history, 2)
 	require.Len(t, history[1].Content, 2)
 	text, ok = fantasy.AsMessagePart[fantasy.TextPart](history[1].Content[0])
@@ -725,7 +729,7 @@ func TestCreateUserMessage_RetainsAllAttachments(t *testing.T) {
 	sess, err := env.sessions.Create(ctx, "test")
 	require.NoError(t, err)
 
-	// Mix of text and image attachments — all should be stored.
+	// Mix of text and image attachments - all should be stored.
 	call := SessionAgentCall{
 		SessionID: sess.ID,
 		Prompt:    "look at this image",
@@ -772,7 +776,7 @@ func TestPreparePrompt_OrphanedToolUse(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create an assistant message with a tool call but no tool result —
+	// Create an assistant message with a tool call but no tool result -
 	// this simulates a cancelled/interrupted agent tool call.
 	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
 		Role: message.Assistant,
@@ -800,7 +804,7 @@ func TestPreparePrompt_OrphanedToolUse(t *testing.T) {
 	msgs, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
-	history, _ := agent.preparePrompt(msgs, true)
+	history, _ := agent.preparePrompt(msgs, true, nil)
 
 	// The history must contain a synthetic tool result for the orphaned call.
 	found := false
@@ -858,7 +862,7 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Only one tool result — for call_ok.
+	// Only one tool result - for call_ok.
 	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
 		Role: message.Tool,
 		Parts: []message.ContentPart{
@@ -874,7 +878,7 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	msgs, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
-	history, _ := agent.preparePrompt(msgs, true)
+	history, _ := agent.preparePrompt(msgs, true, nil)
 
 	// Should have a synthetic result only for the orphaned call.
 	var syntheticCount int
@@ -915,7 +919,7 @@ func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 		},
 	}
 
-	// Non-Anthropic provider, no image support — should replace media with
+	// Non-Anthropic provider, no image support - should replace media with
 	// a text placeholder and not create a synthetic user message.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
@@ -959,7 +963,7 @@ func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
 		},
 	}
 
-	// Non-Anthropic provider, image support — should create a synthetic
+	// Non-Anthropic provider, image support - should create a synthetic
 	// user message with FilePart.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
@@ -1012,7 +1016,7 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 		},
 	}
 
-	// Anthropic provider — should return messages unchanged regardless of
+	// Anthropic provider - should return messages unchanged regardless of
 	// SupportsImages, since Anthropic handles media in tool results natively.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: string(catwalk.InferenceProviderAnthropic)},
@@ -1035,8 +1039,12 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 
 func TestProviderRetryLogFields(t *testing.T) {
 	t.Run("nil provider error", func(t *testing.T) {
-		fields := providerRetryLogFields(nil, 2*time.Second)
-		require.Equal(t, []any{"retry_delay", "2s"}, fields)
+		fields := providerRetryLogFields(nil, 2*time.Second, 1, 10)
+		require.Equal(t, []any{
+			"retry_delay", "2s",
+			"attempt", 1,
+			"max_retries", 10,
+		}, fields)
 	})
 
 	t.Run("provider error with title and message", func(t *testing.T) {
@@ -1044,9 +1052,11 @@ func TestProviderRetryLogFields(t *testing.T) {
 			StatusCode: 429,
 			Title:      "rate limit",
 			Message:    "too many requests",
-		}, 1500*time.Millisecond)
+		}, 1500*time.Millisecond, 3, 10)
 		require.Equal(t, []any{
 			"retry_delay", "1.5s",
+			"attempt", 3,
+			"max_retries", 10,
 			"status_code", 429,
 			"title", "rate limit",
 			"message", "too many requests",
@@ -1056,10 +1066,194 @@ func TestProviderRetryLogFields(t *testing.T) {
 	t.Run("provider error without optional strings", func(t *testing.T) {
 		fields := providerRetryLogFields(&fantasy.ProviderError{
 			StatusCode: 503,
-		}, time.Second)
+		}, time.Second, 2, 10)
 		require.Equal(t, []any{
 			"retry_delay", "1s",
+			"attempt", 2,
+			"max_retries", 10,
 			"status_code", 503,
 		}, fields)
 	})
+}
+
+func TestFormatRetryStatus(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(
+		t,
+		"Retrying in 5s (attempt 2/10) - rate limit",
+		notify.FormatRetryStatus(notify.Notification{
+			Type:       notify.TypeRetry,
+			Message:    "rate limit",
+			RetryDelay: 5 * time.Second,
+			Attempt:    2,
+			MaxRetries: 10,
+		}, 5*time.Second),
+	)
+
+	require.Equal(
+		t,
+		"Retrying in 1s (attempt 1/10)",
+		notify.FormatRetryStatus(notify.Notification{
+			Type:       notify.TypeRetry,
+			RetryDelay: time.Second,
+			Attempt:    1,
+			MaxRetries: 10,
+		}, time.Second),
+	)
+
+	// Sub-second remainders still show as 1s so the bar never flashes 0s.
+	require.Equal(
+		t,
+		"Retrying in 1s (attempt 1/10) - overloaded",
+		notify.FormatRetryStatus(notify.Notification{
+			Type:       notify.TypeRetry,
+			Message:    "overloaded",
+			RetryDelay: 500 * time.Millisecond,
+			Attempt:    1,
+			MaxRetries: 10,
+		}, 200*time.Millisecond),
+	)
+}
+
+func TestTodoSystemReminder(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sub agent never reminded", func(t *testing.T) {
+		t.Parallel()
+		require.Empty(t, todoSystemReminder(true, nil))
+		require.Empty(t, todoSystemReminder(true, []session.Todo{{Status: session.TodoStatusCompleted}}))
+	})
+
+	t.Run("empty list gets create hint", func(t *testing.T) {
+		t.Parallel()
+		got := todoSystemReminder(false, nil)
+		require.Contains(t, got, "currently empty")
+	})
+
+	t.Run("all completed nudges clear", func(t *testing.T) {
+		t.Parallel()
+		got := todoSystemReminder(false, []session.Todo{
+			{Content: "a", Status: session.TodoStatusCompleted},
+		})
+		require.Contains(t, got, "fully completed")
+		require.Contains(t, got, "empty todos array")
+	})
+
+	t.Run("incomplete without in_progress nudges", func(t *testing.T) {
+		t.Parallel()
+		got := todoSystemReminder(false, []session.Todo{
+			{Content: "a", Status: session.TodoStatusPending},
+		})
+		require.Contains(t, got, "none are marked in_progress")
+	})
+
+	t.Run("healthy in_progress is silent", func(t *testing.T) {
+		t.Parallel()
+		got := todoSystemReminder(false, []session.Todo{
+			{Content: "a", Status: session.TodoStatusInProgress},
+		})
+		require.Empty(t, got)
+	})
+}
+
+// TestProviderRetryBudgetIsBounded runs fantasy's real retry middleware
+// (scaled down 1000x) to measure the worst-case wall time a user can be
+// made to wait on providerMaxRetries. Fantasy's backoff is uncapped
+// exponential and offers no maximum-delay knob, so the retry count is
+// the only lever Crush has; a budget large enough to produce a
+// 40-minute countdown is indistinguishable from a hang.
+func TestProviderRetryBudgetIsBounded(t *testing.T) {
+	t.Parallel()
+
+	defaults := fantasy.DefaultRetryOptions()
+	const scale = 1000
+	opts := fantasy.RetryOptions{
+		MaxRetries:     providerMaxRetries,
+		InitialDelayIn: defaults.InitialDelayIn / scale,
+		BackoffFactor:  defaults.BackoffFactor,
+	}
+	var attempts int
+	var scaledTotal, scaledLongest time.Duration
+	opts.OnRetry = func(_ *fantasy.ProviderError, delay time.Duration) {
+		attempts++
+		scaledTotal += delay
+		scaledLongest = delay
+	}
+	retry := fantasy.RetryWithExponentialBackoffRespectingRetryHeaders[int](opts)
+	_, err := retry(t.Context(), func() (int, error) {
+		return 0, &fantasy.ProviderError{Title: "rate limit", StatusCode: 429}
+	})
+	require.Error(t, err)
+	require.Equal(t, providerMaxRetries, attempts)
+
+	total := scaledTotal * scale
+	longest := scaledLongest * scale
+	t.Logf("providerMaxRetries=%d longest single wait=%v total wall time=%v",
+		providerMaxRetries, longest, total)
+
+	require.LessOrEqual(t, longest, 3*time.Minute,
+		"longest single backoff (%v) leaves the user watching a countdown with no way to tell Crush from a hang", longest)
+	require.LessOrEqual(t, total, 6*time.Minute,
+		"worst-case total retry wall time is %v", total)
+}
+
+// recordingPublisher captures published notifications.
+type recordingPublisher struct {
+	mu   sync.Mutex
+	sent []notify.Notification
+}
+
+func (p *recordingPublisher) Publish(_ pubsub.EventType, n notify.Notification) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.sent = append(p.sent, n)
+}
+
+func (p *recordingPublisher) PublishMustDeliver(_ context.Context, e pubsub.EventType, n notify.Notification) {
+	p.Publish(e, n)
+}
+
+func (p *recordingPublisher) attempts() []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]int, 0, len(p.sent))
+	for _, n := range p.sent {
+		out = append(out, n.Attempt)
+	}
+	return out
+}
+
+// TestRetryAttemptReporterResetsPerCall guards the countdown's attempt
+// number. Fantasy resets the retry budget for every AgentStreamCall it
+// runs, so GenerateTitle's small->large model fallback performs two
+// independent retry passes. A single counter shared by both (the shape
+// before newRetryAttemptReporter existed) carried the first pass's count
+// into the second, and the user-facing countdown read "attempt 7/6".
+//
+// Note on scope: this pins the helper's contract -- each reporter starts
+// at 1 and never continues a previous one. The GenerateTitle call site
+// installs a fresh reporter per loop iteration; that wiring is
+// structural (no counter exists in the loop's scope to share any more)
+// rather than covered here, because the loop needs a live provider.
+func TestRetryAttemptReporterResetsPerCall(t *testing.T) {
+	t.Parallel()
+
+	pub := &recordingPublisher{}
+	a := &sessionAgent{notify: pub}
+	perr := &fantasy.ProviderError{Title: "rate limit"}
+
+	first := newRetryAttemptReporter(a, "s1", "prov", providerMaxRetries)
+	first(perr, time.Second)
+	first(perr, 2*time.Second)
+
+	second := newRetryAttemptReporter(a, "s1", "prov", providerMaxRetries)
+	second(perr, time.Second)
+
+	require.Equal(t, []int{1, 2, 1}, pub.attempts(),
+		"the second model attempt must restart the attempt count at 1")
+	for _, n := range pub.sent {
+		require.LessOrEqual(t, n.Attempt, n.MaxRetries,
+			"a published attempt number must never exceed the budget")
+	}
 }

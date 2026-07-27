@@ -803,6 +803,18 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 	return item
 }
 
+// LastAssistantMessageItem returns the most recently appended assistant
+// message item, or nil if the chat has none. Used to surface live retry
+// countdown labels on the in-flight turn spinner.
+func (m *Chat) LastAssistantMessageItem() *chat.AssistantMessageItem {
+	for i := m.list.Len() - 1; i >= 0; i-- {
+		if item, ok := m.list.ItemAt(i).(*chat.AssistantMessageItem); ok {
+			return item
+		}
+	}
+	return nil
+}
+
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {

@@ -50,6 +50,21 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
+// providerMaxRetries is how many times a failed provider request is
+// retried before the error is surfaced. Fantasy defaults to 3; Crush
+// raises this so transient rate limits and network blips recover more
+// often. The wait is cancelable with Escape / Ctrl+C.
+//
+// This number is bounded, not tuned for maximum persistence. Fantasy's
+// backoff is uncapped exponential (5s initial, x2 per attempt, see
+// fantasy.DefaultRetryOptions), so the worst-case wall time grows as
+// 5s*(2^n-1): n=6 gives a 2m40s longest single wait and 5m15s total,
+// while n=10 would give 42m40s and 1h25m15s. A user staring at a
+// 42-minute countdown is indistinguishable from a hang, so the budget
+// is capped here. TestProviderRetryBudgetIsBounded enforces the bound;
+// raise it only alongside a delay cap in fantasy.
+const providerMaxRetries = 6
+
 const (
 	DefaultSessionName = "Untitled Session"
 
@@ -714,7 +729,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	agent := fantasy.NewAgent(
-		largeModel.Model,
+		wrapRetryableModel(largeModel.Model),
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
 		fantasy.WithUserAgent(userAgent),
@@ -812,7 +827,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}()
 
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, currentSession.Todos, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -825,6 +840,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
+	maxRetries := providerMaxRetries
+	var retryAttempt atomic.Int32
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -837,6 +854,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
+		MaxRetries:       &maxRetries,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
@@ -961,15 +979,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+			attempt := int(retryAttempt.Add(1))
+			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay, attempt, maxRetries)...)
 			// Reset streamed content so the retried response doesn't
 			// concatenate with partial content from the failed attempt.
 			// On the final attempt (no more retries), any partial content
 			// stays in the message as useful context beneath the error.
-			currentAssistant.ResetStreamedContent()
-			if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
-				slog.Error("Failed to reset message on retry", "error", updateErr)
+			if currentAssistant != nil {
+				currentAssistant.ResetStreamedContent()
+				if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
+					slog.Error("Failed to reset message on retry", "error", updateErr)
+				}
 			}
+			a.publishRetry(call.SessionID, currentSession.Title, largeModel.ModelCfg.Provider, err, delay, attempt, maxRetries)
 		},
 		OnAuthRefresh: call.OnAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
@@ -977,7 +999,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			slog.Info("ModelProvider called",
 				"provider", m.ModelCfg.Provider,
 				"model", m.ModelCfg.Model)
-			return m.Model
+			return wrapRetryableModel(m.Model)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
@@ -1373,7 +1395,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, currentSession.Todos)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1387,7 +1409,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}()
 
 	agent := fantasy.NewAgent(
-		largeModel.Model,
+		wrapRetryableModel(largeModel.Model),
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
 		fantasy.WithUserAgent(userAgent),
 	)
@@ -1403,17 +1425,29 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
+	maxRetries := providerMaxRetries
+	var retryAttempt atomic.Int32
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
 		ProviderOptions: opts,
+		MaxRetries:      &maxRetries,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 			}
 			return callContext, prepared, nil
+		},
+		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
+			attempt := int(retryAttempt.Add(1))
+			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay, attempt, maxRetries)...)
+			summaryMessage.ResetStreamedContent()
+			if updateErr := a.messages.Update(genCtx, summaryMessage); updateErr != nil {
+				slog.Error("Failed to reset summary message on retry", "error", updateErr)
+			}
+			a.publishRetry(sessionID, currentSession.Title, largeModel.ModelCfg.Provider, err, delay, attempt, maxRetries)
 		},
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
@@ -1545,16 +1579,11 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, todos []session.Todo, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
-	if !a.isSubAgent {
+	if reminder := todoSystemReminder(a.isSubAgent, todos); reminder != "" {
 		history = append(history, fantasy.NewUserMessage(
-			fmt.Sprintf(
-				"<system_reminder>%s</system_reminder>",
-				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
-If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
-If not, please feel free to ignore. Again do not mention this message to the user.`,
-			),
+			fmt.Sprintf("<system_reminder>%s</system_reminder>", reminder),
 		))
 	}
 	// Collect all tool call IDs present in assistant messages and all tool
@@ -1803,7 +1832,7 @@ func (a *sessionAgent) SideQuestion(ctx context.Context, sessionID, question str
 
 	var lastErr error
 	for i, chosen := range attempts {
-		aiMsgs, _ := a.preparePrompt(msgs, chosen.CatwalkCfg.SupportsImages)
+		aiMsgs, _ := a.preparePrompt(msgs, chosen.CatwalkCfg.SupportsImages, sess.Todos)
 		for _, ex := range exchanges {
 			q := strings.TrimSpace(ex.Question)
 			ans := strings.TrimSpace(ex.Answer)
@@ -1818,7 +1847,7 @@ func (a *sessionAgent) SideQuestion(ctx context.Context, sessionID, question str
 		}
 
 		sideAgent := fantasy.NewAgent(
-			chosen.Model,
+			wrapRetryableModel(chosen.Model),
 			fantasy.WithSystemPrompt(string(sideQuestionPrompt)),
 			fantasy.WithMaxOutputTokens(2048),
 			fantasy.WithUserAgent(userAgent),
@@ -1876,16 +1905,18 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(
-			m,
+			wrapRetryableModel(m),
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
 		)
 	}
 
+	maxRetries := providerMaxRetries
 	streamCall := fantasy.AgentStreamCall{
-		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
-		Headers: sessionHeaders(sessionID),
+		Prompt:     fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
+		Headers:    sessionHeaders(sessionID),
+		MaxRetries: &maxRetries,
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages
 			if systemPromptPrefix != "" {
@@ -1915,6 +1946,10 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		if attempt.model.CatwalkCfg.CanReason {
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
+		// Each model attempt gets its own retry budget from fantasy, so
+		// it needs its own counter too. Sharing one across the
+		// small→large fallback made the countdown read "attempt 7/6".
+		streamCall.OnRetry = newRetryAttemptReporter(a, sessionID, attempt.model.ModelCfg.Provider, maxRetries)
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
@@ -2365,6 +2400,48 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
+
+// todoSystemReminder returns a prompt-only reminder about the session
+// todo list. Empty when there is nothing useful to say (sub-agents, or
+// a healthy in-progress list). Incomplete lists that have no current
+// in_progress item, and lists where every item is already completed,
+// get an explicit nudge so the UI pill does not linger after the work
+// is done. An empty list only gets the optional "consider creating"
+// hint.
+func todoSystemReminder(isSubAgent bool, todos []session.Todo) string {
+	if isSubAgent {
+		return ""
+	}
+	if len(todos) == 0 {
+		return `This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
+If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
+If not, please feel free to ignore. Again do not mention this message to the user.`
+	}
+
+	completed := 0
+	inProgress := 0
+	for _, t := range todos {
+		switch t.Status {
+		case session.TodoStatusCompleted:
+			completed++
+		case session.TodoStatusInProgress:
+			inProgress++
+		}
+	}
+
+	switch {
+	case completed == len(todos):
+		// Pre-auto-clear sessions (or external writers) can leave an
+		// all-completed list on disk. Nudge one empty update so the
+		// pill disappears.
+		return `Your todo list is fully completed but still visible in the UI. Call the todos tool with an empty todos array to clear it. DO NOT mention this reminder to the user.`
+	case inProgress == 0:
+		return `Your todo list still has unfinished items and none are marked in_progress. Mark the next task in_progress before continuing, or complete remaining work and clear the list with an empty todos array when finished. DO NOT mention this reminder to the user.`
+	default:
+		return ""
+	}
+}
+
 func buildSummaryPrompt(todos []session.Todo) string {
 	var sb strings.Builder
 	sb.WriteString("Provide a detailed summary of our conversation above.")
@@ -2379,9 +2456,11 @@ func buildSummaryPrompt(todos []session.Todo) string {
 	return sb.String()
 }
 
-func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []any {
+func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration, attempt, maxRetries int) []any {
 	fields := []any{
 		"retry_delay", delay.String(),
+		"attempt", attempt,
+		"max_retries", maxRetries,
 	}
 	if err == nil {
 		return fields
@@ -2394,6 +2473,43 @@ func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []a
 		fields = append(fields, "message", err.Message)
 	}
 	return fields
+}
+
+// newRetryAttemptReporter returns an OnRetry callback with a fresh
+// attempt counter. Fantasy resets the retry budget for every
+// AgentStreamCall it runs, so a callback reused across two calls (the
+// GenerateTitle small→large fallback) must not carry the first call's
+// count into the second — otherwise the logged and user-visible attempt
+// number exceeds maxRetries ("attempt 7/6").
+func newRetryAttemptReporter(a *sessionAgent, sessionID, providerID string, maxRetries int) func(*fantasy.ProviderError, time.Duration) {
+	var retryAttempt atomic.Int32
+	return func(err *fantasy.ProviderError, delay time.Duration) {
+		attempt := int(retryAttempt.Add(1))
+		slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay, attempt, maxRetries)...)
+		a.publishRetry(sessionID, "", providerID, err, delay, attempt, maxRetries)
+	}
+}
+
+// publishRetry notifies the UI that a provider request failed and the
+// agent is backing off before the next attempt.
+func (a *sessionAgent) publishRetry(sessionID, sessionTitle, providerID string, err *fantasy.ProviderError, delay time.Duration, attempt, maxRetries int) {
+	if a.notify == nil {
+		return
+	}
+	msg := "provider error"
+	if err != nil {
+		msg = cmp.Or(err.Title, err.Message, msg)
+	}
+	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+		SessionID:    sessionID,
+		SessionTitle: sessionTitle,
+		Type:         notify.TypeRetry,
+		ProviderID:   providerID,
+		Message:      msg,
+		RetryDelay:   delay,
+		Attempt:      attempt,
+		MaxRetries:   maxRetries,
+	})
 }
 
 // sanitizeToolInput validates tool call JSON from the provider.

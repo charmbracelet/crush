@@ -3,6 +3,12 @@
 // events without importing UI packages.
 package notify
 
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
 // Type identifies the kind of agent notification.
 type Type string
 
@@ -15,6 +21,9 @@ const (
 	// TypeAgentError indicates the agent's turn terminated with an
 	// error. The error text is carried in Notification.Message.
 	TypeAgentError Type = "error"
+	// TypeRetry indicates the agent is backing off before retrying a
+	// failed provider request (rate limit, 5xx, network error, etc.).
+	TypeRetry Type = "retry"
 )
 
 // Notification represents a domain event published by the agent.
@@ -29,9 +38,16 @@ type Notification struct {
 	// specific request rather than to any in-flight run on the
 	// session. Empty when no caller set one.
 	RunID string
-	// Message carries the error text for TypeAgentError. Other
-	// notification types ignore it.
+	// Message carries the error text for TypeAgentError, or a short
+	// reason for TypeRetry (e.g. provider error title).
 	Message string
+	// RetryDelay is how long the agent will wait before the next
+	// attempt when Type is TypeRetry.
+	RetryDelay time.Duration
+	// Attempt is the 1-based retry attempt number for TypeRetry.
+	Attempt int
+	// MaxRetries is the configured retry budget for TypeRetry.
+	MaxRetries int
 }
 
 // RunComplete is the authoritative end-of-run signal for a session.
@@ -60,4 +76,24 @@ type RunComplete struct {
 	Text      string
 	Error     string
 	Cancelled bool
+}
+
+// FormatRetryStatus builds the user-facing retry countdown line shown in
+// the status bar and on the assistant working spinner while the agent
+// backs off before the next provider attempt.
+//
+// remaining is how long is left until the next try; values under one
+// second still render as "1s" so the UI never flashes a zero countdown.
+func FormatRetryStatus(n Notification, remaining time.Duration) string {
+	if remaining < time.Second {
+		remaining = time.Second
+	}
+	// Round up so "4.1s left" shows as 5s rather than dropping early.
+	secs := int((remaining + time.Second - 1) / time.Second)
+	msg := fmt.Sprintf("Retrying in %ds (attempt %d/%d)", secs, n.Attempt, n.MaxRetries)
+	reason := strings.TrimSpace(n.Message)
+	if reason != "" {
+		msg += " - " + reason
+	}
+	return msg
 }

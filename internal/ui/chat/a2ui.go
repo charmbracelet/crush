@@ -595,7 +595,7 @@ func (a *AssistantMessageItem) syncA2UISurfaces(src string, parts []a2tea.Part) 
 	a.a2uiScanned = true
 	// A rebuild replaces focused models with fresh blurred ones; re-grant
 	// focus when the item is selected so the ring survives streaming.
-	if a.focusableMessageItem.isFocused() {
+	if a.isFocused() {
 		a.focusA2UISurfaces()
 	}
 }

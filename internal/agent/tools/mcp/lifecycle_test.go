@@ -237,7 +237,7 @@ func TestUpdateState_ErrorFromCurrentSessionClearsEverything(t *testing.T) {
 // assertion always failed and stdio startup errors reported bare EOF with
 // none of the child's output attached.
 func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
-	cmd := exec.Command("sh", "-c", "echo boom-diagnostic >&2; exit 3")
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo boom-diagnostic >&2; exit 3")
 	inner := &mcp.CommandTransport{Command: cmd}
 	wrapped := &channelTransport{inner: inner, name: "t", gate: &atomic.Bool{}}
 

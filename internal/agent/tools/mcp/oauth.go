@@ -119,7 +119,7 @@ func (s *tokenStore) save(serverURL string, t mcptoken) {
 	// A persist failure is logged, not fatal: tokens are regenerable via
 	// re-auth, but a silently unwritable config dir is worth surfacing.
 	if err := config.AtomicWriteFile(s.path, b, 0o600); err != nil {
-		slog.Warn("failed to persist MCP OAuth tokens", "path", s.path, "err", err)
+		slog.Warn("Failed to persist MCP OAuth tokens", "path", s.path, "err", err)
 	}
 }
 
@@ -229,7 +229,7 @@ func (h *mcpOAuthHandler) Authorize(ctx context.Context, req *http.Request, resp
 	h.endpoints.TokenURL = ""
 	h.mu.Unlock()
 
-	inner, ln, err := h.buildInner()
+	inner, ln, err := h.buildInner(ctx)
 	if err != nil {
 		resp.Body.Close()
 		return err
@@ -264,8 +264,9 @@ func (h *mcpOAuthHandler) Authorize(ctx context.Context, req *http.Request, resp
 // live callback listener. The listener is allocated once and handed to the
 // callback server directly — allocating a port, closing it, and re-listening
 // later would let another process steal the port in between.
-func (h *mcpOAuthHandler) buildInner() (*auth.AuthorizationCodeHandler, net.Listener, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+func (h *mcpOAuthHandler) buildInner(ctx context.Context) (*auth.AuthorizationCodeHandler, net.Listener, error) {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to allocate callback port: %w", err)
 	}

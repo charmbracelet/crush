@@ -276,7 +276,7 @@ func TestCallbackHandler_DuplicateHitDoesNotBlock(t *testing.T) {
 	handler := callbackHandler("s1", resultCh, errCh)
 
 	hit := func() {
-		req := httptest.NewRequest("GET", "/callback?code=abc&state=s1", nil)
+		req := httptest.NewRequestWithContext(t.Context(), "GET", "/callback?code=abc&state=s1", nil)
 		handler(httptest.NewRecorder(), req)
 	}
 
@@ -315,7 +315,7 @@ func TestCallbackHandler_RejectsStateMismatch(t *testing.T) {
 	// a wrong-state hit that reported there would abort the whole flow — the
 	// opposite of "cannot crowd out the legitimate callback". It is dropped.
 	rec := httptest.NewRecorder()
-	handler(rec, httptest.NewRequest("GET", "/callback?code=abc&state=wrong-state", nil))
+	handler(rec, httptest.NewRequestWithContext(t.Context(), "GET", "/callback?code=abc&state=wrong-state", nil))
 
 	require.Equal(t, http.StatusBadRequest, rec.Code,
 		"state mismatch should respond with 400 Bad Request")
@@ -325,7 +325,7 @@ func TestCallbackHandler_RejectsStateMismatch(t *testing.T) {
 	// The legitimate callback that follows must still win the result slot —
 	// the stray hit neither consumed it nor tore the flow down.
 	handler(httptest.NewRecorder(),
-		httptest.NewRequest("GET", "/callback?code=abc&state=expected-state", nil))
+		httptest.NewRequestWithContext(t.Context(), "GET", "/callback?code=abc&state=expected-state", nil))
 	require.Len(t, resultCh, 1, "legitimate callback after a stray must still deliver")
 	got := <-resultCh
 	require.Equal(t, "abc", got.Code)
@@ -341,7 +341,7 @@ func TestCallbackHandler_RejectsMissingState(t *testing.T) {
 	handler := callbackHandler("expected-state", resultCh, errCh)
 
 	rec := httptest.NewRecorder()
-	handler(rec, httptest.NewRequest("GET", "/callback?code=abc", nil))
+	handler(rec, httptest.NewRequestWithContext(t.Context(), "GET", "/callback?code=abc", nil))
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Empty(t, resultCh, "missing state must not deliver a result")
@@ -359,7 +359,7 @@ func TestCallbackHandler_EmptyExpectedStateSkipsValidation(t *testing.T) {
 	handler := callbackHandler("", resultCh, errCh)
 
 	handler(httptest.NewRecorder(),
-		httptest.NewRequest("GET", "/callback?code=abc&state=anything", nil))
+		httptest.NewRequestWithContext(t.Context(), "GET", "/callback?code=abc&state=anything", nil))
 
 	require.Len(t, resultCh, 1, "with no expected state, any callback is accepted")
 	got := <-resultCh
@@ -378,7 +378,7 @@ func TestCallbackHandler_RepeatedStateMismatchDropsCleanly(t *testing.T) {
 
 	for range 3 {
 		rec := httptest.NewRecorder()
-		handler(rec, httptest.NewRequest("GET", "/callback?code=abc&state=wrong", nil))
+		handler(rec, httptest.NewRequestWithContext(t.Context(), "GET", "/callback?code=abc&state=wrong", nil))
 		require.Equal(t, http.StatusBadRequest, rec.Code)
 	}
 	require.Empty(t, resultCh, "stray wrong-state hits must not deliver a result")
@@ -386,7 +386,7 @@ func TestCallbackHandler_RepeatedStateMismatchDropsCleanly(t *testing.T) {
 
 	// The legitimate callback still wins after any number of strays.
 	handler(httptest.NewRecorder(),
-		httptest.NewRequest("GET", "/callback?code=real&state=expected", nil))
+		httptest.NewRequestWithContext(t.Context(), "GET", "/callback?code=real&state=expected", nil))
 	require.Len(t, resultCh, 1)
 	got := <-resultCh
 	require.Equal(t, "real", got.Code)

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"hash/fnv"
@@ -29,6 +30,17 @@ const assistantMessageTailWindowFormat = "… %d earlier lines hidden [click or 
 
 // maxCollapsedThinkingHeight defines the maximum height of the thinking
 const maxCollapsedThinkingHeight = 10
+
+// Default copy for a provider-refusal banner. The agent persists only
+// the FinishReasonContentFilter reason; the TUI owns this text and
+// fills it in when the finish part carries no message/details (the
+// normal live path, and restored sessions). Kept here as the single
+// source of truth so the render path and tests cannot drift apart.
+const (
+	refusalTagLabel = "REFUSED"
+	refusalTitle    = "Model refused to continue"
+	refusalDetails  = "The provider's safety classifier stopped this response before any usable content was produced. Rephrase the request, start a fresh session, or try a different model."
+)
 
 // maxExpandedThinkingTailLines is the F5 tail-window cap. When the user
 // expands a thinking block whose post-glamour line count exceeds this
@@ -399,10 +411,10 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	}
 
 	if a.message.IsFinished() {
-		switch a.message.FinishReason() {
-		case message.FinishReasonCanceled:
+		switch {
+		case a.message.FinishReason() == message.FinishReasonCanceled:
 			messageParts = append(messageParts, a.sty.Messages.AssistantCanceled.Render("Canceled"))
-		case message.FinishReasonError:
+		case a.message.IsErrorLike():
 			messageParts = append(messageParts, a.cachedError(width))
 		}
 	}
@@ -481,10 +493,10 @@ func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
 }
 
 // errorKey returns the (srcHash, extra) cache key components for the
-// error section. Returns (0, 0) when no error is present so the cache
-// stays a no-op for non-error messages.
+// error / refusal section. Returns (0, 0) when no error-like finish
+// is present so the cache stays a no-op for normal messages.
 func (a *AssistantMessageItem) errorKey() (uint64, uint64) {
-	if !a.message.IsFinished() || a.message.FinishReason() != message.FinishReasonError {
+	if !a.message.IsFinished() || !a.message.IsErrorLike() {
 		return 0, 0
 	}
 	finishPart := a.message.FinishPart()
@@ -493,8 +505,9 @@ func (a *AssistantMessageItem) errorKey() (uint64, uint64) {
 	}
 	// Length-prefixed framing prevents Message+Details collisions
 	// between distinct (Message, Details) tuples that would
-	// otherwise concatenate to the same byte sequence.
-	return fnvFields([]byte(finishPart.Message), []byte(finishPart.Details)), 0
+	// otherwise concatenate to the same byte sequence. Fold the
+	// reason in so ERROR vs REFUSED banners never share a cache slot.
+	return fnvFields([]byte(finishPart.Reason), []byte(finishPart.Message), []byte(finishPart.Details)), 0
 }
 
 // cachedThinking returns the rendered thinking section, computing and
@@ -624,13 +637,24 @@ func (a *AssistantMessageItem) renderSpinning() string {
 	return a.anim.Render()
 }
 
-// renderError renders an error message.
+// renderError renders an error or provider-refusal banner.
 func (a *AssistantMessageItem) renderError(width int) string {
 	finishPart := a.message.FinishPart()
-	errTag := a.sty.Messages.ErrorTag.Render("ERROR")
-	truncated := ansi.Truncate(finishPart.Message, width-2-lipgloss.Width(errTag), "...")
+	tagLabel := "ERROR"
+	titleText := finishPart.Message
+	detailsText := finishPart.Details
+	if finishPart.Reason == message.FinishReasonContentFilter {
+		tagLabel = refusalTagLabel
+		titleText = cmp.Or(titleText, refusalTitle)
+		detailsText = cmp.Or(detailsText, refusalDetails)
+	}
+	errTag := a.sty.Messages.ErrorTag.Render(tagLabel)
+	truncated := ansi.Truncate(titleText, width-2-lipgloss.Width(errTag), "...")
 	title := fmt.Sprintf("%s %s", errTag, a.sty.Messages.ErrorTitle.Render(truncated))
-	details := a.sty.Messages.ErrorDetails.Width(width - 2).Render(finishPart.Details)
+	if detailsText == "" {
+		return title
+	}
+	details := a.sty.Messages.ErrorDetails.Width(width - 2).Render(detailsText)
 	return fmt.Sprintf("%s\n\n%s", title, details)
 }
 

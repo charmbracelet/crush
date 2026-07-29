@@ -992,6 +992,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				finishReason = message.FinishReasonEndTurn
 			case fantasy.FinishReasonToolCalls:
 				finishReason = message.FinishReasonToolUse
+			case fantasy.FinishReasonContentFilter:
+				// Provider safety classifier stopped the model
+				// (Anthropic stop_reason=refusal, OpenAI content_filter).
+				// The TUI owns the display copy; we only persist the
+				// reason so the UI can show a REFUSED banner.
+				finishReason = message.FinishReasonContentFilter
+				slog.Warn("Provider content filter stopped the model",
+					"session_id", call.SessionID,
+					"finish_reason", string(stepResult.FinishReason),
+				)
 			}
 			// If a tool result halted the turn (e.g. a hook halt or a
 			// permission denial), the step ends on FinishReasonToolCalls but

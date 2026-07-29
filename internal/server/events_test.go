@@ -216,7 +216,12 @@ func TestUpdateAvailableMsgToProto_RoundTrip(t *testing.T) {
 // mcpEventTypeToProto's default branch mapped every unknown event type to
 // MCPEventStateChanged, so a channel notification looked like a state
 // change to every SSE client.
-func TestMCPChannelMessageNotWrappedAsStateChange(t *testing.T) {
+// TestMCPChannelMessageWrappedAsChannelEvent verifies that an
+// EventChannelMessage is wrapped as an SSE mcp_event carrying the rendered
+// channel body (fork: server-side channel routing). Upstream drops these
+// (no proto representation yet); this fork wires the channel_message proto
+// type and routes channel pushes to clients, so they must be forwarded.
+func TestMCPChannelMessageWrappedAsChannelEvent(t *testing.T) {
 	t.Parallel()
 
 	src := pubsub.Event[mcp.Event]{
@@ -229,7 +234,12 @@ func TestMCPChannelMessageNotWrappedAsStateChange(t *testing.T) {
 	}
 
 	env := wrapEvent(src)
-	require.Nil(t, env, "EventChannelMessage must not be wrapped as an SSE event (no proto representation yet)")
+	require.NotNil(t, env, "EventChannelMessage must be forwarded as an SSE event (fork: channel routing)")
+	require.Equal(t, pubsub.PayloadTypeMCPEvent, env.Type)
+	var pe pubsub.Event[proto.MCPEvent]
+	require.NoError(t, json.Unmarshal(env.Payload, &pe))
+	require.Equal(t, proto.MCPEventChannelMessage, pe.Payload.Type)
+	require.Equal(t, `<channel source="webhook">build failed</channel>`, pe.Payload.ChannelMessage)
 }
 
 // TestMCPUnknownEventTypeNotMappedToStateChange verifies that any

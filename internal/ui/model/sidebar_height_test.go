@@ -28,6 +28,10 @@ type sidebarHeightTestWorkspace struct {
 func (w *sidebarHeightTestWorkspace) Config() *config.Config { return w.cfg }
 func (w *sidebarHeightTestWorkspace) WorkingDir() string     { return "/tmp/project" }
 func (w *sidebarHeightTestWorkspace) AgentIsReady() bool     { return false }
+func (w *sidebarHeightTestWorkspace) AgentReadyErr() error   { return nil }
+func (w *sidebarHeightTestWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
+	return nil
+}
 func (w *sidebarHeightTestWorkspace) LSPGetDiagnosticCounts(string) lsp.DiagnosticCounts {
 	return lsp.DiagnosticCounts{}
 }

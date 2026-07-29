@@ -36,8 +36,8 @@ type countingWorkspace struct {
 	yolo        bool
 	queued      []string
 
-	readyCalls      int
-	agentBusyCalls  int
+	readyCalls     int
+	agentBusyCalls int
 	// sessionBusyCalls records each session ID AgentIsSessionBusy was probed
 	// with, in order (fork: session-scoped busy).
 	sessionBusyCalls []string
@@ -146,9 +146,12 @@ func pinTTLs(t *testing.T) {
 }
 
 // warmCaches marks all memoized workspace state fresh so only explicit
-// invalidation (not startup staleness) can trigger refresh dispatches.
+// invalidation (not startup staleness) can trigger refresh dispatches. It
+// warms the session-scoped busy cache too, since the TTL backstop treats an
+// unwarmed sessionBusyCache as stale (fork: session-scoped busy).
 func warmCaches(m *UI, busy bool) {
 	m.agentBusyCache.set(busy)
+	m.sessionBusyCache.setForSession(busy, m.currentSessionID())
 	m.yoloCache.set(false)
 	m.promptQueueCheckedAt = time.Now()
 }

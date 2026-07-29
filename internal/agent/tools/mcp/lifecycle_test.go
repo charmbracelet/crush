@@ -358,12 +358,11 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 // through the channelTransport wrapper to the inner CommandTransport. Every
 // transport is wrapped in a channelTransport before Connect, so without
 // unwrapping the *mcp.CommandTransport type assertion always fails and stdio
-// startup errors report bare EOF. We assert the unwrap reaches the command
-// (the error is no longer bare EOF — it is joined with the re-check result),
-// which is environment-independent, rather than the re-executed child's
-// stderr text, which depends on the host being able to re-exec the shell.
+// startup errors report bare EOF. We assert both that the unwrap reaches the
+// command (the error is no longer bare EOF) and that the re-executed child's
+// stderr text surfaces in the joined error.
 func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), "sh", "-c", "exit 3")
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo 'startup failed: bad config'; exit 3")
 	inner := &mcp.CommandTransport{Command: cmd}
 	wrapped := &channelTransport{inner: inner, name: "t", gate: newChannelGate()}
 
@@ -371,4 +370,6 @@ func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
 	require.Error(t, got)
 	require.NotEqual(t, io.EOF.Error(), got.Error(),
 		"a wrapped channel transport must still reach the inner CommandTransport, joining the re-check instead of returning bare EOF")
+	require.Contains(t, got.Error(), "startup failed: bad config",
+		"the re-executed child's stderr must surface in the error")
 }

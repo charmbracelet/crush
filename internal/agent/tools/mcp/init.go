@@ -455,6 +455,12 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 	}
 
 	updatePrompts(name, prompts)
+
+	// A repeated init must not overwrite a live session without closing it —
+	// that leaks the child process and pipes.
+	if old, ok := sessions.Take(name); ok && old != session {
+		closeSession(name, old)
+	}
 	sessions.Set(name, session)
 
 	updateState(name, StateConnected, nil, session, Counts{
@@ -464,9 +470,6 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 
 	return session, nil
 }
-
-// persistOAuthToken saves the OAuth token from a session to the global
-// config so it survives restarts.
 
 // DisableSingle disables and closes a single MCP client by name.
 func DisableSingle(cfg *config.ConfigStore, name string) error {
@@ -1052,7 +1055,14 @@ func clearMCPData(name string) {
 func stdioCheck(old *exec.Cmd) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, old.Path, old.Args...)
+	// old.Args includes argv0 as the first element; exec.CommandContext
+	// prepends old.Path as argv0, so we must skip it to avoid duplication
+	// (e.g. "npx npx -y pkg" instead of "npx -y pkg").
+	args := old.Args
+	if len(args) > 0 {
+		args = args[1:]
+	}
+	cmd := exec.CommandContext(ctx, old.Path, args...)
 	cmd.Env = old.Env
 	out, err := cmd.CombinedOutput()
 	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {

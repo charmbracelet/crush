@@ -3192,9 +3192,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.UpDown,
 				},
 				[]key.Binding{
-					k.Chat.FocusChat,
-				},
-				[]key.Binding{
 					k.Chat.Home,
 					k.Chat.End,
 				},
@@ -3213,7 +3210,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.HalfPageDown,
 					k.Chat.Home,
 					k.Chat.End,
-					k.Chat.FocusSidebar,
 				},
 				[]key.Binding{
 					k.Chat.Copy,

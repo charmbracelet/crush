@@ -419,16 +419,32 @@ if (projectStats && projectStats.length > 1) {
       const displayPath = p.project_path || "unknown";
       const projectName = displayPath.split("/").pop() || displayPath;
       const dirPath = displayPath.substring(0, displayPath.length - projectName.length) || "/";
-      row.innerHTML = `
-        <td>
-          <div class="project-name">${projectName}</div>
-          <div class="project-path" title="${displayPath}">${dirPath}</div>
-        </td>
-        <td>${formatNumber(p.stats.total.total_sessions)}</td>
-        <td>${formatNumber(p.stats.total.total_messages)}</td>
-        <td>${formatNumber(p.stats.total.total_tokens)}</td>
-        <td>${formatCost(p.stats.total.total_cost)}</td>
-      `;
+
+      const nameCell = document.createElement("td");
+      const nameDiv = document.createElement("div");
+      nameDiv.className = "project-name";
+      nameDiv.textContent = projectName;
+      const pathDiv = document.createElement("div");
+      pathDiv.className = "project-path";
+      pathDiv.textContent = dirPath;
+      pathDiv.setAttribute("title", displayPath);
+      nameCell.appendChild(nameDiv);
+      nameCell.appendChild(pathDiv);
+
+      const sessionsCell = document.createElement("td");
+      sessionsCell.textContent = formatNumber(p.stats.total.total_sessions);
+      const messagesCell = document.createElement("td");
+      messagesCell.textContent = formatNumber(p.stats.total.total_messages);
+      const tokensCell = document.createElement("td");
+      tokensCell.textContent = formatNumber(p.stats.total.total_tokens);
+      const costCell = document.createElement("td");
+      costCell.textContent = formatCost(p.stats.total.total_cost);
+
+      row.appendChild(nameCell);
+      row.appendChild(sessionsCell);
+      row.appendChild(messagesCell);
+      row.appendChild(tokensCell);
+      row.appendChild(costCell);
       fragment.appendChild(row);
     });
 

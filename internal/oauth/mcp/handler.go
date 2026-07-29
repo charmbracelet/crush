@@ -185,7 +185,6 @@ func NewHandler(
 		},
 	}
 
-	// Restore a saved client registration as a pre-registered client so
 	// Use a pre-registered client so the SDK skips dynamic registration.
 	// An explicitly configured client (for servers that don't support DCR,
 	// like GitHub or Slack) takes precedence over one captured from a

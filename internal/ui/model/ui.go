@@ -1376,12 +1376,19 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// Load nested tool calls for agent/agentic_fetch tools.
 	m.loadNestedToolCalls(items)
 
-	// If the user switches between sessions while the agent is working we want
-	// to make sure the animations are shown.
-	for _, item := range items {
-		if animatable, ok := item.(chat.Animatable); ok {
-			if cmd := animatable.StartAnimation(); cmd != nil {
-				cmds = append(cmds, cmd)
+	// If the user switches between sessions while the agent is working we
+	// want to make sure the animations are shown. Gate on the agent actually
+	// being busy: a session that was killed mid-generation can persist an
+	// assistant message with no Finish part, which still reports isSpinning()
+	// even though nothing is running. Starting animations for it here would
+	// leave a ghost "working" spinner (and a second one alongside any tool
+	// spinner) after the session is reloaded.
+	if m.isAgentBusy() {
+		for _, item := range items {
+			if animatable, ok := item.(chat.Animatable); ok {
+				if cmd := animatable.StartAnimation(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	}

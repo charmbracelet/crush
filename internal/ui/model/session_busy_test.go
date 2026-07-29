@@ -438,6 +438,41 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 	require.False(t, m.busyFetchInFlight, "fresh caches must not re-dispatch the backstop")
 }
 
+// TestSetSessionMessagesGatesAnimationsOnBusy verifies that reloading a
+// session does not start spinner animations when the agent is not busy.
+// A session that was killed mid-generation can persist an assistant message
+// with no Finish part, which still reports isSpinning() even though nothing
+// is running. Starting animations for it would leave a ghost "working"
+// spinner after the session is reloaded.
+func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: false}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	// A message that looks unfinished (no Finish part, no content).
+	msgs := []message.Message{
+		{
+			ID:        "m1",
+			SessionID: "s1",
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.ReasoningContent{Thinking: "thinking..."},
+			},
+		},
+	}
+
+	// When the agent is not busy, setSessionMessages must not start animations.
+	cmd := m.setSessionMessages(msgs)
+	require.Nil(t, cmd, "setSessionMessages must not start animations when agent is idle")
+
+	// When the agent is busy, animations should start.
+	warmCaches(m, true)
+	cmd = m.setSessionMessages(msgs)
+	require.NotNil(t, cmd, "setSessionMessages must start animations when agent is busy")
+}
+
 // TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for
 // busy/permission state: a probe started before a newer state transition
 // (here an optimistic busy write) must not overwrite the newer value when it

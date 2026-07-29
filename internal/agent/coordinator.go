@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -32,9 +33,11 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
@@ -47,7 +50,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
-	openaisdk "github.com/charmbracelet/openai-go/option"
+	openaisdk "github.com/openai/openai-go/v3/option"
 	"github.com/qjebbs/go-jsons"
 )
 
@@ -72,6 +75,9 @@ var copilotResponsesModels = map[string]bool{
 	"gpt-5.4-mini":  true,
 	"gpt-5.5":       true,
 	"gpt-5-mini":    true,
+	"gpt-5.6-luna":  true,
+	"gpt-5.6-terra": true,
+	"gpt-5.6-sol":   true,
 }
 
 // OpenCode models that user Anthropic Messages API instead of Chat Completions.
@@ -110,11 +116,13 @@ type coordinator struct {
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
+	questions   question.Service
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
+	interactive bool
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -127,49 +135,57 @@ type coordinator struct {
 	readyWg errgroup.Group
 }
 
-func NewCoordinator(
-	ctx context.Context,
-	cfg *config.ConfigStore,
-	sessions session.Service,
-	messages message.Service,
-	permissions permission.Service,
-	history history.Service,
-	filetracker filetracker.Service,
-	lspManager *lsp.Manager,
-	notify pubsub.Publisher[notify.Notification],
-	runComplete pubsub.Publisher[notify.RunComplete],
-	skillsMgr *skills.Manager,
-) (Coordinator, error) {
+// CoordinatorOptions holds the dependencies for NewCoordinator. Using a
+// struct keeps the constructor self-documenting and avoids a long
+// positional parameter list.
+type CoordinatorOptions struct {
+	Config      *config.ConfigStore
+	Sessions    session.Service
+	Messages    message.Service
+	Permissions permission.Service
+	Questions   question.Service
+	History     history.Service
+	FileTracker filetracker.Service
+	LSPManager  *lsp.Manager
+	Notify      pubsub.Publisher[notify.Notification]
+	RunComplete pubsub.Publisher[notify.RunComplete]
+	Skills      *skills.Manager
+	Interactive bool
+}
+
+func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
 	// manager was provided (legacy callers), fall back to an in-line
 	// discovery so the coordinator still works.
 	var allSkills, activeSkills []*skills.Skill
-	if skillsMgr != nil {
-		allSkills = skillsMgr.AllSkills()
-		activeSkills = skillsMgr.ActiveSkills()
+	if opts.Skills != nil {
+		allSkills = opts.Skills.AllSkills()
+		activeSkills = opts.Skills.ActiveSkills()
 	} else {
-		allSkills, activeSkills = discoverSkills(cfg)
+		allSkills, activeSkills = discoverSkills(opts.Config)
 	}
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          cfg,
-		sessions:     sessions,
-		messages:     messages,
-		permissions:  permissions,
-		history:      history,
-		filetracker:  filetracker,
-		lspManager:   lspManager,
-		notify:       notify,
-		runComplete:  runComplete,
+		cfg:          opts.Config,
+		sessions:     opts.Sessions,
+		messages:     opts.Messages,
+		permissions:  opts.Permissions,
+		questions:    opts.Questions,
+		history:      opts.History,
+		filetracker:  opts.FileTracker,
+		lspManager:   opts.LSPManager,
+		notify:       opts.Notify,
+		runComplete:  opts.RunComplete,
 		agents:       make(map[string]SessionAgent),
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
+		interactive:  opts.Interactive,
 	}
 
-	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
+	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil, errCoderAgentNotConfigured
 	}
@@ -178,7 +194,7 @@ func NewCoordinator(
 	// A2UI is on unless the user disables it; see prompt.WithA2UI for the
 	// host-capability trade-off.
 	promptOpts := []prompt.Option{prompt.WithWorkingDir(c.cfg.WorkingDir())}
-	if !cfg.Config().Options.DisableA2UI {
+	if !c.cfg.Config().Options.DisableA2UI {
 		promptOpts = append(promptOpts, prompt.WithA2UI())
 	}
 	prompt, err := coderPrompt(promptOpts...)
@@ -288,15 +304,11 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			PresencePenalty:  presPenalty,
 			OnComplete:       onComplete,
 			Accepted:         accept,
+			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
-	var result *fantasy.AgentResult
-	originalErr := c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
-		var err error
-		result, err = run()
-		return err
-	})
+	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
 	// Notify only if still unauthorized after retry — a successful
@@ -422,7 +434,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		)
 
 		switch providerCfg.ID {
-		case string(catwalk.InferenceProviderAlibabaSingapore):
+		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
 			switch {
 			case !hasEffort && shouldSetEffort:
 				extraBody["reasoning_effort"] = reasoningEffort
@@ -503,6 +515,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			switch providerCfg.ID {
 			case string(catwalk.InferenceProviderIoNet):
 				extraBody["reasoning"] = map[string]string{"effort": reasoningEffort}
+			case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+				// MiniMax models use the "thinking" parameter instead of
+				// "reasoning_effort". Other models on these providers still
+				// use the standard field.
+				if !strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
+					mergedOptions["reasoning_effort"] = reasoningEffort
+				}
 			default:
 				mergedOptions["reasoning_effort"] = reasoningEffort
 			}
@@ -543,12 +562,25 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 		case string(catwalk.InferenceProviderBaseten):
 			extraBody["chat_template_args"] = map[string]any{
-				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "",
+				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "" && reasoningEffort != "none",
+			}
+
+		case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+			// MiniMax M3 uses the "thinking" parameter to control reasoning.
+			// "reasoning_split" must be true so thinking content is returned
+			// in the "reasoning_content" field instead of inline in "content".
+			if strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
+				if model.CatwalkCfg.CanReason && (model.ModelCfg.Think || reasoningEffort != "") {
+					extraBody["thinking"] = map[string]any{"type": "adaptive"}
+					extraBody["reasoning_split"] = true
+				} else {
+					extraBody["thinking"] = map[string]any{"type": "disabled"}
+				}
 			}
 
 		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
 			if model.CatwalkCfg.CanReason {
-				extraBody["enable_thinking"] = model.ModelCfg.Think
+				extraBody["enable_thinking"] = model.ModelCfg.Think || reasoningEffort != ""
 			}
 		}
 
@@ -606,8 +638,26 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		RunComplete:          c.runComplete,
 	})
 
+	// The readiness goroutines below perform one-time setup — building the
+	// system prompt and the (MCP-gated) tool list — whose results the
+	// coordinator needs for its whole lifetime, so they must survive the
+	// caller's context being canceled. Several entry points build an agent
+	// from a short-lived HTTP request context: the server's
+	// InitAgent/UpdateAgent handlers, and UpdateModels -> buildTools ->
+	// agentTool -> buildAgent for the sub-agent. Because mcp.WaitForInit
+	// blocks until MCP initialization finishes, a slow MCP server keeps one
+	// of these goroutines parked past the request; when the handler returns
+	// and cancels its context, WaitForInit would observe the cancellation,
+	// the errgroup would record context.Canceled, and every later run would
+	// fail at readyWg.Wait() before emitting anything — the client/server
+	// session hangs with no visible response. WithoutCancel drops
+	// cancellation while keeping context values; the work is bounded
+	// (WaitForInit by MCP init timeouts, the rest is local) so it always
+	// completes.
+	initCtx := context.WithoutCancel(ctx)
+
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
@@ -620,10 +670,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		// building the initial tool list. This ensures the first tool set
 		// (used if anything reads it before run() rebuilds) includes all
 		// MCP tools, not just fast-to-init ones.
-		if err := mcp.WaitForInit(ctx); err != nil {
+		if err := mcp.WaitForInit(initCtx); err != nil {
 			return err
 		}
-		tools, err := c.buildTools(ctx, agent, isSubAgent)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent)
 		if err != nil {
 			return err
 		}
@@ -697,9 +747,24 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
+	// Question tool is interactive-only and not available to sub-agents.
+	if !isSubAgent && c.interactive {
+		allTools = append(allTools, tools.NewQuestionTool(c.questions))
+	}
+
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspManager), tools.NewReferencesTool(c.lspManager), tools.NewLSPRestartTool(c.lspManager))
+		allTools = append(
+			allTools,
+			tools.NewDiagnosticsTool(c.lspManager),
+			tools.NewReferencesTool(c.lspManager),
+			tools.NewLSPRestartTool(c.lspManager),
+			tools.NewSymbolsTool(c.lspManager),
+			tools.NewDefinitionTool(c.lspManager),
+			tools.NewCallHierarchyTool(c.lspManager),
+			tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker),
+			tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker),
+		)
 	}
 
 	if len(c.cfg.Config().MCP) > 0 {
@@ -1238,12 +1303,52 @@ func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg 
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after receiving a 401
-// and returns nil if retry should be attempted.
+// and returns nil if retry should be attempted. When the refresh token is
+// revoked, it triggers interactive re-authentication and blocks until the user
+// completes it (or the context is cancelled).
 func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig) error {
 	switch {
 	case providerCfg.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
-		return c.refreshOAuth2Token(ctx, providerCfg)
+		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
+			// If the refresh token was revoked, trigger interactive
+			// re-auth and wait for the user to complete it.
+			var exchangeErr *oauth.TokenExchangeError
+			if c.notify != nil && errors.As(err, &exchangeErr) && exchangeErr.IsRefreshTokenRevoked() {
+				slog.Info("Refresh token revoked, waiting for re-authentication", "provider", providerCfg.ID)
+				c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					Type:       notify.TypeReAuthenticate,
+					ProviderID: providerCfg.ID,
+				})
+				// Use a detached context with a generous timeout so the
+				// wait survives agent run cancellation. The user needs
+				// time to complete browser-based authentication.
+				waitCtx, waitCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+				defer waitCancel()
+				slog.Info("Blocking on WaitForTokenChange", "provider", providerCfg.ID)
+				if waitErr := c.cfg.WaitForTokenChange(waitCtx, providerCfg.ID); waitErr != nil {
+					slog.Info("WaitForTokenChange returned error", "provider", providerCfg.ID, "error", waitErr)
+					return waitErr
+				}
+				slog.Info("WaitForTokenChange unblocked, updating models", "provider", providerCfg.ID)
+				// Check if the original context is still alive. If it was
+				// cancelled during the wait, fantasy's retry will fail immediately.
+				if ctx.Err() != nil {
+					slog.Warn("Original context cancelled during auth wait, cannot retry",
+						"provider", providerCfg.ID, "ctx_err", ctx.Err())
+					return ctx.Err()
+				}
+				// Rebuild models so ModelProvider picks up the fresh credentials.
+				if updateErr := c.UpdateModels(waitCtx); updateErr != nil {
+					slog.Error("Failed to update models after re-authentication", "error", updateErr)
+					return updateErr
+				}
+				slog.Info("Models updated, returning nil to retry", "provider", providerCfg.ID)
+				return nil
+			}
+			return err
+		}
+		return nil
 	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return c.refreshApiKeyTemplate(ctx, providerCfg)
@@ -1255,6 +1360,18 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 func (c *coordinator) isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
 	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+}
+
+// makeAuthRefreshCallback returns an OnAuthRefresh callback for fantasy that
+// delegates to the coordinator's existing credential refresh logic. Returns
+// nil if no refresh mechanism is configured for the provider.
+func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
+	if providerCfg.OAuthToken == nil && !strings.Contains(providerCfg.APIKeyTemplate, "$") {
+		return nil
+	}
+	return func(ctx context.Context, _ *fantasy.ProviderError) error {
+		return c.retryAfterUnauthorized(ctx, providerCfg)
+	}
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
@@ -1338,14 +1455,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
 			NonInteractive:   true,
+			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
-	var result *fantasy.AgentResult
-	err = c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
-		var runErr error
-		result, runErr = run()
-		return runErr
-	})
+	result, err := run()
 	// Notify only if still unauthorized after retry.
 	if err != nil && c.isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{

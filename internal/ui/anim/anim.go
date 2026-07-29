@@ -83,8 +83,8 @@ var animCacheMap = csync.NewMap[string, *animCache]()
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()
-	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t",
-		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors)
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v",
+		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -106,6 +106,14 @@ type Settings struct {
 	// animated ellipsis are visible. Useful for non-LLM contexts where
 	// scrambled glyphs imply "thinking" rather than "running".
 	NoScramble bool
+
+	// Suffix is an optional function that returns a dynamic suffix string
+	// to render after the label and ellipsis. Called on every Render().
+	Suffix func() string
+
+	// SuffixColor is the color used to render the suffix text.
+	// Falls back to LabelColor if unset.
+	SuffixColor color.Color
 }
 
 // Default settings.
@@ -127,6 +135,8 @@ type Anim struct {
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
+	suffix           func() string
+	suffixColor      color.Color
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -157,6 +167,16 @@ func New(opts Settings) *Anim {
 		a.cyclingCharWidth = opts.Size
 	}
 	a.labelColor = opts.LabelColor
+
+	// Store the suffix function if provided.
+	if opts.Suffix != nil {
+		a.suffix = opts.Suffix
+	}
+	if opts.SuffixColor != nil {
+		a.suffixColor = opts.SuffixColor
+	} else {
+		a.suffixColor = opts.LabelColor
+	}
 
 	// NoScramble means no cycling chars and no birth animation. Mark as
 	// initialized immediately so the label renders without a fade-in.
@@ -417,11 +437,29 @@ func (a *Anim) Render() string {
 		}
 	}
 	// Render animated ellipsis at the end of the label if all characters
-	// have been initialized.
+	// have been initialized. Skip when a suffix is active to avoid visual
+	// competition between the animated dots and the timer.
 	if a.initialized.Load() && a.labelWidth > 0 {
-		ellipsisStep := int(a.ellipsisStep.Load())
-		if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
-			b.WriteString(ellipsisFrame)
+		showEllipsis := true
+		if a.suffix != nil {
+			if s := a.suffix(); s != "" {
+				showEllipsis = false
+			}
+		}
+		if showEllipsis {
+			ellipsisStep := int(a.ellipsisStep.Load())
+			if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
+				b.WriteString(ellipsisFrame)
+			}
+		}
+	}
+
+	// Render optional suffix (e.g., elapsed time).
+	if a.suffix != nil {
+		suffixStr := a.suffix()
+		if suffixStr != "" {
+			b.WriteString(" ")
+			b.WriteString(lipgloss.NewStyle().Foreground(a.suffixColor).Render(suffixStr))
 		}
 	}
 

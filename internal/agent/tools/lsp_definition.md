@@ -1,0 +1,1 @@
+Find the definition of a symbol by name via LSP. Prefer this over `grep` for finding where something is defined: it is language-aware and skips matches in comments, strings, and partial identifiers. Returns the file path, line number, and surrounding context. Complements lsp_references (which finds usages).

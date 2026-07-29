@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -124,6 +123,23 @@ func validateEdits(edits []MultiEditOperation) error {
 	return nil
 }
 
+func applyEditsToContent(currentContent string, edits []MultiEditOperation, startIndex int) (string, []FailedEdit) {
+	var failedEdits []FailedEdit
+	for i, edit := range edits {
+		newContent, err := applyEditToContent(currentContent, edit)
+		if err != nil {
+			failedEdits = append(failedEdits, FailedEdit{
+				Index: startIndex + i + 1,
+				Error: err.Error(),
+				Edit:  edit,
+			})
+			continue
+		}
+		currentContent = newContent
+	}
+	return currentContent, failedEdits
+}
+
 func processMultiEditWithCreation(edit editContext, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	// First edit creates the file
 	firstEdit := params.Edits[0]
@@ -144,24 +160,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
-	// Start with the content from the first edit
-	currentContent := firstEdit.NewString
-
-	// Apply remaining edits to the content, tracking failures
-	var failedEdits []FailedEdit
-	for i := 1; i < len(params.Edits); i++ {
-		edit := params.Edits[i]
-		newContent, err := applyEditToContent(currentContent, edit)
-		if err != nil {
-			failedEdits = append(failedEdits, FailedEdit{
-				Index: i + 1,
-				Error: err.Error(),
-				Edit:  edit,
-			})
-			continue
-		}
-		currentContent = newContent
-	}
+	currentContent, failedEdits := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
 
 	// Get session and message IDs
 	sessionID := GetSessionFromContext(edit.ctx)
@@ -248,64 +247,15 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 }
 
 func processMultiEditExistingFile(edit editContext, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	// Validate file exists and is readable
-	fileInfo, err := os.Stat(params.FilePath)
+	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, params.FilePath, "session ID is required for editing a file")
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", params.FilePath)), nil
-		}
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return fantasy.ToolResponse{}, err
+	}
+	if resp.Content != "" || resp.IsError {
+		return resp, nil
 	}
 
-	if fileInfo.IsDir() {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", params.FilePath)), nil
-	}
-
-	sessionID := GetSessionFromContext(edit.ctx)
-	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for editing file")
-	}
-
-	// Check if file was read before editing
-	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, params.FilePath)
-	if lastRead.IsZero() {
-		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
-	}
-
-	// Check if file was modified since last read.
-	modTime := fileInfo.ModTime().Truncate(time.Second)
-	if modTime.After(lastRead) {
-		return fantasy.NewTextErrorResponse(
-			fmt.Sprintf(
-				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
-				params.FilePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			),
-		), nil
-	}
-
-	// Read current file content
-	content, err := os.ReadFile(params.FilePath)
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
-	}
-
-	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
-	currentContent := oldContent
-
-	// Apply all edits sequentially, tracking failures
-	var failedEdits []FailedEdit
-	for i, edit := range params.Edits {
-		newContent, err := applyEditToContent(currentContent, edit)
-		if err != nil {
-			failedEdits = append(failedEdits, FailedEdit{
-				Index: i + 1,
-				Error: err.Error(),
-				Edit:  edit,
-			})
-			continue
-		}
-		currentContent = newContent
-	}
+	currentContent, failedEdits := applyEditsToContent(oldContent, params.Edits, 0)
 
 	// Check if content actually changed
 	if oldContent == currentContent {
@@ -361,39 +311,14 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return resp, nil
 	}
 
+	writeContent := currentContent
 	if isCrlf {
-		currentContent, _ = fsext.ToWindowsLineEndings(currentContent)
+		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	// Write the updated content
-	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+	if err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
-
-	// Update file history
-	file, err := edit.files.GetByPathAndSession(edit.ctx, params.FilePath, sessionID)
-	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, oldContent)
-		if err != nil {
-			return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User manually changed the content, store an intermediate version
-		_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, oldContent)
-		if err != nil {
-			slog.Error("Error creating file history version", "error", err)
-		}
-	}
-
-	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
-	if err != nil {
-		slog.Error("Error creating file history version", "error", err)
-	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -424,29 +349,5 @@ func applyEditToContent(content string, edit MultiEditOperation) (string, error)
 		return "", fmt.Errorf("old_string cannot be empty for content replacement")
 	}
 
-	var newContent string
-	var replacementCount int
-
-	if edit.ReplaceAll {
-		newContent = strings.ReplaceAll(content, edit.OldString, edit.NewString)
-		replacementCount = strings.Count(content, edit.OldString)
-		if replacementCount == 0 {
-			return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
-		}
-	} else {
-		index := strings.Index(content, edit.OldString)
-		if index == -1 {
-			return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
-		}
-
-		lastIndex := strings.LastIndex(content, edit.OldString)
-		if index != lastIndex {
-			return "", fmt.Errorf("old_string appears multiple times in the content. Please provide more context to ensure a unique match, or set replace_all to true")
-		}
-
-		newContent = content[:index] + edit.NewString + content[index+len(edit.OldString):]
-		replacementCount = 1
-	}
-
-	return newContent, nil
+	return findAndReplace(content, edit.OldString, edit.NewString, edit.ReplaceAll)
 }

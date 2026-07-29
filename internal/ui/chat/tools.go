@@ -255,8 +255,20 @@ func NewToolMessageItem(
 		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.TodosToolName:
 		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
+	case tools.QuestionToolName:
+		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ReferencesToolName:
 		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
+	case tools.DefinitionToolName:
+		item = NewDefinitionToolMessageItem(sty, toolCall, result, canceled)
+	case tools.RenameToolName:
+		item = NewRenameToolMessageItem(sty, toolCall, result, canceled)
+	case tools.ReplaceSymbolToolName:
+		item = NewReplaceSymbolToolMessageItem(sty, toolCall, result, canceled)
+	case tools.CallHierarchyToolName:
+		item = NewCallHierarchyToolMessageItem(sty, toolCall, result, canceled)
+	case tools.SymbolsToolName:
+		item = NewSymbolsToolMessageItem(sty, toolCall, result, canceled)
 	case tools.LSPRestartToolName:
 		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
 	default:
@@ -542,7 +554,8 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 		return ""
 	}
 	errContent := strings.ReplaceAll(result.Content, "\n", " ")
-	if strings.Contains(errContent, "User denied permission") {
+	if strings.Contains(errContent, "User denied permission") ||
+		strings.Contains(errContent, "User cancelled") {
 		deniedTag := sty.Tool.WarnTag.Render("WARN")
 		deniedTagWidth := lipgloss.Width(deniedTag)
 		errContent = ansi.Truncate(errContent, width-deniedTagWidth-3, "…")
@@ -636,7 +649,9 @@ func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, o
 
 // toolOutputPlainContent renders plain text with optional expansion support.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
-	content = common.RemapANSI16(stringext.NormalizeSpace(content), sty.ANSI)
+	content = stringext.NormalizeSpace(content)
+	content = common.StripCursorControl(content)
+	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
 	maxLines := responseContextHeight

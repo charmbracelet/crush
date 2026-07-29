@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 const (
@@ -48,8 +49,6 @@ const (
 
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
-
-	ChannelIcon string = "󰍩"
 
 	LSPErrorIcon   string = "E"
 	LSPWarningIcon string = "W"
@@ -119,8 +118,10 @@ type Styles struct {
 
 	// Buttons
 	Button struct {
-		Focused lipgloss.Style
-		Blurred lipgloss.Style
+		Focused  lipgloss.Style
+		Blurred  lipgloss.Style
+		Hovered  lipgloss.Style
+		Negative lipgloss.Style // Selected negative/destructive action.
 	}
 
 	// Editor
@@ -142,6 +143,22 @@ type Styles struct {
 		PromptBangIconBlurred lipgloss.Style
 		PromptBangDotsFocused lipgloss.Style
 		PromptBangDotsBlurred lipgloss.Style
+
+		// Question mode prompt (" ? " icon + ":::" dots).
+		PromptQuestionIconFocused lipgloss.Style
+		PromptQuestionIconBlurred lipgloss.Style
+
+		// Question choice styling.
+		QuestionSelected   lipgloss.Style // Active choice text (Dolly).
+		QuestionUnselected lipgloss.Style // Inactive header text (Sash).
+		QuestionBody       lipgloss.Style // Description/body text.
+		QuestionConfirm    lipgloss.Style // Confirm tab title (primary).
+		QuestionNote       lipgloss.Style // Saved note text (dimmer than body).
+		QuestionCursorBar  lipgloss.Style // Active cursor indicator bar.
+		QuestionRadioOn    lipgloss.Style // Selected single-choice radio.
+		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
+		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
+		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
 	}
 
 	// Radio
@@ -149,6 +166,17 @@ type Styles struct {
 		On    lipgloss.Style
 		Off   lipgloss.Style
 		Label lipgloss.Style // Text next to a radio button
+	}
+
+	// Tabs for batch question forms. Uses uv types for direct
+	// screen rendering without lipgloss.
+	Tab struct {
+		ActiveBorder          uv.Border
+		InactiveBorder        uv.Border
+		ActiveBorderBlurred   uv.Border
+		InactiveBorderBlurred uv.Border
+		ActiveStyle           uv.Style
+		InactiveStyle         uv.Style
 	}
 
 	// Background
@@ -173,6 +201,7 @@ type Styles struct {
 	WorkingGradFromColor color.Color
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
+	WorkingTimerColor    color.Color // Elapsed timer suffix color
 
 	// Section Title
 	Section struct {
@@ -227,6 +256,7 @@ type Styles struct {
 		BusyIcon        lipgloss.Style // Busy/starting status icon
 		ErrorIcon       lipgloss.Style // Error status icon
 		OnlineIcon      lipgloss.Style // Online/ready status icon
+		NeedsAuthIcon   lipgloss.Style // Needs authentication status icon
 		AdditionalText  lipgloss.Style // "None" and "…and N more" text
 		CapabilityCount lipgloss.Style // "N tools" / "N prompts" / "N resources"
 		RowTitleBase    lipgloss.Style // Base style applied over row titles in common.Status
@@ -283,14 +313,15 @@ type Styles struct {
 		AssistantInfoDuration  lipgloss.Style
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
 
-		// Channel message metadata line styles.
+		// A2UISurface is the themed container wrapped around rendered A2UI
+		// surfaces so they read as part of the chat (fork: A2UI).
+		A2UISurface lipgloss.Style
+
+		// Channel message metadata line styles (fork: channels).
 		ChannelInfoIcon      lipgloss.Style // Chat-bubble glyph prefix
 		ChannelInfoSender    lipgloss.Style // Sender name in channel metadata line
 		ChannelInfoProvider  lipgloss.Style // "via <channel>" text
 		ChannelInfoTimestamp lipgloss.Style // "at <timestamp>" text
-
-		// A2UISurface - themed container around rendered A2UI surfaces
-		A2UISurface lipgloss.Style
 	}
 
 	// Tool - styles for tool call rendering
@@ -470,6 +501,7 @@ type Styles struct {
 
 		Quit struct {
 			Content lipgloss.Style // Wrapper for the quit dialog's inner content
+			Hint    lipgloss.Style // Style for quit hint
 			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 
@@ -553,8 +585,7 @@ type Styles struct {
 	// Pills styles for todo/queue pills
 	Pills struct {
 		Base               lipgloss.Style // Base pill style with padding
-		Focused            lipgloss.Style // Focused pill with visible border
-		Blurred            lipgloss.Style // Blurred pill with hidden border
+		Focused            lipgloss.Style // Pill with visible rounded border
 		QueueItemPrefix    lipgloss.Style // Prefix for queue list items
 		QueueItemText      lipgloss.Style // Queue list item body text
 		QueueLabel         lipgloss.Style // "N Queued" label text

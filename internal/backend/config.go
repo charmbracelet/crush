@@ -352,6 +352,38 @@ func (b *Backend) MCPReconnect(ctx context.Context, workspaceID, name string) er
 	return mcptools.InitializeSingle(ctx, name, ws.Cfg)
 }
 
+// ListMCPPrompts returns the prompts exposed by a workspace's MCP servers.
+func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return nil, err
+	}
+	prompts, err := commands.LoadMCPPrompts()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]proto.MCPPrompt, len(prompts))
+	for i, prompt := range prompts {
+		arguments := make([]proto.MCPPromptArgument, len(prompt.Arguments))
+		for j, argument := range prompt.Arguments {
+			arguments[j] = proto.MCPPromptArgument{
+				ID:          argument.ID,
+				Title:       argument.Title,
+				Description: argument.Description,
+				Required:    argument.Required,
+			}
+		}
+		result[i] = proto.MCPPrompt{
+			ID:          prompt.ID,
+			Title:       prompt.Title,
+			Description: prompt.Description,
+			PromptID:    prompt.PromptID,
+			ClientID:    prompt.ClientID,
+			Arguments:   arguments,
+		}
+	}
+	return result, nil
+}
+
 // GetWorkingDir returns the working directory for a workspace.
 func (b *Backend) GetWorkingDir(workspaceID string) (string, error) {
 	ws, err := b.GetWorkspace(workspaceID)

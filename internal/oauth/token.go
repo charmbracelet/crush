@@ -1,7 +1,9 @@
 package oauth
 
 import (
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -10,12 +12,25 @@ import (
 // tokens from having a meaningless refresh window.
 const minRefreshBuffer = 30
 
+// OAuthClient stores the client registration and authorization-server
+// endpoints captured on the first successful authorization. Persisting
+// them lets a later start rebuild the oauth2 config and refresh a saved
+// token without re-running discovery or the browser flow.
+type OAuthClient struct {
+	ClientID     string `json:"client_id,omitempty"`
+	ClientSecret string `json:"client_secret,omitempty"`
+	AuthURL      string `json:"auth_url,omitempty"`
+	TokenURL     string `json:"token_url,omitempty"`
+	AuthStyle    int    `json:"auth_style,omitempty"`
+}
+
 // Token represents an OAuth2 token.
 type Token struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	ExpiresAt    int64  `json:"expires_at"`
+	AccessToken  string       `json:"access_token"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
+	ExpiresIn    int          `json:"expires_in"`
+	ExpiresAt    int64        `json:"expires_at"`
+	Client       *OAuthClient `json:"client,omitempty"`
 }
 
 // SetExpiresAt calculates and sets the ExpiresAt field based on the
@@ -54,4 +69,25 @@ func (t *Token) IsExpired() bool {
 // SetExpiresIn calculates and sets the ExpiresIn field based on the ExpiresAt field.
 func (t *Token) SetExpiresIn() {
 	t.ExpiresIn = int(time.Until(time.Unix(t.ExpiresAt, 0)).Seconds())
+}
+
+// TokenExchangeError represents a failed OAuth token exchange. It carries
+// the HTTP status code and response body so callers can distinguish between
+// recoverable failures (e.g. temporary server error) and terminal ones
+// (e.g. revoked refresh token).
+type TokenExchangeError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *TokenExchangeError) Error() string {
+	return fmt.Sprintf("token exchange failed: status %d body %q", e.StatusCode, e.Body)
+}
+
+// IsRefreshTokenRevoked reports whether the exchange failed because the
+// refresh token was revoked or invalidated by the provider. This indicates
+// that interactive re-authentication is required.
+func (e *TokenExchangeError) IsRefreshTokenRevoked() bool {
+	return strings.Contains(e.Body, "revoked") ||
+		strings.Contains(e.Body, "invalid_grant")
 }

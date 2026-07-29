@@ -253,9 +253,13 @@ func (d *Overlay) StopLoading() {
 }
 
 // DrawCenterCursor draws the given string view centered in the screen area and
-// adjusts the cursor position accordingly.
+// adjusts the cursor position accordingly. Content larger than the area is
+// clamped to fit.
 func DrawCenterCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cursor) {
 	width, height := lipgloss.Size(view)
+	// Clamp to available area so oversized dialogs don't draw outside bounds.
+	width = min(width, area.Dx())
+	height = min(height, area.Dy())
 	center := common.CenterRect(area, width, height)
 	if cur != nil {
 		cur.X += center.Min.X
@@ -275,9 +279,12 @@ func DrawOnboarding(scr uv.Screen, area uv.Rectangle, view string) {
 }
 
 // DrawOnboardingCursor draws the given string view positioned at the bottom
-// left area of the screen.
+// left area of the screen. Content larger than the area is clamped to fit.
 func DrawOnboardingCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cursor) {
 	width, height := lipgloss.Size(view)
+	// Clamp to available area so oversized dialogs don't draw outside bounds.
+	width = min(width, area.Dx())
+	height = min(height, area.Dy())
 	bottomLeft := common.BottomLeftRect(area, width, height)
 	if cur != nil {
 		cur.X += bottomLeft.Min.X

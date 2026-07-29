@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -37,10 +38,18 @@ func wrapEvent(ev any) *pubsub.Payload {
 			},
 		})
 	case pubsub.Event[mcp.Event]:
+		pt := mcpEventTypeToProto(e.Payload.Type)
+		if pt == "" {
+			// Unsupported MCP event type (e.g. EventChannelMessage, which
+			// has no proto representation until session delivery is wired
+			// up). Drop it instead of fabricating a state_changed event.
+			slog.Debug("Dropping unsupported MCP event type for SSE", "type", e.Payload.Type)
+			return nil
+		}
 		return envelope(pubsub.PayloadTypeMCPEvent, pubsub.Event[proto.MCPEvent]{
 			Type: e.Type,
 			Payload: proto.MCPEvent{
-				Type:           mcpEventTypeToProto(e.Payload.Type),
+				Type:           pt,
 				Name:           e.Payload.Name,
 				State:          proto.MCPState(e.Payload.State),
 				Error:          e.Payload.Error,
@@ -69,6 +78,26 @@ func wrapEvent(ev any) *pubsub.Payload {
 				ToolCallID: e.Payload.ToolCallID,
 				Granted:    e.Payload.Granted,
 				Denied:     e.Payload.Denied,
+			},
+		})
+	case pubsub.Event[question.Request]:
+		slog.Info("Wrapping question batch event for SSE", "id", e.Payload.ID, "questions", len(e.Payload.Questions))
+		return envelope(pubsub.PayloadTypeQuestionRequest, pubsub.Event[proto.QuestionRequest]{
+			Type: e.Type,
+			Payload: proto.QuestionRequest{
+				ID:                 e.Payload.ID,
+				SessionID:          e.Payload.SessionID,
+				ToolCallID:         e.Payload.ToolCallID,
+				Questions:          questionsToProto(e.Payload.Questions),
+				ConfirmTitle:       e.Payload.ConfirmTitle,
+				ConfirmDescription: e.Payload.ConfirmDescription,
+			},
+		})
+	case pubsub.Event[question.Notification]:
+		return envelope(pubsub.PayloadTypeQuestionNotification, pubsub.Event[proto.QuestionNotification]{
+			Type: e.Type,
+			Payload: proto.QuestionNotification{
+				BatchID: e.Payload.BatchID,
 			},
 		})
 	case pubsub.Event[message.Message]:
@@ -115,6 +144,15 @@ func wrapEvent(ev any) *pubsub.Payload {
 		})
 	case pubsub.Event[proto.ConfigChanged]:
 		return envelope(pubsub.PayloadTypeConfigChanged, e)
+	case app.UpdateAvailableMsg:
+		return envelope(pubsub.PayloadTypeUpdateAvailable, pubsub.Event[proto.UpdateAvailable]{
+			Type: pubsub.UpdatedEvent,
+			Payload: proto.UpdateAvailable{
+				CurrentVersion: e.CurrentVersion,
+				LatestVersion:  e.LatestVersion,
+				IsDevelopment:  e.IsDevelopment,
+			},
+		})
 	case pubsub.Event[skills.Event]:
 		return envelope(pubsub.PayloadTypeSkillsEvent, pubsub.Event[proto.SkillsEvent]{
 			Type:    e.Type,
@@ -152,7 +190,9 @@ func mcpEventTypeToProto(t mcp.EventType) proto.MCPEventType {
 	case mcp.EventChannelMessage:
 		return proto.MCPEventChannelMessage
 	default:
-		return proto.MCPEventStateChanged
+		// Unsupported type (e.g. EventChannelMessage). Return empty so
+		// callers can drop it rather than coercing to state_changed.
+		return ""
 	}
 }
 
@@ -310,6 +350,32 @@ func messagesToProto(msgs []message.Message) []proto.Message {
 	out := make([]proto.Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = messageToProto(m)
+	}
+	return out
+}
+
+func questionsToProto(qs []question.Question) []proto.QuestionItem {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]proto.QuestionItem, len(qs))
+	for i, q := range qs {
+		choices := make([]proto.QuestionChoice, len(q.Choices))
+		for j, c := range q.Choices {
+			choices[j] = proto.QuestionChoice{
+				ID:          c.ID,
+				Label:       c.Label,
+				Description: c.Description,
+			}
+		}
+		out[i] = proto.QuestionItem{
+			ID:          q.ID,
+			Type:        string(q.Type),
+			Label:       q.Label,
+			Question:    q.Text,
+			Description: q.Description,
+			Choices:     choices,
+		}
 	}
 	return out
 }

@@ -113,7 +113,7 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 	// Runs under the per-name lifecycle lock so a concurrent renewal can't
 	// swap the session between our Get and the state update below.
-	mu := nameLock(name)
+	mu := renewLock(name)
 	mu.Lock()
 	defer mu.Unlock()
 

@@ -200,7 +200,10 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 		}
 	}
 
-	sort.Slice(matches, func(i, j int) bool {
+	// Use a stable sort so that the multiple matches a single file can
+	// contribute (all sharing the same modTime) keep their original
+	// line order and stay grouped together in the rendered output.
+	sort.SliceStable(matches, func(i, j int) bool {
 		return matches[i].modTime.After(matches[j].modTime)
 	})
 
@@ -330,20 +333,19 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil
 		}
 
-		match, lineNum, charNum, lineText, err := fileContainsPattern(path, regex)
+		lineMatches, err := fileMatches(path, regex)
 		if err != nil {
 			return nil // Skip files we can't read
 		}
 
-		if match {
+		for _, lm := range lineMatches {
 			matches = append(matches, grepMatch{
 				path:     path,
 				modTime:  info.ModTime(),
-				lineNum:  lineNum,
-				charNum:  charNum,
-				lineText: lineText,
+				lineNum:  lm.lineNum,
+				charNum:  lm.charNum,
+				lineText: lm.lineText,
 			})
-
 			if len(matches) >= 200 {
 				return filepath.SkipAll
 			}
@@ -358,21 +360,35 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	return matches, nil
 }
 
-func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
+// lineMatch is a single matching line within a file: its 1-based line
+// number, the 1-based column of the first match on that line, and the
+// line text (with the trailing newline stripped).
+type lineMatch struct {
+	lineNum  int
+	charNum  int
+	lineText string
+}
+
+// fileMatches returns every line in filePath that matches pattern. Like
+// ripgrep, it reports one entry per matching line (using the first match
+// on the line for the column) instead of stopping at the first match in
+// the file.
+func fileMatches(filePath string, pattern *regexp.Regexp) ([]lineMatch, error) {
 	if pattern == nil {
-		return false, 0, 0, "", nil
+		return nil, nil
 	}
 	// Only search text files.
 	if !isTextFile(filePath) {
-		return false, 0, 0, "", nil
+		return nil, nil
 	}
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return false, 0, 0, "", err
+		return nil, err
 	}
 	defer file.Close()
 
+	var matches []lineMatch
 	reader := bufio.NewReader(file)
 	lineNum := 0
 	for {
@@ -381,18 +397,21 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, in
 		line = strings.TrimSuffix(line, "\n")
 		line = strings.TrimSuffix(line, "\r")
 		if loc := pattern.FindStringIndex(line); loc != nil {
-			charNum := loc[0] + 1
-			return true, lineNum, charNum, line, nil
+			matches = append(matches, lineMatch{
+				lineNum:  lineNum,
+				charNum:  loc[0] + 1,
+				lineText: line,
+			})
 		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return false, 0, 0, "", err
+			return nil, err
 		}
 	}
 
-	return false, 0, 0, "", nil
+	return matches, nil
 }
 
 // isTextFile checks if a file is a text file by examining its MIME type.

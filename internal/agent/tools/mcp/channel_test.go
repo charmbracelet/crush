@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"io"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,27 +14,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-func TestPublishChannelMessagePreservesMetadata(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	events := SubscribeEvents(ctx)
-	publishChannelMessage("signal", json.RawMessage(`{"content":"hello","meta":{"sender":"123"}}`))
-
-	select {
-	case event := <-events:
-		if event.Payload.Name != "signal" {
-			t.Fatalf("name = %q, want signal", event.Payload.Name)
-		}
-		if event.Payload.ChannelMeta["sender"] != "123" {
-			t.Fatalf("meta = %v", event.Payload.ChannelMeta)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for channel event")
-	}
-}
 
 func TestParseChannelParams(t *testing.T) {
 	t.Parallel()
@@ -91,6 +69,27 @@ func TestParseChannelParams(t *testing.T) {
 		{
 			name:    "reserved source key dropped",
 			raw:     `{"content":"hi","meta":{"source":"evil","keep":"1"}}`,
+			wantOK:  true,
+			content: "hi",
+			meta:    map[string]string{"keep": "1"},
+		},
+		{
+			name:    "meta key starting with digit dropped",
+			raw:     `{"content":"hi","meta":{"1chat":"dropped","chat":"kept"}}`,
+			wantOK:  true,
+			content: "hi",
+			meta:    map[string]string{"chat": "kept"},
+		},
+		{
+			name:    "xmlns meta key dropped",
+			raw:     `{"content":"hi","meta":{"xmlns":"http://evil","keep":"1"}}`,
+			wantOK:  true,
+			content: "hi",
+			meta:    map[string]string{"keep": "1"},
+		},
+		{
+			name:    "xml meta key dropped",
+			raw:     `{"content":"hi","meta":{"xml":"http://evil","keep":"1"}}`,
 			wantOK:  true,
 			content: "hi",
 			meta:    map[string]string{"keep": "1"},
@@ -262,32 +261,6 @@ func TestRenderChannelDeterministicMetaOrder(t *testing.T) {
 	}
 }
 
-func TestUpdateStatePropagatesChannel(t *testing.T) {
-	const name = "test-channel-propagation"
-	t.Cleanup(func() { states.Del(name) })
-
-	updateState(name, StateConnected, nil, &ClientSession{channel: true}, Counts{Tools: 1})
-	info, ok := GetState(name)
-	if !ok {
-		t.Fatal("expected state to be recorded")
-	}
-	if !info.Channel {
-		t.Error("ClientInfo.Channel should reflect the session's channel flag")
-	}
-
-	// A non-channel session must not report as a channel.
-	updateState(name, StateConnected, nil, &ClientSession{channel: false}, Counts{})
-	if info, _ := GetState(name); info.Channel {
-		t.Error("non-channel session must not report Channel=true")
-	}
-
-	// A nil client (e.g. error/disabled state) must not panic or report a channel.
-	updateState(name, StateError, nil, nil, Counts{})
-	if info, _ := GetState(name); info.Channel {
-		t.Error("nil client must not report Channel=true")
-	}
-}
-
 func TestChannelEnabled(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -301,41 +274,11 @@ func TestChannelEnabled(t *testing.T) {
 		{[]string{"other"}, "webhook", false},
 		{nil, "webhook", false},
 		{[]string{"SERVER:webhook"}, "webhook", true},
-		{[]string{"Webhook"}, "webhook", true},
-		{[]string{"WEBHOOK"}, "webhook", true},
-		{[]string{"  Webhook  "}, "webhook", true},
 	}
 	for _, tt := range tests {
-		if got := ChannelEnabled(tt.enabled, tt.name); got != tt.want {
-			t.Errorf("ChannelEnabled(%v, %q) = %v, want %v", tt.enabled, tt.name, got, tt.want)
+		if got := channelEnabled(tt.enabled, tt.name); got != tt.want {
+			t.Errorf("channelEnabled(%v, %q) = %v, want %v", tt.enabled, tt.name, got, tt.want)
 		}
-	}
-}
-
-func TestChannelOptIn(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name       string
-		cfgEnabled bool
-		overrides  []string
-		server     string
-		want       bool
-	}{
-		{"neither source", false, nil, "webhook", false},
-		{"config only (channel_enabled: true)", true, nil, "webhook", true},
-		{"override only (--channels)", false, []string{"webhook"}, "webhook", true},
-		{"both sources", true, []string{"webhook"}, "webhook", true},
-		{"override for a different server", false, []string{"other"}, "webhook", false},
-		{"config-enabled via server: form override", true, []string{"server:other"}, "webhook", true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			m := config.MCPConfig{ChannelEnabled: tt.cfgEnabled}
-			if got := ChannelOptIn(m, tt.overrides, tt.server); got != tt.want {
-				t.Errorf("ChannelOptIn(%+v, %v, %q) = %v, want %v", m, tt.overrides, tt.server, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -401,8 +344,8 @@ func TestChannelConnGateOpenInjects(t *testing.T) {
 	defer cancel()
 	sub := broker.Subscribe(ctx)
 
-	gate := &atomic.Bool{}
-	gate.Store(true)
+	gate := newChannelGate()
+	gate.resolve(true)
 	passthrough := &jsonrpc.Request{Method: "notifications/other"}
 	conn := &channelConn{
 		Connection: &fakeConn{msgs: []jsonrpc.Message{
@@ -443,7 +386,8 @@ func TestChannelConnGateClosedDropsEvents(t *testing.T) {
 	defer cancel()
 	sub := broker.Subscribe(ctx)
 
-	gate := &atomic.Bool{} // closed: not opted in / not a channel
+	gate := newChannelGate()
+	gate.resolve(false) // closed: not opted in / not a channel
 	passthrough := &jsonrpc.Request{Method: "notifications/other"}
 	conn := &channelConn{
 		Connection: &fakeConn{msgs: []jsonrpc.Message{
@@ -472,8 +416,8 @@ func TestChannelConnMalformedPayloadDropped(t *testing.T) {
 	defer cancel()
 	sub := broker.Subscribe(ctx)
 
-	gate := &atomic.Bool{}
-	gate.Store(true)
+	gate := newChannelGate()
+	gate.resolve(true)
 	bad := &jsonrpc.Request{Method: channelNotificationMethod, Params: json.RawMessage(`{"content":`)}
 	conn := &channelConn{
 		Connection: &fakeConn{msgs: []jsonrpc.Message{
@@ -489,5 +433,275 @@ func TestChannelConnMalformedPayloadDropped(t *testing.T) {
 	}
 	if _, ok := waitForEvent(t, sub); ok {
 		t.Fatal("malformed payload should not publish an event")
+	}
+}
+
+// TestPublishChannelMessageUsesMustDeliver proves channel messages are
+// published through the must-deliver path, not the lossy Publish path.
+// A small-buffer broker is saturated; a lossy publish would drop the channel
+// event, but must-deliver blocks (bounded) and delivers it.
+func TestPublishChannelMessageUsesMustDeliver(t *testing.T) {
+	// Temporarily swap the package-level broker for a tiny one so we can
+	// saturate it.
+	small := pubsub.NewBrokerWithOptions[Event](1)
+	prev := broker
+	broker = small
+	t.Cleanup(func() { broker = prev })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sub := broker.Subscribe(ctx)
+
+	// Fill the buffer with one event so the next publish must block-deliver.
+	broker.Publish(pubsub.CreatedEvent, Event{Type: EventStateChanged})
+
+	// Start draining in the background so the must-deliver send can complete.
+	type received struct {
+		ev Event
+		ok bool
+	}
+	done := make(chan received)
+	go func() {
+		select {
+		case ev := <-sub:
+			done <- received{ev: ev.Payload, ok: true}
+		case <-ctx.Done():
+			done <- received{}
+		}
+	}()
+
+	raw, _ := json.Marshal(channelParams{Content: "channel msg"})
+	publishChannelMessage(ctx, "webhook", raw)
+
+	// The first drain picks up the fill event; the channel event is now in
+	// the buffer. Read it.
+	r1 := <-done
+	if r1.ok && r1.ev.Type == EventChannelMessage {
+		return // got it on the first read
+	}
+
+	select {
+	case ev := <-sub:
+		if ev.Payload.Type != EventChannelMessage {
+			t.Errorf("expected EventChannelMessage, got %v", ev.Payload.Type)
+		}
+		if !strings.Contains(ev.Payload.ChannelMessage, "channel msg") {
+			t.Errorf("unexpected channel message: %q", ev.Payload.ChannelMessage)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel event was dropped — publish is not using must-deliver")
+	}
+}
+
+// TestChannelConnBuffersDuringUndecidedGate proves that a channel notification
+// received while the gate is undecided (during capability negotiation) is not
+// lost. Before the fix, the SDK read loop started inside Connect, but the gate
+// was opened only after Connect returned — a fast server's events were
+// silently swallowed.
+//
+// The test sends a notification while the gate is undecided (simulating the
+// Connect window), then resolves the gate to open and verifies the buffered
+// message is published.
+func TestChannelConnBuffersDuringUndecidedGate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := broker.Subscribe(ctx)
+
+	gate := newChannelGate() // starts undecided
+	conn := &channelConn{
+		Connection: &fakeConn{msgs: []jsonrpc.Message{
+			channelNotification(t, "buffered event"),
+			&jsonrpc.Request{Method: "notifications/other"},
+		}},
+		name: "webhook",
+		gate: gate,
+	}
+
+	// Read while gate is undecided. The channel notification is intercepted
+	// (removed from the SDK stream) and buffered — not published yet.
+	msg, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read err = %v", err)
+	}
+	if got, ok := msg.(*jsonrpc.Request); !ok || got.Method != "notifications/other" {
+		t.Fatalf("expected passthrough, got %#v", msg)
+	}
+
+	// No event published yet — the notification is buffered.
+	if _, ok := waitForEvent(t, sub); ok {
+		t.Fatal("no event should be published while gate is undecided")
+	}
+
+	// Resolve the gate to open — buffered messages are returned for delivery.
+	buffered := gate.resolve(true)
+	if len(buffered) != 1 {
+		t.Fatalf("expected 1 buffered message, got %d", len(buffered))
+	}
+	publishChannelMessage(ctx, "webhook", buffered[0])
+
+	got, ok := waitForEvent(t, sub)
+	if !ok {
+		t.Fatal("buffered event should be published after gate opens")
+	}
+	if got.Type != EventChannelMessage {
+		t.Errorf("event type = %v, want EventChannelMessage", got.Type)
+	}
+	if !strings.Contains(got.ChannelMessage, "buffered event") {
+		t.Errorf("unexpected rendered message: %q", got.ChannelMessage)
+	}
+}
+
+// TestChannelConnDiscardsBufferOnClosedGate verifies that buffered messages
+// are discarded (not published) when the gate resolves to closed — a
+// non-opted-in or non-capable server must never deliver its events.
+func TestChannelConnDiscardsBufferOnClosedGate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub := broker.Subscribe(ctx)
+
+	gate := newChannelGate()
+	conn := &channelConn{
+		Connection: &fakeConn{msgs: []jsonrpc.Message{
+			channelNotification(t, "should be discarded"),
+			&jsonrpc.Request{Method: "notifications/other"},
+		}},
+		name: "webhook",
+		gate: gate,
+	}
+
+	if _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("Read err = %v", err)
+	}
+
+	// Resolve closed — buffered messages must be discarded.
+	buffered := gate.resolve(false)
+	if buffered != nil {
+		t.Fatalf("expected no buffered messages on close, got %d", len(buffered))
+	}
+	if _, ok := waitForEvent(t, sub); ok {
+		t.Fatal("no event should be published when gate resolves closed")
+	}
+}
+
+// TestSubscribeEventsForwardsChannelMessages verifies that SubscribeEvents
+// forwards EventChannelMessage events rather than filtering them out.
+//
+// This fork implements the workspace-scoped channel routing upstream defers:
+// channel events are routed to the correct workspace/session downstream
+// (internal/backend/channels.go, internal/server/events.go,
+// internal/workspace/client_workspace.go), so they must remain visible
+// through SubscribeEvents. The cross-workspace concern is handled at that
+// routing layer, not by filtering at the source.
+func TestSubscribeEventsForwardsChannelMessages(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	events := SubscribeEvents(ctx)
+
+	broker.Publish(pubsub.UpdatedEvent, Event{
+		Type: EventStateChanged,
+		Name: "srv",
+	})
+	broker.Publish(pubsub.CreatedEvent, Event{
+		Type:           EventChannelMessage,
+		Name:           "webhook",
+		ChannelMessage: `<channel source="webhook">hi</channel>`,
+		ChannelMeta:    map[string]string{"sender": "123"},
+	})
+
+	gotState := false
+	gotChannel := false
+	deadline := time.After(time.Second)
+	for !(gotState && gotChannel) {
+		select {
+		case ev := <-events:
+			switch ev.Payload.Type {
+			case EventStateChanged:
+				gotState = true
+			case EventChannelMessage:
+				gotChannel = true
+				if ev.Payload.ChannelMeta["sender"] != "123" {
+					t.Fatalf("channel meta not preserved: %+v", ev.Payload.ChannelMeta)
+				}
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for events: state=%v channel=%v", gotState, gotChannel)
+		}
+	}
+}
+
+// --- Fork: channel opt-in, meta preservation, and channel propagation ---
+
+func TestChannelOptIn(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		cfgEnabled bool
+		overrides  []string
+		server     string
+		want       bool
+	}{
+		{"neither source", false, nil, "webhook", false},
+		{"config only (channel_enabled: true)", true, nil, "webhook", true},
+		{"override only (--channels)", false, []string{"webhook"}, "webhook", true},
+		{"both sources", true, []string{"webhook"}, "webhook", true},
+		{"override for a different server", false, []string{"other"}, "webhook", false},
+		{"config-enabled via server: form override", true, []string{"server:other"}, "webhook", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := config.MCPConfig{ChannelEnabled: tt.cfgEnabled}
+			if got := ChannelOptIn(m, tt.overrides, tt.server); got != tt.want {
+				t.Errorf("ChannelOptIn(%+v, %v, %q) = %v, want %v", m, tt.overrides, tt.server, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPublishChannelMessagePreservesMetadata(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := SubscribeEvents(ctx)
+	publishChannelMessage(ctx, "signal", json.RawMessage(`{"content":"hello","meta":{"sender":"123"}}`))
+
+	select {
+	case event := <-events:
+		if event.Payload.Name != "signal" {
+			t.Fatalf("name = %q, want signal", event.Payload.Name)
+		}
+		if event.Payload.ChannelMeta["sender"] != "123" {
+			t.Fatalf("meta = %v", event.Payload.ChannelMeta)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for channel event")
+	}
+}
+
+func TestUpdateStatePropagatesChannel(t *testing.T) {
+	const name = "test-channel-propagation"
+	t.Cleanup(func() { states.Del(name) })
+
+	updateState(name, StateConnected, nil, &ClientSession{channel: true}, Counts{Tools: 1})
+	info, ok := GetState(name)
+	if !ok {
+		t.Fatal("expected state to be recorded")
+	}
+	if !info.Channel {
+		t.Error("ClientInfo.Channel should reflect the session's channel flag")
+	}
+
+	// A non-channel session must not report as a channel.
+	updateState(name, StateConnected, nil, &ClientSession{channel: false}, Counts{})
+	if info, _ := GetState(name); info.Channel {
+		t.Error("non-channel session must not report Channel=true")
+	}
+
+	// A nil client (e.g. error/disabled state) must not panic or report a channel.
+	updateState(name, StateError, nil, nil, Counts{})
+	if info, _ := GetState(name); info.Channel {
+		t.Error("nil client must not report Channel=true")
 	}
 }

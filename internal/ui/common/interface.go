@@ -18,3 +18,12 @@ type CoalescedWheelMsg struct {
 	DeltaX float64
 	DeltaY float64
 }
+
+// WheelScrollable is an optional interface for components that
+// support mouse wheel scrolling. The UI type-asserts for this
+// before routing CoalescedWheelMsg.
+type WheelScrollable interface {
+	// HandleWheel processes a coalesced wheel event. DeltaY scrolls
+	// vertically, DeltaX scrolls horizontally.
+	HandleWheel(deltaX, deltaY float64)
+}

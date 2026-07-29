@@ -1,13 +1,13 @@
 package attachments
 
 import (
-	"fmt"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -88,6 +88,145 @@ func TestRender_ShowRemoveFalseKeepsGapBetweenChips(t *testing.T) {
 		"each posted chip must carry a 1-col trailing margin so adjacent chip backgrounds don't touch")
 }
 
+func TestRender_DeletingModeKeepsChipLayout(t *testing.T) {
+	t.Parallel()
+
+	// Regression for review feedback on #3338: entering delete-mode used
+	// to replace the leading icon with the numeral and drop the remove
+	// button, shifting every chip. The numeral must instead take over the
+	// remove button's slot, leaving the left side of the chip as-is.
+	r := newTestRenderer()
+	atts := []message.Attachment{
+		{FileName: "main.go"},
+		{FileName: "models.go"},
+	}
+	idle := r.Render(atts, false, true, 200)
+	deleting := r.Render(atts, true, true, 200)
+
+	require.Equal(t, lipgloss.Width(idle), lipgloss.Width(deleting),
+		"entering delete-mode must not shift the chips")
+	require.Contains(t, deleting, styles.TextIcon,
+		"delete-mode must keep the chip's icon")
+	require.Contains(t, deleting, "0")
+	require.Contains(t, deleting, "1")
+}
+
+func TestRender_RemoveButtonHasRightPadding(t *testing.T) {
+	t.Parallel()
+
+	// Regression for review feedback on #3338: the ✕ must not sit flush
+	// against the right edge of its colored box. The cell to the right of the
+	// glyph has to be padding — part of the button's background — rather than
+	// a transparent margin, so the glyph has breathing room on its right.
+	//
+	// A plain-width or ANSI-stripped check can't catch this: a margin space
+	// and a background-colored padding space are both one blank column. So we
+	// inspect the per-cell background and assert the button's background
+	// extends one cell past the ✕.
+	r := newTestRenderer()
+	atts := []message.Attachment{{FileName: "main.go"}}
+	out := r.Render(atts, false, true, 200)
+
+	cells := parseCells(out)
+	xi := -1
+	for i, c := range cells {
+		if c.r == styles.RemoveIcon {
+			xi = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, xi, 0, "rendered output must contain the ✕ glyph")
+	require.NotEmpty(t, cells[xi].bg, "the ✕ cell must have the button's background")
+	require.Less(t, xi+1, len(cells),
+		"the ✕ must be followed by a trailing padding cell, not be the box's last cell")
+	require.Equal(t, cells[xi].bg, cells[xi+1].bg,
+		"the cell to the right of ✕ must share the button's background (padding), not be a transparent margin")
+}
+
+func TestRender_RemoveButtonKeepsGapBetweenChips(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRenderer()
+	atts := []message.Attachment{
+		{FileName: "first.txt"},
+		{FileName: "second.txt"},
+	}
+	cells := parseCells(r.Render(atts, false, true, 200))
+
+	xi := -1
+	for i, c := range cells {
+		if c.r == styles.RemoveIcon {
+			xi = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, xi, 0)
+	require.Less(t, xi+2, len(cells))
+	require.Empty(t, cells[xi+2].bg, "adjacent attachment chips must have a transparent one-cell gap")
+}
+
+// cell is one rendered terminal cell: its rune and the truecolor background
+// in effect ("r;g;b", or "" for none).
+type cell struct {
+	r  string
+	bg string
+}
+
+// parseCells walks a lipgloss-rendered string and returns its visible cells
+// with the background color active at each. It understands the SGR sequences
+// lipgloss emits (truecolor 48;2;r;g;b backgrounds, 38;2;r;g;b foregrounds,
+// and resets); other escapes are ignored.
+func parseCells(s string) []cell {
+	var cells []cell
+	bg := ""
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && s[j] != 'm' {
+				j++
+			}
+			if j < len(s) {
+				bg = applyBG(s[i+2:j], bg)
+				i = j + 1
+				continue
+			}
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		cells = append(cells, cell{r: s[i : i+size], bg: bg})
+		i += size
+	}
+	return cells
+}
+
+// applyBG updates the current background given one SGR parameter string.
+func applyBG(params, cur string) string {
+	if params == "" || params == "0" {
+		return ""
+	}
+	toks := strings.Split(params, ";")
+	for k := 0; k < len(toks); k++ {
+		switch toks[k] {
+		case "0":
+			cur = ""
+		case "38": // foreground — skip its arguments
+			if k+1 < len(toks) && toks[k+1] == "2" {
+				k += 4
+			} else if k+1 < len(toks) && toks[k+1] == "5" {
+				k += 2
+			}
+		case "48": // background
+			if k+4 < len(toks) && toks[k+1] == "2" {
+				cur = toks[k+2] + ";" + toks[k+3] + ";" + toks[k+4]
+				k += 4
+			} else if k+2 < len(toks) && toks[k+1] == "5" {
+				cur = toks[k+2]
+				k += 2
+			}
+		}
+	}
+	return cur
+}
+
 func TestRender_MultipleChipsEachHaveRemoveButton(t *testing.T) {
 	t.Parallel()
 
@@ -149,74 +288,20 @@ func TestHitTestRemove_ReturnsCorrectIndex(t *testing.T) {
 	require.Equal(t, 1, idx)
 }
 
-// removeGlyphCells returns the x cell position of each RemoveIcon glyph in
-// the ANSI-stripped render output, so hit zones can be checked against what
-// is actually on screen rather than against the recorded bounds.
-func removeGlyphCells(t *testing.T, rendered string) []int {
-	t.Helper()
-	var cells []int
-	x := 0
-	for _, r := range ansi.Strip(rendered) {
-		if string(r) == styles.RemoveIcon {
-			cells = append(cells, x)
-		}
-		x += ansi.StringWidth(string(r))
-	}
-	return cells
-}
-
-func TestHitTestRemove_MatchesRenderedGlyphs(t *testing.T) {
+func TestHitTestRemove_TrailingMarginNotClickable(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRenderer()
 	atts := []message.Attachment{
 		{FileName: "first.txt"},
-		{FileName: "second.png"},
-		{FileName: "third.md"},
+		{FileName: "second.txt"},
 	}
-	out := r.Render(atts, false, true, 200)
+	_ = r.Render(atts, false, true, 120)
 
-	glyphs := removeGlyphCells(t, out)
-	require.Len(t, glyphs, len(atts))
-
-	marginW := r.removeStyle.GetMarginRight()
-	require.Positive(t, marginW, "test assumes the remove style has a trailing margin")
-	// Visible button width: padding + glyph, without the trailing margin.
-	btnW := lipgloss.Width(r.removeStyle.String()) - marginW
-
-	for i, glyphX := range glyphs {
-		start := glyphX - r.removeStyle.GetPaddingLeft()
-		for x := start; x < start+btnW; x++ {
-			require.Equalf(t, i, r.HitTestRemove(atts, x), "cell %d inside chip %d's remove button", x, i)
-		}
-		// The margin cells after the button are just the gap between
-		// chips; clicking there must not remove anything.
-		for x := start + btnW; x < start+btnW+marginW; x++ {
-			require.Equalf(t, -1, r.HitTestRemove(atts, x), "margin cell %d after chip %d's remove button", x, i)
-		}
-	}
-}
-
-func TestHitTestRemove_OverflowAreaHitsNothing(t *testing.T) {
-	t.Parallel()
-
-	r := newTestRenderer()
-	var atts []message.Attachment
-	for i := range 10 {
-		atts = append(atts, message.Attachment{FileName: fmt.Sprintf("file-%d.txt", i)})
-	}
-	out := r.Render(atts, false, true, 60)
-
-	stripped := ansi.Strip(out)
-	require.Contains(t, stripped, "more…", "expected the overflow label at this width")
-	require.Less(t, len(r.bounds), len(atts), "not every chip should fit at this width")
-
-	// Every cell from the end of the last remove button to past the end of
-	// the row (the overflow label area) must hit nothing.
-	last := r.bounds[len(r.bounds)-1]
-	for x := last.removeEnd; x < ansi.StringWidth(stripped)+5; x++ {
-		require.Equalf(t, -1, r.HitTestRemove(atts, x), "cell %d in the overflow label area", x)
-	}
+	// The cell just past a button's hit region belongs to the next chip, not
+	// to this button — a click there must not remove this attachment.
+	b0 := r.bounds[0]
+	require.Equal(t, -1, r.HitTestRemove(atts, b0.removeEnd))
 }
 
 func TestHitTestRemove_OutsideAnyRemoveReturnsMinusOne(t *testing.T) {

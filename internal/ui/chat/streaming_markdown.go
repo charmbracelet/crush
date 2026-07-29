@@ -36,6 +36,13 @@ type streamingMarkdown struct {
 	width              int
 	stablePrefix       string
 	stablePrefixRender string
+	// Cached cumulative state at the stable prefix boundary.
+	// Used by findBoundaryAfter to validate new boundary candidates
+	// without re-scanning the entire prefix from the start.
+	// baseFenceCount is always even (safe boundaries require even
+	// fence parity), so the delta scan always starts outside a fence.
+	baseFenceCount    int
+	baseHasListMarker bool
 }
 
 // Reset drops every cached field. After Reset the next Render call
@@ -44,6 +51,8 @@ func (s *streamingMarkdown) Reset() {
 	s.width = 0
 	s.stablePrefix = ""
 	s.stablePrefixRender = ""
+	s.baseFenceCount = 0
+	s.baseHasListMarker = false
 }
 
 // Render returns the glamour render of content at the given width,
@@ -84,7 +93,11 @@ func (s *streamingMarkdown) Render(content string, width int, renderer *glamour.
 		return out
 	}
 
-	boundary := findSafeMarkdownBoundary(content)
+	// Incremental boundary search: only scan the delta after the
+	// stable prefix. The cached cumulative state (baseFenceCount,
+	// baseHasListMarker) lets us validate candidates in O(delta)
+	// instead of re-scanning the entire prefix. See CHARM-1785.
+	boundary := s.findBoundaryAfter(content)
 	if boundary < 0 {
 		// No safe boundary anywhere yet. Full render; do not
 		// modify the cache (a future flush may find one).
@@ -105,6 +118,9 @@ func (s *streamingMarkdown) Render(content string, width int, renderer *glamour.
 	newChunkRender := s.renderTrailing(newChunk, renderer)
 	s.stablePrefixRender = glueRenders(s.stablePrefixRender, newChunkRender)
 	s.stablePrefix = content[:boundary]
+	// Update cumulative state for the new stable prefix.
+	s.baseFenceCount += countFenceLines(newChunk)
+	s.baseHasListMarker = s.baseHasListMarker || chunkHasListMarker(newChunk)
 
 	trail := content[boundary:]
 	if trail == "" {
@@ -140,6 +156,122 @@ func (s *streamingMarkdown) tryAdvanceFromEmpty(content string, width int, rende
 	s.stablePrefix = prefix
 	s.stablePrefixRender = trimGlamourMargins(out)
 	s.width = width
+	// Seed cumulative state for incremental boundary search.
+	s.baseFenceCount = countFenceLines(prefix)
+	s.baseHasListMarker = chunkHasListMarker(prefix)
+}
+
+// findBoundaryAfter searches for the latest safe boundary in content
+// that is strictly after the stable prefix. It uses the cached
+// cumulative state (baseFenceCount, baseHasListMarker) to validate
+// candidates without re-scanning the entire prefix, making the search
+// O(delta) instead of O(n) per tick. See CHARM-1785.
+//
+// Returns -1 when no safe boundary exists after the stable prefix.
+func (s *streamingMarkdown) findBoundaryAfter(content string) int {
+	// When there is no stable prefix, fall back to the full scan.
+	if len(s.stablePrefix) == 0 {
+		return findSafeMarkdownBoundary(content)
+	}
+
+	// Scan blank-line candidates from latest to earliest, but only
+	// those strictly after the stable prefix. Candidates at or
+	// before the stable prefix are already covered by the cache.
+	for p := blankLineBefore(content, len(content)); p > len(s.stablePrefix); p = blankLineBefore(content, p-1) {
+		if s.isSafeBoundaryIncremental(content, p) {
+			return p
+		}
+	}
+	// No new boundary found after the stable prefix. Return the
+	// stable prefix length so the caller takes the "boundary <=
+	// len(stablePrefix)" path (render trailing fresh, keep cache).
+	return len(s.stablePrefix)
+}
+
+// isSafeBoundaryIncremental validates a boundary candidate at
+// position p using the cached cumulative state plus a delta scan
+// of content[len(stablePrefix):p]. This avoids the O(n) re-scan
+// that isSafeBoundaryAt performs on every candidate.
+func (s *streamingMarkdown) isSafeBoundaryIncremental(content string, p int) bool {
+	delta := content[len(s.stablePrefix):p]
+
+	// (2) Fence parity: base count + delta count must be even.
+	if (s.baseFenceCount+countFenceLines(delta))%2 != 0 {
+		return false
+	}
+
+	// (2b) HTML and link-ref hazards in the delta.
+	if deltaHasHTMLorRef(delta) {
+		return false
+	}
+
+	// (2b) List hazard: if a list marker exists anywhere in the
+	// full prefix (base OR delta), the last non-blank line before
+	// the boundary must not be an indented continuation paragraph.
+	hasListMarker := s.baseHasListMarker || chunkHasListMarker(delta)
+	if hasListMarker {
+		lastLine := lastNonBlankLine(content[:p])
+		if lastLine != "" && !isListItemMarker(strings.TrimLeft(lastLine, " \t")) {
+			if len(lastLine) > 0 && (lastLine[0] == ' ' || lastLine[0] == '\t') {
+				return false
+			}
+		}
+	}
+
+	// (3) Last non-blank line must not open a construct.
+	lastLine := lastNonBlankLine(content[:p])
+	if lastLine != "" && lineOpensConstruct(lastLine) {
+		return false
+	}
+
+	// (4) Setext underline check.
+	if rest := content[p:]; rest != "" {
+		first := firstNonBlankLine(rest)
+		if isSetextUnderlineCandidate(first) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// deltaHasHTMLorRef reports whether the delta (text between the
+// stable prefix and a boundary candidate) contains an HTML block
+// opener or a link reference definition.
+func deltaHasHTMLorRef(delta string) bool {
+	inFence := false
+	for line := range splitLines(delta) {
+		if isFenceLine(line) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if isHTMLBlockOpener(line) || isLinkRefDefinition(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// chunkHasListMarker reports whether any line in chunk is a
+// list-item marker (outside fenced code blocks).
+func chunkHasListMarker(chunk string) bool {
+	inFence := false
+	for line := range splitLines(chunk) {
+		if isFenceLine(line) {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if isListItemMarker(strings.TrimLeft(line, " \t")) {
+			return true
+		}
+	}
+	return false
 }
 
 // renderTrailing renders a trailing partial as a fresh glamour
@@ -388,8 +520,60 @@ func isSafeBoundaryAt(content string, p int) bool {
 // streaming traces, the next iteration can promote each rule to
 // its less-conservative variant (closure-aware list tracking,
 // per-tag HTML close detection, suffix-aware ref tracking).
+// prefixHasOpenHazard reports whether prefix contains any of three
+// constructs that cannot be safely cut at a blank-line boundary
+// even when the immediately preceding line looks fine.
+//
+//	B1 (loose lists, refined). A loose list has a blank line between
+//	   an item and a continuation paragraph that begins with
+//	   indentation but no list marker. If a candidate boundary lands
+//	   on that blank line, the prefix's trailing non-blank line is the
+//	   continuation paragraph, NOT a list marker, so the last-line
+//	   check in lineOpensConstruct would accept it even though the
+//	   list is still open.
+//
+//	   Rule chosen: track whether any list-marker line appears in the
+//	   prefix. If one does AND the last non-blank line is indented
+//	   (but is not itself a list marker), the list is potentially
+//	   open and we reject. This catches loose-list continuation
+//	   paragraphs (indented, no marker) that lineOpensConstruct
+//	   misses (it only flags 4+ spaces), without forfeiting every
+//	   boundary after a CLOSED list. A list followed by a blank line
+//	   and then a non-indented paragraph is closed; the boundary
+//	   after that paragraph is safe.
+//
+//	   The previous rule rejected on any list marker anywhere in the
+//	   prefix, which killed the streaming cache for every document
+//	   that ever contained a list — the dominant case for LLM
+//	   thinking blocks. See CHARM-1785.
+//
+//	B2 (HTML blocks). CommonMark defines seven HTML-block opener
+//	   patterns (script/pre/style/textarea, comments, processing
+//	   instructions, CDATA, declarations, recognised tag names).
+//	   If the prefix opens an HTML block that the suffix closes,
+//	   splitting renders the prefix as raw HTML and the suffix as
+//	   prose.
+//
+//	   Rule chosen: any HTML-block opener anywhere in the prefix
+//	   forces -1. Same trade-off as B1 — the typical assistant
+//	   output contains no raw HTML, so the perf cost is zero in
+//	   the common case.
+//
+//	B3 (reference link definitions). A line of the form
+//	   "[label]: <url>" defines a link reference that the suffix
+//	   may later use as "[text][label]". Splitting the document
+//	   loses the definition because each half is rendered as an
+//	   independent glamour document.
+//
+//	   Rule chosen: any reference link definition line anywhere in
+//	   the prefix forces -1. Suffix-side reference detection is
+//	   fragile (three syntaxes: [text][label], [label][], [label]),
+//	   so the prefix-side check is the simpler safe choice.
 func prefixHasOpenHazard(prefix string) bool {
 	inFence := false
+	hasListMarker := false
+	var lastNonBlankTrimmed string
+	var lastNonBlankRaw string
 	for line := range splitLines(prefix) {
 		// Track fenced state so list/html/ref patterns inside a
 		// fenced code block do not falsely trigger the hazards.
@@ -404,9 +588,11 @@ func prefixHasOpenHazard(prefix string) bool {
 		if trimmed == "" {
 			continue
 		}
-		// B1: any list-item marker.
+		lastNonBlankTrimmed = trimmed
+		lastNonBlankRaw = line
+		// B1: track list markers.
 		if isListItemMarker(trimmed) {
-			return true
+			hasListMarker = true
 		}
 		// B2: HTML block opener.
 		if isHTMLBlockOpener(line) {
@@ -414,6 +600,17 @@ func prefixHasOpenHazard(prefix string) bool {
 		}
 		// B3: link reference definition.
 		if isLinkRefDefinition(line) {
+			return true
+		}
+	}
+	// B1 (refined): a list is potentially open only when a marker
+	// appeared earlier AND the last non-blank line is indented but
+	// is not itself a list marker (i.e. it is a continuation
+	// paragraph that lineOpensConstruct would miss because it only
+	// catches 4+ leading spaces). A non-indented last line means
+	// the list was closed by the blank line before it.
+	if hasListMarker && lastNonBlankTrimmed != "" && !isListItemMarker(lastNonBlankTrimmed) {
+		if len(lastNonBlankRaw) > 0 && (lastNonBlankRaw[0] == ' ' || lastNonBlankRaw[0] == '\t') {
 			return true
 		}
 	}

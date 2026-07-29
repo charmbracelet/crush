@@ -192,6 +192,16 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
 	if s.skip.Load() {
+		// Yolo mode returns before the notification broker is touched, so
+		// no UI and no audit subscriber ever observes that consent was
+		// skipped -- unlike the plan-mode, hook-approval and
+		// session-auto-approve paths below, which all publish. `crush run
+		// --yolo` has no editor prompt or status indicator either, so this
+		// line is the ONLY record that a bypass happened. Info keeps it in
+		// the log at the default level (see internal/log.Setup).
+		slog.Info("Permission auto-granted: yolo mode is skipping permission requests",
+			"tool", opts.ToolName, "action", opts.Action, "path", opts.Path,
+			"session_id", opts.SessionID, "tool_call_id", opts.ToolCallID)
 		return true, nil
 	}
 
@@ -351,7 +361,12 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 	if skip {
 		s.planMode.Store(false)
 	}
-	s.skip.Store(skip)
+	// Record the transition, not every call: toggling yolo changes the
+	// consent model for the whole workspace and must be reconstructable
+	// from the log afterwards.
+	if prev := s.skip.Swap(skip); prev != skip {
+		slog.Warn("Permission skip mode (yolo) changed", "enabled", skip)
+	}
 }
 
 func (s *permissionService) SkipRequests() bool {
@@ -393,5 +408,13 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		waitLogInterval:     defaultWaitLogInterval,
 	}
 	svc.skip.Store(skip)
+	if skip {
+		// `crush --yolo` and `crush run --yolo` both land here. The flag is
+		// per-process and never persisted (config.RuntimeOverrides), but a
+		// run that silently skipped every prompt is undebuggable later, so
+		// leave a record that the workspace started in yolo mode.
+		slog.Warn("Permission service started in yolo mode: all permission prompts will be skipped",
+			"working_dir", workingDir)
+	}
 	return svc
 }

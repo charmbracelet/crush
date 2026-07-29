@@ -524,7 +524,8 @@ permissions. Use this with care.
 ```
 
 You can also skip all permission prompts entirely by running Crush with the
-`--yolo` flag. Be very, very careful with this feature.
+`--yolo` flag (works on both `crush` and `crush run`). Be very, very careful
+with this feature.
 
 ### Disabling Built-In Tools
 

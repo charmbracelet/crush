@@ -612,7 +612,7 @@ func TestSubscribeEventsForwardsChannelMessages(t *testing.T) {
 	gotState := false
 	gotChannel := false
 	deadline := time.After(time.Second)
-	for !(gotState && gotChannel) {
+	for !gotState || !gotChannel {
 		select {
 		case ev := <-events:
 			switch ev.Payload.Type {

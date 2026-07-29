@@ -32,6 +32,7 @@ func (w *sidebarHeightTestWorkspace) AgentReadyErr() error   { return nil }
 func (w *sidebarHeightTestWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
 	return nil
 }
+
 func (w *sidebarHeightTestWorkspace) LSPGetDiagnosticCounts(string) lsp.DiagnosticCounts {
 	return lsp.DiagnosticCounts{}
 }

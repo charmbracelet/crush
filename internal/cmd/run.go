@@ -52,6 +52,9 @@ crush run "Generate a hot README for this project" > MY_HOT_README.md
 # Run in quiet mode (hide the spinner)
 crush run --quiet "Generate a README for this project"
 
+# Auto-accept all permission prompts (dangerous)
+crush run --yolo "Refactor the auth module"
+
 # Run in verbose mode (show logs)
 crush run --verbose "Generate a README for this project"
 

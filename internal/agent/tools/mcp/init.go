@@ -3,7 +3,6 @@
 package mcp
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -12,21 +11,29 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/oauth"
+	mcpoauth "github.com/charmbracelet/crush/internal/oauth/mcp"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/oauth2"
 )
 
-func parseLevel(level mcp.LoggingLevel) slog.Level {
+// parseLevel converts an MCP logging level string to a slog.Level. The
+// entire MCP logging feature is deprecated per SEP-2577 but remains
+// functional; servers may still send log notifications during the
+// deprecation window.
+func parseLevel(level string) slog.Level {
 	switch level {
 	case "info":
 		return slog.LevelInfo
@@ -44,36 +51,72 @@ func parseLevel(level mcp.LoggingLevel) slog.Level {
 // on close.
 type ClientSession struct {
 	*mcp.ClientSession
-	cancel context.CancelFunc
+	cancel       context.CancelFunc
+	oauthHandler *mcpoauth.Handler
 	// channel reports whether this server is an active channel (it declared
-	// the claude/channel capability and was opted in via --channels).
+	// the claude/channel capability and was opted in via --channels or
+	// channel_enabled).
 	channel bool
 }
+
+// IsChannel reports whether this session is an active channel.
+func (s *ClientSession) IsChannel() bool { return s.channel }
 
 // Close cancels the session context and then closes the underlying session.
 func (s *ClientSession) Close() error {
 	s.cancel()
+	if s.oauthHandler != nil {
+		s.oauthHandler.Close()
+	}
 	return s.ClientSession.Close()
 }
 
 var (
 	sessions = csync.NewMap[string, *ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
+	authURLs = csync.NewMap[string, *mcpoauth.Handler]()
+	broker   = pubsub.NewBroker[Event]()
+	initOnce sync.Once
+	initDone = make(chan struct{})
 
-	// nameLocks serializes per-server lifecycle mutations — init, disable,
-	// renew, refresh. Without it, two concurrent renewals for the same server
-	// interleave: the loser's error path tears down the winner's healthy,
-	// just-installed session, or the second success overwrites the first
-	// session without closing it. Different servers never contend.
-	nameLocks = csync.NewMap[string, *sync.Mutex]()
-	// nameLocksMu makes mutex creation in nameLock atomic:
-	// csync.Map.GetOrSet is check-then-act, so two first-op callers
-	// could otherwise mint different mutexes and proceed unserialized.
-	nameLocksMu sync.Mutex
-	broker      = pubsub.NewBroker[Event]()
-	initOnce    sync.Once
-	initDone    = make(chan struct{})
+	// initStarted records whether Initialize has been armed. WaitForInit only
+	// blocks once initialization is expected; coordinators built outside app
+	// startup never arm it and so must not wait forever.
+	initMu      sync.Mutex
+	initStarted bool
+
+	// renewMus serializes lazy session renewals per server so concurrent tool
+	// calls cannot race to rebuild the same session.
+	renewMusMu sync.Mutex
+	renewMus   = map[string]*sync.Mutex{}
+
+	// newSession creates a client session. It is a seam so tests can exercise
+	// renewal concurrency without spawning a real transport.
+	newSession = createSession
 )
+
+// ArmInit marks that MCP initialization is expected so WaitForInit blocks
+// until it completes. Call this synchronously before launching Initialize in a
+// goroutine; otherwise WaitForInit could observe the not-yet-started state and
+// return early, letting the tool list be read before MCP tools register.
+func ArmInit() {
+	initMu.Lock()
+	initStarted = true
+	initMu.Unlock()
+}
+
+// renewLock returns the per-server mutex used to serialize session renewals,
+// creating it on first use.
+func renewLock(name string) *sync.Mutex {
+	renewMusMu.Lock()
+	defer renewMusMu.Unlock()
+	mu, ok := renewMus[name]
+	if !ok {
+		mu = &sync.Mutex{}
+		renewMus[name] = mu
+	}
+	return mu
+}
 
 // State represents the current state of an MCP client
 type State int
@@ -83,6 +126,7 @@ const (
 	StateStarting
 	StateConnected
 	StateError
+	StateNeedsAuth
 )
 
 func (s State) String() string {
@@ -95,6 +139,8 @@ func (s State) String() string {
 		return "connected"
 	case StateError:
 		return "error"
+	case StateNeedsAuth:
+		return "needs auth"
 	default:
 		return "unknown"
 	}
@@ -124,7 +170,9 @@ type Event struct {
 	// ChannelMessage is set only for EventChannelMessage: the fully rendered
 	// and escaped <channel>...</channel> element to inject into the session.
 	ChannelMessage string
-	ChannelMeta    map[string]string
+	// ChannelMeta carries the channel payload's meta attributes (sender, group,
+	// etc.) so workspace-side channel and reply routing can act on them.
+	ChannelMeta map[string]string
 }
 
 // Counts number of available tools, prompts, etc.
@@ -142,12 +190,20 @@ type ClientInfo struct {
 	Client      *ClientSession
 	Counts      Counts
 	ConnectedAt time.Time
-	// Channel reports whether this server is an active channel (declared the
-	// claude/channel capability and opted in via --channels).
+	// Channel reports whether this server is an active channel, for the MCP
+	// list marker and the channels dialog.
 	Channel bool
 }
 
-// SubscribeEvents returns a channel for MCP events
+// SubscribeEvents returns a channel for MCP events, including channel-message
+// events (EventChannelMessage).
+//
+// This fork implements the workspace-scoped channel routing upstream defers:
+// channel events flow through this fan-out and are routed to the correct
+// workspace/session downstream (internal/backend/channels.go,
+// internal/server/events.go, internal/workspace/client_workspace.go). The
+// cross-workspace concern is handled at that routing layer, not by filtering
+// at the source, so the events must remain visible here.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return broker.Subscribe(ctx)
 }
@@ -184,13 +240,19 @@ func Close(ctx context.Context) error {
 		})
 	}
 	wg.Wait()
+	// Clean up any remaining OAuth handlers.
+	for _, h := range authURLs.Seq2() {
+		h.Close()
+	}
 	broker.Shutdown()
 	return nil
 }
 
 // Initialize initializes MCP clients based on the provided configuration.
 func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
+	ArmInit()
 	slog.Info("Initializing MCP clients")
+
 	var wg sync.WaitGroup
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.Config().MCP {
@@ -230,12 +292,17 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 }
 
 // WaitForInit blocks until MCP initialization is complete, i.e. until
-// Initialize has finished and closed initDone. If Initialize is never called,
-// initDone is never closed, so this blocks until ctx is cancelled and then
-// returns ctx.Err(). Callers must therefore pass a context that is eventually
-// cancelled (Initialize is spawned unconditionally during app startup, so in
-// practice initDone always closes).
+// Initialize has finished and closed initDone. If initialization was never
+// armed (ArmInit was not called, e.g. a coordinator built outside app
+// startup), there is nothing to wait for and this returns nil immediately
+// rather than blocking until ctx is cancelled.
 func WaitForInit(ctx context.Context) error {
+	initMu.Lock()
+	started := initStarted
+	initMu.Unlock()
+	if !started {
+		return nil
+	}
 	select {
 	case <-initDone:
 		return nil
@@ -260,50 +327,137 @@ func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore)
 	return initClient(ctx, cfg, name, m, cfg.Resolver())
 }
 
-// nameLock returns the mutex serializing lifecycle mutations for one server.
-func nameLock(name string) *sync.Mutex {
-	nameLocksMu.Lock()
-	defer nameLocksMu.Unlock()
-	if mu, ok := nameLocks.Get(name); ok {
-		return mu
+// AuthenticateMCP initiates the OAuth flow for an MCP server that is in
+// StateNeedsAuth. It creates the OAuth handler (which starts a local
+// callback server), connects to the server (which triggers the browser
+// auth flow on 401), and transitions to StateConnected on success.
+func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) error {
+	m, exists := cfg.Config().MCP[name]
+	if !exists {
+		return fmt.Errorf("mcp '%s' not found in configuration", name)
 	}
-	mu := &sync.Mutex{}
-	nameLocks.Set(name, mu)
-	return mu
+
+	if !m.OAuth || m.Type != config.MCPHttp {
+		return fmt.Errorf("mcp '%s' does not use OAuth authentication", name)
+	}
+
+	updateState(name, StateStarting, nil, nil, Counts{})
+
+	// This is the user-initiated flow, so permit the interactive browser
+	// authorization the handler otherwise withholds during startup.
+	ctx = mcpoauth.WithInteractive(ctx)
+
+	// The OAuth handler persists the token automatically as it is
+	// exchanged, so a successful connection has already saved it.
+	_, err := connectAndRegister(ctx, cfg, name, m, cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// PendingAuthServer describes an MCP server awaiting OAuth.
+type PendingAuthServer struct {
+	Name string
+	URL  string
+}
+
+// MCPAuthURL returns the current OAuth authorization URL for the named
+// MCP, or empty if none is in progress.
+func MCPAuthURL(name string) string {
+	h, ok := authURLs.Get(name)
+	if !ok || h == nil {
+		return ""
+	}
+	return h.AuthURL()
+}
+
+// PendingAuthMCPs returns MCP servers in StateNeedsAuth with their URLs.
+func PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer {
+	var pending []PendingAuthServer
+	for name, info := range states.Seq2() {
+		if info.State == StateNeedsAuth {
+			url := ""
+			if m, ok := cfg.Config().MCP[name]; ok {
+				url = m.URL
+			}
+			pending = append(pending, PendingAuthServer{Name: name, URL: url})
+		}
+	}
+	slices.SortFunc(pending, func(a, b PendingAuthServer) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return pending
 }
 
 // initClient initializes a single MCP client with the given configuration.
 func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) error {
-	mu := nameLock(name)
-	mu.Lock()
-	defer mu.Unlock()
+	// OAuth MCPs without a usable cached token require user interaction
+	// (browser auth). If a cached token exists with an access token
+	// (even if expired), try connecting first so the SDK can attempt a
+	// silent refresh. Only defer to the UI if no token is available at
+	// all or the token is structurally invalid (empty access token).
+	if m.OAuth && m.Type == config.MCPHttp && !hasUsableToken(m.OAuthToken) {
+		if m.OAuthToken != nil {
+			clearOAuthToken(cfg, name)
+		}
+		updateState(name, StateNeedsAuth, nil, nil, Counts{})
+		clearMCPData(name)
+		slog.Info("MCP server requires OAuth authentication", "name", name)
+		return nil
+	}
 
-	// Set initial starting state.
 	updateState(name, StateStarting, nil, nil, Counts{})
-
-	// createSession handles its own timeout internally.
-	session, err := createSession(ctx, name, m, resolver, ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
+	_, err := connectAndRegister(ctx, cfg, name, m, resolver, ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
+		// If an OAuth MCP fails because the saved token is no longer
+		// valid (e.g. refresh token expired or revoked) or no token
+		// could be obtained, clear the stale token and prompt the user
+		// to re-authenticate instead of leaving the server stuck in
+		// StateError.
+		if m.OAuth && m.Type == config.MCPHttp && isOAuthInitErr(err) {
+			if m.OAuthToken != nil {
+				clearOAuthToken(cfg, name)
+			}
+			updateState(name, StateNeedsAuth, nil, nil, Counts{})
+			slog.Info("MCP OAuth token is no longer valid, re-authentication required", "name", name, "error", err)
+			return nil
+		}
 		return err
+	}
+	return nil
+}
+
+// connectAndRegister creates a session, lists tools and prompts,
+// registers them in global state, and transitions to StateConnected.
+// Returns the session so callers can perform post-processing (e.g.
+// token persistence).
+func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
+	session, err := createSession(ctx, cfg, name, m, resolver, channelOptIn)
+	if err != nil {
+		return nil, err
 	}
 
 	toolCount, err := registerSessionTools(ctx, cfg, name, session)
 	if err != nil {
 		slog.Error("Error listing tools", "error", err)
-		updateState(name, StateError, err, session, Counts{})
-		return err
+		updateState(name, StateError, err, nil, Counts{})
+		closeSession(name, session)
+		return nil, err
 	}
 
 	prompts, err := getPrompts(ctx, session)
 	if err != nil {
 		slog.Error("Error listing prompts", "error", err)
-		updateState(name, StateError, err, session, Counts{})
-		return err
+		updateState(name, StateError, err, nil, Counts{})
+		closeSession(name, session)
+		return nil, err
 	}
 
 	updatePrompts(name, prompts)
-	// A repeated init (e.g. enable called twice) must not overwrite a live
-	// session without closing it — that leaks the child process and pipes.
+
+	// A repeated init must not overwrite a live session without closing it —
+	// that leaks the child process and pipes.
 	if old, ok := sessions.Take(name); ok && old != session {
 		closeSession(name, old)
 	}
@@ -314,23 +468,17 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		Prompts: len(prompts),
 	})
 
-	return nil
+	return session, nil
 }
 
 // DisableSingle disables and closes a single MCP client by name.
 func DisableSingle(cfg *config.ConfigStore, name string) error {
-	mu := nameLock(name)
-	mu.Lock()
-	defer mu.Unlock()
-
 	if session, ok := sessions.Take(name); ok {
 		closeSession(name, session)
 	}
 
-	// Clear tools, prompts, and resources for this MCP.
-	updateTools(cfg, name, nil)
-	updatePrompts(name, nil)
-	updateResources(name, nil)
+	// Clear tools, prompts, resources, and auth state for this MCP.
+	clearMCPData(name)
 
 	// Update state to disabled.
 	updateState(name, StateDisabled, nil, nil, Counts{})
@@ -340,69 +488,111 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 }
 
 func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string) (*ClientSession, error) {
-	// The whole ping→renew→re-register sequence runs under the per-name lock,
-	// making renewal single-flight: a caller that raced a renewal re-pings the
-	// fresh session the winner installed and returns it, instead of tearing it
-	// down and building another.
-	mu := nameLock(name)
+	m := cfg.Config().MCP[name]
+	timeout := mcpTimeout(m)
+
+	// Fast path: reuse a healthy session without taking the renewal lock.
+	if sess, ok := sessions.Get(name); ok {
+		if err := pingSession(ctx, sess, timeout); err == nil {
+			return sess, nil
+		}
+	}
+
+	// Serialize renewals per server. Two concurrent tool calls can both
+	// observe a dead session and race to rebuild it: one may close the
+	// session the other just registered, or overwrite and leak a live
+	// replacement. Under this lock only the first arrival rebuilds; later
+	// arrivals re-check and reuse the healthy result.
+	mu := renewLock(name)
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Under the lock the map is stable: any in-flight renewal has finished and
+	// either re-registered its session or failed and left none. A renewal
+	// removes the session transiently (StateError takes it before rebuilding),
+	// so this check must happen here rather than before the lock — otherwise a
+	// caller arriving mid-renewal sees no session and wrongly reports the
+	// server unavailable.
 	sess, ok := sessions.Get(name)
 	if !ok {
 		return nil, fmt.Errorf("mcp '%s' not available", name)
 	}
 
-	m := cfg.Config().MCP[name]
-	state, _ := states.Get(name)
-
-	timeout := mcpTimeout(m)
-	pingCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	err := sess.Ping(pingCtx, nil)
-	if err == nil {
+	// A concurrent goroutine may have already renewed the session while we
+	// waited for the lock. Reuse it if it is now healthy.
+	pingErr := pingSession(ctx, sess, timeout)
+	if pingErr == nil {
 		return sess, nil
 	}
-	// Report the failure against the exact session that failed the ping, so
-	// only that session is closed and deregistered.
-	updateState(name, StateError, maybeTimeoutErr(err, timeout), sess, state.Counts)
 
-	fresh, err := createSession(ctx, name, m, cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
+	state, _ := states.Get(name)
+	// StateError closes the dead session and clears its tools, prompts, and
+	// resources from the registry.
+	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), nil, state.Counts)
+
+	newSess, err := newSession(ctx, cfg, name, m, cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
+		clearMCPData(name)
+		// If an OAuth MCP fails to reconnect because the token is no
+		// longer valid, clear the stale token and prompt the user to
+		// re-authenticate instead of leaving it in an error state.
+		if m.OAuth && m.Type == config.MCPHttp {
+			if m.OAuthToken != nil && isOAuthInitErr(err) {
+				clearOAuthToken(cfg, name)
+			}
+			updateState(name, StateNeedsAuth, nil, nil, Counts{})
+			slog.Info("MCP OAuth session expired, re-authentication required", "name", name, "error", err)
+		}
 		return nil, err
 	}
 
-	// The StateError transition above cleared this server's tools and prompts
-	// from the registry (and closed the dead session). Re-list and re-register
-	// both on the fresh session; otherwise the agent reconnects but the LLM's
-	// tool list stays empty and the next call fails with "tool not found",
-	// and the commands menu keeps stale prompts.
-	counts := state.Counts
-	counts.Tools, err = registerSessionTools(ctx, cfg, name, fresh)
+	// StateError cleared this server's tools, prompts, and resources from the
+	// registry. Re-list and re-register them all on the fresh session and
+	// recompute the counts from what actually registered; otherwise the agent
+	// reconnects but the registries stay empty (the next tool call fails with
+	// "tool not found") while the reported counts still advertise capabilities
+	// that are no longer there.
+	var counts Counts
+	counts.Tools, err = registerSessionTools(ctx, cfg, name, newSess)
 	if err != nil {
-		updateState(name, StateError, err, fresh, state.Counts)
+		updateState(name, StateError, err, nil, Counts{})
+		closeSession(name, newSess)
 		return nil, err
 	}
 
-	prompts, err := getPrompts(ctx, fresh)
+	prompts, err := getPrompts(ctx, newSess)
 	if err != nil {
-		slog.Warn("Error re-listing prompts after MCP renewal", "name", name, "error", err)
+		updateState(name, StateError, err, nil, Counts{})
+		closeSession(name, newSess)
+		return nil, err
 	}
 	updatePrompts(name, prompts)
 	counts.Prompts = len(prompts)
 
-	sessions.Set(name, fresh)
-	updateState(name, StateConnected, nil, fresh, counts)
-	return fresh, nil
+	resources, err := getResources(ctx, newSess)
+	if err != nil {
+		updateState(name, StateError, err, nil, Counts{})
+		closeSession(name, newSess)
+		return nil, err
+	}
+	counts.Resources = updateResources(name, resources)
+
+	sessions.Set(name, newSess)
+	updateState(name, StateConnected, nil, newSess, counts)
+	return newSess, nil
+}
+
+// pingSession pings a session with the server's configured timeout.
+func pingSession(ctx context.Context, s *ClientSession, timeout time.Duration) error {
+	pingCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return s.Ping(pingCtx, nil)
 }
 
 // closeSession closes an MCP session, logging only unexpected errors. EOF,
 // context cancellation, and a killed child are the ordinary result of tearing
 // a session down and are not worth surfacing.
 func closeSession(name string, s *ClientSession) {
-	if s == nil || s.ClientSession == nil {
-		return
-	}
 	if err := s.Close(); err != nil &&
 		!errors.Is(err, io.EOF) &&
 		!errors.Is(err, context.Canceled) &&
@@ -414,47 +604,36 @@ func closeSession(name string, s *ClientSession) {
 // updateState updates the state of an MCP client and publishes an event
 func updateState(name string, state State, err error, client *ClientSession, counts Counts) {
 	info := ClientInfo{
-		Name:    name,
-		State:   state,
-		Error:   err,
-		Client:  client,
-		Counts:  counts,
+		Name:   name,
+		State:  state,
+		Error:  err,
+		Client: client,
+		Counts: counts,
+		// Channel marks a server that is an active channel, for the MCP list
+		// marker and the channels dialog.
 		Channel: client != nil && client.channel,
 	}
 	switch state {
 	case StateConnected:
 		info.ConnectedAt = time.Now()
 	case StateError:
-		// A session that has errored is dead to us: close it so the child
-		// process and its stdio pipes are released, and clear its tool/prompt
-		// registrations so the agent stops advertising capabilities it can no
-		// longer call. Crucially, close exactly the session that errored (the
-		// client argument): if the registry already holds a DIFFERENT session
-		// — a newer, healthy one another path installed — leave it and its
-		// registrations alone. Closing "whatever is in the map" here used to
-		// let a stale error transition tear down a healthy replacement.
-		switch {
-		case client != nil:
-			if cur, ok := sessions.Get(name); ok && cur == client {
-				sessions.Del(name)
-				allTools.Del(name)
-				updatePrompts(name, nil)
-				updateResources(name, nil)
-			}
-			closeSession(name, client)
-		default:
-			// No specific session errored (e.g. connect itself failed);
-			// anything still registered under this name is unusable.
-			if old, ok := sessions.Take(name); ok {
-				closeSession(name, old)
-			}
-			allTools.Del(name)
-			updatePrompts(name, nil)
-			updateResources(name, nil)
+		// A session that has errored is dead to us. Atomically remove it and
+		// close it so the child process and its stdio pipes are released — the
+		// bare map delete this used to do leaked both. Clearing the tool
+		// registry keeps the agent from advertising tools it can no longer
+		// call: without it, crush_info / the `/mcp` menu and the tool list
+		// handed to the LLM diverge, so a server still reads "connected, N
+		// tools" while every call fails with "tool not found".
+		if old, ok := sessions.Take(name); ok {
+			closeSession(name, old)
 		}
-		// Never publish a dead session on the state.
-		info.Client = nil
-		info.Channel = false
+		// Drop every registry entry for the dead server. Leaving prompts or
+		// resources behind lets a disconnected server keep advertising
+		// capabilities the agent can no longer fulfil, the same divergence the
+		// tool clear prevents.
+		allTools.Del(name)
+		allPrompts.Del(name)
+		allResources.Del(name)
 	}
 	states.Set(name, info)
 
@@ -468,12 +647,12 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	})
 }
 
-func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
+func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
 
-	transport, err := createTransport(mcpCtx, m, resolver)
+	transport, oauthHandler, err := createTransport(mcpCtx, cfg, name, m, resolver)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		slog.Error("Error creating MCP client", "error", err, "name", name)
@@ -482,11 +661,13 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 		return nil, err
 	}
 
-	// Wrap the transport so channel notifications can be intercepted. The gate
-	// starts closed and is only opened below once the server is confirmed to
-	// declare the channel capability and to have been opted in via --channels,
-	// so a non-channel or non-enabled server can never inject content.
-	channelGate := &atomic.Bool{}
+	// Wrap the transport so channel notifications can be intercepted. The
+	// gate starts undecided: notifications that arrive during capability
+	// negotiation are buffered. After Connect resolves, the gate is opened
+	// (and the buffer drained) only when the server declares the channel
+	// capability AND was opted in via --channels; otherwise it is closed
+	// (buffer discarded). This prevents early notifications from being lost.
+	channelGate := newChannelGate()
 	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
 	client := mcp.NewClient(
@@ -515,7 +696,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 				})
 			},
 			LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
-				level := parseLevel(req.Params.Level)
+				level := parseLevel(string(req.Params.Level))
 				slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
 			},
 		},
@@ -534,17 +715,28 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	cancelTimer.Stop()
 	slog.Debug("MCP client initialized", "name", name)
 
-	// Open the channel gate only for a server that both declares the
-	// claude/channel capability and was opted in — via --channels or
-	// channel_enabled in config. Merely listing a server under mcp is not
-	// enough; this enforces the "listed is not enabled" model.
+	// Resolve the channel gate: open only for a server that both declares
+	// the claude/channel capability and was opted in via --channels.
+	// Otherwise close it (fail closed). Resolving drains buffered messages
+	// that arrived during negotiation so a fast server does not lose early
+	// events.
 	isChannel := channelOptIn && hasChannelCapability(session.InitializeResult())
 	if isChannel {
-		channelGate.Store(true)
-		slog.Info("MCP channel enabled", "name", name)
+		buffered := channelGate.resolve(true)
+		for _, raw := range buffered {
+			publishChannelMessage(mcpCtx, name, raw)
+		}
+		slog.Info("MCP channel enabled", "name", name, "buffered", len(buffered))
+	} else {
+		channelGate.resolve(false)
 	}
 
-	return &ClientSession{ClientSession: session, cancel: cancel, channel: isChannel}, nil
+	return &ClientSession{
+		ClientSession: session,
+		cancel:        cancel,
+		oauthHandler:  oauthHandler,
+		channel:       isChannel,
+	}, nil
 }
 
 // maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail
@@ -558,10 +750,9 @@ func maybeStdioErr(err error, transport mcp.Transport) error {
 	if !errors.Is(err, io.EOF) {
 		return err
 	}
-	// Every transport is wrapped in a channelTransport before Connect; the
-	// stdio transport we're probing for is the inner one. Without this unwrap
-	// the assertion below never matches and stdio startup failures report a
-	// bare EOF instead of the child's actual output.
+	// Unwrap a channelTransport to reach the stdio command it wraps: a channel
+	// stdio server surfaces its child's stderr diagnostics through the inner
+	// CommandTransport, not through the channel wrapper's own type.
 	if cw, ok := transport.(*channelTransport); ok {
 		transport = cw.inner
 	}
@@ -582,23 +773,23 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 	return err
 }
 
-func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
+func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, *mcpoauth.Handler, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		command, err := resolver.ResolveValue(m.Command)
 		if err != nil {
-			return nil, fmt.Errorf("invalid mcp command: %w", err)
+			return nil, nil, fmt.Errorf("invalid mcp command: %w", err)
 		}
 		if strings.TrimSpace(command) == "" {
-			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
+			return nil, nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
 		args, err := m.ResolvedArgs(resolver)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		envs, err := m.ResolvedEnv(resolver)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		cmd := exec.CommandContext(ctx, home.Long(command), args...)
 		cmd.Env = append(os.Environ(), envs...)
@@ -610,77 +801,142 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		configureStdioProcess(cmd)
 		return &mcp.CommandTransport{
 			Command: cmd,
-		}, nil
+		}, nil, nil
 	case config.MCPHttp:
 		url, err := m.ResolvedURL(resolver)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if strings.TrimSpace(url) == "" {
-			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
+			return nil, nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
 		}
+
+		// OAuth-enabled HTTP transport. The handler persists the token
+		// (and the client registration/endpoints needed to refresh it)
+		// on every exchange and refresh via this saver.
+		if m.OAuth {
+			tokenSaver := func(tok *oauth.Token) {
+				if err := cfg.SetConfigField(config.ScopeGlobal, fmt.Sprintf("mcp.%s.oauth_token", name), tok); err != nil {
+					slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
+				} else {
+					slog.Info("Persisted MCP OAuth token", "name", name)
+				}
+			}
+
+			// A pre-registered client is required for servers that do not
+			// support dynamic client registration (e.g. GitHub, Slack).
+			// Resolve the credentials through the shell like other config
+			// values so $VAR and $(cmd) work.
+			var preregistered *oauth.OAuthClient
+			if strings.TrimSpace(m.OAuthClientID) != "" {
+				clientID, err := resolver.ResolveValue(m.OAuthClientID)
+				if err != nil {
+					return nil, nil, fmt.Errorf("oauth_client_id: %w", err)
+				}
+				clientSecret, err := resolver.ResolveValue(m.OAuthClientSecret)
+				if err != nil {
+					return nil, nil, fmt.Errorf("oauth_client_secret: %w", err)
+				}
+				preregistered = &oauth.OAuthClient{
+					ClientID:     strings.TrimSpace(clientID),
+					ClientSecret: strings.TrimSpace(clientSecret),
+				}
+			}
+
+			// Normalize trailing slash for PRM discovery compatibility.
+			normalizedURL := strings.TrimSuffix(url, "/")
+			oauthHandler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
+			if oauthErr != nil {
+				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
+			}
+			authURLs.Set(name, oauthHandler)
+			return &mcp.StreamableClientTransport{
+				Endpoint:     url,
+				OAuthHandler: oauthHandler,
+			}, oauthHandler, nil
+		}
+
 		headers, err := m.ResolvedHeaders(resolver)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		client := &http.Client{
 			Transport: &headerRoundTripper{
 				headers: headers,
 			},
 		}
-		transport := &mcp.StreamableClientTransport{
+		return &mcp.StreamableClientTransport{
 			Endpoint:   url,
 			HTTPClient: client,
-		}
-		// Enable OAuth for HTTP servers that don't have a static
-		// Authorization header. This allows browser-based OAuth flows
-		// (e.g. Cairn, other MCP servers using OIDC) to work
-		// automatically: on 401, the SDK opens a browser for the user
-		// to authenticate, captures the callback, and retries.
-		if !hasAuthHeader(headers) {
-			transport.OAuthHandler = newMCPOAuthHandler(url)
-		}
-		return transport, nil
+		}, nil, nil
 	case config.MCPSSE:
 		url, err := m.ResolvedURL(resolver)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if strings.TrimSpace(url) == "" {
-			return nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
+			return nil, nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
 		}
 		headers, err := m.ResolvedHeaders(resolver)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		client := &http.Client{
-			Transport: &headerRoundTripper{
-				headers: headers,
-			},
+
+		var transport http.RoundTripper = &headerRoundTripper{headers: headers}
+		var oauthHandler *mcpoauth.Handler
+
+		// SSE transports don't support the SDK's OAuthHandler natively,
+		// so we wrap the HTTP transport with our own round-tripper that
+		// injects bearer tokens and handles 401-triggered authorization.
+		// Based on Bruno Krugel's oauthRoundTripper from PR #3396.
+		if m.OAuth {
+			tokenSaver := func(tok *oauth.Token) {
+				if err := cfg.SetConfigField(config.ScopeGlobal, fmt.Sprintf("mcp.%s.oauth_token", name), tok); err != nil {
+					slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
+				} else {
+					slog.Info("Persisted MCP OAuth token", "name", name)
+				}
+			}
+
+			var preregistered *oauth.OAuthClient
+			if strings.TrimSpace(m.OAuthClientID) != "" {
+				clientID, err := resolver.ResolveValue(m.OAuthClientID)
+				if err != nil {
+					return nil, nil, fmt.Errorf("oauth_client_id: %w", err)
+				}
+				clientSecret, err := resolver.ResolveValue(m.OAuthClientSecret)
+				if err != nil {
+					return nil, nil, fmt.Errorf("oauth_client_secret: %w", err)
+				}
+				preregistered = &oauth.OAuthClient{
+					ClientID:     strings.TrimSpace(clientID),
+					ClientSecret: strings.TrimSpace(clientSecret),
+				}
+			}
+
+			// Normalize trailing slash for PRM discovery compatibility.
+			normalizedURL := strings.TrimSuffix(url, "/")
+			handler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
+			if oauthErr != nil {
+				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
+			}
+			oauthHandler = handler
+			authURLs.Set(name, handler)
+			transport = newOAuthRoundTripper(handler, transport)
 		}
+
+		client := &http.Client{Transport: transport}
 		return &mcp.SSEClientTransport{
 			Endpoint:   url,
 			HTTPClient: client,
-		}, nil
+		}, oauthHandler, nil
 	default:
-		return nil, fmt.Errorf("unsupported mcp type: %s", m.Type)
+		return nil, nil, fmt.Errorf("unsupported mcp type: %s", m.Type)
 	}
 }
 
 type headerRoundTripper struct {
 	headers map[string]string
-}
-
-// hasAuthHeader reports whether the headers map contains an
-// Authorization key (case-insensitive). When true, the server is
-// using static bearer-token auth and the OAuth handler is skipped.
-func hasAuthHeader(headers map[string]string) bool {
-	for k := range headers {
-		if strings.EqualFold(k, "Authorization") {
-			return true
-		}
-	}
-	return false
 }
 
 func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -690,18 +946,121 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return http.DefaultTransport.RoundTrip(req)
 }
 
+// oauthRoundTripper wraps an HTTP transport with OAuth bearer token
+// injection and 401-triggered authorization. Used for SSE transports
+// that don't support the SDK's OAuthHandler natively. Based on Bruno
+// Krugel's implementation from PR #3396.
+type oauthRoundTripper struct {
+	base    http.RoundTripper
+	handler auth.OAuthHandler
+}
+
+func newOAuthRoundTripper(handler auth.OAuthHandler, base http.RoundTripper) *oauthRoundTripper {
+	return &oauthRoundTripper{base: base, handler: handler}
+}
+
+func (rt *oauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := rt.doRequestWithToken(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if authErr := rt.handler.Authorize(req.Context(), req, resp); authErr != nil {
+			return resp, nil
+		}
+		resp.Body.Close()
+		return rt.doRequestWithToken(req.Clone(req.Context()))
+	}
+
+	return resp, nil
+}
+
+func (rt *oauthRoundTripper) doRequestWithToken(req *http.Request) (*http.Response, error) {
+	ts, err := rt.handler.TokenSource(req.Context())
+	if err != nil {
+		return nil, fmt.Errorf("oauth token source: %w", err)
+	}
+	if ts != nil {
+		token, err := ts.Token()
+		if err == nil && token != nil {
+			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+		}
+	}
+	return rt.base.RoundTrip(req)
+}
+
 func mcpTimeout(m config.MCPConfig) time.Duration {
-	return time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
+	if m.Timeout > 0 {
+		return time.Duration(m.Timeout) * time.Second
+	}
+	// OAuth flows require user interaction in a browser, so use a
+	// generous default to avoid timing out mid-auth.
+	if m.OAuth {
+		return 5 * time.Minute
+	}
+	return 15 * time.Second
+}
+
+// hasUsableToken returns true if the saved OAuth token has an access
+// token that can be used or refreshed. A token with an empty access
+// token is structurally invalid and should be treated as missing.
+func hasUsableToken(tok *oauth.Token) bool {
+	return tok != nil && tok.AccessToken != ""
+}
+
+// isOAuthInitErr returns true if the error indicates the OAuth token
+// is missing, no longer valid, or cannot be refreshed. This covers:
+//   - invalid_grant: expired or revoked refresh tokens
+//   - invalid_client: deleted or deactivated client registrations
+//   - "no token available": the handler had no cached token to use
+//   - interactive authorization was required but withheld during startup
+func isOAuthInitErr(err error) bool {
+	if errors.Is(err, mcpoauth.ErrInteractiveAuthRequired) {
+		return true
+	}
+	var rErr *oauth2.RetrieveError
+	if errors.As(err, &rErr) {
+		return rErr.ErrorCode == "invalid_grant" || rErr.ErrorCode == "invalid_client"
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "invalid_grant") ||
+		strings.Contains(msg, "invalid_client") ||
+		strings.Contains(msg, "no token available")
+}
+
+// clearOAuthToken removes the persisted OAuth token for a named MCP
+// server from the global config so subsequent startups don't retry
+// with a known-bad refresh token.
+func clearOAuthToken(cfg *config.ConfigStore, name string) {
+	key := fmt.Sprintf("mcp.%s.oauth_token", name)
+	if err := cfg.RemoveConfigField(config.ScopeGlobal, key); err != nil {
+		slog.Warn("Failed to clear stale MCP OAuth token", "name", name, "error", err)
+	}
+}
+
+// clearMCPData removes a stale MCP server's tools, prompts,
+// resources, and auth handlers from global state so they are not
+// served to the agent.
+func clearMCPData(name string) {
+	allTools.Del(name)
+	allPrompts.Del(name)
+	allResources.Del(name)
+	if h, ok := authURLs.Get(name); ok {
+		h.Close()
+		authURLs.Del(name)
+	}
 }
 
 func stdioCheck(old *exec.Cmd) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	// old.Args already includes argv0; passing it whole would duplicate the
-	// program name in the re-exec.
-	var args []string
-	if len(old.Args) > 1 {
-		args = old.Args[1:]
+	// old.Args includes argv0 as the first element; exec.CommandContext
+	// prepends old.Path as argv0, so we must skip it to avoid duplication
+	// (e.g. "npx npx -y pkg" instead of "npx -y pkg").
+	args := old.Args
+	if len(args) > 0 {
+		args = args[1:]
 	}
 	cmd := exec.CommandContext(ctx, old.Path, args...)
 	cmd.Env = old.Env

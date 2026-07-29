@@ -151,4 +151,47 @@ func TestLmstudioEnricher(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "User Name", result[0].Name)
 	})
+
+	t.Run("populates SupportsImages from capabilities.vision", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"models": [
+					{
+						"key": "vision-model",
+						"display_name": "Vision Model",
+						"max_context_length": 131072,
+						"capabilities": {"vision": true}
+					},
+					{
+						"key": "text-only-model",
+						"display_name": "Text Only",
+						"max_context_length": 32768,
+						"capabilities": {"vision": false}
+					},
+					{
+						"key": "no-capabilities",
+						"display_name": "No Capabilities Field",
+						"max_context_length": 8192
+					}
+				]
+			}`))
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL}
+		models := []catwalk.Model{
+			{ID: "vision-model", Name: "vision-model"},
+			{ID: "text-only-model", Name: "text-only-model"},
+			{ID: "no-capabilities", Name: "no-capabilities"},
+		}
+
+		e := &lmstudioEnricher{}
+		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.True(t, result[0].SupportsImages, "vision model should have SupportsImages=true")
+		require.False(t, result[1].SupportsImages, "text-only model should have SupportsImages=false")
+		require.False(t, result[2].SupportsImages, "model without capabilities should default to false")
+	})
 }

@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
@@ -29,14 +30,17 @@ type countingWorkspace struct {
 
 	ready     bool
 	agentBusy bool
-	busy      map[string]bool
-	yolo      bool
-	queued    []string
+	// sessionBusy is the value AgentIsSessionBusy reports (fork: session-
+	// scoped busy).
+	sessionBusy bool
+	yolo        bool
+	queued      []string
 
-	readyCalls       int
-	agentBusyCalls   int
-	sessionBusyCalls int
-	sessionBusyIDs   []string
+	readyCalls     int
+	agentBusyCalls int
+	// sessionBusyCalls records each session ID AgentIsSessionBusy was probed
+	// with, in order (fork: session-scoped busy).
+	sessionBusyCalls []string
 	queuedCalls      int
 	queueListCalls   int
 	permCalls        int
@@ -48,10 +52,20 @@ type countingWorkspace struct {
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
 
+// AgentIsSessionBusy records the session ID it was probed with so a test can
+// assert the busy refresh was scoped to the current session (fork: session-
+// scoped busy).
 func (w *countingWorkspace) AgentIsSessionBusy(sessionID string) bool {
-	w.sessionBusyCalls++
-	w.sessionBusyIDs = append(w.sessionBusyIDs, sessionID)
-	return w.busy[sessionID]
+	w.sessionBusyCalls = append(w.sessionBusyCalls, sessionID)
+	return w.sessionBusy
+}
+
+func (w *countingWorkspace) AgentReadyErr() error {
+	w.readyCalls++
+	if w.ready {
+		return nil
+	}
+	return workspace.ErrAgentNotInitialized
 }
 
 func (w *countingWorkspace) AgentQueuedPrompts(string) int {
@@ -90,13 +104,12 @@ func (w *countingWorkspace) Config() *config.Config { return nil }
 // zero — the busy/queue invariant is that no workspace call ever happens on
 // the Update goroutine.
 func (w *countingWorkspace) syncProbes() int {
-	return w.readyCalls + w.agentBusyCalls + w.sessionBusyCalls +
+	return w.readyCalls + w.agentBusyCalls +
 		w.queuedCalls + w.queueListCalls + w.permCalls
 }
 
 func (w *countingWorkspace) resetCounters() {
-	w.readyCalls, w.agentBusyCalls, w.sessionBusyCalls = 0, 0, 0
-	w.sessionBusyIDs = nil
+	w.readyCalls, w.agentBusyCalls = 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
 }
@@ -133,10 +146,12 @@ func pinTTLs(t *testing.T) {
 }
 
 // warmCaches marks all memoized workspace state fresh so only explicit
-// invalidation (not startup staleness) can trigger refresh dispatches.
-func warmCaches(m *UI, sessionBusy bool) {
-	m.agentBusyCache.set(sessionBusy)
-	m.sessionBusyCache.setForSession(sessionBusy, m.currentSessionID())
+// invalidation (not startup staleness) can trigger refresh dispatches. It
+// warms the session-scoped busy cache too, since the TTL backstop treats an
+// unwarmed sessionBusyCache as stale (fork: session-scoped busy).
+func warmCaches(m *UI, busy bool) {
+	m.agentBusyCache.set(busy)
+	m.sessionBusyCache.setForSession(busy, m.currentSessionID())
 	m.yoloCache.set(false)
 	m.promptQueueCheckedAt = time.Now()
 }
@@ -165,9 +180,11 @@ type plainMsg struct{}
 
 // TestUpdateDoesNotProbeWorkspacePerMessage pins the hot-path fix: Update
 // used to call AgentQueuedPrompts (a synchronous HTTP GET in client/server
-// mode) at the top of EVERY message — every keystroke blocked the single
-// Update goroutine on a network round-trip. Now Update performs no
-// synchronous workspace call at all; refreshes are dispatched as commands.
+// mode) at the top of every message while the agent was busy, and the
+// placeholder path probed AgentIsReady/AgentIsBusy/PermissionSkipRequests —
+// every keystroke blocked the single Update goroutine on network round-
+// trips. Now Update performs no synchronous workspace call at all; refreshes
+// are dispatched as commands.
 func TestUpdateDoesNotProbeWorkspacePerMessage(t *testing.T) {
 	pinTTLs(t)
 
@@ -189,68 +206,20 @@ func TestUpdateDoesNotProbeWorkspacePerMessage(t *testing.T) {
 func TestReadsNeverProbeWorkspace(t *testing.T) {
 	pinTTLs(t)
 
-	ws := &countingWorkspace{ready: true, busy: map[string]bool{"s1": true}}
+	ws := &countingWorkspace{ready: true, agentBusy: true}
 	m := newBusyUI(ws)
 
 	for range 10 {
-		m.isCurrentSessionBusy()
 		m.isAgentBusy()
 		m.yoloModeCached()
 	}
 	require.Zero(t, ws.syncProbes(), "cache reads must never probe the workspace")
 }
 
-// TestBusyRefreshIsSessionScoped is the core of #28/#29 carried over to the
-// off-thread refresh: the current session's busy state must reflect only its
-// own activity, never another session's.
-func TestBusyRefreshIsSessionScoped(t *testing.T) {
-	pinTTLs(t)
-
-	refresh := func(m *UI) {
-		cmd := m.dispatchBusyRefresh()
-		require.NotNil(t, cmd)
-		m.Update(cmd())
-	}
-
-	t.Run("current session busy", func(t *testing.T) {
-		ws := &countingWorkspace{ready: true, busy: map[string]bool{"s1": true}}
-		m := newBusyUI(ws)
-		refresh(m)
-		require.True(t, m.isCurrentSessionBusy(),
-			"the viewed session's own activity must read as busy")
-	})
-
-	t.Run("another session busy does not affect current", func(t *testing.T) {
-		ws := &countingWorkspace{ready: true, busy: map[string]bool{"other": true}}
-		m := newBusyUI(ws)
-		refresh(m)
-		require.False(t, m.isCurrentSessionBusy(),
-			"another session's activity must not mark the current session busy")
-		for _, id := range ws.sessionBusyIDs {
-			require.Equal(t, "s1", id, "AgentIsSessionBusy must be scoped to the current session")
-		}
-	})
-
-	t.Run("agent not ready", func(t *testing.T) {
-		ws := &countingWorkspace{ready: false, busy: map[string]bool{"s1": true}}
-		m := newBusyUI(ws)
-		refresh(m)
-		require.False(t, m.isCurrentSessionBusy(), "a not-ready agent must not read as busy")
-	})
-
-	t.Run("no active session", func(t *testing.T) {
-		ws := &countingWorkspace{ready: true, busy: map[string]bool{"s1": true}}
-		m := newBusyUI(ws)
-		m.session = nil
-		refresh(m)
-		require.False(t, m.isCurrentSessionBusy(), "no active session must not read as busy")
-	})
-}
-
-// TestStreamingUpdatedEventsDoNotProbe pins the streaming regression fix:
-// per-chunk message UpdatedEvents arrive once per streamed token and must
-// neither probe the workspace synchronously nor schedule busy/queue
-// refreshes — only CreatedEvents (run boundaries) do.
+// TestStreamingUpdatedEventsDoNotProbe pins the streaming path: per-chunk
+// message UpdatedEvents arrive once per streamed token and must neither
+// probe the workspace synchronously nor schedule busy/queue refreshes —
+// only CreatedEvents (run boundaries) do.
 func TestStreamingUpdatedEventsDoNotProbe(t *testing.T) {
 	pinTTLs(t)
 
@@ -279,7 +248,7 @@ func TestStreamingUpdatedEventsDoNotProbe(t *testing.T) {
 func TestMessageCreatedEventRefreshesBusyAndQueue(t *testing.T) {
 	pinTTLs(t)
 
-	ws := &countingWorkspace{ready: true, busy: map[string]bool{"s1": true}, queued: []string{"queued prompt"}}
+	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"queued prompt"}}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
 	ws.resetCounters()
@@ -293,14 +262,14 @@ func TestMessageCreatedEventRefreshesBusyAndQueue(t *testing.T) {
 	require.True(t, m.promptQueueInFlight, "CreatedEvent must schedule a queue refresh")
 
 	runCmds(m, cmd)
-	require.True(t, m.isCurrentSessionBusy(), "refreshed busy state must land in the cache")
+	require.True(t, m.isAgentBusy(), "refreshed busy state must land in the cache")
 	require.Equal(t, 1, m.promptQueue, "refreshed queue count must land in the cache")
 	require.False(t, m.busyFetchInFlight)
 	require.False(t, m.promptQueueInFlight)
 }
 
 // TestAgentTerminalNotificationsRefreshBusy pins the busy→idle edge: the
-// agent clears its active request BEFORE publishing TypeAgentFinished (and
+// agent clears its active request before publishing TypeAgentFinished (and
 // TypeAgentError) precisely so observers can re-probe. The handler must
 // invalidate the memoized busy state and re-fetch busy + queue.
 func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
@@ -312,7 +281,7 @@ func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
 			m := newBusyUI(ws)
 			warmCaches(m, true) // stale: still busy
 			ws.resetCounters()
-			require.True(t, m.isCurrentSessionBusy())
+			require.True(t, m.isAgentBusy())
 
 			_, cmd := m.Update(pubsub.Event[notify.Notification]{
 				Type:    pubsub.CreatedEvent,
@@ -322,22 +291,22 @@ func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
 			require.True(t, m.promptQueueInFlight, "terminal notification must schedule a queue refresh")
 
 			runCmds(m, cmd)
-			require.False(t, m.isCurrentSessionBusy(),
+			require.False(t, m.isAgentBusy(),
 				"busy→idle edge must reach the cache without waiting for the TTL")
 		})
 	}
 }
 
 // TestSessionSwitchRefreshesQueueAndBusy: switching sessions must drop the
-// previous session's memoized busy state and queue pill and fetch the new
+// previous session's queue pill and memoized busy state and fetch the new
 // session's, so esc never offers to clear the wrong queue.
 func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, queued: []string{"a", "b"}}
 	m := newBusyUI(ws)
-	warmCaches(m, true) // s1 reads busy...
-	m.promptQueue = 5   // ...with a (stale) queue pill
+	warmCaches(m, true)
+	m.promptQueue = 5 // stale queue pill from the previous session
 	m.promptQueueItems = []string{"x", "y", "z", "w", "v"}
 	ws.resetCounters()
 
@@ -345,8 +314,6 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	require.Zero(t, m.promptQueue, "switching sessions must drop the old session's queue pill")
 	require.True(t, m.promptQueueInFlight, "session switch must schedule a queue refresh")
 	require.True(t, m.busyFetchInFlight, "session switch must schedule a busy refresh")
-	require.False(t, m.isCurrentSessionBusy(),
-		"the old session's busy state must not leak onto the new session")
 
 	runCmds(m, cmd)
 	require.Equal(t, 2, m.promptQueue, "the new session's queue must be fetched")
@@ -355,8 +322,7 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 
 // TestToggleYoloWritesThroughCache: both yolo toggle paths share
 // toggleYoloMode, which must write the known new value through the cache —
-// no invalidation, no re-probe (the old dialog path left the cache empty and
-// caused a double probe).
+// no invalidation, no re-probe.
 func TestToggleYoloWritesThroughCache(t *testing.T) {
 	pinTTLs(t)
 
@@ -379,9 +345,39 @@ func TestToggleYoloWritesThroughCache(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 }
 
-// TestSendMessageSetsOptimisticBusy pins the esc-after-enter fix: submitting
-// a prompt optimistically marks the agent busy so an immediate esc routes to
-// cancelAgent instead of reading a stale idle value and doing nothing.
+// TestLocalYoloToggleSupersedesInFlightProbe pins the generation bump in
+// toggleYoloMode: a busy/yolo probe dispatched before the toggle carries the
+// old generation. Without advancing busyFetchGen its stale result would land
+// with a still-matching generation and clobber the just-toggled value.
+func TestLocalYoloToggleSupersedesInFlightProbe(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, yolo: false}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	// A busy/yolo probe carrying the pre-toggle generation is in flight.
+	m.busyFetchInFlight = true
+	staleGen := m.busyFetchGen
+
+	require.True(t, m.toggleYoloMode())
+	require.NotEqual(t, staleGen, m.busyFetchGen,
+		"toggle must advance the busy generation to supersede in-flight probes")
+	require.True(t, m.yoloModeCached(), "toggle must write the new value through the cache")
+
+	// The stale probe (old generation, old yolo=false) lands.
+	m.busyFetchInFlight = true
+	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, yolo: false})
+	require.True(t, m.yoloModeCached(),
+		"stale probe must not overwrite the freshly toggled value")
+	require.NotEmpty(t, cmds, "stale probe must re-dispatch an authoritative refresh")
+	require.True(t, m.busyFetchInFlight, "re-dispatched refresh must be in flight")
+}
+
+// TestSendMessageSetsOptimisticBusy pins the esc-after-enter behavior:
+// submitting a prompt optimistically marks the agent busy so an immediate
+// esc routes to cancelAgent instead of reading a stale idle value and doing
+// nothing.
 func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 	pinTTLs(t)
 
@@ -394,8 +390,6 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 	require.NotNil(t, cmd)
 	require.True(t, m.isAgentBusy(),
 		"sendMessage must optimistically mark the agent busy")
-	require.True(t, m.isCurrentSessionBusy(),
-		"sendMessage must optimistically mark the session busy")
 
 	// esc right after enter: isAgentBusy gates cancelAgent, first press
 	// arms the double-press cancel.
@@ -437,7 +431,7 @@ func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
 func TestBackstopRefreshesStaleCaches(t *testing.T) {
 	pinTTLs(t)
 
-	ws := &countingWorkspace{ready: true, busy: map[string]bool{"s1": true}}
+	ws := &countingWorkspace{ready: true, agentBusy: true}
 	m := newBusyUI(ws)
 	// Caches start at their zero value: stale by definition.
 
@@ -453,10 +447,180 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 
 	runCmds(m, cmd)
 	require.False(t, m.busyFetchInFlight)
-	require.True(t, m.isCurrentSessionBusy(), "the backstop result must land in the cache")
-	require.Equal(t, 1, ws.sessionBusyCalls, "exactly one probe per backstop refresh")
+	require.True(t, m.isAgentBusy(), "the backstop result must land in the cache")
+	require.Equal(t, 1, ws.agentBusyCalls, "exactly one probe per backstop refresh")
 
 	// Freshly refreshed caches must not re-dispatch.
 	m.Update(plainMsg{})
 	require.False(t, m.busyFetchInFlight, "fresh caches must not re-dispatch the backstop")
+}
+
+// TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for
+// busy/permission state: a probe started before a newer state transition
+// (here an optimistic busy write) must not overwrite the newer value when it
+// lands, and the authoritative refresh must not be lost merely because the
+// older probe was in flight — the stale result re-dispatches it.
+func TestStaleBusyRefreshDiscardedAndReDispatched(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	// A busy probe is in flight; capture the generation it was dispatched
+	// with, then a newer transition (optimistic send) supersedes it.
+	m.busyFetchInFlight = true
+	staleGen := m.busyFetchGen
+	m.agentBusyCache.set(true) // optimistic busy
+	m.busyFetchGen++           // newer state transition
+
+	// The stale probe (agent reported idle) lands with the old generation.
+	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, agentBusy: false})
+	require.True(t, m.isAgentBusy(),
+		"a stale busy result must not overwrite the newer optimistic busy state")
+	require.NotEmpty(t, cmds,
+		"a stale busy result must re-dispatch the authoritative refresh")
+	require.True(t, m.busyFetchInFlight, "the re-dispatched probe must be in flight")
+
+	// The fresh probe (matching generation) is applied normally.
+	freshGen := m.busyFetchGen
+	m.applyBusyState(busyStateMsg{gen: freshGen, agentBusy: false})
+	require.False(t, m.isAgentBusy(), "a current-generation result must land in the cache")
+}
+
+// TestStalePromptQueueDiscardedAndReDispatched pins the generation guard for
+// the queue: a fetch started before a newer transition (here a queue clear)
+// must not repopulate the cleared queue, and it must re-dispatch the
+// authoritative fetch instead of being applied.
+func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, queued: []string{"real"}}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"real"}
+
+	// A fetch is in flight; capture its generation, then a newer transition
+	// (esc clears the queue) supersedes it.
+	m.promptQueueInFlight = true
+	staleGen := m.promptQueueGen
+	m.invalidatePromptQueue()
+	m.promptQueue = 0
+	m.promptQueueItems = nil
+
+	// The stale fetch (still saw one prompt) lands for the same session.
+	cmds := m.applyPromptQueue(promptQueueMsg{
+		forSession: "s1",
+		gen:        staleGen,
+		prompts:    []string{"stale"},
+	})
+	require.Zero(t, m.promptQueue,
+		"a stale queue result must not repopulate the cleared queue")
+	require.Empty(t, m.promptQueueItems)
+	require.NotEmpty(t, cmds,
+		"a stale queue result must re-dispatch the authoritative fetch")
+	require.True(t, m.promptQueueInFlight, "the re-dispatched fetch must be in flight")
+}
+
+// TestStalePromptQueuePreservesSessionScoping pins that the generation guard
+// does not weaken session scoping: a fetch scoped to a different session is
+// still discarded and re-fetched even when its generation would otherwise
+// match.
+func TestStalePromptQueuePreservesSessionScoping(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws) // active session "s1"
+	warmCaches(m, false)
+	m.promptQueueInFlight = true
+	gen := m.promptQueueGen
+
+	cmds := m.applyPromptQueue(promptQueueMsg{
+		forSession: "other",
+		gen:        gen,
+		prompts:    []string{"from other session"},
+	})
+	require.Zero(t, m.promptQueue,
+		"a result from a different session must never populate the queue")
+	require.NotEmpty(t, cmds, "a session-mismatched result must re-fetch for the current session")
+}
+
+// TestRemoteYoloToggleUpdatesEditorPrompt pins the second fix: when an
+// asynchronous busy-state refresh reports a yolo mode different from the
+// cached one (a remote toggle), applyBusyState must update the textarea
+// prompt function too, not just the cache — otherwise the prompt icon/style
+// keeps rendering the old mode.
+func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.textarea.Focus()
+	m.textarea.SetWidth(40)
+	m.yoloCache.set(false)
+	m.setEditorPrompt(false)
+	normalPrompt := ansi.Strip(m.textarea.View())
+
+	// A remote toggle flips yolo on; delivered via an off-thread refresh.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, yolo: true})
+	require.True(t, m.yoloModeCached(), "the refresh must write the new yolo value through the cache")
+	yoloPrompt := ansi.Strip(m.textarea.View())
+	require.NotEqual(t, normalPrompt, yoloPrompt,
+		"a remote yolo toggle must change the rendered editor prompt")
+	require.Contains(t, yoloPrompt, "Y",
+		"the yolo prompt icon must render after a remote toggle")
+
+	// Flipping back off must restore the normal prompt.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, yolo: false})
+	require.False(t, m.yoloModeCached())
+	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
+		"toggling yolo off must restore the normal editor prompt")
+}
+
+// TestBusyRefreshIsSessionScoped pins the fork's session-scoped busy feature:
+// isCurrentSessionBusy reflects only the VIEWED session's activity, never the
+// agent's activity in another session (fork: session-scoped busy).
+func TestBusyRefreshIsSessionScoped(t *testing.T) {
+	pinTTLs(t)
+
+	refresh := func(m *UI) {
+		cmd := m.dispatchBusyRefresh()
+		require.NotNil(t, cmd)
+		m.Update(cmd())
+	}
+
+	t.Run("current session busy", func(t *testing.T) {
+		ws := &countingWorkspace{ready: true, sessionBusy: true}
+		m := newBusyUI(ws)
+		refresh(m)
+		require.True(t, m.isCurrentSessionBusy(),
+			"the viewed session's own activity must read as busy")
+	})
+
+	t.Run("another session busy does not affect current", func(t *testing.T) {
+		ws := &countingWorkspace{ready: true, sessionBusy: false}
+		m := newBusyUI(ws)
+		refresh(m)
+		require.False(t, m.isCurrentSessionBusy(),
+			"a session not busy must not mark the current session busy")
+		for _, id := range ws.sessionBusyCalls {
+			require.Equal(t, "s1", id, "AgentIsSessionBusy must be scoped to the current session")
+		}
+	})
+
+	t.Run("agent not ready", func(t *testing.T) {
+		ws := &countingWorkspace{ready: false, sessionBusy: true}
+		m := newBusyUI(ws)
+		refresh(m)
+		require.False(t, m.isCurrentSessionBusy(), "a not-ready agent must not read as busy")
+	})
+
+	t.Run("no active session", func(t *testing.T) {
+		ws := &countingWorkspace{ready: true, sessionBusy: true}
+		m := newBusyUI(ws)
+		m.session = nil
+		refresh(m)
+		require.False(t, m.isCurrentSessionBusy(), "no active session must not read as busy")
+	})
 }

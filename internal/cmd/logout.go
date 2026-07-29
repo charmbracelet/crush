@@ -131,14 +131,17 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 		name string
 	}
 
+	// Only OAuth-based providers support login/logout. Keep this list in sync
+	// with the switch in RunE and the login command.
+	oauthProviders := map[string]string{
+		"hyper":   "Hyper",
+		"copilot": "GitHub Copilot",
+	}
+
 	var loggedIn []loggedInProvider
-	for p := range cfg.Providers.Seq() {
-		if p.OAuthToken != nil || p.APIKey != "" {
-			name := p.Name
-			if name == "" {
-				name = p.ID
-			}
-			loggedIn = append(loggedIn, loggedInProvider{id: p.ID, name: name})
+	for id, name := range oauthProviders {
+		if p, ok := cfg.Providers.Get(id); ok && p.OAuthToken != nil {
+			loggedIn = append(loggedIn, loggedInProvider{id: id, name: name})
 		}
 	}
 

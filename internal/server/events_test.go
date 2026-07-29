@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -49,33 +50,6 @@ func TestMessageToProtoToolResult(t *testing.T) {
 	require.Equal(t, "image/png", tr.MIMEType)
 	require.Equal(t, `{"file_path":"/tmp/x","content":"hi"}`, tr.Metadata)
 	require.False(t, tr.IsError)
-}
-
-// TestMCPChannelEventToProto_RoundTrip verifies that a channel push survives
-// the SSE envelope conversion with its type and rendered <channel> body intact,
-// so client/server sessions receive channel events rather than dropping the
-// payload at the wire.
-func TestMCPChannelEventToProto_RoundTrip(t *testing.T) {
-	t.Parallel()
-
-	src := pubsub.Event[mcp.Event]{
-		Type: pubsub.CreatedEvent,
-		Payload: mcp.Event{
-			Type:           mcp.EventChannelMessage,
-			Name:           "webhook",
-			ChannelMessage: `<channel source="webhook">build failed</channel>`,
-		},
-	}
-
-	env := wrapEvent(src)
-	require.NotNil(t, env)
-	require.Equal(t, pubsub.PayloadTypeMCPEvent, env.Type)
-
-	var decoded pubsub.Event[proto.MCPEvent]
-	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
-	require.Equal(t, proto.MCPEventChannelMessage, decoded.Payload.Type)
-	require.Equal(t, "webhook", decoded.Payload.Name)
-	require.Equal(t, `<channel source="webhook">build failed</channel>`, decoded.Payload.ChannelMessage)
 }
 
 // TestSkillsEventToProto_RoundTrip verifies that a pubsub.Event[skills.Event]
@@ -207,4 +181,70 @@ func TestRunCompleteToProto_Error(t *testing.T) {
 	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
 	require.Equal(t, "context canceled", decoded.Payload.Error)
 	require.True(t, decoded.Payload.Cancelled)
+}
+
+// TestUpdateAvailableMsgToProto_RoundTrip verifies that an
+// app.UpdateAvailableMsg — published directly (not wrapped in
+// pubsub.Event) by app.checkForUpdates — survives the SSE envelope
+// conversion. Without this, client/server mode silently drops update
+// notifications because wrapEvent hits its default branch.
+func TestUpdateAvailableMsgToProto_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	src := app.UpdateAvailableMsg{
+		CurrentVersion: "1.0.0",
+		LatestVersion:  "1.1.0",
+		IsDevelopment:  false,
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypeUpdateAvailable, env.Type)
+
+	var decoded pubsub.Event[proto.UpdateAvailable]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, pubsub.UpdatedEvent, decoded.Type)
+	require.Equal(t, "1.0.0", decoded.Payload.CurrentVersion)
+	require.Equal(t, "1.1.0", decoded.Payload.LatestVersion)
+	require.False(t, decoded.Payload.IsDevelopment)
+}
+
+// TestMCPChannelMessageWrappedAsChannelEvent verifies that an
+// EventChannelMessage is wrapped as an SSE mcp_event carrying the rendered
+// channel body (fork: server-side channel routing). Upstream drops these
+// (no proto representation yet); this fork wires the channel_message proto
+// type and routes channel pushes to clients, so they must be forwarded.
+func TestMCPChannelMessageWrappedAsChannelEvent(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[mcp.Event]{
+		Type: pubsub.CreatedEvent,
+		Payload: mcp.Event{
+			Type:           mcp.EventChannelMessage,
+			Name:           "webhook",
+			ChannelMessage: `<channel source="webhook">build failed</channel>`,
+		},
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env, "EventChannelMessage must be forwarded as an SSE event (fork: channel routing)")
+	require.Equal(t, pubsub.PayloadTypeMCPEvent, env.Type)
+	var pe pubsub.Event[proto.MCPEvent]
+	require.NoError(t, json.Unmarshal(env.Payload, &pe))
+	require.Equal(t, proto.MCPEventChannelMessage, pe.Payload.Type)
+	require.Equal(t, `<channel source="webhook">build failed</channel>`, pe.Payload.ChannelMessage)
+}
+
+// TestMCPUnknownEventTypeNotMappedToStateChange verifies that any
+// unrecognized MCP event type is not silently coerced to state_changed —
+// the mapping must return ok=false so wrapEvent can drop it instead of
+// fabricating a state change.
+func TestMCPUnknownEventTypeNotMappedToStateChange(t *testing.T) {
+	t.Parallel()
+
+	// Use a value well outside the known range.
+	unknown := mcp.EventType(99)
+	pt := mcpEventTypeToProto(unknown)
+	require.Equal(t, proto.MCPEventType(""), pt,
+		"unknown MCP event types must map to empty proto type, not state_changed")
 }

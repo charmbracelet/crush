@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -48,16 +49,20 @@ const (
 	maxChannelMetaValueBytes = 1024
 )
 
-// metaKeyPattern restricts meta attribute keys to identifiers: letters,
-// digits, and underscores only. Keys with hyphens or any other character are
-// silently dropped so they cannot be used to forge structural attributes on
-// the <channel> tag.
-var metaKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+// metaKeyPattern restricts meta attribute keys to valid XML names: a letter
+// or underscore followed by letters, digits, and underscores. Keys starting
+// with a digit (e.g. "1chat") are not valid XML names and are dropped so
+// they cannot produce structurally altered output. Hyphens and other
+// characters are also rejected, preventing forged structural attributes.
+var metaKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // reservedMetaKeys are attribute names the client controls; a server must not
-// be able to override them via meta.
+// be able to override them via meta. This includes the XML namespace family
+// (xmlns, xml) which encoding/xml would emit as namespace declarations.
 var reservedMetaKeys = map[string]struct{}{
 	"source": {},
+	"xmlns":  {},
+	"xml":    {},
 }
 
 // channelParams is the wire shape of notifications/claude/channel params.
@@ -154,12 +159,18 @@ func hasChannelCapability(res *mcp.InitializeResult) bool {
 	return ok
 }
 
+// channelEnabled reports whether the given server name was opted in via the
+// --channels flag. A server present in MCP config is not a channel until it is
+// explicitly enabled, matching the "listed is not enabled" model. Entries may
+// be written as "server:<name>" or as a bare "<name>".
+func channelEnabled(enabled []string, name string) bool {
+	return ChannelEnabled(enabled, name)
+}
+
 // ChannelEnabled reports whether the given server name was opted in via the
-// --channels flag. A server present in MCP config is not a channel until it
-// is explicitly enabled, matching the "listed is not enabled" model. Entries
-// may be written as "server:<name>" or as a bare "<name>". Exported for the
-// server backend, which routes channel events per workspace and needs the
-// same opt-in semantics.
+// --channels flag, matching either a bare "<name>" or "server:<name>" entry
+// case-insensitively. Exported for the workspace-side channel routing (reply
+// routing) and the channel list marker, which live outside this package.
 func ChannelEnabled(enabled []string, name string) bool {
 	for _, e := range enabled {
 		e = strings.TrimSpace(e)
@@ -178,27 +189,113 @@ func ChannelEnabled(enabled []string, name string) bool {
 // (m.ChannelEnabled) or per-launch via the --channels overrides list. Every
 // site that gates channel behaviour — session creation, session renewal, and
 // backend routing — must use this so the two sources are always ORed together
-// and no site drifts out of sync (a config-enabled channel that keeps its gate
-// on session creation but loses it on renewal is exactly the kind of bug this
-// prevents).
+// and no site drifts out of sync.
 func ChannelOptIn(m config.MCPConfig, enabled []string, name string) bool {
 	return m.ChannelEnabled || ChannelEnabled(enabled, name)
 }
 
 // publishChannelMessage validates and renders a payload, then publishes it as
-// an EventChannelMessage. Malformed payloads are dropped (fail closed).
-func publishChannelMessage(name string, raw json.RawMessage) {
+// an EventChannelMessage via must-deliver semantics. Channel notifications
+// represent ordered inbound messages (chat, alerts) rather than disposable UI
+// updates, so a stalled subscriber must not permanently lose them the way
+// lossy Publish would. Malformed payloads are dropped (fail closed).
+func publishChannelMessage(ctx context.Context, name string, raw json.RawMessage) {
 	p, ok := parseChannelParams(raw)
 	if !ok {
 		slog.Warn("Dropping malformed channel notification", "server", name)
 		return
 	}
-	broker.Publish(pubsub.CreatedEvent, Event{
+	broker.PublishMustDeliver(ctx, pubsub.CreatedEvent, Event{
 		Type:           EventChannelMessage,
 		Name:           name,
-		ChannelMeta:    p.Meta,
 		ChannelMessage: renderChannel(name, p),
+		// ChannelMeta carries the payload's meta attributes so workspace-side
+		// channel routing (reply routing, sender/group targeting) can act on
+		// them. Upstream drops the meta; our reply-routing feature depends on
+		// it, so it is preserved here.
+		ChannelMeta: p.Meta,
 	})
+}
+
+// channelGateState is the lifecycle state of a channel gate.
+//
+// The gate starts in stateGateUndecided: notifications that arrive during
+// MCP capability negotiation (between Connect and the gate resolution) are
+// buffered, because a capable, opted-in server may push events immediately
+// after initialize. Once negotiation completes, the gate transitions to
+// stateGateOpen (publish + drain buffer) or stateGateClosed (discard
+// buffer + drop).
+type channelGateState int32
+
+const (
+	stateGateUndecided channelGateState = iota
+	stateGateOpen
+	stateGateClosed
+)
+
+// channelGate controls whether channel notifications are published, dropped,
+// or buffered. During capability negotiation the gate is undecided and
+// messages are buffered; once resolved, the buffer is drained or discarded.
+type channelGate struct {
+	state   atomic.Int32 // channelGateState
+	mu      sync.Mutex
+	pending []json.RawMessage
+}
+
+func newChannelGate() *channelGate {
+	g := &channelGate{}
+	g.state.Store(int32(stateGateUndecided))
+	return g
+}
+
+// isOpen reports whether the gate has been resolved to open.
+func (g *channelGate) isOpen() bool {
+	return channelGateState(g.state.Load()) == stateGateOpen
+}
+
+// resolve transitions the gate from undecided to its final state. If open,
+// buffered messages are returned for the caller to publish; if closed, the
+// buffer is discarded. Calling resolve on an already-resolved gate is a
+// no-op.
+func (g *channelGate) resolve(open bool) []json.RawMessage {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if channelGateState(g.state.Load()) != stateGateUndecided {
+		return nil
+	}
+	buffered := g.pending
+	g.pending = nil
+	if open {
+		g.state.Store(int32(stateGateOpen))
+		return buffered // drain the buffer for the caller to publish
+	}
+	g.state.Store(int32(stateGateClosed))
+	return nil // discard the buffer
+}
+
+// accept handles a channel notification according to the gate state.
+// Returns the params if the message should be published now, or nil if it
+// was buffered or dropped.
+func (g *channelGate) accept(raw json.RawMessage) json.RawMessage {
+	switch channelGateState(g.state.Load()) {
+	case stateGateOpen:
+		return raw
+	case stateGateClosed:
+		return nil
+	default: // undecided
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		// Re-check under the lock in case resolve ran between the load and
+		// the lock acquisition.
+		switch channelGateState(g.state.Load()) {
+		case stateGateOpen:
+			return raw
+		case stateGateClosed:
+			return nil
+		}
+		g.pending = append(g.pending, raw)
+		return nil
+	}
 }
 
 // channelTransport wraps an mcp.Transport so the client can intercept
@@ -208,7 +305,7 @@ func publishChannelMessage(name string, raw json.RawMessage) {
 type channelTransport struct {
 	inner mcp.Transport
 	name  string
-	gate  *atomic.Bool
+	gate  *channelGate
 }
 
 // Connect implements mcp.Transport.
@@ -225,13 +322,14 @@ func (t *channelTransport) Connect(ctx context.Context) (mcp.Connection, error) 
 type channelConn struct {
 	mcp.Connection
 	name string
-	gate *atomic.Bool
+	gate *channelGate
 }
 
 // Read intercepts notifications/claude/channel. Such messages are always
 // removed from the stream handed to the SDK (which would otherwise reject the
-// unknown method); they are only acted on when this server is a confirmed,
-// opted-in channel (gate set), and dropped otherwise (fail closed).
+// unknown method). During capability negotiation (gate undecided) they are
+// buffered; once the gate is resolved they are published (open) or dropped
+// (closed, fail closed).
 func (c *channelConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 	for {
 		msg, err := c.Connection.Read(ctx)
@@ -242,8 +340,8 @@ func (c *channelConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 		if !ok || req.IsCall() || req.Method != channelNotificationMethod {
 			return msg, nil
 		}
-		if c.gate.Load() {
-			publishChannelMessage(c.name, req.Params)
+		if raw := c.gate.accept(req.Params); raw != nil {
+			publishChannelMessage(ctx, c.name, raw)
 		}
 	}
 }

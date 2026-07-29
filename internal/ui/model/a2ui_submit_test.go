@@ -26,6 +26,7 @@ type a2uiWorkspace struct {
 }
 
 func (w *a2uiWorkspace) AgentIsReady() bool     { return true }
+func (w *a2uiWorkspace) AgentReadyErr() error   { return nil }
 func (w *a2uiWorkspace) Config() *config.Config { return nil }
 
 func (w *a2uiWorkspace) AgentRun(_ context.Context, _, prompt string, _ ...message.Attachment) error {

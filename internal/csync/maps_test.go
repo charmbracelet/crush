@@ -173,6 +173,36 @@ func TestMap_Len(t *testing.T) {
 	require.Equal(t, 0, m.Len())
 }
 
+// TestMap_CompareAndDelete verifies that CompareAndDelete only removes the
+// entry when the stored pointer matches the expected value. This is the
+// ABA-safe cleanup primitive used by the dispatch completion path to prevent
+// a deferred cleanup from wiping a newer run's entry.
+func TestMap_CompareAndDelete(t *testing.T) {
+	t.Parallel()
+
+	type entry struct{ val int }
+	m := NewMap[string, *entry]()
+
+	original := &entry{val: 1}
+	m.Set("k", original)
+
+	// Matching pointer: deletion succeeds.
+	require.True(t, m.CompareAndDelete("k", any(original)))
+	_, ok := m.Get("k")
+	require.False(t, ok)
+
+	// Re-set with a new value, try to delete with the stale pointer.
+	second := &entry{val: 2}
+	m.Set("k", second)
+	require.False(t, m.CompareAndDelete("k", any(original)), "stale pointer must not delete")
+	got, ok := m.Get("k")
+	require.True(t, ok)
+	require.Equal(t, 2, got.val)
+
+	// Missing key: returns false.
+	require.False(t, m.CompareAndDelete("absent", any(original)))
+}
+
 func TestMap_Take(t *testing.T) {
 	t.Parallel()
 

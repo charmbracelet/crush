@@ -106,16 +106,21 @@ crush run --continue "Follow up on your last response"
 
 			event.AppInitialized()
 
+			if !ws.Config.IsConfigured() {
+				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+			}
+
+			clientWs := workspace.NewClientWorkspace(c, *ws)
+			if err := clientWs.InitCoderAgentNonInteractive(ctx); err != nil {
+				return fmt.Errorf("failed to initialize agent: %w", err)
+			}
+
 			if sessionID != "" {
 				sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)
 				if err != nil {
 					return err
 				}
 				sessionID = sess.ID
-			}
-
-			if !ws.Config.IsConfigured() {
-				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 			}
 
 			if verbose {

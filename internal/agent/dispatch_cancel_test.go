@@ -76,7 +76,7 @@ func TestCancel_ActiveAndAcceptedFiresBothBranches(t *testing.T) {
 
 	const sid = "sid"
 	var activeCanceled atomic.Bool
-	sa.activeRequests.Set(sid, func() { activeCanceled.Store(true) })
+	sa.activeRequests.Set(sid, &activeCancel{cancel: func() { activeCanceled.Store(true) }})
 
 	accept := sa.BeginAccepted(sid)
 	defer accept.Close()
@@ -100,7 +100,7 @@ func TestRun_BusyWithPendingCancelTakesCancelOnEntry(t *testing.T) {
 	require.NoError(t, err)
 
 	// Make the session look busy: an earlier prompt is active.
-	sa.activeRequests.Set(sess.ID, func() {})
+	sa.activeRequests.Set(sess.ID, &activeCancel{cancel: func() {}})
 
 	accept := sa.BeginAccepted(sess.ID)
 	// A cancel arrives while this follow-up is accepted-but-not-active.

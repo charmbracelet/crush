@@ -6,11 +6,13 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -18,8 +20,22 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+)
+
+// Reasons the coder agent may be unavailable, returned by
+// Workspace.AgentReadyErr so callers can tell a genuinely
+// uninitialized agent apart from a lost server connection.
+var (
+	// ErrAgentNotInitialized means the workspace exists but its coder
+	// agent has not been configured/initialized (e.g. no model set).
+	ErrAgentNotInitialized = errors.New("coder agent is not initialized")
+	// ErrServerUnreachable means the client could not reach the server
+	// to determine the agent's status (server down, or the workspace was
+	// torn down out from under the client).
+	ErrServerUnreachable = errors.New("lost connection to the crush server")
 )
 
 // LSPClientInfo holds information about an LSP client's state. This is
@@ -100,12 +116,20 @@ type Workspace interface {
 	AgentIsSessionBusy(sessionID string) bool
 	AgentModel() AgentModel
 	AgentIsReady() bool
+	// AgentReadyErr reports nil when the coder agent is ready to accept
+	// work, or a descriptive error otherwise: ErrAgentNotInitialized
+	// when the agent simply isn't set up, or ErrServerUnreachable
+	// (wrapped) when the client could not reach the server to find out.
+	// It lets the UI show an actionable message instead of collapsing
+	// both cases into "agent offline".
+	AgentReadyErr() error
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
+	InitCoderAgentNonInteractive(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel
 
 	// Permissions
@@ -122,6 +146,14 @@ type Workspace interface {
 	PermissionDeny(perm permission.PermissionRequest) bool
 	PermissionSkipRequests() bool
 	PermissionSetSkipRequests(skip bool)
+
+	// Questions
+	//
+	// QuestionAnswer resolves the pending question with responses.
+	QuestionAnswer(responses []question.Answer) bool
+
+	// QuestionCancel cancels the pending question.
+	QuestionCancel() bool
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
@@ -173,6 +205,7 @@ type Workspace interface {
 	MCPRefreshResources(ctx context.Context, name string)
 	RefreshMCPTools(ctx context.Context, name string)
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
+	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
@@ -182,6 +215,9 @@ type Workspace interface {
 	// OAuth/OIDC token refresh commands) and is the mechanism for
 	// refreshing expired credentials.
 	MCPReconnect(ctx context.Context, name string) error
+	MCPAuthenticate(ctx context.Context, name string) error
+	MCPPendingAuth() []mcptools.PendingAuthServer
+	MCPAuthURL(name string) string
 
 	// Events
 	Subscribe(program *tea.Program)

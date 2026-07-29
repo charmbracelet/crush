@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
+	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/sahilm/fuzzy"
@@ -173,17 +174,16 @@ func (n *Notifications) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := n.com.Styles
-	width := max(0, min(notificationsDialogMaxWidth, area.Dx()))
-	height := max(0, min(notificationsDialogMaxHeight, area.Dy()))
+	width := max(0, min(notificationsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(notificationsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	n.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
-	n.list.SetSize(innerWidth, height-heightOffset)
-	n.help.SetWidth(innerWidth)
+	n.input.SetWidth(dialogInputTextWidth(t, n.input, innerWidth))
+	n.list.SetSize(innerWidth, max(0, height-heightOffset))
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Notification Style"
@@ -199,7 +199,7 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	listView := t.Dialog.List.Height(n.list.Height()).Render(n.list.Render())
 	rc.AddPart(listView)
-	rc.Help = n.help.View(n)
+	rc.Help = renderDialogHelp(t, &n.help, n, innerWidth)
 
 	view := rc.Render()
 
@@ -242,17 +242,22 @@ func (n *Notifications) setItems() {
 
 	items := make([]list.FilterableItem, 0, len(AllNotificationStyles))
 	selectedIndex := 0
-	for i, style := range AllNotificationStyles {
+	for _, style := range AllNotificationStyles {
+		// Native OS notifications don't build on every platform
+		// (illumos/solaris); hide the option where it can't work.
+		if style.ID == "native" && !notification.NativeSupported {
+			continue
+		}
 		item := &NotificationItem{
 			Versioned: list.NewVersioned(),
 			style:     style,
 			isCurrent: style.ID == currentStyle,
 			t:         n.com.Styles,
 		}
-		items = append(items, item)
 		if style.ID == currentStyle {
-			selectedIndex = i
+			selectedIndex = len(items)
 		}
+		items = append(items, item)
 	}
 
 	n.list.SetItems(items...)

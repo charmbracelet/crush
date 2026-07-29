@@ -453,6 +453,23 @@ func (m *Message) Clone() Message {
 	return clone
 }
 
+// ResetStreamedContent removes all parts that were added during streaming
+// (text, reasoning, tool calls, finish) so the message is ready for a
+// retry. Non-streamed parts (images, binary attachments, tool results,
+// shell commands) are preserved.
+func (m *Message) ResetStreamedContent() {
+	kept := m.Parts[:0]
+	for _, part := range m.Parts {
+		switch part.(type) {
+		case TextContent, ReasoningContent, ToolCall, Finish:
+			// Drop streamed parts.
+		default:
+			kept = append(kept, part)
+		}
+	}
+	m.Parts = kept
+}
+
 func (m *Message) AddFinish(reason FinishReason, message, details string) {
 	// remove any existing finish part
 	for i, part := range m.Parts {

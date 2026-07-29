@@ -38,13 +38,14 @@ type BashPermissionsParams struct {
 }
 
 type BashResponseMetadata struct {
-	StartTime        int64  `json:"start_time"`
-	EndTime          int64  `json:"end_time"`
-	Output           string `json:"output"`
-	Description      string `json:"description"`
-	WorkingDirectory string `json:"working_directory"`
-	Background       bool   `json:"background,omitempty"`
-	ShellID          string `json:"shell_id,omitempty"`
+	StartTime          int64  `json:"start_time"`
+	EndTime            int64  `json:"end_time"`
+	Output             string `json:"output"`
+	Description        string `json:"description"`
+	WorkingDirectory   string `json:"working_directory"`
+	Background         bool   `json:"background,omitempty"`
+	ShellID            string `json:"shell_id,omitempty"`
+	BackgroundedByUser bool   `json:"backgrounded_by_user,omitempty"`
 }
 
 const (
@@ -311,7 +312,8 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}
 
-			// Wait for either completion, auto-background threshold, or context cancellation
+			// Wait for completion, auto-background threshold, manual
+			// background (Ctrl+B), or context cancellation.
 			ticker := time.NewTicker(100 * time.Millisecond)
 			defer ticker.Stop()
 
@@ -319,9 +321,16 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			autoBackgroundThreshold := time.Duration(autoBackgroundAfter) * time.Second
 			timeout := time.After(autoBackgroundThreshold)
 
+			// Register under the root session so Ctrl+B from the parent
+			// session UI can release waits started by sub-agents.
+			rootSessionID := GetRootSessionFromContext(ctx)
+			releaseCh := shell.RegisterForegroundWait(rootSessionID, bgShell.ID)
+			defer shell.UnregisterForegroundWait(rootSessionID, bgShell.ID)
+
 			var stdout, stderr string
 			var done bool
 			var execErr error
+			var backgroundedByUser bool
 
 		waitLoop:
 			for {
@@ -333,6 +342,14 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					}
 				case <-timeout:
 					stdout, stderr, done, execErr = bgShell.GetOutput()
+					break waitLoop
+				case <-releaseCh:
+					// User (or API) asked to stop blocking the turn.
+					// Keep the shell running as a background job.
+					stdout, stderr, done, execErr = bgShell.GetOutput()
+					if !done {
+						backgroundedByUser = true
+					}
 					break waitLoop
 				case <-ctx.Done():
 					// Incoming context was cancelled before we moved to background
@@ -373,14 +390,20 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			// Still running - keep as background job
 			metadata := BashResponseMetadata{
-				StartTime:        startTime.UnixMilli(),
-				EndTime:          time.Now().UnixMilli(),
-				Description:      params.Description,
-				WorkingDirectory: bgShell.WorkingDir,
-				Background:       true,
-				ShellID:          bgShell.ID,
+				StartTime:          startTime.UnixMilli(),
+				EndTime:            time.Now().UnixMilli(),
+				Description:        params.Description,
+				WorkingDirectory:   bgShell.WorkingDir,
+				Background:         true,
+				ShellID:            bgShell.ID,
+				BackgroundedByUser: backgroundedByUser,
 			}
-			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+			var response string
+			if backgroundedByUser {
+				response = fmt.Sprintf("Command was moved to the background by the user.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+			} else {
+				response = fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
 	)

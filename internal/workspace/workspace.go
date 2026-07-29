@@ -101,6 +101,27 @@ type Workspace interface {
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
+	// AgentBackgroundForegroundTools releases bash tools that are still
+	// blocking the agent turn so they continue as background jobs (Ctrl+B).
+	// Returns how many foreground waits were released.
+	AgentBackgroundForegroundTools(sessionID string) int
+	// AgentHasForegroundWaits reports whether the session has bash tools
+	// that can be manually backgrounded.
+	AgentHasForegroundWaits(sessionID string) bool
+
+	// Background jobs
+	//
+	// The background shell registry lives in the *agent* process, which is
+	// a different process from the TUI under CRUSH_CLIENT_SERVER=1. Both
+	// calls therefore go through the workspace like every other agent
+	// operation; reading shell.GetBackgroundShellManager() from the UI
+	// would see a permanently empty registry in client mode.
+	//
+	// ListBackgroundJobs returns the jobs oldest first. It never returns
+	// output: see proto.BackgroundJob.
+	ListBackgroundJobs(ctx context.Context) ([]proto.BackgroundJob, error)
+	// KillBackgroundJob terminates one job by ID.
+	KillBackgroundJob(ctx context.Context, jobID string) error
 	AgentIsBusy() bool
 	AgentIsSessionBusy(sessionID string) bool
 	AgentModel() AgentModel

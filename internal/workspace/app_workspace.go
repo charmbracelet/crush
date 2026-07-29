@@ -164,6 +164,33 @@ func (w *AppWorkspace) AgentCancel(sessionID string) {
 	}
 }
 
+func (w *AppWorkspace) AgentBackgroundForegroundTools(sessionID string) int {
+	return shell.ReleaseForegroundWaits(sessionID)
+}
+
+func (w *AppWorkspace) AgentHasForegroundWaits(sessionID string) bool {
+	return shell.HasForegroundWaits(sessionID)
+}
+
+func (w *AppWorkspace) ListBackgroundJobs(context.Context) ([]proto.BackgroundJob, error) {
+	shells := shell.GetBackgroundShellManager().ListJobs()
+	jobs := make([]proto.BackgroundJob, 0, len(shells))
+	for _, s := range shells {
+		jobs = append(jobs, proto.BackgroundJob{
+			ID:          s.ID,
+			Command:     s.Command,
+			Description: s.Description,
+			StartedAt:   s.StartedAt,
+			Done:        s.IsDone(),
+		})
+	}
+	return jobs, nil
+}
+
+func (w *AppWorkspace) KillBackgroundJob(_ context.Context, jobID string) error {
+	return shell.GetBackgroundShellManager().Kill(jobID)
+}
+
 func (w *AppWorkspace) AgentIsBusy() bool {
 	if w.app.AgentCoordinator == nil {
 		return false

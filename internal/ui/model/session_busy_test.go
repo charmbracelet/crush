@@ -30,9 +30,12 @@ type countingWorkspace struct {
 
 	ready     bool
 	agentBusy bool
-	yolo      bool
-	plan      bool
-	queued    []string
+	// hasForegroundWaits is what AgentHasForegroundWaits reports; it is a
+	// second HTTP round-trip per busy refresh in client/server mode.
+	hasForegroundWaits bool
+	yolo               bool
+	plan               bool
+	queued             []string
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -42,6 +45,8 @@ type countingWorkspace struct {
 	permSetCalls    int
 	clearQueueCalls int
 	cancelCalls     int
+	fgWaitCalls     int
+	bgToolsCalls    int
 }
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
@@ -87,6 +92,15 @@ func (w *countingWorkspace) PermissionSetPlanMode(enabled bool) {
 
 func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
 func (w *countingWorkspace) AgentCancel(string)     { w.cancelCalls++ }
+func (w *countingWorkspace) AgentBackgroundForegroundTools(string) int {
+	w.bgToolsCalls++
+	return 0
+}
+
+func (w *countingWorkspace) AgentHasForegroundWaits(string) bool {
+	w.fgWaitCalls++
+	return w.hasForegroundWaits
+}
 
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
@@ -105,13 +119,14 @@ func (w *countingWorkspace) Config() *config.Config { return nil }
 // the Update goroutine.
 func (w *countingWorkspace) syncProbes() int {
 	return w.readyCalls + w.agentBusyCalls +
-		w.queuedCalls + w.queueListCalls + w.permCalls
+		w.queuedCalls + w.queueListCalls + w.permCalls + w.fgWaitCalls
 }
 
 func (w *countingWorkspace) resetCounters() {
 	w.readyCalls, w.agentBusyCalls = 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
+	w.fgWaitCalls, w.bgToolsCalls = 0, 0
 }
 
 // newBusyUI builds a UI wired to the stub workspace with an active session
@@ -151,6 +166,10 @@ func warmCaches(m *UI, busy bool) {
 	m.agentBusyCache.set(busy)
 	m.yoloCache.set(false)
 	m.planCache.set(false)
+	// fgWaitCache is part of the same TTL backstop; leaving it cold makes
+	// staleWorkspaceRefreshCmds dispatch a refresh on every message even
+	// with the TTLs pinned.
+	m.fgWaitCache.set(false)
 	m.promptQueueCheckedAt = time.Now()
 }
 
@@ -575,4 +594,94 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
+}
+
+// TestIdleBusyRefreshSkipsForegroundWaitProbe pins that the TTL backstop
+// does not pay for the Ctrl+B "are there backgroundable tools?" probe while
+// the agent is idle. AgentHasForegroundWaits is a *second* HTTP round-trip
+// per refresh in client/server mode (GetAgentSessionInfo on top of
+// GetAgentInfo), and every consumer of the value — the Ctrl+B intercept,
+// ShortHelp and FullHelp — is gated on isAgentBusy, so probing at idle
+// doubles the backstop's network traffic for a value nothing can read.
+func TestIdleBusyRefreshSkipsForegroundWaitProbe(t *testing.T) {
+	ws := &countingWorkspace{ready: true, agentBusy: false, hasForegroundWaits: true}
+	m := newBusyUI(ws)
+
+	// TTL backstop fires from the Update tail because nothing is warm yet.
+	_, cmd := m.Update(plainMsg{})
+	runCmds(m, cmd)
+
+	require.Positive(t, ws.agentBusyCalls, "the busy probe itself must still run")
+	require.Zero(t, ws.fgWaitCalls,
+		"idle refresh must not probe AgentHasForegroundWaits (extra HTTP round-trip per 500ms)")
+	require.False(t, m.hasForegroundWaitsCached())
+}
+
+// TestBusyRefreshProbesForegroundWaits is the other half: once the agent is
+// busy the probe must run, otherwise Ctrl+B is never offered.
+func TestBusyRefreshProbesForegroundWaits(t *testing.T) {
+	ws := &countingWorkspace{ready: true, agentBusy: true, hasForegroundWaits: true}
+	m := newBusyUI(ws)
+
+	_, cmd := m.Update(plainMsg{})
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.fgWaitCalls, "busy refresh must probe exactly once")
+	require.True(t, m.hasForegroundWaitsCached())
+}
+
+// ctrlB is the Ctrl+B keystroke as the Bubble Tea runtime delivers it.
+func ctrlB() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}
+}
+
+// TestCtrlBDoesNotProbeWorkspaceSynchronously pins that the Ctrl+B intercept
+// decides from the memoized value alone.
+//
+// Ctrl+B is bound to character-backward in the textarea, so this handler runs
+// on an ordinary text-editing keystroke while the user types a queued
+// message. Probing the workspace here is a blocking, timeout-less HTTP
+// round-trip in client/server mode
+// (ClientWorkspace.AgentHasForegroundWaits -> GetAgentSessionInfo with
+// context.Background()) on the Update goroutine: a slow or wedged server
+// freezes the TUI mid-word. Update must stay free of synchronous workspace
+// calls — see the invariant at the top of workspace_cache.go.
+func TestCtrlBDoesNotProbeWorkspaceSynchronously(t *testing.T) {
+	pinTTLs(t)
+
+	// Busy, a wait really does exist server-side, but the memoized value
+	// says otherwise and is stale: the tempting moment to "just probe".
+	ws := &countingWorkspace{ready: true, agentBusy: true, hasForegroundWaits: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.fgWaitCache.invalidate()
+	ws.resetCounters()
+
+	m.Update(ctrlB())
+
+	require.Zero(t, ws.syncProbes(),
+		"Ctrl+B must not probe the workspace synchronously from Update (blocking HTTP on a text-editing keystroke)")
+	require.Zero(t, ws.bgToolsCalls,
+		"with no known foreground wait, Ctrl+B must fall through to the textarea")
+}
+
+// TestCtrlBBackgroundsWhenWaitIsKnown is the other half: once the memoized
+// probe reports a foreground wait, Ctrl+B must actually release it — and do
+// so from a command, off the Update goroutine.
+func TestCtrlBBackgroundsWhenWaitIsKnown(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: true, hasForegroundWaits: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.fgWaitCache.set(true)
+	ws.resetCounters()
+
+	_, cmd := m.Update(ctrlB())
+	require.Zero(t, ws.bgToolsCalls,
+		"the release must happen in a tea.Cmd, not inline in Update")
+
+	runCmds(m, cmd)
+	require.Equal(t, 1, ws.bgToolsCalls,
+		"Ctrl+B must release the foreground waits once a wait is known")
 }

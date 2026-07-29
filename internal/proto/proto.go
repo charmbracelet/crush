@@ -161,15 +161,35 @@ type ShellCommandResponse struct {
 	ExitCode int    `json:"exit_code"`
 }
 
+// BackgroundJob describes one background shell job as a frontend sees it.
+//
+// It deliberately carries no output. The jobs dialog lists jobs and renders
+// only ID, command, description and elapsed time; syncBuffer.String() costs a
+// full copy of the retained window per call (measured 2105698 B/op, 4
+// allocs/op at the default 2 MiB window — see BenchmarkSyncBufferString), so putting output in the list payload would
+// make every list refresh — and, over HTTP, every byte on the wire — scale
+// with the total output of every running job. Output stays behind the
+// job_output tool, which fetches exactly one job on demand.
+type BackgroundJob struct {
+	ID          string    `json:"id"`
+	Command     string    `json:"command"`
+	Description string    `json:"description,omitempty"`
+	StartedAt   time.Time `json:"started_at"`
+	Done        bool      `json:"done"`
+}
+
 // AgentSession represents a session with its busy status.
 type AgentSession struct {
 	Session
 	IsBusy bool `json:"is_busy"`
+	// HasForegroundWaits is true when bash tools are blocking the agent
+	// turn and can be manually backgrounded (Ctrl+B).
+	HasForegroundWaits bool `json:"has_foreground_waits,omitempty"`
 }
 
 // IsZero checks if the AgentSession is zero-valued.
 func (a AgentSession) IsZero() bool {
-	return a.ID == "" && !a.IsBusy
+	return a.ID == "" && !a.IsBusy && !a.HasForegroundWaits
 }
 
 // PermissionAction represents an action taken on a permission request.

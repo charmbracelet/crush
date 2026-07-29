@@ -180,6 +180,60 @@ func (b *Backend) CancelSession(workspaceID, sessionID string) error {
 	return nil
 }
 
+// BackgroundSessionResult is the outcome of releasing foreground bash waits.
+type BackgroundSessionResult struct {
+	Released int `json:"released"`
+}
+
+// BackgroundSessionForegroundTools releases bash tools that are still
+// blocking the agent turn for the session so they continue as background
+// jobs. Returns how many waits were released.
+func (b *Backend) BackgroundSessionForegroundTools(ctx context.Context, workspaceID, sessionID string) (BackgroundSessionResult, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return BackgroundSessionResult{}, err
+	}
+	// Ensure the session exists in this workspace before touching the
+	// process-global wait registry.
+	if _, err := ws.Sessions.Get(ctx, sessionID); err != nil {
+		return BackgroundSessionResult{}, err
+	}
+	n := shell.ReleaseForegroundWaits(sessionID)
+	return BackgroundSessionResult{Released: n}, nil
+}
+
+// ListBackgroundJobs returns the background shell jobs, oldest first.
+//
+// Like BackgroundSessionForegroundTools this validates the workspace before
+// touching the process-global background shell registry, so a client can
+// only reach jobs through a workspace it has already resolved.
+func (b *Backend) ListBackgroundJobs(_ context.Context, workspaceID string) ([]proto.BackgroundJob, error) {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return nil, err
+	}
+	shells := shell.GetBackgroundShellManager().ListJobs()
+	jobs := make([]proto.BackgroundJob, 0, len(shells))
+	for _, s := range shells {
+		jobs = append(jobs, proto.BackgroundJob{
+			ID:          s.ID,
+			Command:     s.Command,
+			Description: s.Description,
+			StartedAt:   s.StartedAt,
+			Done:        s.IsDone(),
+		})
+	}
+	return jobs, nil
+}
+
+// KillBackgroundJob terminates one background shell job by ID. Returns
+// ErrBackgroundJobNotFound when the job is already gone.
+func (b *Backend) KillBackgroundJob(_ context.Context, workspaceID, jobID string) error {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return err
+	}
+	return shell.GetBackgroundShellManager().Kill(jobID)
+}
+
 // RevertResult describes the outcome of a revert operation.
 type RevertResult struct {
 	MessagesDeleted int      `json:"messages_deleted"`

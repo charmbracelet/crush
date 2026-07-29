@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -329,6 +330,77 @@ func TestBackgroundShell_WaitContext_Canceled(t *testing.T) {
 	cancel()
 
 	require.False(t, bgShell.WaitContext(ctx))
+}
+
+// TestBackgroundShellManager_ListJobsIsDeterministic pins that ListJobs
+// returns a stable, oldest-first order.
+//
+// csync.Map.Seq2 ranges over a copy of the backing Go map, so an unsorted
+// ListJobs returns a fresh random permutation on every call (measured: 5
+// distinct orders in 8 consecutive calls with 6 jobs). The jobs dialog calls
+// ListJobs from refresh() and hands the result to list.SetItems, which keeps
+// the selected *index* — so a shuffle both reorders the rendered list and
+// makes ctrl+x kill whichever job randomly landed under the cursor instead
+// of the one the user highlighted.
+//
+// 20 jobs inserted in a shuffled order: well past the n=12 threshold below
+// which Go's pdqsort falls back to insertion sort, and far too many for a
+// random permutation to match the sorted order by chance.
+func TestBackgroundShellManager_ListJobsIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	const n = 20
+	manager := newBackgroundShellManager()
+	base := time.Now()
+	// Insert in an order unrelated to StartedAt so a no-op sort cannot pass.
+	for _, i := range []int{7, 3, 19, 0, 12, 5, 17, 1, 9, 14, 2, 18, 6, 11, 4, 16, 8, 13, 10, 15} {
+		id := fmt.Sprintf("%03X", i+1)
+		manager.shells.Set(id, &BackgroundShell{
+			ID:        id,
+			Command:   "job " + id,
+			StartedAt: base.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	want := make([]string, 0, n)
+	for i := range n {
+		want = append(want, fmt.Sprintf("%03X", i+1))
+	}
+
+	// Repeat: a single call could coincidentally come back sorted.
+	for range 20 {
+		got := make([]string, 0, n)
+		for _, job := range manager.ListJobs() {
+			got = append(got, job.ID)
+		}
+		require.Equal(t, want, got,
+			"ListJobs must be deterministic and oldest-first; a shuffled list makes the jobs dialog kill the wrong job")
+	}
+}
+
+// TestBackgroundShellManager_ListJobsOrdersZeroStartedAtByID covers the tie
+// path: shells with no StartedAt must still come back in a stable order
+// rather than a random one.
+func TestBackgroundShellManager_ListJobsOrdersZeroStartedAtByID(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	for _, id := range []string{"00E", "003", "011", "001", "00A", "007", "013", "005", "00C", "009", "002", "012", "006", "00B", "004", "010", "008", "00D", "00F"} {
+		manager.shells.Set(id, &BackgroundShell{ID: id})
+	}
+
+	first := make([]string, 0, 19)
+	for _, job := range manager.ListJobs() {
+		first = append(first, job.ID)
+	}
+	require.True(t, slices.IsSorted(first), "tied StartedAt must fall back to ID order, got %v", first)
+	for range 20 {
+		got := make([]string, 0, 19)
+		for _, job := range manager.ListJobs() {
+			got = append(got, job.ID)
+		}
+		require.Equal(t, first, got, "ListJobs order must not change between calls")
+	}
 }
 
 func TestSyncBufferUnderCap(t *testing.T) {

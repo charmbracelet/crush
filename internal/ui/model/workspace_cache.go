@@ -65,10 +65,11 @@ type busyStateMsg struct {
 	// before a newer state transition (optimistic send, invalidation,
 	// session switch, ...) and is discarded, then re-fetched, so the
 	// authoritative refresh is never lost to an older in-flight request.
-	gen       uint64
-	agentBusy bool
-	yolo      bool
-	plan      bool
+	gen                uint64
+	agentBusy          bool
+	yolo               bool
+	plan               bool
+	hasForegroundWaits bool
 }
 
 // promptQueueMsg delivers the queued prompts fetched off-thread.
@@ -104,6 +105,7 @@ func (m *UI) invalidateBusyCaches() {
 	m.agentBusyCache.invalidate()
 	m.yoloCache.invalidate()
 	m.planCache.invalidate()
+	m.fgWaitCache.invalidate()
 	m.busyFetchGen++
 }
 
@@ -126,10 +128,20 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	m.busyFetchInFlight = true
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
+	sessionID := m.currentSessionID()
 	return func() tea.Msg {
 		st := busyStateMsg{gen: gen}
 		if ws.AgentIsReady() {
 			st.agentBusy = ws.AgentIsBusy()
+			// Only probe for backgroundable tools while the agent is
+			// actually busy: this is a second HTTP round-trip per refresh
+			// in client/server mode, and every consumer of the result
+			// (the Ctrl+B intercept, ShortHelp, FullHelp) is already
+			// gated on isAgentBusy. Probing it at idle would double the
+			// backstop's network traffic for a value nothing can read.
+			if st.agentBusy && sessionID != "" {
+				st.hasForegroundWaits = ws.AgentHasForegroundWaits(sessionID)
+			}
 		}
 		st.yolo = ws.PermissionSkipRequests()
 		st.plan = ws.PermissionPlanMode()
@@ -157,6 +169,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	m.agentBusyCache.set(msg.agentBusy)
 	m.yoloCache.set(msg.yolo)
 	m.planCache.set(msg.plan)
+	m.fgWaitCache.set(msg.hasForegroundWaits)
 	if prevYolo != msg.yolo || prevPlan != msg.plan {
 		// A remote/async toggle changed yolo or plan mode: update the
 		// editor prompt so the icon/style tracks the new mode. The cache
@@ -250,7 +263,7 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
-	if !m.agentBusyCache.fresh(busyCacheTTL) || !m.yoloCache.fresh(busyCacheTTL) || !m.planCache.fresh(busyCacheTTL) {
+	if !m.agentBusyCache.fresh(busyCacheTTL) || !m.yoloCache.fresh(busyCacheTTL) || !m.planCache.fresh(busyCacheTTL) || !m.fgWaitCache.fresh(busyCacheTTL) {
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

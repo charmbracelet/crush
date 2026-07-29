@@ -2,10 +2,13 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -331,4 +334,67 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 		require.True(t, ok, "Should be able to retrieve background shell")
 		require.Equal(t, bgShell.ID, retrieved.ID)
 	})
+}
+
+func TestBashTool_ManualBackgroundRelease(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	sessionID := "manual-bg-" + t.Name()
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, sessionID)
+	tool := newBashToolForTest(workingDir)
+
+	type result struct {
+		resp fantasy.ToolResponse
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		input, err := json.Marshal(BashParams{
+			Description:         "long sleep",
+			Command:             "sleep 30",
+			AutoBackgroundAfter: 120,
+		})
+		if err != nil {
+			done <- result{err: err}
+			return
+		}
+		resp, err := tool.Run(ctx, fantasy.ToolCall{
+			ID:    "tc1",
+			Name:  BashToolName,
+			Input: string(input),
+		})
+		done <- result{resp: resp, err: err}
+	}()
+
+	// Wait until the foreground wait is registered.
+	deadline := time.Now().Add(5 * time.Second)
+	for !shell.HasForegroundWaits(sessionID) {
+		if time.Now().After(deadline) {
+			t.Fatal("foreground wait never registered")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	n := shell.ReleaseForegroundWaits(sessionID)
+	require.Equal(t, 1, n)
+
+	select {
+	case r := <-done:
+		require.NoError(t, r.err)
+		require.Contains(t, r.resp.Content, "moved to the background by the user")
+		require.Contains(t, r.resp.Content, "Background shell ID:")
+
+		// Kill only the shell this test created.
+		bgManager := shell.GetBackgroundShellManager()
+		for _, line := range strings.Split(r.resp.Content, "\n") {
+			const prefix = "Background shell ID: "
+			if after, ok := strings.CutPrefix(line, prefix); ok {
+				_ = bgManager.Kill(strings.TrimSpace(after))
+				break
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("bash tool did not return after manual background")
+	}
 }

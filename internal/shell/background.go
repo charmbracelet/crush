@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,6 +13,13 @@ import (
 
 	"github.com/charmbracelet/crush/internal/csync"
 )
+
+// ErrBackgroundShellNotFound is returned by Kill and Remove when no
+// background shell with the given ID is registered. It is a sentinel so
+// callers across process boundaries can map it to a 404 instead of a 500:
+// a job that finished and was cleaned up between a client listing it and
+// asking to kill it is an expected race, not a server fault.
+var ErrBackgroundShellNotFound = errors.New("background shell not found")
 
 const (
 	// MaxBackgroundJobs is the maximum number of concurrent background jobs allowed
@@ -221,6 +229,7 @@ type BackgroundShell struct {
 	Description string
 	Shell       *Shell
 	WorkingDir  string
+	StartedAt   time.Time // When the shell was started (zero if internal)
 	ctx         context.Context
 	cancel      context.CancelFunc
 	stdout      *syncBuffer
@@ -277,6 +286,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 		Command:     command,
 		Description: description,
 		WorkingDir:  workingDir,
+		StartedAt:   time.Now(),
 		Shell:       shell,
 		ctx:         shellCtx,
 		cancel:      cancel,
@@ -309,7 +319,7 @@ func (m *BackgroundShellManager) Get(id string) (*BackgroundShell, bool) {
 func (m *BackgroundShellManager) Remove(id string) error {
 	_, ok := m.shells.Take(id)
 	if !ok {
-		return fmt.Errorf("background shell not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrBackgroundShellNotFound, id)
 	}
 	return nil
 }
@@ -318,7 +328,7 @@ func (m *BackgroundShellManager) Remove(id string) error {
 func (m *BackgroundShellManager) Kill(id string) error {
 	shell, ok := m.shells.Take(id)
 	if !ok {
-		return fmt.Errorf("background shell not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrBackgroundShellNotFound, id)
 	}
 
 	shell.cancel()
@@ -340,6 +350,29 @@ func (m *BackgroundShellManager) List() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// ListJobs returns all background shells, oldest first.
+//
+// The order must be deterministic: csync.Map.Seq2 ranges over a copy of the
+// underlying Go map, so the raw iteration order is randomized per call. The
+// jobs dialog rebuilds its list from this slice while keeping the selected
+// *index*, so an unordered result both shuffles the rendered list between
+// frames and makes a kill land on a different job than the one the user
+// highlighted. StartedAt is the natural order; ID breaks ties (and orders
+// shells with a zero StartedAt) so the comparison is total.
+func (m *BackgroundShellManager) ListJobs() []*BackgroundShell {
+	jobs := make([]*BackgroundShell, 0, m.shells.Len())
+	for shell := range m.shells.Seq() {
+		jobs = append(jobs, shell)
+	}
+	slices.SortFunc(jobs, func(a, b *BackgroundShell) int {
+		if c := a.StartedAt.Compare(b.StartedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return jobs
 }
 
 // Cleanup removes completed jobs that have been finished for more than the retention period

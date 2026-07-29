@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
@@ -39,6 +40,11 @@ var (
 	ErrWorkspaceClosing        = errors.New("workspace closing")
 	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
 )
+
+// ErrBackgroundJobNotFound is returned when a background job ID does not
+// name a live job. Aliased from the shell package so HTTP handlers can map
+// it to a 404 without importing internal/shell.
+var ErrBackgroundJobNotFound = shell.ErrBackgroundShellNotFound
 
 // DefaultCreateGrace is the window in which a client must open an SSE
 // stream after creating a workspace before its creation hold is

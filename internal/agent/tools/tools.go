@@ -11,15 +11,20 @@ import (
 )
 
 type (
-	sessionIDContextKey string
-	messageIDContextKey string
-	supportsImagesKey   string
-	modelNameKey        string
+	sessionIDContextKey     string
+	rootSessionIDContextKey string
+	messageIDContextKey     string
+	supportsImagesKey       string
+	modelNameKey            string
 )
 
 const (
 	// SessionIDContextKey is the key for the session ID in the context.
 	SessionIDContextKey sessionIDContextKey = "session_id"
+	// RootSessionIDContextKey is the top-level user session ID. Sub-agent
+	// runs keep the parent's root so UI actions (e.g. Ctrl+B) can reach
+	// tools registered under the session the user is viewing.
+	RootSessionIDContextKey rootSessionIDContextKey = "root_session_id"
 	// MessageIDContextKey is the key for the message ID in the context.
 	MessageIDContextKey messageIDContextKey = "message_id"
 	// SupportsImagesContextKey is the key for the model's image support capability.
@@ -44,6 +49,15 @@ func getContextValue[T any](ctx context.Context, key any, defaultValue T) T {
 // GetSessionFromContext retrieves the session ID from the context.
 func GetSessionFromContext(ctx context.Context) string {
 	return getContextValue(ctx, SessionIDContextKey, "")
+}
+
+// GetRootSessionFromContext retrieves the top-level session ID for the
+// current agent run. Falls back to the ordinary session ID when unset.
+func GetRootSessionFromContext(ctx context.Context) string {
+	if root := getContextValue(ctx, RootSessionIDContextKey, ""); root != "" {
+		return root
+	}
+	return GetSessionFromContext(ctx)
 }
 
 // GetMessageFromContext retrieves the message ID from the context.

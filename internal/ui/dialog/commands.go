@@ -444,6 +444,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			WithAliases("sidequestion", "ask", "question").
 			WithDescription("Ask about this session without touching its history"))
 		commands = append(commands, NewCommandItem(c.com.Styles, "revert", "Revert to Checkpoint", "", ActionOpenDialog{DialogID: RevertPickerID}).WithAliases("revert to"))
+		commands = append(commands, NewCommandItem(c.com.Styles, "jobs", "Background Jobs", "", ActionOpenDialog{DialogID: JobsID}).
+			WithAliases("background", "shells", "tasks").
+			WithDescription("List and manage background shell jobs"))
 	}
 
 	// Add reasoning toggle for models that support it

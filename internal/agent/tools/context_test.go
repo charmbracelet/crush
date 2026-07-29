@@ -231,3 +231,22 @@ func TestGetModelNameFromContext(t *testing.T) {
 		})
 	}
 }
+
+func TestGetRootSessionFromContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	if got := GetRootSessionFromContext(ctx); got != "" {
+		t.Fatalf("empty ctx: got %q", got)
+	}
+
+	ctx = context.WithValue(ctx, SessionIDContextKey, "child")
+	if got := GetRootSessionFromContext(ctx); got != "child" {
+		t.Fatalf("fallback to session: got %q", got)
+	}
+
+	ctx = context.WithValue(ctx, RootSessionIDContextKey, "parent")
+	if got := GetRootSessionFromContext(ctx); got != "parent" {
+		t.Fatalf("explicit root: got %q", got)
+	}
+}

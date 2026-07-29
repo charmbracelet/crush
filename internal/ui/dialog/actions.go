@@ -116,6 +116,10 @@ type (
 		MessageID      string
 		MessageContent string
 	}
+	// ActionKillJob is a message to kill a background job.
+	ActionKillJob struct {
+		ShellID string
+	}
 )
 
 // Messages for MCP OAuth authentication dialog.

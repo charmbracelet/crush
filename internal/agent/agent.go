@@ -605,6 +605,33 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
+// newRunContexts builds the two contexts a turn runs under.
+//
+// runCtx carries the per-turn tool values; genCtx is runCtx made
+// cancellable and is what agent.Stream executes under, which makes it the
+// ancestor of every tool call's context. The two are built together, and
+// only here, because the ordering is load-bearing: a value stamped onto
+// some other context variable *after* genCtx has been derived is invisible
+// to tools.
+//
+// That is not hypothetical. The root session ID was originally stamped
+// further down in Run, on a ctx variable genCtx did not descend from, so
+// tools.GetRootSessionFromContext fell back to the *sub-agent's own*
+// session ID. Ctrl+B releases waits for the session the user is viewing,
+// so a bash command inside an agent-tool sub-run was registered under a
+// session the UI never names and could not be backgrounded at all.
+//
+// A sub-agent run inherits the parent turn's root session; a top-level run
+// stamps itself as the root.
+func newRunContexts(ctx context.Context, sessionID string) (runCtx, genCtx context.Context, cancel context.CancelFunc) {
+	runCtx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
+	if runCtx.Value(tools.RootSessionIDContextKey) == nil {
+		runCtx = context.WithValue(runCtx, tools.RootSessionIDContextKey, sessionID)
+	}
+	genCtx, cancel = context.WithCancel(runCtx)
+	return runCtx, genCtx, cancel
+}
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -682,8 +709,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Idle: become the active run. Register the cancel func before dropping
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
-	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	genCtx, cancel = context.WithCancel(runCtx)
+	var runCtx context.Context
+	runCtx, genCtx, cancel = newRunContexts(ctx, call.SessionID)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(call.SessionID, ac)
 	if call.Accepted != nil {
@@ -766,7 +793,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Add the session to the context. The run context (genCtx) and its
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
-	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	//
+	// runCtx already carries both the session ID and the root session ID
+	// (see newRunContexts); reuse it rather than re-deriving from ctx so
+	// the two contexts cannot drift apart.
+	ctx = runCtx
 	// skipRunComplete is set just before the queued-recursion path so
 	// the outer Run doesn't publish a RunComplete that would race
 	// with — and be superseded by — the recursive call's own

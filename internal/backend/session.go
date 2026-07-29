@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // CreateSession creates a new session in the given workspace.
@@ -61,7 +62,8 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 			ID:    se.ID,
 			Title: se.Title,
 		},
-		IsBusy: isSessionBusy,
+		IsBusy:             isSessionBusy,
+		HasForegroundWaits: shell.HasForegroundWaits(sessionID),
 	}, nil
 }
 

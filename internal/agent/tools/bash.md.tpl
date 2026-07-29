@@ -11,8 +11,9 @@ Common shell builtins and core utils available on Windows.
 2. Security Check: Banned commands ({{ .BannedCommands }}) return error - explain to user. Safe read-only commands execute without prompts
 3. Command Execution: Execute with proper quoting, capture output
 4. Auto-Background: Commands exceeding 1 minute (default, configurable via `auto_background_after`) automatically move to background and return shell ID
-5. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters
-6. Return Result: Include errors, metadata with <cwd></cwd> tags
+5. Manual Background: The user can press Ctrl+B while a command is running to move it to background immediately (same result shape as auto-background)
+6. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters
+7. Return Result: Include errors, metadata with <cwd></cwd> tags
 </execution_steps>
 
 <usage_notes>

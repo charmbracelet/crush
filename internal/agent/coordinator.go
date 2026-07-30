@@ -236,11 +236,13 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// before initialization finished — most visibly on the first message.
 	//
 	// Non-interactive runs get a single shot at the tool palette, so they
-	// do wait for initialization to settle. The wait is bounded by each
-	// server's own connect timeout, so a hung server cannot stall the run
-	// indefinitely.
+	// do wait for initialization to settle — but bounded by InitWaitBudget
+	// rather than each server's connect timeout, so a server wedged
+	// mid-handshake cannot stall a headless run for minutes. Past the
+	// budget the turn proceeds without the stragglers; their tools simply
+	// stay absent from this run.
 	if !c.interactive {
-		if err := mcp.WaitForInit(ctx); err != nil {
+		if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget); err != nil {
 			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 		}
 	}

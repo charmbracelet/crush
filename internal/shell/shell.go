@@ -298,9 +298,18 @@ func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
 		return true
 	}
 
-	// Empty environment and nil CmdSubst: variables resolve to empty and
-	// command substitutions error out instead of executing.
-	cfg := &expand.Config{Env: expand.FuncEnviron(func(string) string { return "" })}
+	// Empty environment, nil CmdSubst, and erroring ProcSubst: variables
+	// resolve to empty and command/process substitutions error out instead
+	// of executing. The ProcSubst handler is required: mvdan.cc/sh calls
+	// cfg.ProcSubst directly without a nil guard (unlike CmdSubst), so any
+	// command containing <(...) or >(...) would otherwise panic with a nil
+	// function call.
+	cfg := &expand.Config{
+		Env: expand.FuncEnviron(func(string) string { return "" }),
+		ProcSubst: func(*syntax.ProcSubst) (string, error) {
+			return "", errors.New("process substitution requires execution")
+		},
+	}
 
 	blocked := false
 	syntax.Walk(file, func(node syntax.Node) bool {

@@ -257,6 +257,12 @@ func NewToolMessageItem(
 		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
 	case tools.QuestionToolName:
 		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
+	case tools.CronCreateToolName:
+		item = NewCronCreateToolMessageItem(sty, toolCall, result, canceled)
+	case tools.CronListToolName:
+		item = NewCronListToolMessageItem(sty, toolCall, result, canceled)
+	case tools.CronDeleteToolName:
+		item = NewCronDeleteToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ReferencesToolName:
 		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
 	case tools.DefinitionToolName:

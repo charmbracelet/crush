@@ -680,6 +680,17 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.TodoItem = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Tool.TodoJustStarted = lipgloss.NewStyle().Foreground(o.fgBase)
 
+	// Scheduled task (cron) styles
+	s.Tool.CronRecurringIcon = base.Foreground(o.info)
+	s.Tool.CronOneShotIcon = base.Foreground(o.fgMoreSubtle)
+	s.Tool.CronDeletedIcon = base.Foreground(o.destructive)
+	s.Tool.CronTaskID = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Tool.CronSchedule = lipgloss.NewStyle().Foreground(o.infoMostSubtle)
+	s.Tool.CronNextRun = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Tool.CronPrompt = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Tool.CronMeta = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Tool.CronError = lipgloss.NewStyle().Foreground(o.error)
+
 	// MCP styles
 	s.Tool.MCPName = base.Foreground(o.info)
 	s.Tool.MCPToolName = base.Foreground(o.infoMostSubtle)

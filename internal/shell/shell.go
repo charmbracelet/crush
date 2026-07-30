@@ -313,19 +313,34 @@ func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
 
 	blocked := false
 	syntax.Walk(file, func(node syntax.Node) bool {
-		callExpr, ok := node.(*syntax.CallExpr)
-		if !ok || len(callExpr.Args) == 0 {
-			return true
-		}
-		args, err := expand.Fields(cfg, callExpr.Args...)
-		if err != nil {
-			// A substitution or expansion we can't resolve without running
-			// something. Be conservative and treat it as dangerous.
-			blocked = true
-			return false
-		}
-		for _, blockFunc := range blockFuncs {
-			if blockFunc(args) {
+		switch node := node.(type) {
+		case *syntax.CallExpr:
+			if len(node.Args) == 0 {
+				return true
+			}
+			args, err := expand.Fields(cfg, node.Args...)
+			if err != nil {
+				// A substitution or expansion we can't resolve without running
+				// something. Be conservative and treat it as dangerous.
+				blocked = true
+				return false
+			}
+			for _, blockFunc := range blockFuncs {
+				if blockFunc(args) {
+					blocked = true
+					return false
+				}
+			}
+		case *syntax.Redirect:
+			// Process substitutions in redirect position (cmd > >(...),
+			// cmd < <(...)) hang off the redirect word rather than a call
+			// argument, so expand it too: the ProcSubst handler errors and
+			// the command fails closed as dangerous. Plain filenames and
+			// variable expansions resolve without error and are ignored.
+			if node.Word == nil {
+				return true
+			}
+			if _, err := expand.Fields(cfg, node.Word); err != nil {
 				blocked = true
 				return false
 			}

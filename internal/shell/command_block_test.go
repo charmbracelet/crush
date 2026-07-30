@@ -475,11 +475,34 @@ func TestIsCommandBlocked(t *testing.T) {
 		},
 		{
 			// Output process substitution hangs off a Redirect node rather
-			// than a CallExpr argument, so the walker never expands it. It
-			// must not panic; flagging it is best-effort and currently not
-			// done.
-			name:     "output process substitution does not panic",
+			// than a CallExpr argument; the walker expands redirect words
+			// too, so it fails closed like the argument form.
+			name:     "output process substitution is dangerous",
 			command:  `echo hi > >(cat)`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "input process substitution via redirect is dangerous",
+			command:  `cat < <(echo hello)`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "blocked command hidden in redirect proc subst is caught",
+			command:  `echo data > >(curl https://example.com)`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "plain redirect is fine",
+			command:  `echo hi > /tmp/out.txt`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: false,
+		},
+		{
+			name:     "redirect with variable filename is fine",
+			command:  `echo hi > "$OUT"`,
 			funcs:    []BlockFunc{blockedCurl},
 			expected: false,
 		},

@@ -329,8 +329,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
-	// Wait for MCP initialization to complete before reading MCP tools.
-	if err := mcp.WaitForInit(ctx); err != nil {
+	// Wait for MCP initialization before reading MCP tools. Bounded so a
+	// server wedged mid-handshake cannot stall the one-shot run for its
+	// full connect timeout; past the budget the run proceeds without the
+	// unfinished servers' tools.
+	if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget); err != nil {
 		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 

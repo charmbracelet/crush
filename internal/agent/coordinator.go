@@ -278,12 +278,17 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, err
 	}
 
-	// Wait for MCP initialization to complete before building the tool list.
-	// Without this, slow-to-start MCP servers (e.g. stdio Python via uv) may
-	// not have registered their tools yet when buildTools reads the registry,
+	// Wait for MCP initialization before building the tool list. Without
+	// this, slow-to-start MCP servers (e.g. stdio Python via uv) may not
+	// have registered their tools yet when buildTools reads the registry,
 	// so their tools silently never appear in the LLM tool palette — even
-	// though crush_info reports them as connected.
-	if err := mcp.WaitForInit(ctx); err != nil {
+	// though crush_info reports them as connected. The wait is bounded:
+	// a server wedged mid-handshake would otherwise hold every turn
+	// hostage for its full connect timeout (up to minutes), with nothing
+	// on screen — no user message, no spinner. Past the budget the turn
+	// proceeds without the stragglers; buildTools runs again next turn,
+	// so their tools appear once they finish.
+	if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget); err != nil {
 		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
@@ -699,8 +704,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// fail at readyWg.Wait() before emitting anything — the client/server
 	// session hangs with no visible response. WithoutCancel drops
 	// cancellation while keeping context values; the work is bounded
-	// (WaitForInit by MCP init timeouts, the rest is local) so it always
-	// completes.
+	// (WaitForInitBudget by its wait budget, the rest is local) so it
+	// always completes.
 	initCtx := context.WithoutCancel(ctx)
 
 	c.readyWg.Go(func() error {
@@ -716,8 +721,12 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		// Wait for MCP servers to finish registering their tools before
 		// building the initial tool list. This ensures the first tool set
 		// (used if anything reads it before run() rebuilds) includes all
-		// MCP tools, not just fast-to-init ones.
-		if err := mcp.WaitForInit(initCtx); err != nil {
+		// MCP tools, not just fast-to-init ones. Bounded for the same
+		// reason as run(): every turn gates on readyWg.Wait(), so an MCP
+		// server wedged mid-handshake would otherwise blank the app for
+		// its full connect timeout. run() rebuilds the tool list each
+		// turn, so tools of servers that finish later still appear.
+		if err := mcp.WaitForInitBudget(initCtx, mcp.InitWaitBudget); err != nil {
 			return err
 		}
 		tools, err := c.buildTools(initCtx, agent, isSubAgent)

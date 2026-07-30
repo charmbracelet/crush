@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -754,4 +755,119 @@ func TestParseStdoutClaudeCodeFormat(t *testing.T) {
 		require.Equal(t, DecisionAllow, r.Decision)
 		require.Equal(t, "hello", r.Context)
 	})
+}
+
+func TestUpdatedPromptAggregation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("last writer wins", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{UpdatedPrompt: "first"},
+			{UpdatedPrompt: "second"},
+			{UpdatedPrompt: ""},
+		}, `{}`)
+		require.Equal(t, "second", agg.UpdatedPrompt)
+	})
+
+	t.Run("empty when unset", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow},
+		}, `{}`)
+		require.Empty(t, agg.UpdatedPrompt)
+	})
+}
+
+func TestParseStdoutUpdatedPrompt(t *testing.T) {
+	t.Parallel()
+
+	t.Run("string parsed", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"updated_prompt":"hello world"}`)
+		require.Equal(t, "hello world", r.UpdatedPrompt)
+	})
+
+	t.Run("non-string ignored", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"updated_prompt":{"x":1}}`)
+		require.Empty(t, r.UpdatedPrompt)
+	})
+}
+
+func TestBuildEventPayload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pretooluse via BuildPayload is object with tool fields", func(t *testing.T) {
+		t.Parallel()
+		got := BuildPayload(EventPreToolUse, "s1", "/cwd", "bash", `{"command":"ls"}`)
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(got, &m))
+		require.Equal(t, EventPreToolUse, m["event"])
+		require.Equal(t, "bash", m["tool_name"])
+		require.Equal(t, "s1", m["session_id"])
+		require.Equal(t, "/cwd", m["cwd"])
+		require.IsType(t, map[string]any{}, m["tool_input"])
+	})
+
+	t.Run("prompt event omits tool fields", func(t *testing.T) {
+		t.Parallel()
+		got := BuildEventPayload(EventInput{
+			Event:     EventUserPromptSubmit,
+			SessionID: "s1",
+			Prompt:    "hi",
+		}, "/cwd")
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(got, &m))
+		require.Equal(t, "hi", m["prompt"])
+		_, hasTool := m["tool_name"]
+		require.False(t, hasTool)
+		_, hasInput := m["tool_input"]
+		require.False(t, hasInput)
+	})
+
+	t.Run("post event includes tool_response", func(t *testing.T) {
+		t.Parallel()
+		got := BuildEventPayload(EventInput{
+			Event:        EventPostToolUse,
+			SessionID:    "s1",
+			ToolName:     "view",
+			ToolInput:    `{"file_path":"a.go"}`,
+			ToolResponse: &ToolResponsePayload{Content: "ok", IsError: false},
+		}, "/cwd")
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(got, &m))
+		resp := m["tool_response"].(map[string]any)
+		require.Equal(t, "ok", resp["content"])
+		require.Equal(t, false, resp["is_error"])
+	})
+
+	t.Run("stop event includes outcome and error", func(t *testing.T) {
+		t.Parallel()
+		got := BuildEventPayload(EventInput{
+			Event:     EventStop,
+			SessionID: "s1",
+			Outcome:   "error",
+			Error:     "boom",
+		}, "/cwd")
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(got, &m))
+		require.Equal(t, "error", m["outcome"])
+		require.Equal(t, "boom", m["error"])
+	})
+}
+
+func TestBuildPayloadPreToolUseGolden(t *testing.T) {
+	t.Parallel()
+
+	// PreToolUse payloads are a compatibility surface: hook scripts parse
+	// them. These are byte-for-byte goldens; do not change the expected
+	// strings without a migration plan for existing hooks.
+	got := string(BuildPayload(EventPreToolUse, "s1", "/cwd", "bash", `{"command":"ls"}`))
+	require.Equal(t, `{"event":"PreToolUse","session_id":"s1","cwd":"/cwd","tool_name":"bash","tool_input":{"command":"ls"}}`, got)
+
+	// A zero-argument tool call has an empty raw input string; the payload
+	// still carries tool_input: {}.
+	got = string(BuildPayload(EventPreToolUse, "s1", "/cwd", "lsp_restart", ""))
+	require.Equal(t, `{"event":"PreToolUse","session_id":"s1","cwd":"/cwd","tool_name":"lsp_restart","tool_input":{}}`, got)
 }

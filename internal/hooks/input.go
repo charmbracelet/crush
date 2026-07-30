@@ -16,30 +16,64 @@ import (
 // an older version. Unknown higher versions are still parsed but logged.
 const SupportedOutputVersion = 1
 
+// ToolResponsePayload describes a completed tool call for PostToolUse.
+type ToolResponsePayload struct {
+	Content string `json:"content"`
+	IsError bool   `json:"is_error"`
+}
+
 // Payload is the JSON structure piped to hook commands via stdin.
 // ToolInput is emitted as a parsed JSON object for compatibility with
 // Claude Code hooks (which expect tool_input to be an object, not a
 // string).
 type Payload struct {
-	Event     string          `json:"event"`
-	SessionID string          `json:"session_id"`
-	CWD       string          `json:"cwd"`
-	ToolName  string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
+	Event        string               `json:"event"`
+	SessionID    string               `json:"session_id"`
+	CWD          string               `json:"cwd"`
+	ToolName     string               `json:"tool_name,omitempty"`
+	ToolInput    json.RawMessage      `json:"tool_input,omitempty"`
+	Prompt       string               `json:"prompt,omitempty"`
+	ToolResponse *ToolResponsePayload `json:"tool_response,omitempty"`
+	Outcome      string               `json:"outcome,omitempty"`
+	Error        string               `json:"error,omitempty"`
 }
 
-// BuildPayload constructs the JSON stdin payload for a hook command.
+// BuildPayload constructs the JSON stdin payload for a PreToolUse-shaped
+// hook command. Prefer BuildEventPayload for new call sites.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
-	toolInput := json.RawMessage(toolInputJSON)
-	if !json.Valid(toolInput) {
-		toolInput = json.RawMessage("{}")
-	}
-	p := Payload{
+	return BuildEventPayload(EventInput{
 		Event:     eventName,
 		SessionID: sessionID,
-		CWD:       cwd,
 		ToolName:  toolName,
-		ToolInput: toolInput,
+		ToolInput: toolInputJSON,
+	}, cwd)
+}
+
+// BuildEventPayload constructs the JSON stdin payload for any hook event.
+func BuildEventPayload(in EventInput, cwd string) []byte {
+	p := Payload{
+		Event:     in.Event,
+		SessionID: in.SessionID,
+		CWD:       cwd,
+		Prompt:    in.Prompt,
+		Outcome:   in.Outcome,
+		Error:     in.Error,
+	}
+	if in.ToolName != "" {
+		p.ToolName = in.ToolName
+	}
+	// Tool events always carry tool_input, even when the raw input is
+	// empty (a zero-argument tool call): BuildPayload historically emitted
+	// {} in that case and hook scripts may rely on the field existing.
+	if in.ToolName != "" || in.ToolInput != "" {
+		toolInput := json.RawMessage(in.ToolInput)
+		if !json.Valid(toolInput) {
+			toolInput = json.RawMessage("{}")
+		}
+		p.ToolInput = toolInput
+	}
+	if in.ToolResponse != nil {
+		p.ToolResponse = in.ToolResponse
 	}
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -94,12 +128,13 @@ func parseStdout(stdout string) HookResult {
 	}
 
 	var parsed struct {
-		Version      int             `json:"version"`
-		Decision     string          `json:"decision"`
-		Halt         bool            `json:"halt"`
-		Reason       string          `json:"reason"`
-		Context      json.RawMessage `json:"context"`
-		UpdatedInput json.RawMessage `json:"updated_input"`
+		Version       int             `json:"version"`
+		Decision      string          `json:"decision"`
+		Halt          bool            `json:"halt"`
+		Reason        string          `json:"reason"`
+		Context       json.RawMessage `json:"context"`
+		UpdatedInput  json.RawMessage `json:"updated_input"`
+		UpdatedPrompt json.RawMessage `json:"updated_prompt"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
 		return HookResult{Decision: DecisionNone}
@@ -120,6 +155,18 @@ func parseStdout(stdout string) HookResult {
 	}
 	result.Decision = parseDecision(parsed.Decision)
 	result.UpdatedInput = rawToString(parsed.UpdatedInput)
+	if len(parsed.UpdatedPrompt) > 0 && string(parsed.UpdatedPrompt) != "null" {
+		if parsed.UpdatedPrompt[0] == '"' {
+			var s string
+			if err := json.Unmarshal(parsed.UpdatedPrompt, &s); err == nil {
+				result.UpdatedPrompt = s
+			} else {
+				slog.Warn("Hook updated_prompt ignored; expected string")
+			}
+		} else {
+			slog.Warn("Hook updated_prompt ignored; expected string")
+		}
+	}
 	return result
 }
 

@@ -51,7 +51,7 @@ func TestHookedTool_AllowStampsHookApproval(t *testing.T) {
 
 	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
 	runner := newRunner(t, `echo '{"decision":"allow"}'`)
-	tool := newHookedTool(inner, runner)
+	tool := newHookedTool(inner, runner, nil)
 
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-1", Name: "view"})
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestHookedTool_SilentDoesNotStampApproval(t *testing.T) {
 
 	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
 	runner := newRunner(t, `exit 0`) // no stdout, no decision
-	tool := newHookedTool(inner, runner)
+	tool := newHookedTool(inner, runner, nil)
 
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-2", Name: "view"})
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 
 	inner := &fakeTool{name: "bash"}
 	runner := newRunner(t, `echo "blocked" >&2; exit 2`)
-	tool := newHookedTool(inner, runner)
+	tool := newHookedTool(inner, runner, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-3", Name: "bash"})
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestWrapToolsWithHooks(t *testing.T) {
 
 	t.Run("top-level agent wraps every tool", func(t *testing.T) {
 		t.Parallel()
-		out := wrapToolsWithHooks(inputs, runner, false)
+		out := wrapToolsWithHooks(inputs, runner, nil, false)
 		require.Len(t, out, len(inputs))
 		for i, tool := range out {
 			_, ok := tool.(*hookedTool)
@@ -131,7 +131,7 @@ func TestWrapToolsWithHooks(t *testing.T) {
 
 	t.Run("sub-agent skips the wrap", func(t *testing.T) {
 		t.Parallel()
-		out := wrapToolsWithHooks(inputs, runner, true)
+		out := wrapToolsWithHooks(inputs, runner, nil, true)
 		require.Equal(t, inputs, out, "sub-agent tools should be returned unwrapped")
 		for _, tool := range out {
 			_, isHooked := tool.(*hookedTool)
@@ -141,7 +141,73 @@ func TestWrapToolsWithHooks(t *testing.T) {
 
 	t.Run("nil runner skips the wrap for both agent kinds", func(t *testing.T) {
 		t.Parallel()
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, false))
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, true))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, nil, false))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, nil, true))
 	})
+}
+
+func newPostRunner(t *testing.T, cmd string) *hooks.Runner {
+	t.Helper()
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			hooks.EventPostToolUse: {{Command: cmd}},
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+	return hooks.NewRunner(cfg.Hooks[hooks.EventPostToolUse], t.TempDir(), t.TempDir())
+}
+
+func TestHookedTool_PostToolUseContext(t *testing.T) {
+	t.Parallel()
+	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
+	post := newPostRunner(t, `echo '{"context":"post-ctx"}'`)
+	tool := newHookedTool(inner, nil, post)
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "view", Input: `{}`})
+	require.NoError(t, err)
+	require.True(t, inner.called)
+	require.Contains(t, resp.Content, "ok")
+	require.Contains(t, resp.Content, "post-ctx")
+}
+
+func TestHookedTool_PostToolUseHalt(t *testing.T) {
+	t.Parallel()
+	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
+	post := newPostRunner(t, `echo '{"halt":true,"reason":"stop"}'`)
+	tool := newHookedTool(inner, nil, post)
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "view", Input: `{}`})
+	require.NoError(t, err)
+	require.True(t, resp.StopTurn)
+}
+
+func TestHookedTool_PostToolUseDenyNudge(t *testing.T) {
+	t.Parallel()
+	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
+	post := newPostRunner(t, `echo '{"decision":"deny","reason":"careful"}'`)
+	tool := newHookedTool(inner, nil, post)
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "view", Input: `{}`})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "[post-hook] careful")
+}
+
+func TestHookedTool_PreDenySkipsPost(t *testing.T) {
+	t.Parallel()
+	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
+	pre := newRunner(t, `echo '{"decision":"deny","reason":"no"}'`)
+	post := newPostRunner(t, `echo '{"context":"should-not-run"}'`)
+	tool := newHookedTool(inner, pre, post)
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "view", Input: `{}`})
+	require.NoError(t, err)
+	require.False(t, inner.called)
+	require.NotContains(t, resp.Content, "should-not-run")
+}
+
+func TestWrapToolsWithHooks_PostOnly(t *testing.T) {
+	t.Parallel()
+	inner := &fakeTool{name: "view"}
+	post := newPostRunner(t, `echo '{}'`)
+	out := wrapToolsWithHooks([]fantasy.AgentTool{inner}, nil, post, false)
+	require.Len(t, out, 1)
+	_, ok := out[0].(*hookedTool)
+	require.True(t, ok)
 }

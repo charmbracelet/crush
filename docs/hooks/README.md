@@ -17,8 +17,8 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush currently supports `PreToolUse`, `UserPromptSubmit`, `PostToolUse`, and
+  `Stop`
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -228,7 +228,49 @@ Each hook receives data two ways: environment variables and stdin (as JSON).
 Environment variables are typically easier to work with, with JSON being
 available when input is more complex.
 
-#### Environment Variables
+##
+
+### UserPromptSubmit
+
+Fires after the user submits a prompt and before the turn reaches the LLM.
+Only the top-level agent path is covered (TUI, server, and `crush run`).
+
+- Payload fields: `prompt` (string). Leave `matcher` empty.
+- Honored outputs: `decision=deny` / `halt` block the turn with
+  `prompt blocked by hook: <reason>`; `updated_prompt` fully replaces the
+  prompt (last writer wins); `context` is appended under `<hook-context>`.
+- The stored and displayed prompt is the rewritten prompt when
+  `updated_prompt` is set. Attachments are not included in v1.
+
+### PostToolUse
+
+Fires after a top-level tool call completes successfully (no Go error from
+the tool). The tool has already run; this cannot un-run it.
+
+- Payload fields: `tool_name`, `tool_input` (what actually ran, after any
+  PreToolUse rewrite), `tool_response` (`content`, `is_error`).
+- Honored outputs: `context` appends to the tool response content; `halt`
+  sets `StopTurn` so the model ends the turn; `decision=deny` appends a
+  `[post-hook] <reason>` nudge without marking the tool response as an
+  error. `updated_input` / `updated_prompt` are ignored.
+
+### Stop
+
+Fires when a top-level agent turn ends (complete, cancelled, or error).
+Observational only: decisions, halt, context, and rewrites are ignored.
+Keep Stop hooks fast; they run synchronously before the terminal event is
+published (default 30s timeout still applies).
+
+- Payload fields: `outcome` (`complete` | `cancelled` | `error`), `error`.
+- Leave `matcher` empty.
+- A queued prompt that is discarded before it ever runs (Escape while
+  prompts are queued) produces no Stop event — nothing started, so
+  nothing stopped.
+- When the turn is already being torn down (Escape, app shutdown) the
+  Stop hook is capped at 2s rather than its configured timeout, so
+  Escape and quit stay responsive.
+
+## Environment Variables
 
 The available environment variables are:
 

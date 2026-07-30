@@ -16,8 +16,17 @@ need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
-accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
+Supported events: `PreToolUse`, `UserPromptSubmit`, `PostToolUse`, `Stop`.
+Event names are case-insensitive and accept snake_case (`PreToolUse`,
+`pretooluse`, `pre_tool_use` all work). Leave `matcher` empty for
+non-tool events (`UserPromptSubmit`, `Stop`).
+
+| Event | When | Key payload fields | Honored outputs |
+| --- | --- | --- | --- |
+| `PreToolUse` | Before a top-level tool runs | `tool_name`, `tool_input` | deny/halt, allow (permission), `updated_input`, `context` |
+| `UserPromptSubmit` | After prompt submit, before LLM | `prompt` | deny/halt, `updated_prompt` (last writer), `context` |
+| `PostToolUse` | After top-level tool completes | `tool_name`, `tool_input`, `tool_response` | `context`, halt (`StopTurn`), deny nudge text |
+| `Stop` | Top-level turn ends | `outcome`, `error` | observational only |
 
 ## Configuration
 

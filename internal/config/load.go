@@ -1251,9 +1251,17 @@ func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Termina
 // form. Matching is case-insensitive and accepts snake_case variants
 // (e.g. "pre_tool_use" → "PreToolUse").
 func normalizeHookEvent(name string) string {
+	// Canonical names must match hooks.KnownEvents (config cannot import
+	// hooks without a cycle).
 	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
 	case "pretooluse":
 		return "PreToolUse"
+	case "userpromptsubmit":
+		return "UserPromptSubmit"
+	case "posttooluse":
+		return "PostToolUse"
+	case "stop":
+		return "Stop"
 	default:
 		return name
 	}
@@ -1271,6 +1279,18 @@ func (c *Config) ValidateHooks() error {
 		if canonical != event {
 			c.Hooks[canonical] = append(c.Hooks[canonical], eventHooks...)
 			delete(c.Hooks, event)
+		}
+	}
+
+	known := map[string]bool{
+		"PreToolUse":       true,
+		"UserPromptSubmit": true,
+		"PostToolUse":      true,
+		"Stop":             true,
+	}
+	for event := range c.Hooks {
+		if !known[event] {
+			slog.Warn("Unknown hook event; hooks will not fire until a newer build supports it", "event", event)
 		}
 	}
 

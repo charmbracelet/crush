@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -216,6 +217,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	stopHooks            *hooks.Runner
 	planModeFn           func() bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -269,6 +271,9 @@ type SessionAgentOptions struct {
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
+	// StopHooks fires the Stop event when a top-level turn ends. Nil for
+	// subagents or when no Stop hooks are configured.
+	StopHooks *hooks.Runner
 	// PlanModeFn reports whether plan mode is active; nil for subagents.
 	PlanModeFn  func() bool
 	Sessions    session.Service
@@ -292,6 +297,7 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
+		stopHooks:            opts.StopHooks,
 		planModeFn:           opts.PlanModeFn,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
@@ -491,7 +497,10 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 		if d.RunID == "" {
 			continue
 		}
-		a.publishRunComplete(ctx, d, notify.RunComplete{
+		// deliverRunComplete, not publishRunComplete: these prompts never
+		// ran, so no Stop event is owed. Cancel holds the per-session
+		// mutex across this loop.
+		a.deliverRunComplete(ctx, d, notify.RunComplete{
 			SessionID: d.SessionID,
 			RunID:     d.RunID,
 			Cancelled: true,
@@ -579,6 +588,61 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 // observes exactly one terminal event regardless of which Run branch ends
 // the turn.
 func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgentCall, complete notify.RunComplete) {
+	a.fireStopHook(ctx, call, complete)
+	a.deliverRunComplete(ctx, call, complete)
+}
+
+// stopHookTeardownGrace caps a Stop hook when the run context is already
+// dead — the user pressed Escape or the app is shutting down. Stop is
+// observational (its AggregateResult is discarded), so it must never pin
+// a session as busy for the hook's full configured timeout while the user
+// is trying to get out. On a clean turn end the configured timeout still
+// applies in full.
+const stopHookTeardownGrace = 2 * time.Second
+
+// fireStopHook runs the Stop event for a turn that actually executed.
+//
+// Known edge: on the coordinator's re-auth retry path every attempt
+// publishes through publishRunComplete with an OnComplete coalescer, so
+// Stop hooks can fire once per attempt (at most twice, and only on a
+// 401-refresh retry). Accepted for v1 — moving the fire after the
+// OnComplete branch would skip Stop entirely for interactive runs.
+func (a *sessionAgent) fireStopHook(ctx context.Context, call SessionAgentCall, complete notify.RunComplete) {
+	if a.stopHooks == nil {
+		return
+	}
+	outcome := "complete"
+	switch {
+	case complete.Cancelled:
+		outcome = "cancelled"
+	case complete.Error != "":
+		outcome = "error"
+	}
+	// Detach from the run context so a cancelled turn still reports Stop,
+	// but keep a short leash when the caller is already tearing down.
+	hookCtx := context.WithoutCancel(ctx)
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		hookCtx, cancel = context.WithTimeout(hookCtx, stopHookTeardownGrace)
+		defer cancel()
+	}
+	if _, err := a.stopHooks.RunEvent(hookCtx, hooks.EventInput{
+		Event:     hooks.EventStop,
+		SessionID: call.SessionID,
+		Outcome:   outcome,
+		Error:     complete.Error,
+	}); err != nil {
+		slog.Warn("Stop hook error, ignoring", "error", err)
+	}
+}
+
+// deliverRunComplete publishes the terminal event without firing Stop.
+// Used for calls that were dropped before they ever ran: a queued prompt
+// discarded by a cancel never produced a turn, so there is no Stop to
+// report — and firing one there would block Cancel (which holds the
+// per-session mutex) for the hook's full timeout, wedging Escape and
+// app shutdown.
+func (a *sessionAgent) deliverRunComplete(ctx context.Context, call SessionAgentCall, complete notify.RunComplete) {
 	if call.OnComplete != nil {
 		call.OnComplete(complete)
 		return

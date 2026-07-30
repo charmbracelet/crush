@@ -85,10 +85,32 @@ func (r *Runner) Hooks() []config.HookConfig {
 	return out
 }
 
-// Run executes all matching hooks for the given event and tool, returning
-// an aggregated result.
+// EventInput carries everything needed to fire one hook event.
+type EventInput struct {
+	Event        string
+	SessionID    string
+	ToolName     string // tool events only; "" otherwise
+	ToolInput    string // raw JSON; tool events only
+	Prompt       string
+	ToolResponse *ToolResponsePayload
+	Outcome      string
+	Error        string
+}
+
+// Run is the legacy PreToolUse-shaped entry point.
 func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
-	matching := r.matchingHooks(toolName)
+	return r.RunEvent(ctx, EventInput{
+		Event:     eventName,
+		SessionID: sessionID,
+		ToolName:  toolName,
+		ToolInput: toolInputJSON,
+	})
+}
+
+// RunEvent executes all matching hooks for the given event input,
+// returning an aggregated result.
+func (r *Runner) RunEvent(ctx context.Context, in EventInput) (AggregateResult, error) {
+	matching := r.matchingHooks(in.ToolName)
 	if len(matching) == 0 {
 		return AggregateResult{Decision: DecisionNone}, nil
 	}
@@ -104,8 +126,8 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 		deduped = append(deduped, h)
 	}
 
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
+	envVars := BuildEnv(in.Event, in.ToolName, in.SessionID, r.cwd, r.projectDir, in.ToolInput)
+	payload := BuildEventPayload(in, r.cwd)
 
 	results := make([]HookResult, len(deduped))
 	var wg sync.WaitGroup
@@ -119,7 +141,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 	wg.Wait()
 
-	agg := aggregate(results, toolInputJSON)
+	agg := aggregate(results, in.ToolInput)
 	agg.Hooks = make([]HookInfo, len(deduped))
 	for i, h := range deduped {
 		agg.Hooks[i] = HookInfo{
@@ -133,8 +155,8 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 	slog.Info(
 		"Hook completed",
-		"event", eventName,
-		"tool", toolName,
+		"event", in.Event,
+		"tool", in.ToolName,
 		"hooks", len(deduped),
 		"decision", agg.Decision.String(),
 	)

@@ -235,6 +235,11 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
+	prompt, err := c.applyUserPromptSubmitHooks(ctx, sessionID, prompt)
+	if err != nil {
+		return nil, err
+	}
+
 	// refresh models before each run
 	if err := c.UpdateModels(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update models: %w", err)
@@ -626,6 +631,12 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	var stopRunner *hooks.Runner
+	if !isSubAgent {
+		if hs := c.cfg.Config().Hooks[hooks.EventStop]; len(hs) > 0 {
+			stopRunner = hooks.NewRunner(hs, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+		}
+	}
 	opts := SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
@@ -639,6 +650,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		StopHooks:            stopRunner,
 	}
 	if !isSubAgent {
 		opts.PlanModeFn = c.permissions.PlanMode
@@ -662,7 +674,6 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// (WaitForInit by MCP init timeouts, the rest is local) so it always
 	// completes.
 	initCtx := context.WithoutCancel(ctx)
-
 	c.readyWg.Go(func() error {
 		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
 		if err != nil {
@@ -689,6 +700,36 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	return result, nil
+}
+
+// applyUserPromptSubmitHooks runs UserPromptSubmit hooks and returns the
+// (possibly rewritten) prompt. Deny/halt become a hard error so the model
+// never sees a blocked prompt.
+func (c *coordinator) applyUserPromptSubmitHooks(ctx context.Context, sessionID, prompt string) (string, error) {
+	promptHooks := c.cfg.Config().Hooks[hooks.EventUserPromptSubmit]
+	if len(promptHooks) == 0 {
+		return prompt, nil
+	}
+	runner := hooks.NewRunner(promptHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	agg, herr := runner.RunEvent(ctx, hooks.EventInput{
+		Event:     hooks.EventUserPromptSubmit,
+		SessionID: sessionID,
+		Prompt:    prompt,
+	})
+	if herr != nil {
+		slog.Warn("UserPromptSubmit hook error, proceeding", "error", herr)
+	}
+	if agg.Decision == hooks.DecisionDeny || agg.Halt {
+		reason := cmp.Or(agg.Reason, "blocked by hook")
+		return "", fmt.Errorf("prompt blocked by hook: %s", reason)
+	}
+	if agg.UpdatedPrompt != "" {
+		prompt = agg.UpdatedPrompt
+	}
+	if agg.Context != "" {
+		prompt += "\n\n<hook-context>\n" + agg.Context + "\n</hook-context>"
+	}
+	return prompt, nil
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
@@ -727,10 +768,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	// Build hook runners if PreToolUse / PostToolUse hooks are configured.
+	var preRunner, postRunner *hooks.Runner
+	if hs := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(hs) > 0 {
+		preRunner = hooks.NewRunner(hs, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	}
+	if hs := c.cfg.Config().Hooks[hooks.EventPostToolUse]; len(hs) > 0 {
+		postRunner = hooks.NewRunner(hs, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 	}
 
 	allTools = append(
@@ -827,7 +871,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// without hook interception to avoid firing the user's hook N times
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	filteredTools = wrapToolsWithHooks(filteredTools, preRunner, postRunner, isSubAgent)
 
 	return filteredTools, nil
 }

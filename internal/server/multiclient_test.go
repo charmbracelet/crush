@@ -218,7 +218,7 @@ func TestPostCurrentSession_AttachedClientSucceeds(t *testing.T) {
 	ws := installSyntheticWorkspace(t, c)
 
 	cid := uuid.New().String()
-	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
+	require.NoError(t, c.backend.AttachClient(ws.ID, cid, 0))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
 
 	rec := postCurrentSession(t, c, ws.ID, cid, "S1")

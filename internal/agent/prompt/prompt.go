@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,7 +12,9 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/home"
@@ -40,6 +43,9 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	MemoryEnabled      bool
+	MemoryDir          string
+	MemoryIndex        string
 }
 
 type ContextFile struct {
@@ -229,7 +235,49 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	for _, files := range globalContextFiles {
 		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
 	}
+
+	if !cfg.Options.DisableMemory {
+		data.MemoryEnabled = true
+		data.MemoryDir = filepath.ToSlash(filepath.Join(cfg.Options.DataDirectory, "memory"))
+		data.MemoryIndex = loadMemoryIndex(filepath.Join(cfg.Options.DataDirectory, "memory", "MEMORY.md"))
+	}
+
 	return data, nil
+}
+
+// maxMemoryIndexBytes caps the MEMORY.md snippet injected into the system
+// prompt so a large or poisoned index cannot blow up launch. It is the same
+// budget the memory_write tool enforces when it writes MEMORY.md, so a
+// tool-written index never truncates here; this only backstops an index
+// written by hand or by an older build.
+const maxMemoryIndexBytes = tools.MaxMemoryIndexBytes
+
+// loadMemoryIndex reads at most maxMemoryIndexBytes+1 from path and, when
+// truncated, backs up to a UTF-8 rune boundary before appending a marker.
+func loadMemoryIndex(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	b, err := io.ReadAll(io.LimitReader(f, int64(maxMemoryIndexBytes)+1))
+	if err != nil {
+		return ""
+	}
+	if len(b) <= maxMemoryIndexBytes {
+		return string(b)
+	}
+	b = b[:maxMemoryIndexBytes]
+	// Drop a trailing incomplete UTF-8 sequence so the prompt stays valid.
+	for len(b) > 0 {
+		r, size := utf8.DecodeLastRune(b)
+		if r != utf8.RuneError || size != 1 {
+			break
+		}
+		b = b[:len(b)-1]
+	}
+	return string(b) + "\n(truncated)"
 }
 
 func isGitRepo(dir string) bool {

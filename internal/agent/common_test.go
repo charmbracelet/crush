@@ -153,6 +153,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	cfg.Config().Options.DisabledSkills = []string{"crush-config"}
 	cfg.Config().Options.ContextPaths = nil
 	cfg.Config().Options.GlobalContextPaths = nil
+	cfg.Config().Options.DisableMemory = true
 	cfg.Config().LSP = nil
 
 	pinLsLimits(cfg.Config())

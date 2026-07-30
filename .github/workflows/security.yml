@@ -79,7 +79,9 @@ jobs:
 
   dependency-review:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    # Dependency graph / dependency-review is unavailable on many personal
+    # forks; keep the check for upstream and skip elsewhere.
+    if: github.event_name == 'pull_request' && github.repository == 'charmbracelet/crush'
     permissions:
       contents: read
     steps:

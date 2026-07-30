@@ -1916,6 +1916,38 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
 
+	// Memory dialog messages.
+	case memoriesLoadedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		memDialog, err := dialog.NewMemory(m.com, msg.entries)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		m.dialog.OpenDialog(memDialog)
+	case dialog.ActionOpenMemory:
+		m.dialog.CloseDialog(dialog.MemoryID)
+		path := filepath.Join(m.com.Config().Options.DataDirectory, "memory", msg.Slug+".md")
+		cmds = append(cmds, m.openMemoryFileEditor(path))
+	case memoryEditedMsg:
+		dataDir := m.com.Config().Options.DataDirectory
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := agenttools.RegenerateMemoryIndex(ctx, dataDir); err != nil {
+				return util.NewErrorMsg(fmt.Errorf("refresh memory index: %w", err))
+			}
+			return nil
+		})
+	case dialog.ActionDeleteMemory:
+		// Deliberately leave the dialog open. It refreshes its own list, and
+		// closing it after each delete would make pruning several stale
+		// memories require reopening the dialog every time.
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Deleted memory %q.", msg.Slug)))
+
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -3811,6 +3843,33 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	})
 }
 
+// openMemoryFileEditor opens a memory file in the external editor. It does
+// NOT touch the chat textarea: unlike openEditor, which round-trips a draft
+// message through a temp file, this edits a memory in place, and copying the
+// file into the composer would clobber whatever the user was typing.
+func (m *UI) openMemoryFileEditor(path string) tea.Cmd {
+	cmd, err := editor.Command("crush", path)
+	if err != nil {
+		return util.ReportError(fmt.Errorf("editor: %w", err))
+	}
+	return tea.ExecProcess(
+		cmd,
+		func(err error) tea.Msg {
+			// Return a tea.Msg, not a tea.Cmd. util.ReportError returns a
+			// tea.Cmd, and because tea.Msg is an empty interface, returning
+			// one here compiles and is then silently dropped.
+			if err != nil {
+				return util.NewErrorMsg(fmt.Errorf("editor: %w", err))
+			}
+			return memoryEditedMsg{}
+		},
+	)
+}
+
+// memoryEditedMsg reports that the external editor closed after editing a
+// memory, so the index can be brought back in sync with the edited file.
+type memoryEditedMsg struct{}
+
 // setEditorPrompt configures the textarea prompt function. Priority is
 // bang > plan > yolo > normal. The yolo argument is the cached skip-requests
 // flag so View/Update paths never probe the workspace synchronously.
@@ -4471,6 +4530,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openJobsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.MemoryID:
+		if cmd := m.openMemoryDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
@@ -4490,6 +4553,30 @@ func (m *UI) openBtwDialog() tea.Cmd {
 	btwDialog := dialog.NewBtw(m.com, m.session.ID)
 	m.dialog.OpenDialog(btwDialog)
 	return nil
+}
+
+// openMemoryDialog opens the memory inspect dialog. Scanning the memory
+// directory reads every memory file, so it runs in a tea.Cmd rather than in
+// Update, mirroring openJobsDialog.
+func (m *UI) openMemoryDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MemoryID) {
+		m.dialog.BringToFront(dialog.MemoryID)
+		return nil
+	}
+	memoryDir := filepath.Join(m.com.Config().Options.DataDirectory, "memory")
+	return func() tea.Msg {
+		entries, err := dialog.ScanMemoryDir(memoryDir)
+		return memoriesLoadedMsg{entries: entries, err: err}
+	}
+}
+
+// memoriesLoadedMsg delivers the memory list scanned off the Update loop. err
+// is carried rather than swallowed so an unreadable memory directory says so
+// instead of showing an empty list, which is indistinguishable from "no
+// memories saved".
+type memoriesLoadedMsg struct {
+	entries []dialog.MemoryEntry
+	err     error
 }
 
 // openQuitDialog opens the quit confirmation dialog.

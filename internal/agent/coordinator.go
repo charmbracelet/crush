@@ -759,6 +759,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
 	}
 
+	// Memory is for the top-level coder only; sub-agents stay read-only
+	// with respect to the project memory store.
+	if !isSubAgent && !c.cfg.Config().Options.DisableMemory {
+		allTools = append(allTools, tools.NewMemoryTool(c.cfg.Config().Options.DataDirectory))
+	}
+
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
 		allTools = append(

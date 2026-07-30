@@ -145,6 +145,18 @@ type (
 	}
 )
 
+// Messages for the memory inspect dialog.
+type (
+	// ActionOpenMemory is sent when a memory is selected for opening.
+	ActionOpenMemory struct {
+		Slug string
+	}
+	// ActionDeleteMemory is sent when a memory is deleted from the dialog.
+	ActionDeleteMemory struct {
+		Slug string
+	}
+)
+
 // Messages for API key input dialog.
 type (
 	ActionChangeAPIKeyState struct {

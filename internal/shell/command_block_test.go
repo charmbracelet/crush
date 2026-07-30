@@ -428,3 +428,77 @@ func TestSplitArgsFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestIsCommandBlocked(t *testing.T) {
+	t.Parallel()
+
+	blockedCurl := CommandsBlocker([]string{"curl"})
+
+	tests := []struct {
+		name     string
+		command  string
+		funcs    []BlockFunc
+		expected bool
+	}{
+		{
+			name:     "plain blocked command",
+			command:  "curl https://example.com",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "plain allowed command",
+			command:  "ls -la",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: false,
+		},
+		{
+			name:     "unparseable input is dangerous",
+			command:  "echo 'unterminated",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "command substitution is dangerous",
+			command:  "echo $(curl https://example.com)",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			// Regression: expand.Config.ProcSubst is called by mvdan.cc/sh
+			// without a nil guard, so process substitution used to panic
+			// here instead of failing closed. Crash of 2026-07-30.
+			name:     "process substitution is dangerous, not a panic",
+			command:  `diff -r /tmp/a /tmp/b <(true) 2>/dev/null`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			// Output process substitution hangs off a Redirect node rather
+			// than a CallExpr argument, so the walker never expands it. It
+			// must not panic; flagging it is best-effort and currently not
+			// done.
+			name:     "output process substitution does not panic",
+			command:  `echo hi > >(cat)`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: false,
+		},
+		{
+			// The exact shape of the command that crashed in production:
+			// proc subst combined with a command substitution and a loop.
+			name: "full crash repro command",
+			command: `cd /somewhere && echo "=== verify ===" && diff -r /tmp/a/docs /tmp/a/internal <(true) 2>/dev/null; for f in $(cd /tmp/a && find . -type f | sed 's|^\./||'); do
+  if ! diff -q "/tmp/a/$f" "$f" >/dev/null 2>&1; then echo "DIFFERS: $f"; fi
+done; echo "=== done ==="`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.expected, IsCommandBlocked(tc.command, tc.funcs))
+		})
+	}
+}

@@ -46,6 +46,13 @@ type countingWorkspace struct {
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
 
+// AgentIsSessionBusy mirrors AgentIsBusy for the fake: the busy probe is
+// scoped to the viewed session, and the tests model a single session.
+func (w *countingWorkspace) AgentIsSessionBusy(string) bool {
+	w.agentBusyCalls++
+	return w.agentBusy
+}
+
 func (w *countingWorkspace) AgentReadyErr() error {
 	w.readyCalls++
 	if w.ready {

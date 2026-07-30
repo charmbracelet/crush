@@ -82,7 +82,7 @@ func TestChannelEndToEnd(t *testing.T) {
 	if !hasChannelCapability(session.InitializeResult()) {
 		t.Fatal("expected claude/channel capability to be detected from the handshake")
 	}
-	if channelEnabled([]string{"chan"}, "chan") && hasChannelCapability(session.InitializeResult()) {
+	if ChannelEnabled([]string{"chan"}, "chan") && hasChannelCapability(session.InitializeResult()) {
 		buffered := gate.resolve(true)
 		for _, raw := range buffered {
 			publishChannelMessage(ctx, "chan", raw)

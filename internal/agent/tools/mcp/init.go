@@ -53,6 +53,10 @@ type ClientSession struct {
 	*mcp.ClientSession
 	cancel       context.CancelFunc
 	oauthHandler *mcpoauth.Handler
+	// channel reports whether this server is an active channel (it declared
+	// the claude/channel capability and was opted in via --channels or
+	// channel_enabled in config).
+	channel bool
 }
 
 // Close cancels the session context and then closes the underlying session.
@@ -163,6 +167,7 @@ type Event struct {
 	// ChannelMessage is set only for EventChannelMessage: the fully rendered
 	// and escaped <channel>...</channel> element to inject into the session.
 	ChannelMessage string
+	ChannelMeta    map[string]string
 }
 
 // Counts number of available tools, prompts, etc.
@@ -180,6 +185,10 @@ type ClientInfo struct {
 	Client      *ClientSession
 	Counts      Counts
 	ConnectedAt time.Time
+	// Channel reports whether this server is an active channel (declared the
+	// claude/channel capability and opted in via --channels or
+	// channel_enabled in config).
+	Channel bool
 }
 
 // SubscribeEvents returns a channel for MCP events.
@@ -187,9 +196,10 @@ type ClientInfo struct {
 // Channel message events (EventChannelMessage) are excluded: they carry no
 // workspace or session identity, and the MCP broker is process-global. Without
 // this filter, every workspace that calls SubscribeEvents would receive every
-// other workspace's channel events — a cross-workspace injection path. Channel
-// delivery requires workspace-scoped routing, which is deferred to a later PR;
-// until then, channel events must not flow through the shared event fan-out.
+// other workspace's channel events — a cross-workspace injection path.
+// Consumers that deliver channel messages use SubscribeChannelEvents and are
+// responsible for scoping each event to the workspaces that declared and
+// opted in the originating server.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	raw := broker.Subscribe(ctx)
 	filtered := make(chan pubsub.Event[Event], 64)
@@ -207,6 +217,32 @@ func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 		}
 	}()
 	return filtered
+}
+
+// SubscribeChannelEvents returns a channel carrying only channel message
+// events (EventChannelMessage). The MCP broker is process-global, so these
+// events are not scoped to any workspace: every consumer must check that the
+// originating server is declared in the target workspace's MCP config and
+// opted in (ChannelEnabled) before delivering, otherwise one workspace's
+// channel messages leak into another — the injection path SubscribeEvents
+// filters out.
+func SubscribeChannelEvents(ctx context.Context) <-chan pubsub.Event[Event] {
+	raw := broker.Subscribe(ctx)
+	channelOnly := make(chan pubsub.Event[Event], 64)
+	go func() {
+		defer close(channelOnly)
+		for ev := range raw {
+			if ev.Payload.Type != EventChannelMessage {
+				continue
+			}
+			select {
+			case channelOnly <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return channelOnly
 }
 
 // GetStates returns the current state of all MCP clients
@@ -350,7 +386,7 @@ func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) 
 
 	// The OAuth handler persists the token automatically as it is
 	// exchanged, so a successful connection has already saved it.
-	_, err := connectAndRegister(ctx, cfg, name, m, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	_, err := connectAndRegister(ctx, cfg, name, m, cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return err
 	}
@@ -409,7 +445,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	}
 
 	updateState(name, StateStarting, nil, nil, Counts{})
-	_, err := connectAndRegister(ctx, cfg, name, m, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
+	_, err := connectAndRegister(ctx, cfg, name, m, resolver, ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		// If an OAuth MCP fails because the saved token is no longer
 		// valid (e.g. refresh token expired or revoked) or no token
@@ -528,7 +564,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	// resources from the registry.
 	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), nil, state.Counts)
 
-	newSess, err := newSession(ctx, cfg, name, m, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	newSess, err := newSession(ctx, cfg, name, m, cfg.Resolver(), ChannelOptIn(m, cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		clearMCPData(name)
 		// If an OAuth MCP fails to reconnect because the token is no
@@ -602,11 +638,12 @@ func closeSession(name string, s *ClientSession) {
 // updateState updates the state of an MCP client and publishes an event
 func updateState(name string, state State, err error, client *ClientSession, counts Counts) {
 	info := ClientInfo{
-		Name:   name,
-		State:  state,
-		Error:  err,
-		Client: client,
-		Counts: counts,
+		Name:    name,
+		State:   state,
+		Error:   err,
+		Client:  client,
+		Counts:  counts,
+		Channel: client != nil && client.channel,
 	}
 	switch state {
 	case StateConnected:
@@ -711,11 +748,13 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	slog.Debug("MCP client initialized", "name", name)
 
 	// Resolve the channel gate: open only for a server that both declares
-	// the claude/channel capability and was opted in via --channels.
-	// Otherwise close it (fail closed). Resolving drains buffered messages
+	// the claude/channel capability and was opted in — via --channels or
+	// channel_enabled in config. Merely listing a server under mcp is not
+	// enough. Otherwise close the gate (fail closed). Resolving drains buffered messages
 	// that arrived during negotiation so a fast server does not lose early
 	// events.
-	if channelOptIn && hasChannelCapability(session.InitializeResult()) {
+	isChannel := channelOptIn && hasChannelCapability(session.InitializeResult())
+	if isChannel {
 		buffered := channelGate.resolve(true)
 		for _, raw := range buffered {
 			publishChannelMessage(mcpCtx, name, raw)
@@ -729,6 +768,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 		ClientSession: session,
 		cancel:        cancel,
 		oauthHandler:  oauthHandler,
+		channel:       isChannel,
 	}, nil
 }
 

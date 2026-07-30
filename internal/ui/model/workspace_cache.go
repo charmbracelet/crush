@@ -124,10 +124,21 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	m.busyFetchInFlight = true
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
+	sessionID := m.currentSessionID()
 	return func() tea.Msg {
 		st := busyStateMsg{gen: gen}
 		if ws.AgentIsReady() {
-			st.agentBusy = ws.AgentIsBusy()
+			// Scope the probe to the viewed session when there is one:
+			// with channels dispatching work into background sessions,
+			// global busy state would make the current view look busy
+			// (spinner, cancel hints) for activity happening elsewhere.
+			// Session switches bump gen, so a probe scoped to a departed
+			// session is discarded rather than applied.
+			if sessionID != "" {
+				st.agentBusy = ws.AgentIsSessionBusy(sessionID)
+			} else {
+				st.agentBusy = ws.AgentIsBusy()
+			}
 		}
 		st.yolo = ws.PermissionSkipRequests()
 		return st

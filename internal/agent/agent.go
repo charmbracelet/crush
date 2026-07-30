@@ -1320,6 +1320,28 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
+// summarizeSystemPrompt appends /no_think to base so local reasoning models
+// (Qwen/GLM-style) don't burn their entire output budget on a
+// <think>...</think> block for a short summarization call, leaving no room
+// for the actual summary. Same directive GenerateTitle already relies on.
+func summarizeSystemPrompt(base string) string {
+	return base + "\n /no_think"
+}
+
+// summarizeMaxOutputTokens returns the token budget to request for the
+// summarization call, or nil to leave it unset. Reasoning-capable models
+// need a larger, reasoning-sized budget (mirroring GenerateTitle's same
+// workaround) since a small or provider-default budget can be exhausted by
+// the model's thinking trace before it emits any summary text. Non-reasoning
+// models already work fine with the budget left unset.
+func summarizeMaxOutputTokens(model Model) *int64 {
+	if !model.CatwalkCfg.CanReason {
+		return nil
+	}
+	tok := model.CatwalkCfg.DefaultMaxTokens
+	return &tok
+}
+
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
@@ -1355,11 +1377,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}()
 
-	agent := fantasy.NewAgent(
-		largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
+	agentOpts := []fantasy.AgentOption{
+		fantasy.WithSystemPrompt(summarizeSystemPrompt(string(summaryPrompt))),
 		fantasy.WithUserAgent(userAgent),
-	)
+	}
+	if tok := summarizeMaxOutputTokens(largeModel); tok != nil {
+		agentOpts = append(agentOpts, fantasy.WithMaxOutputTokens(*tok))
+	}
+	agent := fantasy.NewAgent(largeModel.Model, agentOpts...)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
 		Model:            largeModel.ModelCfg.Model,

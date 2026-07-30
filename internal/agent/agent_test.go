@@ -1063,3 +1063,25 @@ func TestProviderRetryLogFields(t *testing.T) {
 		}, fields)
 	})
 }
+
+func TestSummarizeSystemPrompt(t *testing.T) {
+	// /no_think must always be appended so local reasoning models
+	// (Qwen/GLM-style) don't burn their entire output budget on a
+	// <think>...</think> block instead of producing the summary.
+	got := summarizeSystemPrompt("Summarize the conversation.")
+	require.Equal(t, "Summarize the conversation.\n /no_think", got)
+}
+
+func TestSummarizeMaxOutputTokens(t *testing.T) {
+	t.Run("non-reasoning model leaves budget unset", func(t *testing.T) {
+		model := Model{CatwalkCfg: catwalk.Model{CanReason: false, DefaultMaxTokens: 8192}}
+		require.Nil(t, summarizeMaxOutputTokens(model))
+	})
+
+	t.Run("reasoning model gets a reasoning-sized budget", func(t *testing.T) {
+		model := Model{CatwalkCfg: catwalk.Model{CanReason: true, DefaultMaxTokens: 32000}}
+		tok := summarizeMaxOutputTokens(model)
+		require.NotNil(t, tok)
+		require.Equal(t, int64(32000), *tok)
+	})
+}

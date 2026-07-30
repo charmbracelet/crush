@@ -38,6 +38,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
@@ -127,6 +128,8 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
+	cronStore *scheduler.Store
+
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
@@ -167,6 +170,11 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	skillTracker := skills.NewTracker(activeSkills)
 
+	cronStore := scheduler.NewStore(filepath.Join(opts.Config.Config().Options.DataDirectory, "scheduled_tasks.json"))
+	if err := cronStore.Load(); err != nil {
+		slog.Error("Failed to load scheduled tasks", "error", err)
+	}
+
 	c := &coordinator{
 		cfg:          opts.Config,
 		sessions:     opts.Sessions,
@@ -179,6 +187,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		notify:       opts.Notify,
 		runComplete:  opts.RunComplete,
 		agents:       make(map[string]SessionAgent),
+		cronStore:    cronStore,
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
@@ -208,7 +217,45 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+
+	cronScheduler := scheduler.NewScheduler(c.cronStore, c.fireScheduledTask)
+	go cronScheduler.Run(ctx)
+
 	return c, nil
+}
+
+// scheduledTaskPromptMarker prefixes fired scheduled-task prompts so the
+// agent knows the turn was triggered by an automated firing rather than
+// by the user typing, matching Claude Code's scheduled-task marker.
+const scheduledTaskPromptMarker = "[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]"
+
+// fireScheduledTask runs a due scheduled task's prompt against its
+// session. The prompt is injected as a normal user turn so it respects
+// the session's busy queue: it fires between turns, never mid-response,
+// matching Claude Code's scheduler semantics.
+func (c *coordinator) fireScheduledTask(ctx context.Context, task scheduler.Task) error {
+	if _, err := c.sessions.Get(ctx, task.SessionID); err != nil {
+		// The session is gone (deleted or never persisted), so nothing
+		// this task fires can ever land. Drop the whole session's tasks,
+		// durable ones included: leaving them behind means the scheduler
+		// retries a dead session on every fire, forever.
+		c.cronStore.DropSession(task.SessionID)
+		return fmt.Errorf("session %s for scheduled task %s no longer exists", task.SessionID, task.ID)
+	}
+
+	prompt := scheduledTaskPrompt(task)
+	go func() {
+		if _, err := c.run(ctx, nil, task.SessionID, prompt); err != nil {
+			slog.Error("Scheduled task run failed", "id", task.ID, "session_id", task.SessionID, "error", err)
+		}
+	}()
+	return nil
+}
+
+// scheduledTaskPrompt wraps a fired task's prompt with the marker that
+// distinguishes an automated firing from a user-typed turn.
+func scheduledTaskPrompt(task scheduler.Task) string {
+	return scheduledTaskPromptMarker + "\n\n" + task.Prompt
 }
 
 // Run implements Coordinator.
@@ -732,6 +779,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, allowedCommands, allowAllCommands),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
+		tools.NewCronCreateTool(c.cronStore),
+		tools.NewCronListTool(c.cronStore),
+		tools.NewCronDeleteTool(c.cronStore),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),

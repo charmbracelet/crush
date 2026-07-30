@@ -60,6 +60,15 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	}
 }
 
+func TestCoordinator_ReloadSkills_NilManager(t *testing.T) {
+	t.Parallel()
+
+	c := &coordinator{}
+	err := c.ReloadSkills(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "skills manager")
+}
+
 // newMockAgent creates a mockSessionAgent with the given provider and run function.
 func newMockAgent(providerID string, maxTokens int64, runFunc func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)) *mockSessionAgent {
 	return &mockSessionAgent{

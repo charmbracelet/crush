@@ -293,6 +293,10 @@ func (w *ClientWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.client.UpdateAgent(ctx, w.workspaceID())
 }
 
+func (w *ClientWorkspace) ReloadSkills(ctx context.Context) error {
+	return w.client.ReloadSkills(ctx, w.workspaceID())
+}
+
 func (w *ClientWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), true)
 }
@@ -606,6 +610,13 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 		Source:      skills.SourceType(resp.Result.Source),
 		Builtin:     resp.Result.Builtin,
 	}, nil
+}
+
+func (w *ClientWorkspace) GetSkillStates() []*skills.SkillState {
+	if w.skills == nil {
+		return nil
+	}
+	return w.skills.States()
 }
 
 // -- MCP operations --

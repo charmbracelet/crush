@@ -1,6 +1,7 @@
 ---
 name: crush-config
 description: Use when the user needs help configuring Crush — working with crush.json, setting up providers, configuring LSPs, adding MCP servers, managing skills or permissions, or changing Crush behavior.
+user-invocable: true
 ---
 
 # Crush Configuration

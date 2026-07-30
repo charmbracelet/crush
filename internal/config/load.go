@@ -281,6 +281,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			SystemPromptPrefix: config.SystemPromptPrefix,
 			ExtraHeaders:       headers,
 			ExtraBody:          config.ExtraBody,
+			ProviderOptions:    config.ProviderOptions,
 			ExtraParams:        make(map[string]string),
 			Models:             p.Models,
 		}

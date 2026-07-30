@@ -38,11 +38,12 @@ var sessionCmd = &cobra.Command{
 }
 
 var (
-	sessionListJSON   bool
-	sessionShowJSON   bool
-	sessionLastJSON   bool
-	sessionDeleteJSON bool
-	sessionRenameJSON bool
+	sessionListJSON    bool
+	sessionShowJSON    bool
+	sessionShowByModel bool
+	sessionLastJSON    bool
+	sessionDeleteJSON  bool
+	sessionRenameJSON  bool
 )
 
 var sessionListCmd = &cobra.Command{
@@ -56,9 +57,12 @@ var sessionListCmd = &cobra.Command{
 var sessionShowCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show session details",
-	Long:  "Show session details. Use --json for machine-readable output. ID can be a UUID, full hash, or hash prefix.",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSessionShow,
+	Long: "Show session details. Use --json for machine-readable output. ID can be a UUID, full hash, or hash prefix.\n\n" +
+		"Use --by-model for a cost breakdown attributed to the model that incurred each charge, " +
+		"across this session and every sub-session below it. The session's own `cost` column " +
+		"includes cost propagated up from sub-agents, so it alone does not say which model was billed.",
+	Args: cobra.ExactArgs(1),
+	RunE: runSessionShow,
 }
 
 var sessionLastCmd = &cobra.Command{
@@ -88,6 +92,7 @@ var sessionRenameCmd = &cobra.Command{
 func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
+	sessionShowCmd.Flags().BoolVar(&sessionShowByModel, "by-model", false, "break token usage and cost down by the model that incurred it, across this session and its sub-sessions")
 	sessionLastCmd.Flags().BoolVar(&sessionLastJSON, "json", false, "output in JSON format")
 	sessionDeleteCmd.Flags().BoolVar(&sessionDeleteJSON, "json", false, "output in JSON format")
 	sessionRenameCmd.Flags().BoolVar(&sessionRenameJSON, "json", false, "output in JSON format")
@@ -273,6 +278,17 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if sessionShowByModel {
+		report, reportErr := sessionByModelReport(ctx, svc.sessions, svc.messages, sess)
+		if reportErr != nil {
+			return reportErr
+		}
+		if sessionShowJSON {
+			return outputSessionByModelJSON(cmd.OutOrStdout(), sess, report)
+		}
+		return outputSessionByModelHuman(cmd.OutOrStdout(), sess, report)
+	}
+
 	msgs, err := svc.messages.List(ctx, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
@@ -403,6 +419,265 @@ func messagePtrs(msgs []message.Message) []*message.Message {
 		ptrs[i] = &msgs[i]
 	}
 	return ptrs
+}
+
+// maxCostTreeSessions bounds the descendant walk. A subtree larger than this
+// is reported truncated rather than walked forever: sub-agents can spawn
+// sub-agents, and an unbounded walk over a corrupted parent chain would hang
+// the command.
+const maxCostTreeSessions = 4096
+
+// sessionCostStore is the slice of [session.Service] the cost walk needs.
+type sessionCostStore interface {
+	ListChildren(ctx context.Context, parentSessionID string) ([]session.Session, error)
+}
+
+// sessionMessageStore is the slice of [message.Service] the cost walk needs.
+type sessionMessageStore interface {
+	List(ctx context.Context, sessionID string) ([]message.Message, error)
+}
+
+// sessionSubtreeNode is one session in the shown session's subtree, paired
+// with its own assistant messages. Depth 0 is the shown session itself.
+type sessionSubtreeNode struct {
+	sess  session.Session
+	depth int
+	msgs  []*message.Message
+}
+
+// collectSessionSubtree returns the shown session followed by every descendant
+// session, breadth-first, each with its own messages loaded. Sub-agent cost is
+// propagated UP into the parent's `cost` column (see
+// coordinator.updateParentSessionCost), so a breakdown that only reads the
+// shown session's own messages can never account for the parent's figure — the
+// walk is what makes the two reconcile.
+//
+// It is cycle-safe (a session already visited is skipped) and bounded by
+// maxCostTreeSessions; the second return value reports truncation.
+func collectSessionSubtree(
+	ctx context.Context,
+	sessions sessionCostStore,
+	messages sessionMessageStore,
+	root session.Session,
+) ([]sessionSubtreeNode, bool, error) {
+	visited := map[string]bool{root.ID: true}
+	nodes := []sessionSubtreeNode{{sess: root, depth: 0}}
+	truncated := false
+
+	for i := 0; i < len(nodes); i++ {
+		msgs, err := messages.List(ctx, nodes[i].sess.ID)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to list messages for session %s: %w", nodes[i].sess.ID, err)
+		}
+		nodes[i].msgs = messagePtrs(msgs)
+
+		children, err := sessions.ListChildren(ctx, nodes[i].sess.ID)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to list child sessions of %s: %w", nodes[i].sess.ID, err)
+		}
+		for _, child := range children {
+			if visited[child.ID] {
+				continue
+			}
+			if len(nodes) >= maxCostTreeSessions {
+				truncated = true
+				break
+			}
+			visited[child.ID] = true
+			nodes = append(nodes, sessionSubtreeNode{sess: child, depth: nodes[i].depth + 1})
+		}
+		if truncated {
+			break
+		}
+	}
+	return nodes, truncated, nil
+}
+
+// aggregateSessionCostByModel groups assistant-message Finish usage by
+// model/provider across the whole subtree. Every figure it returns is what the
+// named model itself consumed, taken from the message that recorded it — a row
+// never carries cost that merely passed through the session owning the
+// subtree. Messages without Finish usage still count toward MessageCount so
+// older sessions remain useful.
+func aggregateSessionCostByModel(nodes []sessionSubtreeNode) []sessionModelCost {
+	type key struct{ model, provider string }
+	order := make([]key, 0)
+	by := make(map[key]*sessionModelCost)
+	for _, node := range nodes {
+		for _, msg := range node.msgs {
+			if msg == nil || msg.Role != message.Assistant {
+				continue
+			}
+			k := key{model: msg.Model, provider: msg.Provider}
+			if k.model == "" {
+				k.model = "unknown"
+			}
+			if k.provider == "" {
+				k.provider = "unknown"
+			}
+			agg, ok := by[k]
+			if !ok {
+				agg = &sessionModelCost{Model: k.model, Provider: k.provider}
+				by[k] = agg
+				order = append(order, k)
+			}
+			agg.MessageCount++
+			fin := msg.FinishPart()
+			if fin == nil {
+				continue
+			}
+			agg.PromptTokens += fin.PromptTokens
+			agg.CompletionTokens += fin.CompletionTokens
+			if node.depth == 0 {
+				agg.IncurredCostHere += fin.Cost
+			} else {
+				agg.IncurredCostSubSessions += fin.Cost
+			}
+		}
+	}
+	out := make([]sessionModelCost, 0, len(order))
+	for _, k := range order {
+		agg := by[k]
+		agg.TotalTokens = agg.PromptTokens + agg.CompletionTokens
+		agg.IncurredCostTotal = agg.IncurredCostHere + agg.IncurredCostSubSessions
+		out = append(out, *agg)
+	}
+	return out
+}
+
+// sessionOwnCost sums the cost recorded on a session's own assistant messages.
+// This is the session's OWN spend: unlike session.Cost it excludes anything
+// propagated up from a sub-session.
+func sessionOwnCost(msgs []*message.Message) float64 {
+	var total float64
+	for _, msg := range msgs {
+		if msg == nil || msg.Role != message.Assistant {
+			continue
+		}
+		if fin := msg.FinishPart(); fin != nil {
+			total += fin.Cost
+		}
+	}
+	return total
+}
+
+// buildSessionCostReport turns a walked subtree into the reported breakdown.
+func buildSessionCostReport(nodes []sessionSubtreeNode, truncated bool) sessionCostReport {
+	report := sessionCostReport{
+		Truncated: truncated,
+		ByModel:   aggregateSessionCostByModel(nodes),
+		BySession: make([]sessionCostTreeNode, 0, len(nodes)),
+	}
+	for _, node := range nodes {
+		own := sessionOwnCost(node.msgs)
+		if node.depth == 0 {
+			report.RecordedCost = node.sess.Cost
+			report.IncurredCostHere = own
+		} else {
+			report.IncurredCostSubSessions += own
+			report.SubSessionCount++
+		}
+		report.BySession = append(report.BySession, sessionCostTreeNode{
+			ID:           session.HashID(node.sess.ID),
+			UUID:         node.sess.ID,
+			Title:        node.sess.Title,
+			Depth:        node.depth,
+			RecordedCost: node.sess.Cost,
+			IncurredCost: own,
+		})
+	}
+	report.IncurredCostTotal = report.IncurredCostHere + report.IncurredCostSubSessions
+	report.UnattributedCost = report.RecordedCost - report.IncurredCostTotal
+	return report
+}
+
+func sessionByModelReport(
+	ctx context.Context,
+	sessions sessionCostStore,
+	messages sessionMessageStore,
+	sess session.Session,
+) (sessionCostReport, error) {
+	nodes, truncated, err := collectSessionSubtree(ctx, sessions, messages, sess)
+	if err != nil {
+		return sessionCostReport{}, err
+	}
+	return buildSessionCostReport(nodes, truncated), nil
+}
+
+func outputSessionByModelJSON(w io.Writer, sess session.Session, report sessionCostReport) error {
+	output := sessionByModelOutput{
+		Meta: sessionByModelMeta{
+			ID:                      session.HashID(sess.ID),
+			UUID:                    sess.ID,
+			Title:                   sess.Title,
+			Created:                 time.Unix(sess.CreatedAt, 0).Format(time.RFC3339),
+			Modified:                time.Unix(sess.UpdatedAt, 0).Format(time.RFC3339),
+			ContextPromptTokens:     sess.PromptTokens,
+			ContextCompletionTokens: sess.CompletionTokens,
+			CostAttribution:         report,
+		},
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(output)
+}
+
+func outputSessionByModelHuman(w io.Writer, sess session.Session, report sessionCostReport) error {
+	fmt.Fprintf(w, "Session: %s\n\n", sess.Title)
+
+	fmt.Fprintln(w, "Cost attribution")
+	line := func(label string, amount float64, note string) {
+		fmt.Fprintf(w, "  %-30s $%.6f  (%s)\n", label, amount, note)
+	}
+	line("recorded on this session row", report.RecordedCost,
+		"own spend plus cost propagated up from sub-sessions")
+	line("incurred by this session", report.IncurredCostHere,
+		"this session's own assistant steps only")
+	line(fmt.Sprintf("incurred by %d sub-sessions", report.SubSessionCount), report.IncurredCostSubSessions,
+		"each sub-session's own assistant steps only")
+	line("attributed total", report.IncurredCostTotal,
+		"own + sub-sessions; reconciles with the recorded row")
+	line("unattributed", report.UnattributedCost,
+		"recorded minus attributed; non-zero means steps with no recorded usage")
+	if report.Truncated {
+		fmt.Fprintf(w, "  WARNING: subtree larger than %d sessions; figures above are incomplete\n", maxCostTreeSessions)
+	}
+	fmt.Fprintf(w, "\nContext on last step: %d in / %d out (session row counters; these track context\n"+
+		"occupancy of the most recent step, NOT a per-turn total, so they do not sum to the\n"+
+		"PROMPT/COMPLETION columns below)\n\n",
+		sess.PromptTokens, sess.CompletionTokens)
+
+	if len(report.ByModel) == 0 {
+		fmt.Fprintln(w, "No assistant messages with model metadata.")
+		return nil
+	}
+
+	fmt.Fprintln(w, "Every figure below is what the named MODEL itself consumed, summed over this")
+	fmt.Fprintln(w, "session and its sub-sessions. No row includes cost propagated up from a")
+	fmt.Fprintln(w, "sub-session. $ HERE and $ SUB split the same spend by where it happened.")
+	fmt.Fprintf(w, "%-24s %-16s %6s %12s %12s %12s %12s %12s\n",
+		"MODEL", "PROVIDER", "MSGS", "PROMPT", "COMPLETION", "$ HERE", "$ SUB", "$ TOTAL")
+	for _, row := range report.ByModel {
+		fmt.Fprintf(w, "%-24s %-16s %6d %12d %12d %12.6f %12.6f %12.6f\n",
+			row.Model, row.Provider, row.MessageCount,
+			row.PromptTokens, row.CompletionTokens,
+			row.IncurredCostHere, row.IncurredCostSubSessions, row.IncurredCostTotal)
+	}
+
+	if len(report.BySession) > 1 {
+		fmt.Fprintln(w, "\nSessions in this subtree (RECORDED is the session row including propagated")
+		fmt.Fprintln(w, "cost; INCURRED is that session's own steps only, and INCURRED sums to the")
+		fmt.Fprintln(w, "attributed total above)")
+		fmt.Fprintf(w, "%-6s %-16s %12s %12s %s\n", "DEPTH", "ID", "RECORDED", "INCURRED", "TITLE")
+		for _, node := range report.BySession {
+			title := strings.ReplaceAll(node.Title, "\n", " ")
+			fmt.Fprintf(w, "%-6d %-16s %12.6f %12.6f %s\n",
+				node.Depth, node.ID[:min(len(node.ID), 12)],
+				node.RecordedCost, node.IncurredCost,
+				ansi.Truncate(title, 40, "…"))
+		}
+	}
+	return nil
 }
 
 func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Message) error {
@@ -579,6 +854,88 @@ type sessionShowMeta struct {
 	CompletionTokens int64              `json:"completion_tokens"`
 	TotalTokens      int64              `json:"total_tokens"`
 	Skills           []sessionShowSkill `json:"skills,omitempty"`
+}
+
+// sessionByModelOutput is the `session show --by-model --json` payload. It is
+// deliberately a separate shape from sessionShowOutput: the plain `show` meta
+// exposes a single `cost` field that carries sub-session spend propagated up
+// from children, and reusing it here would reintroduce under a new name the
+// exact ambiguity this breakdown exists to remove.
+type sessionByModelOutput struct {
+	Meta sessionByModelMeta `json:"meta"`
+}
+
+type sessionByModelMeta struct {
+	ID       string `json:"id"`
+	UUID     string `json:"uuid"`
+	Title    string `json:"title"`
+	Created  string `json:"created"`
+	Modified string `json:"modified"`
+	// ContextPromptTokens / ContextCompletionTokens are the session row's
+	// token counters. They track the context occupancy of the most recent
+	// step (see agent.updateSessionTokenCounters), NOT a per-turn total, so
+	// they do not sum to the by_model token columns.
+	ContextPromptTokens     int64             `json:"context_prompt_tokens"`
+	ContextCompletionTokens int64             `json:"context_completion_tokens"`
+	CostAttribution         sessionCostReport `json:"cost_attribution"`
+}
+
+// sessionCostReport reconciles the session row's recorded cost against the
+// spend actually attributable to a model.
+type sessionCostReport struct {
+	// RecordedCost is sessions.cost exactly as stored: this session's own
+	// spend PLUS every sub-session's cost, which the coordinator propagates
+	// upward. On its own it says nothing about which model was billed.
+	RecordedCost float64 `json:"recorded_cost"`
+	// IncurredCostHere is the spend recorded on this session's own assistant
+	// messages.
+	IncurredCostHere float64 `json:"incurred_cost_here"`
+	// IncurredCostSubSessions is the sum of the OWN spend of every descendant
+	// session (never their recorded_cost, which would double-count).
+	IncurredCostSubSessions float64 `json:"incurred_cost_sub_sessions"`
+	// IncurredCostTotal is IncurredCostHere + IncurredCostSubSessions, and
+	// equals the sum of by_model[].incurred_cost_total.
+	IncurredCostTotal float64 `json:"incurred_cost_total"`
+	// UnattributedCost is RecordedCost - IncurredCostTotal. Zero means the
+	// breakdown reconciles; non-zero means some spend reached the session row
+	// without a per-step usage record (e.g. sessions written before this
+	// feature existed).
+	UnattributedCost float64               `json:"unattributed_cost"`
+	SubSessionCount  int                   `json:"sub_session_count"`
+	Truncated        bool                  `json:"truncated,omitempty"`
+	ByModel          []sessionModelCost    `json:"by_model"`
+	BySession        []sessionCostTreeNode `json:"by_session"`
+}
+
+// sessionModelCost is the per-model usage breakdown across a session subtree.
+// There is deliberately no plain `cost` field: every cost here is attributed
+// to the model that incurred it.
+type sessionModelCost struct {
+	Model            string `json:"model"`
+	Provider         string `json:"provider"`
+	MessageCount     int64  `json:"message_count"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+	// IncurredCostHere is what this model cost inside the shown session.
+	IncurredCostHere float64 `json:"incurred_cost_here"`
+	// IncurredCostSubSessions is what this model cost inside descendant
+	// sessions of the shown session.
+	IncurredCostSubSessions float64 `json:"incurred_cost_sub_sessions"`
+	// IncurredCostTotal is the sum of the two above.
+	IncurredCostTotal float64 `json:"incurred_cost_total"`
+}
+
+// sessionCostTreeNode is one session in the shown session's subtree.
+type sessionCostTreeNode struct {
+	ID    string `json:"id"`
+	UUID  string `json:"uuid"`
+	Title string `json:"title"`
+	Depth int    `json:"depth"`
+	// RecordedCost is the session row value, including propagated child cost.
+	RecordedCost float64 `json:"recorded_cost"`
+	// IncurredCost is this session's own spend only.
+	IncurredCost float64 `json:"incurred_cost"`
 }
 
 type sessionShowSkill struct {

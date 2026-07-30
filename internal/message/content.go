@@ -126,6 +126,10 @@ type Finish struct {
 	Time    int64        `json:"time"`
 	Message string       `json:"message,omitempty"`
 	Details string       `json:"details,omitempty"`
+	// Optional per-step usage. Zero values mean unknown (legacy messages).
+	PromptTokens     int64   `json:"prompt_tokens,omitempty"`
+	CompletionTokens int64   `json:"completion_tokens,omitempty"`
+	Cost             float64 `json:"cost,omitempty"`
 }
 
 func (Finish) isPart() {}
@@ -471,14 +475,42 @@ func (m *Message) ResetStreamedContent() {
 }
 
 func (m *Message) AddFinish(reason FinishReason, message, details string) {
-	// remove any existing finish part
+	m.AddFinishWithUsage(reason, message, details, 0, 0, 0)
+}
+
+// AddFinishWithUsage records the turn finish along with optional token/cost
+// usage for later per-model aggregation.
+//
+// Usage already recorded on an earlier finish part is CARRIED FORWARD when
+// this call supplies none. That matters because the cancel and error paths in
+// the agent call [Message.AddFinish] on a message whose step usage has already
+// been recorded and already been added to session.Cost: without the carry the
+// money would stay on the session row while the per-model breakdown lost the
+// tokens and cost it was computed from. Use [Message.ResetStreamedContent] to
+// discard step usage deliberately (that is what a provider retry does).
+func (m *Message) AddFinishWithUsage(reason FinishReason, message, details string, promptTokens, completionTokens int64, cost float64) {
+	// Remove any existing finish part, preserving its usage when this call
+	// carries none of its own.
 	for i, part := range m.Parts {
-		if _, ok := part.(Finish); ok {
+		if prev, ok := part.(Finish); ok {
+			if promptTokens == 0 && completionTokens == 0 && cost == 0 {
+				promptTokens = prev.PromptTokens
+				completionTokens = prev.CompletionTokens
+				cost = prev.Cost
+			}
 			m.Parts = slices.Delete(m.Parts, i, i+1)
 			break
 		}
 	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix(), Message: message, Details: details})
+	m.Parts = append(m.Parts, Finish{
+		Reason:           reason,
+		Time:             time.Now().Unix(),
+		Message:          message,
+		Details:          details,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		Cost:             cost,
+	})
 }
 
 func (m *Message) AddImageURL(url, detail string) {

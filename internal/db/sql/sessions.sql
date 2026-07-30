@@ -40,6 +40,14 @@ FROM sessions
 WHERE parent_session_id is NULL
 ORDER BY updated_at DESC;
 
+-- name: ListChildSessions :many
+-- created_at is second-precision, so siblings created within the same second
+-- would otherwise come back in undefined order. Tie-break on insertion order.
+SELECT *
+FROM sessions
+WHERE parent_session_id = ?
+ORDER BY created_at ASC, rowid ASC;
+
 -- name: UpdateSession :one
 UPDATE sessions
 SET

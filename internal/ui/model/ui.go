@@ -44,6 +44,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/remotecontrol"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -392,6 +393,9 @@ type UI struct {
 		index    int
 		draft    string
 	}
+
+	// remoteBridge shares enabled sessions with the self-hosted relay / PWA.
+	remoteBridge *remotecontrol.Bridge
 }
 
 // New creates a new instance of the [UI] model.
@@ -844,6 +848,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.promptHistory.index = -1
 		m.promptHistory.draft = ""
 
+	case remoteControlToggleResultMsg:
+		if cmd := m.handleRemoteControlToggleResult(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
 
@@ -907,8 +916,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			if m.remoteBridge != nil {
+				m.remoteBridge.PublishMessage(msg.Payload)
+			}
 		case pubsub.UpdatedEvent:
 			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
+			if m.remoteBridge != nil {
+				m.remoteBridge.PublishMessage(msg.Payload)
+			}
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
 		}
@@ -948,6 +963,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+		if m.remoteBridge != nil {
+			m.remoteBridge.ForwardPermission(msg.Payload)
 		}
 		if cmd := m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
@@ -1967,6 +1985,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			status = "on"
 		}
 		cmds = append(cmds, util.ReportInfo("Plan mode "+status))
+	case dialog.ActionToggleRemoteControl:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.toggleRemoteControl())
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -2076,6 +2097,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
+		if m.remoteBridge != nil {
+			_ = m.remoteBridge.Close()
+		}
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)

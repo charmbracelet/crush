@@ -536,6 +536,16 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
 
+	if c.hasSession {
+		commands = append(commands, NewCommandItem(
+			c.com.Styles,
+			"toggle_remote_control",
+			"Remote Control",
+			"",
+			ActionToggleRemoteControl{},
+		).WithAliases("rc", "remote").WithDescription("Share this session with the mobile PWA via your relay"))
+	}
+
 	// Add transparent background toggle.
 	transparentLabel := "Disable Background Color"
 	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {

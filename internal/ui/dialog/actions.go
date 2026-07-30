@@ -54,7 +54,10 @@ type (
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
 	// ActionTogglePlanMode toggles plan mode on/off.
-	ActionTogglePlanMode          struct{}
+	ActionTogglePlanMode struct{}
+	// ActionToggleRemoteControl enables or disables remote control for
+	// the current session (session-attached phone bridge).
+	ActionToggleRemoteControl     struct{}
 	ActionToggleNotifications     struct{}
 	ActionSelectNotificationStyle struct {
 		Style string

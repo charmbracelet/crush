@@ -2495,6 +2495,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 			case key.Matches(msg, m.keyMap.Editor.PasteImage):
 				if !m.currentModelSupportsImages() {
+					cmds = append(cmds, util.ReportWarn(fmt.Sprintf("%s doesn't support images", m.currentModelName())))
 					break
 				}
 				cmds = append(cmds, m.pasteImageFromClipboard)
@@ -3302,6 +3303,25 @@ func (m *UI) currentModelSupportsImages() bool {
 	}
 	model := cfg.GetModelByType(agentCfg.Model)
 	return model != nil && model.SupportsImages
+}
+
+// currentModelName returns the display name of the coder agent's current
+// model for user-facing messages, falling back to "current model" when the
+// selection cannot be resolved.
+func (m *UI) currentModelName() string {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return "current model"
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return "current model"
+	}
+	selected, ok := cfg.Models[agentCfg.Model]
+	if !ok || selected.Model == "" {
+		return "current model"
+	}
+	return selected.Model
 }
 
 // toggleCompactMode toggles compact mode between uiChat and uiChatCompact states.
@@ -4872,7 +4892,12 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		if m.currentModelSupportsImages() {
 			return m.pasteImageFromClipboard
 		}
-		return nil
+		// An empty paste on an image-incapable model means the clipboard
+		// holds something the model can't use (most commonly an image) or
+		// nothing at all; either way the paste would otherwise vanish with
+		// zero feedback, which made #197 undiagnosable from the UX. Warn
+		// instead of returning nil so the user knows why nothing landed.
+		return util.ReportWarn(fmt.Sprintf("Paste ignored: %s doesn't support images", m.currentModelName()))
 	}
 
 	if hasPasteExceededThreshold(msg) {

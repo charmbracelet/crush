@@ -424,15 +424,15 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 			head = out[:idx+1]
 			lastLine = out[idx+1:]
 		}
-		// Glamour pads the last line to the full render width with styled
-		// spaces, so appending the icon after it would push the line one
-		// cell past the item width, where the compositor clips it (and a
-		// chat-relative mouse x can never reach). Overwrite the trailing
-		// padding instead so the line stays within width.
-		iconCol := lipgloss.Width(lastLine)
-		if maxCol := width - iconWidth; iconCol > maxCol {
-			iconCol = max(maxCol, 0)
+		// The icon hugs the right edge of the item: pad (or truncate)
+		// the last line so the icon's rightmost cell lands on the item
+		// width, keeping the line within width so the compositor does
+		// not clip it and a chat-relative mouse x can reach it.
+		iconCol := max(width-iconWidth, 0)
+		if w := lipgloss.Width(lastLine); w > iconCol {
 			lastLine = ansi.Truncate(lastLine, iconCol, "")
+		} else {
+			lastLine += strings.Repeat(" ", iconCol-w)
 		}
 		a.copyIconColStart = iconCol
 		a.copyIconColEnd = iconCol + iconWidth

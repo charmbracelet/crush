@@ -16,6 +16,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -185,7 +188,9 @@ func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
 	s.blockFuncs = blockFuncs
 }
 
-// CommandsBlocker creates a BlockFunc that blocks exact command matches
+// CommandsBlocker creates a BlockFunc that blocks exact command matches.
+// argv[0] is reduced to a bare command name first, so a path-prefixed
+// invocation cannot slip past a rule written for the bare name.
 func CommandsBlocker(cmds []string) BlockFunc {
 	bannedSet := make(map[string]struct{})
 	for _, cmd := range cmds {
@@ -196,10 +201,40 @@ func CommandsBlocker(cmds []string) BlockFunc {
 		if len(args) == 0 {
 			return false
 		}
-		_, ok := bannedSet[args[0]]
+		_, ok := bannedSet[commandName(args[0])]
 		return ok
 	}
 }
+
+// commandName reduces argv[0] to the name the block list is written in
+// terms of. `/usr/bin/curl` and `./curl` name the same binary as a bare
+// `curl`, so deny rules have to see through the path prefix.
+//
+// Note this only normalizes the spelling of argv[0]; it does not resolve
+// symlinks or follow PATH. A blocked binary copied to another name is
+// still reachable — see the README on why the block list is a guardrail
+// rather than a sandbox.
+func commandName(arg string) string {
+	if arg == "" {
+		return arg
+	}
+	if runtime.GOOS == "windows" {
+		// Windows accepts either separator, and executables carry an
+		// extension that the block list never spells out.
+		arg = strings.ReplaceAll(arg, "\\", "/")
+		base := path.Base(arg)
+		ext := strings.ToLower(filepath.Ext(base))
+		if slices.Contains(windowsExecExts, ext) {
+			base = base[:len(base)-len(ext)]
+		}
+		return base
+	}
+	return path.Base(arg)
+}
+
+// windowsExecExts are the extensions Windows appends to an executable
+// name during PATH resolution. Lowercased for comparison.
+var windowsExecExts = []string{".exe", ".com", ".bat", ".cmd"}
 
 // ArgumentsBlocker creates a BlockFunc that blocks specific subcommand
 func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {

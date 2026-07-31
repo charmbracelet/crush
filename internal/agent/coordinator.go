@@ -224,11 +224,6 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	return c, nil
 }
 
-// scheduledTaskPromptMarker prefixes fired scheduled-task prompts so the
-// agent knows the turn was triggered by an automated firing rather than
-// by the user typing, matching Claude Code's scheduled-task marker.
-const scheduledTaskPromptMarker = "[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]"
-
 // fireScheduledTask runs a due scheduled task's prompt against its
 // session. The prompt is injected as a normal user turn so it respects
 // the session's busy queue: it fires between turns, never mid-response,
@@ -243,19 +238,13 @@ func (c *coordinator) fireScheduledTask(ctx context.Context, task scheduler.Task
 		return fmt.Errorf("session %s for scheduled task %s no longer exists", task.SessionID, task.ID)
 	}
 
-	prompt := scheduledTaskPrompt(task)
+	prompt := task.Prompt
 	go func() {
 		if _, err := c.run(ctx, nil, task.SessionID, prompt); err != nil {
 			slog.Error("Scheduled task run failed", "id", task.ID, "session_id", task.SessionID, "error", err)
 		}
 	}()
 	return nil
-}
-
-// scheduledTaskPrompt wraps a fired task's prompt with the marker that
-// distinguishes an automated firing from a user-typed turn.
-func scheduledTaskPrompt(task scheduler.Task) string {
-	return scheduledTaskPromptMarker + "\n\n" + task.Prompt
 }
 
 // Run implements Coordinator.

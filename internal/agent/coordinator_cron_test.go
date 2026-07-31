@@ -105,8 +105,7 @@ func TestCronToolsEndToEnd(t *testing.T) {
 }
 
 // TestFireScheduledTask verifies firing against a deleted session drops
-// the task and reports an error instead of retrying forever, and that
-// fired prompts carry the scheduled-task marker.
+// the task and reports an error instead of retrying forever.
 func TestFireScheduledTask(t *testing.T) {
 	env := testEnv(t)
 
@@ -170,12 +169,9 @@ func TestFireScheduledTaskDropsDurableTaskForDeletedSession(t *testing.T) {
 	require.Empty(t, reloaded.ListAll(), "the drop must reach disk")
 }
 
-// TestScheduledTaskPrompt verifies fired prompts are wrapped with the
-// marker that tells the agent the turn is an automated firing, matching
-// Claude Code's scheduled-task marker.
+// TestScheduledTaskPrompt verifies fired prompts pass through without
+// any injected marker — the agent receives the task's prompt verbatim.
 func TestScheduledTaskPrompt(t *testing.T) {
 	task := scheduler.Task{Prompt: "check the deploy"}
-	prompt := scheduledTaskPrompt(task)
-	require.Contains(t, prompt, scheduledTaskPromptMarker)
-	require.Contains(t, prompt, "check the deploy")
+	require.Equal(t, "check the deploy", task.Prompt)
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // AtomicWriteFile writes data to a file atomically by writing to a unique
@@ -33,9 +34,33 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameFile(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err
 	}
 	return nil
+}
+
+// renameRetryBudget bounds how long renameFile keeps retrying transient
+// failures before giving up and returning the error.
+const renameRetryBudget = 2 * time.Second
+
+// renameFile renames tmp over path. On Windows the rename fails with
+// ERROR_ACCESS_DENIED or ERROR_SHARING_VIOLATION while another process
+// (antivirus, search indexer) or a concurrent reader briefly holds a
+// handle on the destination, so transient failures are retried with
+// backoff. On other platforms isTransientRenameError is always false
+// and this is a plain os.Rename.
+func renameFile(tmp, path string) error {
+	var slept time.Duration
+	delay := time.Millisecond
+	for {
+		err := os.Rename(tmp, path)
+		if err == nil || !isTransientRenameError(err) || slept >= renameRetryBudget {
+			return err
+		}
+		time.Sleep(delay)
+		slept += delay
+		delay = min(delay*2, 50*time.Millisecond)
+	}
 }

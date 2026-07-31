@@ -115,7 +115,7 @@ func (s *Store) Load() error {
 			continue
 		}
 		if t.NextRunAt.Before(s.now().Add(-time.Minute)) {
-			t.NextRunAt = sched.Next(s.now())
+			t.NextRunAt = sched.Next(s.now()).Truncate(time.Minute)
 		}
 		// A zero next run is always "due", so a task carrying one would
 		// fire on every tick forever. Drop it instead.
@@ -167,6 +167,12 @@ func (s *Store) Create(sessionID, cronExpr, prompt string, recurring, durable bo
 	if nextRun.IsZero() {
 		return Task{}, fmt.Errorf("%w: %s", ErrNeverFires, cronExpr)
 	}
+	// Truncate to the start of the minute so a task created at HH:MM:50
+	// for minute HH:MM fires at the top of the next minute, not 10
+	// seconds later. The ticker polls every second, but cron expressions
+	// have minute-level granularity — the stored next-run must reflect
+	// that so users are not confused by sub-minute firing.
+	nextRun = nextRun.Truncate(time.Minute)
 
 	id, err := NewTaskID()
 	if err != nil {
@@ -313,7 +319,7 @@ func (s *Store) rescheduleLocked(t *Task, now time.Time) {
 		delete(s.tasks, t.ID)
 		return
 	}
-	t.NextRunAt = next
+	t.NextRunAt = next.Truncate(time.Minute)
 }
 
 // persistBestEffort writes durable tasks, logging rather than returning

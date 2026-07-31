@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -125,6 +126,8 @@ func (w *countingWorkspace) MCPServersDisabled(context.Context) ([]string, error
 func (w *countingWorkspace) MCPServersEnabled(context.Context) ([]string, error) {
 	return nil, nil
 }
+
+func (w *countingWorkspace) AgentListCronTasks(string) []scheduler.Task { return nil }
 
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil

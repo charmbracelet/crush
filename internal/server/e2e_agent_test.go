@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -217,6 +218,7 @@ func (c *scriptedCoordinator) IsSessionBusy(string) bool                     { r
 func (c *scriptedCoordinator) QueuedPrompts(string) int                      { return 0 }
 func (c *scriptedCoordinator) QueuedPromptsList(string) []string             { return nil }
 func (c *scriptedCoordinator) ClearQueue(string)                             {}
+func (c *scriptedCoordinator) ListCronTasks(string) []scheduler.Task         { return nil }
 func (c *scriptedCoordinator) Summarize(context.Context, string) error       { return nil }
 func (c *scriptedCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (c *scriptedCoordinator) UpdateModels(context.Context) error            { return nil }

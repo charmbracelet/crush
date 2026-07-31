@@ -71,16 +71,22 @@ func (c *CommandItem) HasChildren() bool {
 	return len(c.children) > 0
 }
 
-// Filter implements ListItem.
+// Filter implements ListItem. The shortcut is folded in so slash-command
+// shortcuts like "/clear" or "/compact" are findable by typing the command
+// name; without it the shortcut is display-only and the command appears to
+// vanish from the list as the user types.
 func (c *CommandItem) Filter() string {
-	base := c.title
+	parts := []string{c.title}
 	if len(c.aliases) > 0 {
-		base = c.title + " " + strings.Join(c.aliases, " ")
+		parts = append(parts, strings.Join(c.aliases, " "))
+	}
+	if c.shortcut != "" {
+		parts = append(parts, c.shortcut)
 	}
 	if c.description != "" {
-		base = base + " " + c.description
+		parts = append(parts, c.description)
 	}
-	return base
+	return strings.Join(parts, " ")
 }
 
 // ID implements ListItem.

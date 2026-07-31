@@ -433,16 +433,25 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 		icon := a.sty.Messages.AssistantCopyIcon.Render(assistantCopyIcon)
 		iconWidth := lipgloss.Width(icon)
 		a.copyIconRow = lipgloss.Height(out) - 1
-		// Glamour pads the last line to full width with styled spaces,
-		// so the icon lands at the current line width. Record the actual
-		// column so hit-testing agrees with the rendered position.
+		head := ""
 		lastLine := out
 		if idx := strings.LastIndex(out, "\n"); idx >= 0 {
+			head = out[:idx+1]
 			lastLine = out[idx+1:]
 		}
-		a.copyIconColStart = lipgloss.Width(lastLine)
-		a.copyIconColEnd = a.copyIconColStart + iconWidth
-		out += icon
+		// Glamour pads the last line to the full render width with styled
+		// spaces, so appending the icon after it would push the line one
+		// cell past the item width, where the compositor clips it (and a
+		// chat-relative mouse x can never reach). Overwrite the trailing
+		// padding instead so the line stays within width.
+		iconCol := lipgloss.Width(lastLine)
+		if maxCol := width - iconWidth; iconCol > maxCol {
+			iconCol = max(maxCol, 0)
+			lastLine = ansi.Truncate(lastLine, iconCol, "")
+		}
+		a.copyIconColStart = iconCol
+		a.copyIconColEnd = iconCol + iconWidth
+		out = head + lastLine + icon
 	}
 
 	return out, lipgloss.Height(out)

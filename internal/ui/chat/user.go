@@ -108,13 +108,25 @@ func (m *UserMessageItem) RawRender(width int) string {
 		icon := m.sty.Messages.AssistantCopyIcon.Render(assistantCopyIcon)
 		iconWidth := lipgloss.Width(icon)
 		m.copyIconRow = height - 1
+		head := ""
 		lastLine := content
 		if idx := strings.LastIndex(content, "\n"); idx >= 0 {
+			head = content[:idx+1]
 			lastLine = content[idx+1:]
 		}
-		m.copyIconColStart = lipgloss.Width(lastLine)
-		m.copyIconColEnd = m.copyIconColStart + iconWidth
-		content += icon
+		// Glamour pads the last line to the full render width with styled
+		// spaces, so appending the icon after it would push the line one
+		// cell past the item width, where the compositor clips it (and a
+		// chat-relative mouse x can never reach). Overwrite the trailing
+		// padding instead so the line stays within width.
+		iconCol := lipgloss.Width(lastLine)
+		if maxCol := cappedWidth - iconWidth; iconCol > maxCol {
+			iconCol = max(maxCol, 0)
+			lastLine = ansi.Truncate(lastLine, iconCol, "")
+		}
+		m.copyIconColStart = iconCol
+		m.copyIconColEnd = iconCol + iconWidth
+		content = head + lastLine + icon
 		height = lipgloss.Height(content)
 	}
 

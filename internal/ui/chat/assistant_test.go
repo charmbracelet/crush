@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -262,6 +263,33 @@ func TestAssistantMessageItemCopyIconClick(t *testing.T) {
 	require.True(t, item.HandleMouseClick(ansi.MouseLeft,
 		item.copyIconColStart+MessageLeftPaddingTotal, item.copyIconRow))
 	require.Equal(t, thinkingCollapsed, item.thinkingViewMode)
+}
+
+// TestAssistantMessageItemCopyIconStaysWithinWidth guards against the icon
+// overflowing the item width: glamour pads the last content line to the
+// full capped width, so the icon must overwrite trailing padding rather
+// than extend the line. A line wider than the item width is clipped by the
+// screen compositor, making the icon invisible and unclickable on any
+// terminal narrower than maxTextWidth+2.
+func TestAssistantMessageItemCopyIconStaysWithinWidth(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	for _, width := range []int{30, 80, 120} {
+		msg := finishedTextMessage("copy-5", "hello **world** with a longer line of text that wraps")
+		item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+		item.SetFocused(true)
+		rendered := item.RawRender(width)
+
+		capped := cappedMessageWidth(width)
+		for i, line := range strings.Split(rendered, "\n") {
+			require.LessOrEqual(t, lipgloss.Width(line), capped,
+				"line %d must not exceed the capped content width at width %d", i, width)
+		}
+		require.Contains(t, rendered, "⎘", "icon must still render")
+		require.Less(t, item.copyIconColEnd, width,
+			"icon must end within the item width so the mouse can reach it")
+	}
 }
 
 // TestAssistantMessageItemThinkingClickStillExpands guards against the new

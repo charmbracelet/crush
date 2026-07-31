@@ -59,22 +59,16 @@ func (c *CommandItem) WithDescription(desc string) *CommandItem {
 	return c
 }
 
-// Filter implements ListItem. The shortcut is folded in so slash-command
-// shortcuts like "/clear" or "/compact" are findable by typing the command
-// name; without it the shortcut is display-only and the command appears to
-// vanish from the list as the user types.
+// Filter implements ListItem.
 func (c *CommandItem) Filter() string {
-	parts := []string{c.title}
+	base := c.title
 	if len(c.aliases) > 0 {
-		parts = append(parts, strings.Join(c.aliases, " "))
-	}
-	if c.shortcut != "" {
-		parts = append(parts, c.shortcut)
+		base = c.title + " " + strings.Join(c.aliases, " ")
 	}
 	if c.description != "" {
-		parts = append(parts, c.description)
+		base = base + " " + c.description
 	}
-	return strings.Join(parts, " ")
+	return base
 }
 
 // ID implements ListItem.

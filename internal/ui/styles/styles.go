@@ -312,6 +312,7 @@ type Styles struct {
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+		AssistantCopyIcon      lipgloss.Style // Muted click-to-copy footer glyph
 	}
 
 	// Tool - styles for tool call rendering

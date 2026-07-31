@@ -4,20 +4,37 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/pressly/goose/v3"
 )
 
-var (
-	pragmas = map[string]string{
+// SQLite result codes relevant to filesystem locking failures. These
+// are driver-independent numeric values from the SQLite C API.
+const (
+	sqliteProtocol  = 15   // SQLITE_PROTOCOL: database lock protocol error.
+	sqliteIOErrLock = 3850 // SQLITE_IOERR_LOCK: I/O error within file locking.
+)
+
+// pragmas returns the connection pragmas applied when opening a
+// database. journalMode overrides the default WAL journal; pass "" to
+// keep WAL. WAL relies on shared-memory locking that network
+// filesystems (NFS, SMB) do not support, so Connect falls back to the
+// rollback journal ("DELETE") when WAL locking fails.
+func pragmas(journalMode string) map[string]string {
+	if journalMode == "" {
+		journalMode = "WAL"
+	}
+	return map[string]string{
 		"foreign_keys":  "ON",
-		"journal_mode":  "WAL",
+		"journal_mode":  journalMode,
 		"page_size":     "4096",
 		"temp_store":    "MEMORY",
 		"cache_size":    "-8000",
@@ -25,6 +42,9 @@ var (
 		"secure_delete": "ON",
 		"busy_timeout":  "30000",
 	}
+}
+
+var (
 	gooseInitOnce sync.Once
 	gooseInitErr  error
 )
@@ -126,31 +146,26 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		}
 	}
 
-	conn, err := openDB(dbPath)
-	if err != nil {
-		if lock != nil {
-			lock.release()
-		}
-		return nil, err
-	}
-
-	// Serialize all access through a single connection. SQLite
-	// serializes writes at the file level anyway, and allowing multiple
-	// pool connections to interleave writes/checkpoints (especially
-	// under concurrent sub-agents) has caused WAL/header desync
-	// resulting in SQLITE_NOTADB (26) on the next open.
-	conn.SetMaxOpenConns(1)
-
 	releaseLock := func() {
 		if lock != nil {
 			lock.release()
 		}
 	}
 
-	if err = conn.PingContext(ctx); err != nil {
-		conn.Close()
+	// Open with WAL first; if the filesystem cannot support WAL's
+	// shared-memory locking (NFS, SMB, some FUSE mounts) SQLite either
+	// fails with a lock-protocol error or silently stays on the
+	// rollback journal. Either way, retry once with the rollback
+	// journal, which only needs POSIX file locks.
+	conn, err := openAndPing(ctx, dbPath, "")
+	if isLockProtocolError(err) || errors.Is(err, errWALUnavailable) {
+		slog.Warn("WAL journal mode unsupported on this filesystem, falling back to rollback journal",
+			"path", dbPath, "error", err)
+		conn, err = openAndPing(ctx, dbPath, "DELETE")
+	}
+	if err != nil {
 		releaseLock()
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, err
 	}
 
 	if err := initGoose(); err != nil {
@@ -236,6 +251,61 @@ func ConnectReadOnly(ctx context.Context, dbPath string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// errWALUnavailable signals that WAL was requested but the database
+// did not actually enter WAL mode. SQLite silently ignores a failed
+// journal_mode change (returning the current mode instead of an
+// error), so on filesystems that cannot support WAL we detect the
+// mismatch ourselves and treat it like a lock-protocol failure.
+var errWALUnavailable = errors.New("database did not enter WAL journal mode")
+
+// openAndPing opens the database with the given journal mode ("" for
+// the WAL default), serializes it to a single connection, verifies it
+// responds to a ping, and confirms the requested journal mode took
+// effect. On failure the connection is closed and a filesystem-hinting
+// error is returned.
+func openAndPing(ctx context.Context, dbPath, journalMode string) (*sql.DB, error) {
+	conn, err := openDB(dbPath, journalMode)
+	if err != nil {
+		return nil, err
+	}
+
+	// Serialize all access through a single connection. SQLite
+	// serializes writes at the file level anyway, and allowing multiple
+	// pool connections to interleave writes/checkpoints (especially
+	// under concurrent sub-agents) has caused WAL/header desync
+	// resulting in SQLITE_NOTADB (26) on the next open.
+	conn.SetMaxOpenConns(1)
+
+	if err := conn.PingContext(ctx); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to connect to database: %w", maybeLockHint(err))
+	}
+
+	// Confirm the journal mode actually applied. WAL silently falls
+	// back to the rollback journal on filesystems without shared-memory
+	// locking; catch that so Connect can retry cleanly.
+	want := strings.ToLower(pragmas(journalMode)["journal_mode"])
+	var got string
+	if err := conn.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&got); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to connect to database: %w", maybeLockHint(err))
+	}
+	if want == "wal" && got != "wal" {
+		conn.Close()
+		return nil, fmt.Errorf("failed to connect to database: %w", maybeLockHint(errWALUnavailable))
+	}
+	return conn, nil
+}
+
+// maybeLockHint appends a filesystem hint to locking failures so users
+// on NFS/SMB understand the cause and the data_directory workaround.
+func maybeLockHint(err error) error {
+	if !errors.Is(err, errWALUnavailable) && !isLockProtocolError(err) {
+		return err
+	}
+	return fmt.Errorf("%w (the data directory may be on a network filesystem such as NFS or SMB that does not support SQLite locking; set options.data_directory to a local path)", err)
 }
 
 func initGoose() error {

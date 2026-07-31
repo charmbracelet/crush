@@ -358,3 +358,44 @@ func TestUserMessageItemCopyIconClick(t *testing.T) {
 	require.True(t, item.HandleMouseClick(ansi.MouseLeft,
 		item.copyIconColStart+MessageLeftPaddingTotal, item.copyIconRow))
 }
+
+// TestUserMessageItemCopyIconCoexistsWithLinkSpan guards the seam the
+// #210 merge sits on: when a focused message's last line ends in a link,
+// the inline copy icon (which overwrites trailing padding on that same
+// line) must not corrupt the hyperlink span indexed from it, and neither
+// click target may shadow the other.
+func TestUserMessageItemCopyIconCoexistsWithLinkSpan(t *testing.T) {
+	t.Parallel()
+
+	item := newTestUserItem("see the docs at https://example.com/guide", 0)
+	item.SetFocused(true)
+
+	const width = 40
+	rendered := item.RawRender(width)
+
+	require.GreaterOrEqual(t, item.copyIconRow, 0, "focused message must render the copy icon")
+	require.Contains(t, rendered, "⎘", "copy icon must be on screen")
+	require.NotEmpty(t, item.hyperlinks, "link in the message must be indexed")
+
+	// The span parse runs after the icon is appended, so the icon's cell
+	// (past the link, in the trailing padding) is never inside a span. The
+	// two hit zones must be disjoint whether or not the link wrapped onto
+	// the icon's own row.
+	sp := item.hyperlinks[len(item.hyperlinks)-1]
+	if sp.row == item.copyIconRow {
+		require.Less(t, sp.colEnd, item.copyIconColStart,
+			"a link sharing the icon's row must end before the icon column")
+	}
+
+	// A click on the link opens it; a click on the icon copies. The two
+	// hit zones are disjoint, so neither shadows the other.
+	linkHandled, linkCmd := item.HandleMouseClickCmd(ansi.MouseLeft,
+		(sp.colStart+sp.colEnd)/2+MessageLeftPaddingTotal, sp.row)
+	require.True(t, linkHandled, "click on the link span must be handled")
+	require.NotNil(t, linkCmd, "click on the link must produce the open command")
+
+	iconHandled, iconCmd := item.HandleMouseClickCmd(ansi.MouseLeft,
+		item.copyIconColStart+MessageLeftPaddingTotal, item.copyIconRow)
+	require.True(t, iconHandled, "click on the copy icon must be handled")
+	require.NotNil(t, iconCmd, "click on the copy icon must produce the copy command")
+}

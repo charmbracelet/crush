@@ -38,7 +38,8 @@ type ShellItem struct {
 	exitCode        int
 	expandedContent bool
 	xOffset         int
-	maxLineWidth    int // computed during render, used to clamp xOffset
+	maxLineWidth    int             // computed during render, used to clamp xOffset
+	hyperlinks      []hyperlinkSpan // OSC 8 spans in the last render, for click-to-open
 	sty             *styles.Styles
 	pending         bool
 	anim            *anim.Anim
@@ -159,7 +160,22 @@ func (s *ShellItem) Render(width int) string {
 
 // HandleMouseClick implements MouseClickable so clicks select this item.
 func (s *ShellItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
-	return btn == ansi.MouseLeft
+	handled, _ := s.HandleMouseClickCmd(btn, x, y)
+	return handled
+}
+
+// HandleMouseClickCmd implements [list.MouseClickCommandable]. A plain
+// click on a hyperlink span in the shell output opens the URL in the
+// browser; other left clicks report handled with a nil command so the
+// item keeps its existing select-on-click behavior.
+func (s *ShellItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (bool, tea.Cmd) {
+	if btn != ansi.MouseLeft {
+		return false, nil
+	}
+	if url := spanAt(s.hyperlinks, y, x-MessageLeftPaddingTotal); url != "" {
+		return true, openURL(url)
+	}
+	return true, nil
 }
 
 // HandleKeyEvent implements KeyEventHandler for copy and horizontal scrolling.
@@ -199,6 +215,19 @@ func (s *ShellItem) ToggleExpanded() bool {
 }
 
 func (s *ShellItem) RawRender(width int) string {
+	out := s.renderShell(width)
+	// Index hyperlink spans after the horizontal-scroll cut so the click
+	// hit-test matches the visible text. Links cut mid-way by scrolling
+	// simply drop out of the index (the opening sequence is gone), which
+	// degrades to non-clickable rather than a corrupt hit-zone.
+	s.hyperlinks = parseHyperlinkSpans(out)
+	return out
+}
+
+// renderShell assembles the shell item's rendered output. Kept separate
+// from RawRender so hyperlink indexing applies uniformly at every return
+// point.
+func (s *ShellItem) renderShell(width int) string {
 	cappedWidth := cappedMessageWidth(width)
 
 	cmd := strings.ReplaceAll(s.command, "\n", " ")
@@ -263,6 +292,7 @@ func (s *ShellItem) RawRender(width int) string {
 
 	raw = common.StripCursorControl(raw)
 	output := common.RemapANSI16(raw, s.sty.ANSI)
+	output = hyperlinkizeURLs(output)
 	lines := strings.Split(output, "\n")
 
 	// Compute max line width for scroll clamping.

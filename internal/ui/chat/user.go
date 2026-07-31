@@ -44,6 +44,12 @@ type UserMessageItem struct {
 	message     *message.Message
 	sty         *styles.Styles
 
+	// hyperlinks holds the OSC 8 hyperlink spans found in the last
+	// rendered content, so a plain click on a link opens it in the
+	// browser (terminals defer link clicks to the app under mouse
+	// reporting; see parseHyperlinkSpans).
+	hyperlinks []hyperlinkSpan
+
 	// Click-to-copy icon geometry, recorded during RawRender so
 	// HandleMouseClickCmd can hit-test without re-deriving the layout.
 	copyIconRow      int
@@ -144,6 +150,11 @@ func (m *UserMessageItem) RawRender(width int) string {
 		height = lipgloss.Height(content)
 	}
 
+	// Index hyperlink spans for click-to-open. Parsing after the copy
+	// icon is appended keeps span rows/cols aligned with the on-screen
+	// content (the icon overwrites trailing padding on the last line,
+	// which never intersects a link span).
+	m.hyperlinks = parseHyperlinkSpans(content)
 	return m.renderHighlighted(content, cappedWidth, height)
 }
 
@@ -268,9 +279,13 @@ func (m *UserMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool 
 	return handled
 }
 
-// HandleMouseClickCmd implements [list.MouseClickCommandable]. A click on
-// the click-to-copy icon returns the copy command, which suppresses the
-// generic expansion toggle in the chat click dispatcher.
+// HandleMouseClickCmd implements [list.MouseClickCommandable]. The
+// click-to-copy icon wins over every other region: it is a discrete
+// action, not an expansion target, so the copy command suppresses the
+// generic expansion toggle in the chat click dispatcher. A plain click
+// on a hyperlink span opens the URL in the system browser (terminals
+// defer link clicks to the app under mouse reporting; see
+// parseHyperlinkSpans). All other clicks fall through unhandled.
 func (m *UserMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (bool, tea.Cmd) {
 	if btn != ansi.MouseLeft {
 		return false, nil
@@ -279,6 +294,9 @@ func (m *UserMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (b
 		x >= m.copyIconColStart+MessageLeftPaddingTotal && x < m.copyIconColEnd+MessageLeftPaddingTotal {
 		text := m.message.Content().Text
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")
+	}
+	if url := spanAt(m.hyperlinks, y, x-MessageLeftPaddingTotal); url != "" {
+		return true, openURL(url)
 	}
 	return false, nil
 }

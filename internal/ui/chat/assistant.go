@@ -148,6 +148,13 @@ type AssistantMessageItem struct {
 	copyIconColStart int
 	copyIconColEnd   int
 
+	// hyperlinks holds the OSC 8 hyperlink spans found in the last
+	// rendered content, so a plain click on a link can open it in the
+	// browser. Ghostty (and every terminal once an app owns the mouse)
+	// defers link handling to the application, so terminal-level
+	// CMD+click never fires while Crush holds mouse reporting.
+	hyperlinks []hyperlinkSpan
+
 	// Per-section render caches. Splitting these out means content
 	// streaming does not invalidate the (often expensive) thinking
 	// render, and vice versa.
@@ -431,6 +438,12 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 		a.copyIconColEnd = iconCol + iconWidth
 		out = head + lastLine + icon
 	}
+
+	// Index hyperlink spans for click-to-open. Reparsing the joined output
+	// (rather than tracking spans through each section cache) keeps the
+	// index consistent with what is actually on screen regardless of which
+	// section caches hit.
+	a.hyperlinks = parseHyperlinkSpans(out)
 
 	return out, lipgloss.Height(out)
 }
@@ -789,6 +802,14 @@ func (a *AssistantMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y in
 		x >= a.copyIconColStart+MessageLeftPaddingTotal && x < a.copyIconColEnd+MessageLeftPaddingTotal {
 		text := a.message.Content().Text
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")
+	}
+	// Hyperlinks open in the browser on plain click. Terminals defer link
+	// handling to the application whenever mouse reporting is active
+	// (verified on Ghostty 1.3.1: CMD+click dies in any mouse mode), so
+	// without this links render but can never be opened. Like the copy
+	// footer, producing a command suppresses the expansion toggle.
+	if url := spanAt(a.hyperlinks, y, x-MessageLeftPaddingTotal); url != "" {
+		return true, openURL(url)
 	}
 	// Only the thinking box is clickable for expansion; other regions of
 	// the assistant message should not trigger expansion.

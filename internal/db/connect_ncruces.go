@@ -4,6 +4,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/ncruces/go-sqlite3"
@@ -20,7 +21,7 @@ func openDBReadOnly(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func openDB(dbPath string) (*sql.DB, error) {
+func openDB(dbPath, journalMode string) (*sql.DB, error) {
 	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
 	// preventing deferred-to-writer upgrade deadlocks. The "file:" prefix
 	// is required for the ncruces driver to parse query parameters.
@@ -28,7 +29,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 	db, err := driver.Open(dsn, func(c *sqlite3.Conn) error {
 		// Set pragmas for better performance via _pragma query params.
 		// Format: PRAGMA name = value;
-		for name, value := range pragmas {
+		for name, value := range pragmas(journalMode) {
 			if err := c.Exec(fmt.Sprintf("PRAGMA %s = %s;", name, value)); err != nil {
 				return fmt.Errorf("failed to set pragma %q: %w", name, err)
 			}
@@ -40,4 +41,18 @@ func openDB(dbPath string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// isLockProtocolError reports whether err is a SQLite lock-protocol or
+// lock I/O error, the signature of a filesystem (NFS, SMB, FUSE) that
+// cannot support WAL's shared-memory locking.
+//
+// This driver reports errors two ways: a *sqlite3.Error when there is a
+// message or OS error to attach, and a bare code value otherwise. Both
+// implement Is against the exported code constants, so match on those
+// rather than unwrapping to a concrete type. Note also that Code() on
+// this driver narrows to the primary code, so IOERR_LOCK must be
+// matched as an extended code.
+func isLockProtocolError(err error) bool {
+	return errors.Is(err, sqlite3.PROTOCOL) || errors.Is(err, sqlite3.IOERR_LOCK)
 }

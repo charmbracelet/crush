@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // skillInvocation represents the XML structure for a loaded skill.
@@ -31,6 +32,12 @@ type UserMessageItem struct {
 	attachments *attachments.Renderer
 	message     *message.Message
 	sty         *styles.Styles
+
+	// Click-to-copy icon geometry, recorded during RawRender so
+	// HandleMouseClickCmd can hit-test without re-deriving the layout.
+	copyIconRow      int
+	copyIconColStart int
+	copyIconColEnd   int
 }
 
 // NewUserMessageItem creates a new UserMessageItem.
@@ -58,45 +65,59 @@ func (m *UserMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)
 
 	content, height, ok := m.getCachedRender(cappedWidth)
-	// cache hit
-	if ok {
-		return m.renderHighlighted(content, cappedWidth, height)
-	}
+	if !ok {
+		msgContent := strings.TrimSpace(m.message.Content().Text)
 
-	msgContent := strings.TrimSpace(m.message.Content().Text)
+		// Check if this is a skill invocation (loaded_skill XML)
+		if strings.HasPrefix(msgContent, "<loaded_skill>") {
+			content = m.renderSkillInvocation(msgContent, cappedWidth)
+		} else {
+			renderer := common.MarkdownRenderer(m.sty, cappedWidth)
+			mu := common.LockMarkdownRenderer(renderer)
 
-	// Check if this is a skill invocation (loaded_skill XML)
-	if strings.HasPrefix(msgContent, "<loaded_skill>") {
-		content = m.renderSkillInvocation(msgContent, cappedWidth)
+			mu.Lock()
+			result, err := renderer.Render(msgContent)
+			mu.Unlock()
+
+			if err != nil {
+				content = msgContent
+			} else {
+				content = strings.TrimSuffix(result, "\n")
+			}
+
+			if len(m.message.BinaryContent()) > 0 {
+				attachmentsStr := m.renderAttachments(cappedWidth)
+				if content == "" {
+					content = attachmentsStr
+				} else {
+					content = strings.Join([]string{content, "", attachmentsStr}, "\n")
+				}
+			}
+		}
+
 		height = lipgloss.Height(content)
 		m.setCachedRender(content, cappedWidth, height)
-		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
-	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
-	mu := common.LockMarkdownRenderer(renderer)
-
-	mu.Lock()
-	result, err := renderer.Render(msgContent)
-	mu.Unlock()
-
-	if err != nil {
-		content = msgContent
-	} else {
-		content = strings.TrimSuffix(result, "\n")
-	}
-
-	if len(m.message.BinaryContent()) > 0 {
-		attachmentsStr := m.renderAttachments(cappedWidth)
-		if content == "" {
-			content = attachmentsStr
-		} else {
-			content = strings.Join([]string{content, "", attachmentsStr}, "\n")
+	// Click-to-copy icon: right-aligned ⎘ appended to the last content
+	// line, shown only while the message item is focused (selected).
+	// The icon copies the raw Markdown source via HandleMouseClickCmd.
+	m.copyIconRow = -1
+	msgText := strings.TrimSpace(m.message.Content().Text)
+	if msgText != "" && m.focused {
+		icon := m.sty.Messages.AssistantCopyIcon.Render(assistantCopyIcon)
+		iconWidth := lipgloss.Width(icon)
+		m.copyIconRow = height - 1
+		lastLine := content
+		if idx := strings.LastIndex(content, "\n"); idx >= 0 {
+			lastLine = content[idx+1:]
 		}
+		m.copyIconColStart = lipgloss.Width(lastLine)
+		m.copyIconColEnd = m.copyIconColStart + iconWidth
+		content += icon
+		height = lipgloss.Height(content)
 	}
 
-	height = lipgloss.Height(content)
-	m.setCachedRender(content, cappedWidth, height)
 	return m.renderHighlighted(content, cappedWidth, height)
 }
 
@@ -171,6 +192,29 @@ func (m *UserMessageItem) renderAttachments(width int) string {
 	// This message is already posted, so the attachment can't be removed;
 	// don't render the remove button.
 	return m.attachments.Render(attachments, false, false, width)
+}
+
+// HandleMouseClick implements [list.MouseClickable]. Defers to
+// HandleMouseClickCmd; the command return is discarded because the
+// generic click dispatcher only checks the handled flag on this path.
+func (m *UserMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
+	handled, _ := m.HandleMouseClickCmd(btn, x, y)
+	return handled
+}
+
+// HandleMouseClickCmd implements [list.MouseClickCommandable]. A click on
+// the click-to-copy icon returns the copy command, which suppresses the
+// generic expansion toggle in the chat click dispatcher.
+func (m *UserMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (bool, tea.Cmd) {
+	if btn != ansi.MouseLeft {
+		return false, nil
+	}
+	if m.copyIconRow >= 0 && y == m.copyIconRow &&
+		x >= m.copyIconColStart+MessageLeftPaddingTotal && x < m.copyIconColEnd+MessageLeftPaddingTotal {
+		text := m.message.Content().Text
+		return true, common.CopyToClipboard(text, "Message copied to clipboard")
+	}
+	return false, nil
 }
 
 // HandleKeyEvent implements KeyEventHandler.

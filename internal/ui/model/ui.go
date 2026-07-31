@@ -4847,6 +4847,27 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		return nil
 	}
 
+	// When the pasted content is strictly empty, the clipboard likely holds
+	// a non-text format (e.g. an image copied from Preview on macOS). On
+	// macOS, terminal emulators intercept CMD+V and send the clipboard's
+	// text via bracketed paste; if the clipboard has an image instead of
+	// text, the resulting PasteMsg is empty. Fall back to reading image data
+	// from the native clipboard so the paste is not silently swallowed.
+	// (GitHub issue #197)
+	//
+	// The check is a strict == "" rather than TrimSpace: the #197 repro
+	// produces a strictly empty message, and trimming would also swallow
+	// genuine whitespace-only pastes (silently dropping them when no image is
+	// found). Mirroring the key-bound path (ui.go:2476-2480), the fallback is
+	// gated to image-capable models so a text-only model doesn't attach an
+	// image chip that preparePrompt then silently drops at send time.
+	if msg.Content == "" {
+		if m.currentModelSupportsImages() {
+			return m.pasteImageFromClipboard
+		}
+		return nil
+	}
+
 	if hasPasteExceededThreshold(msg) {
 		return func() tea.Msg {
 			content := []byte(msg.Content)

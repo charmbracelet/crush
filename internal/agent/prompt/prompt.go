@@ -37,6 +37,7 @@ type PromptDat struct {
 	IsGitRepo          bool
 	Platform           string
 	Date               string
+	Time               string
 	GitStatus          string
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
@@ -214,6 +215,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		IsGitRepo:     isGit,
 		Platform:      platform,
 		Date:          p.now().Format("1/2/2006"),
+		Time:          p.now().Format("3:04:05 PM MST"),
 		AvailSkillXML: availSkillXML,
 	}
 	if isGit {

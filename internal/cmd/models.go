@@ -32,7 +32,7 @@ crush models gpt5`,
 		dataDir, _ := cmd.Flags().GetString("data-dir")
 		debug, _ := cmd.Flags().GetBool("debug")
 
-		cfg, err := config.Init(cwd, dataDir, debug)
+		cfg, err := config.Init(cmd.Context(), cwd, dataDir, debug)
 		if err != nil {
 			return err
 		}

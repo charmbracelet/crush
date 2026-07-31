@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -156,8 +157,8 @@ func finishedTextMessage(id, text string) *message.Message {
 }
 
 // TestAssistantMessageItemCopyFooterRendered guards the render side of the
-// click-to-copy footer: a finished message with content must render the ⎘
-// footer on its own row at the right edge, and the recorded click geometry
+// click-to-copy icon: a finished message with content must render the ⎘
+// right-aligned on the last content row, and the recorded click geometry
 // must agree with the rendered output.
 func TestAssistantMessageItemCopyFooterRendered(t *testing.T) {
 	t.Parallel()
@@ -165,22 +166,23 @@ func TestAssistantMessageItemCopyFooterRendered(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	msg := finishedTextMessage("copy-1", "hello **world**")
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item.SetFocused(true)
 
 	const width = 40
 	rendered := item.RawRender(width)
 	lines := strings.Split(rendered, "\n")
 
-	require.GreaterOrEqual(t, item.copyIconRow, 0, "finished message with content must render the copy footer")
-	require.Less(t, item.copyIconRow, len(lines), "recorded footer row must be within the rendered output")
-	// The blank separator line precedes the footer row.
-	require.Empty(t, strings.TrimSpace(lines[item.copyIconRow-1]),
-		"the line above the footer must be the blank separator")
+	require.GreaterOrEqual(t, item.copyIconRow, 0, "finished message with content must render the copy icon")
+	require.Less(t, item.copyIconRow, len(lines), "recorded icon row must be within the rendered output")
+	// The icon is inline on the last content row, not on a separate footer.
+	require.Equal(t, len(lines)-1, item.copyIconRow,
+		"icon row must be the last rendered line")
 
-	footerLine := lines[item.copyIconRow]
-	require.Contains(t, footerLine, "⎘", "footer line must contain the copy glyph")
+	iconLine := lines[item.copyIconRow]
+	require.Contains(t, iconLine, "⎘", "last line must contain the copy glyph")
 	// The glyph must be right-aligned inside the capped content width:
 	// strip ANSI styling before measuring its cell offset within the line.
-	plain := ansi.Strip(footerLine)
+	plain := ansi.Strip(iconLine)
 	require.Equal(t, item.copyIconColStart, len([]rune(strings.Split(plain, "⎘")[0])),
 		"icon must sit at the recorded start column")
 	require.Equal(t, item.copyIconColStart+1, item.copyIconColEnd,
@@ -188,8 +190,8 @@ func TestAssistantMessageItemCopyFooterRendered(t *testing.T) {
 }
 
 // TestAssistantMessageItemCopyFooterSuppressed guards the states where the
-// footer must not render: a still-streaming message and an empty finished
-// message.
+// icon must not render: a still-streaming message, an empty finished
+// message, and a finished message that is not focused.
 func TestAssistantMessageItemCopyFooterSuppressed(t *testing.T) {
 	t.Parallel()
 
@@ -199,7 +201,7 @@ func TestAssistantMessageItemCopyFooterSuppressed(t *testing.T) {
 	streaming := NewAssistantMessageItem(&sty, thinkingMessage("copy-2", "", "partial")).(*AssistantMessageItem)
 	streaming.RawRender(40)
 	require.Equal(t, -1, streaming.copyIconRow,
-		"streaming message must not render the copy footer")
+		"streaming message must not render the copy icon")
 
 	// Finished but empty content: nothing worth copying.
 	empty := NewAssistantMessageItem(&sty, &message.Message{
@@ -209,15 +211,22 @@ func TestAssistantMessageItemCopyFooterSuppressed(t *testing.T) {
 			message.Finish{Reason: message.FinishReasonEndTurn, Time: testFinishTime},
 		},
 	}).(*AssistantMessageItem)
+	empty.SetFocused(true)
 	empty.RawRender(40)
 	require.Equal(t, -1, empty.copyIconRow,
-		"empty finished message must not render the copy footer")
+		"empty finished message must not render the copy icon")
+
+	// Finished with content but unfocused: icon hidden.
+	unfocused := NewAssistantMessageItem(&sty, finishedTextMessage("copy-3b", "hello **world**")).(*AssistantMessageItem)
+	unfocused.RawRender(40)
+	require.Equal(t, -1, unfocused.copyIconRow,
+		"unfocused finished message must not render the copy icon")
 }
 
 // TestAssistantMessageItemCopyIconClick guards the click contract: a click
-// on the footer glyph must be handled, return a non-nil command (the
+// on the copy glyph must be handled, return a non-nil command (the
 // clipboard copy), and leave the view-mode untouched so the generic
-// expansion path cannot fire. Clicks elsewhere on the footer row or with
+// expansion path cannot fire. Clicks elsewhere on the icon row or with
 // the wrong button must not copy.
 func TestAssistantMessageItemCopyIconClick(t *testing.T) {
 	t.Parallel()
@@ -225,6 +234,7 @@ func TestAssistantMessageItemCopyIconClick(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	msg := finishedTextMessage("copy-4", "raw **markdown** body")
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item.SetFocused(true)
 	item.RawRender(40)
 	require.GreaterOrEqual(t, item.copyIconRow, 0)
 
@@ -253,6 +263,33 @@ func TestAssistantMessageItemCopyIconClick(t *testing.T) {
 	require.True(t, item.HandleMouseClick(ansi.MouseLeft,
 		item.copyIconColStart+MessageLeftPaddingTotal, item.copyIconRow))
 	require.Equal(t, thinkingCollapsed, item.thinkingViewMode)
+}
+
+// TestAssistantMessageItemCopyIconStaysWithinWidth guards against the icon
+// overflowing the item width: glamour pads the last content line to the
+// full capped width, so the icon must overwrite trailing padding rather
+// than extend the line. A line wider than the item width is clipped by the
+// screen compositor, making the icon invisible and unclickable on any
+// terminal narrower than maxTextWidth+2.
+func TestAssistantMessageItemCopyIconStaysWithinWidth(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	for _, width := range []int{30, 80, 120} {
+		msg := finishedTextMessage("copy-5", "hello **world** with a longer line of text that wraps")
+		item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+		item.SetFocused(true)
+		rendered := item.RawRender(width)
+
+		capped := cappedMessageWidth(width)
+		for i, line := range strings.Split(rendered, "\n") {
+			require.LessOrEqual(t, lipgloss.Width(line), capped,
+				"line %d must not exceed the capped content width at width %d", i, width)
+		}
+		require.Contains(t, rendered, "⎘", "icon must still render")
+		require.Less(t, item.copyIconColEnd, width,
+			"icon must end within the item width so the mouse can reach it")
+	}
 }
 
 // TestAssistantMessageItemThinkingClickStillExpands guards against the new

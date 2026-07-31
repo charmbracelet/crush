@@ -21,8 +21,8 @@ import (
 // truncated in the collapsed state.
 const assistantMessageTruncateFormat = "… (%d lines hidden) [click or space to expand]"
 
-// assistantCopyIcon is the click-to-copy glyph rendered as a right-aligned
-// footer on finished assistant messages. Clicking it copies the message's
+// assistantCopyIcon is the click-to-copy glyph rendered right-aligned on
+// the last content line of finished assistant messages. Clicking it copies the message's
 // raw Markdown source (not the glamour-rendered text) to the clipboard.
 const assistantCopyIcon = "⎘"
 
@@ -137,11 +137,12 @@ type AssistantMessageItem struct {
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 
-	// Click-to-copy footer geometry, recorded during renderMessageContent
+	// Click-to-copy icon geometry, recorded during renderMessageContent
 	// so HandleMouseClickCmd can hit-test without re-deriving the layout.
-	// copyIconRow is the item-relative row of the footer line, or -1 when
-	// the footer is not rendered (streaming, empty, or non-copyable end
-	// states). copyIconColStart/End bound the icon's cell span within the
+	// copyIconRow is the item-relative row the icon sits on (the last
+	// content line), or -1 when not rendered (streaming, empty, or
+	// non-copyable end states). copyIconColStart/End bound the icon's
+	// cell span within the
 	// line (start inclusive, end exclusive).
 	copyIconRow      int
 	copyIconColStart int
@@ -402,24 +403,33 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 
 	out := strings.Join(messageParts, "\n")
 
-	// Click-to-copy footer: a right-aligned ⎘ on its own line below the
-	// message, shown once the message is finished and has copyable content.
+	// Click-to-copy icon: right-aligned ⎘ appended to the last content
+	// line, shown only while the message item is focused (selected).
 	// The icon copies the raw Markdown source via HandleMouseClickCmd.
 	a.copyIconRow = -1
-	if a.message.IsFinished() && content != "" {
+	if a.message.IsFinished() && content != "" && a.focused {
 		icon := a.sty.Messages.AssistantCopyIcon.Render(assistantCopyIcon)
 		iconWidth := lipgloss.Width(icon)
-		pad := width - iconWidth
-		if pad < 0 {
-			pad = 0
+		a.copyIconRow = lipgloss.Height(out) - 1
+		head := ""
+		lastLine := out
+		if idx := strings.LastIndex(out, "\n"); idx >= 0 {
+			head = out[:idx+1]
+			lastLine = out[idx+1:]
 		}
-		footer := strings.Repeat(" ", pad) + icon
-		// The footer line index is the current height plus one for the blank
-		// separator line inserted between the body and the footer.
-		a.copyIconRow = lipgloss.Height(out) + 1
-		a.copyIconColStart = pad
-		a.copyIconColEnd = pad + iconWidth
-		out += "\n\n" + footer
+		// Glamour pads the last line to the full render width with styled
+		// spaces, so appending the icon after it would push the line one
+		// cell past the item width, where the compositor clips it (and a
+		// chat-relative mouse x can never reach). Overwrite the trailing
+		// padding instead so the line stays within width.
+		iconCol := lipgloss.Width(lastLine)
+		if maxCol := width - iconWidth; iconCol > maxCol {
+			iconCol = max(maxCol, 0)
+			lastLine = ansi.Truncate(lastLine, iconCol, "")
+		}
+		a.copyIconColStart = iconCol
+		a.copyIconColEnd = iconCol + iconWidth
+		out = head + lastLine + icon
 	}
 
 	return out, lipgloss.Height(out)
@@ -761,7 +771,7 @@ func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 }
 
 // HandleMouseClickCmd implements [list.MouseClickCommandable]. A click on
-// the click-to-copy footer returns the copy command, which suppresses the
+// the click-to-copy icon returns the copy command, which suppresses the
 // generic expansion toggle in the chat click dispatcher; a click on the
 // thinking box reports handled with a nil command so expansion proceeds
 // through the generic [Expandable] path (see HandleMouseClick for why the
@@ -770,7 +780,7 @@ func (a *AssistantMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y in
 	if btn != ansi.MouseLeft {
 		return false, nil
 	}
-	// The click-to-copy footer wins over every other region: it is a
+	// The click-to-copy icon wins over every other region: it is a
 	// discrete action, not an expansion target. The copy takes the raw
 	// Markdown source (the same text the c/y keybinding copies), not the
 	// glamour-rendered output. Click coordinates are chat-relative, so the

@@ -382,6 +382,7 @@ Working directory: {{.WorkingDir}}
 Is directory a git repo: {{if .IsGitRepo}}yes{{else}}no{{end}}
 Platform: {{.Platform}}
 Today's date: {{.Date}}
+Current time: {{.Time}}
 {{if .GitStatus}}
 
 Git status (snapshot at conversation start - may be outdated):

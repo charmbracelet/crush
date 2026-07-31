@@ -18,13 +18,19 @@ func TestCommandItem_FilterIncludesShortcut(t *testing.T) {
 	t.Parallel()
 
 	s := styles.CharmtonePantera()
-	item := NewCommandItem(&s, "new_session", "New Session", "ctrl+n / /clear", ActionNewSession{})
+	item := NewCommandItem(&s, "new_session", "New Session", "ctrl+n", ActionNewSession{}).
+		WithAliases("clear")
 
 	filter := item.Filter()
-	require.Contains(t, filter, "/clear", "shortcut must be part of the filter string")
+	require.Contains(t, filter, "ctrl+n", "shortcut must be part of the filter string")
 	require.Contains(t, filter, "New Session", "title must remain in the filter string")
+	require.Contains(t, filter, "clear", "alias must be part of the filter string")
 
-	// The fuzzy matcher must find the item by its slash-command name.
+	// The fuzzy matcher must find the item by its alias (the slash-command name).
 	matches := fuzzy.FindFrom("clear", list.FilterableItemsSource{item})
-	require.Len(t, matches, 1, "typing 'clear' should match the New Session command")
+	require.Len(t, matches, 1, "typing 'clear' should match the New Session command via its alias")
+
+	// The fuzzy matcher must also find the item by its shortcut.
+	matches = fuzzy.FindFrom("ctrl", list.FilterableItemsSource{item})
+	require.Len(t, matches, 1, "typing 'ctrl' should match the New Session command via its shortcut")
 }

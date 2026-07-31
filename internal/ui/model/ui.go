@@ -1535,6 +1535,11 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			return nil
 		}
 		m.lastUserMessageTime = msg.CreatedAt
+		// A scheduled task's prompt arrives as an ordinary user
+		// message; firing also deletes one-shots from the store, so
+		// re-list to keep the scheduled pill from showing a task that
+		// has already run.
+		m.refreshCronTasks()
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {

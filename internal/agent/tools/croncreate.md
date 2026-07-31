@@ -4,7 +4,7 @@ Takes a 5-field cron expression (minute hour day-of-month month day-of-week) eva
 
 Tasks fire at the top of the specified minute. If you pin the current minute (e.g. it is 06:22:50 and you schedule for minute 22), the task fires at 06:23:00, not 10 seconds later. Sub-minute precision is not supported.
 
-**Scheduling relative to "now"**: The current date and time is available in the `<env>` block of your system prompt — use it directly to compute cron fields. Do NOT call `date`, `time`, or any shell command to look up the current time.
+**Scheduling relative to "now"**: The `<env>` block in your system prompt carries the session's START time, which goes stale the longer the session runs. Before computing cron fields, call `date` in the shell to get the actual current time — a schedule built from the stale env time lands in the past and is rejected.
 
 To schedule N minutes from now, add N to the current minute (handling hour/day rollover). For example, if the env says "7/30/2026, 7:29:00 PM PDT" and the user asks for "1 minute from now", use minute 30 (29+1). If they ask for "5 minutes from now", use minute 34 (29+5). If the sum exceeds 59, rollover to the next hour and adjust accordingly.
 
@@ -15,5 +15,7 @@ To schedule N minutes from now, add N to the current minute (handling hour/day r
 - "At 2:30pm today": "30 14 <today_dom> <today_month> *", recurring: false
 
 Expressions that are syntactically valid but can never match — "0 0 30 2 *", February 30th — are rejected rather than accepted as a task that silently never runs.
+
+A one-shot (recurring: false) whose pinned time has already passed today is also rejected: its next match would jump to tomorrow or next year, which is never what a one-shot means. Recompute the cron fields against the current time and try again. Recurring schedules are unaffected — a daily 9am task created at 10:30 legitimately fires tomorrow.
 
 Set recurring to false for a one-shot reminder that fires once and deletes itself (pin minute/hour/day-of-month/month to specific values). Set durable to true to persist the task to disk so it survives restarts; otherwise it lives only in this session. A session can hold up to 50 scheduled tasks. Returns a task ID you can pass to CronDelete.

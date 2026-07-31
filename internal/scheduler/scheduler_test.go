@@ -348,6 +348,38 @@ func TestCreateRejectsScheduleThatNeverFires(t *testing.T) {
 	require.Empty(t, store.ListAll(), "a rejected task must not be stored")
 }
 
+// A one-shot pinned to a minute that already passed today must be
+// rejected: its next match has jumped to tomorrow or next year, which
+// is never what "remind me in 3 minutes" means. This is the signature
+// of cron fields computed against a stale clock. Recurring tasks are
+// exempt — "0 9 * * *" created at 10:30 legitimately fires tomorrow.
+func TestCreateRejectsOneShotInPast(t *testing.T) {
+	t.Parallel()
+
+	// testStore's clock is 2026-07-27 10:30 local.
+	store := testStore(t)
+
+	// 09:15 today already passed: the next match is tomorrow.
+	_, err := store.Create("s1", "15 9 27 7 *", "stale-clock one-shot", false, false)
+	require.ErrorIs(t, err, ErrOneShotInPast)
+	require.Empty(t, store.ListAll(), "a rejected task must not be stored")
+
+	// 10:45 today is still ahead: accepted, fires today.
+	task, err := store.Create("s1", "45 10 27 7 *", "future one-shot", false, false)
+	require.NoError(t, err)
+	require.Equal(t, time.Date(2026, 7, 27, 10, 45, 0, 0, time.Local), task.NextRunAt)
+
+	// The current minute counts as already passed: robfig treats it as
+	// consumed, so a fully-pinned one-shot for 10:30 created at 10:30
+	// would otherwise store a next run a year out.
+	_, err = store.Create("s1", "30 10 27 7 *", "this minute", false, false)
+	require.ErrorIs(t, err, ErrOneShotInPast)
+
+	// A daily recurring schedule whose time passed today is fine.
+	_, err = store.Create("s1", "0 9 * * *", "recurring 9am", true, false)
+	require.NoError(t, err)
+}
+
 // The same guard has to hold on the rescheduling path. A recurring task
 // whose next fire falls outside the lookahead window is deleted rather
 // than left with a zero NextRunAt, which would spin the scheduler.

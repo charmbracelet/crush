@@ -62,6 +62,16 @@ var ErrTooManyTasks = errors.New("session already has the maximum of 50 schedule
 // match, such as "0 0 30 2 *" (February 30th).
 var ErrNeverFires = errors.New("cron expression is valid but will never fire")
 
+// ErrOneShotInPast is returned when a one-shot (non-recurring) task's
+// schedule already matched at an earlier minute today. The intended
+// fire time is then unrecoverable: the schedule's next match has jumped
+// to tomorrow, next month, or next year, which is never what a one-shot
+// means. The usual cause is an agent computing the cron fields against
+// a stale clock (e.g. the session-start time in its prompt rather than
+// the actual current time), so the error names the next match to make
+// the discrepancy visible.
+var ErrOneShotInPast = errors.New("one-shot schedule's fire time has already passed today")
+
 // Store keeps scheduled tasks for all sessions. Session tasks live only
 // in memory; durable tasks are additionally persisted to a JSON file so
 // they survive restarts.
@@ -174,6 +184,13 @@ func (s *Store) Create(sessionID, cronExpr, prompt string, recurring, durable bo
 	// that so users are not confused by sub-minute firing.
 	nextRun = nextRun.Truncate(time.Minute)
 
+	// A one-shot whose schedule already matched earlier today pinned a
+	// fire time that has passed; accepting it would store a task firing
+	// tomorrow or next year when the caller meant "in a few minutes".
+	if !recurring && matchedEarlierToday(sched, now) {
+		return Task{}, fmt.Errorf("%w: %q next matches %s", ErrOneShotInPast, cronExpr, nextRun.Format(time.RFC3339))
+	}
+
 	id, err := NewTaskID()
 	if err != nil {
 		return Task{}, err
@@ -194,6 +211,22 @@ func (s *Store) Create(sessionID, cronExpr, prompt string, recurring, durable bo
 		return Task{}, err
 	}
 	return *task, nil
+}
+
+// matchedEarlierToday reports whether the schedule's most recent match
+// is at or before the current minute today. A one-shot created after
+// such a match can only fire on a later day than its fields suggest —
+// the signature of cron fields computed against a stale clock. The
+// current minute counts as "already passed": robfig treats it as
+// consumed, so a schedule matching it next fires tomorrow or beyond.
+// Next returns the first match strictly after its argument, so the
+// cursor starts a second before midnight to include a "0 0 ..."
+// schedule firing exactly at midnight.
+func matchedEarlierToday(sched *Schedule, now time.Time) bool {
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := now.Truncate(time.Minute)
+	next := sched.Next(midnight.Add(-time.Second))
+	return !next.IsZero() && !next.After(today)
 }
 
 // List returns the tasks belonging to sessionID, ordered by next run.

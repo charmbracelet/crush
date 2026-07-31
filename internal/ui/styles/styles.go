@@ -318,6 +318,7 @@ type Styles struct {
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+		AssistantCopyIcon      lipgloss.Style // Muted click-to-copy footer glyph
 
 		// A2UISurface is the themed container wrapped around rendered A2UI
 		// surfaces so they read as part of the chat (fork: A2UI).

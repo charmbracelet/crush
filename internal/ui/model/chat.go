@@ -914,41 +914,52 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 
 // HandleDelayedClick handles a delayed single-click action (like expansion).
 // It only executes if the click ID matches (i.e., no double-click occurred)
-// and no text selection was made (drag to select).
-func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
+// and no text selection was made (drag to select). It returns whether the
+// click was handled and an optional command produced by the clicked item
+// (e.g. a clipboard copy from a click-to-copy affordance).
+func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (bool, tea.Cmd) {
 	// Ignore if this click was superseded by a newer click (double/triple).
 	if msg.ClickID != m.pendingClickID {
-		return false
+		return false, nil
 	}
 
 	// Don't expand if user dragged to select text.
 	if m.HasHighlight() {
-		return false
+		return false, nil
 	}
 
 	// Execute the click action (e.g., expansion).
 	selectedItem := m.list.SelectedItem()
-	if clickable, ok := selectedItem.(list.MouseClickable); ok {
-		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
-		// Toggle expansion only when the item signalled it handled the
-		// click. Items like AssistantMessageItem only report handled when
-		// the click is on their expandable region, so this avoids
-		// toggling expansion for clicks outside the clickable area.
-		if handled {
-			if expandable, ok := selectedItem.(chat.Expandable); ok {
-				wasFollowing := m.follow
-				if !expandable.ToggleExpanded() {
-					m.ScrollToIndex(m.list.Selected())
-				}
-				if wasFollowing {
-					m.ScrollToBottom()
-				}
-			}
-		}
-		return handled
+	var handled bool
+	var cmd tea.Cmd
+	if commandable, ok := selectedItem.(list.MouseClickCommandable); ok {
+		// Items that can produce click commands get first refusal. A
+		// non-nil command (e.g. copy-to-clipboard) replaces the generic
+		// expansion toggle below.
+		handled, cmd = commandable.HandleMouseClickCmd(ansi.MouseButton1, msg.X, msg.Y)
+	} else if clickable, ok := selectedItem.(list.MouseClickable); ok {
+		handled = clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
+	} else {
+		return false, nil
 	}
 
-	return false
+	// Toggle expansion only when the item signalled it handled the
+	// click without producing a command of its own. Items like
+	// AssistantMessageItem only report handled when the click is on
+	// their expandable region, so this avoids toggling expansion for
+	// clicks outside the clickable area.
+	if handled && cmd == nil {
+		if expandable, ok := selectedItem.(chat.Expandable); ok {
+			wasFollowing := m.follow
+			if !expandable.ToggleExpanded() {
+				m.ScrollToIndex(m.list.Selected())
+			}
+			if wasFollowing {
+				m.ScrollToBottom()
+			}
+		}
+	}
+	return handled, cmd
 }
 
 // HandleMouseUp handles mouse up events for the chat component.

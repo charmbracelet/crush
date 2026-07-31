@@ -21,6 +21,11 @@ import (
 // truncated in the collapsed state.
 const assistantMessageTruncateFormat = "… (%d lines hidden) [click or space to expand]"
 
+// assistantCopyIcon is the click-to-copy glyph rendered as a right-aligned
+// footer on finished assistant messages. Clicking it copies the message's
+// raw Markdown source (not the glamour-rendered text) to the clipboard.
+const assistantCopyIcon = "⎘"
+
 // assistantMessageTailWindowFormat is shown above a tail-windowed thinking
 // block to advertise that earlier lines exist and that the user can
 // promote the view to a full expansion. The promotion is wired through
@@ -131,6 +136,16 @@ type AssistantMessageItem struct {
 	anim              *anim.Anim
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
+
+	// Click-to-copy footer geometry, recorded during renderMessageContent
+	// so HandleMouseClickCmd can hit-test without re-deriving the layout.
+	// copyIconRow is the item-relative row of the footer line, or -1 when
+	// the footer is not rendered (streaming, empty, or non-copyable end
+	// states). copyIconColStart/End bound the icon's cell span within the
+	// line (start inclusive, end exclusive).
+	copyIconRow      int
+	copyIconColStart int
+	copyIconColEnd   int
 
 	// Per-section render caches. Splitting these out means content
 	// streaming does not invalidate the (often expensive) thinking
@@ -386,6 +401,27 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	}
 
 	out := strings.Join(messageParts, "\n")
+
+	// Click-to-copy footer: a right-aligned ⎘ on its own line below the
+	// message, shown once the message is finished and has copyable content.
+	// The icon copies the raw Markdown source via HandleMouseClickCmd.
+	a.copyIconRow = -1
+	if a.message.IsFinished() && content != "" {
+		icon := a.sty.Messages.AssistantCopyIcon.Render(assistantCopyIcon)
+		iconWidth := lipgloss.Width(icon)
+		pad := width - iconWidth
+		if pad < 0 {
+			pad = 0
+		}
+		footer := strings.Repeat(" ", pad) + icon
+		// The footer line index is the current height plus one for the blank
+		// separator line inserted between the body and the footer.
+		a.copyIconRow = lipgloss.Height(out) + 1
+		a.copyIconColStart = pad
+		a.copyIconColEnd = pad + iconWidth
+		out += "\n\n" + footer
+	}
+
 	return out, lipgloss.Height(out)
 }
 
@@ -720,12 +756,33 @@ func (a *AssistantMessageItem) tailWindowWouldTruncate() bool {
 // path. Toggling here directly would double-toggle because the caller always
 // runs the generic path after a handled click.
 func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
+	handled, _ := a.HandleMouseClickCmd(btn, x, y)
+	return handled
+}
+
+// HandleMouseClickCmd implements [list.MouseClickCommandable]. A click on
+// the click-to-copy footer returns the copy command, which suppresses the
+// generic expansion toggle in the chat click dispatcher; a click on the
+// thinking box reports handled with a nil command so expansion proceeds
+// through the generic [Expandable] path (see HandleMouseClick for why the
+// toggle itself must not run here).
+func (a *AssistantMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int) (bool, tea.Cmd) {
 	if btn != ansi.MouseLeft {
-		return false
+		return false, nil
 	}
-	// Only the thinking box is clickable; other regions of the assistant
-	// message should not trigger expansion.
-	return a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight
+	// The click-to-copy footer wins over every other region: it is a
+	// discrete action, not an expansion target. The copy takes the raw
+	// Markdown source (the same text the c/y keybinding copies), not the
+	// glamour-rendered output. Click coordinates are chat-relative, so the
+	// content column is offset by MessageLeftPaddingTotal (the prefix bar).
+	if a.copyIconRow >= 0 && y == a.copyIconRow &&
+		x >= a.copyIconColStart+MessageLeftPaddingTotal && x < a.copyIconColEnd+MessageLeftPaddingTotal {
+		text := a.message.Content().Text
+		return true, common.CopyToClipboard(text, "Message copied to clipboard")
+	}
+	// Only the thinking box is clickable for expansion; other regions of
+	// the assistant message should not trigger expansion.
+	return a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight, nil
 }
 
 // SetFocused implements list.Focusable. Besides the base focus bookkeeping

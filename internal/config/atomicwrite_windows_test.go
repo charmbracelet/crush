@@ -22,7 +22,7 @@ func TestAtomicWriteFile_RetriesWhileDestinationHandleOpen(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.json")
-	require.NoError(t, atomicWriteFile(path, []byte(`{"v":1}`), 0o600))
+	require.NoError(t, AtomicWriteFile(path, []byte(`{"v":1}`), 0o600))
 
 	// Hold the destination open with no sharing flags so the rename
 	// fails with ERROR_ACCESS_DENIED/ERROR_SHARING_VIOLATION until the
@@ -37,7 +37,7 @@ func TestAtomicWriteFile_RetriesWhileDestinationHandleOpen(t *testing.T) {
 		windows.CloseHandle(h)
 	}()
 
-	require.NoError(t, atomicWriteFile(path, []byte(`{"v":2}`), 0o600))
+	require.NoError(t, AtomicWriteFile(path, []byte(`{"v":2}`), 0o600))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)

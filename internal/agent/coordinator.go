@@ -106,6 +106,7 @@ type Coordinator interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
+	ListCronTasks(sessionID string) []scheduler.Task
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
@@ -1258,6 +1259,11 @@ func (c *coordinator) CancelAll() {
 
 func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent.ClearQueue(sessionID)
+}
+
+// ListCronTasks returns the scheduled tasks belonging to sessionID.
+func (c *coordinator) ListCronTasks(sessionID string) []scheduler.Task {
+	return c.cronStore.List(sessionID)
 }
 
 func (c *coordinator) IsBusy() bool {

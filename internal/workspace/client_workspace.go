@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -313,6 +314,12 @@ func (w *ClientWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 
 func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
 	_ = w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
+}
+
+// AgentListCronTasks returns nil in client/server mode: the cron store
+// lives server-side and there is no client API for it yet.
+func (w *ClientWorkspace) AgentListCronTasks(sessionID string) []scheduler.Task {
+	return nil
 }
 
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {

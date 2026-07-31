@@ -3,9 +3,11 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -27,6 +29,7 @@ type pillSection int
 const (
 	pillSectionTodos pillSection = iota
 	pillSectionQueue
+	pillSectionCron
 )
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
@@ -129,6 +132,45 @@ func queueList(queueItems []string, t *styles.Styles) string {
 	return strings.Join(lines, "\n")
 }
 
+// cronPill renders the scheduled-task count pill.
+func cronPill(tasks []scheduler.Task, t *styles.Styles) string {
+	if len(tasks) == 0 {
+		return ""
+	}
+	icon := t.Pills.QueueLabel.Render("⏰")
+	label := t.Pills.QueueLabel.Render(fmt.Sprintf("%d Scheduled", len(tasks)))
+	content := fmt.Sprintf("%s %s", icon, label)
+	return t.Pills.Focused.Render(content)
+}
+
+// cronList renders the expanded scheduled-task list.
+func cronList(tasks []scheduler.Task, t *styles.Styles) string {
+	if len(tasks) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, task := range tasks {
+		nextRun := task.NextRunAt.Local().Format("15:04")
+		if task.NextRunAt.Local().Day() != time.Now().Local().Day() {
+			nextRun = task.NextRunAt.Local().Format("Jan 2 15:04")
+		}
+		prompt := task.Prompt
+		if ansi.StringWidth(prompt) > maxQueueDisplayLength {
+			prompt = ansi.Truncate(prompt, maxQueueDisplayLength-1, "…")
+		}
+		recurring := ""
+		if task.Recurring {
+			recurring = " ↻"
+		}
+		text := fmt.Sprintf("%s %s%s — %s", task.ID, nextRun, recurring, prompt)
+		prefix := t.Pills.QueueItemPrefix.Render() + " "
+		lines = append(lines, prefix+t.Pills.QueueItemText.Render(text))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 // pillsHeightReasonableTerminalHeight is the minimum terminal height at which
 // we auto-expand pills when there are incomplete todos.
 const pillsHeightReasonableTerminalHeight = 40
@@ -145,7 +187,7 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if m.height < pillsHeightReasonableTerminalHeight {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0 || len(m.cronTasks) > 0
 	if !hasPills {
 		return nil
 	}
@@ -159,8 +201,10 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	m.pillsAutoExpanded = true
 	if hasIncompleteTodos(m.session.Todos) {
 		m.focusedPillSection = pillSectionTodos
-	} else {
+	} else if m.promptQueue > 0 {
 		m.focusedPillSection = pillSectionQueue
+	} else {
+		m.focusedPillSection = pillSectionCron
 	}
 	m.updateLayoutAndSize()
 	if m.chat.Follow() {
@@ -174,7 +218,7 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0 || len(m.cronTasks) > 0
 	if !hasPills {
 		return nil
 	}
@@ -182,8 +226,10 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if m.pillsExpanded {
 		if hasIncompleteTodos(m.session.Todos) {
 			m.focusedPillSection = pillSectionTodos
-		} else {
+		} else if m.promptQueue > 0 {
 			m.focusedPillSection = pillSectionQueue
+		} else {
+			m.focusedPillSection = pillSectionCron
 		}
 	}
 	m.updateLayoutAndSize()
@@ -198,23 +244,39 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	return nil
 }
 
-// switchPillSection changes focus between todo and queue sections.
+// switchPillSection changes focus between todo, queue, and cron sections.
 func (m *UI) switchPillSection(dir int) tea.Cmd {
 	if !m.pillsExpanded || !m.hasSession() {
 		return nil
 	}
 	hasIncompleteTodos := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
+	hasCron := len(m.cronTasks) > 0
 
-	if dir < 0 && m.focusedPillSection == pillSectionQueue && hasIncompleteTodos {
-		m.focusedPillSection = pillSectionTodos
-		m.updateLayoutAndSize()
+	// Build the ordered list of sections that have content.
+	var sections []pillSection
+	if hasIncompleteTodos {
+		sections = append(sections, pillSectionTodos)
+	}
+	if hasQueue {
+		sections = append(sections, pillSectionQueue)
+	}
+	if hasCron {
+		sections = append(sections, pillSectionCron)
+	}
+	if len(sections) < 2 {
 		return nil
 	}
-	if dir > 0 && m.focusedPillSection == pillSectionTodos && hasQueue {
-		m.focusedPillSection = pillSectionQueue
-		m.updateLayoutAndSize()
-		return nil
+
+	// Find the current section in the list and move by dir.
+	current := m.effectiveFocusedSection()
+	for i, s := range sections {
+		if s == current {
+			next := (i + dir + len(sections)) % len(sections)
+			m.focusedPillSection = sections[next]
+			m.updateLayoutAndSize()
+			return nil
+		}
 	}
 	return nil
 }
@@ -227,7 +289,19 @@ func (m *UI) switchPillSection(dir int) tea.Cmd {
 func (m *UI) effectiveFocusedSection() pillSection {
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
+	hasCron := len(m.cronTasks) > 0
+
 	switch m.focusedPillSection {
+	case pillSectionCron:
+		if hasCron {
+			return pillSectionCron
+		}
+		if hasIncomplete {
+			return pillSectionTodos
+		}
+		if hasQueue {
+			return pillSectionQueue
+		}
 	case pillSectionQueue:
 		if hasQueue {
 			return pillSectionQueue
@@ -235,12 +309,18 @@ func (m *UI) effectiveFocusedSection() pillSection {
 		if hasIncomplete {
 			return pillSectionTodos
 		}
+		if hasCron {
+			return pillSectionCron
+		}
 	default: // pillSectionTodos
 		if hasIncomplete {
 			return pillSectionTodos
 		}
 		if hasQueue {
 			return pillSectionQueue
+		}
+		if hasCron {
+			return pillSectionCron
 		}
 	}
 	return m.focusedPillSection
@@ -258,7 +338,8 @@ func (m *UI) pillsAreaHeight() int {
 	}
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
-	hasPills := hasIncomplete || hasQueue
+	hasCron := len(m.cronTasks) > 0
+	hasPills := hasIncomplete || hasQueue || hasCron
 	if !hasPills {
 		return 0
 	}
@@ -273,6 +354,10 @@ func (m *UI) pillsAreaHeight() int {
 		case pillSectionQueue:
 			if hasQueue {
 				pillsAreaHeight += m.promptQueue
+			}
+		case pillSectionCron:
+			if hasCron {
+				pillsAreaHeight += len(m.cronTasks)
 			}
 		}
 	}
@@ -300,8 +385,9 @@ func (m *UI) renderPills() {
 
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
+	hasCron := len(m.cronTasks) > 0
 
-	if !hasIncomplete && !hasQueue {
+	if !hasIncomplete && !hasQueue && !hasCron {
 		return
 	}
 
@@ -309,6 +395,7 @@ func (m *UI) renderPills() {
 	effective := m.effectiveFocusedSection()
 	todosFocused := m.pillsExpanded && effective == pillSectionTodos
 	queueFocused := m.pillsExpanded && effective == pillSectionQueue
+	cronFocused := m.pillsExpanded && effective == pillSectionCron
 
 	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 	if m.todoIsSpinning {
@@ -324,6 +411,9 @@ func (m *UI) renderPills() {
 	if hasQueue {
 		pills = append(pills, queuePill(m.promptQueue, t))
 	}
+	if hasCron {
+		pills = append(pills, cronPill(m.cronTasks, t))
+	}
 
 	var expandedList string
 	if m.pillsExpanded {
@@ -336,6 +426,8 @@ func (m *UI) renderPills() {
 			if len(m.promptQueueItems) > 0 {
 				expandedList = queueList(m.promptQueueItems, t)
 			}
+		} else if cronFocused && hasCron {
+			expandedList = cronList(m.cronTasks, t)
 		}
 	}
 

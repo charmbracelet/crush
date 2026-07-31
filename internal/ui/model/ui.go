@@ -43,6 +43,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -349,6 +350,10 @@ type UI struct {
 	promptQueueGen uint64
 	sidebarScroll  int
 	pillsView      string
+
+	// cronTasks holds the scheduled tasks for the current session,
+	// refreshed on session load and after cron tool results.
+	cronTasks []scheduler.Task
 
 	// Todo spinner
 	todoSpinner    spinner.Model
@@ -721,6 +726,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.promptQueue = 0
 		m.promptQueueItems = nil
 		m.promptQueueCheckedAt = time.Time{}
+		m.cronTasks = nil
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -756,6 +762,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+		m.refreshCronTasks()
 		m.updateLayoutAndSize()
 
 	case sessionFilesUpdatesMsg:
@@ -1575,6 +1582,12 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
+				}
+				// Refresh cron tasks after a cron tool result so the
+				// pill stays current.
+				toolName := toolMsgItem.ToolCall().Name
+				if toolName == "CronCreate" || toolName == "CronList" || toolName == "CronDelete" {
+					m.refreshCronTasks()
 				}
 			}
 		}
@@ -3926,6 +3939,17 @@ func (m *UI) isCurrentSessionBusy() bool {
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
+}
+
+// refreshCronTasks fetches the current session's scheduled tasks from
+// the workspace and re-renders the pills panel if the set changed.
+func (m *UI) refreshCronTasks() {
+	if !m.hasSession() {
+		m.cronTasks = nil
+		return
+	}
+	m.cronTasks = m.com.Workspace.AgentListCronTasks(m.session.ID)
+	m.renderPills()
 }
 
 // focusSidebar moves focus to the sidebar panel, blurring the editor and chat.

@@ -211,7 +211,7 @@ That said, you can also set environment variables for preferred providers:
 | `SYNTHETIC_API_KEY`         | Synthetic                                          |
 | `HF_TOKEN`                  | Hugging Face Inference                             |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
-| `FRIENDLI_API_KEY`          | Friendli                                           |
+| `FRIENDLI_API_KEY`          | FriendliAI                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
 | `ALIBABA_SINGAPORE_API_KEY` | Alibaba (Singapore)                                |

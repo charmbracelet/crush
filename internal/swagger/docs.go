@@ -3645,6 +3645,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/proto.Attachment"
                     }
                 },
+                "permission_policy": {
+                    "$ref": "#/definitions/proto.PermissionRequestPolicy"
+                },
                 "prompt": {
                     "type": "string"
                 },
@@ -4091,6 +4094,17 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "proto.PermissionRequestPolicy": {
+            "type": "string",
+            "enum": [
+                "",
+                "auto_approve"
+            ],
+            "x-enum-varnames": [
+                "PermissionRequestPolicyPrompt",
+                "PermissionRequestPolicyAutoApprove"
+            ]
         },
         "proto.PermissionSkipRequest": {
             "type": "object",

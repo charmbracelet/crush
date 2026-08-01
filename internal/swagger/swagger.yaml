@@ -498,6 +498,8 @@ definitions:
         items:
           $ref: '#/definitions/proto.Attachment'
         type: array
+      permission_policy:
+        $ref: '#/definitions/proto.PermissionRequestPolicy'
       prompt:
         type: string
       run_id:
@@ -795,6 +797,14 @@ definitions:
       tool_name:
         type: string
     type: object
+  proto.PermissionRequestPolicy:
+    enum:
+    - ""
+    - auto_approve
+    type: string
+    x-enum-varnames:
+    - PermissionRequestPolicyPrompt
+    - PermissionRequestPolicyAutoApprove
   proto.PermissionSkipRequest:
     properties:
       skip:

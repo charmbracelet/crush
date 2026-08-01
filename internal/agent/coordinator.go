@@ -287,6 +287,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			SessionID:        sessionID,
 			RunID:            runID,
 			Prompt:           prompt,
+			PermissionPolicy: permission.RequestPolicyFromContext(ctx),
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  mergedOptions,
@@ -1424,6 +1425,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return params.Agent.Run(ctx, SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
+			PermissionPolicy: permission.RequestPolicyFromContext(ctx),
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  getProviderOptions(model, providerCfg),
 			Temperature:      model.ModelCfg.Temperature,

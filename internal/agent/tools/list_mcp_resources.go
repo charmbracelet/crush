@@ -63,15 +63,16 @@ func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Ser
 				return NewPermissionDeniedResponse(), nil
 			}
 
-			resources, err := mcp.ListResources(ctx, cfg, params.MCPName)
+			resources, templates, err := mcp.ListResources(ctx, cfg, params.MCPName)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
-			if len(resources) == 0 {
+			if len(resources) == 0 && len(templates) == 0 {
 				return fantasy.NewTextResponse("No resources found"), nil
 			}
 
-			lines := make([]string, 0, len(resources))
+			lines := make([]string, 0, len(resources)+len(templates))
+
 			for _, resource := range resources {
 				if resource == nil {
 					continue
@@ -89,6 +90,24 @@ func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Ser
 				}
 				if resource.Size > 0 {
 					line = fmt.Sprintf("%s [size: %d]", line, resource.Size)
+				}
+				lines = append(lines, line)
+			}
+
+			for _, template := range templates {
+				if template == nil {
+					continue
+				}
+				title := cmp.Or(template.Title, template.Name, template.URITemplate)
+				line := fmt.Sprintf("- [template] %s", title)
+				if template.URITemplate != "" {
+					line = fmt.Sprintf("%s (%s)", line, template.URITemplate)
+				}
+				if template.Description != "" {
+					line = fmt.Sprintf("%s: %s", line, template.Description)
+				}
+				if template.MIMEType != "" {
+					line = fmt.Sprintf("%s [mime: %s]", line, template.MIMEType)
 				}
 				lines = append(lines, line)
 			}

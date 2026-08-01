@@ -14,32 +14,50 @@ import (
 
 type Resource = mcp.Resource
 
+type ResourceTemplate = mcp.ResourceTemplate
+
 type ResourceContents = mcp.ResourceContents
 
-var allResources = csync.NewMap[string, []*Resource]()
+var (
+	allResources         = csync.NewMap[string, []*Resource]()
+	allResourceTemplates = csync.NewMap[string, []*ResourceTemplate]()
+)
 
 // Resources returns all available MCP resources.
 func Resources() iter.Seq2[string, []*Resource] {
 	return allResources.Seq2()
 }
 
-// ListResources returns the current resources for an MCP server.
-func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([]*Resource, error) {
+// ResourceTemplates returns all available MCP resource templates.
+func ResourceTemplates() iter.Seq2[string, []*ResourceTemplate] {
+	return allResourceTemplates.Seq2()
+}
+
+// ListResources returns the current resources (including resource templates) for an MCP server.
+func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([]*Resource, []*ResourceTemplate, error) {
 	session, err := getOrRenewClient(ctx, cfg, name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	resources, err := getResources(ctx, session)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	templates, err := getResourceTemplates(ctx, session)
+	if err != nil {
+		// Templates are best-effort; some servers may not support resources/templates/list.
+		slog.Warn("MCP server does not support resources/templates/list", "error", err)
+		templates = nil
 	}
 
 	resourceCount := updateResources(name, resources)
+	templateCount := updateResourceTemplates(name, templates)
 	prev, _ := states.Get(name)
-	prev.Counts.Resources = resourceCount
+	prev.Counts.Resources = resourceCount + templateCount
 	updateState(name, StateConnected, nil, session, prev.Counts)
-	return resources, nil
+	return resources, templates, nil
 }
 
 // ReadResource reads the contents of a resource from an MCP server.
@@ -55,7 +73,7 @@ func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string
 	return result.Contents, nil
 }
 
-// RefreshResources gets the updated list of resources from the MCP and updates the
+// RefreshResources gets the updated list of resources and resource templates from the MCP and updates the
 // global state.
 func RefreshResources(ctx context.Context, name string) {
 	// Runs under the per-name lifecycle lock so a concurrent renewal can't
@@ -76,10 +94,17 @@ func RefreshResources(ctx context.Context, name string) {
 		return
 	}
 
+	templates, err := getResourceTemplates(ctx, session)
+	if err != nil {
+		slog.Warn("MCP server does not support resources/templates/list", "error", err)
+		templates = nil
+	}
+
 	resourceCount := updateResources(name, resources)
+	templateCount := updateResourceTemplates(name, templates)
 
 	prev, _ := states.Get(name)
-	prev.Counts.Resources = resourceCount
+	prev.Counts.Resources = resourceCount + templateCount
 	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
@@ -99,6 +124,20 @@ func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {
 	return result.Resources, nil
 }
 
+func getResourceTemplates(ctx context.Context, c *ClientSession) ([]*ResourceTemplate, error) {
+	if c.InitializeResult().Capabilities.Resources == nil {
+		return nil, nil
+	}
+	result, err := c.ListResourceTemplates(ctx, &mcp.ListResourceTemplatesParams{})
+	if err != nil {
+		if isMethodNotFoundError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return result.ResourceTemplates, nil
+}
+
 // isMethodNotFoundError checks if the error is a JSON-RPC "Method not found" error.
 func isMethodNotFoundError(err error) bool {
 	var rpcErr *jsonrpc.Error
@@ -112,4 +151,13 @@ func updateResources(name string, resources []*Resource) int {
 	}
 	allResources.Set(name, resources)
 	return len(resources)
+}
+
+func updateResourceTemplates(name string, templates []*ResourceTemplate) int {
+	if len(templates) == 0 {
+		allResourceTemplates.Del(name)
+		return 0
+	}
+	allResourceTemplates.Set(name, templates)
+	return len(templates)
 }

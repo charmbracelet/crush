@@ -12,7 +12,9 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/joestump-agent/a2tea"
 	"github.com/joestump-agent/a2tea/event"
 	"github.com/joestump-agent/a2tea/render"
@@ -560,6 +562,51 @@ func repairA2UIMessage(msg map[string]any) bool {
 	return true
 }
 
+// a2uiThemeStyles builds a2tea render.Styles from the active crush theme so
+// surfaces draw with the same palette as the rest of the chat. Card borders
+// pick up the same border color the old A2UISurface frame used (the theme's
+// visible background), headings and buttons use the brand colors, captions
+// use the muted foreground, and the focused button inverts to a
+// primary-background highlight — matching the dialog selected-item pattern.
+func a2uiThemeStyles(sty *styles.Styles) render.Styles {
+	st := render.DefaultStyles()
+	if sty == nil {
+		return st
+	}
+	st.CardBorder = st.CardBorder.
+		BorderForeground(sty.Messages.A2UISurface.GetBorderTopForeground())
+	st.Heading = st.Heading.Foreground(sty.WorkingGradFromColor)
+	st.Subheading = st.Subheading.Foreground(sty.WorkingGradToColor)
+	st.Caption = st.Caption.Foreground(sty.Dialog.SecondaryText.GetForeground())
+	st.Button = st.Button.Foreground(sty.WorkingGradFromColor)
+	st.ButtonFocused = st.ButtonFocused.
+		Background(sty.Dialog.SelectedItem.GetBackground()).
+		Foreground(sty.Dialog.SelectedItem.GetForeground()).
+		Reverse(false)
+	return st
+}
+
+// renderA2UILoading renders a "✨ Rendering UI…" placeholder for when an
+// assistant message is still streaming and an unclosed <a2ui-json> tag
+// indicates a surface is being composed. The raw partial JSON is replaced
+// with a styled shimmer that reads as intentional rather than broken.
+func renderA2UILoading(sty *styles.Styles, width int) string {
+	sparkle := lipgloss.NewStyle().
+		Foreground(sty.WorkingGradFromColor).
+		Bold(true).
+		Render("✨")
+	label := lipgloss.NewStyle().
+		Foreground(sty.WorkingLabelColor).
+		Render(" Rendering UI…")
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(sty.WorkingGradFromColor).
+		Padding(0, 1).
+		Width(width).
+		Render(sparkle + label)
+	return box
+}
+
 // syncA2UISurfaces builds — or reuses — the live a2tea models for the
 // scanned parts (#44). Surfaces are keyed by a hash of the scanned source:
 // streaming deltas rebuild them, while pure re-renders (width changes,
@@ -577,9 +624,10 @@ func (a *AssistantMessageItem) syncA2UISurfaces(src string, parts []a2tea.Part) 
 		if len(p.Messages) == 0 {
 			continue
 		}
-		// Render compact: crush wraps the surface in its own A2UISurface
-		// frame, so a2tea must not draw a second CardBorder inside it.
-		model, err := a2tea.Render(p.Messages, render.WithCompact(true))
+		// Render with the crush theme: a2tea's CardBorder picks up the
+		// palette, and crush no longer wraps the surface in its own frame —
+		// a2tea's box is the only one.
+		model, err := a2tea.Render(p.Messages, render.WithStyles(a2uiThemeStyles(a.sty)))
 		if err != nil {
 			// Valid A2UI with nothing to draw (e.g. a bare data-model
 			// update). The render loop skips nil entries; the block-stats
@@ -920,11 +968,9 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 		b.WriteString(s)
 	}
 
-	// a2tea's chrome renders with terminal defaults (monochrome by design),
-	// so each surface is wrapped in a themed container to match the rest of
-	// the chat. The a2tea model is sized to the container's inner width.
-	surface := a.sty.Messages.A2UISurface
-	innerWidth := max(width-surface.GetHorizontalFrameSize(), 1)
+	// a2tea renders its own themed chrome (CardBorder, headings, buttons)
+	// via render.WithStyles — crush no longer wraps the surface in its own
+	// frame. The model is sized to the full content width.
 	for i, p := range parts {
 		writeChunk(renderMarkdown(p.Text))
 		if len(p.Messages) == 0 {
@@ -938,14 +984,17 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 		}
 		// Render from the live model each call: its View reflects the
 		// current focus ring and edited values, not a frozen snapshot.
-		model.SetSize(innerWidth, 0)
+		model.SetSize(width, 0)
 		rendered := strings.TrimRight(model.View().Content, "\n")
-		// The model renders in compact mode (a2tea drops its own CardBorder),
-		// so this frame is the ONLY box — no double border. lipgloss Width
-		// sets the TOTAL box width (border + padding included), so pass the
-		// full content width; the model inside was sized to innerWidth so its
-		// text wraps to the frame's inner area.
-		writeChunk(surface.Width(width).Render(rendered))
+		writeChunk(rendered)
+	}
+
+	// While streaming, an unclosed <a2ui-json> tag means the model is
+	// still composing the surface — the parser consumed the raw JSON but
+	// produced no messages, so it doesn't appear in any part. Show a
+	// magical loading placeholder instead of leaving a blank gap.
+	if !finished && hasUnclosedA2UITag(masked) {
+		writeChunk(renderA2UILoading(a.sty, width))
 	}
 
 	// Alert when the parser dropped a complete tagged block (#7) — checked

@@ -941,15 +941,12 @@ func TestRetireA2UISurfaceUnknownID(t *testing.T) {
 	require.GreaterOrEqual(t, item.focusedA2UISurfaceIndex(), 0)
 }
 
-// --- Double-bounded + width regression ---
+// --- Single-border + width regression ---
 //
-// A Card surface used to render inside two nested boxes: a2tea's own
-// CardBorder, then crush's A2UISurface frame around that. The inner border
-// wrapped and dangled its right edge, and the whole thing rendered two cells
-// short of the available width. The fix renders the a2tea model in compact
-// mode (no inner border) so crush's single frame is the only box, and sizes
-// the model to the frame's true content width so the box fills exactly
-// `width`.
+// A Card surface renders inside exactly one box: a2tea's own CardBorder,
+// themed via render.WithStyles. Crush no longer wraps the surface in an
+// A2UISurface frame. The box must fill exactly `width` with no dangling
+// border fragments.
 
 // TestA2UISurfaceSingleBorder asserts exactly one box is drawn: one top
 // border line and one bottom border line, no nested inner border.
@@ -998,4 +995,45 @@ func TestA2UISurfaceFillsWidth(t *testing.T) {
 			require.NotEqual(t, "─╯", trimmed, "width=%d: wrapped border fragment\n%s", width, plain)
 		}
 	}
+}
+
+// --- Streaming loading indicator ---
+
+// TestA2UIStreamingLoadingPlaceholder asserts that an unclosed <a2ui-json>
+// tag during streaming renders a magical "Rendering UI…" placeholder instead
+// of raw partial JSON.
+func TestA2UIStreamingLoadingPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+
+	// Simulate streaming: prose followed by an unclosed <a2ui-json> tag.
+	content := "Here is the trace:\n\n<a2ui-json>{\"version\":\"v0.9\",\"updateComponents\":{\"surfaceId\":\"s\",\"components\":["
+
+	out := ansi.Strip(item.renderContentWithA2UI(content, 80, false))
+
+	require.Contains(t, out, "Here is the trace:", "prose before the unclosed tag should render")
+	require.Contains(t, out, "✨", "loading placeholder should contain the sparkle")
+	require.Contains(t, out, "Rendering UI", "loading placeholder should contain the label")
+	require.NotContains(t, out, `"version"`, "raw partial JSON should not leak into the render")
+	require.NotContains(t, out, `"updateComponents"`, "raw partial JSON should not leak into the render")
+	require.NotContains(t, out, `"surfaceId"`, "raw partial JSON should not leak into the render")
+}
+
+// TestA2UIStreamingLoadingPlaceholderComplete asserts that a complete
+// <a2ui-json> block during streaming renders the surface normally (no
+// loading placeholder).
+func TestA2UIStreamingLoadingPlaceholderComplete(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+
+	content := "Here you go:\n\n" + a2uiSurface
+
+	out := ansi.Strip(item.renderContentWithA2UI(content, 80, false))
+
+	require.Contains(t, out, "Hello from A2UI", "complete surface should render its content")
+	require.NotContains(t, out, "Rendering UI", "complete surface should not show loading placeholder")
 }

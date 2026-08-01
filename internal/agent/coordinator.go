@@ -577,6 +577,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			if model.CatwalkCfg.CanReason {
 				extraBody["enable_thinking"] = model.ModelCfg.Think || reasoningEffort != ""
 			}
+
+		case "friendli":
+			extraBody["parse_reasoning"] = true
+			extraBody["include_reasoning"] = true
+			extraBody["chat_template_kwargs"] = map[string]any{
+				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "" && reasoningEffort != "none",
+			}
 		}
 
 		mergedOptions["extra_body"] = extraBody

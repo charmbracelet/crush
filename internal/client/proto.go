@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -424,20 +423,8 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 }
 
 // SendMessage sends a message to the agent for a workspace.
-//
-// When runID is non-empty it is echoed back on the resulting
-// proto.RunComplete event, giving the caller a unique correlator
-// for completion detection. Pass "" when the caller does not need
-// to distinguish its own turn's terminal event from any concurrent
-// turn on the same session (e.g. interactive TUI usage).
-func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID string, permissionPolicy proto.PermissionRequestPolicy, prompt string, attachments ...message.Attachment) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(proto.AgentMessage{
-		SessionID:        sessionID,
-		RunID:            runID,
-		Prompt:           prompt,
-		PermissionPolicy: permissionPolicy,
-		Attachments:      proto.AttachmentsFromMessage(attachments),
-	}), http.Header{"Content-Type": []string{"application/json"}})
+func (c *Client) SendMessage(ctx context.Context, workspaceID string, msg proto.AgentMessage) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", workspaceID), nil, jsonBody(msg), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("failed to send message to agent: %w", err)
 	}

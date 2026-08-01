@@ -100,10 +100,7 @@ func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	require.NoError(t, c.SendMessage(
 		context.Background(),
 		"ws1",
-		"sess1",
-		"",
-		proto.PermissionRequestPolicyPrompt,
-		"hello",
+		proto.AgentMessage{SessionID: "sess1", Prompt: "hello"},
 	))
 }
 
@@ -119,10 +116,7 @@ func TestSendMessageAcceptsStatusOK(t *testing.T) {
 	require.NoError(t, c.SendMessage(
 		context.Background(),
 		"ws1",
-		"sess1",
-		"",
-		proto.PermissionRequestPolicyPrompt,
-		"hello",
+		proto.AgentMessage{SessionID: "sess1", Prompt: "hello"},
 	))
 }
 
@@ -152,10 +146,12 @@ func TestSendMessageIncludesPermissionPolicy(t *testing.T) {
 			require.NoError(t, c.SendMessage(
 				t.Context(),
 				"ws1",
-				"sess1",
-				"run1",
-				test.policy,
-				"hello",
+				proto.AgentMessage{
+					SessionID:        "sess1",
+					RunID:            "run1",
+					Prompt:           "hello",
+					PermissionPolicy: test.policy,
+				},
 			))
 			require.Equal(t, test.policy, got.PermissionPolicy)
 		})
@@ -172,7 +168,7 @@ func TestSendMessageDecodesErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "", "", proto.PermissionRequestPolicyPrompt, "hello")
+	err := c.SendMessage(context.Background(), "ws1", proto.AgentMessage{Prompt: "hello"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 400")
 	require.Contains(t, err.Error(), "session id is required")
@@ -188,7 +184,7 @@ func TestSendMessageFallsBackOnMalformedErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", proto.PermissionRequestPolicyPrompt, "hello")
+	err := c.SendMessage(context.Background(), "ws1", proto.AgentMessage{SessionID: "sess1", Prompt: "hello"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 	require.NotContains(t, err.Error(), "not json")
@@ -203,7 +199,7 @@ func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", proto.PermissionRequestPolicyPrompt, "hello")
+	err := c.SendMessage(context.Background(), "ws1", proto.AgentMessage{SessionID: "sess1", Prompt: "hello"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 }

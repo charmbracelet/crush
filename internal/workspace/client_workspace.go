@@ -212,11 +212,12 @@ func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string
 	return w.client.SendMessage(
 		ctx,
 		w.workspaceID(),
-		sessionID,
-		"",
-		proto.PermissionRequestPolicyPrompt,
-		prompt,
-		attachments...,
+		proto.AgentMessage{
+			SessionID:        sessionID,
+			Prompt:           prompt,
+			PermissionPolicy: proto.PermissionRequestPolicyPrompt,
+			Attachments:      proto.AttachmentsFromMessage(attachments),
+		},
 	)
 }
 

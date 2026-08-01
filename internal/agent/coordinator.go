@@ -517,6 +517,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				if !strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
 					mergedOptions["reasoning_effort"] = reasoningEffort
 				}
+			case "friendli":
+				// Friendli does not accept reasoning_effort; it uses
+				// chat_template_kwargs.enable_thinking instead.
 			default:
 				mergedOptions["reasoning_effort"] = reasoningEffort
 			}

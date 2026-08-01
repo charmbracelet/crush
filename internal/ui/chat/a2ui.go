@@ -577,7 +577,9 @@ func (a *AssistantMessageItem) syncA2UISurfaces(src string, parts []a2tea.Part) 
 		if len(p.Messages) == 0 {
 			continue
 		}
-		model, err := a2tea.Render(p.Messages)
+		// Render compact: crush wraps the surface in its own A2UISurface
+		// frame, so a2tea must not draw a second CardBorder inside it.
+		model, err := a2tea.Render(p.Messages, render.WithCompact(true))
 		if err != nil {
 			// Valid A2UI with nothing to draw (e.g. a bare data-model
 			// update). The render loop skips nil entries; the block-stats
@@ -938,7 +940,12 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 		// current focus ring and edited values, not a frozen snapshot.
 		model.SetSize(innerWidth, 0)
 		rendered := strings.TrimRight(model.View().Content, "\n")
-		writeChunk(surface.Width(max(width-surface.GetHorizontalBorderSize(), 1)).Render(rendered))
+		// The model renders in compact mode (a2tea drops its own CardBorder),
+		// so this frame is the ONLY box — no double border. lipgloss Width
+		// sets the TOTAL box width (border + padding included), so pass the
+		// full content width; the model inside was sized to innerWidth so its
+		// text wraps to the frame's inner area.
+		writeChunk(surface.Width(width).Render(rendered))
 	}
 
 	// Alert when the parser dropped a complete tagged block (#7) — checked

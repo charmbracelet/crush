@@ -940,3 +940,62 @@ func TestRetireA2UISurfaceUnknownID(t *testing.T) {
 	item.SetFocused(true)
 	require.GreaterOrEqual(t, item.focusedA2UISurfaceIndex(), 0)
 }
+
+// --- Double-bounded + width regression ---
+//
+// A Card surface used to render inside two nested boxes: a2tea's own
+// CardBorder, then crush's A2UISurface frame around that. The inner border
+// wrapped and dangled its right edge, and the whole thing rendered two cells
+// short of the available width. The fix renders the a2tea model in compact
+// mode (no inner border) so crush's single frame is the only box, and sizes
+// the model to the frame's true content width so the box fills exactly
+// `width`.
+
+// TestA2UISurfaceSingleBorder asserts exactly one box is drawn: one top
+// border line and one bottom border line, no nested inner border.
+func TestA2UISurfaceSingleBorder(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+
+	plain := ansi.Strip(item.renderContentWithA2UI(a2uiSurface, 80, true))
+
+	top := strings.Count(plain, "╭")
+	bottom := strings.Count(plain, "╰")
+	require.Equal(t, 1, top, "expected exactly one top border (single box), got %d\n%s", top, plain)
+	require.Equal(t, 1, bottom, "expected exactly one bottom border (single box), got %d\n%s", bottom, plain)
+}
+
+// TestA2UISurfaceFillsWidth asserts the rendered box spans the full content
+// width — no line narrower than the box and, critically, no dangling border
+// fragment wrapped onto its own line (the double-border overflow symptom).
+func TestA2UISurfaceFillsWidth(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+
+	for _, width := range []int{80, 60, 41} {
+		plain := ansi.Strip(item.renderContentWithA2UI(a2uiSurface, width, true))
+		lines := strings.Split(plain, "\n")
+
+		var maxW int
+		for _, ln := range lines {
+			if w := ansi.StringWidth(ln); w > maxW {
+				maxW = w
+			}
+		}
+		require.Equal(t, width, maxW, "width=%d: box must fill the full content width\n%s", width, plain)
+
+		// No line may be a lone border fragment (a right border that wrapped
+		// onto its own line), the visible sign of the double-border overflow.
+		for _, ln := range lines {
+			trimmed := strings.TrimSpace(ln)
+			require.NotEqual(t, "╮", trimmed, "width=%d: dangling top-right border fragment\n%s", width, plain)
+			require.NotEqual(t, "╯", trimmed, "width=%d: dangling bottom-right border fragment\n%s", width, plain)
+			require.NotEqual(t, "─╮", trimmed, "width=%d: wrapped border fragment\n%s", width, plain)
+			require.NotEqual(t, "─╯", trimmed, "width=%d: wrapped border fragment\n%s", width, plain)
+		}
+	}
+}

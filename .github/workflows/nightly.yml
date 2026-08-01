@@ -5,6 +5,12 @@ on:
     - cron: "0 0 * * *" # every day at midnight
   workflow_dispatch: # allows manual triggering
 
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+  actions: read
+
 jobs:
   check:
     runs-on: ubuntu-latest

@@ -2718,7 +2718,7 @@ func parseFlexDuration(v any) time.Duration {
 	switch val := v.(type) {
 	case float64:
 		if val > 0 {
-			return time.Duration(val) * time.Second
+			return time.Duration(val * float64(time.Second))
 		}
 	case int64:
 		if val > 0 {
@@ -2734,7 +2734,7 @@ func parseFlexDuration(v any) time.Duration {
 			return 0
 		}
 		if sec, err := strconv.ParseFloat(val, 64); err == nil && sec > 0 {
-			return time.Duration(sec) * time.Second
+			return time.Duration(sec * float64(time.Second))
 		}
 		if d, err := time.ParseDuration(val); err == nil && d > 0 {
 			return d
@@ -2835,9 +2835,12 @@ func cleanErrorString(s string) string {
 	if idx := strings.Index(s, "\": "); idx != -1 {
 		s = strings.TrimSpace(s[idx+3:])
 	}
-	// Strip trailing embedded JSON substring if present
-	if start := strings.Index(s, "{"); start != -1 {
+	// Strip trailing embedded JSON substring if present after non-JSON text
+	if start := strings.Index(s, "{"); start > 0 {
 		s = strings.TrimSpace(s[:start])
+	} else if start == 0 {
+		// Pure JSON string
+		s = ""
 	}
 	return s
 }
@@ -2979,15 +2982,18 @@ func formatProviderErrorForAssistant(err *fantasy.ProviderError) (string, string
 	formatted := formatProviderError(err)
 	parts := strings.Split(formatted, " - ")
 	if len(parts) >= 2 {
-		title := parts[1]
-		var bodyParts []string
-		if len(parts) >= 3 {
-			bodyParts = parts[2:]
+		if strings.HasPrefix(parts[0], "HTTP ") {
+			title := parts[1]
+			var body string
+			if len(parts) >= 3 {
+				body = strings.Join(parts[2:], " - ")
+			} else {
+				body = parts[0]
+			}
+			return title, body
 		}
-		body := strings.Join(bodyParts, " - ")
-		if body == "" {
-			body = parts[0]
-		}
+		title := parts[0]
+		body := strings.Join(parts[1:], " - ")
 		return title, body
 	}
 	return cmp.Or(stringext.Capitalize(err.Title), "Provider Error"), formatted

@@ -152,12 +152,16 @@ func FormatRetryStatusCompact(n Notification, remaining time.Duration) string {
 	}
 	secs := int((remaining + time.Second - 1) / time.Second)
 	msg := fmt.Sprintf("Retrying in %ds", secs)
-	reason := FormatRetryReason(n)
+
+	// Strip HTTP status prefix to save horizontal space in narrow split terminals
+	nCompact := n
+	cleanMsg := strings.TrimPrefix(nCompact.Message, "HTTP 429 - ")
+	cleanMsg = strings.TrimPrefix(cleanMsg, "HTTP 503 - ")
+	nCompact.Message = cleanMsg
+
+	reason := FormatRetryReason(nCompact)
 	if reason != "" {
-		// Strip HTTP status prefix to save horizontal space in narrow split terminals
-		cleanReason := strings.TrimPrefix(reason, "HTTP 429 - ")
-		cleanReason = strings.TrimPrefix(cleanReason, "HTTP 503 - ")
-		msg += " - " + cleanReason
+		msg += " - " + reason
 	}
 	return msg
 }

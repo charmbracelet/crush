@@ -1365,3 +1365,44 @@ func TestRetryAttemptCounterResetsPerStep(t *testing.T) {
 	require.Equal(t, 1, c.Next(),
 		"a new step must publish attempt 1, not continue from the prior step")
 }
+
+func TestParseFlexDuration_FloatPrecision(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, 500*time.Millisecond, parseFlexDuration(0.5))
+	require.Equal(t, 2500*time.Millisecond, parseFlexDuration(2.5))
+	require.Equal(t, 1500*time.Millisecond, parseFlexDuration("1.5"))
+}
+
+func TestCleanErrorString(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "429 Too Many Requests", cleanErrorString(`POST "https://api.openai.com/v1/chat/completions": 429 Too Many Requests {"error": "foo"}`))
+	require.Equal(t, "", cleanErrorString(`{"error":{"message":"quota exceeded"}}`))
+	require.Equal(t, "Connection reset", cleanErrorString("Connection reset"))
+}
+
+func TestFormatProviderErrorForAssistant(t *testing.T) {
+	t.Parallel()
+
+	t.Run("with HTTP status code", func(t *testing.T) {
+		pe := &fantasy.ProviderError{
+			Title:      "too many requests",
+			Message:    `{"error":{"message":"Quota exceeded"}}`,
+			StatusCode: 429,
+		}
+		title, body := formatProviderErrorForAssistant(pe)
+		require.Equal(t, "Quota Exceeded / Out of Credits", title)
+		require.Equal(t, "Quota exceeded", body)
+	})
+
+	t.Run("without HTTP status code", func(t *testing.T) {
+		pe := &fantasy.ProviderError{
+			Title:   "resource exhausted",
+			Message: `{"error":{"message":"Resource limit reached"}}`,
+		}
+		title, body := formatProviderErrorForAssistant(pe)
+		require.Equal(t, "Quota Exceeded / Out of Credits", title)
+		require.Equal(t, "Resource limit reached", body)
+	})
+}

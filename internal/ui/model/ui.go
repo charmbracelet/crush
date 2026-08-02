@@ -5131,7 +5131,16 @@ func (m *UI) applyRetryCountdown() {
 	})
 	if item := m.chat.LastAssistantMessageItem(); item != nil {
 		secs := max(1, int((remaining+time.Second-1)/time.Second))
-		reason := notify.FormatRetryReason(m.retryStatus)
+		var reason string
+		if m.width > 0 && m.width < 90 {
+			nCompact := m.retryStatus
+			cleanMsg := strings.TrimPrefix(nCompact.Message, "HTTP 429 - ")
+			cleanMsg = strings.TrimPrefix(cleanMsg, "HTTP 503 - ")
+			nCompact.Message = cleanMsg
+			reason = notify.FormatRetryReason(nCompact)
+		} else {
+			reason = notify.FormatRetryReason(m.retryStatus)
+		}
 		label := fmt.Sprintf("Retrying in %ds", secs)
 		if reason != "" {
 			label += " - " + reason

@@ -5116,7 +5116,12 @@ func (m *UI) applyRetryCountdown() {
 	if remaining < 0 {
 		remaining = 0
 	}
-	text := notify.FormatRetryStatus(m.retryStatus, remaining)
+	var text string
+	if m.width > 0 && m.width < 90 {
+		text = notify.FormatRetryStatusCompact(m.retryStatus, remaining)
+	} else {
+		text = notify.FormatRetryStatus(m.retryStatus, remaining)
+	}
 	m.status.SetInfoMsg(util.InfoMsg{
 		Type: util.InfoTypeWarn,
 		Msg:  text,
@@ -5125,8 +5130,12 @@ func (m *UI) applyRetryCountdown() {
 		TTL: 24 * time.Hour,
 	})
 	if item := m.chat.LastAssistantMessageItem(); item != nil {
-		// Spinner label is short; drop the reason so it stays readable.
-		label := fmt.Sprintf("Retrying in %ds", max(1, int((remaining+time.Second-1)/time.Second)))
+		secs := max(1, int((remaining+time.Second-1)/time.Second))
+		reason := notify.FormatRetryReason(m.retryStatus)
+		label := fmt.Sprintf("Retrying in %ds", secs)
+		if reason != "" {
+			label += " - " + reason
+		}
 		item.SetWorkingLabel(label)
 	}
 }

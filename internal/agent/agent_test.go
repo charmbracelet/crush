@@ -1076,6 +1076,49 @@ func TestProviderRetryLogFields(t *testing.T) {
 	})
 }
 
+func TestFormatProviderError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil error", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "provider error", formatProviderError(nil))
+	})
+
+	t.Run("title and message both present and distinct", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{
+			Title:   "rate limit",
+			Message: "You exceeded your current quota, please check your plan and billing details.",
+		}
+		require.Equal(t, "rate limit: You exceeded your current quota, please check your plan and billing details.", formatProviderError(err))
+	})
+
+	t.Run("message contains title prefix", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{
+			Title:   "rate limit",
+			Message: "Rate limit reached for requests per minute (RPM)",
+		}
+		require.Equal(t, "Rate limit reached for requests per minute (RPM)", formatProviderError(err))
+	})
+
+	t.Run("only title present", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{
+			Title: "overloaded",
+		}
+		require.Equal(t, "overloaded", formatProviderError(err))
+	})
+
+	t.Run("only status code present", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{
+			StatusCode: 503,
+		}
+		require.Equal(t, "HTTP 503", formatProviderError(err))
+	})
+}
+
 func TestFormatRetryStatus(t *testing.T) {
 	t.Parallel()
 
@@ -1085,6 +1128,19 @@ func TestFormatRetryStatus(t *testing.T) {
 		notify.FormatRetryStatus(notify.Notification{
 			Type:       notify.TypeRetry,
 			Message:    "rate limit",
+			RetryDelay: 5 * time.Second,
+			Attempt:    2,
+			MaxRetries: 10,
+		}, 5*time.Second),
+	)
+
+	require.Equal(
+		t,
+		"Retrying in 5s (9/10 retries left) - gemini: rate limit: quota exceeded",
+		notify.FormatRetryStatus(notify.Notification{
+			Type:       notify.TypeRetry,
+			ProviderID: "gemini",
+			Message:    "rate limit: quota exceeded",
 			RetryDelay: 5 * time.Second,
 			Attempt:    2,
 			MaxRetries: 10,

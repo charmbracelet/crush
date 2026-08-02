@@ -2704,16 +2704,43 @@ func newRetryAttemptReporter(a *sessionAgent, sessionID, providerID string, maxR
 	}
 }
 
+// formatProviderError returns a human-readable description of a provider failure,
+// combining the error title and message when both are present and distinct.
+func formatProviderError(err *fantasy.ProviderError) string {
+	if err == nil {
+		return "provider error"
+	}
+	title := strings.TrimSpace(err.Title)
+	msg := strings.TrimSpace(err.Message)
+
+	if title != "" && msg != "" {
+		if strings.EqualFold(title, msg) || strings.HasPrefix(strings.ToLower(msg), strings.ToLower(title)) {
+			return msg
+		}
+		return title + ": " + msg
+	}
+	if msg != "" {
+		return msg
+	}
+	if title != "" {
+		return title
+	}
+	if err.StatusCode > 0 {
+		return fmt.Sprintf("HTTP %d", err.StatusCode)
+	}
+	if err.Cause != nil {
+		return err.Cause.Error()
+	}
+	return "provider error"
+}
+
 // publishRetry notifies the UI that a provider request failed and the
 // agent is backing off before the next attempt.
 func (a *sessionAgent) publishRetry(sessionID, sessionTitle, providerID string, err *fantasy.ProviderError, delay time.Duration, attempt, maxRetries int) {
 	if a.notify == nil {
 		return
 	}
-	msg := "provider error"
-	if err != nil {
-		msg = cmp.Or(err.Title, err.Message, msg)
-	}
+	msg := formatProviderError(err)
 	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 		SessionID:    sessionID,
 		SessionTitle: sessionTitle,

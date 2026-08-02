@@ -126,6 +126,11 @@ func FormatRetryStatus(n Notification, remaining time.Duration) string {
 	left := n.MaxRetries - n.Attempt + 1
 	msg := fmt.Sprintf("Retrying in %ds (%d/%d retries left)", secs, left, n.MaxRetries)
 	reason := strings.TrimSpace(n.Message)
+	if n.ProviderID != "" && reason != "" && !strings.Contains(strings.ToLower(reason), strings.ToLower(n.ProviderID)) {
+		reason = n.ProviderID + ": " + reason
+	} else if n.ProviderID != "" && reason == "" {
+		reason = n.ProviderID
+	}
 	if reason != "" {
 		msg += " - " + reason
 	}

@@ -361,7 +361,6 @@ type RemoteControlOptions struct {
 	RelayURL string `json:"relay_url,omitempty" jsonschema:"description=Relay WebSocket base URL (ws://localhost or wss://host),example=wss://relay.example.com"`
 	Username string `json:"username,omitempty" jsonschema:"description=Relay login username (password via CRUSH_REMOTE_PASS only)"`
 }
-}
 
 type MCPs map[string]MCPConfig
 

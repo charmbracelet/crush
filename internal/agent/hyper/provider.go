@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -47,9 +48,30 @@ var BaseURL = sync.OnceValue(func() string {
 	return cmp.Or(os.Getenv("HYPER_URL"), defaultBaseURL)
 })
 
-// FetchCredits calls the Hyper /v1/credits endpoint and returns the remaining
-// credits count.
+// lastKnownBalance stores the most recently extracted hypercredit balance
+// from API response metadata. FetchCredits checks this before making a
+// separate HTTP call.
+var lastKnownBalance atomic.Int64
+
+// hasBalance tracks whether lastKnownBalance has been set.
+var hasBalance atomic.Bool
+
+// SetBalance stores a credit balance extracted from API response metadata.
+func SetBalance(balance int) {
+	lastKnownBalance.Store(int64(balance))
+	hasBalance.Store(true)
+}
+
+// FetchCredits returns the remaining hypercredit balance. It first checks
+// for a balance extracted from the most recent API response's usage
+// metadata. If none is available, it falls back to calling the /v1/credits
+// endpoint directly.
 func FetchCredits(ctx context.Context, apiKey string) (int, error) {
+	if hasBalance.Load() {
+		hasBalance.Store(false)
+		return int(lastKnownBalance.Load()), nil
+	}
+
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,

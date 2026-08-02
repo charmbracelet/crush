@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -16,6 +18,23 @@ import (
 	_ "github.com/charmbracelet/crush/internal/swagger"
 	httpswagger "github.com/swaggo/http-swagger/v2"
 )
+
+// maxUnixSocketPathLen is the maximum length of a Unix domain socket
+// path. The macOS sun_path field is 104 bytes; Linux allows 108. We
+// use 104 so the resulting path is portable across both platforms.
+const maxUnixSocketPathLen = 104
+
+// socketDir returns the directory used for the Crush Unix socket.
+// It prefers $XDG_RUNTIME_DIR when set (systemd's per-user runtime
+// directory on Linux), and otherwise falls back to [os.TempDir],
+// which resolves to the per-user private $TMPDIR on macOS and to
+// /tmp on Linux.
+func socketDir() string {
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return dir
+	}
+	return os.TempDir()
+}
 
 // ErrServerClosed is returned when the server is closed.
 var ErrServerClosed = http.ErrServerClosed
@@ -44,6 +63,14 @@ func ParseHostURL(host string) (*url.URL, error) {
 }
 
 // DefaultHost returns the default server host.
+//
+// On Windows the address is a named pipe under \\.\pipe\. On Unix
+// platforms the socket lives in the per-user runtime directory
+// returned by [socketDir] and is named crush-<uid>.sock, falling
+// back to crush.sock when the current uid cannot be determined. If
+// the composed path would exceed [maxUnixSocketPathLen] bytes (the
+// macOS sun_path limit), we fall back to /tmp/crush-<uid>.sock so
+// the socket remains bindable.
 func DefaultHost() string {
 	sock := "crush.sock"
 	usr, err := user.Current()
@@ -53,7 +80,11 @@ func DefaultHost() string {
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf("npipe:////./pipe/%s", sock)
 	}
-	return fmt.Sprintf("unix:///tmp/%s", sock)
+	path := filepath.Join(socketDir(), sock)
+	if len(path) > maxUnixSocketPathLen {
+		path = filepath.Join("/tmp", sock)
+	}
+	return "unix://" + path
 }
 
 // Server represents a Crush server bound to a specific address.
@@ -148,6 +179,8 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("GET /v1/workspaces/{id}/permissions/skip", c.handleGetWorkspacePermissionsSkip)
 	mux.HandleFunc("POST /v1/workspaces/{id}/permissions/skip", c.handlePostWorkspacePermissionsSkip)
 	mux.HandleFunc("POST /v1/workspaces/{id}/permissions/grant", c.handlePostWorkspacePermissionsGrant)
+	mux.HandleFunc("POST /v1/workspaces/{id}/questions/answer", c.handlePostWorkspaceQuestionsAnswer)
+	mux.HandleFunc("POST /v1/workspaces/{id}/questions/cancel", c.handlePostWorkspaceQuestionsCancel)
 	mux.HandleFunc("GET /v1/workspaces/{id}/agent", c.handleGetWorkspaceAgent)
 	mux.HandleFunc("POST /v1/workspaces/{id}/agent", c.handlePostWorkspaceAgent)
 	mux.HandleFunc("POST /v1/workspaces/{id}/agent/init", c.handlePostWorkspaceAgentInit)
@@ -158,6 +191,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("GET /v1/workspaces/{id}/agent/sessions/{sid}/prompts/list", c.handleGetWorkspaceAgentSessionPromptList)
 	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/prompts/clear", c.handlePostWorkspaceAgentSessionPromptClear)
 	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/summarize", c.handlePostWorkspaceAgentSessionSummarize)
+	mux.HandleFunc("POST /v1/workspaces/{id}/agent/sessions/{sid}/shell", c.handlePostWorkspaceAgentSessionShell)
 	mux.HandleFunc("GET /v1/workspaces/{id}/agent/default-small-model", c.handleGetWorkspaceAgentDefaultSmallModel)
 	mux.HandleFunc("POST /v1/workspaces/{id}/config/set", c.handlePostWorkspaceConfigSet)
 	mux.HandleFunc("POST /v1/workspaces/{id}/config/remove", c.handlePostWorkspaceConfigRemove)
@@ -173,6 +207,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("POST /v1/workspaces/{id}/skills/read", c.handlePostWorkspaceSkillRead)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-tools", c.handlePostWorkspaceMCPRefreshTools)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/read-resource", c.handlePostWorkspaceMCPReadResource)
+	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/prompts", c.handleGetWorkspaceMCPPrompts)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/get-prompt", c.handlePostWorkspaceMCPGetPrompt)
 	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/states", c.handleGetWorkspaceMCPStates)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-prompts", c.handlePostWorkspaceMCPRefreshPrompts)
@@ -203,9 +238,12 @@ func (s *Server) ListenAndServe() error {
 	if s.ln != nil {
 		return fmt.Errorf("server already started")
 	}
-	ln, err := listen(s.network, s.Addr)
+	ln, removedStale, err := listen(s.network, s.Addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.Addr, err)
+	}
+	if removedStale && s.logger != nil {
+		s.logger.Warn("Removed stale socket before binding", "address", s.Addr)
 	}
 	return s.Serve(ln)
 }

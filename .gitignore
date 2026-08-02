@@ -54,4 +54,3 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
-crush-dev

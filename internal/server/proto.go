@@ -261,16 +261,21 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	if err := c.backend.AttachClient(id, clientID); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	defer c.backend.DetachClient(id, clientID)
+	// Subscribe to the event broker BEFORE attaching the client.
+	// AttachClient bumps the stream count that observers use to
+	// detect a live subscriber; subscribing first guarantees that
+	// once a client appears attached, any published event is
+	// delivered rather than dropped on a not-yet-registered stream.
 	events, err := c.backend.SubscribeEvents(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
 	}
+	if err := c.backend.AttachClient(id, clientID); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	defer c.backend.DetachClient(id, clientID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -781,7 +786,17 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 //	@Router			/workspaces/{id}/agent/init [post]
 func (c *controllerV1) handlePostWorkspaceAgentInit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := c.backend.InitAgent(r.Context(), id); err != nil {
+
+	var req proto.AgentInitRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			c.server.logError(r, "Failed to decode agent init request", "error", err)
+			jsonError(w, http.StatusBadRequest, "failed to decode request")
+			return
+		}
+	}
+
+	if err := c.backend.InitAgent(r.Context(), id, req.Interactive); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -910,6 +925,40 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentSessionShell runs a shell command in the workspace.
+//
+//	@Summary		Run shell command
+//	@Tags			agent
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string						true	"Workspace ID"
+//	@Param			sid		path		string						true	"Session ID"
+//	@Param			request	body		proto.ShellCommandRequest	true	"Shell command"
+//	@Success		200		{object}	proto.ShellCommandResponse
+//	@Failure		400		{object}	proto.Error
+//	@Failure		404		{object}	proto.Error
+//	@Failure		500		{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/sessions/{sid}/shell [post]
+func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+
+	var req proto.ShellCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	req.SessionID = sid
+
+	resp, err := c.backend.RunShellCommand(r.Context(), id, req)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, resp)
+}
+
 // handleGetWorkspaceAgentSessionPromptList returns the list of queued prompts.
 //
 //	@Summary		List queued prompts
@@ -982,6 +1031,58 @@ func (c *controllerV1) handlePostWorkspacePermissionsGrant(w http.ResponseWriter
 		return
 	}
 	jsonEncode(w, proto.PermissionGrantResponse{Resolved: resolved})
+}
+
+// handlePostWorkspaceQuestionsAnswer submits answers for a batch question.
+//
+//	@Summary		Answer question batch
+//	@Tags			questions
+//	@Accept			json
+//	@Param			id		path	string						true	"Workspace ID"
+//	@Param			request	body	proto.QuestionAnswer	true	"Question batch answer"
+//	@Success		200	{object}	proto.QuestionAnswerResponse
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/questions/answer [post]
+func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.QuestionAnswer
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	resolved, err := c.backend.AnswerQuestion(id, req)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: resolved})
+}
+
+// handlePostWorkspaceQuestionsCancel cancels the pending question
+// batch for a workspace.
+//
+//	@Summary		Cancel question batch
+//	@Tags			questions
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200	{object}	proto.QuestionAnswerResponse
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/questions/cancel [post]
+func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	cancelled, err := c.backend.CancelQuestion(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: cancelled})
 }
 
 // handlePostWorkspacePermissionsSkip sets whether to skip permission prompts.

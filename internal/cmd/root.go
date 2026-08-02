@@ -57,6 +57,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific crush server host (for advanced users)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
+	_ = rootCmd.PersistentFlags().MarkHidden("channels")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
@@ -127,12 +129,13 @@ crush --continue
 		com := common.DefaultCommon(ws)
 		model := ui.New(com, sessionID, continueLast)
 
+		inputFilter := ui.NewFilter()
 		var env uv.Environ = os.Environ()
 		program := tea.NewProgram(
 			model,
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
-			tea.WithFilter(ui.MouseEventFilter),
+			tea.WithFilter(inputFilter.Filter),
 		)
 		go ws.Subscribe(program)
 
@@ -249,6 +252,7 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	channels, _ := cmd.Flags().GetStringSlice("channels")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -264,6 +268,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 
 	cfg := store.Config()
 	store.Overrides().SkipPermissionRequests = yolo
+	store.Overrides().EnabledChannels = channels
 
 	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("failed to create data directory: %q %w", cfg.Options.DataDirectory, err)
@@ -371,6 +376,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	channels, _ := cmd.Flags().GetStringSlice("channels")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -385,12 +391,13 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	}
 
 	wsReq := proto.Workspace{
-		Path:    cwd,
-		DataDir: dataDir,
-		Debug:   debug,
-		YOLO:    yolo,
-		Version: version.Version,
-		Env:     os.Environ(),
+		Path:     cwd,
+		DataDir:  dataDir,
+		Debug:    debug,
+		YOLO:     yolo,
+		Channels: channels,
+		Version:  version.Version,
+		Env:      os.Environ(),
 	}
 
 	ws, err := c.CreateWorkspace(ctx, wsReq)
@@ -416,12 +423,42 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 // version matches the client; on mismatch it shuts down the old server
 // and starts a fresh one.
 func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
+	// Initialize the persistent log here so stale-socket diagnostics
+	// emitted before connectToServer runs are captured in the per-host
+	// server log file. crushlog.Setup uses sync.Once internally, so the
+	// later call from connectToServer becomes a no-op.
+	debug, _ := cmd.Flags().GetBool("debug")
+	logFile := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "crush.log")
+	crushlog.Setup(logFile, debug)
+
 	switch hostURL.Scheme {
 	case "unix", "npipe":
 		needsStart := false
 		_, statErr := os.Stat(hostURL.Host)
 		switch {
 		case statErr == nil:
+			// Probe the socket explicitly before the version-check
+			// path. A stale unix socket file (the previous server
+			// exited without cleaning up) would otherwise make
+			// restartIfStale spin on a non-responsive endpoint; here
+			// we detect it with a short DialTimeout and remove the
+			// orphaned file so the normal spawn path can run.
+			if hostURL.Scheme == "unix" {
+				conn, dialErr := net.DialTimeout( //nolint:noctx
+					hostURL.Scheme, hostURL.Host, 200*time.Millisecond,
+				)
+				if dialErr == nil {
+					conn.Close()
+				} else if server.IsStaleSocketErr(dialErr) {
+					slog.Warn("Stale socket detected, removing",
+						"path", hostURL.Host, "error", dialErr)
+					if err := os.Remove(hostURL.Host); err != nil && !errors.Is(err, fs.ErrNotExist) {
+						return fmt.Errorf("failed to remove stale server socket %q: %v", hostURL.Host, err)
+					}
+					needsStart = true
+					break
+				}
+			}
 			restarted, err := restartIfStale(cmd, hostURL)
 			if err != nil {
 				slog.Warn("Failed to check server version", "error", err)

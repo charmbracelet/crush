@@ -498,7 +498,7 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load will trigger configureProviders which removes anthropic OAuth config.
-	// This should NOT cause infinite recursion — reloadMu prevents re-entrant reloads.
+	// This should NOT cause infinite recursion — writeMu prevents re-entrant reloads.
 	store, err := Load(dir, dir, false)
 	require.NoError(t, err)
 

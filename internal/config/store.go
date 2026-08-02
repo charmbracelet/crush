@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,12 +21,29 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"golang.org/x/sync/singleflight"
 )
 
 // configLockDeadline bounds how long lockConfig waits for the
 // cross-process flock before giving up. A few seconds is plenty for
 // honest contention; longer suggests something is wedged.
 const configLockDeadline = 5 * time.Second
+
+// refreshLockDeadline bounds how long RefreshOAuthToken waits for the
+// per-provider cross-process refresh lock. It must exceed the token
+// exchange HTTP timeout (30s) so that a peer mid-exchange is given time
+// to finish and publish its result, which we then adopt instead of
+// running our own exchange. Running our own would reuse an
+// already-rotated refresh token and trip the provider's reuse detection,
+// revoking the whole token family.
+const refreshLockDeadline = 45 * time.Second
+
+// credentialWriteLockDeadline bounds how long a credential write (e.g.
+// storing the token from a fresh interactive login) waits for the
+// per-provider refresh lock. It is deliberately shorter than
+// refreshLockDeadline because a user is watching: if a peer is wedged we
+// would rather write and risk a rare clobber than hang the UI.
+const credentialWriteLockDeadline = 10 * time.Second
 
 // fileSnapshot captures metadata about a config file at a point in time.
 type fileSnapshot struct {
@@ -40,6 +58,16 @@ type fileSnapshot struct {
 // the lifetime of the process (or workspace).
 type RuntimeOverrides struct {
 	SkipPermissionRequests bool
+	// EnabledChannels lists the MCP servers opted in as channels for this
+	// session (via the --channels flag). A server present in MCP config only
+	// pushes channel events when it also appears here. Entries may be written
+	// as "server:<name>" or as a bare "<name>".
+	EnabledChannels []string
+	// Models records the model choices made in this instance, whether
+	// persisted or not. They are reapplied after a config reload so that a
+	// selection made here always outranks whatever the shared config file
+	// happens to hold — see pinPreferredModelLocked.
+	Models map[SelectedModelType]SelectedModel
 }
 
 // ConfigStore is the single entry point for all config access. It owns the
@@ -51,9 +79,14 @@ type RuntimeOverrides struct {
 // goroutine races and, together with the shared lock.File, cross-process
 // races on the config file.
 //
-// reloadMu serialises ReloadFromDisk calls to prevent concurrent reloads
-// from racing on store fields. autoReload uses TryLock on reloadMu to
-// skip redundant reloads when one is already in progress.
+// writeMu serialises every operation that produces a new in-memory Config:
+// the typed copy-on-write mutators (SetCompactMode, UpdatePreferredModel,
+// ...) and ReloadFromDisk. Typed mutators take Lock; autoReload takes
+// TryLock so a write triggered re-entrantly during a reload (e.g.
+// configureProviders calling RemoveConfigField) skips the nested reload
+// instead of deadlocking. This is what lets published Configs be treated
+// as immutable: a mutator clones, mutates the clone, and swaps it in under
+// writeMu rather than mutating the live Config in place.
 type ConfigStore struct {
 	config             *Config
 	workingDir         string
@@ -66,13 +99,56 @@ type ConfigStore struct {
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
 
-	mu       sync.Mutex // serialises config file writes
-	reloadMu sync.Mutex // serialises ReloadFromDisk calls
+	// configMu guards the config pointer field against concurrent
+	// readers (Config) and the writeMu-serialised swap (setConfig). It
+	// protects the pointer word only; the pointed-to Config is treated
+	// as immutable once published, since both reloads and typed mutators
+	// build a fresh Config rather than mutating the live one.
+	configMu sync.RWMutex
+
+	mu      sync.Mutex   // serialises config file writes
+	writeMu sync.RWMutex // serialises in-memory config production (mutators + reload); RLock for readers
+
+	// refreshSF collapses concurrent in-process OAuth refreshes for the
+	// same provider into a single attempt. Combined with the per-provider
+	// cross-process refresh lock, it ensures only one token exchange runs
+	// at a time. See RefreshOAuthToken.
+	refreshSF singleflight.Group
+
+	// exchangeToken performs the provider-specific OAuth token exchange.
+	// It is a field so tests can substitute a fake exchange without making
+	// real network calls. Production code leaves it nil, and exchange falls
+	// back to the real provider clients.
+	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
+
+	// authSignalMu guards authSignals, which maps provider IDs to
+	// channels that WaitForTokenChange blocks on. SignalAuthComplete
+	// closes the channel to unblock waiters; a new channel is created
+	// on the next wait.
+	authSignalMu sync.Mutex
+	authSignals  map[string]chan struct{}
 }
 
 // Config returns the pure-data config struct (read-only after load).
+//
+// The pointer read is guarded by configMu so it can never tear against
+// the reload swap in reloadFromDiskLocked. Reloads build a brand-new
+// Config and swap it in rather than mutating the live one, so holding the
+// returned pointer stays safe even across a concurrent reload — the reader
+// keeps reading its (now immutable) snapshot.
 func (s *ConfigStore) Config() *Config {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
 	return s.config
+}
+
+// setConfig atomically swaps the active config pointer under configMu.
+// Used by the reload path; in-place field mutators leave the pointer
+// untouched and run under mu instead.
+func (s *ConfigStore) setConfig(cfg *Config) {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	s.config = cfg
 }
 
 // WorkingDir returns the current working directory.
@@ -82,34 +158,45 @@ func (s *ConfigStore) WorkingDir() string {
 
 // Resolver returns the variable resolver.
 func (s *ConfigStore) Resolver() VariableResolver {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	return s.resolver
 }
 
 // Resolve resolves a variable reference using the configured resolver.
 func (s *ConfigStore) Resolve(key string) (string, error) {
-	if s.resolver == nil {
+	s.writeMu.RLock()
+	r := s.resolver
+	s.writeMu.RUnlock()
+	if r == nil {
 		return "", fmt.Errorf("no variable resolver configured")
 	}
-	return s.resolver.ResolveValue(key)
+	return r.ResolveValue(key)
 }
 
 // KnownProviders returns the list of known providers.
 func (s *ConfigStore) KnownProviders() []catwalk.Provider {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	return s.knownProviders
 }
 
 // SetupAgents configures the coder and task agents on the config.
 func (s *ConfigStore) SetupAgents() {
-	s.config.SetupAgents()
+	s.Config().SetupAgents()
 }
 
 // Overrides returns the runtime overrides for this store.
 func (s *ConfigStore) Overrides() *RuntimeOverrides {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	return &s.overrides
 }
 
 // LoadedPaths returns the config file paths that were successfully loaded.
 func (s *ConfigStore) LoadedPaths() []string {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	return slices.Clone(s.loadedPaths)
 }
 
@@ -212,15 +299,36 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 	return s.SetConfigFields(scope, map[string]any{key: value})
 }
 
-// SetConfigFields sets multiple key/value pairs in the config file for the given
-// scope in a single write. After a successful write, it automatically reloads
-// config to keep in-memory state fresh. This is preferred over multiple
-// SetConfigField calls when writing several fields atomically to avoid
-// intermediate reloads with partial state.
+// SetConfigFields sets multiple key/value pairs in the config file for the
+// given scope in a single write, then reloads in-memory state from disk.
+//
+// Use this for arbitrary external edits where the in-memory effect of the
+// change is not known ahead of time. The typed mutators (which know exactly
+// what changed) go through update instead and skip the reload.
 //
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
+	if err := s.writeConfigFields(scope, kv); err != nil {
+		return err
+	}
+	// Auto-reload to keep in-memory state fresh after config edits.
+	// We use context.Background() since this is an internal operation that
+	// shouldn't be cancelled by user context.
+	if err := s.autoReload(context.Background()); err != nil {
+		// Log warning but don't fail the write - disk is already updated.
+		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+	}
+	return nil
+}
+
+// writeConfigFields persists key/value pairs to the config file. It does not
+// touch in-memory config state or the staleness snapshot: callers either
+// reload (SetConfigFields, whose reload recaptures the snapshot) or have
+// already published an updated clone and capture the snapshot themselves
+// (update). Both of those run under writeMu, which is what keeps the
+// snapshot map free of concurrent writers.
+func (s *ConfigStore) writeConfigFields(scope Scope, kv map[string]any) error {
 	// Sort keys for deterministic output regardless of map iteration
 	// order. This also ensures consistent results when callers pass
 	// overlapping JSONPath keys (e.g. "a" and "a.b").
@@ -230,30 +338,89 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	}
 	slices.Sort(keys)
 
-	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+	return s.atomicWrite(scope, func(data []byte) ([]byte, error) {
 		v := string(data)
 		for _, key := range keys {
 			var sErr error
-			v, sErr = sjson.Set(v, key, kv[key])
-			if sErr != nil {
+			if v, sErr = sjson.Set(v, key, kv[key]); sErr != nil {
 				return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
 			}
 		}
 		return []byte(v), nil
 	})
-	if err != nil {
+}
+
+// mutateInMemory applies a copy-on-write change to the config without
+// persisting. Under writeMu it clones the live config, lets mutate edit the
+// clone, and publishes it. This is the single primitive every in-memory
+// config change goes through, so a published Config is never mutated in
+// place and readers always see a consistent snapshot.
+func (s *ConfigStore) mutateInMemory(mutate func(*Config)) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	nc := s.Config().cloneForWrite()
+	mutate(nc)
+	s.setConfig(nc)
+}
+
+// update applies a copy-on-write change and persists the reported fields.
+// mutate edits the clone and returns the JSON-path fields to write to disk;
+// because the clone already reflects the change, no reload is needed.
+// Returning an empty map publishes the clone without a disk write.
+func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.updateLocked(scope, mutate)
+}
+
+// updateLocked is the lock-free core of update. Caller must hold writeMu.
+func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]any) error {
+	nc := s.Config().cloneForWrite()
+	fields := mutate(nc)
+	s.setConfig(nc)
+	if len(fields) == 0 {
+		return nil
+	}
+	if err := s.writeConfigFields(scope, fields); err != nil {
 		return err
 	}
-
-	// Auto-reload to keep in-memory state fresh after config edits.
-	// We use context.Background() since this is an internal operation that
-	// shouldn't be cancelled by user context.
-	if err := s.autoReload(context.Background()); err != nil {
-		// Log warning but don't fail the write - disk is already updated.
-		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+	// Refresh the staleness snapshot so the file watcher does not treat
+	// our own write as an external change. Safe to touch the snapshot map
+	// here because we hold writeMu.
+	if path, err := s.configPath(scope); err == nil {
+		s.captureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
 	}
-
 	return nil
+}
+
+// OverridePreferredModel sets the preferred model for the given type in
+// memory only, without persisting. It is for per-run overrides (such as the
+// non-interactive --model flags) that must not be written to the user's
+// config file.
+func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model SelectedModel) {
+	s.mutateInMemory(func(c *Config) {
+		if c.Models == nil {
+			c.Models = make(map[SelectedModelType]SelectedModel)
+		}
+		c.Models[modelType] = model
+		s.pinPreferredModelLocked(modelType, model)
+	})
+}
+
+// pinPreferredModelLocked records a model choice made in this instance so
+// that a later config reload cannot replace it with a choice made
+// somewhere else. Several Crush instances share one global config file, so
+// a reload triggered by an unrelated write (a token refresh, say) would
+// otherwise import whichever model a sibling instance last selected and
+// switch models out from under the user mid-session.
+//
+// Caller must hold writeMu.
+func (s *ConfigStore) pinPreferredModelLocked(modelType SelectedModelType, model SelectedModel) {
+	if s.overrides.Models == nil {
+		s.overrides.Models = make(map[SelectedModelType]SelectedModel)
+	}
+	s.overrides.Models[modelType] = model
 }
 
 // RemoveConfigField removes a key from the config file for the given scope.
@@ -281,34 +448,56 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 }
 
 // UpdatePreferredModel updates the preferred model for the given type and
-// persists it to the config file at the given scope.
+// persists it to the config file at the given scope. The selected model and
+// the recent-models list are written together in a single config write.
+//
+// The write skips the full disk reparse/reload (which would rebuild the
+// provider catalog and agents on every model switch and dominate selection
+// latency); agents are refreshed separately by the caller (see
+// UpdateAgentModel).
 func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
-	s.config.Models[modelType] = model
-	if err := s.SetConfigField(scope, fmt.Sprintf("models.%s", modelType), model); err != nil {
-		return fmt.Errorf("failed to update preferred model: %w", err)
+	return s.update(scope, func(c *Config) map[string]any {
+		return s.updatePreferredModelFields(c, modelType, model)
+	})
+}
+
+// updatePreferredModelFields builds the fields map for persisting a preferred
+// model change. Shared between UpdatePreferredModel and direct updateLocked
+// callers (e.g. Load). Caller must hold writeMu.
+func (s *ConfigStore) updatePreferredModelFields(c *Config, modelType SelectedModelType, model SelectedModel) map[string]any {
+	if c.Models == nil {
+		c.Models = make(map[SelectedModelType]SelectedModel)
 	}
-	if err := s.recordRecentModel(scope, modelType, model); err != nil {
-		return err
+	c.Models[modelType] = model
+	s.pinPreferredModelLocked(modelType, model)
+
+	fields := map[string]any{
+		fmt.Sprintf("models.%s", modelType): model,
 	}
-	return nil
+	if updated, changed := nextRecentModels(c, modelType, model); changed {
+		if c.RecentModels == nil {
+			c.RecentModels = make(map[SelectedModelType][]SelectedModel)
+		}
+		c.RecentModels[modelType] = updated
+		fields[fmt.Sprintf("recent_models.%s", modelType)] = updated
+	}
+	return fields
 }
 
 // SetCompactMode sets the compact mode setting and persists it.
 func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
-	if s.config.Options == nil {
-		s.config.Options = &Options{}
-	}
-	s.config.Options.TUI.CompactMode = enabled
-	return s.SetConfigField(scope, "options.tui.compact_mode", enabled)
+	return s.update(scope, func(c *Config) map[string]any {
+		c.ensureTUI().CompactMode = enabled
+		return map[string]any{"options.tui.compact_mode": enabled}
+	})
 }
 
 // SetTransparentBackground sets the transparent background setting and persists it.
 func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error {
-	if s.config.Options == nil {
-		s.config.Options = &Options{}
-	}
-	s.config.Options.TUI.Transparent = &enabled
-	return s.SetConfigField(scope, "options.tui.transparent", enabled)
+	return s.update(scope, func(c *Config) map[string]any {
+		c.ensureTUI().Transparent = &enabled
+		return map[string]any{"options.tui.transparent": enabled}
+	})
 }
 
 // SetProviderAPIKey sets the API key for a provider and persists it.
@@ -324,9 +513,15 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		}
 		setKeyOrToken = func() { providerConfig.APIKey = v }
 	case *oauth.Token:
-		if err := s.SetConfigFields(scope, map[string]any{
-			fmt.Sprintf("providers.%s.api_key", providerID): v.AccessToken,
-			fmt.Sprintf("providers.%s.oauth", providerID):   v,
+		// Hold the refresh lock across the write so a peer's in-flight
+		// token exchange cannot land on top of a credential the user just
+		// obtained interactively — which would silently invalidate the
+		// login they only just completed.
+		if err := s.withRefreshLock(providerID, func() error {
+			return s.SetConfigFields(scope, map[string]any{
+				fmt.Sprintf("providers.%s.api_key", providerID): v.AccessToken,
+				fmt.Sprintf("providers.%s.oauth", providerID):   v,
+			})
 		}); err != nil {
 			return err
 		}
@@ -340,10 +535,11 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		}
 	}
 
-	providerConfig, exists = s.config.Providers.Get(providerID)
+	cfg := s.Config()
+	providerConfig, exists = cfg.Providers.Get(providerID)
 	if exists {
 		setKeyOrToken()
-		s.config.Providers.Set(providerID, providerConfig)
+		cfg.Providers.Set(providerID, providerConfig)
 		return nil
 	}
 
@@ -370,83 +566,111 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	} else {
 		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
 	}
-	s.config.Providers.Set(providerID, providerConfig)
+	cfg.Providers.Set(providerID, providerConfig)
 	return nil
 }
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 //
-// It uses two-phase locking: the pre-check (reading the config file to
-// see if another process already refreshed) happens under the config
-// lock, then the HTTP exchange runs without any lock held, and finally
-// the result is persisted via SetConfigFields (which acquires the lock
-// internally). If the exchange fails — e.g. because another process
-// already rotated the refresh token — the disk is re-checked under lock
-// to recover the other process's token.
+// Providers like Hyper rotate refresh tokens: each exchange consumes the
+// caller's refresh token, issues a new pair, and revokes the old one. If
+// two crush instances (or two goroutines) refresh concurrently with the
+// same stored refresh token, the second exchange reuses an already-revoked
+// token, trips the provider's reuse detection, and revokes the entire
+// token family — leaving both with dead tokens even though each refresh
+// "succeeded".
+//
+// To prevent that, refreshes are single-flighted at two levels:
+//
+//   - In-process: refreshSF collapses concurrent goroutines for the same
+//     provider into one attempt.
+//   - Cross-process: a per-provider advisory lock is held across the whole
+//     read-decide-exchange-write cycle, so only one process exchanges at a
+//     time. A process that acquires the lock after a peer rotated finds the
+//     peer's fresh token on disk and adopts it instead of exchanging.
 func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
-	providerConfig, exists := s.config.Providers.Get(providerID)
+	key := fmt.Sprintf("%d\x00%s", scope, providerID)
+	_, err, _ := s.refreshSF.Do(key, func() (any, error) {
+		return nil, s.refreshOAuthTokenLocked(ctx, scope, providerID)
+	})
+	return err
+}
+
+// refreshOAuthTokenLocked performs the cross-process single-flighted
+// refresh. It is invoked through refreshSF, so at most one goroutine per
+// provider runs it at a time within this process.
+func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, providerID string) error {
+	cfg := s.Config()
+	providerConfig, exists := cfg.Providers.Get(providerID)
 	if !exists {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
-
 	if providerConfig.OAuthToken == nil {
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
+	entryToken := providerConfig.OAuthToken
 
-	// Phase 1: Pre-check under lock — did another process already refresh?
-	release, lockErr := s.lockConfig(scope)
+	// Acquire the per-provider cross-process refresh lock. This is a
+	// dedicated lock file, not the config-write lock, and it does not take
+	// s.mu — so the network exchange below cannot stall unrelated config
+	// operations. The deadline exceeds the exchange timeout so that a peer
+	// mid-exchange has time to publish a token we can adopt. Lock ordering:
+	// the refresh lock is always taken before the config-write lock (via
+	// SetConfigFields), never the reverse, so no deadlock is possible.
+	lockCtx, cancel := context.WithTimeout(ctx, refreshLockDeadline)
+	defer cancel()
+	release, lockErr := lock.File(lockCtx, s.refreshLockPath(providerID))
 	if lockErr != nil {
-		slog.Warn("Failed to lock config for pre-check, proceeding anyway", "provider", providerID, "error", lockErr)
-	} else {
-		diskToken, err := s.loadTokenFromDisk(scope, providerID)
-		release()
-		if err != nil {
-			slog.Warn("Failed to read token from config file", "provider", providerID, "error", err)
-		} else if diskToken != nil && !diskToken.IsExpired() && diskToken.AccessToken != providerConfig.OAuthToken.AccessToken {
-			slog.Info("Using token refreshed by another session", "provider", providerID)
+		// Could not acquire the lock (peer wedged or deadline hit). Prefer a
+		// usable token already on disk over forcing our own exchange, which
+		// would risk reusing a rotated refresh token.
+		if diskToken := s.usableDiskToken(scope, providerID, entryToken); diskToken != nil {
+			slog.Warn("Refresh lock unavailable; adopting token from disk", "provider", providerID, "error", lockErr)
 			return s.applyToken(providerConfig, diskToken, providerID)
 		}
+		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, lockErr)
+	}
+	defer release()
+
+	// Now that we hold the lock, disk is the authority on which credential
+	// is current: a peer may have rotated ours away while we waited. Adopt
+	// a newer token outright when it is still usable, and otherwise switch
+	// to its refresh token for the exchange below. Presenting our own
+	// already-rotated refresh token would trip the provider's reuse
+	// detection and revoke the whole family, forcing an interactive login.
+	if diskToken := s.newerDiskToken(scope, providerID, entryToken); diskToken != nil {
+		if !diskToken.IsExpired() {
+			slog.Info("Adopting token refreshed by another session", "provider", providerID)
+			return s.applyToken(providerConfig, diskToken, providerID)
+		}
+		slog.Info("Exchanging with refresh token rotated by another session", "provider", providerID)
+		entryToken = diskToken
 	}
 
-	// Phase 2: HTTP exchange — no lock held.
-	var refreshedToken *oauth.Token
-	var refreshErr error
-	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
-		refreshedToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	case hyperp.Name:
-		refreshedToken, refreshErr = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	default:
-		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
-	}
+	// Disk still holds our token (or no newer peer token exists) and we hold
+	// the lock, so we are the sole exchanger. Perform the exchange.
+	refreshedToken, refreshErr := s.exchange(ctx, providerID, entryToken.RefreshToken)
 	if refreshErr != nil {
-		// Phase 3: Fallback — re-check disk under lock. The exchange may
-		// have failed because another process already rotated the refresh
-		// token.
-		if release, lockErr := s.lockConfig(scope); lockErr == nil {
-			diskToken, diskErr := s.loadTokenFromDisk(scope, providerID)
-			release()
-			if diskErr == nil &&
-				diskToken != nil &&
-				!diskToken.IsExpired() &&
-				diskToken.AccessToken != providerConfig.OAuthToken.AccessToken {
-				slog.Info("Using token refreshed by another session after exchange failure", "provider", providerID)
+		// The exchange may have failed because a peer rotated the refresh
+		// token in a window we did not cover. Re-check disk: adopt a usable
+		// token, or retry once with the peer's newer refresh token.
+		if diskToken := s.newerDiskToken(scope, providerID, entryToken); diskToken != nil {
+			if !diskToken.IsExpired() {
+				slog.Info("Adopting token refreshed by another session after exchange failure", "provider", providerID)
 				return s.applyToken(providerConfig, diskToken, providerID)
 			}
+			slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
+			refreshedToken, refreshErr = s.exchange(ctx, providerID, diskToken.RefreshToken)
 		}
+	}
+	if refreshErr != nil {
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
-	providerConfig.OAuthToken = refreshedToken
-	providerConfig.APIKey = refreshedToken.AccessToken
-
-	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
-		providerConfig.SetupGitHubCopilot()
+	if err := s.applyToken(providerConfig, refreshedToken, providerID); err != nil {
+		return err
 	}
-
-	s.config.Providers.Set(providerID, providerConfig)
 
 	if err := s.SetConfigFields(scope, map[string]any{
 		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
@@ -454,8 +678,161 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 	}); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
-
 	return nil
+}
+
+// WaitForTokenChange blocks until SignalAuthComplete is called for the
+// given provider or the context is cancelled. It is used by OnAuthRefresh
+// callbacks to wait for interactive re-authentication to complete before
+// retrying a failed request. The channel is created atomically with the
+// wait registration so a concurrent SignalAuthComplete cannot miss it.
+func (s *ConfigStore) WaitForTokenChange(ctx context.Context, providerID string) error {
+	s.authSignalMu.Lock()
+	ch, ok := s.authSignals[providerID]
+	if !ok {
+		ch = make(chan struct{})
+		if s.authSignals == nil {
+			s.authSignals = make(map[string]chan struct{})
+		}
+		s.authSignals[providerID] = ch
+	}
+	s.authSignalMu.Unlock()
+
+	select {
+	case <-ch:
+		// Remove the consumed signal so a subsequent
+		// SignalAuthComplete does not close an already-closed
+		// channel.
+		s.authSignalMu.Lock()
+		if s.authSignals[providerID] == ch {
+			delete(s.authSignals, providerID)
+		}
+		s.authSignalMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// SignalAuthComplete unblocks any goroutine waiting in WaitForTokenChange
+// for the given provider. If no waiter exists yet, it pre-creates and
+// immediately closes the channel so a subsequent WaitForTokenChange
+// returns without blocking. This eliminates the race where the signal
+// fires before the waiter registers.
+func (s *ConfigStore) SignalAuthComplete(providerID string) {
+	s.authSignalMu.Lock()
+	defer s.authSignalMu.Unlock()
+	if ch, ok := s.authSignals[providerID]; ok {
+		delete(s.authSignals, providerID)
+		select {
+		case <-ch:
+			// Already closed by a previous signal; nothing to do.
+		default:
+			close(ch)
+		}
+	} else {
+		// No waiter yet. Pre-create a closed channel so the next
+		// WaitForTokenChange returns immediately.
+		if s.authSignals == nil {
+			s.authSignals = make(map[string]chan struct{})
+		}
+		ch := make(chan struct{})
+		close(ch)
+		s.authSignals[providerID] = ch
+	}
+}
+
+// newerDiskToken returns the on-disk token for the provider when it is
+// newer than entryToken — i.e. another session (possibly in another
+// process) has already rotated the credential. It returns nil when disk
+// holds nothing newer than what we started with.
+//
+// Newness is judged by expiry as well as identity, so a config file that
+// somehow holds an older token cannot drag us backwards. The result may
+// itself be expired: providers that rotate refresh tokens invalidate ours
+// the moment a peer refreshes, so the peer's refresh token is the only one
+// the provider will still accept even after its access token ages out.
+// Callers decide whether to adopt the token wholesale or merely borrow its
+// refresh token.
+func (s *ConfigStore) newerDiskToken(scope Scope, providerID string, entryToken *oauth.Token) *oauth.Token {
+	diskToken, err := s.loadTokenFromDisk(scope, providerID)
+	if err != nil {
+		slog.Warn("Failed to read token from config file", "provider", providerID, "error", err)
+		return nil
+	}
+	if diskToken == nil {
+		return nil
+	}
+	if diskToken.AccessToken == entryToken.AccessToken {
+		// Same token we started with; nobody rotated since.
+		return nil
+	}
+	if diskToken.RefreshToken == "" && entryToken.RefreshToken != "" {
+		// Adopting would strand us with no way to refresh later, and
+		// there is nothing to borrow for an exchange.
+		return nil
+	}
+	if diskToken.ExpiresAt < entryToken.ExpiresAt {
+		// Older than ours; nothing to gain from adopting it.
+		return nil
+	}
+	return diskToken
+}
+
+// usableDiskToken returns the on-disk token only when it is both newer
+// than entryToken and still valid, meaning it can be adopted as-is with
+// no exchange at all.
+func (s *ConfigStore) usableDiskToken(scope Scope, providerID string, entryToken *oauth.Token) *oauth.Token {
+	diskToken := s.newerDiskToken(scope, providerID, entryToken)
+	if diskToken == nil || diskToken.IsExpired() {
+		return nil
+	}
+	return diskToken
+}
+
+// exchange performs the provider-specific OAuth token exchange. Tests may
+// override it via the exchangeToken field; production uses the real
+// provider clients.
+func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	if s.exchangeToken != nil {
+		return s.exchangeToken(ctx, providerID, refreshToken)
+	}
+	switch providerID {
+	case string(catwalk.InferenceProviderCopilot):
+		return copilot.RefreshToken(ctx, refreshToken)
+	case hyperp.Name:
+		return hyper.ExchangeToken(ctx, refreshToken)
+	default:
+		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
+	}
+}
+
+// withRefreshLock runs fn while holding the per-provider cross-process
+// refresh lock, so a credential write cannot interleave with a peer's
+// token exchange. Acquisition is best effort: when the lock cannot be
+// taken in time, fn runs anyway rather than blocking a write the user is
+// waiting on.
+func (s *ConfigStore) withRefreshLock(providerID string, fn func() error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), credentialWriteLockDeadline)
+	defer cancel()
+	release, err := lock.File(ctx, s.refreshLockPath(providerID))
+	if err != nil {
+		slog.Warn("Writing credentials without the refresh lock", "provider", providerID, "error", err)
+		return fn()
+	}
+	defer release()
+	return fn()
+}
+
+// refreshLockPath returns the path to the per-provider cross-process refresh
+// lock file. Lock files live under a dedicated locks/ subdirectory of the
+// data dir so they do not clutter the config directory. The file is created
+// on demand by lock.File and is never removed (flock keys on inode, not
+// path).
+func (s *ConfigStore) refreshLockPath(providerID string) string {
+	dir := filepath.Join(filepath.Dir(s.globalDataPath), "locks")
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, fmt.Sprintf("%s.refresh.lock", providerID))
 }
 
 // applyToken updates the in-memory provider config with the given token.
@@ -465,7 +842,7 @@ func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Tok
 	if providerID == string(catwalk.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}
-	s.config.Providers.Set(providerID, providerConfig)
+	s.Config().Providers.Set(providerID, providerConfig)
 	return nil
 }
 
@@ -504,14 +881,14 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 	return &token, nil
 }
 
-// recordRecentModel records a model in the recent models list.
-func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
+// nextRecentModels computes the recent-models list for the given type
+// after recording the supplied model at the front, operating on the
+// provided config without persisting anything. It returns the new slice
+// and whether it differs from cfg's current list. Callers fold the result
+// into a clone they are about to publish.
+func nextRecentModels(cfg *Config, modelType SelectedModelType, model SelectedModel) ([]SelectedModel, bool) {
 	if model.Provider == "" || model.Model == "" {
-		return nil
-	}
-
-	if s.config.RecentModels == nil {
-		s.config.RecentModels = make(map[SelectedModelType][]SelectedModel)
+		return nil, false
 	}
 
 	eq := func(a, b SelectedModel) bool {
@@ -523,7 +900,7 @@ func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType
 		Model:    model.Model,
 	}
 
-	current := s.config.RecentModels[modelType]
+	current := cfg.RecentModels[modelType]
 	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
 		return eq(existing, entry)
 	})
@@ -534,16 +911,10 @@ func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType
 	}
 
 	if slices.EqualFunc(current, updated, eq) {
-		return nil
+		return current, false
 	}
 
-	s.config.RecentModels[modelType] = updated
-
-	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
-		return fmt.Errorf("failed to persist recent models: %w", err)
-	}
-
-	return nil
+	return updated, true
 }
 
 // NewTestStore creates a ConfigStore for testing purposes.
@@ -723,31 +1094,31 @@ func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
 // config atomically. It rebuilds the staleness snapshot after successful reload.
 // On failure, the store state is rolled back to its previous state.
-// Concurrent calls are serialised via reloadMu.
+// Concurrent calls are serialised via writeMu.
 func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 	if s.workingDir == "" {
 		return fmt.Errorf("cannot reload: working directory not set")
 	}
-	s.reloadMu.Lock()
-	defer s.reloadMu.Unlock()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	return s.reloadFromDiskLocked(ctx)
 }
 
-// reloadFromDiskLocked performs the actual reload. Caller must hold reloadMu.
+// reloadFromDiskLocked performs the actual reload. Caller must hold writeMu.
 func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// Migrate deprecated disable_notifications before reloading config.
 	migrateDisableNotifications()
 
 	configPaths := lookupConfigs(s.workingDir)
-	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
+	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
 	if err != nil {
 		return fmt.Errorf("failed to reload config: %w", err)
 	}
 
 	// Apply defaults (using existing data directory if set)
 	var dataDir string
-	if s.config != nil && s.config.Options != nil {
-		dataDir = s.config.Options.DataDirectory
+	if cur := s.Config(); cur != nil && cur.Options != nil {
+		dataDir = cur.Options.DataDirectory
 	}
 	cfg.setDefaults(s.workingDir, dataDir)
 
@@ -772,52 +1143,70 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		return fmt.Errorf("invalid hook configuration on reload: %w", err)
 	}
 
-	// Preserve runtime overrides
-	overrides := s.overrides
-
-	// Reconfigure providers
-	env := env.New()
-	resolver := NewShellVariableResolver(env)
-	providers, err := Providers(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to load providers during reload: %w", err)
-	}
-
-	if err := cfg.configureProviders(s, env, resolver, providers); err != nil {
-		return fmt.Errorf("failed to configure providers during reload: %w", err)
-	}
-
-	// Save current state for potential rollback
-	oldConfig := s.config
+	// Save current state for potential rollback BEFORE configureProviders,
+	// which may write to disk via RemoveConfigField (e.g. removing stale
+	// OAuth providers). Capturing after would snapshot a config that has
+	// already been mutated, and the rollback would restore corrupted state.
+	oldConfig := s.Config()
 	oldLoadedPaths := s.loadedPaths
 	oldResolver := s.resolver
 	oldKnownProviders := s.knownProviders
 	oldOverrides := s.overrides
 	oldWorkspacePath := s.workspacePath
 
+	// Preserve runtime overrides
+	overrides := s.overrides
+
+	// Reapply model choices made in this instance. The global config file is
+	// shared, so it may now name a model a sibling instance selected; a
+	// reload triggered by an unrelated write must not swap the user's model
+	// mid-session. An external edit to the config still takes effect for any
+	// model type this instance never chose.
+	maps.Copy(cfg.Models, overrides.Models)
+
+	// Reconfigure providers
+	env := env.New()
+	resolver := NewShellVariableResolver(env)
+
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
+	cfg.applyEnv(resolver)
+
+	providers, err := Providers(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to load providers during reload: %w", err)
+	}
+
+	if err := cfg.configureProviders(ctx, s, env, resolver, providers); err != nil {
+		return fmt.Errorf("failed to configure providers during reload: %w", err)
+	}
+
 	// Update store state BEFORE running model/agent setup (so they see new config)
-	s.config = cfg
+	s.setConfig(cfg)
 	s.loadedPaths = loadedPaths
 	s.resolver = resolver
 	s.knownProviders = providers
 	s.overrides = overrides
 	s.workspacePath = workspacePath
 
-	// Mirror startup flow: setup models and agents against NEW config
+	// Mirror startup flow: setup models and agents against NEW config.
 	var setupErr error
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured after reload")
 	} else {
-		if err := configureSelectedModels(s, providers, false); err != nil {
-			setupErr = fmt.Errorf("failed to configure selected models during reload: %w", err)
+		resolved, resolveErr := resolveSelectedModels(cfg, providers)
+		if resolveErr != nil {
+			setupErr = fmt.Errorf("failed to configure selected models during reload: %w", resolveErr)
 		} else {
+			cfg.Models[SelectedModelTypeLarge] = resolved.Large
+			cfg.Models[SelectedModelTypeSmall] = resolved.Small
 			s.SetupAgents()
 		}
 	}
 
 	// Rollback on setup failure
 	if setupErr != nil {
-		s.config = oldConfig
+		s.setConfig(oldConfig)
 		s.loadedPaths = oldLoadedPaths
 		s.resolver = oldResolver
 		s.knownProviders = oldKnownProviders
@@ -826,8 +1215,10 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		return setupErr
 	}
 
-	// Rebuild staleness tracking
-	s.captureStalenessSnapshot(loadedPaths)
+	// Rebuild staleness tracking. Track every discovered config path, not
+	// just the ones that loaded, so a config file created after this reload
+	// is detected as a change on the next staleness check.
+	s.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
 
 	return nil
 }
@@ -850,9 +1241,9 @@ func (s *ConfigStore) autoReload(ctx context.Context) error {
 	// are rare and the next user action or file-watch tick will pick
 	// up the change. Callers that need guaranteed fresh state after a
 	// write should call ReloadFromDisk explicitly.
-	if !s.reloadMu.TryLock() {
+	if !s.writeMu.TryLock() {
 		return nil
 	}
-	defer s.reloadMu.Unlock()
+	defer s.writeMu.Unlock()
 	return s.reloadFromDiskLocked(ctx)
 }

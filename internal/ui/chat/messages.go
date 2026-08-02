@@ -338,7 +338,7 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	}
 	finishTime := time.Unix(finishData.Time, 0)
 	duration := finishTime.Sub(a.lastUserMessageTime)
-	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(duration.String())
+	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(fmt.Sprintf("in %s", duration))
 	icon := a.sty.Messages.AssistantInfoIcon.Render(styles.ModelIcon)
 	model := a.cfg.GetModel(a.message.Provider, a.message.Model)
 	if model == nil {
@@ -367,12 +367,23 @@ func cappedMessageWidth(availableWidth int) int {
 func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult) []MessageItem {
 	switch msg.Role {
 	case message.User:
+		// Reconstruct shell command items from ShellCommand parts.
+		var items []MessageItem
+		for _, part := range msg.Parts {
+			if sc, ok := part.(message.ShellCommand); ok {
+				items = append(items, NewShellItem(sty, sc.Command, sc.Output, sc.ExitCode))
+			}
+		}
+		if len(items) > 0 {
+			return items
+		}
 		r := attachments.NewRenderer(
 			sty.Attachments.Normal,
 			sty.Attachments.Deleting,
 			sty.Attachments.Image,
 			sty.Attachments.Text,
 			sty.Attachments.Skill,
+			sty.Attachments.Remove,
 		)
 		return []MessageItem{NewUserMessageItem(sty, msg, r)}
 	case message.Assistant:
@@ -405,10 +416,9 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	content := strings.TrimSpace(msg.Content().Text)
 	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
-	isError := msg.FinishReason() == message.FinishReasonError
 	isCancelled := msg.FinishReason() == message.FinishReasonCanceled
 	hasToolCalls := len(msg.ToolCalls()) > 0
-	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || isError || isCancelled
+	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || msg.IsErrorLike() || isCancelled
 }
 
 // BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.

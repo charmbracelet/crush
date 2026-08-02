@@ -2,10 +2,13 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -82,7 +85,7 @@ func TestApplyEditToContentPartialSuccess(t *testing.T) {
 	content := "line 1\nline 2\nline 3\n"
 
 	// Test successful edit.
-	newContent, err := applyEditToContent(content, MultiEditOperation{
+	newContent, _, err := applyEditToContent(content, MultiEditOperation{
 		OldString: "line 1",
 		NewString: "LINE 1",
 	})
@@ -91,12 +94,37 @@ func TestApplyEditToContentPartialSuccess(t *testing.T) {
 	require.Contains(t, newContent, "line 2")
 
 	// Test failed edit (string not found).
-	_, err = applyEditToContent(content, MultiEditOperation{
+	_, _, err = applyEditToContent(content, MultiEditOperation{
 		OldString: "line 99",
 		NewString: "LINE 99",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
+}
+
+func TestApplyEditToContentReplacementModes(t *testing.T) {
+	t.Parallel()
+
+	content := "alpha\nbeta\nalpha\n"
+
+	newContent, _, err := applyEditToContent(content, MultiEditOperation{
+		OldString:  "alpha",
+		NewString:  "ALPHA",
+		ReplaceAll: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "ALPHA\nbeta\nALPHA\n", newContent)
+
+	_, _, err = applyEditToContent(content, MultiEditOperation{
+		OldString: "alpha",
+		NewString: "ALPHA",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "multiple times")
+
+	newContent, _, err = applyEditToContent(content, MultiEditOperation{})
+	require.NoError(t, err)
+	require.Equal(t, content, newContent)
 }
 
 func TestMultiEditSequentialApplication(t *testing.T) {
@@ -125,7 +153,7 @@ func TestMultiEditSequentialApplication(t *testing.T) {
 	successCount := 0
 
 	for i, edit := range edits {
-		newContent, err := applyEditToContent(currentContent, edit)
+		newContent, _, err := applyEditToContent(currentContent, edit)
 		if err != nil {
 			failedEdits = append(failedEdits, FailedEdit{
 				Index: i + 1,
@@ -169,7 +197,7 @@ func TestMultiEditAllEditsSucceed(t *testing.T) {
 	successCount := 0
 
 	for _, edit := range edits {
-		newContent, err := applyEditToContent(currentContent, edit)
+		newContent, _, err := applyEditToContent(currentContent, edit)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
@@ -197,7 +225,7 @@ func TestMultiEditAllEditsFail(t *testing.T) {
 	var failedEdits []FailedEdit
 
 	for i, edit := range edits {
-		newContent, err := applyEditToContent(currentContent, edit)
+		newContent, _, err := applyEditToContent(currentContent, edit)
 		if err != nil {
 			failedEdits = append(failedEdits, FailedEdit{
 				Index: i + 1,
@@ -211,4 +239,84 @@ func TestMultiEditAllEditsFail(t *testing.T) {
 
 	require.Len(t, failedEdits, 2)
 	require.Equal(t, content, currentContent, "Content should be unchanged")
+}
+
+func TestProcessMultiEditExistingFilePartialFailure(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("one\ntwo\nthree\n"), 0o644))
+
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: &mockEditFileTracker{lastRead: time.Now().Add(time.Second)},
+		workingDir:  dir,
+	}
+	params := MultiEditParams{
+		FilePath: filePath,
+		Edits: []MultiEditOperation{
+			{OldString: "two", NewString: "TWO"},
+			{OldString: "missing", NewString: "MISSING"},
+		},
+	}
+
+	resp, err := processMultiEditExistingFile(edit, params, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "Applied 1 of 2 edits")
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.Equal(t, "one\nTWO\nthree\n", string(content))
+
+	var meta MultiEditResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, 1, meta.EditsApplied)
+	require.Len(t, meta.EditsFailed, 1)
+	require.Equal(t, 2, meta.EditsFailed[0].Index)
+	require.Equal(t, "one\ntwo\nthree\n", meta.OldContent)
+	require.Equal(t, "one\nTWO\nthree\n", meta.NewContent)
+}
+
+func TestProcessMultiEditWithCreationPartialFailure(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "nested", "test.txt")
+
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: &mockEditFileTracker{},
+		workingDir:  dir,
+	}
+	params := MultiEditParams{
+		FilePath: filePath,
+		Edits: []MultiEditOperation{
+			{OldString: "", NewString: "one\ntwo\nthree\n"},
+			{OldString: "two", NewString: "TWO"},
+			{OldString: "missing", NewString: "MISSING"},
+		},
+	}
+
+	resp, err := processMultiEditWithCreation(edit, params, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "File created with 2 of 3 edits")
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.Equal(t, "one\nTWO\nthree\n", string(content))
+
+	var meta MultiEditResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, 2, meta.EditsApplied)
+	require.Len(t, meta.EditsFailed, 1)
+	require.Equal(t, 3, meta.EditsFailed[0].Index)
+	require.Equal(t, "", meta.OldContent)
+	require.Equal(t, "one\nTWO\nthree\n", meta.NewContent)
 }

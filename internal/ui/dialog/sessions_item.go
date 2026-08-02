@@ -51,6 +51,7 @@ type SessionItem struct {
 	cache            map[int]string
 	updateTitleInput textinput.Model
 	focused          bool
+	hideInfo         bool
 }
 
 // Finished implements list.Item. Session items are render-stable
@@ -104,9 +105,30 @@ func (s *SessionItem) Cursor() *tea.Cursor {
 	return s.updateTitleInput.Cursor()
 }
 
+// InfoText returns the secondary text shown on the right of the item.
+func (s *SessionItem) InfoText() string {
+	return humanize.Time(time.Unix(s.UpdatedAt, 0))
+}
+
+// SetHideInfo controls whether the timestamp info column is shown. The
+// dialog hides it uniformly when it would crowd the title.
+func (s *SessionItem) SetHideInfo(v bool) {
+	if s.hideInfo == v {
+		return
+	}
+	s.cache = nil
+	s.hideInfo = v
+	if s.Versioned != nil {
+		s.Bump()
+	}
+}
+
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
-	info := humanize.Time(time.Unix(s.UpdatedAt, 0))
+	info := s.InfoText()
+	if s.hideInfo {
+		info = ""
+	}
 	styles := ListItemStyles{
 		ItemBlurred:     s.t.Dialog.NormalItem,
 		ItemFocused:     s.t.Dialog.SelectedItem,
@@ -155,10 +177,20 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 		style = t.ItemFocused
 	}
 
+	// Build content to the width left after the item style's own padding,
+	// so the final rendered line is exactly `width` wide. Otherwise the
+	// padding pushes the line past the list width and it wraps.
+	lineWidth := max(0, width-style.GetHorizontalFrameSize())
+
 	var infoText string
 	var infoWidth int
-	lineWidth := width
 	if len(info) > 0 {
+		// Cap the info column so a long value (e.g. a provider name) can
+		// truncate instead of overflowing the row or squeezing the title
+		// to nothing; the title keeps at least half the width.
+		if maxInfo := lineWidth / 2; lipgloss.Width(info)+2 > maxInfo {
+			info = ansi.Truncate(info, max(0, maxInfo-2), "…")
+		}
 		infoText = fmt.Sprintf(" %s ", info)
 		if focused {
 			infoText = t.InfoTextFocused.Render(infoText)

@@ -55,8 +55,8 @@ func NewCoordinator(
 		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
 	})
 	selected := config.SelectedModel{Provider: providerID, Model: modelID}
-	cfg.Config().Models[config.SelectedModelTypeLarge] = selected
-	cfg.Config().Models[config.SelectedModelTypeSmall] = selected
+	cfg.OverridePreferredModel(config.SelectedModelTypeLarge, selected)
+	cfg.OverridePreferredModel(config.SelectedModelTypeSmall, selected)
 	cfg.SetupAgents()
 
 	// Keep buildTools light: no sub-agent or agentic-fetch construction.
@@ -64,17 +64,10 @@ func NewCoordinator(
 	coderCfg.AllowedTools = nil
 	cfg.Config().Agents[config.AgentCoder] = coderCfg
 
-	return agent.NewCoordinator(
-		ctx,
-		cfg,
-		sessions,
-		messages,
-		permission.NewPermissionService(workingDir, true, nil),
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-	)
+	return agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+		Config:      cfg,
+		Sessions:    sessions,
+		Messages:    messages,
+		Permissions: permission.NewPermissionService(workingDir, true, nil),
+	})
 }

@@ -11,6 +11,7 @@ import (
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -47,7 +48,7 @@ type quickStyleOpts struct {
 	error             color.Color
 	warning           color.Color
 	warningSubtle     color.Color
-	denied            color.Color
+	attention         color.Color
 	busy              color.Color
 	info              color.Color
 	infoMoreSubtle    color.Color
@@ -55,6 +56,28 @@ type quickStyleOpts struct {
 	success           color.Color
 	successMoreSubtle color.Color
 	successMostSubtle color.Color
+
+	// ANSI 16-color palette. These remap the basic terminal colors that
+	// programs emit (e.g. bang-mode shell output) onto legible, on-brand
+	// colors instead of leaving them to the user's terminal defaults.
+	// Normal intensity.
+	ansiBlack   color.Color
+	ansiRed     color.Color
+	ansiGreen   color.Color
+	ansiYellow  color.Color
+	ansiBlue    color.Color
+	ansiMagenta color.Color
+	ansiCyan    color.Color
+	ansiWhite   color.Color
+	// Bright intensity.
+	ansiBrightBlack   color.Color
+	ansiBrightRed     color.Color
+	ansiBrightGreen   color.Color
+	ansiBrightYellow  color.Color
+	ansiBrightBlue    color.Color
+	ansiBrightMagenta color.Color
+	ansiBrightCyan    color.Color
+	ansiBrightWhite   color.Color
 }
 
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
@@ -75,7 +98,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Populate color fields
 	s.WorkingGradFromColor = o.primary
 	s.WorkingGradToColor = o.secondary
-	s.WorkingLabelColor = o.fgBase
+	s.WorkingLabelColor = o.fgMostSubtle
+	s.WorkingTimerColor = o.fgMostSubtle
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{
@@ -578,7 +602,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.Charm = base.Foreground(o.secondary)
 	s.Header.Diagonals = base.Foreground(o.primary)
 	s.Header.Percentage = muted
-	s.Header.Hypercredit = base.Foreground(charmtone.Dolly)
+	s.Header.HypercreditIcon = base.Foreground(o.secondary)
 	s.Header.Keystroke = muted
 	s.Header.KeystrokeTip = subtle
 	s.Header.WorkingDir = muted
@@ -623,7 +647,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ErrorTag = base.Padding(0, 1).Background(o.destructive).Foreground(o.onPrimary)
 	s.Tool.ErrorMessage = base.Foreground(o.fgSubtle)
 
-	s.Tool.WarnTag = base.Padding(0, 1).Background(o.denied).Foreground(o.bgBase).Bold(true)
+	s.Tool.WarnTag = base.Padding(0, 1).Background(o.attention).Foreground(o.bgBase).Bold(true)
 	s.Tool.WarnMessage = base.Foreground(o.fgSubtle)
 
 	// Diff and multi-edit styles
@@ -691,18 +715,66 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Buttons
 	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
 	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
+	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.fgMostSubtle)
+	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
 	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
-	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" ! ")
+	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" Y ")
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" ! ")
+	s.Editor.PromptBangIconBlurred = s.Editor.PromptBangIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
+	s.Editor.PromptBangDotsBlurred = s.Editor.PromptBangDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptQuestionIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgBase).Background(o.primary).Bold(true).SetString(" ? ")
+	s.Editor.PromptQuestionIconBlurred = s.Editor.PromptQuestionIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.QuestionSelected = lipgloss.NewStyle().Foreground(o.secondary).Bold(true)
+	s.Editor.QuestionUnselected = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Editor.QuestionBody = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Editor.QuestionConfirm = lipgloss.NewStyle().Foreground(o.primary).Bold(true)
+	s.Editor.QuestionNote = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Editor.QuestionCursorBar = lipgloss.NewStyle().Foreground(o.secondary)
+	s.Editor.QuestionRadioOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
+	s.Editor.QuestionRadioOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
+	s.Editor.QuestionCheckOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
+	s.Editor.QuestionCheckOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 	s.Radio.Label = lipgloss.NewStyle().Foreground(o.fgSubtle)
+
+	// Tabs for batch question forms. All borders use charple
+	// (primary). Active tab has an open bottom that merges with
+	// the content area; inactive tabs have a closed bottom. First
+	// tab gets a right-angle bottom-left corner at draw time.
+	borderColor := uv.Style{Fg: o.primary}
+	inactiveBorder := uv.RoundedBorder().Style(borderColor)
+	inactiveBorder.BottomLeft = uv.Side{Content: "┴", Style: borderColor}
+	inactiveBorder.BottomRight = uv.Side{Content: "┴", Style: borderColor}
+	activeBorder := uv.RoundedBorder().Style(borderColor)
+	activeBorder.Bottom = uv.Side{Content: " ", Style: borderColor}
+	activeBorder.BottomLeft = uv.Side{Content: "┘", Style: borderColor}
+	activeBorder.BottomRight = uv.Side{Content: "└", Style: borderColor}
+
+	s.Tab.ActiveBorder = activeBorder
+	s.Tab.InactiveBorder = inactiveBorder
+
+	blurredBorderColor := uv.Style{Fg: o.fgMoreSubtle}
+	inactiveBorderBlurred := uv.RoundedBorder().Style(blurredBorderColor)
+	inactiveBorderBlurred.BottomLeft = uv.Side{Content: "┴", Style: blurredBorderColor}
+	inactiveBorderBlurred.BottomRight = uv.Side{Content: "┴", Style: blurredBorderColor}
+	activeBorderBlurred := uv.RoundedBorder().Style(blurredBorderColor)
+	activeBorderBlurred.Bottom = uv.Side{Content: " ", Style: blurredBorderColor}
+	activeBorderBlurred.BottomLeft = uv.Side{Content: "┘", Style: blurredBorderColor}
+	activeBorderBlurred.BottomRight = uv.Side{Content: "└", Style: blurredBorderColor}
+	s.Tab.ActiveBorderBlurred = activeBorderBlurred
+	s.Tab.InactiveBorderBlurred = inactiveBorderBlurred
+
+	s.Tab.ActiveStyle = uv.Style{Fg: o.fgBase}
+	s.Tab.InactiveStyle = uv.Style{Fg: o.fgMoreSubtle}
 
 	// Logo
 	s.Logo.FieldColor = o.primary
@@ -733,6 +805,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Resource.BusyIcon = s.Resource.OfflineIcon.Foreground(o.busy)
 	s.Resource.ErrorIcon = s.Resource.OfflineIcon.Foreground(o.destructive)
 	s.Resource.OnlineIcon = s.Resource.OfflineIcon.Foreground(o.successMostSubtle)
+	s.Resource.NeedsAuthIcon = s.Resource.OfflineIcon.Foreground(o.attention)
 	s.Resource.DisabledIcon = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("●")
 	s.Resource.AdditionalText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Resource.CapabilityCount = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
@@ -769,7 +842,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.ModelInfo.EstimatedUsagePrefix = s.ModelInfo.TokenPercentage
 	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
-	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(charmtone.Dolly)
+	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(o.secondary)
 	s.ModelInfo.HypercreditText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 
 	// ResourceGroup
@@ -803,12 +876,36 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted
+
+	// ANSI 16-color palette (indices 0-7 normal, 8-15 bright). Used to
+	// remap raw terminal color codes in command output onto legible
+	// colors. See [Styles.ANSI].
+	s.ANSI = [16]color.Color{
+		o.ansiBlack, o.ansiRed, o.ansiGreen, o.ansiYellow,
+		o.ansiBlue, o.ansiMagenta, o.ansiCyan, o.ansiWhite,
+		o.ansiBrightBlack, o.ansiBrightRed, o.ansiBrightGreen, o.ansiBrightYellow,
+		o.ansiBrightBlue, o.ansiBrightMagenta, o.ansiBrightCyan, o.ansiBrightWhite,
+	}
+
+	// Shell (bang mode) item styles.
+	s.Messages.ShellBarFocused = lipgloss.NewStyle().PaddingLeft(1).
+		BorderStyle(messageFocussedBorder).BorderLeft(true).
+		BorderForeground(o.primary)
+	s.Messages.ShellBarBlurred = lipgloss.NewStyle().PaddingLeft(1).BorderLeft(true).
+		BorderForeground(o.bgMostVisible).BorderStyle(lipgloss.NormalBorder())
+	s.Messages.ShellPrompt = base.Foreground(o.primary).Bold(true)
+	s.Messages.ShellPromptBlurred = base.Foreground(o.fgMoreSubtle)
+	s.Messages.ShellCommand = base.Foreground(o.fgBase)
+	s.Messages.ShellOutput = lipgloss.NewStyle().Foreground(o.fgSubtle)
+	s.Messages.ShellExitCode = lipgloss.NewStyle().Foreground(o.destructive)
+	s.Messages.ShellTruncation = muted
+
 	s.Messages.SectionHeader = base.PaddingLeft(2)
 	s.Messages.AssistantInfoIcon = subtle
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
-	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
+	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
 
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
@@ -828,8 +925,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.TitleGradFromColor = o.primary
 	s.Dialog.TitleGradToColor = o.secondary
 
-	// Dialog.ListItem (commands, reasoning, models)
-	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgBase)
+	// Dialog.ListItem (commands, reasoning, models). The info column holds
+	// secondary hints like keybind shortcuts, so mute it when blurred and
+	// keep it readable on the focused row.
+	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	// Dialog.Models
@@ -842,6 +941,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	// Dialog.Quit
 	s.Dialog.Quit.Content = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.Quit.Hint = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Dialog.Quit.Frame = lipgloss.NewStyle().BorderForeground(o.primary).Border(lipgloss.RoundedBorder()).Padding(1, 2)
 	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)
 	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(o.primary)
@@ -928,13 +1028,18 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Attachments.Image = attachmentIconStyle.SetString(ImageIcon)
 	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
 	s.Attachments.Skill = attachmentIconStyle.SetString(SkillIcon)
-	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(o.fgMoreSubtle).Foreground(o.fgBase)
-	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
+	s.Attachments.Normal = base.Padding(0, 1).Background(o.fgMoreSubtle).Foreground(o.fgBase)
+	// Remove and Deleting share the same slot on the right side of a chip
+	// and must keep the same geometry so toggling delete-mode doesn't
+	// shift the chips. Padding(0, 1) puts a colored cell on each side of the
+	// glyph so it isn't flush against the box edge, while MarginRight(1)
+	// keeps a transparent gap between adjacent chips.
+	s.Attachments.Remove = base.Padding(0, 1).MarginRight(1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
+	s.Attachments.Deleting = base.Padding(0, 1).MarginRight(1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
 
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)
 	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(o.bgMostVisible)
-	s.Pills.Blurred = base.Padding(0, 1).BorderStyle(lipgloss.HiddenBorder())
 	s.Pills.QueueItemPrefix = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("  •")
 	s.Pills.QueueItemText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Pills.QueueLabel = lipgloss.NewStyle().Foreground(o.fgBase)

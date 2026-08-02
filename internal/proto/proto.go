@@ -22,6 +22,9 @@ type Workspace struct {
 	ClientID string         `json:"client_id,omitempty"`
 	Config   *config.Config `json:"config,omitempty"`
 	Env      []string       `json:"env,omitempty"`
+	// Channels lists the MCP servers opted in as channels for this workspace
+	// (from the --channels flag).
+	Channels []string `json:"channels,omitempty"`
 	// Skills carries the snapshot of skill discovery state at workspace
 	// creation time. Subsequent updates flow through the SSE event
 	// stream.
@@ -38,6 +41,16 @@ type Error struct {
 // workspace snapshot so cached config stays in sync across subscribers.
 type ConfigChanged struct {
 	WorkspaceID string `json:"workspace_id"`
+}
+
+// UpdateAvailable is published when a newer Crush release is detected
+// on the server side. It mirrors app.UpdateAvailableMsg across the SSE
+// boundary so client/server mode TUI clients see the same notification
+// as local-mode clients.
+type UpdateAvailable struct {
+	CurrentVersion string `json:"current_version"`
+	LatestVersion  string `json:"latest_version"`
+	IsDevelopment  bool   `json:"is_development"`
 }
 
 // CurrentSession is the request body for the per-client
@@ -135,6 +148,19 @@ type AgentMessage struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
+// ShellCommandRequest represents a request to run a shell command directly.
+type ShellCommandRequest struct {
+	SessionID string `json:"session_id"`
+	Command   string `json:"command"`
+	TermWidth int    `json:"term_width,omitempty"`
+}
+
+// ShellCommandResponse represents the result of a direct shell command.
+type ShellCommandResponse struct {
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
+
 // AgentSession represents a session with its busy status.
 type AgentSession struct {
 	Session
@@ -179,6 +205,62 @@ type PermissionGrant struct {
 // false value is not an error.
 type PermissionGrantResponse struct {
 	Resolved bool `json:"resolved"`
+}
+
+// QuestionRequest is the wire format for a batch question
+// sent from server to client over SSE.
+type QuestionRequest struct {
+	ID                 string         `json:"id"`
+	SessionID          string         `json:"session_id"`
+	ToolCallID         string         `json:"tool_call_id"`
+	Questions          []QuestionItem `json:"questions"`
+	ConfirmTitle       string         `json:"confirm_title,omitempty"`
+	ConfirmDescription string         `json:"confirm_description,omitempty"`
+}
+
+// QuestionItem is a single question within a batch.
+type QuestionItem struct {
+	ID          string           `json:"id"`
+	Type        string           `json:"type"`
+	Label       string           `json:"label,omitempty"`
+	Question    string           `json:"question"`
+	Description string           `json:"description,omitempty"`
+	Choices     []QuestionChoice `json:"choices,omitempty"`
+}
+
+// QuestionChoice is a selectable option.
+type QuestionChoice struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// QuestionAnswer is the wire format for answering a batch
+// question, sent from client to server via REST.
+type QuestionAnswer struct {
+	BatchRequestID string             `json:"batch_request_id"`
+	Responses      []QuestionResponse `json:"responses"`
+}
+
+// QuestionResponse is a single answer within a batch response.
+type QuestionResponse struct {
+	QuestionID  string            `json:"request_id"`
+	SelectedIDs []string          `json:"selected_ids,omitempty"`
+	FillInText  string            `json:"fill_in_text,omitempty"`
+	Yes         *bool             `json:"yes,omitempty"`
+	Notes       map[string]string `json:"notes,omitempty"`
+}
+
+// QuestionAnswerResponse is the server's response to a
+// question batch answer call.
+type QuestionAnswerResponse struct {
+	Resolved bool `json:"resolved"`
+}
+
+// QuestionNotification is published when a question batch is
+// resolved so non-answering clients can dismiss their forms.
+type QuestionNotification struct {
+	BatchID string `json:"batch_id"`
 }
 
 // PermissionSkipRequest represents a request to skip permission prompts.

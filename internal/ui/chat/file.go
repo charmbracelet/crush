@@ -56,7 +56,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "offset", fmt.Sprintf("%d", params.Offset))
 	}
 
-	header := toolHeader(sty, opts.Status, "View", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "View", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -134,7 +134,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, "Write", cappedWidth, opts.Compact, file)
+	header := toolHeader(sty, opts.Status, "Write", cappedWidth, opts, file)
 	if opts.Compact {
 		return header
 	}
@@ -203,7 +203,7 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, "Edit", width, opts.Compact, file)
+	header := toolHeader(sty, opts.Status, "Edit", width, opts, file)
 	if opts.Compact {
 		return header
 	}
@@ -276,7 +276,7 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))
 	}
 
-	header := toolHeader(sty, opts.Status, "Multi-Edit", width, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Multi-Edit", width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -352,7 +352,7 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		toolParams = append(toolParams, "timeout", formatTimeout(params.Timeout))
 	}
 
-	header := toolHeader(sty, opts.Status, "Download", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Download", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

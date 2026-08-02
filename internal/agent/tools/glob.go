@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 )
@@ -48,7 +50,7 @@ type GlobResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
-func NewGlobTool(workingDir string) fantasy.AgentTool {
+func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GlobToolName,
 		globDescription(),
@@ -59,7 +61,13 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 
 			searchPath := cmp.Or(params.Path, workingDir)
 
-			files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
+			// Bound the search so a huge or symlink-heavy root (e.g. $HOME
+			// or a module cache) fails cleanly instead of pinning the CPU
+			// and hanging the agent.
+			searchCtx, cancel := context.WithTimeout(ctx, cfg.GetTimeout())
+			defer cancel()
+
+			files, truncated, err := globFiles(searchCtx, params.Pattern, searchPath, 100)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error finding files: %v", err)), nil
 			}
@@ -87,38 +95,87 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 }
 
 func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {
-	cmdRg := getRgCmd(ctx, pattern)
+	// Scope the walk to the pattern's literal directory prefix. A pattern
+	// like "internal/agent/*.go" only needs to walk "internal/agent", so we
+	// start there instead of enumerating the entire tree and filtering.
+	// Patterns that begin with a wildcard (e.g. "**/foo.go") have no prefix
+	// and still walk from searchPath.
+	prefix, rest := filepathext.SplitGlobPrefix(pattern)
+	walkRoot := searchPath
+	walkPattern := pattern
+	if prefix != "" {
+		walkRoot = filepath.Join(searchPath, prefix)
+		walkPattern = rest
+	}
+
+	cmdRg := getRgCmd(ctx, walkPattern)
 	if cmdRg != nil {
-		cmdRg.Dir = searchPath
-		matches, err := runRipgrep(cmdRg, searchPath, limit)
+		cmdRg.Dir = walkRoot
+		matches, err := runRipgrep(cmdRg, walkRoot, limit)
 		if err == nil {
 			return matches, len(matches) >= limit && limit > 0, nil
 		}
 		slog.Warn("Ripgrep execution failed, falling back to doublestar", "error", err)
 	}
 
-	return fsext.GlobGitignoreAware(pattern, searchPath, limit)
+	return fsext.GlobGitignoreAwareCtx(ctx, walkPattern, walkRoot, limit)
 }
 
 func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
-	out, err := cmd.CombinedOutput()
+	// Stream ripgrep's stdout instead of buffering the whole file list.
+	// Over a huge root (e.g. $HOME) the full --files listing can be
+	// hundreds of MB; reading it all at once and then sorting allocated
+	// gigabytes. We read incrementally and stop once we have a bounded
+	// pool of candidates.
+	//
+	// We collect more than `limit` so the shortest-path preference below
+	// still has something to choose from, but the pool is capped so memory
+	// stays small (a few thousand paths) no matter how large the tree is.
+	candidatePool := max(limit*20, 1000)
+
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("ripgrep: %w\n%s", err, out)
+		return nil, fmt.Errorf("ripgrep: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("ripgrep: %w", err)
 	}
 
 	var matches []string
-	for p := range bytes.SplitSeq(out, []byte{0}) {
-		if len(p) == 0 {
-			continue
+	reader := bufio.NewReader(stdout)
+	for {
+		path, err := reader.ReadString(0)
+		if len(path) > 0 {
+			path = strings.TrimRight(path, "\x00")
+			if path != "" {
+				absPath := filepathext.SmartJoin(searchRoot, path)
+				if !fsext.SkipHidden(absPath) {
+					matches = append(matches, absPath)
+				}
+			}
 		}
-		absPath := filepathext.SmartJoin(searchRoot, string(p))
-		if fsext.SkipHidden(absPath) {
-			continue
+		if err != nil {
+			break // EOF or read error; drain handled by Wait below.
 		}
-		matches = append(matches, absPath)
+		if len(matches) >= candidatePool {
+			// Enough candidates; stop reading and let the process be
+			// killed by the command context / Wait. Draining the rest
+			// would just buffer paths we are going to discard.
+			break
+		}
+	}
+
+	// Close our end so ripgrep gets SIGPIPE and stops, then reap it.
+	_ = stdout.Close()
+	waitErr := cmd.Wait()
+	if waitErr != nil && len(matches) == 0 {
+		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return nil, nil // No matches.
+		}
+		return nil, fmt.Errorf("ripgrep: %w\n%s", waitErr, stderr.String())
 	}
 
 	sort.SliceStable(matches, func(i, j int) bool {

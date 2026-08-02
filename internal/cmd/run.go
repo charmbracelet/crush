@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"charm.land/log/v2"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/format"
+	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -23,7 +23,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -105,16 +104,21 @@ crush run --continue "Follow up on your last response"
 
 			event.AppInitialized()
 
+			if !ws.Config.IsConfigured() {
+				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+			}
+
+			clientWs := workspace.NewClientWorkspace(c, *ws)
+			if err := clientWs.InitCoderAgentNonInteractive(ctx); err != nil {
+				return fmt.Errorf("failed to initialize agent: %w", err)
+			}
+
 			if sessionID != "" {
 				sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)
 				if err != nil {
 					return err
 				}
 				sessionID = sess.ID
-			}
-
-			if !ws.Config.IsConfigured() {
-				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 			}
 
 			if verbose {
@@ -141,6 +145,15 @@ crush run --continue "Follow up on your last response"
 		}
 
 		appWs := ws.(*workspace.AppWorkspace)
+
+		if sessionID != "" {
+			sess, err := resolveSessionID(ctx, appWs.App().Sessions, sessionID)
+			if err != nil {
+				return err
+			}
+			sessionID = sess.ID
+		}
+
 		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
 	},
 }
@@ -179,30 +192,19 @@ func runNonInteractive(
 
 	var (
 		spinner   *format.Spinner
-		stdoutTTY bool
 		stderrTTY bool
-		stdinTTY  bool
 		progress  bool
 	)
 
-	stdoutTTY = term.IsTerminal(os.Stdout.Fd())
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
-	stdinTTY = term.IsTerminal(os.Stdin.Fd())
 	progress = ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
 
 	if !hideSpinner && stderrTTY {
 		t := common.ThemeStylesFromConfig(ws.Config)
 
-		hasDarkBG := true
-		if stdinTTY && stdoutTTY {
-			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
-		}
-		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.WorkingLabelColor)
-
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,
 			Label:       "Generating",
-			LabelColor:  defaultFG,
 			GradColorA:  t.WorkingGradFromColor,
 			GradColorB:  t.WorkingGradToColor,
 			CycleColors: true,
@@ -262,6 +264,11 @@ func runNonInteractive(
 		read:      make(map[string]int),
 	}
 
+	// Start herdr integration when running inside a herdr pane.
+	hc := herdr.Init()
+	hc.SetSessionID(sess.ID)
+	defer hc.Close()
+
 	defer func() {
 		if progress && stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
@@ -279,6 +286,11 @@ func runNonInteractive(
 			if !ok {
 				stopSpinner()
 				return nil
+			}
+
+			// Forward events to herdr if running inside a herdr pane.
+			if hev := herdr.Translate(ev); hev != nil {
+				hc.HandleEvent(hev)
 			}
 
 			done, err := stream.handle(ev, stopSpinner)

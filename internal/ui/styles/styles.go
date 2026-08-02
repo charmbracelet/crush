@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 const (
@@ -42,9 +43,10 @@ const (
 	TodoPendingIcon    string = "•"
 	TodoInProgressIcon string = "→"
 
-	ImageIcon string = "■"
-	TextIcon  string = "≡"
-	SkillIcon string = "▲"
+	ImageIcon  string = "■"
+	TextIcon   string = "≡"
+	SkillIcon  string = "▲"
+	RemoveIcon string = "✕"
 
 	ColorSwatchIcon string = "■"
 
@@ -63,12 +65,22 @@ const (
 )
 
 type Styles struct {
+	// ANSI holds the 16 standard ANSI colors (0-7 normal, 8-15 bright)
+	// used to remap legible colors onto raw terminal output, such as the
+	// output of bang-mode shell commands. Terminal programs emit the
+	// basic 16-color SGR codes (red, green, blue, …) and leave the actual
+	// colors up to the terminal; without this palette they fall through
+	// to the user's terminal defaults, which are often illegible on
+	// Crush's background. Defining them here keeps output readable and
+	// on-brand regardless of terminal configuration.
+	ANSI [16]color.Color
+
 	// Header
 	Header struct {
 		Charm             lipgloss.Style // Style for "Charm™" label
 		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
 		Percentage        lipgloss.Style // Style for context percentage
-		Hypercredit       lipgloss.Style // Style for Hypercredit count (◆ N)
+		HypercreditIcon   lipgloss.Style // Style for Hypercredit count (◆ N)
 		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
 		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
 		WorkingDir        lipgloss.Style // Style for current working directory
@@ -109,8 +121,10 @@ type Styles struct {
 
 	// Buttons
 	Button struct {
-		Focused lipgloss.Style
-		Blurred lipgloss.Style
+		Focused  lipgloss.Style
+		Blurred  lipgloss.Style
+		Hovered  lipgloss.Style
+		Negative lipgloss.Style // Selected negative/destructive action.
 	}
 
 	// Editor
@@ -126,6 +140,28 @@ type Styles struct {
 		PromptYoloIconBlurred lipgloss.Style
 		PromptYoloDotsFocused lipgloss.Style
 		PromptYoloDotsBlurred lipgloss.Style
+
+		// Bang mode prompt (" ! " icon + ":::" dots, Turtle color).
+		PromptBangIconFocused lipgloss.Style
+		PromptBangIconBlurred lipgloss.Style
+		PromptBangDotsFocused lipgloss.Style
+		PromptBangDotsBlurred lipgloss.Style
+
+		// Question mode prompt (" ? " icon + ":::" dots).
+		PromptQuestionIconFocused lipgloss.Style
+		PromptQuestionIconBlurred lipgloss.Style
+
+		// Question choice styling.
+		QuestionSelected   lipgloss.Style // Active choice text (Dolly).
+		QuestionUnselected lipgloss.Style // Inactive header text (Sash).
+		QuestionBody       lipgloss.Style // Description/body text.
+		QuestionConfirm    lipgloss.Style // Confirm tab title (primary).
+		QuestionNote       lipgloss.Style // Saved note text (dimmer than body).
+		QuestionCursorBar  lipgloss.Style // Active cursor indicator bar.
+		QuestionRadioOn    lipgloss.Style // Selected single-choice radio.
+		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
+		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
+		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
 	}
 
 	// Radio
@@ -133,6 +169,17 @@ type Styles struct {
 		On    lipgloss.Style
 		Off   lipgloss.Style
 		Label lipgloss.Style // Text next to a radio button
+	}
+
+	// Tabs for batch question forms. Uses uv types for direct
+	// screen rendering without lipgloss.
+	Tab struct {
+		ActiveBorder          uv.Border
+		InactiveBorder        uv.Border
+		ActiveBorderBlurred   uv.Border
+		InactiveBorderBlurred uv.Border
+		ActiveStyle           uv.Style
+		InactiveStyle         uv.Style
 	}
 
 	// Background
@@ -157,6 +204,7 @@ type Styles struct {
 	WorkingGradFromColor color.Color
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
+	WorkingTimerColor    color.Color // Elapsed timer suffix color
 
 	// Section Title
 	Section struct {
@@ -211,6 +259,7 @@ type Styles struct {
 		BusyIcon        lipgloss.Style // Busy/starting status icon
 		ErrorIcon       lipgloss.Style // Error status icon
 		OnlineIcon      lipgloss.Style // Online/ready status icon
+		NeedsAuthIcon   lipgloss.Style // Needs authentication status icon
 		AdditionalText  lipgloss.Style // "None" and "…and N more" text
 		CapabilityCount lipgloss.Style // "N tools" / "N prompts" / "N resources"
 		RowTitleBase    lipgloss.Style // Base style applied over row titles in common.Status
@@ -244,7 +293,17 @@ type Styles struct {
 		ToolCallFocused  lipgloss.Style
 		ToolCallCompact  lipgloss.Style
 		ToolCallBlurred  lipgloss.Style
-		SectionHeader    lipgloss.Style
+
+		// Shell (bang mode) item styles.
+		ShellBarFocused    lipgloss.Style // Left vertical bar when focused.
+		ShellBarBlurred    lipgloss.Style // Left vertical bar when blurred.
+		ShellPrompt        lipgloss.Style // "$" prompt symbol (focused).
+		ShellPromptBlurred lipgloss.Style // "$" prompt symbol (blurred).
+		ShellCommand       lipgloss.Style // Command text (syntax-highlighted).
+		ShellOutput        lipgloss.Style // Plain output text.
+		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
+		ShellTruncation    lipgloss.Style // "N more lines" hint.
+		SectionHeader      lipgloss.Style
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
@@ -435,6 +494,7 @@ type Styles struct {
 
 		Quit struct {
 			Content lipgloss.Style // Wrapper for the quit dialog's inner content
+			Hint    lipgloss.Style // Style for quit hint
 			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 
@@ -511,14 +571,14 @@ type Styles struct {
 		Image    lipgloss.Style
 		Text     lipgloss.Style
 		Skill    lipgloss.Style
+		Remove   lipgloss.Style
 		Deleting lipgloss.Style
 	}
 
 	// Pills styles for todo/queue pills
 	Pills struct {
 		Base               lipgloss.Style // Base pill style with padding
-		Focused            lipgloss.Style // Focused pill with visible border
-		Blurred            lipgloss.Style // Blurred pill with hidden border
+		Focused            lipgloss.Style // Pill with visible rounded border
 		QueueItemPrefix    lipgloss.Style // Prefix for queue list items
 		QueueItemText      lipgloss.Style // Queue list item body text
 		QueueLabel         lipgloss.Style // "N Queued" label text

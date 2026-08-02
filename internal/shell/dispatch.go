@@ -45,7 +45,7 @@ const probeWindow = 128
 // blockFuncs is the block list used when building the nested runner for the
 // shell-source case, so deny rules apply recursively to commands invoked
 // from in-process scripts.
-func scriptDispatchHandler(blockFuncs []BlockFunc) func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+func scriptDispatchHandler(blockFuncs []BlockFunc) execMiddleware {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			if len(args) == 0 || !isPathPrefixed(args[0]) {
@@ -197,6 +197,7 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	cmd.Stdin = hc.Stdin
 	cmd.Stdout = hc.Stdout
 	cmd.Stderr = hc.Stderr
+	isolateProcess(cmd)
 
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
@@ -392,7 +393,7 @@ func runShellSource(ctx context.Context, path string, args []string, blockFuncs 
 		interp.Interactive(false),
 		interp.Env(hc.Env),
 		interp.Dir(hc.Dir),
-		interp.ExecHandlers(standardHandlers(blockFuncs)...),
+		execHandlerOption(blockFuncs),
 	}
 	if len(args) > 1 {
 		// Params with a leading "--" avoids any of args[1:] being

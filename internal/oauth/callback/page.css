@@ -1,0 +1,214 @@
+:root {
+  /* Dark mode surface colors - charmtone dark palette. */
+  --bg: #201f26; /* Pepper */
+  --bg-card: #2d2c36; /* BBQ */
+  --bg-inset: #201f26; /* Pepper */
+  --text: #f7f6fb; /* Salt */
+  --text-muted: #f7f6fb; /* Salt */
+  --border: #4d4c57; /* Iron */
+
+  /* Outcome accents; subject highlight follows --text unless light
+     mode overrides below. Error codes use Coral; the success rail
+     uses Blush. */
+  --blush: #ff84ff; /* Blush */
+  --coral: #ff577d; /* Coral */
+  --hazy: #f7f6fb; /* Salt — matches body text in dark */
+
+  /* Code-like fragments (the error code, the countdown) use mono. */
+  --font-mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
+
+  /* Large, soft lift — even quieter on dark surfaces. */
+  --card-shadow: 0 32px 96px rgba(0, 0, 0, 0.05);
+}
+
+/* Light: Sash ground, Salt card, Charple type — error codes stay Coral. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ecebf0; /* Sash */
+    --bg-card: #f7f6fb; /* Salt */
+    --bg-inset: #ecebf0; /* Sash */
+    --text: #6b50ff; /* Charple */
+    --text-muted: #6b50ff; /* Charple */
+    --border: #d6d3dc; /* Steep */
+    --hazy: #6b50ff; /* Charple */
+    --card-shadow: 0 32px 96px rgba(32, 31, 38, 0.1); /* Pepper */
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 2.5rem;
+  width: 100%;
+  max-width: 30rem;
+  text-align: center;
+  box-shadow: var(--card-shadow);
+}
+
+.card.ok {
+  --accent: var(--blush);
+}
+
+.card.failed {
+  --accent: var(--coral);
+}
+
+.mark {
+  width: 4.5rem;
+  margin: 0 auto 1.75rem;
+}
+
+.mark svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Tint the heart to match the outcome so the state is legible before a
+   single word is read. */
+.card.failed .mark .heart {
+  fill: var(--coral);
+}
+
+h1 {
+  font-size: 1.375rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.75rem;
+}
+
+.detail {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.detail .subject {
+  color: var(--hazy);
+}
+
+.reason {
+  margin-top: 1.5rem;
+  padding: 0.875rem 1rem;
+  background: var(--bg-inset);
+  border-radius: 8px;
+  text-align: left;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.reason .code {
+  display: block;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+
+/* The code is the only verbatim fragment, so the description beneath it
+   reads as a small label: caps and tracking set it apart without a second
+   typeface. */
+.reason {
+  letter-spacing: 0.01em;
+}
+
+.status {
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  /* Hold the line's height so swapping the message never shifts the card. */
+  min-height: 1.6em;
+}
+
+/* Failed pages have no rail, so the status line needs its own top spacing. */
+.card.failed .status {
+  margin-top: 2rem;
+}
+
+.count {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+/* Countdown bar above the closing status on success. Drains over the
+   closing delay so the wait is visible as well as spelled out. */
+.rail {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 2rem auto 0;
+  max-width: 12rem;
+  overflow: hidden;
+}
+
+.rail span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: left;
+}
+
+/* Only a running countdown drains. Otherwise the bar stays full, which is
+   also what a reader without JavaScript sees. */
+.rail.running span {
+  animation: drain var(--delay, 5s) linear forwards;
+}
+
+@keyframes drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail.running span {
+    animation: none;
+  }
+}
+
+.brand {
+  margin-top: 2.5rem;
+  color: var(--text);
+}
+
+.brand a {
+  display: inline-block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand a:hover {
+  opacity: 0.8;
+}
+
+.brand svg {
+  display: block;
+  height: 1.5rem;
+  width: auto;
+  /* viewBox-only SVGs collapse to 0 width under height + width:auto. */
+  aspect-ratio: 153 / 47;
+}

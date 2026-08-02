@@ -17,11 +17,20 @@ import (
 
 // publishConfigChanged publishes a ConfigChanged event on the workspace's
 // event broker so all subscribers (e.g. remote clients) refresh their
-// cached config snapshot.
+// cached config snapshot. It also re-initializes any MCP servers whose
+// configuration changed as a result of the write.
 func publishConfigChanged(ws *Workspace) {
 	if ws == nil || ws.App == nil {
 		return
 	}
+
+	// Re-init MCP servers whose config changed. MCP state is process-global,
+	// so this only needs to happen once regardless of which workspace
+	// triggered the write. Run async so unrelated config writes (model
+	// switches, API keys) don't block on MCP reconciliation. Bound to the
+	// workspace ctx so teardown cancels any in-flight init.
+	go mcptools.Reinitialize(ws.ctx, ws.Cfg)
+
 	ws.SendEvent(pubsub.Event[proto.ConfigChanged]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: proto.ConfigChanged{WorkspaceID: ws.ID},
@@ -222,13 +231,13 @@ func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error
 
 	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, ws.Cfg); err != nil {
 		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
-		delete(ws.Cfg.Config().MCP, config.DockerMCPName)
+		ws.Cfg.RemoveDockerMCPInMemory()
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
 	if err := ws.Cfg.PersistDockerMCPConfig(mcpConfig); err != nil {
 		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
-		delete(ws.Cfg.Config().MCP, config.DockerMCPName)
+		ws.Cfg.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
 	}
 
@@ -295,6 +304,37 @@ func (b *Backend) GetMCPPrompt(workspaceID, clientID, promptID string, args map[
 		return "", err
 	}
 	return commands.GetMCPPrompt(ws.Cfg, clientID, promptID, args)
+}
+
+func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return nil, err
+	}
+	prompts, err := commands.LoadMCPPrompts()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]proto.MCPPrompt, len(prompts))
+	for i, prompt := range prompts {
+		arguments := make([]proto.MCPPromptArgument, len(prompt.Arguments))
+		for j, argument := range prompt.Arguments {
+			arguments[j] = proto.MCPPromptArgument{
+				ID:          argument.ID,
+				Title:       argument.Title,
+				Description: argument.Description,
+				Required:    argument.Required,
+			}
+		}
+		result[i] = proto.MCPPrompt{
+			ID:          prompt.ID,
+			Title:       prompt.Title,
+			Description: prompt.Description,
+			PromptID:    prompt.PromptID,
+			ClientID:    prompt.ClientID,
+			Arguments:   arguments,
+		}
+	}
+	return result, nil
 }
 
 // GetWorkingDir returns the working directory for a workspace.

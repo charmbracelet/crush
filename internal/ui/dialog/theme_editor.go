@@ -170,7 +170,7 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			t.Dialog.NormalItem.GetMarginLeft() +
 			inputPrefixWidth
 	}
-	
+
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }
@@ -316,7 +316,7 @@ func newPaletteSlots() []paletteSlot {
 		{name: "error", get: func(p styles.Palette) string { return p.Error }, set: func(p *styles.Palette, v string) { p.Error = v }},
 		{name: "warning", get: func(p styles.Palette) string { return p.Warning }, set: func(p *styles.Palette, v string) { p.Warning = v }},
 		{name: "warning_subtle", get: func(p styles.Palette) string { return p.WarningSubtle }, set: func(p *styles.Palette, v string) { p.WarningSubtle = v }},
-		{name: "denied", get: func(p styles.Palette) string { return p.Denied }, set: func(p *styles.Palette, v string) { p.Denied = v }},
+		{name: "attention", get: func(p styles.Palette) string { return p.Attention }, set: func(p *styles.Palette, v string) { p.Attention = v }},
 		{name: "busy", get: func(p styles.Palette) string { return p.Busy }, set: func(p *styles.Palette, v string) { p.Busy = v }},
 		{name: "info", get: func(p styles.Palette) string { return p.Info }, set: func(p *styles.Palette, v string) { p.Info = v }},
 		{name: "info_more_subtle", get: func(p styles.Palette) string { return p.InfoMoreSubtle }, set: func(p *styles.Palette, v string) { p.InfoMoreSubtle = v }},

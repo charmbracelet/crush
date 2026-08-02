@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type FileInfo struct {
@@ -86,15 +88,21 @@ func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
 //
 // Does not respect gitignore.
 func Glob(pattern string, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(pattern, cwd, limit, false)
+	return globWithDoubleStar(context.Background(), pattern, cwd, limit, false)
 }
 
 // GlobGitignoreAware globs files respecting gitignore.
 func GlobGitignoreAware(pattern string, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(pattern, cwd, limit, true)
+	return globWithDoubleStar(context.Background(), pattern, cwd, limit, true)
 }
 
-func globWithDoubleStar(pattern, searchPath string, limit int, gitignore bool) ([]string, bool, error) {
+// GlobGitignoreAwareCtx is like [GlobGitignoreAware] but stops early when ctx
+// is cancelled (e.g. on timeout), returning whatever was found so far.
+func GlobGitignoreAwareCtx(ctx context.Context, pattern, cwd string, limit int) ([]string, bool, error) {
+	return globWithDoubleStar(ctx, pattern, cwd, limit, true)
+}
+
+func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit int, gitignore bool) ([]string, bool, error) {
 	// Normalize pattern to forward slashes on Windows so their config can use
 	// backslashes
 	pattern = filepath.ToSlash(pattern)
@@ -102,11 +110,18 @@ func globWithDoubleStar(pattern, searchPath string, limit int, gitignore bool) (
 	walker := NewFastGlobWalker(searchPath)
 	found := csync.NewSlice[FileInfo]()
 	conf := fastwalk.Config{
-		Follow:  true,
+		// Do not follow symlinks: following them lets the walk escape the
+		// search root (into module caches, the nix store, $HOME, etc.) and
+		// chase cycles, which is slow and can hang. Mirrors the rg path,
+		// which no longer passes -L.
+		Follow:  false,
 		ToSlash: fastwalk.DefaultToSlash(),
 		Sort:    fastwalk.SortFilesFirst,
 	}
 	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return filepath.SkipAll // Timed out or cancelled; stop walking.
+		}
 		if err != nil {
 			return nil // Skip files we can't access
 		}
@@ -190,7 +205,11 @@ func DirTrim(pwd string, lim int) string {
 		if i == len(dirs)-1 {
 			out = dirs[i]
 		} else if i >= len(dirs)-lim {
-			out = string(dirs[i][0]) + out
+			// Keep the first grapheme cluster, not the first byte: CJK,
+			// combining marks, and emoji can span multiple bytes and runes,
+			// so a byte or single rune would render the wrong character.
+			first, _ := ansi.FirstGraphemeCluster(dirs[i], ansi.GraphemeWidth)
+			out = first + out
 		} else {
 			out = "..." + out
 			break

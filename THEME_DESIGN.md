@@ -110,7 +110,7 @@ type Palette struct {
     Error             string `json:"error,omitempty"`
     Warning           string `json:"warning,omitempty"`
     WarningSubtle     string `json:"warning_subtle,omitempty"`
-    Denied            string `json:"denied,omitempty"`
+    Attention         string `json:"attention,omitempty"`
     Busy              string `json:"busy,omitempty"`
     Info              string `json:"info,omitempty"`
     InfoMoreSubtle    string `json:"info_more_subtle,omitempty"`
@@ -228,7 +228,7 @@ Current `quickStyleOpts` fields (as of main `a4181d6d`):
 | `error` | Error state |
 | `warning` | Warning state |
 | `warningSubtle` | Subtle warning |
-| `denied` | Permission denied |
+| `attention` | Needs attention (e.g. auth required) |
 | `busy` | Loading/processing |
 | `info` | Informational |
 | `infoMoreSubtle` | Subtle info |

@@ -3,12 +3,14 @@ package backend
 import (
 	"context"
 	"errors"
+	"os"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // SendMessage validates and accepts a prompt for the workspace's agent,
@@ -140,13 +142,16 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 }
 
 // InitAgent initializes the coder agent for the workspace.
-func (b *Backend) InitAgent(ctx context.Context, workspaceID string) error {
+func (b *Backend) InitAgent(ctx context.Context, workspaceID string, interactive bool) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
 
-	return ws.InitCoderAgent(ctx)
+	if interactive {
+		return ws.InitCoderAgent(ctx)
+	}
+	return ws.InitCoderAgentNonInteractive(ctx)
 }
 
 // UpdateAgent reloads the agent model configuration.
@@ -237,4 +242,35 @@ func (b *Backend) GetDefaultSmallModel(workspaceID, providerID string) (config.S
 	}
 
 	return ws.GetDefaultSmallModel(providerID), nil
+}
+
+// RunShellCommand runs a shell command in the workspace directory and
+// persists the command + output as a user message in the session.
+func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req proto.ShellCommandRequest) (proto.ShellCommandResponse, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return proto.ShellCommandResponse{}, err
+	}
+
+	var persist shell.PersistFunc
+	if req.SessionID != "" {
+		persist = func(cmd, output string, exitCode int) error {
+			return shell.PersistOutput(ctx, ws.Messages, req.SessionID, cmd, output, exitCode)
+		}
+	}
+
+	result, err := shell.RunAndPersist(ctx, shell.RunOptions{
+		Command:   req.Command,
+		Cwd:       ws.Path,
+		Env:       append(os.Environ(), ws.Env...),
+		TermWidth: req.TermWidth,
+	}, persist)
+	if err != nil {
+		return proto.ShellCommandResponse{}, err
+	}
+
+	return proto.ShellCommandResponse{
+		Output:   result.Output,
+		ExitCode: result.ExitCode,
+	}, nil
 }

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/mattn/go-isatty"
@@ -16,8 +15,8 @@ import (
 
 var modelsCmd = &cobra.Command{
 	Use:   "models",
-	Short: "List all available models from configured providers",
-	Long:  `List all available models from configured providers. Shows provider name and model IDs.`,
+	Short: "List all available models from known providers",
+	Long:  `List all available models from known providers. Shows provider name and model IDs. Unconfigured providers are marked with (not configured).`,
 	Example: `# List all available models
 crush models
 
@@ -38,53 +37,94 @@ crush models gpt5`,
 			return err
 		}
 
-		if !cfg.Config().IsConfigured() {
-			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
-		}
-
 		term := strings.ToLower(strings.Join(args, " "))
-		filter := func(p config.ProviderConfig, m catwalk.Model) bool {
-			for _, s := range []string{p.ID, p.Name, m.ID, m.Name} {
-				if term == "" || strings.Contains(strings.ToLower(s), term) {
-					return true
-				}
-			}
-			return false
+
+		type providerEntry struct {
+			name       string
+			models     []string
+			configured bool
 		}
 
-		var providerIDs []string
-		providerModels := make(map[string][]string)
+		entries := make(map[string]*providerEntry)
 
+		// Add configured providers first.
 		for providerID, provider := range cfg.Config().Providers.Seq2() {
 			if provider.Disable {
 				continue
 			}
-			var found bool
-			for _, model := range provider.Models {
-				if !filter(provider, model) {
-					continue
-				}
-				providerModels[providerID] = append(providerModels[providerID], model.ID)
-				found = true
+			entry := &providerEntry{
+				name:       provider.Name,
+				configured: true,
 			}
-			if !found {
+			for _, model := range provider.Models {
+				if term != "" {
+					matched := false
+					for _, s := range []string{provider.ID, provider.Name, model.ID, model.Name} {
+						if strings.Contains(strings.ToLower(s), term) {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						continue
+					}
+				}
+				entry.models = append(entry.models, model.ID)
+			}
+			if len(entry.models) > 0 {
+				slices.Sort(entry.models)
+				entries[providerID] = entry
+			}
+		}
+
+		// Add known but unconfigured providers from catwalk.
+		for _, kp := range cfg.KnownProviders() {
+			providerID := string(kp.ID)
+			if _, exists := entries[providerID]; exists {
 				continue
 			}
-			slices.Sort(providerModels[providerID])
-			providerIDs = append(providerIDs, providerID)
+			entry := &providerEntry{
+				name:       kp.Name,
+				configured: false,
+			}
+			for _, model := range kp.Models {
+				if term != "" {
+					matched := false
+					for _, s := range []string{providerID, kp.Name, model.ID, model.Name} {
+						if strings.Contains(strings.ToLower(s), term) {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						continue
+					}
+				}
+				entry.models = append(entry.models, model.ID)
+			}
+			if len(entry.models) > 0 {
+				slices.Sort(entry.models)
+				entries[providerID] = entry
+			}
+		}
+
+		var providerIDs []string
+		for id := range entries {
+			providerIDs = append(providerIDs, id)
 		}
 		sort.Strings(providerIDs)
 
 		if len(providerIDs) == 0 && len(args) == 0 {
-			return fmt.Errorf("no enabled providers found")
+			return fmt.Errorf("no providers found")
 		}
 		if len(providerIDs) == 0 {
-			return fmt.Errorf("no enabled providers found matching %q", term)
+			return fmt.Errorf("no providers found matching %q", term)
 		}
 
 		if !isatty.IsTerminal(os.Stdout.Fd()) {
 			for _, providerID := range providerIDs {
-				for _, modelID := range providerModels[providerID] {
+				entry := entries[providerID]
+				for _, modelID := range entry.models {
 					fmt.Println(providerID + "/" + modelID)
 				}
 			}
@@ -93,8 +133,13 @@ crush models gpt5`,
 
 		t := tree.New()
 		for _, providerID := range providerIDs {
-			providerNode := tree.Root(providerID)
-			for _, modelID := range providerModels[providerID] {
+			entry := entries[providerID]
+			label := providerID
+			if !entry.configured {
+				label += " (not configured)"
+			}
+			providerNode := tree.Root(label)
+			for _, modelID := range entry.models {
 				providerNode.Child(modelID)
 			}
 			t.Child(providerNode)

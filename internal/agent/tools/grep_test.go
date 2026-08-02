@@ -391,6 +391,43 @@ func TestIsTextFile(t *testing.T) {
 	}
 }
 
+func TestMultipleMatchesPerFile(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+
+	// "world" appears on lines 1 and 3, but not line 2. Both grep
+	// implementations must report every matching line, not just the first.
+	content := "Hello world.\nHello.\nHello world.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte(content), 0o644))
+
+	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
+		"regex": searchFilesWithRegex,
+		"rg": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchWithRipgrep(t.Context(), pattern, path, include)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if name == "rg" && getRg() == "" {
+				t.Skip("rg is not in $PATH")
+			}
+
+			matches, err := fn("world", tempDir, "")
+			require.NoError(t, err)
+			require.Len(t, matches, 2, "should report both matching lines")
+
+			lines := make([]int, len(matches))
+			for i, match := range matches {
+				lines[i] = match.lineNum
+				require.Equal(t, 7, match.charNum)
+				require.Equal(t, "Hello world.", match.lineText)
+			}
+			require.ElementsMatch(t, []int{1, 3}, lines)
+		})
+	}
+}
+
 func TestColumnMatch(t *testing.T) {
 	t.Parallel()
 

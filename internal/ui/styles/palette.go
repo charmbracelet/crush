@@ -56,7 +56,7 @@ type Palette struct {
 	Error             string `json:"error,omitempty"`
 	Warning           string `json:"warning,omitempty"`
 	WarningSubtle     string `json:"warning_subtle,omitempty"`
-	Denied            string `json:"denied,omitempty"`
+	Attention         string `json:"attention,omitempty"`
 	Busy              string `json:"busy,omitempty"`
 	Info              string `json:"info,omitempty"`
 	InfoMoreSubtle    string `json:"info_more_subtle,omitempty"`
@@ -92,7 +92,7 @@ func PaletteFromOpts(o quickStyleOpts) Palette {
 		Error:             colorToHex(o.error),
 		Warning:           colorToHex(o.warning),
 		WarningSubtle:     colorToHex(o.warningSubtle),
-		Denied:            colorToHex(o.denied),
+		Attention:         colorToHex(o.attention),
 		Busy:              colorToHex(o.busy),
 		Info:              colorToHex(o.info),
 		InfoMoreSubtle:    colorToHex(o.infoMoreSubtle),
@@ -130,7 +130,7 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		error:             resolveColor(p.Error, base.error),
 		warning:           resolveColor(p.Warning, base.warning),
 		warningSubtle:     resolveColor(p.WarningSubtle, base.warningSubtle),
-		denied:            resolveColor(p.Denied, base.denied),
+		attention:         resolveColor(p.Attention, base.attention),
 		busy:              resolveColor(p.Busy, base.busy),
 		info:              resolveColor(p.Info, base.info),
 		infoMoreSubtle:    resolveColor(p.InfoMoreSubtle, base.infoMoreSubtle),
@@ -138,6 +138,26 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 		success:           resolveColor(p.Success, base.success),
 		successMoreSubtle: resolveColor(p.SuccessMoreSubtle, base.successMoreSubtle),
 		successMostSubtle: resolveColor(p.SuccessMostSubtle, base.successMostSubtle),
+
+		// The ANSI 16-color palette isn't customizable, so it's always
+		// inherited from the base theme.
+		ansiBlack:   base.ansiBlack,
+		ansiRed:     base.ansiRed,
+		ansiGreen:   base.ansiGreen,
+		ansiYellow:  base.ansiYellow,
+		ansiBlue:    base.ansiBlue,
+		ansiMagenta: base.ansiMagenta,
+		ansiCyan:    base.ansiCyan,
+		ansiWhite:   base.ansiWhite,
+
+		ansiBrightBlack:   base.ansiBrightBlack,
+		ansiBrightRed:     base.ansiBrightRed,
+		ansiBrightGreen:   base.ansiBrightGreen,
+		ansiBrightYellow:  base.ansiBrightYellow,
+		ansiBrightBlue:    base.ansiBrightBlue,
+		ansiBrightMagenta: base.ansiBrightMagenta,
+		ansiBrightCyan:    base.ansiBrightCyan,
+		ansiBrightWhite:   base.ansiBrightWhite,
 	}
 }
 
@@ -221,7 +241,7 @@ func (p Palette) Validate() error {
 	validate("error", p.Error)
 	validate("warning", p.Warning)
 	validate("warning_subtle", p.WarningSubtle)
-	validate("denied", p.Denied)
+	validate("attention", p.Attention)
 	validate("busy", p.Busy)
 	validate("info", p.Info)
 	validate("info_more_subtle", p.InfoMoreSubtle)
@@ -249,27 +269,40 @@ func ThemePalette(name string) (Palette, error) {
 // MergePalette applies palette overrides on top of a built-in base theme
 // and returns the fully resolved palette. Empty baseName uses Charmtone.
 func MergePalette(baseName string, palette Palette) (Palette, error) {
+	base, err := baseThemeOpts(baseName)
+	if err != nil {
+		return Palette{}, err
+	}
 	if err := palette.Validate(); err != nil {
 		return Palette{}, err
 	}
-	if baseName == "" {
-		baseName = "charmtone"
+	return PaletteFromOpts(palette.ToQuickStyleOpts(base)), nil
+}
+
+// baseThemeOpts returns the quickStyleOpts of the named built-in theme.
+// An empty name yields the default Charmtone palette.
+func baseThemeOpts(name string) (quickStyleOpts, error) {
+	if name == "" {
+		name = "charmtone"
 	}
-	optsFn, ok := builtinThemes[strings.ToLower(baseName)]
+	optsFn, ok := builtinThemes[strings.ToLower(name)]
 	if !ok {
-		return Palette{}, fmt.Errorf("unknown theme %q; available themes: %s", baseName, strings.Join(BuiltinThemeNames(), ", "))
+		return quickStyleOpts{}, fmt.Errorf("unknown theme %q; available themes: %s", name, strings.Join(BuiltinThemeNames(), ", "))
 	}
-	return PaletteFromOpts(palette.ToQuickStyleOpts(optsFn())), nil
+	return optsFn(), nil
 }
 
 // LoadPaletteTheme builds Styles by applying palette overrides on top of
 // a built-in base theme. Empty baseName uses the default Charmtone theme.
 func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
-	merged, err := MergePalette(baseName, palette)
+	base, err := baseThemeOpts(baseName)
 	if err != nil {
 		return Styles{}, err
 	}
-	return quickStyle(merged.ToQuickStyleOpts(quickStyleOpts{})), nil
+	if err := palette.Validate(); err != nil {
+		return Styles{}, err
+	}
+	return quickStyle(palette.ToQuickStyleOpts(base)), nil
 }
 
 // colorToHex converts a color.Color to its display string. If the color

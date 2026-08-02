@@ -67,6 +67,15 @@ func TestA2UIWidthHint(t *testing.T) {
 	}
 }
 
+func TestStripA2UIWidthParam(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "cairn://run/x/a2ui", stripA2UIWidthParam("cairn://run/x/a2ui?w=114"))
+	require.Equal(t, "cairn://run/x/a2ui?theme=dark", stripA2UIWidthParam("cairn://run/x/a2ui?theme=dark&w=114"))
+	require.Equal(t, "cairn://run/x/a2ui", stripA2UIWidthParam("cairn://run/x/a2ui"))
+	require.Equal(t, "mcp://cairn/artifact/y", stripA2UIWidthParam("mcp://cairn/artifact/y"))
+}
+
 func TestGetContentWidthFromContext(t *testing.T) {
 	t.Parallel()
 

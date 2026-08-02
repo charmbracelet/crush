@@ -71,6 +71,18 @@ func TestSplitMCPResourceContents(t *testing.T) {
 		require.True(t, strings.HasPrefix(textParts[1], A2UISurfacePlaceholderPrefix))
 	})
 
+	t.Run("placeholder hides the injected width hint", func(t *testing.T) {
+		t.Parallel()
+		// Servers echo the request URI verbatim, ?w=N included; the model
+		// must not learn a width-frozen URI it could reuse after a resize.
+		textParts, _ := splitMCPResourceContents([]*mcp.ResourceContents{
+			{URI: "cairn://run/x/a2ui?w=114", MIMEType: a2uiMIMEType, Text: testA2UIPayload},
+		}, true)
+		require.Len(t, textParts, 1)
+		require.Contains(t, textParts[0], "cairn://run/x/a2ui ")
+		require.NotContains(t, textParts[0], "w=114")
+	})
+
 	t.Run("nil and empty entries are skipped", func(t *testing.T) {
 		t.Parallel()
 		textParts, meta := splitMCPResourceContents([]*mcp.ResourceContents{

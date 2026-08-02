@@ -77,8 +77,13 @@ func splitMCPResourceContents(contents []*mcp.ResourceContents, divert bool) ([]
 			metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+text+"</a2ui-json>")
 			// The placeholder is a single-line protocol the chat renderer
 			// strips line-wise — a server-controlled URI must not be able
-			// to break out of it with embedded newlines.
+			// to break out of it with embedded newlines. The injected
+			// width hint is stripped too: servers echo the request URI
+			// verbatim, and a model that re-reads the echoed ?w=N URI
+			// after a terminal resize would freeze the surface at the old
+			// width (a2uiWidthHint respects an existing w=).
 			uri := strings.NewReplacer("\n", " ", "\r", " ").Replace(content.URI)
+			uri = stripA2UIWidthParam(uri)
 			textParts = append(textParts, A2UISurfacePlaceholderPrefix+uri+" — the user can already see it; do not repeat or echo its JSON payload]")
 			continue
 		}
@@ -115,6 +120,23 @@ func a2uiWidthHint(uri string, width int) string {
 		sep = "&"
 	}
 	return fmt.Sprintf("%s%sw=%d", uri, sep, width)
+}
+
+// stripA2UIWidthParam removes the w= query parameter from a URI for display
+// in the model-facing placeholder. This URI is informational (never
+// fetched), so re-encoding any remaining query parameters is harmless.
+func stripA2UIWidthParam(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil || !u.Query().Has("w") {
+		return uri
+	}
+	q := u.Query()
+	q.Del("w")
+	base, _, _ := strings.Cut(uri, "?")
+	if enc := q.Encode(); enc != "" {
+		return base + "?" + enc
+	}
+	return base
 }
 
 func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
@@ -177,9 +199,13 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 			// Divert A2UI payloads to UI-only metadata only when a chat UI
 			// will actually render them: on channel-originated turns the
 			// reply travels back over the channel and the model needs the
-			// payload to relay it, and disable_a2ui deployments opted out
-			// of surfaces entirely.
-			divert := GetChannelFromContext(ctx) == "" && !cfg.Config().Options.DisableA2UI
+			// payload to relay it, disable_a2ui deployments opted out of
+			// surfaces entirely, and a zero content width means no
+			// interactive UI tagged this turn (headless crush run, remote
+			// clients that predate the wire field).
+			divert := GetChannelFromContext(ctx) == "" &&
+				!cfg.Config().Options.DisableA2UI &&
+				GetContentWidthFromContext(ctx) > 0
 			textParts, metadata := splitMCPResourceContents(contents, divert)
 
 			if len(textParts) == 0 {

@@ -123,7 +123,8 @@ func FormatRetryStatus(n Notification, remaining time.Duration) string {
 	}
 	// Round up so "4.1s left" shows as 5s rather than dropping early.
 	secs := int((remaining + time.Second - 1) / time.Second)
-	msg := fmt.Sprintf("Retrying in %ds (attempt %d/%d)", secs, n.Attempt, n.MaxRetries)
+	left := n.MaxRetries - n.Attempt + 1
+	msg := fmt.Sprintf("Retrying in %ds (%d/%d retries left)", secs, left, n.MaxRetries)
 	reason := strings.TrimSpace(n.Message)
 	if reason != "" {
 		msg += " - " + reason

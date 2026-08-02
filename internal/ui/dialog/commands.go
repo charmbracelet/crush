@@ -553,6 +553,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(
 			c.com.Styles,
+			"workflow_progress",
+			"Workflow Progress",
+			"ctrl+w",
+			ActionOpenDialog{DialogID: WorkflowPopupID},
+		).WithAliases("workflow", "wf").WithDescription("Show live progress of running workflow"))
+		commands = append(commands, NewCommandItem(
+			c.com.Styles,
 			"toggle_remote_control",
 			"Remote Control",
 			"",

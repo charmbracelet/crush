@@ -398,3 +398,60 @@ func TestBashTool_ManualBackgroundRelease(t *testing.T) {
 		t.Fatal("bash tool did not return after manual background")
 	}
 }
+
+func TestJobOutputTool_ManualBackgroundRelease(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	sessionID := "job-output-bg-" + t.Name()
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, sessionID)
+
+	bgManager := shell.GetBackgroundShellManager()
+	bgShell, err := bgManager.Start(ctx, workingDir, nil, "sleep 30", "")
+	require.NoError(t, err)
+	defer bgManager.Kill(bgShell.ID)
+
+	tool := NewJobOutputTool()
+
+	type result struct {
+		resp fantasy.ToolResponse
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		input, err := json.Marshal(JobOutputParams{
+			ShellID: bgShell.ID,
+			Wait:    true,
+		})
+		if err != nil {
+			done <- result{err: err}
+			return
+		}
+		resp, err := tool.Run(ctx, fantasy.ToolCall{
+			ID:    "tc2",
+			Name:  JobOutputToolName,
+			Input: string(input),
+		})
+		done <- result{resp: resp, err: err}
+	}()
+
+	// Wait until the foreground wait is registered.
+	deadline := time.Now().Add(5 * time.Second)
+	for !shell.HasForegroundWaits(sessionID) {
+		if time.Now().After(deadline) {
+			t.Fatal("foreground wait never registered for job_output")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	n := shell.ReleaseForegroundWaits(sessionID)
+	require.Equal(t, 1, n)
+
+	select {
+	case r := <-done:
+		require.NoError(t, r.err)
+		require.Contains(t, r.resp.Content, "Status: running")
+	case <-time.After(5 * time.Second):
+		t.Fatal("job_output tool did not return after manual background release")
+	}
+}

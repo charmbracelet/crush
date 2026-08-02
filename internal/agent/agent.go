@@ -89,10 +89,14 @@ var sideQuestionPrompt []byte
 //go:embed templates/plan_mode.md
 var planModePrompt string
 
-// Used to remove <think> tags from generated titles.
+// Used to remove <think>, DSML, and tool tags from generated outputs.
 var (
 	thinkTagRegex       = regexp.MustCompile(`(?s)<think>.*?</think>`)
 	orphanThinkTagRegex = regexp.MustCompile(`</?think>`)
+	dsmlTagRegex        = regexp.MustCompile(`(?s)<\|+DSML\|+.*?>.*?</\|+DSML\|+.*?>`)
+	orphanDsmlTagRegex  = regexp.MustCompile(`</?\|+DSML\|+.*?>`)
+	toolCallTagRegex    = regexp.MustCompile(`(?s)<(?:tool_call|function_call)>.*?</(?:tool_call|function_call)>`)
+	orphanIntroRegex    = regexp.MustCompile(`(?i)^(?:let me check|checking|running).*?:\s*$`)
 )
 
 type SessionAgentCall struct {
@@ -935,7 +939,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		maxOutputTokens = &call.MaxOutputTokens
 	}
 	maxRetries := providerMaxRetries
-	var retryAttempt atomic.Int32
+	var retryAttempt retryAttemptCounter
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -950,6 +954,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		FrequencyPenalty: call.FrequencyPenalty,
 		MaxRetries:       &maxRetries,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// Fantasy gives each step its own retry budget. Reset the
+			// user-visible attempt counter to match, otherwise retries
+			// on later steps keep climbing past a prior success
+			// ("attempt 5/6" after the previous step already recovered).
+			retryAttempt.Reset()
+
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
@@ -1073,7 +1083,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			attempt := int(retryAttempt.Add(1))
+			attempt := retryAttempt.Next()
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay, attempt, maxRetries)...)
 			// Reset streamed content so the retried response doesn't
 			// concatenate with partial content from the failed attempt.
@@ -1087,7 +1097,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 			a.publishRetry(call.SessionID, currentSession.Title, largeModel.ModelCfg.Provider, err, delay, attempt, maxRetries)
 		},
-		OnAuthRefresh: call.OnAuthRefresh,
+		OnAuthRefresh: func(callContext context.Context, err *fantasy.ProviderError) error {
+			if call.OnAuthRefresh != nil {
+				refreshErr := call.OnAuthRefresh(callContext, err)
+				if refreshErr == nil {
+					retryAttempt.Reset()
+				}
+				return refreshErr
+			}
+			return nil
+		},
 		ModelProvider: func() fantasy.LanguageModel {
 			m := a.largeModel.Get()
 			slog.Info("ModelProvider called",
@@ -1533,7 +1552,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
 	maxRetries := providerMaxRetries
-	var retryAttempt atomic.Int32
+	var retryAttempt retryAttemptCounter
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
@@ -1545,6 +1564,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			return a.largeModel.Get().Model
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// Match fantasy's per-step retry budget (see run path).
+			retryAttempt.Reset()
+
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
@@ -1552,7 +1574,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			return callContext, prepared, nil
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			attempt := int(retryAttempt.Add(1))
+			attempt := retryAttempt.Next()
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay, attempt, maxRetries)...)
 			summaryMessage.ResetStreamedContent()
 			if updateErr := a.messages.Update(genCtx, summaryMessage); updateErr != nil {
@@ -1991,7 +2013,7 @@ func (a *sessionAgent) SideQuestion(ctx context.Context, sessionID, question str
 		promptTokens := res.TotalUsage.InputTokens + res.TotalUsage.CacheCreationTokens
 		completionTokens := res.TotalUsage.OutputTokens
 		return SideQuestionResult{
-			Answer:           strings.TrimSpace(res.Response.Content.Text()),
+			Answer:           sanitizeSideQuestionAnswer(res.Response.Content.Text()),
 			Model:            chosen.ModelCfg.Model,
 			Provider:         chosen.ModelCfg.Provider,
 			PromptTokens:     promptTokens,
@@ -1999,6 +2021,17 @@ func (a *sessionAgent) SideQuestion(ctx context.Context, sessionID, question str
 		}, nil
 	}
 	return SideQuestionResult{}, lastErr
+}
+
+func sanitizeSideQuestionAnswer(ans string) string {
+	ans = thinkTagRegex.ReplaceAllString(ans, "")
+	ans = orphanThinkTagRegex.ReplaceAllString(ans, "")
+	ans = dsmlTagRegex.ReplaceAllString(ans, "")
+	ans = orphanDsmlTagRegex.ReplaceAllString(ans, "")
+	ans = toolCallTagRegex.ReplaceAllString(ans, "")
+	ans = strings.TrimSpace(ans)
+	ans = orphanIntroRegex.ReplaceAllString(ans, "")
+	return strings.TrimSpace(ans)
 }
 
 // GenerateTitle generates a session title based on the initial prompt.
@@ -2639,16 +2672,33 @@ func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration, att
 	return fields
 }
 
+// retryAttemptCounter tracks the 1-based attempt number shown in the
+// retry countdown. Fantasy allocates a fresh MaxRetries budget per
+// stream step (and per AgentStreamCall), so callers must Reset between
+// those boundaries or the UI keeps climbing past a prior recovery
+// ("attempt 5/6") and can exceed maxRetries ("attempt 7/6").
+type retryAttemptCounter struct {
+	n atomic.Int32
+}
+
+// Next returns the next 1-based attempt number.
+func (c *retryAttemptCounter) Next() int {
+	return int(c.n.Add(1))
+}
+
+// Reset clears the counter so the next Next() returns 1.
+func (c *retryAttemptCounter) Reset() {
+	c.n.Store(0)
+}
+
 // newRetryAttemptReporter returns an OnRetry callback with a fresh
-// attempt counter. Fantasy resets the retry budget for every
-// AgentStreamCall it runs, so a callback reused across two calls (the
-// GenerateTitle small→large fallback) must not carry the first call's
-// count into the second — otherwise the logged and user-visible attempt
-// number exceeds maxRetries ("attempt 7/6").
+// attempt counter. Used when a single call has no PrepareStep hook to
+// reset on (GenerateTitle's small→large fallback): each call site must
+// install a new reporter so the first call's count does not leak.
 func newRetryAttemptReporter(a *sessionAgent, sessionID, providerID string, maxRetries int) func(*fantasy.ProviderError, time.Duration) {
-	var retryAttempt atomic.Int32
+	var retryAttempt retryAttemptCounter
 	return func(err *fantasy.ProviderError, delay time.Duration) {
-		attempt := int(retryAttempt.Add(1))
+		attempt := retryAttempt.Next()
 		slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay, attempt, maxRetries)...)
 		a.publishRetry(sessionID, "", providerID, err, delay, attempt, maxRetries)
 	}

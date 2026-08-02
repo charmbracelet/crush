@@ -248,6 +248,9 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
 		Suffix: func() string {
+			if a.workingLabel != "" {
+				return ""
+			}
 			return common.Elapsed()
 		},
 		SuffixColor: sty.WorkingTimerColor,

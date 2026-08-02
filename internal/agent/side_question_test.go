@@ -65,3 +65,52 @@ func TestSideQuestionAttemptsOrder(t *testing.T) {
 		require.Empty(t, got)
 	})
 }
+
+func TestSanitizeSideQuestionAnswer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "plain answer unchanged",
+			input:    "This model conversion is finished.",
+			expected: "This model conversion is finished.",
+		},
+		{
+			name:     "strips DSML tool call tags",
+			input:    "<|DSML|tool_calls><||DSML||invoke name=\"bash\"><||DSML||parameter name=\"command\" string=\"true\">ls -la</||DSML||parameter></||DSML||invoke></|DSML|tool_calls>Check status.",
+			expected: "Check status.",
+		},
+		{
+			name:     "strips orphan DSML tags",
+			input:    "<||DSML||invoke name=\"bash\">Some content",
+			expected: "Some content",
+		},
+		{
+			name:     "strips think tags",
+			input:    "<think>Thinking process...</think>Here is the answer.",
+			expected: "Here is the answer.",
+		},
+		{
+			name:     "strips tool_call tags",
+			input:    "<tool_call>ls -la</tool_call>Finished",
+			expected: "Finished",
+		},
+		{
+			name:     "strips orphan intro before tool call",
+			input:    "Let me check actual progress:\n<|DSML|tool_calls><||DSML||invoke name=\"bash\"><||DSML||parameter name=\"command\" string=\"true\">ls</||DSML||parameter></||DSML||invoke></|DSML|tool_calls>",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sanitizeSideQuestionAnswer(tt.input)
+			require.Equal(t, tt.expected, got)
+		})
+	}
+}

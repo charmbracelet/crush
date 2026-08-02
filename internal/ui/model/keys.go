@@ -71,6 +71,7 @@ type KeyMap struct {
 	Tab        key.Binding
 	ToggleYolo key.Binding
 	TogglePlan key.Binding
+	Workflow   key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -110,6 +111,10 @@ func DefaultKeyMap() KeyMap {
 		TogglePlan: key.NewBinding(
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "toggle plan mode"),
+		),
+		Workflow: key.NewBinding(
+			key.WithKeys("ctrl+w"),
+			key.WithHelp("ctrl+w", "workflow progress"),
 		),
 	}
 

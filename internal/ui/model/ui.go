@@ -228,8 +228,9 @@ type UI struct {
 	keyMap KeyMap
 	keyenh tea.KeyboardEnhancementsMsg
 
-	dialog *dialog.Overlay
-	status *Status
+	dialog        *dialog.Overlay
+	status        *Status
+	workflowPopup *dialog.WorkflowPopup
 
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
@@ -752,6 +753,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionFiles = msg.files
 		// A retry countdown belongs to the previous session; drop it.
 		m.clearRetryCountdown()
+		m.dialog.CloseDialog(dialog.WorkflowPopupID)
+		m.workflowPopup = nil
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
@@ -2496,6 +2499,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
+		case key.Matches(msg, m.keyMap.Workflow):
+			if m.workflowPopup == nil {
+				m.workflowPopup = dialog.NewWorkflowPopup(m.com, "")
+			}
+			m.workflowPopup.SetDismissed(false)
+			if !m.dialog.ContainsDialog(m.workflowPopup.ID()) {
+				m.dialog.OpenDialog(m.workflowPopup)
+			}
+			return true
+
 		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
 			m.detailsOpen = !m.detailsOpen
 			m.updateLayoutAndSize()
@@ -4570,11 +4583,29 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openMemoryDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.WorkflowPopupID:
+		if cmd := m.openWorkflowPopupDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
 	}
 	return tea.Batch(cmds...)
+}
+
+// openWorkflowPopupDialog opens or brings to front the workflow progress popup.
+func (m *UI) openWorkflowPopupDialog() tea.Cmd {
+	if m.workflowPopup == nil {
+		m.workflowPopup = dialog.NewWorkflowPopup(m.com, "")
+	}
+	m.workflowPopup.SetDismissed(false)
+	if !m.dialog.ContainsDialog(m.workflowPopup.ID()) {
+		m.dialog.OpenDialog(m.workflowPopup)
+	} else {
+		m.dialog.BringToFront(m.workflowPopup.ID())
+	}
+	return nil
 }
 
 // openBtwDialog opens the ephemeral side-question dialog.
@@ -4994,20 +5025,45 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 }
 
 // handleWorkflowProgress forwards a live workflow progress event to the
-// corresponding WorkflowToolMessageItem in the chat.
+// corresponding WorkflowToolMessageItem in the chat and updates the workflow popup overlay.
 func (m *UI) handleWorkflowProgress(wp *notify.WorkflowProgress) tea.Cmd {
 	if wp == nil {
 		return nil
 	}
 	item := m.chat.MessageItem(wp.ToolCallID)
-	if item == nil {
-		return nil
+	var wf *chat.WorkflowToolMessageItem
+	if item != nil {
+		if w, ok := item.(*chat.WorkflowToolMessageItem); ok {
+			wf = w
+			wf.SetProgress(wp.Running, wp.Completed, wp.Total, wp.Index, wp.Kind, wp.Label, wp.Message)
+		}
 	}
-	wf, ok := item.(*chat.WorkflowToolMessageItem)
-	if !ok {
-		return nil
+
+	if m.workflowPopup == nil || m.workflowPopup.ToolCallID() != wp.ToolCallID {
+		m.workflowPopup = dialog.NewWorkflowPopup(m.com, wp.ToolCallID)
 	}
-	wf.SetProgress(wp.Running, wp.Completed, wp.Total, wp.Index, wp.Kind, wp.Label, wp.Message)
+
+	if wf != nil && wf.Description() != "" {
+		m.workflowPopup.SetDescription(wf.Description())
+	}
+
+	m.workflowPopup.HandleProgress(wp)
+
+	// Auto-open popup on agent start or progress if not already open or dismissed by user
+	if !m.workflowPopup.IsFinished() && !m.workflowPopup.IsDismissed() {
+		if !m.dialog.ContainsDialog(m.workflowPopup.ID()) {
+			m.dialog.OpenDialog(m.workflowPopup)
+		}
+	}
+
+	// Auto-close when workflow completes
+	if wp.Total > 0 && wp.Completed == wp.Total && wp.Running == 0 {
+		m.workflowPopup.SetFinished(true)
+		if m.dialog.ContainsDialog(m.workflowPopup.ID()) {
+			m.dialog.CloseDialog(m.workflowPopup.ID())
+		}
+	}
+
 	return nil
 }
 
@@ -5093,10 +5149,9 @@ func (m *UI) handleRetryTick(msg retryTickMsg) tea.Cmd {
 		return nil
 	}
 	if time.Now().After(m.retryUntil) {
-		// Backoff elapsed; keep the last frame until the next attempt
-		// either streams content (cleared in updateSessionMessage) or
-		// fails again (a new TypeRetry replaces this countdown).
-		m.applyRetryCountdown()
+		// Backoff elapsed; the next attempt is already in flight.
+		// Clear the countdown so the UI doesn't freeze on "1s" forever.
+		m.clearRetryCountdown()
 		return nil
 	}
 	m.applyRetryCountdown()

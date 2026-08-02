@@ -71,3 +71,12 @@ func TestRenderSpinningAppliesLabelChanges(t *testing.T) {
 	item.renderSpinning()
 	require.Equal(t, "Working", item.appliedLabel)
 }
+
+func TestRenderSpinningHidesSuffixTimerWhenWorkingLabelIsSet(t *testing.T) {
+	t.Parallel()
+
+	item := spinningAssistantItem(t)
+	item.SetWorkingLabel("Retrying in 5s")
+	item.renderSpinning()
+	require.Equal(t, "Retrying in 5s", item.appliedLabel)
+}

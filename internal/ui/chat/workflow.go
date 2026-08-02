@@ -110,6 +110,16 @@ func (w *WorkflowToolMessageItem) SetProgress(running, completed, total, index i
 	w.Bump()
 }
 
+// Description returns the description from the workflow tool parameters.
+func (w *WorkflowToolMessageItem) Description() string {
+	if w == nil {
+		return ""
+	}
+	var params agent.WorkflowParams
+	_ = json.Unmarshal([]byte(w.ToolCall().Input), &params)
+	return params.Description
+}
+
 // agentLabelIndexRe extracts the agent index from a synthetic tool call ID.
 var agentLabelIndexRe = regexp.MustCompile(`-a(\d+)$`)
 

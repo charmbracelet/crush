@@ -46,7 +46,23 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			if params.Wait {
-				bgShell.WaitContext(ctx)
+				rootSessionID := GetRootSessionFromContext(ctx)
+				releaseCh := shell.RegisterForegroundWait(rootSessionID, bgShell.ID)
+				defer shell.UnregisterForegroundWait(rootSessionID, bgShell.ID)
+
+				waitDone := make(chan struct{})
+				go func() {
+					bgShell.WaitContext(ctx)
+					close(waitDone)
+				}()
+
+				select {
+				case <-waitDone:
+				case <-releaseCh:
+					// User pressed Ctrl+B to release foreground wait
+				case <-ctx.Done():
+					return fantasy.ToolResponse{}, ctx.Err()
+				}
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()

@@ -1347,12 +1347,12 @@ func (c *coordinator) SideQuestion(ctx context.Context, sessionID, question stri
 		slog.Error("Failed to refresh OAuth2 token before side question. Proceeding with existing token.", "error", err)
 	}
 
-	var result SideQuestionResult
-	err := c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
-		var runErr error
-		result, runErr = c.currentAgent.SideQuestion(ctx, sessionID, question, exchanges)
-		return runErr
-	})
+	result, err := c.currentAgent.SideQuestion(ctx, sessionID, question, exchanges)
+	if err != nil {
+		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
+			result, err = c.currentAgent.SideQuestion(ctx, sessionID, question, exchanges)
+		}
+	}
 	return result, err
 }
 

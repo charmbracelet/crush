@@ -1081,7 +1081,7 @@ func TestFormatRetryStatus(t *testing.T) {
 
 	require.Equal(
 		t,
-		"Retrying in 5s (attempt 2/10) - rate limit",
+		"Retrying in 5s (9/10 retries left) - rate limit",
 		notify.FormatRetryStatus(notify.Notification{
 			Type:       notify.TypeRetry,
 			Message:    "rate limit",
@@ -1093,7 +1093,7 @@ func TestFormatRetryStatus(t *testing.T) {
 
 	require.Equal(
 		t,
-		"Retrying in 1s (attempt 1/10)",
+		"Retrying in 1s (10/10 retries left)",
 		notify.FormatRetryStatus(notify.Notification{
 			Type:       notify.TypeRetry,
 			RetryDelay: time.Second,
@@ -1105,7 +1105,7 @@ func TestFormatRetryStatus(t *testing.T) {
 	// Sub-second remainders still show as 1s so the bar never flashes 0s.
 	require.Equal(
 		t,
-		"Retrying in 1s (attempt 1/10) - overloaded",
+		"Retrying in 1s (10/10 retries left) - overloaded",
 		notify.FormatRetryStatus(notify.Notification{
 			Type:       notify.TypeRetry,
 			Message:    "overloaded",
@@ -1256,4 +1256,23 @@ func TestRetryAttemptReporterResetsPerCall(t *testing.T) {
 		require.LessOrEqual(t, n.Attempt, n.MaxRetries,
 			"a published attempt number must never exceed the budget")
 	}
+}
+
+// TestRetryAttemptCounterResetsPerStep pins the multi-step run contract:
+// fantasy allocates a fresh MaxRetries budget per step, and Crush's
+// user-visible attempt counter must reset at PrepareStep so a recovery
+// on step N does not make step N+1 start at "attempt 5/6".
+func TestRetryAttemptCounterResetsPerStep(t *testing.T) {
+	t.Parallel()
+
+	var c retryAttemptCounter
+
+	// Step 1: fail twice, then succeed (counter would sit at 2).
+	require.Equal(t, 1, c.Next())
+	require.Equal(t, 2, c.Next())
+
+	// Step 2: PrepareStep clears the counter before any OnRetry.
+	c.Reset()
+	require.Equal(t, 1, c.Next(),
+		"a new step must publish attempt 1, not continue from the prior step")
 }

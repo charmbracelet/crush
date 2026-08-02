@@ -2705,9 +2705,64 @@ func newRetryAttemptReporter(a *sessionAgent, sessionID, providerID string, maxR
 }
 
 type parsedErrorJSON struct {
-	Type       string `json:"type"`
-	Message    string `json:"message"`
-	RetryAfter int    `json:"retryAfter"`
+	Type       string        `json:"type"`
+	Message    string        `json:"message"`
+	RetryAfter time.Duration `json:"retryAfter"`
+}
+
+func parseFlexDuration(v any) time.Duration {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		if val > 0 {
+			return time.Duration(val) * time.Second
+		}
+	case int64:
+		if val > 0 {
+			return time.Duration(val) * time.Second
+		}
+	case int:
+		if val > 0 {
+			return time.Duration(val) * time.Second
+		}
+	case string:
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return 0
+		}
+		if sec, err := strconv.ParseFloat(val, 64); err == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
+		if d, err := time.ParseDuration(val); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+func formatDurationHuman(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	d = d.Truncate(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("resets in %ds", int(d.Seconds()))
+	}
+	hours := int(d.Hours())
+	mins := int(d.Minutes()) % 60
+	secs := int(d.Seconds()) % 60
+	if hours > 0 {
+		if mins > 0 {
+			return fmt.Sprintf("resets in %dh%dm", hours, mins)
+		}
+		return fmt.Sprintf("resets in %dh", hours)
+	}
+	if secs > 0 {
+		return fmt.Sprintf("resets in %dm%ds", mins, secs)
+	}
+	return fmt.Sprintf("resets in %dm", mins)
 }
 
 func parseJSONErrorString(input string) *parsedErrorJSON {
@@ -2719,16 +2774,24 @@ func parseJSONErrorString(input string) *parsedErrorJSON {
 	}
 	jsonSub := input[start : end+1]
 	var payload struct {
-		Type       string `json:"type"`
-		Message    string `json:"message"`
-		RetryAfter int    `json:"retryAfter"`
-		Error      struct {
-			Type       string `json:"type"`
-			Message    string `json:"message"`
-			Code       any    `json:"code"`
-			Status     string `json:"status"`
-			Detail     string `json:"detail"`
-			RetryAfter int    `json:"retryAfter"`
+		Type            string `json:"type"`
+		Message         string `json:"message"`
+		RetryAfter      any    `json:"retryAfter"`
+		RetryAfterSnake any    `json:"retry_after"`
+		RetryAfterSecs  any    `json:"retry_after_seconds"`
+		ResetsIn        any    `json:"resets_in"`
+		ResetIn         any    `json:"reset_in"`
+		Error           struct {
+			Type            string `json:"type"`
+			Message         string `json:"message"`
+			Code            any    `json:"code"`
+			Status          string `json:"status"`
+			Detail          string `json:"detail"`
+			RetryAfter      any    `json:"retryAfter"`
+			RetryAfterSnake any    `json:"retry_after"`
+			RetryAfterSecs  any    `json:"retry_after_seconds"`
+			ResetsIn        any    `json:"resets_in"`
+			ResetIn         any    `json:"reset_in"`
 		} `json:"error"`
 		Detail string `json:"detail"`
 	}
@@ -2752,11 +2815,16 @@ func parseJSONErrorString(input string) *parsedErrorJSON {
 		res.Message = payload.Error.Detail
 	}
 
-	if payload.RetryAfter > 0 {
-		res.RetryAfter = payload.RetryAfter
-	} else if payload.Error.RetryAfter > 0 {
-		res.RetryAfter = payload.Error.RetryAfter
+	for _, rawVal := range []any{
+		payload.RetryAfter, payload.RetryAfterSnake, payload.RetryAfterSecs, payload.ResetsIn, payload.ResetIn,
+		payload.Error.RetryAfter, payload.Error.RetryAfterSnake, payload.Error.RetryAfterSecs, payload.Error.ResetsIn, payload.Error.ResetIn,
+	} {
+		if dur := parseFlexDuration(rawVal); dur > 0 {
+			res.RetryAfter = dur
+			break
+		}
 	}
+
 	return res
 }
 
@@ -2799,19 +2867,25 @@ func formatProviderError(err *fantasy.ProviderError) string {
 
 	detail := ""
 	jsonType := ""
-	retryAfterStr := ""
+	var retryAfterDur time.Duration
 	if jsonParsed != nil {
 		jsonType = jsonParsed.Type
 		detail = jsonParsed.Message
-		if jsonParsed.RetryAfter > 0 {
-			dur := (time.Duration(jsonParsed.RetryAfter) * time.Second).Truncate(time.Minute)
-			if dur < time.Minute {
-				retryAfterStr = fmt.Sprintf("resets in %ds", jsonParsed.RetryAfter)
-			} else {
-				retryAfterStr = fmt.Sprintf("resets in %s", dur.String())
+		retryAfterDur = jsonParsed.RetryAfter
+	}
+
+	if retryAfterDur == 0 && err.ResponseHeaders != nil {
+		for _, k := range []string{"retry-after", "Retry-After", "x-ratelimit-reset-requests", "X-RateLimit-Reset-Requests"} {
+			if val, ok := err.ResponseHeaders[k]; ok {
+				if d := parseFlexDuration(val); d > 0 {
+					retryAfterDur = d
+					break
+				}
 			}
 		}
 	}
+
+	retryAfterStr := formatDurationHuman(retryAfterDur)
 
 	// Build full text across all available error fields for categorization
 	fullText := strings.Join([]string{title, msg, detail, jsonType, causeStr}, " ")
@@ -2869,7 +2943,13 @@ func formatProviderError(err *fantasy.ProviderError) string {
 		parts = append(parts, fmt.Sprintf("HTTP %d", err.StatusCode))
 	}
 	if category != "" {
-		parts = append(parts, category)
+		catStr := category
+		if retryAfterStr != "" {
+			catStr += fmt.Sprintf(" (%s)", retryAfterStr)
+		}
+		parts = append(parts, catStr)
+	} else if retryAfterStr != "" {
+		parts = append(parts, retryAfterStr)
 	}
 
 	// Add explanation if it provides additional information beyond the category name
@@ -2883,10 +2963,6 @@ func formatProviderError(err *fantasy.ProviderError) string {
 				parts = append(parts, cleanExp)
 			}
 		}
-	}
-
-	if retryAfterStr != "" {
-		parts = append(parts, retryAfterStr)
 	}
 
 	if len(parts) > 0 {

@@ -115,10 +115,12 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 // which would be false here.
 func renderToolA2UIResultBody(sty *styles.Styles, surfaces []string, opts *ToolRenderOpts, widths toolResultContentWidths) string {
 	var b strings.Builder
+	failed := 0
 	if opts.LiveSurfaces != nil {
-		b.WriteString(opts.LiveSurfaces(widths.Body))
+		rendered, liveFailed := opts.LiveSurfaces(widths.Body)
+		b.WriteString(rendered)
+		failed = liveFailed
 	} else {
-		failed := 0
 		for _, surf := range surfaces {
 			rendered, err := renderToolA2UI(sty, surf, widths.Body)
 			if err != nil || rendered == "" {
@@ -130,30 +132,21 @@ func renderToolA2UIResultBody(sty *styles.Styles, surfaces []string, opts *ToolR
 			}
 			b.WriteString(rendered)
 		}
-
-		var chunks []string
-		if b.Len() > 0 {
-			chunks = append(chunks, sty.Tool.Body.Render(clampToolA2UI(sty, b.String(), widths.Body, opts.ExpandedContent)))
-		}
-		// Alert on ANY failed surface, not only when all fail: a sibling
-		// surface rendering fine must not hide that another one vanished —
-		// the model was told the user can see every one of them.
-		if failed > 0 {
-			chunks = append(chunks, sty.Tool.Body.Render(renderToolA2UIAlert(sty, widths.Body)))
-		}
-		// Show any real text the resource returned alongside its surfaces — the
-		// model-facing placeholder lines are stripped, the rest belongs to the
-		// user just as much as the surfaces do.
-		if text := stripA2UIPlaceholders(opts.Result.Content); text != "" {
-			chunks = append(chunks, renderToolResultTextContent(sty, text, widths, opts.ExpandedContent))
-		}
-		return strings.Join(chunks, "\n")
 	}
 
 	var chunks []string
 	if b.Len() > 0 {
 		chunks = append(chunks, sty.Tool.Body.Render(clampToolA2UI(sty, b.String(), widths.Body, opts.ExpandedContent)))
 	}
+	// Alert on ANY failed surface, not only when all fail: a sibling
+	// surface rendering fine must not hide that another one vanished —
+	// the model was told the user can see every one of them.
+	if failed > 0 {
+		chunks = append(chunks, sty.Tool.Body.Render(renderToolA2UIAlert(sty, widths.Body)))
+	}
+	// Show any real text the resource returned alongside its surfaces — the
+	// model-facing placeholder lines are stripped, the rest belongs to the
+	// user just as much as the surfaces do.
 	if text := stripA2UIPlaceholders(opts.Result.Content); text != "" {
 		chunks = append(chunks, renderToolResultTextContent(sty, text, widths, opts.ExpandedContent))
 	}

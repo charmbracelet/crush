@@ -93,10 +93,29 @@ func TestToolA2UISurfaces(t *testing.T) {
 		t.Parallel()
 		item := newA2UIToolItem(t, []string{a2uiToolSurface}, []string{"cairn"}, tools.ReadMCPResourceToolName)
 		item.syncToolA2UISurfaces()
-		out := item.renderToolA2UISurfaces(80)
+		out, failed := item.renderToolA2UISurfaces(80)
 		plain := ansi.Strip(out)
 		require.Contains(t, plain, "Recipe Card")
 		require.NotContains(t, plain, "updateComponents")
+		require.Zero(t, failed)
+	})
+
+	t.Run("a failed sibling payload still alerts next to a live surface", func(t *testing.T) {
+		t.Parallel()
+		// One payload renders, one is malformed: the live path must show
+		// the rendered surface AND the alert — the model was told the
+		// user can see both.
+		item := newA2UIToolItem(t,
+			[]string{a2uiToolSurface, "<a2ui-json>{malformed</a2ui-json>"},
+			[]string{"cairn", "cairn"}, tools.ReadMCPResourceToolName)
+		item.syncToolA2UISurfaces()
+		require.True(t, item.hasToolA2UISurfaces())
+		_, failed := item.renderToolA2UISurfaces(80)
+		require.Equal(t, 1, failed)
+
+		out := ansi.Strip(item.RawRender(100))
+		require.Contains(t, out, "Recipe Card")
+		require.Contains(t, out, "couldn't render this resource's UI surface")
 	})
 
 	t.Run("RawRender renders the surface instead of the placeholder", func(t *testing.T) {

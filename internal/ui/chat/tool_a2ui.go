@@ -36,16 +36,20 @@ func (t *baseToolMessageItem) syncToolA2UISurfaces() {
 	}
 	var surfaces []render.Model
 	var ids []string
+	failed := 0
 	for i, surfJSON := range meta.A2UISurfaces {
 		parts, err := a2tea.Scan(surfJSON)
 		if err != nil {
+			failed++
 			continue
 		}
 		built, builtIDs := buildA2UISurfaces(t.sty, parts)
+		payloadLive := 0
 		for j, m := range built {
 			if m == nil {
 				continue
 			}
+			payloadLive++
 			surfaces = append(surfaces, m)
 			id := builtIDs[j]
 			ids = append(ids, id)
@@ -55,9 +59,16 @@ func (t *baseToolMessageItem) syncToolA2UISurfaces() {
 				registerA2UISurfaceProvenance(id, meta.MCPSurfaceProvenance[i])
 			}
 		}
+		// A payload that scanned but drew nothing (unsupported components,
+		// bare data-model update) failed just like a scan error: the model
+		// was told the user can see it.
+		if payloadLive == 0 {
+			failed++
+		}
 	}
 	t.a2ui.surfaces = surfaces
 	t.a2ui.surfaceIDs = ids
+	t.surfaceBuildFailed = failed
 	t.surfaceSrcHash = h
 	t.surfaceScanned = true
 	if t.focusableMessageItem.isFocused() {
@@ -89,11 +100,13 @@ func (t *baseToolMessageItem) blurToolA2UISurfaces() {
 }
 
 // renderToolA2UISurfaces renders each live surface from its model at the
-// given width, joined by blank lines. Surfaces that fail to produce output
-// are skipped; the alert path in generic.go/mcp.go covers payloads that
-// produced no renderable model at all.
-func (t *baseToolMessageItem) renderToolA2UISurfaces(width int) string {
+// given width, joined by blank lines. It also reports how many surfaces
+// failed — payloads that never built a model (surfaceBuildFailed) plus live
+// models that drew nothing — so the renderer can show the same alert the
+// static path shows: the model was told the user can see every surface.
+func (t *baseToolMessageItem) renderToolA2UISurfaces(width int) (string, int) {
 	var b strings.Builder
+	failed := t.surfaceBuildFailed
 	for _, s := range t.a2ui.surfaces {
 		if s == nil {
 			continue
@@ -101,6 +114,7 @@ func (t *baseToolMessageItem) renderToolA2UISurfaces(width int) string {
 		s.SetSize(width, 0)
 		rendered := strings.TrimRight(s.View().Content, "\n")
 		if rendered == "" {
+			failed++
 			continue
 		}
 		if b.Len() > 0 {
@@ -108,7 +122,7 @@ func (t *baseToolMessageItem) renderToolA2UISurfaces(width int) string {
 		}
 		b.WriteString(rendered)
 	}
-	return b.String()
+	return b.String(), failed
 }
 
 // HandleKeyEvent routes keys to the focused live MCP surface first

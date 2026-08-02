@@ -15,8 +15,8 @@ import (
 // renderable surface hold nil.
 //
 // Assistant surfaces stream and rebuild as deltas arrive, so the assistant
-// item keys its models by source hash and retires them on first submission
-// . MCP tool-result surfaces are long-lived app UIs: they build once
+// item keys its models by source hash and retires them on first
+// submission. MCP tool-result surfaces are long-lived app UIs: they build once
 // from a fixed payload, are never retired on interaction, and feed a button
 // back to the owning server. The host carries the shared state and
 // behavior both kinds need; the items own their lifecycle.
@@ -152,11 +152,14 @@ func (h *a2uiSurfaceHost) blurAll() {
 // --- MCP surface provenance registry ---
 
 // a2uiMCPProvenance maps a rendered A2UI surface ID to the MCP server that
-// served it, so a later interaction event (button press, render failure) can
-// route back to the owning server as an a2ui_action / a2ui_error tool call
-// . Entries live for the process lifetime: surface IDs are
+// served it, so a later interaction event (button press, render failure)
+// can route back to the owning server as an a2ui_action / a2ui_error tool
+// call. Entries live for the process lifetime: surface IDs are
 // server-scoped (typically "default"), so re-rendering a surface from the
-// same server simply overwrites the same key.
+// same server simply overwrites the same key. Two servers emitting the SAME
+// surface ID would clobber each other here — the action round-trip should
+// resolve provenance through the owning item before falling back to this
+// registry.
 var a2uiMCPProvenance = csync.NewMap[string, string]()
 
 // registerA2UISurfaceProvenance records that surfaceID came from mcpName.

@@ -99,11 +99,12 @@ type ToolRenderOpts struct {
 	IsSpinning      bool
 	Status          ToolStatus
 	// LiveSurfaces renders the item's live MCP A2UI surface models at the
-	// given width. Set only when the result metadata carried
-	// renderable surfaces; nil otherwise, in which case renderers fall
-	// back to the static/text paths. Carried on the opts because the
-	// ToolRenderer interface does not see the owning item.
-	LiveSurfaces func(width int) string
+	// given width, and reports how many of the metadata's surfaces failed
+	// to draw. Set only when the result metadata carried renderable
+	// surfaces; nil otherwise, in which case renderers fall back to the
+	// static/text paths. Carried on the opts because the ToolRenderer
+	// interface does not see the owning item.
+	LiveSurfaces func(width int) (string, int)
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -170,16 +171,19 @@ type baseToolMessageItem struct {
 	// parseHyperlinkSpans for why the app must handle this itself).
 	hyperlinks []hyperlinkSpan
 
-	// a2ui holds the live surface models for an MCP-served A2UI payload
-	//: a read_mcp_resource or mcp_* tool whose result metadata
-	// carries surfaces. They render interactively and, being long-lived
-	// app UIs, are never retired on interaction. Nil for tools
-	// without surfaces. surfaceSrcHash fingerprints the metadata the
-	// models were built from so a re-render with the same metadata reuses
-	// the live models (and their edited values) instead of rebuilding.
-	a2ui           a2uiSurfaceHost
-	surfaceSrcHash uint64
-	surfaceScanned bool
+	// a2ui holds the live surface models for an MCP-served A2UI payload:
+	// a read_mcp_resource or mcp_* tool whose result metadata carries
+	// surfaces. They render interactively and, being long-lived app UIs,
+	// are never retired on interaction. Nil for tools without surfaces.
+	// surfaceSrcHash fingerprints the metadata the models were built from
+	// so a re-render with the same metadata reuses the live models (and
+	// their edited values) instead of rebuilding; surfaceBuildFailed
+	// counts payloads that never produced a drawable model, so the
+	// renderer can alert on them.
+	a2ui               a2uiSurfaceHost
+	surfaceSrcHash     uint64
+	surfaceScanned     bool
+	surfaceBuildFailed int
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
@@ -369,7 +373,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	// edited values, not a frozen frame.
 	t.syncToolA2UISurfaces()
 	liveSurfaces := t.hasToolA2UISurfaces()
-	var liveRender func(width int) string
+	var liveRender func(width int) (string, int)
 	if liveSurfaces {
 		liveRender = t.renderToolA2UISurfaces
 	}

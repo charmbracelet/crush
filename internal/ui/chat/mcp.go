@@ -77,7 +77,7 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 	widths := toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}
 
 	// An MCP tool result can carry an A2UI surface in its metadata
-	// (#219): the server returned an application/a2ui+json
+	//: the server returned an application/a2ui+json
 	// EmbeddedResource, diverted so the model only sees a placeholder.
 	// Render the live surface (or static fallback) instead of raw text.
 	if opts.Result.Metadata != "" {

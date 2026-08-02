@@ -81,7 +81,7 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	// embedded one), render it instead of raw text. The payload arrives via
 	// response metadata — the model only sees a placeholder, so it cannot
 	// echo the JSON back and double-render the surface. Live surface models
-	// (#219) render interactively; without them (older persisted results)
+	// render interactively; without them (older persisted results)
 	// fall back to the static snapshot. This is what makes
 	// cairn://artifact/{id}/a2ui and similar resource reads render inline.
 	if opts.Result.Metadata != "" {
@@ -108,7 +108,7 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 
 // renderToolA2UIResultBody renders the metadata-delivered surfaces plus any
 // real text content the resource returned alongside them. When the item
-// carries live surface models (opts.LiveSurfaces, #219) they render
+// carries live surface models (opts.LiveSurfaces) they render
 // interactively; otherwise each surface falls back to a static snapshot.
 // When every surface fails to render, an alert replaces the body — the
 // model-facing placeholder claims the user can already see the surface,

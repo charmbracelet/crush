@@ -99,7 +99,7 @@ type ToolRenderOpts struct {
 	IsSpinning      bool
 	Status          ToolStatus
 	// LiveSurfaces renders the item's live MCP A2UI surface models at the
-	// given width (#219). Set only when the result metadata carried
+	// given width. Set only when the result metadata carried
 	// renderable surfaces; nil otherwise, in which case renderers fall
 	// back to the static/text paths. Carried on the opts because the
 	// ToolRenderer interface does not see the owning item.
@@ -171,9 +171,9 @@ type baseToolMessageItem struct {
 	hyperlinks []hyperlinkSpan
 
 	// a2ui holds the live surface models for an MCP-served A2UI payload
-	// (#219): a read_mcp_resource or mcp_* tool whose result metadata
+	//: a read_mcp_resource or mcp_* tool whose result metadata
 	// carries surfaces. They render interactively and, being long-lived
-	// app UIs, are never retired on interaction (#221). Nil for tools
+	// app UIs, are never retired on interaction. Nil for tools
 	// without surfaces. surfaceSrcHash fingerprints the metadata the
 	// models were built from so a re-render with the same metadata reuses
 	// the live models (and their edited values) instead of rebuilding.
@@ -364,7 +364,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	}
 
 	// Build or refresh the live MCP surface models from the result
-	// metadata (#219). While surfaces are live the content cache is
+	// metadata. While surfaces are live the content cache is
 	// bypassed: a surface's View reflects the current focus ring and
 	// edited values, not a frozen frame.
 	t.syncToolA2UISurfaces()
@@ -573,9 +573,9 @@ func (t *baseToolMessageItem) HandleMouseClickCmd(btn ansi.MouseButton, x, y int
 }
 
 // HandleKeyEvent implements KeyEventHandler. A focused live MCP surface
-// gets first claim on the keys it understands (#219) — Tab/Shift+Tab cycle
+// gets first claim on the keys it understands — Tab/Shift+Tab cycle
 // its focus ring, Enter activates a button (surfacing an
-// a2uievent.ButtonClicked the UI model routes per provenance, #221) — and
+// a2uievent.ButtonClicked the UI model routes per provenance) — and
 // every other key falls through, so the copy shortcut keeps working
 // whenever no surface consumes the key.
 func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
@@ -590,7 +590,7 @@ func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 // SetFocused implements MessageItem. Focus also drives the live MCP
-// surfaces (#219): gaining focus grants it to the first live surface,
+// surfaces: gaining focus grants it to the first live surface,
 // losing focus blurs them all — so the focus ring only ever lives on the
 // selected item.
 func (t *baseToolMessageItem) SetFocused(focused bool) {

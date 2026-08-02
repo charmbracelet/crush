@@ -11,11 +11,11 @@ import (
 )
 
 // syncToolA2UISurfaces builds — or reuses — the live a2tea models for the
-// surfaces carried in the tool result's metadata (#219). Models are keyed by
+// surfaces carried in the tool result's metadata. Models are keyed by
 // a hash of the metadata: a re-render with the same result reuses the live
 // models (preserving focus and edited field values), while a result swap
 // (SetResult) rebuilds them. Each surface's provenance is registered so a
-// later interaction routes back to the owning MCP server (#221).
+// later interaction routes back to the owning MCP server.
 func (t *baseToolMessageItem) syncToolA2UISurfaces() {
 	if t.result == nil || t.result.Metadata == "" {
 		t.a2ui.surfaces = nil
@@ -71,7 +71,7 @@ func (t *baseToolMessageItem) hasToolA2UISurfaces() bool {
 }
 
 // focusToolA2UISurfaces grants focus to the first live surface and blurs the
-// rest. MCP surfaces are long-lived app UIs (#219) — unlike chat-scanned
+// rest. MCP surfaces are long-lived app UIs — unlike chat-scanned
 // forms they are never retired on submission, so every live surface is
 // focusable.
 func (t *baseToolMessageItem) focusToolA2UISurfaces() {
@@ -112,11 +112,11 @@ func (t *baseToolMessageItem) renderToolA2UISurfaces(width int) string {
 }
 
 // HandleKeyEvent routes keys to the focused live MCP surface first
-// (#219) — Tab/Shift+Tab cycle its focus ring, Enter activates a button,
+// — Tab/Shift+Tab cycle its focus ring, Enter activates a button,
 // printable keys edit a focused field (see a2uiSurfaceWantsKey) — then falls
 // through to the copy shortcut. A button activation surfaces as an
 // a2uievent.ButtonClicked tea.Cmd, which the UI model routes per the
-// surface's provenance (#221).
+// surface's provenance.
 func (t *baseToolMessageItem) handleA2UIKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 	if idx := t.a2ui.focusedIndex(); idx >= 0 && a2uiSurfaceWantsKey(t.a2ui.surfaces[idx], key) {
 		t.Bump()

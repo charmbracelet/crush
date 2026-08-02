@@ -9,16 +9,16 @@ import (
 )
 
 // a2uiSurfaceHost holds the live a2tea surface models for one message item —
-// an assistant message whose content scanned as A2UI (#44), or a tool result
-// that delivered an MCP A2UI surface (#219). The slice is indexed by
+// an assistant message whose content scanned as A2UI, or a tool result
+// that delivered an MCP A2UI surface. The slice is indexed by
 // scan-part (assistant) or surface (tool result); entries without a
 // renderable surface hold nil.
 //
 // Assistant surfaces stream and rebuild as deltas arrive, so the assistant
 // item keys its models by source hash and retires them on first submission
-// (#45). MCP tool-result surfaces are long-lived app UIs: they build once
+// . MCP tool-result surfaces are long-lived app UIs: they build once
 // from a fixed payload, are never retired on interaction, and feed a button
-// back to the owning server (#221). The host carries the shared state and
+// back to the owning server. The host carries the shared state and
 // behavior both kinds need; the items own their lifecycle.
 type a2uiSurfaceHost struct {
 	// surfaces holds the live a2tea models so they can receive focus and
@@ -149,12 +149,12 @@ func (h *a2uiSurfaceHost) blurAll() {
 	}
 }
 
-// --- MCP surface provenance registry (#219) ---
+// --- MCP surface provenance registry ---
 
 // a2uiMCPProvenance maps a rendered A2UI surface ID to the MCP server that
 // served it, so a later interaction event (button press, render failure) can
 // route back to the owning server as an a2ui_action / a2ui_error tool call
-// (#221). Entries live for the process lifetime: surface IDs are
+// . Entries live for the process lifetime: surface IDs are
 // server-scoped (typically "default"), so re-rendering a surface from the
 // same server simply overwrites the same key.
 var a2uiMCPProvenance = csync.NewMap[string, string]()

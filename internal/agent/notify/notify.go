@@ -24,6 +24,16 @@ const (
 	// TypeRetry indicates the agent is backing off before retrying a
 	// failed provider request (rate limit, 5xx, network error, etc.).
 	TypeRetry Type = "retry"
+	// TypeAWSSSOAuth indicates AWS SSO credentials have expired and the
+	// coordinator is running the configured refresh command. It opens the
+	// AWS SSO dialog; a follow-up with the same type carries the SSO URL
+	// once it appears in the command output. AWSSOCommand carries the
+	// command being run; AWSSOURL carries the verification URL when known.
+	TypeAWSSSOAuth Type = "aws_sso_auth"
+	// TypeAWSSSOAuthResult indicates the AWS SSO refresh command has
+	// finished. Message carries the error text when it failed, empty on
+	// success.
+	TypeAWSSSOAuthResult Type = "aws_sso_auth_result"
 )
 
 // TypeWorkflowProgress indicates the workflow engine has new live progress.
@@ -66,6 +76,11 @@ type Notification struct {
 	Attempt int
 	// MaxRetries is the configured retry budget for TypeRetry.
 	MaxRetries int
+	// AWSSOCommand carries the shell command for TypeAWSSSOAuth.
+	AWSSOCommand string
+	// AWSSOURL carries the SSO verification URL for TypeAWSSSOAuth once it
+	// appears in the refresh command's output.
+	AWSSOURL string
 }
 
 // RunComplete is the authoritative end-of-run signal for a session.

@@ -15,6 +15,16 @@ func HandleWorkspaceConfiguration(_ context.Context, _ string, params json.RawMe
 	return []map[string]any{{}}, nil
 }
 
+// HandleWorkDoneProgressCreate handles server-initiated window/workDoneProgress/create
+// requests. The client advertises window.workDoneProgress: true in its capabilities
+// (see makeClientCapabilities in powernap), which per the LSP spec grants servers
+// permission to send this request — so it must be answered, even as a no-op, or the
+// server (e.g. typescript-language-server) treats the unhandled response as fatal and
+// crashes. See github.com/charmbracelet/x issue tracking powernap capability gaps.
+func HandleWorkDoneProgressCreate(_ context.Context, _ string, _ json.RawMessage) (any, error) {
+	return nil, nil
+}
+
 // HandleRegisterCapability handles capability registration requests
 func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	var registerParams protocol.RegistrationParams

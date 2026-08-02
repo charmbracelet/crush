@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 
-	"mvdan.cc/sh/moreinterp/coreutils"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -285,6 +284,11 @@ func withoutHerdrEnv(env []string) []string {
 	return result
 }
 
+// execMiddleware wraps a base [interp.ExecHandlerFunc], composing like HTTP
+// middleware: each layer either handles a command itself or delegates to the
+// next handler in the chain.
+type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
+
 // standardHandlers returns the exec-handler middleware chain used by both
 // [Run] and [Shell]. Order matters:
 //  1. builtins first (so Crush's in-process jq wins over any PATH binary);
@@ -294,33 +298,33 @@ func withoutHerdrEnv(env []string) []string {
 //     script exec's rather than the outer path-prefixed wrapper;
 //  3. block list;
 //  4. optional Go coreutils (only when useGoCoreUtils is on).
-func standardHandlers(blockFuncs []BlockFunc) []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
-	handlers := []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc{
+func standardHandlers(blockFuncs []BlockFunc) []execMiddleware {
+	handlers := []execMiddleware{
 		builtinHandler(),
 		scriptDispatchHandler(blockFuncs),
 		blockHandler(blockFuncs),
 	}
-	if useGoCoreUtils {
-		handlers = append(handlers, coreutils.ExecHandler)
+	if useGoCoreUtils && coreUtilsExecHandler != nil {
+		handlers = append(handlers, coreUtilsExecHandler)
 	}
 	return handlers
 }
 
 // builtinHandler returns middleware that dispatches recognized Crush
-// builtins to their in-process Go implementations. Currently: jq.
-func builtinHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+// builtins to their in-process Go implementations. All builtins (jq plus the
+// config builtins registered by shellconfig) live in the builtins map; config
+// builtins are no-ops without a ConfigBuilder on the context.
+func builtinHandler() execMiddleware {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			if len(args) == 0 {
 				return next(ctx, args)
 			}
-			switch args[0] {
-			case "jq":
+			if h, ok := builtins[args[0]]; ok {
 				hc := interp.HandlerCtx(ctx)
-				return handleJQ(ctx, args, hc.Stdin, hc.Stdout, hc.Stderr)
-			default:
-				return next(ctx, args)
+				return h(ctx, args, hc.Stdin, hc.Stdout, hc.Stderr)
 			}
+			return next(ctx, args)
 		}
 	}
 }
@@ -328,7 +332,7 @@ func builtinHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 // blockHandler returns middleware that rejects commands matched by any of
 // the provided [BlockFunc]s before they reach the underlying exec path.
 // A nil or empty blockFuncs slice is a no-op.
-func blockHandler(blockFuncs []BlockFunc) func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+func blockHandler(blockFuncs []BlockFunc) execMiddleware {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			if len(args) == 0 {

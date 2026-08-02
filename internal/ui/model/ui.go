@@ -485,7 +485,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
-	if !com.Config().IsConfigured() {
+	if !com.Config().IsConfigured() || !com.Config().HasSelectedModel(config.SelectedModelTypeLarge) {
+		// No provider, or providers are available but the user has never
+		// picked a model. Either way the model picker is the only thing
+		// standing between them and a usable session.
 		desiredState = uiOnboarding
 	} else if n, _ := com.Workspace.ProjectNeedsInitialization(); n {
 		desiredState = uiInitialize

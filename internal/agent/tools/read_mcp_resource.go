@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 
 	"charm.land/fantasy"
@@ -89,17 +90,31 @@ func splitMCPResourceContents(contents []*mcp.ResourceContents, divert bool) ([]
 //go:embed read_mcp_resource.md
 var readMCPResourceDescription string
 
-// a2uiWidthHint appends ?w=N to an A2UI surface URI so the server sizes its
+// a2uiWidthHint appends w=N to an A2UI surface URI so the server sizes its
 // pre-rendered geometry to the host's content width. It is a no-op for
-// non-A2UI URIs and for URIs that already carry a width hint.
+// non-A2UI URIs and for URIs that already carry a width hint (an explicit
+// w= is respected wherever it came from). The /a2ui path suffix is the
+// convention the in-house A2UI resource templates share (cairn,
+// switchboard); the template registry's MIME types would be the
+// protocol-level signal, but templates can legitimately fail to list, so
+// the convention stays the trigger.
+//
+// The URI is parsed only to decide — the hint is appended to the original
+// string, never re-serialized, because MCP servers match URIs textually
+// against their templates.
 func a2uiWidthHint(uri string, width int) string {
-	if !strings.HasSuffix(uri, "/a2ui") && !strings.Contains(uri, "/a2ui?") {
+	u, err := url.Parse(uri)
+	if err != nil || !strings.HasSuffix(u.Path, "/a2ui") {
 		return uri
 	}
-	if strings.Contains(uri, "?") {
+	if u.Query().Has("w") {
 		return uri
 	}
-	return fmt.Sprintf("%s?w=%d", uri, width)
+	sep := "?"
+	if u.RawQuery != "" {
+		sep = "&"
+	}
+	return fmt.Sprintf("%s%sw=%d", uri, sep, width)
 }
 
 func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {

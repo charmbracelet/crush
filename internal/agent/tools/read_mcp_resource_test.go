@@ -41,6 +41,12 @@ func TestA2UIWidthHint(t *testing.T) {
 			want:  "mcp://cairn/run/vitkuUpp/a2ui?w=60",
 		},
 		{
+			name:  "a non-width query still gets the width appended",
+			uri:   "mcp://cairn/run/vitkuUpp/a2ui?theme=dark",
+			width: 114,
+			want:  "mcp://cairn/run/vitkuUpp/a2ui?theme=dark&w=114",
+		},
+		{
 			name:  "non-a2ui resources are untouched",
 			uri:   "mcp://cairn/run/vitkuUpp",
 			width: 114,

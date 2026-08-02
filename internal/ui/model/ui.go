@@ -4176,9 +4176,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	sessionID := m.session.ID
 	// The turn's content width hint: tools that read width-sensitive remote
 	// content (A2UI surfaces with server-pre-rendered bar geometry) get the
-	// surface card's interior width so the server sizes its rows to fill the
-	// card — the message cap minus the tool-item indent and the card chrome.
-	contentWidth := min(m.layout.main.Dx()-2, 120) - 6
+	// surface card's interior width so the server sizes its rows to fill
+	// the card. The chat package owns the computation — it must track the
+	// real render chain, not constants copied here.
+	contentWidth := chat.ToolA2UISurfaceWidth(m.layout.main.Dx())
 	// Optimistically mark the agent busy: the prompt we are about to submit
 	// either starts a run or is enqueued behind one. This keeps esc pressed
 	// right after enter routing to cancelAgent instead of reading a stale

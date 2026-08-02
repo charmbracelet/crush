@@ -27,6 +27,11 @@ type ReadMCPResourcePermissionsParams struct {
 
 const ReadMCPResourceToolName = "read_mcp_resource"
 
+// a2uiMIMEType is the MIME type MCP resource templates use for A2UI surfaces.
+// When a resource read returns this type, the payload is wrapped in inline
+// <a2ui-json> tags so the chat renderer renders it as a live surface.
+const a2uiMIMEType = "application/a2ui+json"
+
 //go:embed read_mcp_resource.md
 var readMCPResourceDescription string
 
@@ -83,6 +88,15 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 					continue
 				}
 				if content.Text != "" {
+					// If the resource is an A2UI surface, wrap it in
+					// the inline tags so the chat renderer picks it up
+					// as a live surface instead of raw JSON. The model
+					// never needs to copy/paste the payload — the tool
+					// result itself renders as an interactive surface.
+					if content.MIMEType == a2uiMIMEType {
+						textParts = append(textParts, "<a2ui-json>"+content.Text+"</a2ui-json>")
+						continue
+					}
 					textParts = append(textParts, content.Text)
 					continue
 				}

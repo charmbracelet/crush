@@ -583,6 +583,21 @@ func a2uiThemeStyles(sty *styles.Styles) render.Styles {
 		Background(sty.Dialog.SelectedItem.GetBackground()).
 		Foreground(sty.Dialog.SelectedItem.GetForeground()).
 		Reverse(false)
+	// Inject Crush's glamour renderer so body-variant Text containing
+	// Markdown (tables, lists, bold, code) renders with the same styling
+	// as the rest of the chat. The renderer is created per-width inside
+	// the callback; glamour memoizes per width internally.
+	st.MarkdownRenderer = func(text string, width int) string {
+		renderer := common.MarkdownRenderer(sty, width)
+		mu := common.LockMarkdownRenderer(renderer)
+		mu.Lock()
+		defer mu.Unlock()
+		out, err := renderer.Render(text)
+		if err != nil {
+			return text
+		}
+		return strings.TrimSpace(out)
+	}
 	return st
 }
 

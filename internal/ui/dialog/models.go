@@ -487,10 +487,14 @@ func (m *Models) setProviderItems() error {
 
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
-	m.list.SetSelectedItem(selectedItemID)
 	if selectedItemID != "" {
+		m.list.SetSelectedItem(selectedItemID)
 		m.list.ScrollToSelected()
 	} else {
+		// With nothing selected yet, highlight the first actual model.
+		// Index 0 is a group header, which is not selectable, so leaving
+		// the highlight there would make the first Enter do nothing.
+		m.list.SelectFirst()
 		m.list.ScrollToTop()
 	}
 

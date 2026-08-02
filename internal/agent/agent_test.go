@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1123,6 +1124,17 @@ func TestFormatProviderError(t *testing.T) {
 			Message:    "Service Unavailable",
 		}
 		require.Equal(t, "HTTP 503 - Provider Server Down / Overloaded - Service Unavailable", formatProviderError(err))
+	})
+
+	t.Run("cause carrying underlying quota error", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{
+			StatusCode: 429,
+			Title:      "rate limit",
+			Message:    "too many requests",
+			Cause:      errors.New("googleapi: Error 429: Quota exceeded for quota metric 'Generate Content API requests'"),
+		}
+		require.Equal(t, "HTTP 429 - Quota Exceeded / Out of Credits - googleapi: Error 429: Quota exceeded for quota metric 'Generate Content API requests'", formatProviderError(err))
 	})
 }
 

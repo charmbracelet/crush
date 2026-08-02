@@ -2738,8 +2738,9 @@ func extractResponseBodyMessage(body []byte) string {
 }
 
 // formatProviderError returns a detailed, human-readable description of a provider failure.
-// It inspects status codes, response bodies, and error fields to clearly distinguish
-// rate limits vs quota exhaustion vs provider outages.
+// It inspects status codes, response bodies, error messages, and cause chains to clearly
+// distinguish rate limits vs quota exhaustion vs provider outages, and includes the full
+// underlying error message.
 func formatProviderError(err *fantasy.ProviderError) string {
 	if err == nil {
 		return "provider error"
@@ -2748,34 +2749,32 @@ func formatProviderError(err *fantasy.ProviderError) string {
 	title := strings.TrimSpace(err.Title)
 	msg := strings.TrimSpace(err.Message)
 	detail := extractResponseBodyMessage(err.ResponseBody)
-
-	// Prefer detailed message from API response body if present and useful
-	if detail != "" && !strings.EqualFold(detail, msg) && !strings.EqualFold(detail, title) {
-		if msg == "" || strings.EqualFold(msg, "too many requests") || strings.EqualFold(msg, "rate limit") {
-			msg = detail
-		} else {
-			msg = msg + " (" + detail + ")"
-		}
+	var causeStr string
+	if err.Cause != nil {
+		causeStr = strings.TrimSpace(err.Cause.Error())
 	}
 
-	lowerMsg := strings.ToLower(msg + " " + title + " " + detail)
-	isQuota := strings.Contains(lowerMsg, "quota") ||
-		strings.Contains(lowerMsg, "credit") ||
-		strings.Contains(lowerMsg, "billing") ||
-		strings.Contains(lowerMsg, "insufficient_quota") ||
-		strings.Contains(lowerMsg, "resource_exhausted") ||
-		strings.Contains(lowerMsg, "payment_required") ||
+	// Build full text across all available error fields for categorization
+	fullText := strings.Join([]string{title, msg, detail, causeStr}, " ")
+	lowerFull := strings.ToLower(fullText)
+
+	isQuota := strings.Contains(lowerFull, "quota") ||
+		strings.Contains(lowerFull, "credit") ||
+		strings.Contains(lowerFull, "billing") ||
+		strings.Contains(lowerFull, "insufficient_quota") ||
+		strings.Contains(lowerFull, "resource_exhausted") ||
+		strings.Contains(lowerFull, "payment_required") ||
 		err.StatusCode == http.StatusPaymentRequired
 
-	isRateLimit := strings.Contains(lowerMsg, "rate limit") ||
-		strings.Contains(lowerMsg, "rate_limit") ||
-		strings.Contains(lowerMsg, "too many requests") ||
+	isRateLimit := strings.Contains(lowerFull, "rate limit") ||
+		strings.Contains(lowerFull, "rate_limit") ||
+		strings.Contains(lowerFull, "too many requests") ||
 		err.StatusCode == http.StatusTooManyRequests
 
-	isServerDown := strings.Contains(lowerMsg, "overloaded") ||
-		strings.Contains(lowerMsg, "service unavailable") ||
-		strings.Contains(lowerMsg, "bad gateway") ||
-		strings.Contains(lowerMsg, "internal server error") ||
+	isServerDown := strings.Contains(lowerFull, "overloaded") ||
+		strings.Contains(lowerFull, "service unavailable") ||
+		strings.Contains(lowerFull, "bad gateway") ||
+		strings.Contains(lowerFull, "internal server error") ||
 		err.StatusCode == http.StatusServiceUnavailable ||
 		err.StatusCode == http.StatusBadGateway ||
 		err.StatusCode == http.StatusInternalServerError
@@ -2791,6 +2790,18 @@ func formatProviderError(err *fantasy.ProviderError) string {
 		category = "Authentication / Access Denied"
 	}
 
+	// Pick the most specific explanation string
+	explanation := detail
+	if explanation == "" && causeStr != "" {
+		explanation = causeStr
+	}
+	if explanation == "" {
+		explanation = msg
+	}
+	if explanation == "" {
+		explanation = title
+	}
+
 	var parts []string
 	if err.StatusCode > 0 {
 		parts = append(parts, fmt.Sprintf("HTTP %d", err.StatusCode))
@@ -2799,25 +2810,21 @@ func formatProviderError(err *fantasy.ProviderError) string {
 		parts = append(parts, category)
 	}
 
-	explanation := msg
-	if explanation == "" {
-		explanation = title
-	}
-
-	if explanation != "" && !strings.EqualFold(explanation, category) {
-		// Avoid duplicating category if explanation is a generic status text
-		if (isRateLimit || isQuota) && (strings.EqualFold(explanation, "too many requests") || strings.EqualFold(explanation, "rate limit")) {
-			// Generic text covered by category
-		} else {
-			parts = append(parts, explanation)
+	// Add explanation if it provides additional information beyond the category name
+	if explanation != "" {
+		cleanExp := strings.TrimSpace(explanation)
+		if !strings.EqualFold(cleanExp, category) {
+			// Suppress generic "too many requests" / "rate limit" text when category already explains it
+			if (isRateLimit || isQuota) && (strings.EqualFold(cleanExp, "too many requests") || strings.EqualFold(cleanExp, "rate limit")) {
+				// Suppress redundant generic string
+			} else {
+				parts = append(parts, cleanExp)
+			}
 		}
 	}
 
 	if len(parts) > 0 {
 		return strings.Join(parts, " - ")
-	}
-	if err.Cause != nil {
-		return err.Cause.Error()
 	}
 	return "provider error"
 }

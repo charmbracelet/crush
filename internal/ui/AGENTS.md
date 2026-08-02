@@ -141,6 +141,7 @@ tool names to specific types:
 | `chat/references.go`  | References                                     |
 | `chat/lsp_restart.go` | LSPRestart                                     |
 | `chat/todos.go`       | Todos                                          |
+| `chat/cron.go`        | CronCreate, CronList, CronDelete               |
 | `chat/mcp.go`         | MCP tools (`mcp_` prefix)                      |
 | `chat/generic.go`     | Fallback for unrecognized tools                |
 | `chat/assistant.go`   | Assistant messages (thinking, content, errors) |

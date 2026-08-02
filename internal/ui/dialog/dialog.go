@@ -53,10 +53,7 @@ type LoadingDialog interface {
 // receive in-flight keystrokes from a previously focused component.
 const (
 	// graceQuietPeriod is how long input must be quiet before the dialog
-	// arms. Each absorbed keystroke resets this timer. Covers the window
-	// where hands are still mid-keystroke but the brain hasn't reacted to
-	// the dialog appearing yet (#3383) -- not meant to cover a genuine
-	// pause to think or reread, which should arm the dialog normally.
+	// arms. Each absorbed keystroke resets this timer.
 	graceQuietPeriod = 425 * time.Millisecond
 	// graceMaxDelay is the absolute ceiling: the dialog always arms after
 	// this duration regardless of input activity. Prevents auto-repeat

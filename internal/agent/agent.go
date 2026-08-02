@@ -1343,7 +1343,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
 				)
 			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+				title, body := formatProviderErrorForAssistant(providerErr)
+				currentAssistant.AddFinish(message.FinishReasonError, title, body)
 			}
 		} else if errors.As(err, &fantasyErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
@@ -2969,6 +2970,27 @@ func formatProviderError(err *fantasy.ProviderError) string {
 		return strings.Join(parts, " - ")
 	}
 	return "provider error"
+}
+
+func formatProviderErrorForAssistant(err *fantasy.ProviderError) (string, string) {
+	if err == nil {
+		return "Provider Error", "An unknown error occurred."
+	}
+	formatted := formatProviderError(err)
+	parts := strings.Split(formatted, " - ")
+	if len(parts) >= 2 {
+		title := parts[1]
+		var bodyParts []string
+		if len(parts) >= 3 {
+			bodyParts = parts[2:]
+		}
+		body := strings.Join(bodyParts, " - ")
+		if body == "" {
+			body = parts[0]
+		}
+		return title, body
+	}
+	return cmp.Or(stringext.Capitalize(err.Title), "Provider Error"), formatted
 }
 
 // publishRetry notifies the UI that a provider request failed and the

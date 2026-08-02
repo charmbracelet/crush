@@ -1145,6 +1145,10 @@ func TestFormatProviderError(t *testing.T) {
 			Message:    `{"type":"Account.FreeUsageLimitError","message":"Rate limit exceeded. Please try again later.","retryAfter":27109}`,
 		}
 		require.Equal(t, "HTTP 429 - Quota Exceeded / Out of Credits (resets in 7h31m) - Rate limit exceeded. Please try again later.", formatProviderError(err))
+
+		title, body := formatProviderErrorForAssistant(err)
+		require.Equal(t, "Quota Exceeded / Out of Credits (resets in 7h31m)", title)
+		require.Equal(t, "Rate limit exceeded. Please try again later.", body)
 	})
 }
 

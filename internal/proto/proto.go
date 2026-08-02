@@ -156,11 +156,17 @@ func (a AgentInfo) IsZero() bool {
 // remains correct only when no other turns are in flight for the
 // same session.
 type AgentMessage struct {
-	SessionID   string       `json:"session_id"`
-	RunID       string       `json:"run_id,omitempty"`
-	Channel     string       `json:"channel,omitempty"`
-	Prompt      string       `json:"prompt"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	SessionID string `json:"session_id"`
+	RunID     string `json:"run_id,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	// ContentWidth is the client UI's chat content width hint in cells
+	// (0 when the turn has no interactive UI). Like Channel it is a
+	// per-turn context value on the server side, so it must travel as an
+	// explicit wire field — context values do not cross the HTTP
+	// boundary. See ShellCommandRequest.TermWidth for the same pattern.
+	ContentWidth int          `json:"content_width,omitempty"`
+	Prompt       string       `json:"prompt"`
+	Attachments  []Attachment `json:"attachments,omitempty"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.

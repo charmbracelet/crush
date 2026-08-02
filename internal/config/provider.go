@@ -137,9 +137,12 @@ var (
 // 3. try to get the fresh list of providers, and return either this new list,
 // the cached list, or the embedded list if all others fail.
 //
-// A returned error is advisory: it reports that providers could not be
-// refreshed or cached, not that none are available. Callers should surface it
-// as a warning and keep using the returned list.
+// A returned error is advisory: it reports that the catalog could not be
+// cached, or that an upstream returned nothing usable. It never means that no
+// providers are available, so callers should surface it as a warning and keep
+// using the returned list. A refresh that simply could not reach the network
+// is not an error at all: the cached or embedded catalog is a sound answer, so
+// those are logged and the fallback is returned.
 func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup

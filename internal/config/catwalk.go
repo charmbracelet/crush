@@ -67,7 +67,10 @@ func (s *catwalkSync) Get(ctx context.Context) ([]catwalk.Provider, error) {
 			return
 		}
 		if err != nil {
-			// On error, fall back to cached (which defaults to embedded if empty).
+			// Fall back to cached (which defaults to embedded if empty).
+			// Being offline is routine and the fallback is sound, so this
+			// is logged rather than reported to the caller.
+			slog.Warn("Could not fetch providers from Catwalk", "error", err)
 			s.result = cached
 			return
 		}

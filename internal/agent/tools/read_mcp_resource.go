@@ -89,6 +89,19 @@ func splitMCPResourceContents(contents []*mcp.ResourceContents, divert bool) ([]
 //go:embed read_mcp_resource.md
 var readMCPResourceDescription string
 
+// a2uiWidthHint appends ?w=N to an A2UI surface URI so the server sizes its
+// pre-rendered geometry to the host's content width. It is a no-op for
+// non-A2UI URIs and for URIs that already carry a width hint.
+func a2uiWidthHint(uri string, width int) string {
+	if !strings.HasSuffix(uri, "/a2ui") && !strings.Contains(uri, "/a2ui?") {
+		return uri
+	}
+	if strings.Contains(uri, "?") {
+		return uri
+	}
+	return fmt.Sprintf("%s?w=%d", uri, width)
+}
+
 func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ReadMCPResourceToolName,
@@ -126,6 +139,16 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 			}
 			if !p {
 				return NewPermissionDeniedResponse(), nil
+			}
+
+			// A2UI surface templates (…/a2ui) pre-render their bar
+			// geometry server-side, so pass the UI's content width as
+			// the ?w= hint — the surface then fills the chat card
+			// instead of a fixed default budget. Only when the URI
+			// carries no width of its own and the turn has a UI width
+			// (0 = headless/remote turn).
+			if w := GetContentWidthFromContext(ctx); w > 0 {
+				params.URI = a2uiWidthHint(params.URI, w)
 			}
 
 			contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)

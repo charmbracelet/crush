@@ -335,6 +335,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			SessionID:        sessionID,
 			RunID:            runID,
 			Channel:          ChannelFromContext(ctx),
+			ContentWidth:     ContentWidthFromContext(ctx),
 			Prompt:           prompt,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,

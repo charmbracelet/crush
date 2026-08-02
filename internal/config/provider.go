@@ -229,7 +229,11 @@ func (c cache[T]) Store(v T) error {
 		return fmt.Errorf("failed to marshal provider data: %w", err)
 	}
 
-	if err := os.WriteFile(c.path, data, 0o644); err != nil {
+	// Written through a temporary file and renamed into place. Several Crush
+	// instances start independently and race to refresh this cache, and a
+	// truncating write would let one of them read a half-written catalog and
+	// silently fall back to the bundled copy.
+	if err := atomicWriteFile(c.path, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write provider data to cache: %w", err)
 	}
 	return nil

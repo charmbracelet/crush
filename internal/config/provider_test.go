@@ -306,3 +306,38 @@ func TestCachePathFor(t *testing.T) {
 		})
 	}
 }
+
+// TestCacheStore_ReplacesFileInsteadOfRewritingIt guards the property that
+// several Crush instances depend on: the provider cache is swapped into place
+// as a finished file, never truncated and refilled underneath a reader that is
+// already reading it. A reader that loses that race cannot parse the catalog
+// and silently falls back to the bundled copy.
+func TestCacheStore_ReplacesFileInsteadOfRewritingIt(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	c := newCache[[]catwalk.Provider](path)
+
+	require.NoError(t, c.Store([]catwalk.Provider{{ID: "first", Name: "First"}}))
+	before, err := os.Stat(path)
+	require.NoError(t, err)
+
+	require.NoError(t, c.Store([]catwalk.Provider{{ID: "second", Name: "Second"}}))
+	after, err := os.Stat(path)
+	require.NoError(t, err)
+
+	require.False(t, os.SameFile(before, after),
+		"the cache should be replaced by a rename, not rewritten in place")
+
+	// The new contents are complete and no temporary files are left behind.
+	got, _, err := c.Get()
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, catwalk.InferenceProvider("second"), got[0].ID)
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "only the cache file should remain")
+	require.Equal(t, "providers.json", entries[0].Name())
+}

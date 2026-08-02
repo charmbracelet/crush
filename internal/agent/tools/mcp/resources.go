@@ -45,12 +45,7 @@ func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([
 		return nil, nil, err
 	}
 
-	templates, err := getResourceTemplates(ctx, session)
-	if err != nil {
-		// Templates are best-effort; some servers may not support resources/templates/list.
-		slog.Warn("MCP server does not support resources/templates/list", "error", err)
-		templates = nil
-	}
+	templates := listTemplatesBestEffort(ctx, session, name)
 
 	resourceCount := updateResources(name, resources)
 	templateCount := updateResourceTemplates(name, templates)
@@ -94,11 +89,7 @@ func RefreshResources(ctx context.Context, name string) {
 		return
 	}
 
-	templates, err := getResourceTemplates(ctx, session)
-	if err != nil {
-		slog.Warn("MCP server does not support resources/templates/list", "error", err)
-		templates = nil
-	}
+	templates := listTemplatesBestEffort(ctx, session, name)
 
 	resourceCount := updateResources(name, resources)
 	templateCount := updateResourceTemplates(name, templates)
@@ -122,6 +113,36 @@ func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {
 		return nil, err
 	}
 	return result.Resources, nil
+}
+
+// refreshSessionResources re-fetches a session's resources and resource
+// templates (best-effort: a listing failure degrades to an empty registry
+// and a warn, never an error) and installs them in the registries. It
+// returns the combined count for ClientInfo.Counts.Resources, so callers
+// publishing a StateConnected transition report exactly what the
+// registries hold.
+func refreshSessionResources(ctx context.Context, name string, session *ClientSession) int {
+	resources, err := getResources(ctx, session)
+	if err != nil {
+		slog.Warn("Error listing MCP resources", "name", name, "error", err)
+		resources = nil
+	}
+	templates := listTemplatesBestEffort(ctx, session, name)
+	return updateResources(name, resources) + updateResourceTemplates(name, templates)
+}
+
+// listTemplatesBestEffort lists a session's resource templates, treating any
+// failure as "no templates". getResourceTemplates already swallows
+// method-not-found, so an error reaching here is a timeout, transport
+// failure, or server bug — never lack of support — and is logged as such,
+// with the server name so a multi-server config stays debuggable.
+func listTemplatesBestEffort(ctx context.Context, session *ClientSession, name string) []*ResourceTemplate {
+	templates, err := getResourceTemplates(ctx, session)
+	if err != nil {
+		slog.Warn("Error listing MCP resource templates", "name", name, "error", err)
+		return nil
+	}
+	return templates
 }
 
 func getResourceTemplates(ctx context.Context, c *ClientSession) ([]*ResourceTemplate, error) {

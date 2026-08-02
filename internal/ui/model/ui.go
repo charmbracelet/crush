@@ -3849,15 +3849,27 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 }
 
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
-// replacing the @query, and adds the resource as an attachment.
+// replacing the @query, and adds the resource as an attachment. An unexpanded
+// resource template is only inserted as text: its URI still carries RFC 6570
+// placeholders ("cairn://run/{id}"), so reading it now would send the literal
+// braces to the server and fail — the read happens once someone (user or
+// agent) has substituted real values.
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := cmp.Or(item.Title, item.URI)
+	if item.IsTemplate() {
+		// Insert the raw template URI, not the title: the placeholders are
+		// the point — they show what needs filling in.
+		displayText = item.URI
+	}
 
 	prevHeight := m.textarea.Height()
 	if !m.insertCompletionText(displayText) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
+	if item.IsTemplate() {
+		return heightCmd
+	}
 
 	resourceCmd := func() tea.Msg {
 		contents, err := m.com.Workspace.ReadMCPResource(

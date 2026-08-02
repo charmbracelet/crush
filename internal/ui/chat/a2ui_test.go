@@ -769,6 +769,30 @@ func TestA2UISurfaceModelStableAcrossRenders(t *testing.T) {
 		"re-renders must reuse the live model — rebuilding would drop interaction state")
 }
 
+// TestA2UIClearCacheDropsSurfacesForRestyle pins the theme-swap path: a
+// style change reaches items as clearCache (applyTheme → refreshStyles →
+// InvalidateRenderCaches → ClearItemCaches), and the surface models baked
+// the old theme's render.Styles in at build time. clearCache must drop them
+// so the next render rebuilds the surfaces with the current theme instead
+// of drawing the previous palette next to newly-themed chat.
+func TestA2UIClearCacheDropsSurfacesForRestyle(t *testing.T) {
+	t.Parallel()
+
+	item := newA2UIFormItem(t)
+	_ = item.RawRender(80)
+	require.True(t, item.hasLiveA2UISurfaces())
+	first := firstLiveA2UISurface(t, item)
+
+	item.clearCache()
+	require.False(t, item.hasLiveA2UISurfaces(),
+		"a style change must drop surface models carrying baked-in styles")
+
+	_ = item.RawRender(80)
+	require.True(t, item.hasLiveA2UISurfaces(), "the next render must rebuild the surfaces")
+	require.NotSame(t, first, firstLiveA2UISurface(t, item),
+		"the rebuilt surface must be a fresh model, not the stale-styled one")
+}
+
 func TestA2UIContentCacheBypassedForLiveSurfaces(t *testing.T) {
 	t.Parallel()
 

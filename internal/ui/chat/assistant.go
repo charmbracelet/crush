@@ -710,6 +710,15 @@ func (a *AssistantMessageItem) clearCache() {
 	a.errorSec.reset()
 	a.streamingContent.Reset()
 	a.streamingThinking.Reset()
+	// A2UI surface models bake the theme's render.Styles in at build time
+	// (a2uiThemeStyles), so after a theme swap a kept model would draw the
+	// old palette next to newly-themed chat. Drop them and let the next
+	// render rebuild from the message with the current theme; retirement
+	// marks are keyed by surface ID and survive the rebuild. The cost is
+	// losing in-progress field values on an explicit theme change —
+	// clearCache is only reached via ClearItemCaches (style change) — until
+	// a2tea grows a restyle-in-place.
+	a.dropA2UISurfaces()
 }
 
 // ToggleExpanded advances the F5 thinking view-mode cycle and returns

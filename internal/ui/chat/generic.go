@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/joestump-agent/a2tea"
@@ -70,10 +71,29 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 		return joinToolParts(header, body)
 	}
 
-	// If the tool result contains an A2UI surface (e.g. a read_mcp_resource
-	// that returned application/a2ui+json), render it as a live surface
-	// instead of raw text. This is what makes cairn://artifact/{id}/a2ui
-	// and similar resource reads render inline — no JSON barf.
+	// If the tool result carries an A2UI surface (a read_mcp_resource that
+	// returned application/a2ui+json), render it as a live surface instead
+	// of raw text. The payload arrives via response metadata — the model
+	// only sees a placeholder, so it cannot echo the JSON back and
+	// double-render the surface. This is what makes
+	// cairn://artifact/{id}/a2ui and similar resource reads render inline.
+	if opts.Result.Metadata != "" {
+		var meta tools.ReadMCPResourceResponseMetadata
+		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && len(meta.A2UISurfaces) > 0 {
+			var b strings.Builder
+			for _, surf := range meta.A2UISurfaces {
+				rendered, err := renderToolA2UI(sty, surf, bodyWidth)
+				if err != nil || rendered == "" {
+					continue
+				}
+				b.WriteString(rendered)
+				b.WriteString("\n")
+			}
+			if s := strings.TrimRight(b.String(), "\n"); s != "" {
+				return joinToolParts(header, s)
+			}
+		}
+	}
 	if a2tea.Contains(opts.Result.Content) {
 		surf, err := renderToolA2UI(sty, opts.Result.Content, bodyWidth)
 		if err == nil && surf != "" {

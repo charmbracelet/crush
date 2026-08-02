@@ -28,9 +28,16 @@ type ReadMCPResourcePermissionsParams struct {
 const ReadMCPResourceToolName = "read_mcp_resource"
 
 // a2uiMIMEType is the MIME type MCP resource templates use for A2UI surfaces.
-// When a resource read returns this type, the payload is wrapped in inline
-// <a2ui-json> tags so the chat renderer renders it as a live surface.
+// A2UI payloads are delivered to the UI through response metadata (never to
+// the model): the model gets a compact placeholder instead of the raw JSON,
+// so it cannot echo the payload back and double-render the surface.
 const a2uiMIMEType = "application/a2ui+json"
+
+// ReadMCPResourceResponseMetadata carries the UI-only A2UI surface payload
+// for a resource whose MIME type is application/a2ui+json.
+type ReadMCPResourceResponseMetadata struct {
+	A2UISurfaces []string `json:"a2ui_surfaces,omitempty"`
+}
 
 //go:embed read_mcp_resource.md
 var readMCPResourceDescription string
@@ -83,18 +90,20 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 			}
 
 			var textParts []string
+			var metadata ReadMCPResourceResponseMetadata
 			for _, content := range contents {
 				if content == nil {
 					continue
 				}
 				if content.Text != "" {
-					// If the resource is an A2UI surface, wrap it in
-					// the inline tags so the chat renderer picks it up
-					// as a live surface instead of raw JSON. The model
-					// never needs to copy/paste the payload — the tool
-					// result itself renders as an interactive surface.
+					// A2UI surfaces go to the UI via metadata, not the
+					// model-facing content: the chat renderer renders
+					// the surface itself, and the raw JSON is
+					// unreadable to the model anyway — it only ever
+					// echoed it back, double-rendering the surface.
 					if content.MIMEType == a2uiMIMEType {
-						textParts = append(textParts, "<a2ui-json>"+content.Text+"</a2ui-json>")
+						metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+content.Text+"</a2ui-json>")
+						textParts = append(textParts, "[A2UI surface rendered in the chat UI from "+content.URI+" — the user can already see it; do not repeat or echo its JSON payload]")
 						continue
 					}
 					textParts = append(textParts, content.Text)
@@ -111,7 +120,11 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 				return fantasy.NewTextResponse(""), nil
 			}
 
-			return fantasy.NewTextResponse(strings.Join(textParts, "\n")), nil
+			resp := fantasy.NewTextResponse(strings.Join(textParts, "\n"))
+			if len(metadata.A2UISurfaces) > 0 {
+				resp = fantasy.WithResponseMetadata(resp, metadata)
+			}
+			return resp, nil
 		},
 	)
 }

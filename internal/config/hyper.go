@@ -25,6 +25,7 @@ var _ syncer[catwalk.Provider] = (*hyperSync)(nil)
 type hyperSync struct {
 	once       sync.Once
 	result     catwalk.Provider
+	err        error
 	cache      cache[catwalk.Provider]
 	client     hyperClient
 	autoupdate bool
@@ -43,7 +44,8 @@ func (s *hyperSync) Get(ctx context.Context) (catwalk.Provider, error) {
 		panic("called Get before Init")
 	}
 
-	var throwErr error
+	// The result and the error are memoized together so that every caller
+	// sees the same outcome, not just the one that won the once.
 	s.once.Do(func() {
 		if !s.autoupdate {
 			slog.Info("Using embedded Hyper provider")
@@ -69,16 +71,24 @@ func (s *hyperSync) Get(ctx context.Context) (catwalk.Provider, error) {
 			s.result = cached
 			return
 		}
+		if err != nil {
+			slog.Warn("Could not fetch the Hyper provider", "error", err)
+			s.result = cached
+			return
+		}
 		if len(result.Models) == 0 {
 			slog.Warn("Hyper did not return any models")
 			s.result = cached
 			return
 		}
 
+		// The provider is usable from here on. A cache write failure only
+		// costs the next run a refresh, so it is reported alongside a valid
+		// result rather than in place of one.
 		s.result = result
-		throwErr = s.cache.Store(result)
+		s.err = s.cache.Store(result)
 	})
-	return s.result, throwErr
+	return s.result, s.err
 }
 
 var _ hyperClient = realHyperClient{}

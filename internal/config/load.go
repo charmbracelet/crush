@@ -100,10 +100,16 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		assignIfNil(&cfg.Options.TUI.Transparent, true)
 	}
 
-	// Load known providers, this loads the config from catwalk
+	// Load known providers, this loads the config from catwalk. A failed
+	// refresh still yields the cached or embedded catalog, so only an empty
+	// list is fatal: starting up without providers is worse than starting
+	// up with slightly stale ones.
 	providers, err := Providers(cfg)
 	if err != nil {
-		return nil, err
+		if len(providers) == 0 {
+			return nil, err
+		}
+		slog.Warn("Continuing with the previously known providers", "error", err)
 	}
 	store.knownProviders = providers
 

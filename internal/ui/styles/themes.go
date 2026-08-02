@@ -58,7 +58,7 @@ func CharmtonePantera() Styles {
 		error:             charmtone.Sriracha,
 		warningSubtle:     charmtone.Zest,
 		warning:           charmtone.Mustard,
-		denied:            charmtone.Tang,
+		attention:         charmtone.Tang,
 		busy:              charmtone.Citron,
 		info:              charmtone.Malibu,
 		infoMoreSubtle:    charmtone.Sardine,

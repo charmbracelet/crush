@@ -4,14 +4,19 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/oauth2"
 )
@@ -25,6 +30,10 @@ type fakeASOpts struct {
 	refreshToken   string // refresh_token returned by /token
 	tokenExpiresIn int    // expires_in returned by /token (0 => 3600)
 	failRegister   bool   // make /register return 500 (server has no DCR)
+	// issSupported advertises RFC 9207: the server promises to name itself
+	// in the authorization response, and the SDK rejects the authorization
+	// if no issuer comes back.
+	issSupported bool
 }
 
 // newFakeAS starts an httptest server speaking enough of the OAuth
@@ -52,14 +61,18 @@ func newFakeAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
 		})
 	})
 	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{
+		meta := map[string]any{
 			"issuer":                           baseURL,
 			"authorization_endpoint":           baseURL + "/authorize",
 			"token_endpoint":                   baseURL + "/token",
 			"registration_endpoint":            baseURL + "/register",
 			"code_challenge_methods_supported": []string{"S256"},
 			"scopes_supported":                 []string{"offline_access"},
-		})
+		}
+		if opts.issSupported {
+			meta["authorization_response_iss_parameter_supported"] = true
+		}
+		writeJSON(w, meta)
 	})
 	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		if opts.failRegister {
@@ -96,6 +109,13 @@ func newFakeAS(t *testing.T, opts fakeASOpts) (base, mcpURL string) {
 // callback with a fixed code, driving the flow forward without a real
 // browser.
 func browserRedirect(code string) func(string) error {
+	return browserRedirectIss(code, "")
+}
+
+// browserRedirectIss is browserRedirect for a server that implements RFC
+// 9207: the redirect also names the issuer. Pass an empty iss for a server
+// that does not.
+func browserRedirectIss(code, iss string) func(string) error {
 	return func(rawAuthURL string) error {
 		u, err := url.Parse(rawAuthURL)
 		if err != nil {
@@ -109,6 +129,9 @@ func browserRedirect(code string) func(string) error {
 		cbq := cb.Query()
 		cbq.Set("code", code)
 		cbq.Set("state", q.Get("state"))
+		if iss != "" {
+			cbq.Set("iss", iss)
+		}
 		cb.RawQuery = cbq.Encode()
 		go func() {
 			resp, err := http.Get(cb.String()) //nolint:noctx
@@ -399,4 +422,299 @@ func TestHandler_BackgroundAuthorizeRefused(t *testing.T) {
 
 	err = authorizeWith401(t, h, base, mcpURL)
 	require.ErrorIs(t, err, ErrInteractiveAuthRequired)
+}
+
+// TestCallbackReceiver_IgnoresNonCallbackPaths is a regression test for a
+// browser incidentally aborting the flow. The listener answered every path,
+// so a request for something like /favicon.ico could win the one-time
+// handoff and hand the flow an empty authorization code.
+func TestCallbackReceiver_IgnoresNonCallbackPaths(t *testing.T) {
+	t.Parallel()
+
+	r := &callbackReceiver{}
+	t.Cleanup(r.close)
+
+	listener := newTestListener(t)
+	go r.serve(listener)
+
+	base := "http://" + listener.Addr().String()
+	flight, owned := r.begin()
+	require.True(t, owned)
+
+	// A stray request must not be mistaken for the redirect.
+	resp, err := http.Get(base + "/favicon.ico") //nolint:noctx
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	require.Empty(t, flight.done, "a stray request must not complete the flow")
+
+	// The real redirect still lands.
+	resp, err = http.Get(base + callbackPath + "?code=abc&state=xyz") //nolint:noctx
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, string(body), "You’re all set")
+
+	<-flight.done
+	require.NoError(t, flight.err)
+	require.Equal(t, "abc", flight.result.Code)
+	require.Equal(t, "xyz", flight.result.State)
+}
+
+// TestCallbackReceiver_RendersFailurePage proves a denied authorization
+// reaches the user as a readable page naming the server, not just a status
+// line in the terminal.
+func TestCallbackReceiver_RendersFailurePage(t *testing.T) {
+	t.Parallel()
+
+	r := &callbackReceiver{serverName: "linear"}
+	t.Cleanup(r.close)
+
+	listener := newTestListener(t)
+	go r.serve(listener)
+
+	flight, owned := r.begin()
+	require.True(t, owned)
+
+	url := "http://" + listener.Addr().String() + callbackPath +
+		"?error=access_denied&error_description=user+said+no"
+	resp, err := http.Get(url) //nolint:noctx
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Contains(t, string(body), "access_denied")
+	require.Contains(t, string(body), "user said no")
+	require.Contains(t, string(body), "linear")
+
+	<-flight.done
+	require.ErrorContains(t, flight.err, "access_denied")
+}
+
+// TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab is a regression test
+// for the browser opening twice for a single login. Connecting to a server
+// can put several requests in flight, and each one that meets a 401 asks to
+// authorize. Every ask used to open its own tab and then contend for the
+// single redirect, so the user saw two tabs and one of the two requests
+// waited on a redirect that had already been consumed, hanging until its
+// context expired.
+func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
+	t.Parallel()
+
+	r := &callbackReceiver{serverName: "linear"}
+	t.Cleanup(r.close)
+
+	listener := newTestListener(t)
+	go r.serve(listener)
+	base := "http://" + listener.Addr().String()
+
+	// Stand in for the browser: record the open, then redirect back as the
+	// authorization server would once the user consents.
+	var opens atomic.Int64
+	r.handler = &Handler{openURL: func(string) error {
+		opens.Add(1)
+		go func() {
+			resp, gerr := http.Get(base + callbackPath + "?code=abc&state=xyz") //nolint:noctx
+			if gerr == nil {
+				resp.Body.Close()
+			}
+		}()
+		return nil
+	}}
+
+	const callers = 4
+	var wg sync.WaitGroup
+	results := make(chan *auth.AuthorizationResult, callers)
+	errs := make(chan error, callers)
+	for range callers {
+		wg.Go(func() {
+			result, ferr := r.fetchAuthorizationCode(t.Context(), &auth.AuthorizationArgs{URL: base + "/authorize"})
+			results <- result
+			errs <- ferr
+		})
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	require.Equal(t, int64(1), opens.Load(), "one login must open exactly one tab")
+
+	// Every caller is served the same authorization code, and none is left
+	// waiting on a redirect it will never see.
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	for result := range results {
+		require.NotNil(t, result)
+		require.Equal(t, "abc", result.Code)
+	}
+}
+
+// TestCallbackReceiver_AuthorizeTwiceInSequence proves a later
+// authorization still works. The handler outlives a single login (tokens
+// get revoked, servers reconnect), and the redirect handoff used to be
+// once-per-handler, so any second attempt hung forever.
+func TestCallbackReceiver_AuthorizeTwiceInSequence(t *testing.T) {
+	t.Parallel()
+
+	r := &callbackReceiver{serverName: "linear"}
+	t.Cleanup(r.close)
+
+	listener := newTestListener(t)
+	go r.serve(listener)
+	base := "http://" + listener.Addr().String()
+
+	var opens atomic.Int64
+	code := "first"
+	r.handler = &Handler{openURL: func(string) error {
+		opens.Add(1)
+		go func() {
+			resp, gerr := http.Get(base + callbackPath + "?code=" + code) //nolint:noctx
+			if gerr == nil {
+				resp.Body.Close()
+			}
+		}()
+		return nil
+	}}
+
+	args := &auth.AuthorizationArgs{URL: base + "/authorize"}
+
+	result, err := r.fetchAuthorizationCode(t.Context(), args)
+	require.NoError(t, err)
+	require.Equal(t, "first", result.Code)
+
+	code = "second"
+	result, err = r.fetchAuthorizationCode(t.Context(), args)
+	require.NoError(t, err)
+	require.Equal(t, "second", result.Code)
+
+	require.Equal(t, int64(2), opens.Load(), "each login opens its own tab")
+}
+
+// newTestListener binds a loopback listener on an arbitrary free port for
+// a callback receiver to serve on.
+func newTestListener(t *testing.T) net.Listener {
+	t.Helper()
+	lc := &net.ListenConfig{}
+	listener, err := lc.Listen(t.Context(), "tcp", "localhost:0")
+	require.NoError(t, err)
+	return listener
+}
+
+// TestHandler_PassesIssuerThrough is a regression test for logins failing
+// against servers that implement RFC 9207. Such a server names itself in
+// the redirect and the SDK rejects the authorization when that name does
+// not come back, so dropping it broke the connection outright and sent the
+// user round the browser flow again.
+func TestHandler_PassesIssuerThrough(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientID:     "c",
+		accessToken:  "a",
+		issSupported: true,
+	})
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	var opens atomic.Int64
+	redirect := browserRedirectIss("code123", base)
+	h.openURL = func(u string) error {
+		opens.Add(1)
+		return redirect(u)
+	}
+
+	require.NoError(t, authorizeWith401(t, h, base, mcpURL))
+	require.Equal(t, int64(1), opens.Load())
+	require.NotNil(t, h.Token())
+	require.Equal(t, "a", h.Token().AccessToken)
+}
+
+// TestHandler_RejectsWrongIssuer confirms the issuer is passed through for
+// checking rather than merely echoed: a redirect naming a different server
+// must fail the login.
+func TestHandler_RejectsWrongIssuer(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientID:     "c",
+		accessToken:  "a",
+		issSupported: true,
+	})
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	h.openURL = browserRedirectIss("code123", "https://attacker.example.com")
+
+	require.ErrorContains(t, authorizeWith401(t, h, base, mcpURL), "issuer")
+}
+
+// newFakeMCP starts a server that refuses requests until a bearer token is
+// present, pointing at the given authorization server. It returns the MCP
+// endpoint URL.
+func newFakeMCP(t *testing.T, authServer string) string {
+	t.Helper()
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"resource":              srv.URL + "/mcp",
+			"authorization_servers": []string{authServer},
+		})
+	})
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			w.Header().Set("WWW-Authenticate",
+				`Bearer resource_metadata="`+srv.URL+`/.well-known/oauth-protected-resource/mcp"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// Authorization is all this fake is for; the MCP handshake itself
+		// is left to fail so the test stays focused.
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv.URL + "/mcp"
+}
+
+// TestConnect_OneLoginOpensOneTab drives a real client connection against a
+// server that requires authorization, and is the regression test for a
+// single login opening two browser tabs.
+//
+// Connecting makes more than one request, and each refusal asks to log in.
+// The first tab's redirect was being accepted but then rejected during
+// validation, so the login failed just as the user finished it and the next
+// request opened another tab.
+func TestConnect_OneLoginOpensOneTab(t *testing.T) {
+	authServer, _ := newFakeAS(t, fakeASOpts{
+		clientID:     "c",
+		accessToken:  "tok",
+		issSupported: true,
+	})
+	endpoint := newFakeMCP(t, authServer)
+
+	h, err := NewHandler("test", endpoint, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	var opens atomic.Int64
+	redirect := browserRedirectIss("code123", authServer)
+	h.openURL = func(u string) error {
+		opens.Add(1)
+		return redirect(u)
+	}
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "crush", Version: "test"}, nil)
+	// The handshake itself fails by design; the tab count is the subject.
+	_, _ = client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint:     endpoint,
+		OAuthHandler: h,
+	}, nil)
+
+	require.Equal(t, int64(1), opens.Load(), "one login must open exactly one browser tab")
+	require.NotNil(t, h.Token(), "the login must yield a usable token")
 }

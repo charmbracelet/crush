@@ -38,7 +38,7 @@ func (a *recordingAgent) IsBusy() bool                      { return false }
 func (a *recordingAgent) QueuedPrompts(string) int          { return 0 }
 func (a *recordingAgent) QueuedPromptsList(string) []string { return nil }
 func (a *recordingAgent) ClearQueue(string)                 {}
-func (a *recordingAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
+func (a *recordingAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
 	return nil
 }
 func (a *recordingAgent) Model() Model                                  { return a.model }

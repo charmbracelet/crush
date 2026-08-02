@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/callback"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/pkg/browser"
@@ -44,6 +45,11 @@ func IsInteractive(ctx context.Context) bool {
 	v, _ := ctx.Value(interactiveKey{}).(bool)
 	return v
 }
+
+// callbackPath is the path the authorization server redirects back to. It
+// is part of the registered redirect URI, so it must not change without
+// re-registering clients.
+const callbackPath = "/callback"
 
 // callbackPorts are the localhost ports tried, in order, for the OAuth
 // redirect listener. The first available one is used.
@@ -105,8 +111,7 @@ func NewHandler(
 	callbackPort int,
 ) (*Handler, error) {
 	receiver := &callbackReceiver{
-		authChan: make(chan *auth.AuthorizationResult, 1),
-		errChan:  make(chan error, 1),
+		serverName: serverName,
 	}
 
 	lc := &net.ListenConfig{}
@@ -138,7 +143,7 @@ func NewHandler(
 		}
 	}
 
-	redirectURL := fmt.Sprintf("http://localhost:%d/callback", port)
+	redirectURL := fmt.Sprintf("http://localhost:%d%s", port, callbackPath)
 
 	go receiver.serve(listener)
 
@@ -352,50 +357,144 @@ func (h *Handler) Close() {
 	h.receiver.close()
 }
 
+// callbackReceiver owns the localhost listener that the authorization
+// server redirects back to, and hands each authorization result to the
+// flow waiting for it.
 type callbackReceiver struct {
-	handler  *Handler
-	authChan chan *auth.AuthorizationResult
-	errChan  chan error
-	server   *http.Server
-	mu       sync.Mutex
-	once     sync.Once
+	handler *Handler
+	server  *http.Server
+	// serverName labels the callback page so the user can see which MCP
+	// server they just authorized.
+	serverName string
+
+	mu sync.Mutex
+	// flight is the authorization currently awaiting a redirect, if any.
+	// Connecting to a server can issue several requests at once, so more
+	// than one of them can meet a 401 and ask to authorize. They share a
+	// single flight rather than each opening their own browser tab and
+	// racing for one redirect.
+	flight *authFlight
+}
+
+// authFlight is one authorization attempt: a browser tab was opened and a
+// redirect is expected. It settles exactly once, whichever arrives first —
+// a result, an error, or the receiver shutting down.
+type authFlight struct {
+	done   chan struct{}
+	once   sync.Once
+	result *auth.AuthorizationResult
+	err    error
+}
+
+// settle records the outcome of the flight and wakes everyone waiting on
+// it. Only the first call has any effect, so a duplicate redirect (a
+// reloaded tab, say) cannot overwrite a result already in use.
+func (f *authFlight) settle(result *auth.AuthorizationResult, err error) {
+	f.once.Do(func() {
+		f.result, f.err = result, err
+		close(f.done)
+	})
+}
+
+// begin returns the flight to wait on, and whether the caller created it.
+// The creator is responsible for opening the browser and, once the attempt
+// is over, for clearing it so a later authorization can start fresh.
+func (r *callbackReceiver) begin() (*authFlight, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.flight != nil {
+		return r.flight, false
+	}
+	r.flight = &authFlight{done: make(chan struct{})}
+	return r.flight, true
+}
+
+// end retires the flight if it is still the current one, so the next
+// authorization opens a fresh browser tab instead of waiting on a redirect
+// that will never come.
+func (r *callbackReceiver) end(flight *authFlight) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.flight == flight {
+		r.flight = nil
+	}
+}
+
+// current returns the in-progress flight, or nil when no authorization is
+// waiting on a redirect.
+func (r *callbackReceiver) current() *authFlight {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.flight
 }
 
 func (r *callbackReceiver) serve(listener net.Listener) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		code := req.URL.Query().Get("code")
-		state := req.URL.Query().Get("state")
-
-		if errParam := req.URL.Query().Get("error"); errParam != "" {
-			desc := req.URL.Query().Get("error_description")
-			fmt.Fprintf(w, "Authentication failed: %s — %s\nYou can close this window.", errParam, desc)
-			r.once.Do(func() {
-				r.errChan <- fmt.Errorf("OAuth error: %s: %s", errParam, desc)
-			})
-			return
-		}
-
-		r.once.Do(func() {
-			r.authChan <- &auth.AuthorizationResult{
-				Code:  code,
-				State: state,
-			}
-		})
-
-		fmt.Fprint(w, "Authentication successful! You can close this window.")
-	})
+	mux.HandleFunc("/", r.handleCallback)
 
 	r.mu.Lock()
 	r.server = &http.Server{Handler: mux}
+	server := r.server
 	r.mu.Unlock()
 
-	if err := r.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		r.errChan <- err
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if flight := r.current(); flight != nil {
+			flight.settle(nil, err)
+		}
+	}
+}
+
+// handleCallback receives the authorization redirect, hands the result to
+// the waiting flow, and renders the page the user sees.
+//
+// Only the redirect path is treated as a callback. Browsers request extras
+// such as /favicon.ico against the same origin, and letting one of those
+// settle the flight would abort authorization with an empty code.
+func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Request) {
+	if req.URL.Path != callbackPath {
+		http.NotFound(w, req)
+		return
+	}
+
+	query := req.URL.Query()
+	result := callback.Result{
+		Subject:          r.serverName,
+		ErrorCode:        query.Get("error"),
+		ErrorDescription: query.Get("error_description"),
+	}
+
+	// A redirect with no flight waiting means the tab was reloaded or
+	// revisited after the flow finished. Still render the page, since the
+	// outcome it describes is accurate, but do not disturb any later
+	// authorization.
+	if flight := r.current(); flight != nil {
+		if result.Failed() {
+			flight.settle(nil, fmt.Errorf("OAuth error: %s: %s", result.ErrorCode, result.ErrorDescription))
+		} else {
+			flight.settle(&auth.AuthorizationResult{
+				Code:  query.Get("code"),
+				State: query.Get("state"),
+				// Required by servers that implement RFC 9207.
+				Iss: query.Get("iss"),
+			}, nil)
+		}
+	}
+
+	if err := callback.Serve(w, result); err != nil {
+		slog.Warn("Failed to render OAuth callback page", "error", err)
 	}
 }
 
 func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
+	flight, owned := r.begin()
+	if !owned {
+		// Another request already opened the browser for this server. Wait
+		// for that redirect instead of opening a second tab.
+		slog.Debug("Joining in-progress MCP OAuth authorization", "name", r.serverName)
+		return r.await(ctx, flight, false)
+	}
+	defer r.end(flight)
+
 	// Some authorization servers reject the "resource" query parameter in
 	// the authorization URL (RFC 8707) but accept it during token exchange.
 	// Strip it from the browser URL to avoid server_error responses.
@@ -415,24 +514,44 @@ func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *aut
 		slog.Info("Please open the following URL in your browser to authorize", "url", authURL)
 	}
 
+	return r.await(ctx, flight, true)
+}
+
+// await blocks until the flight settles or ctx is cancelled.
+func (r *callbackReceiver) await(ctx context.Context, flight *authFlight, owned bool) (*auth.AuthorizationResult, error) {
 	select {
-	case result := <-r.authChan:
+	case <-flight.done:
+		if flight.err != nil {
+			slog.Error("MCP OAuth authorization failed", "error", flight.err)
+			return nil, flight.err
+		}
 		slog.Info("MCP OAuth authorization completed")
-		return result, nil
-	case err := <-r.errChan:
-		slog.Error("MCP OAuth authorization failed", "error", err)
-		return nil, err
+		return flight.result, nil
 	case <-ctx.Done():
 		slog.Warn("MCP OAuth authorization cancelled")
+		if owned {
+			// Abandoning the tab we opened; make sure nobody keeps
+			// waiting on a redirect that is no longer coming.
+			flight.settle(nil, ctx.Err())
+		}
 		return nil, ctx.Err()
 	}
 }
 
+// close shuts the listener down and fails any authorization still waiting
+// on a redirect, so a pending flow ends promptly instead of hanging until
+// its context expires.
 func (r *callbackReceiver) close() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.server != nil {
-		_ = r.server.Close()
+	server, flight := r.server, r.flight
+	r.flight = nil
+	r.mu.Unlock()
+
+	if server != nil {
+		_ = server.Close()
+	}
+	if flight != nil {
+		flight.settle(nil, errors.New("OAuth callback listener closed"))
 	}
 }
 

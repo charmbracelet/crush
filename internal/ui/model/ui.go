@@ -581,9 +581,13 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 // change.
 func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
 	// Check for explicit user preference first.
-	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
-		switch cfg.Options.NotificationStyle {
+	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
+		switch cfg.Options.Notifications {
 		case "native":
+			if !notification.NativeSupported {
+				slog.Debug("Native notifications unavailable on this platform; using OSC backend", "osc99_supported", caps.OSC99Notifications)
+				return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+			}
 			slog.Debug("Using native backend (user preference)")
 			return notification.NewNativeBackend(notification.Icon)
 		case "osc":
@@ -598,7 +602,7 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 		case "auto":
 			// Fall through to auto-detection below.
 		default:
-			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.NotificationStyle)
+			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.Notifications)
 		}
 	}
 
@@ -613,9 +617,10 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 
 	// Local sessions: prefer OSC on macOS because the native backend (beeep)
 	// uses terminal-notifier or AppleScript, which is slow and doesn't display
-	// icons properly. OSC 99 provides a more polished experience with icon support.
-	if runtime.GOOS == "darwin" {
-		slog.Debug("Selected OSCBackend for local macOS session", "osc99_supported", caps.OSC99Notifications)
+	// icons properly. Also prefer OSC where native notifications are unavailable
+	// (illumos/solaris). OSC 99 provides a polished experience with icon support.
+	if runtime.GOOS == "darwin" || !notification.NativeSupported {
+		slog.Debug("Selected OSCBackend for local session", "osc99_supported", caps.OSC99Notifications, "native_supported", notification.NativeSupported)
 		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
 	}
 
@@ -641,7 +646,7 @@ func (m *UI) updateNotificationBackend() {
 // focused, and notifications must not be disabled in config.
 func (m *UI) shouldSendNotification() bool {
 	cfg := m.com.Config()
-	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle == "disabled" {
+	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications == "disabled" {
 		return false
 	}
 	return m.caps.ReportFocusEvents && !m.notifyWindowFocused
@@ -1516,12 +1521,19 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// Load nested tool calls for agent/agentic_fetch tools.
 	m.loadNestedToolCalls(items)
 
-	// If the user switches between sessions while the agent is working we want
-	// to make sure the animations are shown.
-	for _, item := range items {
-		if animatable, ok := item.(chat.Animatable); ok {
-			if cmd := animatable.StartAnimation(); cmd != nil {
-				cmds = append(cmds, cmd)
+	// If the user switches between sessions while the agent is working we
+	// want to make sure the animations are shown. Gate on the agent actually
+	// being busy: a session that was killed mid-generation can persist an
+	// assistant message with no Finish part, which still reports isSpinning()
+	// even though nothing is running. Starting animations for it here would
+	// leave a ghost "working" spinner (and a second one alongside any tool
+	// spinner) after the session is reloaded.
+	if m.isAgentBusy() {
+		for _, item := range items {
+			if animatable, ok := item.(chat.Animatable); ok {
+				if cmd := animatable.StartAnimation(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	}
@@ -1991,8 +2003,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
-			cfg.Options.NotificationStyle = msg.Style
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notification_style", msg.Style); err != nil {
+			cfg.Options.Notifications = msg.Style
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notifications", msg.Style); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			} else {
 				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
@@ -4959,6 +4971,10 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeWorkflowProgress:
 		return m.handleWorkflowProgress(n.WorkflowProgress)
+	case notify.TypeAWSSSOAuth:
+		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
+	case notify.TypeAWSSSOAuthResult:
+		return m.handleAWSSSOAuthResult(n.Message)
 	default:
 		return nil
 	}
@@ -5113,6 +5129,49 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 		return nil
 	}
 	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[agentCfg.Model], agentCfg.Model)
+}
+
+// handleAWSSSOAuth opens the AWS SSO progress dialog (or updates the SSO URL
+// on an already-open one). The refresh command runs in the coordinator; this
+// dialog is a display surface driven by agent notifications.
+func (m *UI) handleAWSSSOAuth(command, url string) tea.Cmd {
+	// Update the URL on an already-open dialog.
+	if existing := m.dialog.Dialog(dialog.AWSSSOID); existing != nil {
+		if awsDlg, ok := existing.(*dialog.AWSSSO); ok && url != "" {
+			awsDlg.SetURL(url)
+		}
+		m.dialog.BringToFront(dialog.AWSSSOID)
+		return nil
+	}
+	if command == "" {
+		return nil
+	}
+	dlg, cmd := dialog.NewAWSSSO(m.com, command)
+	if url != "" {
+		dlg.SetURL(url)
+	}
+	m.dialog.OpenDialogWithGrace(dlg)
+	return cmd
+}
+
+// handleAWSSSOAuthResult finishes the AWS SSO dialog once the refresh command
+// exits: it closes on success or shows the error so the user can dismiss it.
+func (m *UI) handleAWSSSOAuthResult(errMsg string) tea.Cmd {
+	existing := m.dialog.Dialog(dialog.AWSSSOID)
+	if existing == nil {
+		return nil
+	}
+	awsDlg, ok := existing.(*dialog.AWSSSO)
+	if !ok {
+		return nil
+	}
+	if errMsg == "" {
+		// Success: the turn retries transparently, so no need to linger.
+		m.dialog.CloseDialog(dialog.AWSSSOID)
+		return nil
+	}
+	awsDlg.Finish(errMsg)
+	return nil
 }
 
 // newSession clears the current session state and prepares for a new session.

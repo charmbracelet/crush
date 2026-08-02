@@ -4,10 +4,12 @@ import (
 	"context"
 	"maps"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -522,5 +524,246 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 			require.Contains(t, info.Error.Error(), tc.wantErrContains)
 			require.Nil(t, info.Client, "no client session on failure")
 		})
+	}
+}
+
+func TestReconcile(t *testing.T) {
+	t.Parallel()
+
+	base := config.MCPConfig{
+		Type: config.MCPHttp,
+		URL:  "https://example.com/mcp",
+	}
+	changed := func() config.MCPConfig { m := base; m.URL = "https://other.com/mcp"; return m }()
+	disabled := func() config.MCPConfig { m := base; m.Disabled = true; return m }()
+	ptr := func(m config.MCPConfig) *config.MCPConfig { return &m }
+
+	// server seeds the running state reconcile diffs against: a state, the
+	// config the server last connected with (Config), and, for a server
+	// mid-connect, the config that attempt is connecting with (PendingConfig).
+	type server struct {
+		state   State
+		config  config.MCPConfig
+		pending *config.MCPConfig
+	}
+
+	tests := []struct {
+		name    string
+		servers map[string]server
+		current config.MCPs
+		want    map[string]reinitAction
+	}{
+		{
+			name:    "new server starts",
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name:    "removed server is cleaned up",
+			servers: map[string]server{"gone": {state: StateConnected, config: base}},
+			current: config.MCPs{},
+			want:    map[string]reinitAction{"gone": reinitRemove},
+		},
+		{
+			name:    "unchanged connected server is skipped",
+			servers: map[string]server{"a": {state: StateConnected, config: base}},
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{},
+		},
+		{
+			name:    "changed config restarts",
+			servers: map[string]server{"a": {state: StateConnected, config: base}},
+			current: config.MCPs{"a": changed},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name:    "disabled server is disabled",
+			servers: map[string]server{"a": {state: StateConnected, config: base}},
+			current: config.MCPs{"a": disabled},
+			want:    map[string]reinitAction{"a": reinitDisable},
+		},
+		{
+			name:    "already disabled server is skipped",
+			servers: map[string]server{"a": {state: StateDisabled}},
+			current: config.MCPs{"a": disabled},
+			want:    map[string]reinitAction{},
+		},
+		{
+			// Regression: disabling clears the recorded config, so a server
+			// left disabled with an unchanged config must restart on re-enable
+			// rather than being skipped as "already initialized".
+			name:    "re-enabled server restarts despite unchanged config",
+			servers: map[string]server{"a": {state: StateDisabled}},
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name:    "errored server restarts",
+			servers: map[string]server{"a": {state: StateError, config: base}},
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name:    "starting server connecting with current config is left alone",
+			servers: map[string]server{"a": {state: StateStarting, pending: ptr(base)}},
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{},
+		},
+		{
+			// Regression: a config change that lands while a server is still
+			// connecting must restart it, otherwise the in-flight attempt
+			// connects with the old config and the change is silently lost.
+			name:    "starting server with changed config restarts",
+			servers: map[string]server{"a": {state: StateStarting, pending: ptr(base)}},
+			current: config.MCPs{"a": changed},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name: "mixed scenario",
+			servers: map[string]server{
+				"keep":    {state: StateConnected, config: base},
+				"remove":  {state: StateConnected, config: base},
+				"restart": {state: StateConnected, config: base},
+			},
+			current: config.MCPs{
+				"keep":    base,
+				"restart": changed,
+				"new":     base,
+			},
+			want: map[string]reinitAction{
+				"remove":  reinitRemove,
+				"restart": reinitStart,
+				"new":     reinitStart,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			running := make(map[string]ClientInfo, len(tc.servers))
+			for name, s := range tc.servers {
+				running[name] = ClientInfo{
+					Name:          name,
+					State:         s.state,
+					Config:        s.config,
+					PendingConfig: s.pending,
+				}
+			}
+			got := reconcile(tc.current, running)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestMCPConfigEqual(t *testing.T) {
+	t.Parallel()
+
+	base := config.MCPConfig{
+		Type:    config.MCPHttp,
+		URL:     "https://example.com/mcp",
+		Headers: map[string]string{"Authorization": "Bearer tok"},
+		Timeout: 30,
+	}
+
+	tests := []struct {
+		name string
+		a, b config.MCPConfig
+		want bool
+	}{
+		{"identical", base, base, true},
+		{"different URL", base, func() config.MCPConfig { m := base; m.URL = "https://other.com/mcp"; return m }(), false},
+		{"different headers", base, func() config.MCPConfig {
+			m := base
+			m.Headers = map[string]string{"Authorization": "Bearer other"}
+			return m
+		}(), false},
+		{"different timeout", base, func() config.MCPConfig { m := base; m.Timeout = 60; return m }(), false},
+		{"different type", base, func() config.MCPConfig { m := base; m.Type = config.MCPStdio; return m }(), false},
+		{
+			"OAuthToken ignored",
+			base,
+			func() config.MCPConfig {
+				m := base
+				m.OAuthToken = &oauth.Token{AccessToken: "x"}
+				return m
+			}(),
+			true,
+		},
+		{
+			"both OAuthToken ignored",
+			func() config.MCPConfig {
+				m := base
+				m.OAuthToken = &oauth.Token{AccessToken: "x"}
+				return m
+			}(),
+			func() config.MCPConfig {
+				m := base
+				m.OAuthToken = &oauth.Token{AccessToken: "y"}
+				return m
+			}(),
+			true,
+		},
+		{"disabled vs enabled", base, func() config.MCPConfig { m := base; m.Disabled = true; return m }(), false},
+		{"oauth flag", base, func() config.MCPConfig { m := base; m.OAuth = true; return m }(), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, mcpConfigEqual(tc.a, tc.b))
+		})
+	}
+}
+
+// TestMCPConfigEqualExhaustive guards mcpConfigEqual against drift. It
+// enumerates every field of config.MCPConfig via reflection and fails if a
+// field is neither compared by mcpConfigEqual nor explicitly excluded here.
+// Adding a field to MCPConfig now forces a conscious decision about whether
+// it should trigger a server restart, rather than being silently ignored.
+func TestMCPConfigEqualExhaustive(t *testing.T) {
+	t.Parallel()
+
+	// Fields intentionally excluded from the comparison.
+	excluded := map[string]bool{
+		"OAuthToken": true, // internally managed, refreshed out-of-band.
+	}
+
+	typ := reflect.TypeOf(config.MCPConfig{})
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		if excluded[name] {
+			continue
+		}
+		// Build two configs that differ only in this field and assert the
+		// difference is detected.
+		a := config.MCPConfig{}
+		b := config.MCPConfig{}
+		setDistinct(typ.Field(i).Type, reflect.ValueOf(&a).Elem().Field(i))
+		require.False(t, mcpConfigEqual(a, b),
+			"mcpConfigEqual ignores field %q; add it to the comparison or to the excluded set", name)
+	}
+}
+
+// setDistinct assigns a non-zero value of the given type so two structs
+// differ in exactly one field.
+func setDistinct(typ reflect.Type, field reflect.Value) {
+	switch typ.Kind() {
+	case reflect.String:
+		field.SetString("x")
+	case reflect.Bool:
+		field.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		field.SetInt(1)
+	case reflect.Slice:
+		field.Set(reflect.MakeSlice(typ, 1, 1))
+	case reflect.Map:
+		m := reflect.MakeMap(typ)
+		m.SetMapIndex(reflect.Zero(typ.Key()), reflect.Zero(typ.Elem()))
+		field.Set(m)
+	case reflect.Ptr:
+		field.Set(reflect.New(typ.Elem()))
+	default:
+		panic("setDistinct: unhandled kind " + typ.Kind().String())
 	}
 }

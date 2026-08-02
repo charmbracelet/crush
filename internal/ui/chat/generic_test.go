@@ -120,6 +120,28 @@ func TestGenericToolMetadataAllFailShowsAlert(t *testing.T) {
 	require.NotContains(t, plain, "do not repeat")
 }
 
+// A failed surface next to a healthy sibling still surfaces an alert — the
+// model was told the user can see every surface.
+func TestGenericToolMetadataPartialFailShowsAlert(t *testing.T) {
+	t.Parallel()
+
+	meta, err := json.Marshal(tools.ReadMCPResourceResponseMetadata{
+		A2UISurfaces: []string{a2uiSurface, "<a2ui-json>{malformed</a2ui-json>"},
+	})
+	require.NoError(t, err)
+
+	sty := styles.CharmtonePantera()
+	ctx := &GenericToolRenderContext{}
+	out := ctx.RenderTool(&sty, 80, genericToolOpts(t, &message.ToolResult{
+		Content:  a2uiTestPlaceholder,
+		Metadata: string(meta),
+	}))
+	plain := ansi.Strip(out)
+
+	require.Contains(t, plain, "Hello from A2UI")
+	require.Contains(t, plain, "couldn't render this resource's UI surface")
+}
+
 // The content-scan fallback exists for pre-change persisted read_mcp_resource
 // results only — other tools sharing the generic renderer must keep
 // payload-shaped text as text.

@@ -74,7 +74,11 @@ func splitMCPResourceContents(contents []*mcp.ResourceContents, divert bool) ([]
 		// surface.
 		if divert && content.MIMEType == a2uiMIMEType {
 			metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+text+"</a2ui-json>")
-			textParts = append(textParts, A2UISurfacePlaceholderPrefix+content.URI+" — the user can already see it; do not repeat or echo its JSON payload]")
+			// The placeholder is a single-line protocol the chat renderer
+			// strips line-wise — a server-controlled URI must not be able
+			// to break out of it with embedded newlines.
+			uri := strings.NewReplacer("\n", " ", "\r", " ").Replace(content.URI)
+			textParts = append(textParts, A2UISurfacePlaceholderPrefix+uri+" — the user can already see it; do not repeat or echo its JSON payload]")
 			continue
 		}
 		textParts = append(textParts, text)

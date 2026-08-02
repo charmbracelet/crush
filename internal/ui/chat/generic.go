@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -109,9 +110,11 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 // claims the user can already see the surface, which would be false here.
 func renderToolA2UIResultBody(sty *styles.Styles, surfaces []string, opts *ToolRenderOpts, widths toolResultContentWidths) string {
 	var b strings.Builder
+	failed := 0
 	for _, surf := range surfaces {
 		rendered, err := renderToolA2UI(sty, surf, widths.Body)
 		if err != nil || rendered == "" {
+			failed++
 			continue
 		}
 		if b.Len() > 0 {
@@ -123,7 +126,11 @@ func renderToolA2UIResultBody(sty *styles.Styles, surfaces []string, opts *ToolR
 	var chunks []string
 	if b.Len() > 0 {
 		chunks = append(chunks, sty.Tool.Body.Render(clampToolA2UI(sty, b.String(), widths.Body, opts.ExpandedContent)))
-	} else {
+	}
+	// Alert on ANY failed surface, not only when all fail: a sibling
+	// surface rendering fine must not hide that another one vanished —
+	// the model was told the user can see every one of them.
+	if failed > 0 {
 		chunks = append(chunks, sty.Tool.Body.Render(renderToolA2UIAlert(sty, widths.Body)))
 	}
 	// Show any real text the resource returned alongside its surfaces — the
@@ -186,12 +193,13 @@ func renderToolA2UI(sty *styles.Styles, content string, width int) (string, erro
 	}
 	var b strings.Builder
 	themedStyles := a2uiThemeStyles(sty)
+	proseStyle := lipgloss.NewStyle().Width(width)
 	for _, p := range parts {
-		// Keep each part's prose: pre-change persisted results interleave
-		// text with surfaces, and dropping it would lose content the model
-		// (and user) saw.
+		// Keep each part's prose, wrapped to the body budget: pre-change
+		// persisted results interleave text with surfaces, and dropping
+		// (or overflowing) it would corrupt content the model saw.
 		if text := strings.TrimSpace(p.Text); text != "" {
-			b.WriteString(text)
+			b.WriteString(proseStyle.Render(text))
 			b.WriteString("\n")
 		}
 		if len(p.Messages) == 0 {

@@ -77,10 +77,12 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	widths := toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}
 
 	// If the tool result carries an A2UI surface (a read_mcp_resource that
-	// returned application/a2ui+json), render it as a surface snapshot
-	// instead of raw text. The payload arrives via response metadata — the
-	// model only sees a placeholder, so it cannot echo the JSON back and
-	// double-render the surface. This is what makes
+	// returned application/a2ui+json, or an mcp_* tool whose result
+	// embedded one), render it instead of raw text. The payload arrives via
+	// response metadata — the model only sees a placeholder, so it cannot
+	// echo the JSON back and double-render the surface. Live surface models
+	// (#219) render interactively; without them (older persisted results)
+	// fall back to the static snapshot. This is what makes
 	// cairn://artifact/{id}/a2ui and similar resource reads render inline.
 	if opts.Result.Metadata != "" {
 		var meta tools.ReadMCPResourceResponseMetadata
@@ -105,37 +107,53 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 }
 
 // renderToolA2UIResultBody renders the metadata-delivered surfaces plus any
-// real text content the resource returned alongside them. When every surface
-// fails to render, an alert replaces the body — the model-facing placeholder
-// claims the user can already see the surface, which would be false here.
+// real text content the resource returned alongside them. When the item
+// carries live surface models (opts.LiveSurfaces, #219) they render
+// interactively; otherwise each surface falls back to a static snapshot.
+// When every surface fails to render, an alert replaces the body — the
+// model-facing placeholder claims the user can already see the surface,
+// which would be false here.
 func renderToolA2UIResultBody(sty *styles.Styles, surfaces []string, opts *ToolRenderOpts, widths toolResultContentWidths) string {
 	var b strings.Builder
-	failed := 0
-	for _, surf := range surfaces {
-		rendered, err := renderToolA2UI(sty, surf, widths.Body)
-		if err != nil || rendered == "" {
-			failed++
-			continue
+	if opts.LiveSurfaces != nil {
+		b.WriteString(opts.LiveSurfaces(widths.Body))
+	} else {
+		failed := 0
+		for _, surf := range surfaces {
+			rendered, err := renderToolA2UI(sty, surf, widths.Body)
+			if err != nil || rendered == "" {
+				failed++
+				continue
+			}
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(rendered)
 		}
+
+		var chunks []string
 		if b.Len() > 0 {
-			b.WriteString("\n")
+			chunks = append(chunks, sty.Tool.Body.Render(clampToolA2UI(sty, b.String(), widths.Body, opts.ExpandedContent)))
 		}
-		b.WriteString(rendered)
+		// Alert on ANY failed surface, not only when all fail: a sibling
+		// surface rendering fine must not hide that another one vanished —
+		// the model was told the user can see every one of them.
+		if failed > 0 {
+			chunks = append(chunks, sty.Tool.Body.Render(renderToolA2UIAlert(sty, widths.Body)))
+		}
+		// Show any real text the resource returned alongside its surfaces — the
+		// model-facing placeholder lines are stripped, the rest belongs to the
+		// user just as much as the surfaces do.
+		if text := stripA2UIPlaceholders(opts.Result.Content); text != "" {
+			chunks = append(chunks, renderToolResultTextContent(sty, text, widths, opts.ExpandedContent))
+		}
+		return strings.Join(chunks, "\n")
 	}
 
 	var chunks []string
 	if b.Len() > 0 {
 		chunks = append(chunks, sty.Tool.Body.Render(clampToolA2UI(sty, b.String(), widths.Body, opts.ExpandedContent)))
 	}
-	// Alert on ANY failed surface, not only when all fail: a sibling
-	// surface rendering fine must not hide that another one vanished —
-	// the model was told the user can see every one of them.
-	if failed > 0 {
-		chunks = append(chunks, sty.Tool.Body.Render(renderToolA2UIAlert(sty, widths.Body)))
-	}
-	// Show any real text the resource returned alongside its surfaces — the
-	// model-facing placeholder lines are stripped, the rest belongs to the
-	// user just as much as the surfaces do.
 	if text := stripA2UIPlaceholders(opts.Result.Content); text != "" {
 		chunks = append(chunks, renderToolResultTextContent(sty, text, widths, opts.ExpandedContent))
 	}

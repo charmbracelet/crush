@@ -18,12 +18,22 @@ func TestSplitMCPResourceContents(t *testing.T) {
 		t.Parallel()
 		textParts, meta := splitMCPResourceContents([]*mcp.ResourceContents{
 			{URI: "cairn://run/x/a2ui", MIMEType: a2uiMIMEType, Text: testA2UIPayload},
-		}, true)
+		}, true, "test-mcp")
 		require.Len(t, meta.A2UISurfaces, 1)
 		require.Equal(t, "<a2ui-json>"+testA2UIPayload+"</a2ui-json>", meta.A2UISurfaces[0])
+		require.Equal(t, []string{"test-mcp"}, meta.MCPSurfaceProvenance)
 		require.Len(t, textParts, 1)
 		require.True(t, strings.HasPrefix(textParts[0], A2UISurfacePlaceholderPrefix))
 		require.NotContains(t, textParts[0], "updateComponents")
+	})
+
+	t.Run("legacy MIME spelling is diverted too", func(t *testing.T) {
+		t.Parallel()
+		_, meta := splitMCPResourceContents([]*mcp.ResourceContents{
+			{URI: "a2ui://form", MIMEType: mcp.A2UILegacyMIMEType, Text: testA2UIPayload},
+		}, true, "test-mcp")
+		require.Len(t, meta.A2UISurfaces, 1)
+		require.Equal(t, []string{"test-mcp"}, meta.MCPSurfaceProvenance)
 	})
 
 	t.Run("a2ui blob content is diverted too", func(t *testing.T) {
@@ -32,7 +42,7 @@ func TestSplitMCPResourceContents(t *testing.T) {
 		// surface must not leak raw JSON into the model-facing content.
 		textParts, meta := splitMCPResourceContents([]*mcp.ResourceContents{
 			{URI: "cairn://run/x/a2ui", MIMEType: a2uiMIMEType, Blob: []byte(testA2UIPayload)},
-		}, true)
+		}, true, "test-mcp")
 		require.Len(t, meta.A2UISurfaces, 1)
 		require.Len(t, textParts, 1)
 		require.True(t, strings.HasPrefix(textParts[0], A2UISurfacePlaceholderPrefix))
@@ -45,7 +55,7 @@ func TestSplitMCPResourceContents(t *testing.T) {
 		// the model can relay or summarize the data.
 		textParts, meta := splitMCPResourceContents([]*mcp.ResourceContents{
 			{URI: "cairn://run/x/a2ui", MIMEType: a2uiMIMEType, Text: testA2UIPayload},
-		}, false)
+		}, false, "test-mcp")
 		require.Empty(t, meta.A2UISurfaces)
 		require.Equal(t, []string{testA2UIPayload}, textParts)
 	})
@@ -54,7 +64,7 @@ func TestSplitMCPResourceContents(t *testing.T) {
 		t.Parallel()
 		textParts, meta := splitMCPResourceContents([]*mcp.ResourceContents{
 			{URI: "cairn://artifact/x", MIMEType: "text/markdown", Text: "# hello"},
-		}, true)
+		}, true, "test-mcp")
 		require.Empty(t, meta.A2UISurfaces)
 		require.Equal(t, []string{"# hello"}, textParts)
 	})
@@ -64,7 +74,7 @@ func TestSplitMCPResourceContents(t *testing.T) {
 		textParts, meta := splitMCPResourceContents([]*mcp.ResourceContents{
 			{URI: "cairn://artifact/x", MIMEType: "text/markdown", Text: "summary"},
 			{URI: "cairn://artifact/x/a2ui", MIMEType: a2uiMIMEType, Text: testA2UIPayload},
-		}, true)
+		}, true, "test-mcp")
 		require.Len(t, meta.A2UISurfaces, 1)
 		require.Len(t, textParts, 2)
 		require.Equal(t, "summary", textParts[0])
@@ -77,7 +87,7 @@ func TestSplitMCPResourceContents(t *testing.T) {
 		// must not learn a width-frozen URI it could reuse after a resize.
 		textParts, _ := splitMCPResourceContents([]*mcp.ResourceContents{
 			{URI: "cairn://run/x/a2ui?w=114", MIMEType: a2uiMIMEType, Text: testA2UIPayload},
-		}, true)
+		}, true, "test-mcp")
 		require.Len(t, textParts, 1)
 		require.Contains(t, textParts[0], "cairn://run/x/a2ui ")
 		require.NotContains(t, textParts[0], "w=114")
@@ -88,7 +98,7 @@ func TestSplitMCPResourceContents(t *testing.T) {
 		textParts, meta := splitMCPResourceContents([]*mcp.ResourceContents{
 			nil,
 			{URI: "cairn://artifact/empty"},
-		}, true)
+		}, true, "test-mcp")
 		require.Empty(t, meta.A2UISurfaces)
 		require.Empty(t, textParts)
 	})

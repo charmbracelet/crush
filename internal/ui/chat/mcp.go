@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -73,6 +74,19 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 	}
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
+	widths := toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}
+
+	// An MCP tool result can carry an A2UI surface in its metadata
+	// (#219): the server returned an application/a2ui+json
+	// EmbeddedResource, diverted so the model only sees a placeholder.
+	// Render the live surface (or static fallback) instead of raw text.
+	if opts.Result.Metadata != "" {
+		var meta tools.ReadMCPResourceResponseMetadata
+		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && len(meta.A2UISurfaces) > 0 {
+			return joinToolParts(header, renderToolA2UIResultBody(sty, meta.A2UISurfaces, opts, widths))
+		}
+	}
+
+	body := renderToolResultTextContent(sty, opts.Result.Content, widths, opts.ExpandedContent)
 	return joinToolParts(header, body)
 }

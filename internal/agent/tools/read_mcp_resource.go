@@ -32,12 +32,16 @@ const ReadMCPResourceToolName = "read_mcp_resource"
 // A2UI payloads are delivered to the UI through response metadata (never to
 // the model): the model gets a compact placeholder instead of the raw JSON,
 // so it cannot echo the payload back and double-render the surface.
-const a2uiMIMEType = "application/a2ui+json"
+const a2uiMIMEType = mcp.A2UIJSONMIMEType
 
 // ReadMCPResourceResponseMetadata carries the UI-only A2UI surface payload
-// for a resource whose MIME type is application/a2ui+json.
+// for a resource whose MIME type is application/a2ui+json (or a tool result
+// that embedded one). MCPSurfaceProvenance records which MCP server each
+// surface came from — by slice position — so a later interaction event can
+// route back to the owning server.
 type ReadMCPResourceResponseMetadata struct {
-	A2UISurfaces []string `json:"a2ui_surfaces,omitempty"`
+	A2UISurfaces         []string `json:"a2ui_surfaces,omitempty"`
+	MCPSurfaceProvenance []string `json:"mcp_surface_provenance,omitempty"`
 }
 
 // A2UISurfacePlaceholderPrefix starts every model-facing placeholder that
@@ -51,7 +55,7 @@ const A2UISurfacePlaceholderPrefix = "[A2UI surface rendered in the chat UI from
 // metadata (channel-originated turns, disable_a2ui deployments): the raw
 // payload then stays in the model-facing content so the model can still
 // relay or summarize the data.
-func splitMCPResourceContents(contents []*mcp.ResourceContents, divert bool) ([]string, ReadMCPResourceResponseMetadata) {
+func splitMCPResourceContents(contents []*mcp.ResourceContents, divert bool, provenance string) ([]string, ReadMCPResourceResponseMetadata) {
 	var textParts []string
 	var metadata ReadMCPResourceResponseMetadata
 	for _, content := range contents {
@@ -72,9 +76,10 @@ func splitMCPResourceContents(contents []*mcp.ResourceContents, divert bool) ([]
 		// A2UI surfaces go to the UI via metadata, not the model-facing
 		// content: the chat renderer draws the surface itself, and the
 		// model only ever echoed the raw JSON back, double-rendering the
-		// surface.
-		if divert && content.MIMEType == a2uiMIMEType {
+		// surface. Both the canonical and legacy MIME spellings match.
+		if divert && mcp.IsA2UIMIMEType(content.MIMEType) {
 			metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+text+"</a2ui-json>")
+			metadata.MCPSurfaceProvenance = append(metadata.MCPSurfaceProvenance, provenance)
 			// The placeholder is a single-line protocol the chat renderer
 			// strips line-wise — a server-controlled URI must not be able
 			// to break out of it with embedded newlines. The injected
@@ -206,7 +211,7 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 			divert := GetChannelFromContext(ctx) == "" &&
 				!cfg.Config().Options.DisableA2UI &&
 				GetContentWidthFromContext(ctx) > 0
-			textParts, metadata := splitMCPResourceContents(contents, divert)
+			textParts, metadata := splitMCPResourceContents(contents, divert, params.MCPName)
 
 			if len(textParts) == 0 {
 				return fantasy.NewTextResponse(""), nil

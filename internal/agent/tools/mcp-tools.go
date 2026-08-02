@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -133,6 +134,17 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
+	// Divert A2UI surface payloads to UI-only metadata only when a chat UI
+	// will actually render them: on channel-originated turns the reply
+	// travels back over the channel and the model needs the payload to
+	// relay it, disable_a2ui deployments opted out of surfaces entirely,
+	// and a zero content width means no interactive UI tagged this turn.
+	// Mirrors the diversion rule in read_mcp_resource.go.
+	divert := GetChannelFromContext(ctx) == "" &&
+		!m.cfg.Config().Options.DisableA2UI &&
+		GetContentWidthFromContext(ctx) > 0
+	content, metadata := splitMCPToolResult(result, m.mcpName, divert)
+
 	switch result.Type {
 	case "image", "media":
 		if !GetSupportsImagesFromContext(ctx) {
@@ -146,9 +158,51 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		} else {
 			response = fantasy.NewMediaResponse(result.Data, result.MediaType)
 		}
-		response.Content = result.Content
+		response.Content = content
+		if len(metadata.A2UISurfaces) > 0 {
+			response = fantasy.WithResponseMetadata(response, metadata)
+		}
 		return response, nil
 	default:
-		return fantasy.NewTextResponse(result.Content), nil
+		resp := fantasy.NewTextResponse(content)
+		if len(metadata.A2UISurfaces) > 0 {
+			resp = fantasy.WithResponseMetadata(resp, metadata)
+		}
+		return resp, nil
 	}
+}
+
+// splitMCPToolResult partitions an MCP tool result into model-facing text
+// and, when divert is set, UI-only A2UI surface payloads carried in response
+// metadata. The surfaces travel exactly like read_mcp_resource's: wrapped in
+// <a2ui-json> tags on ReadMCPResourceResponseMetadata, with a single-line
+// placeholder left for the model so it cannot echo the JSON back and
+// double-render the surface. When divert is false the raw payload is folded
+// back into the model-facing content (except payloads the server annotated
+// for the user only — hiding those from the model is the annotation's whole
+// point), so the model can still relay or summarize the data.
+func splitMCPToolResult(result mcp.ToolResult, mcpName string, divert bool) (string, ReadMCPResourceResponseMetadata) {
+	var metadata ReadMCPResourceResponseMetadata
+	content := result.Content
+	for _, surface := range result.Surfaces {
+		if divert {
+			metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+surface.Payload+"</a2ui-json>")
+			metadata.MCPSurfaceProvenance = append(metadata.MCPSurfaceProvenance, mcpName)
+			uri := strings.NewReplacer("\n", " ", "\r", " ").Replace(surface.URI)
+			placeholder := A2UISurfacePlaceholderPrefix + uri + " from MCP server " + mcpName + " — the user can already see it; do not repeat or echo its JSON payload]"
+			if content != "" {
+				content += "\n"
+			}
+			content += placeholder
+			continue
+		}
+		if !surface.AssistantVisible {
+			continue
+		}
+		if content != "" {
+			content += "\n"
+		}
+		content += surface.Payload
+	}
+	return content, metadata
 }

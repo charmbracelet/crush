@@ -9,9 +9,11 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -585,20 +587,61 @@ func a2uiThemeStyles(sty *styles.Styles) render.Styles {
 		Reverse(false)
 	// Inject Crush's glamour renderer so body-variant Text containing
 	// Markdown (tables, lists, bold, code) renders with the same styling
-	// as the rest of the chat. The renderer is created per-width inside
-	// the callback; glamour memoizes per width internally.
+	// as the rest of the chat. Rendered output is memoized per
+	// (renderer, text): items holding live surfaces bypass the chat render
+	// caches, so without a memo every repaint re-runs a full glamour parse
+	// per markdown body. The renderer lock is scoped to the Render call —
+	// callers must never hold the same renderer's lock while a surface
+	// View runs (see renderContentWithA2UI), or this hook would deadlock.
 	st.MarkdownRenderer = func(text string, width int) string {
 		renderer := common.MarkdownRenderer(sty, width)
+		if out, ok := a2uiMarkdownMemoGet(renderer, text); ok {
+			return out
+		}
 		mu := common.LockMarkdownRenderer(renderer)
 		mu.Lock()
-		defer mu.Unlock()
 		out, err := renderer.Render(text)
+		mu.Unlock()
 		if err != nil {
 			return text
 		}
-		return strings.TrimSpace(out)
+		out = strings.TrimSpace(out)
+		a2uiMarkdownMemoPut(renderer, text, out)
+		return out
 	}
 	return st
+}
+
+// a2uiMarkdownMemo caches glamour output for surface body Text. Keyed by the
+// memoized renderer pointer — which already encodes the width and is dropped
+// on theme change via InvalidateMarkdownRendererCache — plus the source text.
+// Bounded crudely: the map resets once it grows past a2uiMarkdownMemoMax.
+var (
+	a2uiMarkdownMemoMu sync.Mutex
+	a2uiMarkdownMemo   = map[a2uiMarkdownMemoKey]string{}
+)
+
+type a2uiMarkdownMemoKey struct {
+	renderer *glamour.TermRenderer
+	text     string
+}
+
+const a2uiMarkdownMemoMax = 512
+
+func a2uiMarkdownMemoGet(r *glamour.TermRenderer, text string) (string, bool) {
+	a2uiMarkdownMemoMu.Lock()
+	defer a2uiMarkdownMemoMu.Unlock()
+	out, ok := a2uiMarkdownMemo[a2uiMarkdownMemoKey{r, text}]
+	return out, ok
+}
+
+func a2uiMarkdownMemoPut(r *glamour.TermRenderer, text, out string) {
+	a2uiMarkdownMemoMu.Lock()
+	defer a2uiMarkdownMemoMu.Unlock()
+	if len(a2uiMarkdownMemo) >= a2uiMarkdownMemoMax {
+		clear(a2uiMarkdownMemo)
+	}
+	a2uiMarkdownMemo[a2uiMarkdownMemoKey{r, text}] = out
 }
 
 // renderA2UILoading renders a "✨ Rendering UI…" placeholder for when an
@@ -933,7 +976,10 @@ func a2uiSurfaceWantsKey(s render.Model, key tea.KeyMsg) bool {
 //
 // This deliberately bypasses the streaming-markdown prefix cache (which assumes
 // a single glamour render per item) and renders each segment directly. The
-// renderer is shared, so the whole multi-render sequence holds its lock.
+// renderer is shared, so each Render call takes its lock — scoped to the call,
+// never held across model.View(): a surface body Text re-enters the same
+// memoized renderer through the a2uiThemeStyles MarkdownRenderer hook, and
+// holding the lock across View would self-deadlock the UI goroutine.
 func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, finished bool) string {
 	masked, codeReps := maskMarkdownCode(content)
 	// Repair childless-but-labeled buttons on the raw JSON before parsing —
@@ -956,8 +1002,6 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 
 	renderer := common.MarkdownRenderer(a.sty, width)
 	mu := common.LockMarkdownRenderer(renderer)
-	mu.Lock()
-	defer mu.Unlock()
 
 	renderMarkdown := func(text string) string {
 		if strings.TrimSpace(text) == "" {
@@ -965,7 +1009,9 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 		}
 		// Restore masked code before markdown rendering.
 		text = unmaskMarkdownCode(text, codeReps)
+		mu.Lock()
 		out, err := renderer.Render(text)
+		mu.Unlock()
 		if err != nil {
 			return strings.TrimSpace(text)
 		}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/message"
@@ -1060,4 +1061,32 @@ func TestA2UIStreamingLoadingPlaceholderComplete(t *testing.T) {
 
 	require.Contains(t, out, "Hello from A2UI", "complete surface should render its content")
 	require.NotContains(t, out, "Rendering UI", "complete surface should not show loading placeholder")
+}
+
+// Regression: a markdown-looking body Text rendered at the surface's
+// un-narrowed width re-enters the shared glamour renderer through the
+// a2uiThemeStyles MarkdownRenderer hook. renderContentWithA2UI used to hold
+// that renderer's lock across model.View(), so the hook's Lock() on the same
+// non-reentrant mutex froze the UI goroutine permanently.
+func TestRenderContentWithA2UIMarkdownBodyNoDeadlock(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+	// Root-level Text (no Card): a2tea passes the full host width to the
+	// markdown hook, matching the outer renderer's width bucket.
+	content := `<a2ui-json>{"version":"v0.9","updateComponents":{"surfaceId":"s","components":[` +
+		`{"component":"Text","id":"t","text":"This is **bold** markdown"}` +
+		`]}}</a2ui-json>`
+
+	done := make(chan string, 1)
+	go func() {
+		done <- item.renderContentWithA2UI(content, 80, true)
+	}()
+	select {
+	case out := <-done:
+		require.Contains(t, ansi.Strip(out), "bold")
+	case <-time.After(15 * time.Second):
+		t.Fatal("renderContentWithA2UI deadlocked rendering a markdown body Text")
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -327,8 +328,15 @@ func TestCacheStore_ReplacesFileInsteadOfRewritingIt(t *testing.T) {
 	after, err := os.Stat(path)
 	require.NoError(t, err)
 
-	require.False(t, os.SameFile(before, after),
-		"the cache should be replaced by a rename, not rewritten in place")
+	// os.Stat on Windows resolves file identity lazily by reopening the path,
+	// so both stats describe whichever file the path points at by the time
+	// they are compared and SameFile cannot observe the replacement. The
+	// write path is shared, so asserting this on the other platforms covers
+	// it. The checks below still run everywhere.
+	if runtime.GOOS != "windows" {
+		require.False(t, os.SameFile(before, after),
+			"the cache should be replaced by a rename, not rewritten in place")
+	}
 
 	// The new contents are complete and no temporary files are left behind.
 	got, _, err := c.Get()

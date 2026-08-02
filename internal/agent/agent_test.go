@@ -1084,38 +1084,45 @@ func TestFormatProviderError(t *testing.T) {
 		require.Equal(t, "provider error", formatProviderError(nil))
 	})
 
-	t.Run("title and message both present and distinct", func(t *testing.T) {
+	t.Run("quota error with HTTP status 429", func(t *testing.T) {
 		t.Parallel()
 		err := &fantasy.ProviderError{
-			Title:   "rate limit",
-			Message: "You exceeded your current quota, please check your plan and billing details.",
+			StatusCode: 429,
+			Title:      "rate limit",
+			Message:    "You exceeded your current quota, please check your plan and billing details.",
 		}
-		require.Equal(t, "rate limit: You exceeded your current quota, please check your plan and billing details.", formatProviderError(err))
+		require.Equal(t, "HTTP 429 - Quota Exceeded / Out of Credits - You exceeded your current quota, please check your plan and billing details.", formatProviderError(err))
 	})
 
-	t.Run("message contains title prefix", func(t *testing.T) {
+	t.Run("rate limit error with generic message", func(t *testing.T) {
 		t.Parallel()
 		err := &fantasy.ProviderError{
-			Title:   "rate limit",
-			Message: "Rate limit reached for requests per minute (RPM)",
+			StatusCode: 429,
+			Title:      "rate limit",
+			Message:    "too many requests",
 		}
-		require.Equal(t, "Rate limit reached for requests per minute (RPM)", formatProviderError(err))
+		require.Equal(t, "HTTP 429 - Rate Limit Reached", formatProviderError(err))
 	})
 
-	t.Run("only title present", func(t *testing.T) {
+	t.Run("extract message from response body JSON", func(t *testing.T) {
 		t.Parallel()
 		err := &fantasy.ProviderError{
-			Title: "overloaded",
+			StatusCode:   429,
+			Title:        "rate limit",
+			Message:      "too many requests",
+			ResponseBody: []byte(`{"error": {"message": "Quota exceeded for metric GenerateContent"}}`),
 		}
-		require.Equal(t, "overloaded", formatProviderError(err))
+		require.Equal(t, "HTTP 429 - Quota Exceeded / Out of Credits - Quota exceeded for metric GenerateContent", formatProviderError(err))
 	})
 
-	t.Run("only status code present", func(t *testing.T) {
+	t.Run("server overloaded 503", func(t *testing.T) {
 		t.Parallel()
 		err := &fantasy.ProviderError{
 			StatusCode: 503,
+			Title:      "overloaded",
+			Message:    "Service Unavailable",
 		}
-		require.Equal(t, "HTTP 503", formatProviderError(err))
+		require.Equal(t, "HTTP 503 - Provider Server Down / Overloaded - Service Unavailable", formatProviderError(err))
 	})
 }
 
@@ -1136,11 +1143,11 @@ func TestFormatRetryStatus(t *testing.T) {
 
 	require.Equal(
 		t,
-		"Retrying in 5s (9/10 retries left) - gemini: rate limit: quota exceeded",
+		"Retrying in 5s (9/10 retries left) - [gemini] HTTP 429 - Quota Exceeded / Out of Credits - quota exceeded",
 		notify.FormatRetryStatus(notify.Notification{
 			Type:       notify.TypeRetry,
 			ProviderID: "gemini",
-			Message:    "rate limit: quota exceeded",
+			Message:    "HTTP 429 - Quota Exceeded / Out of Credits - quota exceeded",
 			RetryDelay: 5 * time.Second,
 			Attempt:    2,
 			MaxRetries: 10,

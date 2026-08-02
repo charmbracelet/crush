@@ -2704,29 +2704,117 @@ func newRetryAttemptReporter(a *sessionAgent, sessionID, providerID string, maxR
 	}
 }
 
-// formatProviderError returns a human-readable description of a provider failure,
-// combining the error title and message when both are present and distinct.
+// extractResponseBodyMessage attempts to parse a JSON error payload from
+// provider response bodies to retrieve the exact message sent by the API.
+func extractResponseBodyMessage(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var payload struct {
+		Error struct {
+			Message string `json:"message"`
+			Code    any    `json:"code"`
+			Status  string `json:"status"`
+			Detail  string `json:"detail"`
+		} `json:"error"`
+		Message string `json:"message"`
+		Detail  string `json:"detail"`
+	}
+	if json.Unmarshal(body, &payload) == nil {
+		if payload.Error.Message != "" {
+			return strings.TrimSpace(payload.Error.Message)
+		}
+		if payload.Error.Detail != "" {
+			return strings.TrimSpace(payload.Error.Detail)
+		}
+		if payload.Message != "" {
+			return strings.TrimSpace(payload.Message)
+		}
+		if payload.Detail != "" {
+			return strings.TrimSpace(payload.Detail)
+		}
+	}
+	return ""
+}
+
+// formatProviderError returns a detailed, human-readable description of a provider failure.
+// It inspects status codes, response bodies, and error fields to clearly distinguish
+// rate limits vs quota exhaustion vs provider outages.
 func formatProviderError(err *fantasy.ProviderError) string {
 	if err == nil {
 		return "provider error"
 	}
+
 	title := strings.TrimSpace(err.Title)
 	msg := strings.TrimSpace(err.Message)
+	detail := extractResponseBodyMessage(err.ResponseBody)
 
-	if title != "" && msg != "" {
-		if strings.EqualFold(title, msg) || strings.HasPrefix(strings.ToLower(msg), strings.ToLower(title)) {
-			return msg
+	// Prefer detailed message from API response body if present and useful
+	if detail != "" && !strings.EqualFold(detail, msg) && !strings.EqualFold(detail, title) {
+		if msg == "" || strings.EqualFold(msg, "too many requests") || strings.EqualFold(msg, "rate limit") {
+			msg = detail
+		} else {
+			msg = msg + " (" + detail + ")"
 		}
-		return title + ": " + msg
 	}
-	if msg != "" {
-		return msg
+
+	lowerMsg := strings.ToLower(msg + " " + title + " " + detail)
+	isQuota := strings.Contains(lowerMsg, "quota") ||
+		strings.Contains(lowerMsg, "credit") ||
+		strings.Contains(lowerMsg, "billing") ||
+		strings.Contains(lowerMsg, "insufficient_quota") ||
+		strings.Contains(lowerMsg, "resource_exhausted") ||
+		strings.Contains(lowerMsg, "payment_required") ||
+		err.StatusCode == http.StatusPaymentRequired
+
+	isRateLimit := strings.Contains(lowerMsg, "rate limit") ||
+		strings.Contains(lowerMsg, "rate_limit") ||
+		strings.Contains(lowerMsg, "too many requests") ||
+		err.StatusCode == http.StatusTooManyRequests
+
+	isServerDown := strings.Contains(lowerMsg, "overloaded") ||
+		strings.Contains(lowerMsg, "service unavailable") ||
+		strings.Contains(lowerMsg, "bad gateway") ||
+		strings.Contains(lowerMsg, "internal server error") ||
+		err.StatusCode == http.StatusServiceUnavailable ||
+		err.StatusCode == http.StatusBadGateway ||
+		err.StatusCode == http.StatusInternalServerError
+
+	var category string
+	if isQuota {
+		category = "Quota Exceeded / Out of Credits"
+	} else if isServerDown {
+		category = "Provider Server Down / Overloaded"
+	} else if isRateLimit {
+		category = "Rate Limit Reached"
+	} else if err.StatusCode == http.StatusUnauthorized || err.StatusCode == http.StatusForbidden {
+		category = "Authentication / Access Denied"
 	}
-	if title != "" {
-		return title
-	}
+
+	var parts []string
 	if err.StatusCode > 0 {
-		return fmt.Sprintf("HTTP %d", err.StatusCode)
+		parts = append(parts, fmt.Sprintf("HTTP %d", err.StatusCode))
+	}
+	if category != "" {
+		parts = append(parts, category)
+	}
+
+	explanation := msg
+	if explanation == "" {
+		explanation = title
+	}
+
+	if explanation != "" && !strings.EqualFold(explanation, category) {
+		// Avoid duplicating category if explanation is a generic status text
+		if (isRateLimit || isQuota) && (strings.EqualFold(explanation, "too many requests") || strings.EqualFold(explanation, "rate limit")) {
+			// Generic text covered by category
+		} else {
+			parts = append(parts, explanation)
+		}
+	}
+
+	if len(parts) > 0 {
+		return strings.Join(parts, " - ")
 	}
 	if err.Cause != nil {
 		return err.Cause.Error()
@@ -2739,6 +2827,10 @@ func formatProviderError(err *fantasy.ProviderError) string {
 func (a *sessionAgent) publishRetry(sessionID, sessionTitle, providerID string, err *fantasy.ProviderError, delay time.Duration, attempt, maxRetries int) {
 	if a.notify == nil {
 		return
+	}
+	if providerID == "" && a.largeModel != nil {
+		m := a.largeModel.Get()
+		providerID = m.ModelCfg.Provider
 	}
 	msg := formatProviderError(err)
 	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{

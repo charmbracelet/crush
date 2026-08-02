@@ -1136,6 +1136,16 @@ func TestFormatProviderError(t *testing.T) {
 		}
 		require.Equal(t, "HTTP 429 - Quota Exceeded / Out of Credits - googleapi: Error 429: Quota exceeded for quota metric 'Generate Content API requests'", formatProviderError(err))
 	})
+
+	t.Run("embedded JSON string in message with FreeUsageLimitError and retryAfter", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{
+			StatusCode: 429,
+			Title:      "too many requests",
+			Message:    `{"type":"Account.FreeUsageLimitError","message":"Rate limit exceeded. Please try again later.","retryAfter":27109}`,
+		}
+		require.Equal(t, "HTTP 429 - Quota Exceeded / Out of Credits - Rate limit exceeded. Please try again later. - resets in 7h31m0s", formatProviderError(err))
+	})
 }
 
 func TestFormatRetryStatus(t *testing.T) {

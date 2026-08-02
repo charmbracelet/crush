@@ -2704,37 +2704,73 @@ func newRetryAttemptReporter(a *sessionAgent, sessionID, providerID string, maxR
 	}
 }
 
-// extractResponseBodyMessage attempts to parse a JSON error payload from
-// provider response bodies to retrieve the exact message sent by the API.
-func extractResponseBodyMessage(body []byte) string {
-	if len(body) == 0 {
-		return ""
+type parsedErrorJSON struct {
+	Type       string `json:"type"`
+	Message    string `json:"message"`
+	RetryAfter int    `json:"retryAfter"`
+}
+
+func parseJSONErrorString(input string) *parsedErrorJSON {
+	input = strings.TrimSpace(input)
+	start := strings.Index(input, "{")
+	end := strings.LastIndex(input, "}")
+	if start == -1 || end == -1 || end <= start {
+		return nil
 	}
+	jsonSub := input[start : end+1]
 	var payload struct {
-		Error struct {
-			Message string `json:"message"`
-			Code    any    `json:"code"`
-			Status  string `json:"status"`
-			Detail  string `json:"detail"`
+		Type       string `json:"type"`
+		Message    string `json:"message"`
+		RetryAfter int    `json:"retryAfter"`
+		Error      struct {
+			Type       string `json:"type"`
+			Message    string `json:"message"`
+			Code       any    `json:"code"`
+			Status     string `json:"status"`
+			Detail     string `json:"detail"`
+			RetryAfter int    `json:"retryAfter"`
 		} `json:"error"`
-		Message string `json:"message"`
-		Detail  string `json:"detail"`
+		Detail string `json:"detail"`
 	}
-	if json.Unmarshal(body, &payload) == nil {
-		if payload.Error.Message != "" {
-			return strings.TrimSpace(payload.Error.Message)
-		}
-		if payload.Error.Detail != "" {
-			return strings.TrimSpace(payload.Error.Detail)
-		}
-		if payload.Message != "" {
-			return strings.TrimSpace(payload.Message)
-		}
-		if payload.Detail != "" {
-			return strings.TrimSpace(payload.Detail)
-		}
+	if json.Unmarshal([]byte(jsonSub), &payload) != nil {
+		return nil
 	}
-	return ""
+	res := &parsedErrorJSON{}
+	if payload.Type != "" {
+		res.Type = payload.Type
+	} else if payload.Error.Type != "" {
+		res.Type = payload.Error.Type
+	}
+
+	if payload.Message != "" {
+		res.Message = payload.Message
+	} else if payload.Error.Message != "" {
+		res.Message = payload.Error.Message
+	} else if payload.Detail != "" {
+		res.Message = payload.Detail
+	} else if payload.Error.Detail != "" {
+		res.Message = payload.Error.Detail
+	}
+
+	if payload.RetryAfter > 0 {
+		res.RetryAfter = payload.RetryAfter
+	} else if payload.Error.RetryAfter > 0 {
+		res.RetryAfter = payload.Error.RetryAfter
+	}
+	return res
+}
+
+func cleanErrorString(s string) string {
+	s = strings.TrimSpace(s)
+	// Strip Go HTTP client request URL prefix (e.g. `POST "https://...": 429 Too Many Requests ...`)
+	if idx := strings.Index(s, "\": "); idx != -1 {
+		s = strings.TrimSpace(s[idx+3:])
+	}
+	// Strip trailing embedded JSON substring if present
+	if start := strings.Index(s, "{"); start != -1 {
+		s = strings.TrimSpace(s[:start])
+	}
+	return s
 }
 
 // formatProviderError returns a detailed, human-readable description of a provider failure.
@@ -2748,14 +2784,37 @@ func formatProviderError(err *fantasy.ProviderError) string {
 
 	title := strings.TrimSpace(err.Title)
 	msg := strings.TrimSpace(err.Message)
-	detail := extractResponseBodyMessage(err.ResponseBody)
 	var causeStr string
 	if err.Cause != nil {
 		causeStr = strings.TrimSpace(err.Cause.Error())
 	}
 
+	var jsonParsed *parsedErrorJSON
+	for _, raw := range []string{msg, string(err.ResponseBody), causeStr} {
+		if parsed := parseJSONErrorString(raw); parsed != nil {
+			jsonParsed = parsed
+			break
+		}
+	}
+
+	detail := ""
+	jsonType := ""
+	retryAfterStr := ""
+	if jsonParsed != nil {
+		jsonType = jsonParsed.Type
+		detail = jsonParsed.Message
+		if jsonParsed.RetryAfter > 0 {
+			dur := (time.Duration(jsonParsed.RetryAfter) * time.Second).Truncate(time.Minute)
+			if dur < time.Minute {
+				retryAfterStr = fmt.Sprintf("resets in %ds", jsonParsed.RetryAfter)
+			} else {
+				retryAfterStr = fmt.Sprintf("resets in %s", dur.String())
+			}
+		}
+	}
+
 	// Build full text across all available error fields for categorization
-	fullText := strings.Join([]string{title, msg, detail, causeStr}, " ")
+	fullText := strings.Join([]string{title, msg, detail, jsonType, causeStr}, " ")
 	lowerFull := strings.ToLower(fullText)
 
 	isQuota := strings.Contains(lowerFull, "quota") ||
@@ -2763,6 +2822,9 @@ func formatProviderError(err *fantasy.ProviderError) string {
 		strings.Contains(lowerFull, "billing") ||
 		strings.Contains(lowerFull, "insufficient_quota") ||
 		strings.Contains(lowerFull, "resource_exhausted") ||
+		strings.Contains(lowerFull, "freeusage") ||
+		strings.Contains(lowerFull, "usage_limit") ||
+		strings.Contains(lowerFull, "limiterror") ||
 		strings.Contains(lowerFull, "payment_required") ||
 		err.StatusCode == http.StatusPaymentRequired
 
@@ -2793,13 +2855,13 @@ func formatProviderError(err *fantasy.ProviderError) string {
 	// Pick the most specific explanation string
 	explanation := detail
 	if explanation == "" && causeStr != "" {
-		explanation = causeStr
+		explanation = cleanErrorString(causeStr)
 	}
 	if explanation == "" {
-		explanation = msg
+		explanation = cleanErrorString(msg)
 	}
 	if explanation == "" {
-		explanation = title
+		explanation = cleanErrorString(title)
 	}
 
 	var parts []string
@@ -2821,6 +2883,10 @@ func formatProviderError(err *fantasy.ProviderError) string {
 				parts = append(parts, cleanExp)
 			}
 		}
+	}
+
+	if retryAfterStr != "" {
+		parts = append(parts, retryAfterStr)
 	}
 
 	if len(parts) > 0 {

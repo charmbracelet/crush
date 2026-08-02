@@ -24,6 +24,24 @@
       "supports_attachments": false
     },
     {
+      "id": "deepseek-v4-flash-0731",
+      "name": "DeepSeek V4 Flash 0731",
+      "cost_per_1m_in": 0.152432,
+      "cost_per_1m_out": 0.304864,
+      "cost_per_1m_in_cached": 0,
+      "cost_per_1m_out_cached": 0.0304864,
+      "context_window": 1048576,
+      "default_max_tokens": 384000,
+      "can_reason": true,
+      "reasoning_levels": [
+        "none",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "high",
+      "supports_attachments": false
+    },
+    {
       "id": "deepseek-v4-pro",
       "name": "DeepSeek V4 Pro",
       "cost_per_1m_in": 2.4,
@@ -43,9 +61,9 @@
     {
       "id": "gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B A4B",
-      "cost_per_1m_in": 0.122,
-      "cost_per_1m_out": 0.388,
-      "cost_per_1m_in_cached": 0.061,
+      "cost_per_1m_in": 0.13,
+      "cost_per_1m_out": 0.43,
+      "cost_per_1m_in_cached": 0.065,
       "cost_per_1m_out_cached": 0,
       "context_window": 256000,
       "default_max_tokens": 25600,
@@ -55,9 +73,9 @@
     {
       "id": "glm-5",
       "name": "GLM-5",
-      "cost_per_1m_in": 0.86,
-      "cost_per_1m_out": 2.784,
-      "cost_per_1m_in_cached": 0.43,
+      "cost_per_1m_in": 0.85,
+      "cost_per_1m_out": 2.622,
+      "cost_per_1m_in_cached": 0.425,
       "cost_per_1m_out_cached": 0,
       "context_window": 202752,
       "default_max_tokens": 20275,
@@ -119,9 +137,9 @@
     {
       "id": "kimi-k2.5",
       "name": "Kimi K2.5",
-      "cost_per_1m_in": 0.528,
-      "cost_per_1m_out": 2.79,
-      "cost_per_1m_in_cached": 0.264,
+      "cost_per_1m_in": 0.564,
+      "cost_per_1m_out": 2.82,
+      "cost_per_1m_in_cached": 0.282,
       "cost_per_1m_out_cached": 0,
       "context_window": 262144,
       "default_max_tokens": 26214,
@@ -168,6 +186,12 @@
       "context_window": 1048576,
       "default_max_tokens": 131072,
       "can_reason": true,
+      "reasoning_levels": [
+        "low",
+        "high",
+        "max"
+      ],
+      "default_reasoning_effort": "max",
       "supports_attachments": true
     },
     {
@@ -197,9 +221,9 @@
     {
       "id": "minimax-m2.7",
       "name": "MiniMax M2.7",
-      "cost_per_1m_in": 0.42,
-      "cost_per_1m_out": 1.62,
-      "cost_per_1m_in_cached": 0.21,
+      "cost_per_1m_in": 0.436,
+      "cost_per_1m_out": 1.72,
+      "cost_per_1m_in_cached": 0.218,
       "cost_per_1m_out_cached": 0,
       "context_window": 204800,
       "default_max_tokens": 20480,
@@ -299,9 +323,9 @@
     {
       "id": "qwen3-coder-480b-a35b-instruct-int4-mixed-ar",
       "name": "Qwen3 Coder 480B A35B Instruct INT4 Mixed AR",
-      "cost_per_1m_in": 0.585,
-      "cost_per_1m_out": 2.245,
-      "cost_per_1m_in_cached": 0.2925,
+      "cost_per_1m_in": 0.569,
+      "cost_per_1m_out": 2.135,
+      "cost_per_1m_in_cached": 0.2845,
       "cost_per_1m_out_cached": 0,
       "context_window": 106000,
       "default_max_tokens": 10600,

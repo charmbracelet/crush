@@ -1929,9 +1929,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.applyTheme(newStyles)
 	case dialog.ActionRevertThemePreview:
 		if m.preThemeStyles != nil {
-			*m.com.Styles = *m.preThemeStyles
-			common.InvalidateMarkdownRendererCache()
-			m.refreshStyles()
+			m.applyTheme(*m.preThemeStyles)
 			m.preThemeStyles = nil
 		}
 		m.dialog.CloseDialog(dialog.ThemeID)
@@ -1968,9 +1966,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
 	case dialog.ActionRevertThemePalette:
 		if m.preThemeStyles != nil {
-			*m.com.Styles = *m.preThemeStyles
-			common.InvalidateMarkdownRendererCache()
-			m.refreshStyles()
+			m.applyTheme(*m.preThemeStyles)
 			m.preThemeStyles = nil
 		}
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
@@ -3952,11 +3948,11 @@ func (m *UI) applyThemeForProvider(providerID string) {
 }
 
 // applyTheme replaces the active styles with the given theme, drops the
-// shared markdown renderer cache, and refreshes every component that
-// caches style data.
+// shared style caches, and refreshes every component that caches style
+// data.
 func (m *UI) applyTheme(s styles.Styles) {
 	*m.com.Styles = s
-	common.InvalidateMarkdownRendererCache()
+	common.InvalidateStyleCaches()
 	m.refreshStyles()
 }
 

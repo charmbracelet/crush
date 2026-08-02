@@ -122,6 +122,24 @@ func charmtoneOverrides(s Styles) Styles {
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
 		Foreground(charmtone.Hazy)
 
+	// Restore the original Charmtone syntax-highlight and markdown colors
+	// where the generic quickStyle token choices diverge from the palette
+	// this theme has always used.
+	chroma := s.Markdown.CodeBlock.Chroma
+	if chroma != nil {
+		chroma.CommentPreproc.Color = hex(charmtone.Bengal)
+		chroma.KeywordReserved.Color = hex(charmtone.Pony)
+		chroma.KeywordNamespace.Color = hex(charmtone.Pony)
+		chroma.KeywordType.Color = hex(charmtone.Guppy)
+		chroma.Operator.Color = hex(charmtone.Salmon)
+		chroma.NameTag.Color = hex(charmtone.Mauve)
+		chroma.NameAttribute.Color = hex(charmtone.Hazy)
+		chroma.NameClass.Color = hex(charmtone.Salt)
+		chroma.LiteralString.Color = hex(charmtone.Cumin)
+	}
+	s.Markdown.Link.Color = hex(charmtone.Zinc)
+	s.Markdown.Image.Color = hex(charmtone.Cheeky)
+
 	return s
 }
 

@@ -30,6 +30,19 @@ func TestMapRetryableStreamErr_RateLimitSSE(t *testing.T) {
 	require.Contains(t, pe.Message, "few minutes")
 }
 
+func TestMapRetryableStreamErr_LongRetryDelaySkipsAutoRetry(t *testing.T) {
+	t.Parallel()
+	orig := &fantasy.ProviderError{
+		Title:      "too many requests",
+		Message:    `{"type":"Account.FreeUsageLimitError","message":"Rate limit exceeded. Please try again later.","retryAfter":27109}`,
+		StatusCode: http.StatusTooManyRequests,
+	}
+	mapped := mapRetryableStreamErr(orig)
+	var pe *fantasy.ProviderError
+	require.ErrorAs(t, mapped, &pe)
+	require.False(t, pe.IsRetryable(), "errors with retryAfter >= 1 minute must skip auto-retry")
+}
+
 func TestMapRetryableStreamErr_NonRetryable(t *testing.T) {
 	t.Parallel()
 	err := &ssestream.StreamError{

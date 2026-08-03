@@ -281,6 +281,12 @@ type UI struct {
 	completionsQuery         string
 	completionsPositionStart image.Point // x,y where user typed '@'
 
+	// lastCompletionEnd tracks the end index of the most recently
+	// inserted completion text so that a single backspace can delete
+	// the entire inserted path/name at once instead of one character.
+	lastCompletionStart int
+	lastCompletionEnd   int
+
 	// Chat components
 	chat *Chat
 
@@ -2614,6 +2620,32 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
+				// Atomic backspace: delete the entire last-inserted
+				// completion text (file path, resource name) in one go
+				// instead of character by character. Only fires when
+				// backspace is pressed immediately after insertion with
+				// no intervening edits.
+				if msg.Code == tea.KeyBackspace && m.lastCompletionEnd > 0 {
+					val := m.textarea.Value()
+					if len(val) == m.lastCompletionEnd {
+						newVal := val[:m.lastCompletionStart] + val[m.lastCompletionEnd:]
+						m.textarea.SetValue(newVal)
+						m.textarea.MoveToEnd()
+						m.lastCompletionStart = 0
+						m.lastCompletionEnd = 0
+						break
+					}
+					// Text changed since insertion; invalidate.
+					m.lastCompletionStart = 0
+					m.lastCompletionEnd = 0
+				}
+
+				// Any non-backspace key clears the atomic-delete range.
+				if msg.Code != tea.KeyBackspace {
+					m.lastCompletionStart = 0
+					m.lastCompletionEnd = 0
+				}
+
 				// Check for @ trigger before passing to textarea.
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
@@ -3794,6 +3826,10 @@ func (m *UI) insertCompletionText(text string) bool {
 	m.textarea.SetValue(newValue)
 	m.textarea.MoveToEnd()
 	m.textarea.InsertRune(' ')
+
+	// Record the inserted range so backspace can delete it atomically.
+	m.lastCompletionStart = m.completionsStartIndex
+	m.lastCompletionEnd = m.completionsStartIndex + len(text) + 1 // +1 for trailing space
 	return true
 }
 

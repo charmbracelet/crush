@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lock"
 )
 
@@ -85,7 +86,7 @@ func saveLocked(list *ProjectList) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0o600)
+	return fsext.AtomicWriteFile(path, data, 0o600)
 }
 
 // Save writes the projects list to disk.

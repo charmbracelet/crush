@@ -1416,6 +1416,41 @@ func TestParseFlexDuration_EpochAndHTTPDate(t *testing.T) {
 	}
 }
 
+func TestParseJSONErrorString_FlexibleErrorField(t *testing.T) {
+	t.Parallel()
+
+	// Nested object form (OpenAI-shaped) — unchanged behaviour.
+	nested := parseJSONErrorString(`{"error":{"type":"rate_limit_error","message":"slow down","retry_after":60}}`)
+	require.NotNil(t, nested)
+	require.Equal(t, "rate_limit_error", nested.Type)
+	require.Equal(t, "slow down", nested.Message)
+	require.Equal(t, 60*time.Second, nested.RetryAfter)
+
+	// OAuth 2.0 / proxy shape: "error" is a string code. The code becomes the
+	// Type, and sibling fields are still read.
+	oauth := parseJSONErrorString(`{"error": "rate_limit_exceeded", "message": "slow down", "retry_after": 60}`)
+	require.NotNil(t, oauth)
+	require.Equal(t, "rate_limit_exceeded", oauth.Type)
+	require.Equal(t, "slow down", oauth.Message)
+	require.Equal(t, 60*time.Second, oauth.RetryAfter)
+
+	// "error" as neither object nor string: must not panic, and the sibling
+	// fields that did parse survive.
+	neither := parseJSONErrorString(`{"error": 42, "message": "still here", "retry_after": 30}`)
+	require.NotNil(t, neither)
+	require.Equal(t, "", neither.Type)
+	require.Equal(t, "still here", neither.Message)
+	require.Equal(t, 30*time.Second, neither.RetryAfter)
+
+	// End to end: the string code must still classify as a rate limit.
+	title, _ := formatProviderErrorForAssistant(&fantasy.ProviderError{
+		Title:      "too many requests",
+		Message:    `{"error": "rate_limit_exceeded", "message": "slow down", "retry_after": 60}`,
+		StatusCode: http.StatusTooManyRequests,
+	})
+	require.Contains(t, title, "Rate Limit Reached")
+}
+
 func TestCleanErrorString(t *testing.T) {
 	t.Parallel()
 

@@ -23,10 +23,10 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
@@ -57,6 +57,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/textarea"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
@@ -135,9 +136,12 @@ type shellStreamMsg struct {
 type (
 	// cancelTimerExpiredMsg is sent when the cancel timer expires.
 	cancelTimerExpiredMsg struct{}
-	// userCommandsLoadedMsg is sent when user commands are loaded.
+	// userCommandsLoadedMsg is sent when user commands are loaded. It also
+	// carries the skill catalog the command list was built from, so the
+	// '/' completions popup gets descriptions off the same single load.
 	userCommandsLoadedMsg struct {
-		Commands []commands.CustomCommand
+		Commands     []commands.CustomCommand
+		SkillEntries []skills.CatalogEntry
 	}
 	// mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
 	mcpPromptsLoadedMsg struct {
@@ -277,9 +281,14 @@ type UI struct {
 	// Completions state
 	completions              *completions.Completions
 	completionsOpen          bool
+	completionsTrigger       completions.Trigger
 	completionsStartIndex    int
 	completionsQuery         string
-	completionsPositionStart image.Point // x,y where user typed '@'
+	completionsPositionStart image.Point // x,y where user typed the trigger
+
+	// promptHighlighter styles @file and /skill tokens inline as the user
+	// types. Installed on the textarea via SetHighlighter.
+	promptHighlighter *promptHighlighter
 
 	// lastCompletionEnd tracks the end index of the most recently
 	// inserted completion text so that a single backspace can delete
@@ -308,6 +317,11 @@ type UI struct {
 
 	// skills
 	skillStates []*skills.SkillState
+
+	// skillCatalog is the effective visible skill set (post-override,
+	// post-disable) with frontmatter descriptions, refreshed alongside the
+	// custom commands. It backs the '/' completions popup.
+	skillCatalog []skills.CatalogEntry
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
@@ -399,6 +413,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.MaxHeight = TextareaMaxHeight
 	ta.Focus()
 
+	promptHL := newPromptHighlighter(
+		com.Styles.Editor.TokenFile,
+		com.Styles.Editor.TokenSkill,
+	)
+	ta.SetHighlighter(promptHL)
+
 	scrollbarMode := config.ScrollbarDefault
 	if cfg := com.Config(); cfg.Options.TUI != nil && cfg.Options.TUI.Scrollbar != "" {
 		scrollbarMode = cfg.Options.TUI.Scrollbar
@@ -448,6 +468,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		completions:         comp,
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
+		promptHighlighter:   promptHL,
 		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
@@ -456,6 +477,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
 	}
+	ui.refreshSkillNames()
 
 	status := NewStatus(com, ui)
 
@@ -663,7 +685,7 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 			slog.Error("Failed to load skill commands", "error", err)
 		}
 		customCommands = append(customCommands, commands.FromSkillCatalog(skillEntries)...)
-		return userCommandsLoadedMsg{Commands: customCommands}
+		return userCommandsLoadedMsg{Commands: customCommands, SkillEntries: skillEntries}
 	}
 }
 
@@ -795,8 +817,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 
+	case a2uiActionResultMsg:
+		// An a2ui_action round-trip returned: update the originating
+		// surface in place (or land plain text) without an agent turn.
+		if cmd := m.handleA2UIActionResult(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
+		m.skillCatalog = msg.SkillEntries
+		m.refreshSkillNames()
 		dia := m.dialog.Dialog(dialog.CommandsID)
 		if dia == nil {
 			break
@@ -929,6 +960,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lspStates = m.com.Workspace.LSPGetStates()
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+		m.refreshSkillNames()
+		// Discovery states carry no descriptions and no override/disable
+		// resolution, so re-read the catalog too: a ctrl+r reload in the
+		// skills dialog must move both the command palette and the '/'
+		// completions popup.
+		cmds = append(cmds, m.loadCustomCommands())
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -1355,7 +1392,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
 	case completions.CompletionItemsLoadedMsg:
-		if m.completionsOpen {
+		// Guard against a stale async file load landing after the popup
+		// switched to (or was reopened in) skill mode.
+		if m.completionsOpen && m.completionsTrigger == completions.TriggerFile {
 			m.completions.SetItems(msg.Files, msg.Resources)
 		}
 	case uv.KittyGraphicsEvent:
@@ -2477,6 +2516,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if m.completionsOpen {
 				if msg, ok := m.completions.Update(msg); ok {
 					switch msg := msg.(type) {
+					case completions.SelectionMsg[completions.SkillCompletionValue]:
+						cmds = append(cmds, m.insertSkillCompletion(msg.Value))
+						if !msg.KeepOpen {
+							m.closeCompletions()
+						}
 					case completions.SelectionMsg[completions.FileCompletionValue]:
 						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
 						if !msg.KeepOpen {
@@ -2489,6 +2533,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						}
 					case completions.ClosedMsg:
 						m.completionsOpen = false
+						m.completionsTrigger = completions.TriggerNone
 					}
 					return tea.Batch(cmds...)
 				}
@@ -2666,20 +2711,32 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.clearCompletionRange()
 				}
 
-				// Check for @ trigger before passing to textarea.
+				// Check for completion triggers before passing to textarea.
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
 
-				// Trigger completions on @.
+				// Trigger file completions on @.
 				if msg.String() == "@" && !m.completionsOpen {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 						m.completionsOpen = true
+						m.completionsTrigger = completions.TriggerFile
 						m.completionsQuery = ""
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
 						cmds = append(cmds, m.completions.Open(depth, limit))
+					}
+				}
+
+				// Trigger skill completions on / mid-prompt. At the start of
+				// an empty prompt the commands dialog handles '/' instead
+				// (see the Editor.Commands binding above), so here we only
+				// fire when the textarea already has content and '/' begins
+				// a new word.
+				if msg.String() == "/" && !m.completionsOpen && !m.bangMode {
+					if curIdx > 0 && isWhitespace(curValue[curIdx-1]) {
+						m.openSkillCompletions(curIdx)
 					}
 				}
 
@@ -2723,8 +2780,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.updateHistoryDraft(curValue)
 
 				// After updating textarea, check if we need to filter completions.
-				// Skip filtering on the initial @ keystroke since items are loading async.
-				if m.completionsOpen && msg.String() != "@" {
+				// Skip filtering on the initial trigger keystroke since items
+				// are loading async.
+				if m.completionsOpen && msg.String() != string(m.completionsTrigger) {
 					newValue := m.textarea.Value()
 					newIdx := len(newValue)
 
@@ -2737,7 +2795,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					} else {
 						// Extract current word and filter.
 						word := m.textareaWord()
-						if strings.HasPrefix(word, "@") {
+						if strings.HasPrefix(word, string(m.completionsTrigger)) {
 							m.completionsQuery = word[1:]
 							m.completions.Filter(m.completionsQuery)
 						} else if m.completionsOpen {
@@ -3827,9 +3885,73 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 // closeCompletions closes the completions popup and resets state.
 func (m *UI) closeCompletions() {
 	m.completionsOpen = false
+	m.completionsTrigger = completions.TriggerNone
 	m.completionsQuery = ""
 	m.completionsStartIndex = 0
 	m.completions.Close()
+}
+
+// skillCompletionValues returns the skills offered by the '/' popup.
+//
+// The catalog is the right source: it is the effective, post-dedup,
+// post-disable set, it includes the builtin skills the raw discovery states
+// omit, and it carries each skill's frontmatter description. The discovery
+// states are only a fallback for the window between startup and the first
+// catalog load, where a name-only list still beats an empty popup.
+func (m *UI) skillCompletionValues() []completions.SkillCompletionValue {
+	var values []completions.SkillCompletionValue
+	if len(m.skillCatalog) > 0 {
+		for _, entry := range m.skillCatalog {
+			if entry.Name == "" {
+				continue
+			}
+			values = append(values, completions.SkillCompletionValue{
+				Name:        entry.Name,
+				Description: entry.Description,
+				Path:        entry.ID,
+			})
+		}
+	} else {
+		seen := make(map[string]struct{}, len(m.skillStates))
+		for _, s := range m.skillStates {
+			if s == nil || s.Name == "" || s.State != skills.StateNormal {
+				continue
+			}
+			if _, dup := seen[s.Name]; dup {
+				continue
+			}
+			seen[s.Name] = struct{}{}
+			values = append(values, completions.SkillCompletionValue{
+				Name: s.Name,
+				Path: s.Path,
+			})
+		}
+	}
+	slices.SortFunc(values, func(a, b completions.SkillCompletionValue) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return values
+}
+
+// openSkillCompletions opens the completions popup in skill mode at the
+// given trigger index. Skills are already in memory, so no async load is
+// needed.
+func (m *UI) openSkillCompletions(startIndex int) {
+	values := m.skillCompletionValues()
+	if len(values) == 0 {
+		// An open-but-empty popup still consumes enter and the arrow keys,
+		// so a user with no skills configured could not submit a prompt
+		// containing a '/'. Unlike '@' there is nothing to wait on here —
+		// no skills means no popup.
+		return
+	}
+
+	m.completionsOpen = true
+	m.completionsTrigger = completions.TriggerSkill
+	m.completionsQuery = ""
+	m.completionsStartIndex = startIndex
+	m.completionsPositionStart = m.completionsPosition()
+	m.completions.SetSkillItems(values)
 }
 
 // insertCompletionText replaces the @query in the textarea with the given text.
@@ -3916,15 +4038,27 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 }
 
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
-// replacing the @query, and adds the resource as an attachment.
+// replacing the @query, and adds the resource as an attachment. An unexpanded
+// resource template is only inserted as text: its URI still carries RFC 6570
+// placeholders ("cairn://run/{id}"), so reading it now would send the literal
+// braces to the server and fail — the read happens once someone (user or
+// agent) has substituted real values.
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := cmp.Or(item.Title, item.URI)
+	if item.IsTemplate() {
+		// Insert the raw template URI, not the title: the placeholders are
+		// the point — they show what needs filling in.
+		displayText = item.URI
+	}
 
 	prevHeight := m.textarea.Height()
 	if !m.insertCompletionText(displayText) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
+	if item.IsTemplate() {
+		return heightCmd
+	}
 
 	resourceCmd := func() tea.Msg {
 		contents, err := m.com.Workspace.ReadMCPResource(
@@ -3967,6 +4101,17 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 		}
 	}
 	return tea.Batch(heightCmd, resourceCmd)
+}
+
+// insertSkillCompletion inserts the selected skill name into the textarea,
+// replacing the /query. Unlike files, skills are not attached — the
+// "/skill-name" text in the prompt is the signal to load the skill.
+func (m *UI) insertSkillCompletion(skill completions.SkillCompletionValue) tea.Cmd {
+	prevHeight := m.textarea.Height()
+	if !m.insertCompletionText("/" + skill.Name) {
+		return nil
+	}
+	return m.handleTextareaHeightChange(prevHeight)
 }
 
 // completionsPosition returns the X and Y position for the completions popup.
@@ -4088,6 +4233,19 @@ func (m *UI) renderEditorView(width int) string {
 	var attachmentsView string
 	if len(m.attachments.List()) > 0 {
 		attachmentsView = m.attachments.Render(width)
+	}
+	// Retokenize @file and /skill tokens on every render. The scan is
+	// linear in prompt length and render happens every frame anyway, so
+	// this is the single seam that stays correct for every value-mutation
+	// path (typing, paste, history, completion inserts). Bang mode is a
+	// shell prompt — its slashes are paths, not skills — so tokens are
+	// suppressed there.
+	if m.promptHighlighter != nil {
+		if m.bangMode {
+			m.promptHighlighter.Rescan("")
+		} else {
+			m.promptHighlighter.Rescan(m.textarea.Value())
+		}
 	}
 	return strings.Join([]string{
 		attachmentsView,
@@ -4228,6 +4386,12 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID
+	// The turn's content width hint: tools that read width-sensitive remote
+	// content (A2UI surfaces with server-pre-rendered bar geometry) get the
+	// surface card's interior width so the server sizes its rows to fill
+	// the card. The chat package owns the computation — it must track the
+	// real render chain, not constants copied here.
+	contentWidth := chat.ToolA2UISurfaceWidth(m.layout.main.Dx())
 	// Optimistically mark the agent busy: the prompt we are about to submit
 	// either starts a run or is enqueued behind one. This keeps esc pressed
 	// right after enter routing to cancelAgent instead of reading a stale
@@ -4243,7 +4407,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		// been accepted (HTTP 202) or synchronously with a validation
 		// or transport error. Run failures and cancellation surface
 		// through SSE-derived events, not this return value.
-		err := m.com.Workspace.AgentRun(context.Background(), sessionID, content, attachments...)
+		err := m.com.Workspace.AgentRun(agent.WithContentWidth(context.Background(), contentWidth), sessionID, content, attachments...)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -4268,11 +4432,174 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 // the surface rebuilt without an ID — in which case the submission still
 // goes out with just the button identity rather than being dropped.
 func (m *UI) handleA2UIButtonClicked(clicked a2uievent.ButtonClicked) tea.Cmd {
-	values, _ := m.chat.RetireA2UISurface(clicked.SurfaceID)
+	// A cancel/dismiss button only ever dismisses the surface locally —
+	// it never starts an agent turn nor round-trips to an MCP server.
+	// Checked first, before any provenance branch.
 	if chat.A2UIButtonIsCancel(clicked) {
+		m.chat.RetireA2UISurface(clicked.SurfaceID)
 		return nil
 	}
+	// MCP-served surface: route the interaction back to the owning server
+	// when it speaks the action round-trip, instead of starting an agent
+	// turn. The button press is itself the consent, so the a2ui_action
+	// call is not gated on permission. The surface is long-lived — it is
+	// NOT retired, and a surface payload in the response updates it in
+	// place.
+	// Provenance resolves through the item that owns the surface, falling
+	// back to the global surfaceID-keyed registry only when no live item
+	// claims it: surface IDs are server-scoped (typically "default"), so two
+	// servers would otherwise clobber each other in that registry and route
+	// one another's clicks.
+	mcpName, isMCP := m.chat.A2UISurfaceOwner(clicked.SurfaceID)
+	if !isMCP {
+		mcpName, isMCP = chat.A2UISurfaceProvenance(clicked.SurfaceID)
+	}
+	if isMCP && clicked.Action != nil {
+		if mcp.HasTool(mcpName, "a2ui_action") {
+			return m.runA2UIAction(mcpName, clicked)
+		}
+		// The server serves surfaces but not the action round-trip: keep
+		// today's behavior so a dumb server still works.
+	}
+	// RetireA2UISurface only matches assistant items, so an MCP surface's
+	// values must be read from the tool item that holds it — otherwise the
+	// fallback submits the button identity with everything the user typed
+	// silently dropped.
+	values, ok := m.chat.RetireA2UISurface(clicked.SurfaceID)
+	if !ok {
+		values, _ = m.chat.A2UISurfaceFieldValues(clicked.SurfaceID)
+	}
 	return m.sendMessage(chat.A2UISubmissionPrompt(clicked, values))
+}
+
+// a2uiActionResultMsg carries the outcome of an a2ui_action round-trip back
+// to the UI so the surface updates in place (or a plain-text reply lands as
+// tool output) without an agent turn.
+type a2uiActionResultMsg struct {
+	surfaceID string
+	mcpName   string
+	// surfaces holds any A2UI payloads the response embedded, applied to
+	// the surface in place. content holds plain text from the response.
+	surfaces []string
+	content  string
+	err      error
+}
+
+// runA2UIAction calls the owning server's a2ui_action tool with the
+// button's action name and the surface's resolved input values as the
+// context. The call runs off the UI goroutine; the result returns as an
+// a2uiActionResultMsg.
+func (m *UI) runA2UIAction(mcpName string, clicked a2uievent.ButtonClicked) tea.Cmd {
+	values, _ := m.chat.A2UISurfaceFieldValues(clicked.SurfaceID)
+	if values == nil {
+		values = map[string]any{}
+	}
+	args := map[string]any{
+		"name":    clicked.Action.Name,
+		"context": values,
+	}
+	surfaceID := clicked.SurfaceID
+	return func() tea.Msg {
+		res, err := m.com.Workspace.CallMCPTool(context.Background(), mcpName, "a2ui_action", args)
+		if err != nil {
+			return a2uiActionResultMsg{surfaceID: surfaceID, mcpName: mcpName, err: err}
+		}
+		out := a2uiActionResultMsg{surfaceID: surfaceID, mcpName: mcpName, content: res.Content}
+		for _, s := range res.Surfaces {
+			out.surfaces = append(out.surfaces, s.Payload)
+		}
+		return out
+	}
+}
+
+// handleA2UIActionResult applies an a2ui_action response: any A2UI payload
+// updates the originating surface in place (the surface stays live), and any
+// plain text lands as an informational note. A transport/server error is
+// surfaced as an error note — the surface is left untouched.
+func (m *UI) handleA2UIActionResult(msg a2uiActionResultMsg) tea.Cmd {
+	if msg.err != nil {
+		return util.ReportError(fmt.Errorf("A2UI action failed: %w", msg.err))
+	}
+	var cmds []tea.Cmd
+	for _, payload := range msg.surfaces {
+		if cmd := m.applyA2UIPayloadToSurface(msg.mcpName, msg.surfaceID, payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if msg.content != "" {
+		cmds = append(cmds, util.ReportInfo(msg.content))
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
+// applyA2UIPayloadToSurface scans an A2UI payload and feeds its server
+// messages into the surface the payload targets, which updates in place. A
+// payload that does not scan, or that targets a surface nothing holds, is
+// reported back to the owning server as an a2ui_error when it exposes that
+// tool. clickedID is the surface the interaction came from — the fallback
+// target for a payload that declares no surface of its own — and mcpName is
+// the server that sent it, which is who any error is reported to.
+func (m *UI) applyA2UIPayloadToSurface(mcpName, clickedID, payload string) tea.Cmd {
+	msgs, err := chat.A2UIMessagesFromPayload(payload)
+	if err != nil {
+		return m.reportA2UIError(mcpName, clickedID, "INVALID_JSON",
+			"Failed to parse A2UI payload.")
+	}
+	if len(msgs) == 0 {
+		// The payload parsed but carried no server messages — it scanned
+		// as prose, not A2UI. Applying it would be a silent no-op, which
+		// looks to the user like a dead button.
+		return m.reportA2UIError(mcpName, clickedID, "INVALID_PAYLOAD",
+			"Payload carried no A2UI server messages.")
+	}
+	// Honor the surface the payload itself declares: a server may answer an
+	// action by updating a sibling surface, not the clicked one. Forcing
+	// every payload onto the clicked ID would corrupt that surface instead.
+	target := chat.A2UIMessagesSurfaceID(msgs)
+	if target == "" {
+		target = clickedID
+	}
+	if !m.chat.ApplyA2UISurfaceUpdate(target, msgs) {
+		// Either nothing holds that surface, or the server just deleted
+		// it. A delete is the expected end of a surface's life; a payload
+		// aimed at a surface we never had is a real mismatch worth
+		// reporting back.
+		if !chat.A2UIMessagesDeleteSurface(msgs) {
+			return m.reportA2UIError(mcpName, target, "SURFACE_NOT_FOUND",
+				fmt.Sprintf("No live surface %q to apply the payload to.", target))
+		}
+	}
+	return nil
+}
+
+// reportA2UIError reports a render failure to mcpName via its a2ui_error
+// tool, when it exposes one. Otherwise the failure is only shown to the user
+// (the existing render-failure alert path). mcpName may be empty when the
+// caller only holds a surface ID, in which case the owner is resolved from
+// the surface — item-scoped first, same as the action path, because the
+// global registry is keyed by surface ID alone and two servers sharing an ID
+// clobber each other there.
+func (m *UI) reportA2UIError(mcpName, surfaceID, code, message string) tea.Cmd {
+	ok := mcpName != ""
+	if !ok {
+		if mcpName, ok = m.chat.A2UISurfaceOwner(surfaceID); !ok {
+			mcpName, ok = chat.A2UISurfaceProvenance(surfaceID)
+		}
+	}
+	if !ok || !mcp.HasTool(mcpName, "a2ui_error") {
+		return nil
+	}
+	args := map[string]any{"code": code, "message": message, "surfaceId": surfaceID}
+	return func() tea.Msg {
+		_, err := m.com.Workspace.CallMCPTool(context.Background(), mcpName, "a2ui_error", args)
+		if err != nil {
+			return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("A2UI error report failed: %v", err)}
+		}
+		return nil
+	}
 }
 
 // handleChannelMessage injects a channel event pushed by an MCP server into a

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,6 +37,19 @@ type MCPResourceContents struct {
 	MIMEType string `json:"mime_type,omitempty"`
 	Text     string `json:"text,omitempty"`
 	Blob     []byte `json:"blob,omitempty"`
+}
+
+// MCPToolCallResult holds the model-facing text and any A2UI surface
+// payloads from an MCP tool call.
+type MCPToolCallResult struct {
+	Content  string               `json:"content"`
+	Surfaces []MCPToolCallSurface `json:"surfaces,omitempty"`
+}
+
+// MCPToolCallSurface is a single A2UI surface payload from a tool call.
+type MCPToolCallSurface struct {
+	Payload string `json:"payload"`
+	URI     string `json:"uri"`
 }
 
 // SetConfigField sets a key/value pair in the config file for the
@@ -321,6 +335,28 @@ func (b *Backend) ReadMCPResource(ctx context.Context, workspaceID, name, uri st
 		}
 	}
 	return result, nil
+}
+
+// CallMCPTool invokes a tool on a named MCP server and returns its text
+// content plus any A2UI surface payload it embedded.
+func (b *Backend) CallMCPTool(ctx context.Context, workspaceID, name, toolName string, args map[string]any) (MCPToolCallResult, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return MCPToolCallResult{}, err
+	}
+	input, err := json.Marshal(args)
+	if err != nil {
+		return MCPToolCallResult{}, fmt.Errorf("failed to encode tool arguments: %w", err)
+	}
+	res, err := mcptools.RunTool(ctx, ws.Cfg, name, toolName, string(input))
+	if err != nil {
+		return MCPToolCallResult{}, err
+	}
+	out := MCPToolCallResult{Content: res.Content}
+	for _, s := range res.Surfaces {
+		out.Surfaces = append(out.Surfaces, MCPToolCallSurface{Payload: s.Payload, URI: s.URI})
+	}
+	return out, nil
 }
 
 // GetMCPPrompt retrieves a prompt from a named MCP server.

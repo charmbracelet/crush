@@ -208,6 +208,12 @@ type Workspace interface {
 	RefreshMCPTools(ctx context.Context, name string)
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
 	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
+	// CallMCPTool invokes a tool on a named MCP server and returns its
+	// text content plus any A2UI surface payload it embedded. It backs the
+	// A2UI action round-trip: a button press on an MCP-served surface
+	// routes back to the owning server as an a2ui_action (or a render
+	// failure as an a2ui_error) without an agent turn.
+	CallMCPTool(ctx context.Context, name, toolName string, args map[string]any) (MCPToolCallResult, error)
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
@@ -232,4 +238,19 @@ type MCPResourceContents struct {
 	MIMEType string `json:"mime_type,omitempty"`
 	Text     string `json:"text,omitempty"`
 	Blob     []byte `json:"blob,omitempty"`
+}
+
+// MCPToolCallResult holds the model-facing text and any A2UI surface
+// payloads from an MCP tool call.
+type MCPToolCallResult struct {
+	// Content is the result's text (its TextContent, joined).
+	Content string `json:"content"`
+	// Surfaces carries any A2UI surface payloads the result embedded.
+	Surfaces []MCPToolCallSurface `json:"surfaces,omitempty"`
+}
+
+// MCPToolCallSurface is a single A2UI surface payload from a tool call.
+type MCPToolCallSurface struct {
+	Payload string `json:"payload"`
+	URI     string `json:"uri"`
 }

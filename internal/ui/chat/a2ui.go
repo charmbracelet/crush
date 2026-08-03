@@ -9,10 +9,14 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/joestump-agent/a2tea"
 	"github.com/joestump-agent/a2tea/event"
 	"github.com/joestump-agent/a2tea/render"
@@ -560,6 +564,107 @@ func repairA2UIMessage(msg map[string]any) bool {
 	return true
 }
 
+// a2uiThemeStyles builds a2tea render.Styles from the active crush theme so
+// surfaces draw with the same palette as the rest of the chat. Card borders
+// pick up the same border color the old A2UISurface frame used (the theme's
+// visible background), headings and buttons use the brand colors, captions
+// use the muted foreground, and the focused button inverts to a
+// primary-background highlight — matching the dialog selected-item pattern.
+func a2uiThemeStyles(sty *styles.Styles) render.Styles {
+	st := render.DefaultStyles()
+	if sty == nil {
+		return st
+	}
+	st.CardBorder = st.CardBorder.
+		BorderForeground(sty.Messages.A2UISurface.GetBorderTopForeground())
+	st.Heading = st.Heading.Foreground(sty.WorkingGradFromColor)
+	st.Subheading = st.Subheading.Foreground(sty.WorkingGradToColor)
+	st.Caption = st.Caption.Foreground(sty.Dialog.SecondaryText.GetForeground())
+	st.Button = st.Button.Foreground(sty.WorkingGradFromColor)
+	st.ButtonFocused = st.ButtonFocused.
+		Background(sty.Dialog.SelectedItem.GetBackground()).
+		Foreground(sty.Dialog.SelectedItem.GetForeground()).
+		Reverse(false)
+	// Inject Crush's glamour renderer so body-variant Text containing
+	// Markdown (tables, lists, bold, code) renders with the same styling
+	// as the rest of the chat. Rendered output is memoized per
+	// (renderer, text): items holding live surfaces bypass the chat render
+	// caches, so without a memo every repaint re-runs a full glamour parse
+	// per markdown body. The renderer lock is scoped to the Render call —
+	// callers must never hold the same renderer's lock while a surface
+	// View runs (see renderContentWithA2UI), or this hook would deadlock.
+	st.MarkdownRenderer = func(text string, width int) string {
+		renderer := common.MarkdownRenderer(sty, width)
+		if out, ok := a2uiMarkdownMemoGet(renderer, text); ok {
+			return out
+		}
+		mu := common.LockMarkdownRenderer(renderer)
+		mu.Lock()
+		out, err := renderer.Render(text)
+		mu.Unlock()
+		if err != nil {
+			return text
+		}
+		out = strings.TrimSpace(out)
+		a2uiMarkdownMemoPut(renderer, text, out)
+		return out
+	}
+	return st
+}
+
+// a2uiMarkdownMemo caches glamour output for surface body Text. Keyed by the
+// memoized renderer pointer — which already encodes the width and is dropped
+// on theme change via InvalidateMarkdownRendererCache — plus the source text.
+// Bounded crudely: the map resets once it grows past a2uiMarkdownMemoMax.
+var (
+	a2uiMarkdownMemoMu sync.Mutex
+	a2uiMarkdownMemo   = map[a2uiMarkdownMemoKey]string{}
+)
+
+type a2uiMarkdownMemoKey struct {
+	renderer *glamour.TermRenderer
+	text     string
+}
+
+const a2uiMarkdownMemoMax = 512
+
+func a2uiMarkdownMemoGet(r *glamour.TermRenderer, text string) (string, bool) {
+	a2uiMarkdownMemoMu.Lock()
+	defer a2uiMarkdownMemoMu.Unlock()
+	out, ok := a2uiMarkdownMemo[a2uiMarkdownMemoKey{r, text}]
+	return out, ok
+}
+
+func a2uiMarkdownMemoPut(r *glamour.TermRenderer, text, out string) {
+	a2uiMarkdownMemoMu.Lock()
+	defer a2uiMarkdownMemoMu.Unlock()
+	if len(a2uiMarkdownMemo) >= a2uiMarkdownMemoMax {
+		clear(a2uiMarkdownMemo)
+	}
+	a2uiMarkdownMemo[a2uiMarkdownMemoKey{r, text}] = out
+}
+
+// renderA2UILoading renders a "✨ Rendering UI…" placeholder for when an
+// assistant message is still streaming and an unclosed <a2ui-json> tag
+// indicates a surface is being composed. The raw partial JSON is replaced
+// with a styled shimmer that reads as intentional rather than broken.
+func renderA2UILoading(sty *styles.Styles, width int) string {
+	sparkle := lipgloss.NewStyle().
+		Foreground(sty.WorkingGradFromColor).
+		Bold(true).
+		Render("✨")
+	label := lipgloss.NewStyle().
+		Foreground(sty.WorkingLabelColor).
+		Render(" Rendering UI…")
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(sty.WorkingGradFromColor).
+		Padding(0, 1).
+		Width(width).
+		Render(sparkle + label)
+	return box
+}
+
 // syncA2UISurfaces builds — or reuses — the live a2tea models for the
 // scanned parts (#44). Surfaces are keyed by a hash of the scanned source:
 // streaming deltas rebuild them, while pure re-renders (width changes,
@@ -577,7 +682,10 @@ func (a *AssistantMessageItem) syncA2UISurfaces(src string, parts []a2tea.Part) 
 		if len(p.Messages) == 0 {
 			continue
 		}
-		model, err := a2tea.Render(p.Messages)
+		// Render with the crush theme: a2tea's CardBorder picks up the
+		// palette, and crush no longer wraps the surface in its own frame —
+		// a2tea's box is the only one.
+		model, err := a2tea.Render(p.Messages, render.WithStyles(a2uiThemeStyles(a.sty)))
 		if err != nil {
 			// Valid A2UI with nothing to draw (e.g. a bare data-model
 			// update). The render loop skips nil entries; the block-stats
@@ -621,6 +729,57 @@ func a2uiPartSurfaceID(msgs []a2ui.ServerMessage) string {
 		}
 	}
 	return ""
+}
+
+// A2UIMessagesFromPayload converts a raw A2UI JSON payload (the body of an
+// MCP-served surface) into the server messages it encodes, so a follow-up
+// payload can be applied to a live surface. The payload is wrapped in the
+// wire tags before scanning because a2tea's scanner treats a bare JSON array
+// of messages as several separate bare objects; the tags make it one block.
+// An error means the payload could not be parsed at all.
+func A2UIMessagesFromPayload(payload string) ([]a2ui.ServerMessage, error) {
+	parts, err := a2tea.Scan(a2uiOpenTag + payload + a2uiCloseTag)
+	if err != nil {
+		return nil, err
+	}
+	var msgs []a2ui.ServerMessage
+	for _, p := range parts {
+		msgs = append(msgs, p.Messages...)
+	}
+	return msgs, nil
+}
+
+// A2UIMessagesSurfaceID reports the surface a batch of server messages
+// targets — the first surfaceId any of them names, whichever payload field
+// carries it. A response to an a2ui_action may update a sibling surface
+// rather than the clicked one, so the payload's own target wins over the
+// surface the interaction came from. Empty means the batch names none.
+func A2UIMessagesSurfaceID(msgs []a2ui.ServerMessage) string {
+	for _, m := range msgs {
+		switch {
+		case m.UpdateComponents != nil:
+			return m.UpdateComponents.SurfaceID
+		case m.CreateSurface != nil:
+			return m.CreateSurface.SurfaceID
+		case m.DeleteSurface != nil:
+			return m.DeleteSurface.SurfaceID
+		case m.UpdateDataModel != nil:
+			return m.UpdateDataModel.SurfaceID
+		}
+	}
+	return ""
+}
+
+// A2UIMessagesDeleteSurface reports whether a batch of server messages
+// deletes a surface. A delete that lands on a surface already gone is the
+// expected end of its life, not a mismatch worth reporting to the server.
+func A2UIMessagesDeleteSurface(msgs []a2ui.ServerMessage) bool {
+	for _, m := range msgs {
+		if m.DeleteSurface != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // a2uiSurfaceRetired reports whether the surface at part-index i has been
@@ -868,7 +1027,10 @@ func a2uiSurfaceWantsKey(s render.Model, key tea.KeyMsg) bool {
 //
 // This deliberately bypasses the streaming-markdown prefix cache (which assumes
 // a single glamour render per item) and renders each segment directly. The
-// renderer is shared, so the whole multi-render sequence holds its lock.
+// renderer is shared, so each Render call takes its lock — scoped to the call,
+// never held across model.View(): a surface body Text re-enters the same
+// memoized renderer through the a2uiThemeStyles MarkdownRenderer hook, and
+// holding the lock across View would self-deadlock the UI goroutine.
 func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, finished bool) string {
 	masked, codeReps := maskMarkdownCode(content)
 	// Repair childless-but-labeled buttons on the raw JSON before parsing —
@@ -891,8 +1053,6 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 
 	renderer := common.MarkdownRenderer(a.sty, width)
 	mu := common.LockMarkdownRenderer(renderer)
-	mu.Lock()
-	defer mu.Unlock()
 
 	renderMarkdown := func(text string) string {
 		if strings.TrimSpace(text) == "" {
@@ -900,7 +1060,9 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 		}
 		// Restore masked code before markdown rendering.
 		text = unmaskMarkdownCode(text, codeReps)
+		mu.Lock()
 		out, err := renderer.Render(text)
+		mu.Unlock()
 		if err != nil {
 			return strings.TrimSpace(text)
 		}
@@ -918,11 +1080,9 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 		b.WriteString(s)
 	}
 
-	// a2tea's chrome renders with terminal defaults (monochrome by design),
-	// so each surface is wrapped in a themed container to match the rest of
-	// the chat. The a2tea model is sized to the container's inner width.
-	surface := a.sty.Messages.A2UISurface
-	innerWidth := max(width-surface.GetHorizontalFrameSize(), 1)
+	// a2tea renders its own themed chrome (CardBorder, headings, buttons)
+	// via render.WithStyles — crush no longer wraps the surface in its own
+	// frame. The model is sized to the full content width.
 	for i, p := range parts {
 		writeChunk(renderMarkdown(p.Text))
 		if len(p.Messages) == 0 {
@@ -936,9 +1096,17 @@ func (a *AssistantMessageItem) renderContentWithA2UI(content string, width int, 
 		}
 		// Render from the live model each call: its View reflects the
 		// current focus ring and edited values, not a frozen snapshot.
-		model.SetSize(innerWidth, 0)
+		model.SetSize(width, 0)
 		rendered := strings.TrimRight(model.View().Content, "\n")
-		writeChunk(surface.Width(max(width-surface.GetHorizontalBorderSize(), 1)).Render(rendered))
+		writeChunk(rendered)
+	}
+
+	// While streaming, an unclosed <a2ui-json> tag means the model is
+	// still composing the surface — the parser consumed the raw JSON but
+	// produced no messages, so it doesn't appear in any part. Show a
+	// magical loading placeholder instead of leaving a blank gap.
+	if !finished && hasUnclosedA2UITag(masked) {
+		writeChunk(renderA2UILoading(a.sty, width))
 	}
 
 	// Alert when the parser dropped a complete tagged block (#7) — checked

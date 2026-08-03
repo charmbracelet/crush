@@ -3,7 +3,6 @@ package model
 import (
 	"testing"
 
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/textarea"
 )
 
 func newCompletionBackspaceUI() *UI {

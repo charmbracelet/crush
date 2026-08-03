@@ -5,12 +5,12 @@ import (
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
+	"github.com/charmbracelet/crush/internal/ui/textarea"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
@@ -752,6 +752,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.QuestionRadioOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 	s.Editor.QuestionCheckOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
 	s.Editor.QuestionCheckOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
+
+	// Inline prompt tokens: @file mentions use the primary accent, /skill
+	// references the secondary, both bolded so they stand apart from prompt
+	// prose.
+	s.Editor.TokenFile = lipgloss.NewStyle().Foreground(o.primary).Bold(true)
+	s.Editor.TokenSkill = lipgloss.NewStyle().Foreground(o.secondary).Bold(true)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -489,6 +490,24 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 
 func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, error) {
 	return commands.LoadMCPPrompts()
+}
+
+// CallMCPTool invokes a tool on a named MCP server and returns its text
+// content plus any A2UI surface payload it embedded.
+func (w *AppWorkspace) CallMCPTool(ctx context.Context, name, toolName string, args map[string]any) (MCPToolCallResult, error) {
+	input, err := json.Marshal(args)
+	if err != nil {
+		return MCPToolCallResult{}, fmt.Errorf("failed to encode tool arguments: %w", err)
+	}
+	res, err := mcptools.RunTool(ctx, w.store, name, toolName, string(input))
+	if err != nil {
+		return MCPToolCallResult{}, err
+	}
+	out := MCPToolCallResult{Content: res.Content}
+	for _, s := range res.Surfaces {
+		out.Surfaces = append(out.Surfaces, MCPToolCallSurface{Payload: s.Payload, URI: s.URI})
+	}
+	return out, nil
 }
 
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/message"
@@ -769,6 +770,30 @@ func TestA2UISurfaceModelStableAcrossRenders(t *testing.T) {
 		"re-renders must reuse the live model — rebuilding would drop interaction state")
 }
 
+// TestA2UIClearCacheDropsSurfacesForRestyle pins the theme-swap path: a
+// style change reaches items as clearCache (applyTheme → refreshStyles →
+// InvalidateRenderCaches → ClearItemCaches), and the surface models baked
+// the old theme's render.Styles in at build time. clearCache must drop them
+// so the next render rebuilds the surfaces with the current theme instead
+// of drawing the previous palette next to newly-themed chat.
+func TestA2UIClearCacheDropsSurfacesForRestyle(t *testing.T) {
+	t.Parallel()
+
+	item := newA2UIFormItem(t)
+	_ = item.RawRender(80)
+	require.True(t, item.hasLiveA2UISurfaces())
+	first := firstLiveA2UISurface(t, item)
+
+	item.clearCache()
+	require.False(t, item.hasLiveA2UISurfaces(),
+		"a style change must drop surface models carrying baked-in styles")
+
+	_ = item.RawRender(80)
+	require.True(t, item.hasLiveA2UISurfaces(), "the next render must rebuild the surfaces")
+	require.NotSame(t, first, firstLiveA2UISurface(t, item),
+		"the rebuilt surface must be a fresh model, not the stale-styled one")
+}
+
 func TestA2UIContentCacheBypassedForLiveSurfaces(t *testing.T) {
 	t.Parallel()
 
@@ -939,4 +964,129 @@ func TestRetireA2UISurfaceUnknownID(t *testing.T) {
 	// The live surface is untouched: it can still be focused.
 	item.SetFocused(true)
 	require.GreaterOrEqual(t, item.focusedA2UISurfaceIndex(), 0)
+}
+
+// --- Single-border + width regression ---
+//
+// A Card surface renders inside exactly one box: a2tea's own CardBorder,
+// themed via render.WithStyles. Crush no longer wraps the surface in an
+// A2UISurface frame. The box must fill exactly `width` with no dangling
+// border fragments.
+
+// TestA2UISurfaceSingleBorder asserts exactly one box is drawn: one top
+// border line and one bottom border line, no nested inner border.
+func TestA2UISurfaceSingleBorder(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+
+	plain := ansi.Strip(item.renderContentWithA2UI(a2uiSurface, 80, true))
+
+	top := strings.Count(plain, "╭")
+	bottom := strings.Count(plain, "╰")
+	require.Equal(t, 1, top, "expected exactly one top border (single box), got %d\n%s", top, plain)
+	require.Equal(t, 1, bottom, "expected exactly one bottom border (single box), got %d\n%s", bottom, plain)
+}
+
+// TestA2UISurfaceFillsWidth asserts the rendered box spans the full content
+// width — no line narrower than the box and, critically, no dangling border
+// fragment wrapped onto its own line (the double-border overflow symptom).
+func TestA2UISurfaceFillsWidth(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+
+	for _, width := range []int{80, 60, 41} {
+		plain := ansi.Strip(item.renderContentWithA2UI(a2uiSurface, width, true))
+		lines := strings.Split(plain, "\n")
+
+		var maxW int
+		for _, ln := range lines {
+			if w := ansi.StringWidth(ln); w > maxW {
+				maxW = w
+			}
+		}
+		require.Equal(t, width, maxW, "width=%d: box must fill the full content width\n%s", width, plain)
+
+		// No line may be a lone border fragment (a right border that wrapped
+		// onto its own line), the visible sign of the double-border overflow.
+		for _, ln := range lines {
+			trimmed := strings.TrimSpace(ln)
+			require.NotEqual(t, "╮", trimmed, "width=%d: dangling top-right border fragment\n%s", width, plain)
+			require.NotEqual(t, "╯", trimmed, "width=%d: dangling bottom-right border fragment\n%s", width, plain)
+			require.NotEqual(t, "─╮", trimmed, "width=%d: wrapped border fragment\n%s", width, plain)
+			require.NotEqual(t, "─╯", trimmed, "width=%d: wrapped border fragment\n%s", width, plain)
+		}
+	}
+}
+
+// --- Streaming loading indicator ---
+
+// TestA2UIStreamingLoadingPlaceholder asserts that an unclosed <a2ui-json>
+// tag during streaming renders a magical "Rendering UI…" placeholder instead
+// of raw partial JSON.
+func TestA2UIStreamingLoadingPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+
+	// Simulate streaming: prose followed by an unclosed <a2ui-json> tag.
+	content := "Here is the trace:\n\n<a2ui-json>{\"version\":\"v0.9\",\"updateComponents\":{\"surfaceId\":\"s\",\"components\":["
+
+	out := ansi.Strip(item.renderContentWithA2UI(content, 80, false))
+
+	require.Contains(t, out, "Here is the trace:", "prose before the unclosed tag should render")
+	require.Contains(t, out, "✨", "loading placeholder should contain the sparkle")
+	require.Contains(t, out, "Rendering UI", "loading placeholder should contain the label")
+	require.NotContains(t, out, `"version"`, "raw partial JSON should not leak into the render")
+	require.NotContains(t, out, `"updateComponents"`, "raw partial JSON should not leak into the render")
+	require.NotContains(t, out, `"surfaceId"`, "raw partial JSON should not leak into the render")
+}
+
+// TestA2UIStreamingLoadingPlaceholderComplete asserts that a complete
+// <a2ui-json> block during streaming renders the surface normally (no
+// loading placeholder).
+func TestA2UIStreamingLoadingPlaceholderComplete(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+
+	content := "Here you go:\n\n" + a2uiSurface
+
+	out := ansi.Strip(item.renderContentWithA2UI(content, 80, false))
+
+	require.Contains(t, out, "Hello from A2UI", "complete surface should render its content")
+	require.NotContains(t, out, "Rendering UI", "complete surface should not show loading placeholder")
+}
+
+// Regression: a markdown-looking body Text rendered at the surface's
+// un-narrowed width re-enters the shared glamour renderer through the
+// a2uiThemeStyles MarkdownRenderer hook. renderContentWithA2UI used to hold
+// that renderer's lock across model.View(), so the hook's Lock() on the same
+// non-reentrant mutex froze the UI goroutine permanently.
+func TestRenderContentWithA2UIMarkdownBodyNoDeadlock(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := &AssistantMessageItem{sty: &sty}
+	// Root-level Text (no Card): a2tea passes the full host width to the
+	// markdown hook, matching the outer renderer's width bucket.
+	content := `<a2ui-json>{"version":"v0.9","updateComponents":{"surfaceId":"s","components":[` +
+		`{"component":"Text","id":"t","text":"This is **bold** markdown"}` +
+		`]}}</a2ui-json>`
+
+	done := make(chan string, 1)
+	go func() {
+		done <- item.renderContentWithA2UI(content, 80, true)
+	}()
+	select {
+	case out := <-done:
+		require.Contains(t, ansi.Strip(out), "bold")
+	case <-time.After(15 * time.Second):
+		t.Fatal("renderContentWithA2UI deadlocked rendering a markdown body Text")
+	}
 }

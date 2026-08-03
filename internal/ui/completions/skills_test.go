@@ -1,0 +1,158 @@
+package completions
+
+import (
+	"strings"
+	"testing"
+
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/stretchr/testify/require"
+)
+
+func TestSetSkillItemsOpensWithSkills(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	require.False(t, c.IsOpen())
+
+	c.SetSkillItems([]SkillCompletionValue{
+		{Name: "code-review", Path: "/skills/code-review/SKILL.md"},
+		{Name: "commit", Path: "/skills/commit/SKILL.md"},
+	})
+
+	require.True(t, c.IsOpen())
+	require.Len(t, c.filtered, 2)
+	first, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	require.Equal(t, "/code-review", first.Text())
+}
+
+func TestSkillCompletionFilter(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{
+		{Name: "code-review"},
+		{Name: "commit"},
+		{Name: "coder"},
+	})
+
+	c.Filter("cod")
+
+	require.NotEmpty(t, c.filtered)
+	first, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	// "coder" is an exact-stem/prefix tier winner over "code-review".
+	require.Equal(t, "/coder", first.Text())
+}
+
+func TestSkillDescriptionShownAndSearchable(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{
+		{Name: "skill-creator", Description: "Use for naming skills\nand writing frontmatter."},
+		{Name: "commit", Description: "Write a conventional commit."},
+	})
+
+	first, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	// The row reads "/name - description", with the frontmatter
+	// description flattened onto one line.
+	require.Equal(t, "/skill-creator - Use for naming skills and writing frontmatter.", first.Text())
+	// The name leads; the description renders as dimmed detail.
+	require.Equal(t, len("/skill-creator"), first.detailStart)
+	require.Equal(t, "/skill-creator", first.SortKey())
+
+	// The description is part of the filter text, so a skill is findable by
+	// what it does and not only by what it is named.
+	c.Filter("frontmatter")
+	require.Len(t, c.filtered, 1)
+	hit, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	require.Equal(t, "skill-creator", hit.Value().(SkillCompletionValue).Name)
+}
+
+func TestSkillDescriptionTruncatedToPopupWidth(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{
+		{Name: "commit", Description: strings.Repeat("long ", 200)},
+	})
+
+	first, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	require.LessOrEqual(t, ansi.StringWidth(first.Text()), maxWidth-2)
+	require.True(t, strings.HasSuffix(first.Text(), "…"), "expected an ellipsis, got %q", first.Text())
+}
+
+func TestSkillDescriptionDroppedWhenNameEatsTheRow(t *testing.T) {
+	t.Parallel()
+
+	// A name long enough to leave no room for a useful description renders
+	// bare rather than as a row of ellipsis.
+	long := strings.Repeat("a", maxWidth)
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{{Name: long, Description: "does things"}})
+
+	first, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	require.Equal(t, "/"+long, first.Text())
+	require.Equal(t, -1, first.detailStart)
+}
+
+func TestSelectCurrentReturnsSkillSelectionMsg(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{
+		{Name: "commit", Path: "/skills/commit/SKILL.md"},
+	})
+
+	msg := c.selectCurrent(false)
+	sel, ok := msg.(SelectionMsg[SkillCompletionValue])
+	require.True(t, ok, "expected SelectionMsg[SkillCompletionValue], got %T", msg)
+	require.Equal(t, "commit", sel.Value.Name)
+	require.Equal(t, "/skills/commit/SKILL.md", sel.Value.Path)
+	require.False(t, sel.KeepOpen)
+	require.False(t, c.IsOpen(), "popup should close on non-keep-open select")
+}
+
+func TestSelectCurrentSkillKeepOpen(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{{Name: "commit"}})
+
+	msg := c.selectCurrent(true)
+	sel, ok := msg.(SelectionMsg[SkillCompletionValue])
+	require.True(t, ok)
+	require.True(t, sel.KeepOpen)
+	require.True(t, c.IsOpen(), "popup should stay open on keep-open select")
+}
+
+func TestSetSkillItemsEmpty(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems(nil)
+
+	require.True(t, c.IsOpen())
+	require.False(t, c.HasItems())
+	require.Nil(t, c.selectCurrent(false))
+}
+
+func TestSkillItemsDoNotAffectFileSelectionDispatch(t *testing.T) {
+	t.Parallel()
+
+	// Regression: file/resource values must still dispatch their own
+	// SelectionMsg types after the skill case was added.
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetItems([]FileCompletionValue{{Path: "foo.go"}}, nil)
+
+	msg := c.selectCurrent(false)
+	sel, ok := msg.(SelectionMsg[FileCompletionValue])
+	require.True(t, ok, "expected SelectionMsg[FileCompletionValue], got %T", msg)
+	require.Equal(t, "foo.go", sel.Value.Path)
+}

@@ -335,6 +335,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			SessionID:        sessionID,
 			RunID:            runID,
 			Channel:          ChannelFromContext(ctx),
+			ContentWidth:     ContentWidthFromContext(ctx),
 			Prompt:           prompt,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
@@ -1499,7 +1500,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	// Run the agent
 	run := func() (*fantasy.AgentResult, error) {
 		return params.Agent.Run(ctx, SessionAgentCall{
-			SessionID:        session.ID,
+			SessionID: session.ID,
+			// Inherit the parent turn's UI width hint: the sub-agent's
+			// PrepareStep stamps call.ContentWidth over the tool-call
+			// context unconditionally, so leaving this zero would clobber
+			// the value the parent already carries.
+			ContentWidth:     tools.GetContentWidthFromContext(ctx),
 			Prompt:           params.Prompt,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  getProviderOptions(model, providerCfg),

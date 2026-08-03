@@ -41,6 +41,11 @@ linters:
         text: "SA1019.*interp.ExecHandler"
         linters:
           - staticcheck
+      # Vendored upstream code (bubbles textarea) is kept byte-close to
+      # upstream on purpose; don't restyle it.
+      - path: internal/ui/textarea/
+        linters:
+          - staticcheck
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

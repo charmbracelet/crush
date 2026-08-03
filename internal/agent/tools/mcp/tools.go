@@ -17,12 +17,49 @@ import (
 
 type Tool = mcp.Tool
 
+// A2UIJSONMIMEType is the canonical MIME type identifying an A2UI surface
+// payload, per the A2UI-over-MCP contract. A2UILegacyMIMEType is the legacy
+// spelling reference clients also accept.
+const (
+	A2UIJSONMIMEType   = "application/a2ui+json"
+	A2UILegacyMIMEType = "application/json+a2ui"
+)
+
+// IsA2UIMIMEType reports whether mime identifies an A2UI surface payload,
+// accepting both the canonical and legacy spellings.
+func IsA2UIMIMEType(mime string) bool {
+	return mime == A2UIJSONMIMEType || mime == A2UILegacyMIMEType
+}
+
+// A2UISurface is a UI-only A2UI surface payload extracted from a tool
+// result's EmbeddedResource content. The chat UI renders it as a live
+// surface; the model never sees the raw JSON.
+type A2UISurface struct {
+	// Payload is the raw A2UI JSON.
+	Payload string
+	// URI is the embedded resource's URI, for display/diagnostics.
+	URI string
+	// RenderForUser reports whether the payload should be rendered for the
+	// user. False only when the audience is ["assistant"] alone: the spec's
+	// verbalization contract renders for every audience except that one.
+	RenderForUser bool
+	// AssistantVisible reports whether the server annotated the payload
+	// for the LLM as well as the user (empty audience or one containing
+	// "assistant"). An audience of ["user"] alone hides the raw JSON from
+	// the model.
+	AssistantVisible bool
+}
+
 // ToolResult represents the result of running an MCP tool.
 type ToolResult struct {
 	Type      string
 	Content   string
 	Data      []byte
 	MediaType string
+	// Surfaces carries any A2UI surface payloads found in the result's
+	// EmbeddedResource content. They are kept out of Content: the chat UI
+	// draws them, and the model only ever echoed the JSON back.
+	Surfaces []A2UISurface
 }
 
 var allTools = csync.NewMap[string, []*Tool]()
@@ -30,6 +67,31 @@ var allTools = csync.NewMap[string, []*Tool]()
 // Tools returns all available MCP tools.
 func Tools() iter.Seq2[string, []*Tool] {
 	return allTools.Seq2()
+}
+
+// HasTool reports whether the named MCP server currently exposes a tool with
+// the given name. It backs the A2UI action round-trip: a server that serves
+// interactive surfaces may also expose the a2ui_action / a2ui_error tools
+// the client round-trips interactions through, and the client needs to know
+// before it commits to that path.
+func HasTool(name, toolName string) bool {
+	tools, ok := allTools.Get(name)
+	if !ok {
+		return false
+	}
+	return slices.ContainsFunc(tools, func(t *Tool) bool { return t.Name == toolName })
+}
+
+// SetToolsForTest installs the given tool names for an MCP server in the
+// shared registry and returns a cleanup that removes them. It exists for
+// tests outside this package that need HasTool to observe a server's tools.
+func SetToolsForTest(name string, toolNames ...string) func() {
+	tools := make([]*Tool, len(toolNames))
+	for i, n := range toolNames {
+		tools[i] = &Tool{Name: n}
+	}
+	allTools.Set(name, tools)
+	return func() { allTools.Del(name) }
 }
 
 // RunTool runs an MCP tool with the given input parameters.
@@ -55,7 +117,15 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{Type: "text", Content: ""}, nil
 	}
 
+	return extractToolResult(result), nil
+}
+
+// extractToolResult partitions a CallToolResult's content into model-facing
+// text, binary media, and UI-only A2UI surfaces — the extraction half of
+// RunTool, split out so tests can drive it through a live in-memory server.
+func extractToolResult(result *mcp.CallToolResult) ToolResult {
 	var textParts []string
+	var surfaces []A2UISurface
 	var imageData []byte
 	var imageMimeType string
 	var audioData []byte
@@ -75,6 +145,27 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 				audioData = content.Data
 				audioMimeType = content.MIMEType
 			}
+		case *mcp.EmbeddedResource:
+			// A2UI surfaces arrive as embedded resources — pull them
+			// aside for the UI instead of stringifying them into the
+			// model-facing text.
+			if content.Resource != nil && IsA2UIMIMEType(content.Resource.MIMEType) {
+				payload := content.Resource.Text
+				if payload == "" && len(content.Resource.Blob) > 0 {
+					payload = string(content.Resource.Blob)
+				}
+				if payload != "" {
+					render, assistantVisible := a2uiAudience(content.Annotations)
+					surfaces = append(surfaces, A2UISurface{
+						Payload:          payload,
+						URI:              content.Resource.URI,
+						RenderForUser:    render,
+						AssistantVisible: assistantVisible,
+					})
+				}
+				continue
+			}
+			textParts = append(textParts, fmt.Sprintf("%v", v))
 		default:
 			textParts = append(textParts, fmt.Sprintf("%v", v))
 		}
@@ -90,7 +181,8 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 			Content:   textContent,
 			Data:      ensureRawBytes(imageData),
 			MediaType: imageMimeType,
-		}, nil
+			Surfaces:  surfaces,
+		}
 	}
 
 	if audioData != nil {
@@ -99,13 +191,33 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 			Content:   textContent,
 			Data:      ensureRawBytes(audioData),
 			MediaType: audioMimeType,
-		}, nil
+			Surfaces:  surfaces,
+		}
 	}
 
 	return ToolResult{
-		Type:    "text",
-		Content: textContent,
-	}, nil
+		Type:     "text",
+		Content:  textContent,
+		Surfaces: surfaces,
+	}
+}
+
+// a2uiAudience resolves an A2UI embedded resource's audience annotations
+// into the spec's verbalization contract:
+//
+//	audience (empty)      → render for the user, visible to the model
+//	["user"]              → render for the user, hidden from the model
+//	["assistant"]         → visible to the model, NOT rendered
+//	["user","assistant"]  → both
+//
+// It returns (renderForUser, assistantVisible).
+func a2uiAudience(annotations *mcp.Annotations) (bool, bool) {
+	if annotations == nil || len(annotations.Audience) == 0 {
+		return true, true
+	}
+	forUser := slices.Contains(annotations.Audience, mcp.Role("user"))
+	forAssistant := slices.Contains(annotations.Audience, mcp.Role("assistant"))
+	return forUser, forAssistant
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

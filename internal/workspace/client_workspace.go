@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
@@ -236,11 +237,15 @@ func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string
 	// completion detection (it observes message events directly),
 	// so passing an empty RunID is correct here: it skips the
 	// correlator stamping path without functional consequences.
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", prompt, attachments...)
+	//
+	// The content-width hint rides the context locally but cannot cross
+	// the HTTP boundary as a context value, so it is lifted onto the wire
+	// message here and re-attached server-side (backend.runAgent).
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", "", agent.ContentWidthFromContext(ctx), prompt, attachments...)
 }
 
 func (w *ClientWorkspace) AgentRunChannel(ctx context.Context, channel, sessionID, prompt string, attachments ...message.Attachment) error {
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", channel, prompt, attachments...)
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", channel, 0, prompt, attachments...)
 }
 
 func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, _ func(string), _ bool) (proto.ShellCommandResponse, error) {
@@ -759,6 +764,20 @@ func (w *ClientWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPro
 
 func (w *ClientWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
 	return w.client.GetMCPPrompt(context.Background(), w.workspaceID(), clientID, promptID, args)
+}
+
+// CallMCPTool invokes a tool on a named MCP server via the server and
+// returns its text content plus any A2UI surface payload it embedded.
+func (w *ClientWorkspace) CallMCPTool(ctx context.Context, name, toolName string, args map[string]any) (MCPToolCallResult, error) {
+	res, err := w.client.CallMCPTool(ctx, w.workspaceID(), name, toolName, args)
+	if err != nil {
+		return MCPToolCallResult{}, err
+	}
+	out := MCPToolCallResult{Content: res.Content}
+	for _, s := range res.Surfaces {
+		out.Surfaces = append(out.Surfaces, MCPToolCallSurface{Payload: s.Payload, URI: s.URI})
+	}
+	return out, nil
 }
 
 func (w *ClientWorkspace) EnableDockerMCP(ctx context.Context) error {

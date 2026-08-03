@@ -1,7 +1,9 @@
 package projects
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/lock"
 )
 
 const projectsFileName = "projects.json"
@@ -42,11 +45,8 @@ func projectsFilePath() string {
 	return filepath.Join(filepath.Dir(config.GlobalConfigData()), projectsFileName)
 }
 
-// Load reads the projects list from disk.
-func Load() (*ProjectList, error) {
-	mu.Lock()
-	defer mu.Unlock()
-
+// loadLocked reads the projects list from disk. Callers must hold mu.
+func loadLocked() (*ProjectList, error) {
 	path := projectsFilePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -64,11 +64,15 @@ func Load() (*ProjectList, error) {
 	return &list, nil
 }
 
-// Save writes the projects list to disk.
-func Save(list *ProjectList) error {
+// Load reads the projects list from disk.
+func Load() (*ProjectList, error) {
 	mu.Lock()
 	defer mu.Unlock()
+	return loadLocked()
+}
 
+// saveLocked writes the projects list to disk. Callers must hold mu.
+func saveLocked(list *ProjectList) error {
 	path := projectsFilePath()
 
 	// Ensure directory exists
@@ -84,9 +88,46 @@ func Save(list *ProjectList) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
+// Save writes the projects list to disk.
+func Save(list *ProjectList) error {
+	mu.Lock()
+	defer mu.Unlock()
+	return saveLocked(list)
+}
+
+// lockProjects serialises projects.json across processes. Register runs on
+// every crush startup (cmd/root.go), so concurrent launches would otherwise
+// lose updates; the process-local mu is not enough. Short timeout: a stuck
+// holder must not hang startup.
+func lockProjects(ctx context.Context) (func(), error) {
+	dir := filepath.Dir(projectsFilePath())
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	lockPath := filepath.Join(dir, "projects.lock")
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return lock.File(ctx, lockPath)
+}
+
 // Register adds or updates a project in the list.
 func Register(workingDir, dataDir string) error {
-	list, err := Load()
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Serialise against other processes' Registers (concurrent crush
+	// launches). Acquired inside mu so the lock order is total (mu -> file
+	// lock), matching every other path. If the lock cannot be acquired within
+	// the timeout, log and continue rather than fail startup: losing an LRU
+	// entry is cosmetic, refusing to launch crush is not.
+	release, err := lockProjects(context.Background())
+	if err != nil {
+		slog.Debug("Failed to acquire cross-process projects lock; registering without it", "err", err)
+	} else {
+		defer release()
+	}
+
+	list, err := loadLocked()
 	if err != nil {
 		return err
 	}
@@ -125,7 +166,7 @@ func Register(workingDir, dataDir string) error {
 		list.Projects = kept
 	}
 
-	return Save(list)
+	return saveLocked(list)
 }
 
 // List returns all tracked projects sorted by last accessed.

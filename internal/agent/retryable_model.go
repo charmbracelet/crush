@@ -145,12 +145,14 @@ func idleStreamTimeoutError() error {
 	}
 }
 
-// mapRetryableStreamErr promotes mid-stream provider failures that
-// fantasy's openai adapter leaves unwrapped into retryable
-// ProviderErrors. OpenAI-compatible gateways (Hyper, xAI, …) often
-// emit rate limits as SSE error events (*ssestream.StreamError)
-// rather than HTTP 429 on the initial response; without this those
-// errors skip the retry budget and kill the turn immediately.
+// isLongRetryDelay reports whether the provider asked us to wait a minute or
+// more before retrying, by inspecting the error's JSON body, response body,
+// cause chain, and Retry-After / x-ratelimit-reset-* headers.
+//
+// Callers use this to SUPPRESS automatic retry (clearing StatusCode and
+// TransientError) rather than to schedule one: silently sleeping for minutes
+// inside a turn looks like a hang, so a long provider-mandated backoff is
+// surfaced to the user as a terminal error they can act on instead.
 func isLongRetryDelay(err *fantasy.ProviderError) bool {
 	if err == nil {
 		return false

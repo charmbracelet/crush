@@ -43,6 +43,23 @@ func TestMapRetryableStreamErr_LongRetryDelaySkipsAutoRetry(t *testing.T) {
 	require.False(t, pe.IsRetryable(), "errors with retryAfter >= 1 minute must skip auto-retry")
 }
 
+func TestIsLongRetryDelay_EpochHeaderNotSuppressed(t *testing.T) {
+	t.Parallel()
+
+	// A provider that emits a Unix epoch timestamp in Retry-After (common
+	// for OAuth proxies / rate-limit-reset headers) must NOT count as a
+	// long retry delay, or auto-retry gets suppressed for a reset that has
+	// already happened or is imminent.
+	pe := &fantasy.ProviderError{
+		StatusCode: http.StatusTooManyRequests,
+		ResponseHeaders: map[string]string{
+			"retry-after": "1722715000", // July 2024: in the past.
+		},
+	}
+	require.False(t, isLongRetryDelay(pe),
+		"a past epoch in Retry-After must not be treated as a >1min backoff")
+}
+
 func TestMapRetryableStreamErr_NonRetryable(t *testing.T) {
 	t.Parallel()
 	err := &ssestream.StreamError{

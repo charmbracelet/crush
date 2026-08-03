@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1372,6 +1373,47 @@ func TestParseFlexDuration_FloatPrecision(t *testing.T) {
 	require.Equal(t, 500*time.Millisecond, parseFlexDuration(0.5))
 	require.Equal(t, 2500*time.Millisecond, parseFlexDuration(2.5))
 	require.Equal(t, 1500*time.Millisecond, parseFlexDuration("1.5"))
+}
+
+func TestParseFlexDuration_EpochAndHTTPDate(t *testing.T) {
+	t.Parallel()
+
+	// Fix the wall clock so the epoch and HTTP-date cases are deterministic.
+	fixed := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	old := timeNow
+	timeNow = func() time.Time { return fixed }
+	defer func() { timeNow = old }()
+
+	cases := []struct {
+		name string
+		in   any
+		want time.Duration
+	}{
+		{"float seconds", float64(30), 30 * time.Second},
+		{"int64 seconds", int64(30), 30 * time.Second},
+		{"int seconds", 30, 30 * time.Second},
+		{"string seconds", "30", 30 * time.Second},
+		{"string duration", "30s", 30 * time.Second},
+		// 90 seconds past the fixed clock: an epoch in the future becomes a
+		// relative delay, never a ~54-year gap.
+		{"future epoch", fixed.Add(90 * time.Second).Unix(), 90 * time.Second},
+		// 1722715000 is July 2024: an epoch in the past yields zero, not a
+		// negative duration callers would misread as "no value".
+		{"past epoch float", float64(1722715000), 0},
+		{"past epoch string", "1722715000", 0},
+		{"past epoch int64", int64(1722715000), 0},
+		{"http date", fixed.Add(2 * time.Hour).Format(http.TimeFormat), 2 * time.Hour},
+		{"empty", "", 0},
+		{"nil", nil, 0},
+		{"garbage", "garbage", 0},
+		{"negative", -1, 0},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			require.Equal(t, c.want, parseFlexDuration(c.in))
+		})
+	}
 }
 
 func TestCleanErrorString(t *testing.T) {

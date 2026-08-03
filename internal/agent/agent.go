@@ -2711,6 +2711,32 @@ type parsedErrorJSON struct {
 	RetryAfter time.Duration `json:"retryAfter"`
 }
 
+// epochThreshold distinguishes a relative duration in seconds from a Unix
+// epoch timestamp. Providers return both shapes in Retry-After and
+// x-ratelimit-reset-* headers with no way to tell them apart other than
+// magnitude. 1e9 seconds is ~31 years as a relative delay -- never a real
+// backoff -- and 1e9 as an epoch is 2001-09-09, safely in the past, so
+// anything above it is a timestamp.
+const epochThreshold = 1e9
+
+// timeNow is overridable so tests can fix the wall clock for the epoch
+// and HTTP-date duration maths in secondsOrEpoch and parseFlexDuration.
+var timeNow = time.Now
+
+// secondsOrEpoch interprets a positive number of seconds as either a relative
+// delay or a Unix epoch timestamp, depending on magnitude. An epoch already in
+// the past yields a zero duration, which callers would silently treat as
+// "no value"; clamp it to 0 explicitly.
+func secondsOrEpoch(sec float64) time.Duration {
+	if sec > epochThreshold {
+		if t := time.Unix(int64(sec), 0); t.After(timeNow()) {
+			return t.Sub(timeNow())
+		}
+		return 0
+	}
+	return time.Duration(sec * float64(time.Second))
+}
+
 func parseFlexDuration(v any) time.Duration {
 	if v == nil {
 		return 0
@@ -2718,15 +2744,15 @@ func parseFlexDuration(v any) time.Duration {
 	switch val := v.(type) {
 	case float64:
 		if val > 0 {
-			return time.Duration(val * float64(time.Second))
+			return secondsOrEpoch(val)
 		}
 	case int64:
 		if val > 0 {
-			return time.Duration(val) * time.Second
+			return secondsOrEpoch(float64(val))
 		}
 	case int:
 		if val > 0 {
-			return time.Duration(val) * time.Second
+			return secondsOrEpoch(float64(val))
 		}
 	case string:
 		val = strings.TrimSpace(val)
@@ -2734,10 +2760,20 @@ func parseFlexDuration(v any) time.Duration {
 			return 0
 		}
 		if sec, err := strconv.ParseFloat(val, 64); err == nil && sec > 0 {
-			return time.Duration(sec * float64(time.Second))
+			return secondsOrEpoch(sec)
 		}
 		if d, err := time.ParseDuration(val); err == nil && d > 0 {
 			return d
+		}
+		// Retry-After may also be an HTTP-date (RFC 9110) rather than
+		// delta-seconds. Try it last: a date can never be parsed as a
+		// number, so the numeric forms above take precedence with no
+		// ambiguity.
+		if t, err := http.ParseTime(val); err == nil {
+			if d := t.Sub(timeNow()); d > 0 {
+				return d
+			}
+			return 0
 		}
 	}
 	return 0

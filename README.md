@@ -168,14 +168,12 @@ Or just install it with Go:
 go install github.com/charmbracelet/crush@latest
 ```
 
-On illumos (OpenIndiana, OmniOS), the command above works as-is. Only native
-OS notifications are unavailable there; terminal-based notifications (OSC) and
-the terminal bell still work. On Oracle Solaris, add `-tags sqlite3_dotlk` so
-the local database uses dot-file locking:
+Crush stores its local database with [modernc.org/sqlite][modernc], so it
+builds on the platforms that driver supports — which covers every platform
+binaries are published for, plus Android. The illumos and Solaris family is
+not among them and no longer builds.
 
-```
-go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
-```
+[modernc]: https://pkg.go.dev/modernc.org/sqlite
 
 > [!WARNING]
 > Productivity may increase when using Crush and you may find yourself nerd

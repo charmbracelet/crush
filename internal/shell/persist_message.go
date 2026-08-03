@@ -31,8 +31,8 @@ func PersistOutput(
 	})
 	// The messages table has a single foreign key (session_id), so an FK
 	// failure here can only mean the session is gone. We match on the error
-	// text because the codebase builds against two swappable SQLite drivers
-	// (modernc and ncruces) and this is the one signal stable across both.
+	// text because modernc.org/sqlite reports constraint violations as a
+	// plain error string rather than a typed, inspectable error.
 	if err != nil && strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
 		slog.Debug(
 			"Skipping shell command persistence: session no longer exists",

@@ -98,10 +98,22 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	if err != nil {
 		return ToolResult{}, err
 	}
-	result, err := c.CallTool(ctx, &mcp.CallToolParams{
-		Name:      toolName,
-		Arguments: args,
-	})
+
+	// Attach the A2UI capability to the call's _meta for stateless servers
+	// that cannot carry initialize-time state. Gated the same way as the
+	// handshake advertisement: a host that won't render A2UI must not claim
+	// it.
+	var params *mcp.CallToolParams
+	if cfg.Config().Options.DisableA2UI {
+		params = &mcp.CallToolParams{Name: toolName, Arguments: args}
+	} else {
+		params = &mcp.CallToolParams{
+			Meta:      mcp.Meta(a2uiMetaCapabilities()),
+			Name:      toolName,
+			Arguments: args,
+		}
+	}
+	result, err := c.CallTool(ctx, params)
 	if err != nil {
 		return ToolResult{}, err
 	}

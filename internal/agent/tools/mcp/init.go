@@ -922,6 +922,13 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	channelGate := newChannelGate()
 	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
+	// Advertise A2UI support in the initialize handshake so an A2UI-over-MCP
+	// server knows it can send surfaces. A host that won't render A2UI must
+	// not claim the capability.
+	if !cfg.Config().Options.DisableA2UI {
+		transport = &a2uiInitTransport{inner: transport}
+	}
+
 	client := mcp.NewClient(
 		&mcp.Implementation{
 			Name:    "crush",

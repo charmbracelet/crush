@@ -83,7 +83,7 @@ func (t *baseToolMessageItem) syncToolA2UISurfaces() {
 	t.surfaceBuildFailed = failed
 	t.surfaceSrcHash = h
 	t.surfaceScanned = true
-	if t.focusableMessageItem.isFocused() {
+	if t.isFocused() {
 		t.focusToolA2UISurfaces()
 	}
 }

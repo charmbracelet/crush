@@ -55,6 +55,8 @@ func TestRunTool_A2UISurfaceExtraction(t *testing.T) {
 	t.Parallel()
 
 	t.Run("embedded A2UI resource becomes a surface, not text", func(t *testing.T) {
+		t.Parallel()
+
 		sess := liveA2UIToolSession(t, "get_card", []mcp.Content{
 			&mcp.TextContent{Text: "Your recipe card"},
 			&mcp.EmbeddedResource{
@@ -76,6 +78,8 @@ func TestRunTool_A2UISurfaceExtraction(t *testing.T) {
 	})
 
 	t.Run("legacy MIME spelling is recognized", func(t *testing.T) {
+		t.Parallel()
+
 		sess := liveA2UIToolSession(t, "get_card", []mcp.Content{
 			&mcp.EmbeddedResource{
 				Resource: &mcp.ResourceContents{
@@ -90,6 +94,8 @@ func TestRunTool_A2UISurfaceExtraction(t *testing.T) {
 	})
 
 	t.Run("user-only audience hides the payload from the model", func(t *testing.T) {
+		t.Parallel()
+
 		sess := liveA2UIToolSession(t, "get_card", []mcp.Content{
 			&mcp.EmbeddedResource{
 				Resource: &mcp.ResourceContents{
@@ -106,6 +112,8 @@ func TestRunTool_A2UISurfaceExtraction(t *testing.T) {
 	})
 
 	t.Run("blob-delivered surface is normalized to text", func(t *testing.T) {
+		t.Parallel()
+
 		sess := liveA2UIToolSession(t, "get_card", []mcp.Content{
 			&mcp.EmbeddedResource{
 				Resource: &mcp.ResourceContents{
@@ -121,6 +129,8 @@ func TestRunTool_A2UISurfaceExtraction(t *testing.T) {
 	})
 
 	t.Run("non-A2UI embedded resource stays in the text", func(t *testing.T) {
+		t.Parallel()
+
 		sess := liveA2UIToolSession(t, "get_doc", []mcp.Content{
 			&mcp.EmbeddedResource{
 				Resource: &mcp.ResourceContents{

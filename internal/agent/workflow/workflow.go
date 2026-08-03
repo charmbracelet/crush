@@ -425,7 +425,18 @@ func registerParallel(L *lua.LState, st *runState) {
 			L.RaiseError("parallel() requires an array of calls")
 		}
 		t := L.CheckTable(1)
-		calls := tableToSlice(t)
+		calls, err := tableToSlice(t)
+		if err != nil {
+			L.RaiseError("parallel() argument: %s", err.Error())
+		}
+		// Reject stray named keys (e.g. parallel({...}, timeout=30))
+		// deterministically; ForEach would have appended them at a random
+		// position in Go map order.
+		keyCount := 0
+		t.ForEach(func(_, _ lua.LValue) { keyCount++ })
+		if keyCount > len(calls) {
+			L.RaiseError("parallel() expects an array of call objects, got a table with named keys")
+		}
 		if len(calls) == 0 {
 			L.RaiseError("parallel() requires a non-empty array of call objects")
 		}
@@ -581,12 +592,24 @@ func registerLog(L *lua.LState, st *runState) {
 	}))
 }
 
-func tableToSlice(t *lua.LTable) []lua.LValue {
-	var out []lua.LValue
-	t.ForEach(func(_, v lua.LValue) {
+// tableToSlice returns the 1..MaxN array part of t in index order.
+//
+// gopher-lua's ForEach walks the array part in order but then appends the
+// string and hash parts in Go map order, which silently turns a stray named
+// key into an extra positional entry at a random position. Iterating by
+// index instead makes both a hole and a stray key a deterministic error
+// rather than a confusing downstream one.
+func tableToSlice(t *lua.LTable) ([]lua.LValue, error) {
+	n := t.MaxN()
+	out := make([]lua.LValue, 0, n)
+	for i := 1; i <= n; i++ {
+		v := t.RawGetInt(i)
+		if v == lua.LNil {
+			return nil, fmt.Errorf("array has a nil hole at index %d", i)
+		}
 		out = append(out, v)
-	})
-	return out
+	}
+	return out, nil
 }
 
 // luaToGo converts a Lua value to a Go any suitable for json.Marshal.

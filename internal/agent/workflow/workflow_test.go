@@ -960,3 +960,45 @@ func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
 		(!t2.IsZero() && !t2.Before(c2.start) && t2.Before(c2.end))
 	require.True(t, concurrent, "a read-only task must run while a coder is executing")
 }
+
+// TestParallelRejectsNamedKeys pins W3: a stray named key in the parallel()
+// table must be a deterministic error naming the problem, not a silent extra
+// positional entry at a random Go-map-order position. Run with -count=20 the
+// message must be identical every run.
+func TestParallelRejectsNamedKeys(t *testing.T) {
+	t.Parallel()
+	script := `
+		local ok, err = pcall(function()
+			parallel({ {prompt = "a"}, foo = "bar" })
+		end)
+		if ok then return "fail" end
+		return err
+	`
+	var called atomic.Bool
+	spawn := func(_ context.Context, _ int, _, _ string, _ SpawnOpts) (string, error) {
+		called.Store(true)
+		return "", nil
+	}
+	res, err := Run(context.Background(), script, spawn, Options{})
+	require.NoError(t, err)
+	require.Contains(t, res.Value, "named keys")
+	require.Contains(t, res.Value, "parallel()")
+	require.False(t, called.Load(), "no agent may spawn for a malformed parallel() table")
+}
+
+// TestParallelRejectsNilHole pins W3: a sparse array must be a deterministic
+// error naming the hole index, not a silently compacted list that renumbers
+// the caller's indices.
+func TestParallelRejectsNilHole(t *testing.T) {
+	t.Parallel()
+	script := `
+		local ok, err = pcall(function()
+			parallel({ [1] = {prompt = "a"}, [3] = {prompt = "b"} })
+		end)
+		if ok then return "fail" end
+		return err
+	`
+	res, err := Run(context.Background(), script, nil, Options{})
+	require.NoError(t, err)
+	require.Contains(t, res.Value, "nil hole at index 2")
+}

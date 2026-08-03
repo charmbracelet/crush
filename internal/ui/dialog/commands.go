@@ -234,6 +234,11 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 				c.setCommandItems(c.selected)
 			}
 		default:
+			// Typing '/' while the filter is empty closes the dialog
+			// so the user can dismiss it without reaching for Escape.
+			if msg.String() == "/" && c.input.Value() == "" {
+				return ActionClose{}
+			}
 			var cmd tea.Cmd
 			for _, item := range c.list.FilteredItems() {
 				if item, ok := item.(*CommandItem); ok && item != nil {

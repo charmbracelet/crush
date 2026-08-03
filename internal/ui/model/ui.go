@@ -281,6 +281,17 @@ type UI struct {
 	completionsQuery         string
 	completionsPositionStart image.Point // x,y where user typed '@'
 
+	// lastCompletionEnd tracks the end index of the most recently
+	// inserted completion text so that a single backspace can delete
+	// the entire inserted path/name at once instead of one character.
+	// lastCompletionText is the exact run that was inserted; the range
+	// is only honoured while the textarea still holds it, so a whole-value
+	// replacement (history recall, paste) cannot make a stale range point
+	// at unrelated text that happens to be the same length.
+	lastCompletionStart int
+	lastCompletionEnd   int
+	lastCompletionText  string
+
 	// Chat components
 	chat *Chat
 
@@ -2614,6 +2625,47 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
+				// Atomic backspace: delete the entire last-inserted
+				// completion text (file path, resource name) in one go
+				// instead of character by character. Only fires when
+				// backspace is pressed immediately after insertion with
+				// no intervening edits.
+				if msg.Code == tea.KeyBackspace && m.lastCompletionEnd > 0 {
+					val := m.textarea.Value()
+					// Require the recorded run to still be sitting where it
+					// was inserted. Length alone would let a same-length
+					// value from history recall or a paste be treated as the
+					// completion and get its middle cut out.
+					if len(val) == m.lastCompletionEnd &&
+						val[m.lastCompletionStart:m.lastCompletionEnd] == m.lastCompletionText {
+						prevHeight := m.textarea.Height()
+						m.textarea.SetValue(val[:m.lastCompletionStart])
+						m.textarea.MoveToEnd()
+						m.clearCompletionRange()
+						// Deleting a wrapped completion changes the editor's
+						// height, and the deletion is a draft edit like any
+						// other; skipping either left the layout stale until
+						// the next keystroke.
+						if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						m.updateHistoryDraft(val)
+						// A keep-open insert (up/down-insert) leaves the popup
+						// up; its query no longer matches anything now.
+						if m.completionsOpen {
+							m.closeCompletions()
+						}
+						return tea.Batch(cmds...)
+					}
+					// Text changed since insertion; invalidate.
+					m.clearCompletionRange()
+				}
+
+				// Any non-backspace key clears the atomic-delete range.
+				if msg.Code != tea.KeyBackspace {
+					m.clearCompletionRange()
+				}
+
 				// Check for @ trigger before passing to textarea.
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
@@ -3794,7 +3846,22 @@ func (m *UI) insertCompletionText(text string) bool {
 	m.textarea.SetValue(newValue)
 	m.textarea.MoveToEnd()
 	m.textarea.InsertRune(' ')
+
+	// Record the inserted range so backspace can delete it atomically.
+	// The trailing space is part of the run: deleting the completion
+	// should not leave a stray separator behind.
+	m.lastCompletionText = text + " "
+	m.lastCompletionStart = m.completionsStartIndex
+	m.lastCompletionEnd = m.completionsStartIndex + len(m.lastCompletionText)
 	return true
+}
+
+// clearCompletionRange forgets the last inserted completion, so a later
+// backspace deletes one character like any other.
+func (m *UI) clearCompletionRange() {
+	m.lastCompletionStart = 0
+	m.lastCompletionEnd = 0
+	m.lastCompletionText = ""
 }
 
 // insertFileCompletion inserts the selected file path into the textarea,

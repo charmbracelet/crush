@@ -354,3 +354,29 @@ func setupMenuHierarchy(t *testing.T) *Commands {
 	c.list.SetSelected(0)
 	return c
 }
+
+// TestCommandsDialogClosesOnSlashWithEmptyFilter covers the dismiss-on-'/'
+// behaviour, which shipped without a test.
+func TestCommandsDialogClosesOnSlashWithEmptyFilter(t *testing.T) {
+	t.Parallel()
+	c := newTestCommands(t)
+
+	action := c.HandleMsg(tea.KeyPressMsg{Code: '/', Text: "/"})
+
+	_, ok := action.(ActionClose)
+	require.True(t, ok, "expected ActionClose, got %T", action)
+}
+
+// TestCommandsDialogSlashFiltersOnceFilterIsNonEmpty pins the other half
+// of the rule: '/' only dismisses as the very first keystroke, so it stays
+// usable inside a filter string rather than closing the dialog mid-typing.
+func TestCommandsDialogSlashFiltersOnceFilterIsNonEmpty(t *testing.T) {
+	t.Parallel()
+	c := newTestCommands(t)
+
+	c.HandleMsg(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	action := c.HandleMsg(tea.KeyPressMsg{Code: '/', Text: "/"})
+
+	_, closed := action.(ActionClose)
+	require.False(t, closed, "'/' after a filter character must not close the dialog")
+}

@@ -44,6 +44,19 @@ type CompletionItemsLoadedMsg struct {
 	Resources []ResourceCompletionValue
 }
 
+// Trigger identifies which trigger character opened the completions popup.
+type Trigger rune
+
+const (
+	// TriggerNone means the completions popup is closed.
+	TriggerNone Trigger = 0
+	// TriggerFile is the '@' file-mention trigger.
+	TriggerFile Trigger = '@'
+	// TriggerSkill is the '/' skill trigger (mid-prompt only; at the start
+	// of an empty prompt '/' opens the commands dialog instead).
+	TriggerSkill Trigger = '/'
+)
+
 // Completions represents the completions popup component.
 type Completions struct {
 	// Popup dimensions
@@ -177,6 +190,38 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 		item := NewCompletionItem(
 			resource.MCPName+"/"+cmp.Or(resource.Title, resource.URI),
 			resource,
+			c.normalStyle,
+			c.focusedStyle,
+			c.matchStyle,
+		)
+		items = append(items, item)
+	}
+
+	c.open = true
+	c.query = ""
+	c.allItems = items
+	c.filtered = append([]list.FilterableItem(nil), items...)
+	c.list.SetItems(c.filtered...)
+	c.list.SetFilter("")
+	c.list.Focus()
+
+	c.width = maxWidth
+	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
+	c.list.SetSize(c.width, c.height)
+	c.list.SelectFirst()
+	c.list.ScrollToSelected()
+
+	c.updateSize()
+}
+
+// SetSkillItems sets skill items and opens the popup. Unlike files, skills
+// are already in memory, so no async load is needed.
+func (c *Completions) SetSkillItems(skills []SkillCompletionValue) {
+	items := make([]list.FilterableItem, 0, len(skills))
+	for _, skill := range skills {
+		item := NewCompletionItem(
+			skill.Name,
+			skill,
 			c.normalStyle,
 			c.focusedStyle,
 			c.matchStyle,
@@ -375,6 +420,11 @@ func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
 	}
 
 	switch item := item.Value().(type) {
+	case SkillCompletionValue:
+		return SelectionMsg[SkillCompletionValue]{
+			Value:    item,
+			KeepOpen: keepOpen,
+		}
 	case ResourceCompletionValue:
 		return SelectionMsg[ResourceCompletionValue]{
 			Value:    item,

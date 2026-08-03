@@ -278,9 +278,10 @@ type UI struct {
 	// Completions state
 	completions              *completions.Completions
 	completionsOpen          bool
+	completionsTrigger       completions.Trigger
 	completionsStartIndex    int
 	completionsQuery         string
-	completionsPositionStart image.Point // x,y where user typed '@'
+	completionsPositionStart image.Point // x,y where user typed the trigger
 
 	// Chat components
 	chat *Chat
@@ -1352,7 +1353,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
 	case completions.CompletionItemsLoadedMsg:
-		if m.completionsOpen {
+		// Guard against a stale async file load landing after the popup
+		// switched to (or was reopened in) skill mode.
+		if m.completionsOpen && m.completionsTrigger == completions.TriggerFile {
 			m.completions.SetItems(msg.Files, msg.Resources)
 		}
 	case uv.KittyGraphicsEvent:
@@ -2474,6 +2477,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if m.completionsOpen {
 				if msg, ok := m.completions.Update(msg); ok {
 					switch msg := msg.(type) {
+					case completions.SelectionMsg[completions.SkillCompletionValue]:
+						cmds = append(cmds, m.insertSkillCompletion(msg.Value))
+						if !msg.KeepOpen {
+							m.closeCompletions()
+						}
 					case completions.SelectionMsg[completions.FileCompletionValue]:
 						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
 						if !msg.KeepOpen {
@@ -2486,6 +2494,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						}
 					case completions.ClosedMsg:
 						m.completionsOpen = false
+						m.completionsTrigger = completions.TriggerNone
 					}
 					return tea.Batch(cmds...)
 				}
@@ -2622,20 +2631,32 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
-				// Check for @ trigger before passing to textarea.
+				// Check for completion triggers before passing to textarea.
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
 
-				// Trigger completions on @.
+				// Trigger file completions on @.
 				if msg.String() == "@" && !m.completionsOpen {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 						m.completionsOpen = true
+						m.completionsTrigger = completions.TriggerFile
 						m.completionsQuery = ""
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
 						cmds = append(cmds, m.completions.Open(depth, limit))
+					}
+				}
+
+				// Trigger skill completions on / mid-prompt. At the start of
+				// an empty prompt the commands dialog handles '/' instead
+				// (see the Editor.Commands binding above), so here we only
+				// fire when the textarea already has content and '/' begins
+				// a new word.
+				if msg.String() == "/" && !m.completionsOpen && !m.bangMode {
+					if curIdx > 0 && isWhitespace(curValue[curIdx-1]) {
+						m.openSkillCompletions(curIdx)
 					}
 				}
 
@@ -2679,8 +2700,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.updateHistoryDraft(curValue)
 
 				// After updating textarea, check if we need to filter completions.
-				// Skip filtering on the initial @ keystroke since items are loading async.
-				if m.completionsOpen && msg.String() != "@" {
+				// Skip filtering on the initial trigger keystroke since items
+				// are loading async.
+				if m.completionsOpen && msg.String() != string(m.completionsTrigger) {
 					newValue := m.textarea.Value()
 					newIdx := len(newValue)
 
@@ -2693,7 +2715,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					} else {
 						// Extract current word and filter.
 						word := m.textareaWord()
-						if strings.HasPrefix(word, "@") {
+						if strings.HasPrefix(word, string(m.completionsTrigger)) {
 							m.completionsQuery = word[1:]
 							m.completions.Filter(m.completionsQuery)
 						} else if m.completionsOpen {
@@ -3783,9 +3805,36 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 // closeCompletions closes the completions popup and resets state.
 func (m *UI) closeCompletions() {
 	m.completionsOpen = false
+	m.completionsTrigger = completions.TriggerNone
 	m.completionsQuery = ""
 	m.completionsStartIndex = 0
 	m.completions.Close()
+}
+
+// openSkillCompletions opens the completions popup in skill mode at the
+// given trigger index. Skills are already in memory (m.skillStates), so no
+// async load is needed.
+func (m *UI) openSkillCompletions(startIndex int) {
+	var values []completions.SkillCompletionValue
+	for _, s := range m.skillStates {
+		if s == nil || s.State != skills.StateNormal {
+			continue
+		}
+		values = append(values, completions.SkillCompletionValue{
+			Name: s.Name,
+			Path: s.Path,
+		})
+	}
+	slices.SortFunc(values, func(a, b completions.SkillCompletionValue) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	m.completionsOpen = true
+	m.completionsTrigger = completions.TriggerSkill
+	m.completionsQuery = ""
+	m.completionsStartIndex = startIndex
+	m.completionsPositionStart = m.completionsPosition()
+	m.completions.SetSkillItems(values)
 }
 
 // insertCompletionText replaces the @query in the textarea with the given text.
@@ -3920,6 +3969,17 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 		}
 	}
 	return tea.Batch(heightCmd, resourceCmd)
+}
+
+// insertSkillCompletion inserts the selected skill name into the textarea,
+// replacing the /query. Unlike files, skills are not attached — the
+// "/skill-name" text in the prompt is the signal to load the skill.
+func (m *UI) insertSkillCompletion(skill completions.SkillCompletionValue) tea.Cmd {
+	prevHeight := m.textarea.Height()
+	if !m.insertCompletionText("/" + skill.Name) {
+		return nil
+	}
+	return m.handleTextareaHeightChange(prevHeight)
 }
 
 // completionsPosition returns the X and Y position for the completions popup.

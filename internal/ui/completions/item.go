@@ -24,6 +24,12 @@ type ResourceCompletionValue struct {
 	MIMEType string
 }
 
+// SkillCompletionValue represents an agent skill completion value.
+type SkillCompletionValue struct {
+	Name string
+	Path string
+}
+
 // IsTemplate reports whether the completion's URI is an unexpanded RFC 6570
 // URI template (it still contains a "{expression}") rather than a concrete,
 // readable resource URI. Templates come from resources/templates/list and

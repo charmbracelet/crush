@@ -3,8 +3,8 @@ package model
 import (
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -55,6 +55,70 @@ func TestOpenSkillCompletionsPopulatesFromSkillStates(t *testing.T) {
 	require.Equal(t, 5, m.completionsStartIndex)
 	require.True(t, m.completions.IsOpen())
 	require.True(t, m.completions.HasItems())
+}
+
+// TestSkillCompletionValuesPrefersCatalog verifies the popup is built from
+// the effective skill catalog once it has loaded. The catalog is what
+// carries descriptions, includes builtin skills, and has already resolved
+// user-over-builtin overrides and the disabled-skills list — the raw
+// discovery states do none of that.
+func TestSkillCompletionValuesPrefersCatalog(t *testing.T) {
+	t.Parallel()
+
+	m := newSkillCompletionUI()
+	m.skillStates = []*skills.SkillState{
+		{Name: "only-a-state", Path: "/skills/only-a-state/SKILL.md", State: skills.StateNormal},
+	}
+	m.skillCatalog = []skills.CatalogEntry{
+		{ID: "crush://skills/commit/SKILL.md", Name: "commit", Description: "Write a conventional commit."},
+		{ID: "/skills/alpha/SKILL.md", Name: "alpha", Description: "Go first."},
+		{Name: ""}, // Nameless entries are not selectable; drop them.
+	}
+
+	values := m.skillCompletionValues()
+
+	require.Equal(t, []completions.SkillCompletionValue{
+		{Name: "alpha", Description: "Go first.", Path: "/skills/alpha/SKILL.md"},
+		{Name: "commit", Description: "Write a conventional commit.", Path: "crush://skills/commit/SKILL.md"},
+	}, values)
+}
+
+// TestSkillCompletionValuesFallsBackToStates covers the window between
+// startup and the first catalog load: a name-only list still beats an empty
+// popup. Duplicate names (a user skill shadowing a builtin) collapse to one.
+func TestSkillCompletionValuesFallsBackToStates(t *testing.T) {
+	t.Parallel()
+
+	m := newSkillCompletionUI()
+	m.skillStates = []*skills.SkillState{
+		{Name: "commit", Path: "/user/skills/commit/SKILL.md", State: skills.StateNormal},
+		{Name: "commit", Path: "crush://skills/commit/SKILL.md", State: skills.StateNormal},
+		{Name: "", Path: "/skills/unnamed/SKILL.md", State: skills.StateNormal},
+		{Name: "broken", State: skills.StateError},
+		nil,
+	}
+
+	values := m.skillCompletionValues()
+
+	require.Equal(t, []completions.SkillCompletionValue{
+		{Name: "commit", Path: "/user/skills/commit/SKILL.md"},
+	}, values)
+}
+
+// TestOpenSkillCompletionsNoopWithoutSkills guards the empty-popup trap: an
+// open completions popup consumes enter and the arrow keys, so opening one
+// with nothing in it would leave a user with no skills unable to submit a
+// prompt containing a '/'.
+func TestOpenSkillCompletionsNoopWithoutSkills(t *testing.T) {
+	t.Parallel()
+
+	m := newSkillCompletionUI()
+
+	m.openSkillCompletions(3)
+
+	require.False(t, m.completionsOpen)
+	require.Equal(t, completions.TriggerNone, m.completionsTrigger)
+	require.False(t, m.completions.IsOpen())
 }
 
 // TestOpenSkillCompletionsSortsByName pins alphabetical ordering of the

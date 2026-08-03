@@ -136,9 +136,12 @@ type shellStreamMsg struct {
 type (
 	// cancelTimerExpiredMsg is sent when the cancel timer expires.
 	cancelTimerExpiredMsg struct{}
-	// userCommandsLoadedMsg is sent when user commands are loaded.
+	// userCommandsLoadedMsg is sent when user commands are loaded. It also
+	// carries the skill catalog the command list was built from, so the
+	// '/' completions popup gets descriptions off the same single load.
 	userCommandsLoadedMsg struct {
-		Commands []commands.CustomCommand
+		Commands     []commands.CustomCommand
+		SkillEntries []skills.CatalogEntry
 	}
 	// mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
 	mcpPromptsLoadedMsg struct {
@@ -299,6 +302,11 @@ type UI struct {
 
 	// skills
 	skillStates []*skills.SkillState
+
+	// skillCatalog is the effective visible skill set (post-override,
+	// post-disable) with frontmatter descriptions, refreshed alongside the
+	// custom commands. It backs the '/' completions popup.
+	skillCatalog []skills.CatalogEntry
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
@@ -654,7 +662,7 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 			slog.Error("Failed to load skill commands", "error", err)
 		}
 		customCommands = append(customCommands, commands.FromSkillCatalog(skillEntries)...)
-		return userCommandsLoadedMsg{Commands: customCommands}
+		return userCommandsLoadedMsg{Commands: customCommands, SkillEntries: skillEntries}
 	}
 }
 
@@ -795,6 +803,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
+		m.skillCatalog = msg.SkillEntries
 		dia := m.dialog.Dialog(dialog.CommandsID)
 		if dia == nil {
 			break
@@ -927,6 +936,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lspStates = m.com.Workspace.LSPGetStates()
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+		// Discovery states carry no descriptions and no override/disable
+		// resolution, so re-read the catalog too: a ctrl+r reload in the
+		// skills dialog must move both the command palette and the '/'
+		// completions popup.
+		cmds = append(cmds, m.loadCustomCommands())
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -3811,23 +3825,60 @@ func (m *UI) closeCompletions() {
 	m.completions.Close()
 }
 
-// openSkillCompletions opens the completions popup in skill mode at the
-// given trigger index. Skills are already in memory (m.skillStates), so no
-// async load is needed.
-func (m *UI) openSkillCompletions(startIndex int) {
+// skillCompletionValues returns the skills offered by the '/' popup.
+//
+// The catalog is the right source: it is the effective, post-dedup,
+// post-disable set, it includes the builtin skills the raw discovery states
+// omit, and it carries each skill's frontmatter description. The discovery
+// states are only a fallback for the window between startup and the first
+// catalog load, where a name-only list still beats an empty popup.
+func (m *UI) skillCompletionValues() []completions.SkillCompletionValue {
 	var values []completions.SkillCompletionValue
-	for _, s := range m.skillStates {
-		if s == nil || s.State != skills.StateNormal {
-			continue
+	if len(m.skillCatalog) > 0 {
+		for _, entry := range m.skillCatalog {
+			if entry.Name == "" {
+				continue
+			}
+			values = append(values, completions.SkillCompletionValue{
+				Name:        entry.Name,
+				Description: entry.Description,
+				Path:        entry.ID,
+			})
 		}
-		values = append(values, completions.SkillCompletionValue{
-			Name: s.Name,
-			Path: s.Path,
-		})
+	} else {
+		seen := make(map[string]struct{}, len(m.skillStates))
+		for _, s := range m.skillStates {
+			if s == nil || s.Name == "" || s.State != skills.StateNormal {
+				continue
+			}
+			if _, dup := seen[s.Name]; dup {
+				continue
+			}
+			seen[s.Name] = struct{}{}
+			values = append(values, completions.SkillCompletionValue{
+				Name: s.Name,
+				Path: s.Path,
+			})
+		}
 	}
 	slices.SortFunc(values, func(a, b completions.SkillCompletionValue) int {
 		return strings.Compare(a.Name, b.Name)
 	})
+	return values
+}
+
+// openSkillCompletions opens the completions popup in skill mode at the
+// given trigger index. Skills are already in memory, so no async load is
+// needed.
+func (m *UI) openSkillCompletions(startIndex int) {
+	values := m.skillCompletionValues()
+	if len(values) == 0 {
+		// An open-but-empty popup still consumes enter and the arrow keys,
+		// so a user with no skills configured could not submit a prompt
+		// containing a '/'. Unlike '@' there is nothing to wait on here —
+		// no skills means no popup.
+		return
+	}
 
 	m.completionsOpen = true
 	m.completionsTrigger = completions.TriggerSkill

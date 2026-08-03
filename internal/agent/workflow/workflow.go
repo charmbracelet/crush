@@ -56,6 +56,7 @@ type ProgressFunc func(Progress)
 
 // Progress carries a snapshot of workflow engine state at one point in time.
 type Progress struct {
+	Seq       int64  // monotonic, assigned under the engine lock
 	Kind      string // "log" | "agent_start" | "agent_done" | "agent_error"
 	Index     int    // agent index, -1 for log events
 	Label     string // agent label if set
@@ -64,6 +65,10 @@ type Progress struct {
 	Completed int    // agents finished (success or error)
 	Total     int    // agents started so far
 }
+
+// Progress has a monotonic Seq: events may be delivered out of order because
+// the engine unlocks before invoking the Progress callback, and consumers
+// must drop any event whose Seq is not greater than the last one they applied.
 
 // Options configures workflow execution limits.
 type Options struct {
@@ -90,6 +95,7 @@ type runState struct {
 	agentIndex     int
 	runningCount   int
 	completedCount int
+	seq            int64
 
 	sem chan struct{}
 }
@@ -125,7 +131,9 @@ func (st *runState) progress(kind string, idx int, label, msg string) {
 		st.runningCount--
 		st.completedCount++
 	}
+	st.seq++
 	p := Progress{
+		Seq:       st.seq,
 		Kind:      kind,
 		Index:     idx,
 		Label:     label,

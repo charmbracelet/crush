@@ -901,7 +901,8 @@ func TestParallelCoderDoesNotStarveReadOnlyTasks(t *testing.T) {
 // TestParallelMixedBatchInterleavesTaskBetweenCoders asserts both halves of
 // the fix at once: the two coders never overlap (Safety 3b still holds) and a
 // read-only task runs concurrently with a coder (the batch lock is not
-// applied to the whole batch).
+// applied to the whole batch). Counters, not timestamps: the assertions hold
+// regardless of goroutine scheduling order.
 func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
 	t.Parallel()
 	script := `
@@ -913,26 +914,35 @@ func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
 		})
 		return res
 	`
-	type interval struct{ start, end time.Time }
-	var mu sync.Mutex
-	coderIntervals := map[int]interval{}
-	taskStarts := map[int]time.Time{}
-	spawn := func(_ context.Context, index int, _, prompt string, opts SpawnOpts) (string, error) {
-		start := time.Now()
+	var (
+		coderRuns     atomic.Int32
+		coderActive   atomic.Int32
+		maxCoderActive atomic.Int32
+		taskActive    atomic.Int32
+		sawOverlap    atomic.Bool
+	)
+	spawn := func(_ context.Context, _ int, _, prompt string, opts SpawnOpts) (string, error) {
 		if opts.Agent == "coder" {
-			mu.Lock()
-			coderIntervals[index] = interval{start: start}
-			mu.Unlock()
+			coderRuns.Add(1)
+			v := coderActive.Add(1)
+			for {
+				cur := maxCoderActive.Load()
+				if v <= cur || maxCoderActive.CompareAndSwap(cur, v) {
+					break
+				}
+			}
+			if taskActive.Load() > 0 {
+				sawOverlap.Store(true)
+			}
 			time.Sleep(50 * time.Millisecond)
-			mu.Lock()
-			iv := coderIntervals[index]
-			iv.end = time.Now()
-			coderIntervals[index] = iv
-			mu.Unlock()
+			coderActive.Add(-1)
 		} else {
-			mu.Lock()
-			taskStarts[index] = start
-			mu.Unlock()
+			taskActive.Add(1)
+			if coderActive.Load() > 0 {
+				sawOverlap.Store(true)
+			}
+			time.Sleep(50 * time.Millisecond)
+			taskActive.Add(-1)
 		}
 		return "ok", nil
 	}
@@ -940,25 +950,11 @@ func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
 	res, err := Run(context.Background(), script, spawn, Options{MaxConcurrent: 2, MaxAgents: 10})
 	require.NoError(t, err)
 	require.Equal(t, 4, res.AgentCount)
-
-	mu.Lock()
-	c1, c2 := coderIntervals[0], coderIntervals[1]
-	t1, t2 := taskStarts[2], taskStarts[3]
-	mu.Unlock()
-
-	require.True(t, !c1.end.IsZero() && !c2.end.IsZero(), "both coders must have run")
-	// Safety 3b: the two coder executions must not overlap.
-	if c1.start.Before(c2.start) {
-		require.False(t, c2.start.Before(c1.end), "coder executions must not overlap")
-	} else {
-		require.False(t, c1.start.Before(c2.end), "coder executions must not overlap")
-	}
-	// A read-only task must have run concurrently with a coder.
-	concurrent := (!t1.IsZero() && !t1.Before(c1.start) && t1.Before(c1.end)) ||
-		(!t2.IsZero() && !t2.Before(c1.start) && t2.Before(c1.end)) ||
-		(!t1.IsZero() && !t1.Before(c2.start) && t1.Before(c2.end)) ||
-		(!t2.IsZero() && !t2.Before(c2.start) && t2.Before(c2.end))
-	require.True(t, concurrent, "a read-only task must run while a coder is executing")
+	require.Equal(t, int32(2), coderRuns.Load(), "both coders must have run")
+	require.LessOrEqual(t, maxCoderActive.Load(), int32(1),
+		"coder executions must not overlap (Safety 3b)")
+	require.True(t, sawOverlap.Load(),
+		"a read-only task must run while a coder is executing")
 }
 
 // TestParallelRejectsNamedKeys pins W3: a stray named key in the parallel()
@@ -1001,4 +997,50 @@ func TestParallelRejectsNilHole(t *testing.T) {
 	res, err := Run(context.Background(), script, nil, Options{})
 	require.NoError(t, err)
 	require.Contains(t, res.Value, "nil hole at index 2")
+}
+
+// TestWorkflowRun_ProgressSeqsContiguous pins the monotonic Seq assignment:
+// across a parallel() of N agents the multiset of Seq values must be exactly
+// 1..2N (each agent emits agent_start and agent_done), with no gaps and no
+// duplicates. Delivery order may vary, assignment must not.
+func TestWorkflowRun_ProgressSeqsContiguous(t *testing.T) {
+	t.Parallel()
+	script := `
+		local calls = {}
+		for i = 1, 4 do
+			calls[i] = {prompt = "p" .. i}
+		end
+		parallel(calls)
+	`
+	var mu sync.Mutex
+	var seqs []int64
+	spawn := func(_ context.Context, _ int, _, _ string, _ SpawnOpts) (string, error) {
+		return "ok", nil
+	}
+
+	_, err := Run(context.Background(), script, spawn, Options{
+		MaxConcurrent: 2,
+		MaxAgents:     10,
+		Progress: func(p Progress) {
+			mu.Lock()
+			seqs = append(seqs, p.Seq)
+			mu.Unlock()
+		},
+	})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, seqs, 8, "4 agents must emit exactly 8 progress events")
+	want := make(map[int64]bool)
+	for i := int64(1); i <= 8; i++ {
+		want[i] = true
+	}
+	for _, s := range seqs {
+		if !want[s] {
+			t.Fatalf("progress Seq %d outside 1..8 or duplicated", s)
+		}
+		delete(want, s)
+	}
+	require.Empty(t, want, "every Seq 1..8 must appear exactly once")
 }

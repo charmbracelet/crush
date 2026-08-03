@@ -42,6 +42,7 @@ const TypeWorkflowProgress Type = "workflow_progress"
 // WorkflowProgress carries live progress for a running workflow tool.
 type WorkflowProgress struct {
 	ToolCallID string
+	Seq        int64  // monotonic per workflow run; consumers drop non-increasing events
 	Kind       string // "log" | "agent_start" | "agent_done" | "agent_error"
 	Index      int
 	Label      string

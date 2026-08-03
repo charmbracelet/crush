@@ -181,28 +181,37 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 // back into the model-facing content (except payloads the server annotated
 // for the user only — hiding those from the model is the annotation's whole
 // point), so the model can still relay or summarize the data.
+//
+// The audience annotation decides each surface's path (see a2uiAudience):
+// a ["user"]-only payload renders but never reaches the model; an
+// ["assistant"]-only payload reaches the model but is never rendered; an
+// empty audience does both (renders, and folds back to the model when no
+// chat UI is consuming it) — the established default.
 func splitMCPToolResult(result mcp.ToolResult, mcpName string, divert bool) (string, ReadMCPResourceResponseMetadata) {
 	var metadata ReadMCPResourceResponseMetadata
 	content := result.Content
-	for _, surface := range result.Surfaces {
-		if divert {
-			metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+surface.Payload+"</a2ui-json>")
-			metadata.MCPSurfaceProvenance = append(metadata.MCPSurfaceProvenance, mcpName)
-			uri := strings.NewReplacer("\n", " ", "\r", " ").Replace(surface.URI)
-			placeholder := A2UISurfacePlaceholderPrefix + uri + " from MCP server " + mcpName + " — the user can already see it; do not repeat or echo its JSON payload]"
-			if content != "" {
-				content += "\n"
-			}
-			content += placeholder
-			continue
-		}
-		if !surface.AssistantVisible {
-			continue
-		}
+	appendToContent := func(s string) {
 		if content != "" {
 			content += "\n"
 		}
-		content += surface.Payload
+		content += s
+	}
+	for _, surface := range result.Surfaces {
+		if divert && surface.RenderForUser {
+			// Render for the user via metadata; the model gets a
+			// placeholder so it cannot echo the JSON back and double-render.
+			metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+surface.Payload+"</a2ui-json>")
+			metadata.MCPSurfaceProvenance = append(metadata.MCPSurfaceProvenance, mcpName)
+			uri := strings.NewReplacer("\n", " ", "\r", " ").Replace(surface.URI)
+			appendToContent(A2UISurfacePlaceholderPrefix + uri + " from MCP server " + mcpName + " — the user can already see it; do not repeat or echo its JSON payload]")
+			continue
+		}
+		// Not rendered: either divert is off (no chat UI) or the surface is
+		// ["assistant"]-only. It reaches the model only when assistant-visible.
+		if !surface.AssistantVisible {
+			continue
+		}
+		appendToContent(surface.Payload)
 	}
 	return content, metadata
 }

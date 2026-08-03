@@ -109,6 +109,24 @@ func TestRunTool_A2UISurfaceExtraction(t *testing.T) {
 		res := runToolWithSession(t, sess, "get_card")
 		require.Len(t, res.Surfaces, 1)
 		require.False(t, res.Surfaces[0].AssistantVisible)
+		require.True(t, res.Surfaces[0].RenderForUser, "user audience still renders")
+	})
+
+	t.Run("assistant-only audience is visible to the model but not rendered", func(t *testing.T) {
+		sess := liveA2UIToolSession(t, "get_card", []mcp.Content{
+			&mcp.EmbeddedResource{
+				Resource: &mcp.ResourceContents{
+					URI:      "a2ui://card",
+					MIMEType: A2UIJSONMIMEType,
+					Text:     testA2UIToolPayload,
+				},
+				Annotations: &mcp.Annotations{Audience: []mcp.Role{"assistant"}},
+			},
+		})
+		res := runToolWithSession(t, sess, "get_card")
+		require.Len(t, res.Surfaces, 1)
+		require.True(t, res.Surfaces[0].AssistantVisible)
+		require.False(t, res.Surfaces[0].RenderForUser, "assistant-only audience must not render")
 	})
 
 	t.Run("blob-delivered surface is normalized to text", func(t *testing.T) {

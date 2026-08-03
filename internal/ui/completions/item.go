@@ -24,10 +24,14 @@ type ResourceCompletionValue struct {
 	MIMEType string
 }
 
-// SkillCompletionValue represents an agent skill completion value.
+// SkillCompletionValue represents an agent skill completion value. The
+// fields mirror the SKILL.md frontmatter: Description is shown after the
+// name in the popup and folded into the item's filter text, so a skill is
+// findable by what it does and not only by what it is called.
 type SkillCompletionValue struct {
-	Name string
-	Path string
+	Name        string
+	Description string
+	Path        string
 }
 
 // IsTemplate reports whether the completion's URI is an unexpanded RFC 6570
@@ -48,6 +52,16 @@ type CompletionItem struct {
 	focused bool
 	cache   map[int]string
 
+	// detailStart is the byte offset in text where the secondary detail
+	// (e.g. a skill's description) begins, or -1 when the item is all
+	// primary text. The detail renders dimmed so the name still leads.
+	detailStart int
+
+	// sortKey is what the name-priority tiering ranks on. It defaults to
+	// text, but items whose display text carries a trailing detail set it
+	// to the bare name so the description can't skew the tier.
+	sortKey string
+
 	// Styles
 	normalStyle  lipgloss.Style
 	focusedStyle lipgloss.Style
@@ -60,10 +74,25 @@ func NewCompletionItem(text string, value any, normalStyle, focusedStyle, matchS
 		Versioned:    list.NewVersioned(),
 		text:         text,
 		value:        value,
+		detailStart:  -1,
+		sortKey:      text,
 		normalStyle:  normalStyle,
 		focusedStyle: focusedStyle,
 		matchStyle:   matchStyle,
 	}
+}
+
+// withDetail marks everything from byte offset start onwards as secondary
+// detail text and ranks the item on sortKey instead of its full text.
+func (c *CompletionItem) withDetail(start int, sortKey string) *CompletionItem {
+	c.detailStart = start
+	c.sortKey = sortKey
+	return c
+}
+
+// SortKey returns the string the name-priority tiering ranks on.
+func (c *CompletionItem) SortKey() string {
+	return c.sortKey
 }
 
 // Finished implements list.Item. Completion items render purely from
@@ -129,6 +158,7 @@ func (c *CompletionItem) Render(width int) string {
 		c.focusedStyle,
 		c.matchStyle,
 		c.text,
+		c.detailStart,
 		c.focused,
 		width,
 		c.cache,
@@ -139,6 +169,7 @@ func (c *CompletionItem) Render(width int) string {
 func renderItem(
 	normalStyle, focusedStyle, matchStyle lipgloss.Style,
 	text string,
+	detailStart int,
 	focused bool,
 	width int,
 	cache map[int]string,
@@ -169,6 +200,17 @@ func renderItem(
 
 	// Render full-width text with background.
 	content := style.Padding(0, 1).Width(width).Render(text)
+
+	// Dim the trailing detail (a skill's description) so the name still
+	// leads the row. Applied before the match ranges so a fuzzy hit inside
+	// the description still reads as a match.
+	if detailStart >= 0 {
+		start, _ := bytePosToVisibleCharPos(text, [2]int{detailStart, detailStart})
+		if start+1 < width {
+			detailStyle := style.Faint(true)
+			content = lipgloss.StyleRanges(content, lipgloss.NewRange(start+1, width, detailStyle))
+		}
+	}
 
 	// Apply match highlighting using StyleRanges.
 	if len(match.MatchedIndexes) > 0 {

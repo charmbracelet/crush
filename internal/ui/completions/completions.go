@@ -214,18 +214,49 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 	c.updateSize()
 }
 
+// skillDetailSeparator sits between a skill's name and its description in
+// the popup row.
+const skillDetailSeparator = " - "
+
+// minSkillDetailWidth is the smallest description tail worth showing. Below
+// it the row is all ellipsis and the description only costs width, so long
+// skill names simply render bare.
+const minSkillDetailWidth = 12
+
 // SetSkillItems sets skill items and opens the popup. Unlike files, skills
 // are already in memory, so no async load is needed.
+//
+// Each row reads "/name - description", with the description truncated to
+// whatever width the name leaves behind. The description is part of the
+// item's text, so the fuzzy filter matches it too: typing "/pdf" finds a
+// skill described as "extract text from PDFs" even if it is named
+// "document-tools".
 func (c *Completions) SetSkillItems(skills []SkillCompletionValue) {
 	items := make([]list.FilterableItem, 0, len(skills))
 	for _, skill := range skills {
+		name := "/" + skill.Name
+		text := name
+		detailStart := -1
+		if desc := flattenSkillDescription(skill.Description); desc != "" {
+			// maxWidth is the popup's hard cap and renderItem reserves a
+			// cell of padding on each side, so that is the real budget the
+			// name and description share.
+			budget := maxWidth - 2 - ansi.StringWidth(name) - len(skillDetailSeparator)
+			if budget >= minSkillDetailWidth {
+				detailStart = len(name)
+				text = name + skillDetailSeparator + ansi.Truncate(desc, budget, "…")
+			}
+		}
 		item := NewCompletionItem(
-			skill.Name,
+			text,
 			skill,
 			c.normalStyle,
 			c.focusedStyle,
 			c.matchStyle,
 		)
+		if detailStart >= 0 {
+			item = item.withDetail(detailStart, name)
+		}
 		items = append(items, item)
 	}
 
@@ -288,10 +319,28 @@ func (c *Completions) applyNamePriorityFilter(query string) {
 
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 	slices.SortStableFunc(filtered, func(a, b list.FilterableItem) int {
-		return namePriorityTier(a.Filter(), queryLower) - namePriorityTier(b.Filter(), queryLower)
+		return namePriorityTier(tierKey(a), queryLower) - namePriorityTier(tierKey(b), queryLower)
 	})
 	c.filtered = filtered
 	c.list.SetItems(c.filtered...)
+}
+
+// tierKey returns the string namePriorityTier should rank an item on. Items
+// whose display text carries a trailing detail (skills, which append their
+// description) expose the bare name via SortKey; everything else ranks on
+// its filter text, which is the path.
+func tierKey(item list.FilterableItem) string {
+	if s, ok := item.(interface{ SortKey() string }); ok {
+		return s.SortKey()
+	}
+	return item.Filter()
+}
+
+// flattenSkillDescription collapses a SKILL.md description onto one line.
+// Frontmatter descriptions are frequently wrapped across several lines, and
+// a popup row is exactly one.
+func flattenSkillDescription(desc string) string {
+	return strings.Join(strings.Fields(desc), " ")
 }
 
 func namePriorityTier(path, queryLower string) int {

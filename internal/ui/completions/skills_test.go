@@ -1,9 +1,11 @@
 package completions
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +24,7 @@ func TestSetSkillItemsOpensWithSkills(t *testing.T) {
 	require.Len(t, c.filtered, 2)
 	first, ok := c.filtered[0].(*CompletionItem)
 	require.True(t, ok)
-	require.Equal(t, "code-review", first.Text())
+	require.Equal(t, "/code-review", first.Text())
 }
 
 func TestSkillCompletionFilter(t *testing.T) {
@@ -41,7 +43,63 @@ func TestSkillCompletionFilter(t *testing.T) {
 	first, ok := c.filtered[0].(*CompletionItem)
 	require.True(t, ok)
 	// "coder" is an exact-stem/prefix tier winner over "code-review".
-	require.Equal(t, "coder", first.Text())
+	require.Equal(t, "/coder", first.Text())
+}
+
+func TestSkillDescriptionShownAndSearchable(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{
+		{Name: "skill-creator", Description: "Use for naming skills\nand writing frontmatter."},
+		{Name: "commit", Description: "Write a conventional commit."},
+	})
+
+	first, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	// The row reads "/name - description", with the frontmatter
+	// description flattened onto one line.
+	require.Equal(t, "/skill-creator - Use for naming skills and writing frontmatter.", first.Text())
+	// The name leads; the description renders as dimmed detail.
+	require.Equal(t, len("/skill-creator"), first.detailStart)
+	require.Equal(t, "/skill-creator", first.SortKey())
+
+	// The description is part of the filter text, so a skill is findable by
+	// what it does and not only by what it is named.
+	c.Filter("frontmatter")
+	require.Len(t, c.filtered, 1)
+	hit, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	require.Equal(t, "skill-creator", hit.Value().(SkillCompletionValue).Name)
+}
+
+func TestSkillDescriptionTruncatedToPopupWidth(t *testing.T) {
+	t.Parallel()
+
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{
+		{Name: "commit", Description: strings.Repeat("long ", 200)},
+	})
+
+	first, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	require.LessOrEqual(t, ansi.StringWidth(first.Text()), maxWidth-2)
+	require.True(t, strings.HasSuffix(first.Text(), "…"), "expected an ellipsis, got %q", first.Text())
+}
+
+func TestSkillDescriptionDroppedWhenNameEatsTheRow(t *testing.T) {
+	t.Parallel()
+
+	// A name long enough to leave no room for a useful description renders
+	// bare rather than as a row of ellipsis.
+	long := strings.Repeat("a", maxWidth)
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c.SetSkillItems([]SkillCompletionValue{{Name: long, Description: "does things"}})
+
+	first, ok := c.filtered[0].(*CompletionItem)
+	require.True(t, ok)
+	require.Equal(t, "/"+long, first.Text())
+	require.Equal(t, -1, first.detailStart)
 }
 
 func TestSelectCurrentReturnsSkillSelectionMsg(t *testing.T) {

@@ -50,6 +50,38 @@ func TestStyleSegmentAppliesRanges(t *testing.T) {
 	require.Contains(t, ansi.Strip(got), "see @foo.go here")
 }
 
+// TestStyleSegmentStylesExactlyTheToken pins which cells the token style
+// lands on. Regression: the rune-to-cell conversion used to add one, so
+// every token rendered shifted a cell to the right — the trigger character
+// stayed unstyled and the following space picked the style up instead.
+func TestStyleSegmentStylesExactlyTheToken(t *testing.T) {
+	t.Parallel()
+
+	base := lipgloss.NewStyle()
+	tokenStyle := lipgloss.NewStyle().Bold(true)
+
+	seg := []rune("ab @foo cd")
+	got := styleSegment(base, seg, 0, []lipgloss.Range{lipgloss.NewRange(3, 7, tokenStyle)})
+
+	require.Equal(t, "ab \x1b[1m@foo\x1b[m cd", got)
+}
+
+// TestStyleSegmentStylesExactlyTheTokenWideRunes is the same pin with
+// double-width runes ahead of the token, where a rune offset and a cell
+// offset diverge.
+func TestStyleSegmentStylesExactlyTheTokenWideRunes(t *testing.T) {
+	t.Parallel()
+
+	base := lipgloss.NewStyle()
+	tokenStyle := lipgloss.NewStyle().Bold(true)
+
+	// "世界" is two runes but four cells.
+	seg := []rune("世界 @foo")
+	got := styleSegment(base, seg, 0, []lipgloss.Range{lipgloss.NewRange(3, 7, tokenStyle)})
+
+	require.Equal(t, "世界 \x1b[1m@foo\x1b[m", got)
+}
+
 func TestStyleSegmentOffsetsBySegStart(t *testing.T) {
 	t.Parallel()
 	base := lipgloss.NewStyle()

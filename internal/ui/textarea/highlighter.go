@@ -87,16 +87,17 @@ func styleSegment(
 	return lipgloss.StyleRanges(base.Render(string(seg)), toStyleRanges(seg, ranges, base)...)
 }
 
-// toStyleRanges converts rune-offset ranges into lipgloss display-cell
-// ranges (1-based), inheriting the base style's attributes under each token
-// style so tokens only override what they set.
+// toStyleRanges converts rune-offset ranges into the display-cell ranges
+// lipgloss.StyleRanges expects: zero-based and half-open over the cells of
+// the ANSI-stripped string. Each token style inherits the base style's
+// attributes so tokens only override what they set.
 func toStyleRanges(seg []rune, ranges []lipgloss.Range, base lipgloss.Style) []lipgloss.Range {
 	out := make([]lipgloss.Range, 0, len(ranges))
 	for _, r := range ranges {
 		startCell := runeDisplayWidth(seg[:r.Start])
 		endCell := startCell + runeDisplayWidth(seg[r.Start:r.End])
 		style := r.Style.Inherit(base)
-		out = append(out, lipgloss.NewRange(startCell+1, endCell+1, style))
+		out = append(out, lipgloss.NewRange(startCell, endCell, style))
 	}
 	return out
 }

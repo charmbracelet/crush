@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/pkg/browser"
 )
 
 // ClientWorkspace implements the Workspace interface by delegating all
@@ -726,18 +727,64 @@ func (w *ClientWorkspace) DisableDockerMCP() error {
 }
 
 func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
-	// OAuth authentication requires local browser interaction and
-	// cannot be proxied through the server. Return an error so the
-	// caller knows to handle it differently in client mode.
-	return fmt.Errorf("MCP OAuth authentication is not supported in client mode")
+	// The server suppresses its own browser open for this flow; the client
+	// polls the auth URL and opens it locally so the user authorizes on
+	// their own machine. The OAuth callback listener runs on the server
+	// (localhost ports shared when server and client are co-located).
+	authErr := make(chan error, 1)
+	go func() {
+		authErr <- w.client.MCPAuthenticate(ctx, w.workspaceID(), name)
+	}()
+
+	// Poll for the authorization URL so we can open it in the local
+	// browser as soon as the flow generates one.
+	var opened bool
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-authErr:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if opened {
+				continue
+			}
+			if u := w.MCPAuthURL(name); u != "" {
+				if err := browser.OpenURL(u); err != nil {
+					slog.Warn("Failed to open MCP OAuth URL in browser", "error", err)
+				}
+				opened = true
+			}
+		}
+	}
 }
 
 func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
-	return nil
+	pending, err := w.client.MCPPendingAuth(context.Background(), w.workspaceID())
+	if err != nil {
+		slog.Warn("Failed to fetch MCP pending auth", "error", err)
+		return nil
+	}
+	result := make([]mcp.PendingAuthServer, len(pending))
+	for i, p := range pending {
+		result[i] = mcp.PendingAuthServer{Name: p.Name, URL: p.URL}
+	}
+	return result
 }
 
-func (w *ClientWorkspace) MCPAuthURL(_ string) string {
-	return ""
+func (w *ClientWorkspace) MCPAuthURL(name string) string {
+	// The server's in-progress authorization URL is exposed through the
+	// pending-auth list while the flow runs; a server in StateNeedsAuth
+	// paired with an active flow reports its URL here. Poll the server
+	// for the in-flight URL.
+	u, err := w.client.MCPAuthURL(context.Background(), w.workspaceID(), name)
+	if err != nil {
+		return ""
+	}
+	return u
 }
 
 // -- Lifecycle --

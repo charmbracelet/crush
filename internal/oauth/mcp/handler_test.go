@@ -424,6 +424,48 @@ func TestHandler_BackgroundAuthorizeRefused(t *testing.T) {
 	require.ErrorIs(t, err, ErrInteractiveAuthRequired)
 }
 
+// TestHandler_BrowserSuppressed proves SetBrowserSuppress prevents the
+// browser from opening while still recording the authorization URL, which
+// is how a remote client surfaces the flow on the user's machine. The
+// returned restore function re-enables the browser.
+func TestHandler_BrowserSuppressed(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{clientID: "c", accessToken: "a"})
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	var opens atomic.Int64
+	h.openURL = func(string) error {
+		opens.Add(1)
+		return browserRedirect("code")(h.AuthURL())
+	}
+
+	restore := h.SetBrowserSuppress(true)
+
+	// Suppressed: the flow generates the URL but never opens a browser.
+	// Drive the callback manually using the recorded URL.
+	done := make(chan error, 1)
+	go func() {
+		done <- authorizeWith401(t, h, base, mcpURL)
+	}()
+
+	require.Eventually(t, func() bool { return h.AuthURL() != "" },
+		2*time.Second, 10*time.Millisecond, "auth URL should be recorded")
+	require.Equal(t, int64(0), opens.Load(), "browser must not open while suppressed")
+
+	// Complete the flow by simulating the browser redirect.
+	require.NoError(t, browserRedirect("code")(h.AuthURL()))
+	require.NoError(t, <-done)
+	require.Equal(t, int64(0), opens.Load())
+
+	// Restoring re-enables the browser.
+	restore()
+	h.mu.Lock()
+	suppressed := h.suppressBrowser
+	h.mu.Unlock()
+	require.False(t, suppressed)
+}
+
 // TestCallbackReceiver_IgnoresNonCallbackPaths is a regression test for a
 // browser incidentally aborting the flow. The listener answered every path,
 // so a request for something like /favicon.ico could win the one-time

@@ -922,6 +922,7 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 	return &ConfigStore{
 		config:      cfg,
 		loadedPaths: loadedPaths,
+		resolver:    NewShellVariableResolver(env.New()),
 	}
 }
 

@@ -4,25 +4,18 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/textarea"
 )
 
-// promptHighlighter implements textarea.LineHighlighter for the prompt:
-// it marks @file tokens and /skill tokens as they are typed. Tokens are
-// recognized at word boundaries (start of line or after whitespace) and run
-// to the next whitespace — they never span lines, which keeps the
-// textarea's per-line range contract trivially satisfiable.
-//
-// A @token is always highlighted (the file may not exist yet, and the
-// completion popup is the discovery path). A /token is only highlighted
-// when it is a prefix of a known skill name, so arbitrary slash-words in
-// prose don't get styled as skills.
+// promptHighlighter implements textarea.LineHighlighter for the prompt: it
+// marks @file tokens and /skill tokens as they are typed. Tokenization
+// itself lives in common.ScanPromptTokens, shared with the posted-message
+// renderer so a token looks the same before and after you hit enter; this
+// type only maps tokens onto the editor's styles and caches the result.
 type promptHighlighter struct {
 	fileStyle  lipgloss.Style
 	skillStyle lipgloss.Style
-
-	// skillNames is the set of known skill names used to validate /tokens.
-	skillNames []string
 
 	// lines caches the tokenized logical lines from the last Rescan.
 	lines [][]lipgloss.Range
@@ -30,17 +23,11 @@ type promptHighlighter struct {
 
 var _ textarea.LineHighlighter = (*promptHighlighter)(nil)
 
-func newPromptHighlighter(fileStyle, skillStyle lipgloss.Style, skillNames []string) *promptHighlighter {
+func newPromptHighlighter(fileStyle, skillStyle lipgloss.Style) *promptHighlighter {
 	return &promptHighlighter{
 		fileStyle:  fileStyle,
 		skillStyle: skillStyle,
-		skillNames: skillNames,
 	}
-}
-
-// setSkillNames updates the known skill set (e.g. after a skills reload).
-func (h *promptHighlighter) setSkillNames(names []string) {
-	h.skillNames = names
 }
 
 // Rescan retokenizes the full prompt value. Called whenever the textarea
@@ -61,48 +48,24 @@ func (h *promptHighlighter) Highlight(lineIdx int, _ []rune) []lipgloss.Range {
 	return h.lines[lineIdx]
 }
 
-// scanLine finds all tokens in a single logical line.
+// scanLine turns one logical line's tokens into styled rune ranges.
 func (h *promptHighlighter) scanLine(line []rune) []lipgloss.Range {
-	var ranges []lipgloss.Range
-	i := 0
-	for i < len(line) {
-		atWordStart := i == 0 || isSpaceRune(line[i-1])
-		if atWordStart && (line[i] == '@' || line[i] == '/') && i+1 < len(line) && !isSpaceRune(line[i+1]) {
-			end := i + 1
-			for end < len(line) && !isSpaceRune(line[end]) {
-				end++
-			}
-			if style, ok := h.tokenStyle(line[i], line[i+1:end]); ok {
-				ranges = append(ranges, lipgloss.NewRange(i, end, style))
-			}
-			i = end
-			continue
-		}
-		i++
+	tokens := common.ScanPromptTokens(line)
+	if len(tokens) == 0 {
+		return nil
+	}
+	ranges := make([]lipgloss.Range, 0, len(tokens))
+	for _, tok := range tokens {
+		ranges = append(ranges, lipgloss.NewRange(tok.Start, tok.End, h.tokenStyle(tok.Kind)))
 	}
 	return ranges
 }
 
-// tokenStyle decides whether a candidate token gets styled, and with which
-// style. trigger is '@' or '/'; word is the token body without the trigger.
-func (h *promptHighlighter) tokenStyle(trigger rune, word []rune) (lipgloss.Style, bool) {
-	if trigger == '@' {
-		return h.fileStyle, true
+func (h *promptHighlighter) tokenStyle(kind common.PromptTokenKind) lipgloss.Style {
+	if kind == common.PromptTokenSkill {
+		return h.skillStyle
 	}
-	if len(word) == 0 {
-		return lipgloss.Style{}, false
-	}
-	name := string(word)
-	for _, s := range h.skillNames {
-		if strings.HasPrefix(s, name) {
-			return h.skillStyle, true
-		}
-	}
-	return lipgloss.Style{}, false
-}
-
-func isSpaceRune(r rune) bool {
-	return r == ' ' || r == '\t'
+	return h.fileStyle
 }
 
 // skillNames returns the names of the skills a /token may refer to. It
@@ -118,11 +81,8 @@ func (m *UI) skillNames() []string {
 	return names
 }
 
-// refreshSkillNames re-primes the prompt highlighter's known-skill set.
+// refreshSkillNames re-primes the known-skill set that validates "/" tokens.
 // Called from every path that can change the effective skill list.
 func (m *UI) refreshSkillNames() {
-	if m.promptHighlighter == nil {
-		return
-	}
-	m.promptHighlighter.setSkillNames(m.skillNames())
+	common.SetPromptSkillNames(m.skillNames())
 }

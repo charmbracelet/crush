@@ -13,10 +13,8 @@ import (
 // containing @file and /skill tokens renders with ANSI styling once the
 // highlighter is wired, and the plain text is unchanged underneath.
 func TestRenderEditorViewStylesTokens(t *testing.T) {
-	t.Parallel()
-
 	m := newSkillCompletionUI()
-	m.promptHighlighter = newTestHighlighter("code-review")
+	m.promptHighlighter = newTestHighlighter(t, "code-review")
 	m.textarea.SetHighlighter(m.promptHighlighter)
 	m.textarea.SetValue("please /code-review @main.go")
 	m.textarea.SetWidth(120)
@@ -31,10 +29,8 @@ func TestRenderEditorViewStylesTokens(t *testing.T) {
 // TestRenderEditorViewUnknownSkillNotStyled verifies an arbitrary /word in
 // the prompt is left alone.
 func TestRenderEditorViewUnknownSkillNotStyled(t *testing.T) {
-	t.Parallel()
-
 	m := newSkillCompletionUI()
-	m.promptHighlighter = newTestHighlighter("code-review")
+	m.promptHighlighter = newTestHighlighter(t, "code-review")
 	m.textarea.SetHighlighter(m.promptHighlighter)
 	m.textarea.SetValue("what is /bogus anyway")
 	m.textarea.SetWidth(120)
@@ -50,10 +46,8 @@ func TestRenderEditorViewUnknownSkillNotStyled(t *testing.T) {
 // TestRenderEditorViewBangModeSuppressesTokens verifies shell prompts don't
 // get token styling.
 func TestRenderEditorViewBangModeSuppressesTokens(t *testing.T) {
-	t.Parallel()
-
 	m := newSkillCompletionUI()
-	m.promptHighlighter = newTestHighlighter("ls")
+	m.promptHighlighter = newTestHighlighter(t, "ls")
 	m.textarea.SetHighlighter(m.promptHighlighter)
 	m.bangMode = true
 	m.textarea.SetValue("ls /tmp")
@@ -70,13 +64,11 @@ func TestRenderEditorViewBangModeSuppressesTokens(t *testing.T) {
 // seeding: names come from skillStates so a /skill typed before the first
 // skills.Event still highlights.
 func TestPromptHighlighterSeededFromSkillStates(t *testing.T) {
-	t.Parallel()
-
 	m := newSkillCompletionUI()
 	m.skillStates = []*skills.SkillState{
 		{Name: "commit", State: skills.StateNormal},
 	}
-	h := newTestHighlighter(m.skillNames()...)
+	h := newTestHighlighter(t, m.skillNames()...)
 	h.Rescan("/commit")
 	require.Len(t, h.Highlight(0, nil), 1)
 }

@@ -405,7 +405,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	promptHL := newPromptHighlighter(
 		com.Styles.Editor.TokenFile,
 		com.Styles.Editor.TokenSkill,
-		nil, // Skill names arrive with the first skills.Event.
 	)
 	ta.SetHighlighter(promptHL)
 
@@ -467,7 +466,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
 	}
-	ui.promptHighlighter.setSkillNames(ui.skillNames())
+	ui.refreshSkillNames()
 
 	status := NewStatus(com, ui)
 

@@ -126,20 +126,26 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		}
 	}
 
-	result, err := mcp.RunTool(ctx, m.cfg, m.mcpName, m.tool.Name, params.Input)
-	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
-	}
-
 	// Divert A2UI surface payloads to UI-only metadata only when a chat UI
 	// will actually render them: on channel-originated turns the reply
 	// travels back over the channel and the model needs the payload to
 	// relay it, disable_a2ui deployments opted out of surfaces entirely,
 	// and a zero content width means no interactive UI tagged this turn.
 	// Mirrors the diversion rule in read_mcp_resource.go.
+	//
+	// Computed BEFORE the call so the same answer gates the A2UI capability
+	// crush claims in the call's _meta. Advertising a2ui on a turn that will
+	// not divert invites a surface payload we then fold into model-facing
+	// content as raw JSON.
 	divert := GetChannelFromContext(ctx) == "" &&
 		!m.cfg.Config().Options.DisableA2UI &&
 		GetContentWidthFromContext(ctx) > 0
+
+	result, err := mcp.RunTool(mcp.WithA2UICapable(ctx, divert), m.cfg, m.mcpName, m.tool.Name, params.Input)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+
 	content, metadata := splitMCPToolResult(result, m.mcpName, divert)
 
 	switch result.Type {

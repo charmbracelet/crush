@@ -3,11 +3,14 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
+	a2ui "github.com/tmc/a2ui"
 )
 
 // a2uiFakeConn records written messages instead of sending them anywhere, so a
@@ -136,4 +139,103 @@ func TestA2UIMetaCapabilitiesShape(t *testing.T) {
 	clientCaps, ok := a2uiCap["clientCapabilities"].(map[string]any)
 	require.True(t, ok)
 	require.Contains(t, clientCaps, "v0.9")
+}
+
+// TestA2UIHandshakeReachesRealServer drives a real client/server initialize
+// over the SDK's in-memory transport, wrapped the way createSession wraps it,
+// and asserts what the SERVER actually observes — not what crush wrote.
+//
+// This is the gap the unit tests above cannot cover: they hand-build params
+// and call Write directly, so they pass even when the capability never
+// survives to the peer. It does not survive at the spec's top-level key,
+// because the go-sdk unmarshals capabilities into a typed struct with no such
+// field and no catch-all, which is exactly why the Extensions payload exists.
+func TestA2UIHandshakeReachesRealServer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "probe", Version: "1"}, nil)
+	go func() { _, _ = srv.Connect(ctx, serverTransport, nil) }()
+
+	client := mcp.NewClient(
+		&mcp.Implementation{Name: "crush", Version: "1"},
+		&mcp.ClientOptions{Capabilities: a2uiSDKCapabilities(false)},
+	)
+	sess, err := client.Connect(ctx, &a2uiInitTransport{inner: clientTransport}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.Close() })
+
+	var seen int
+	for ss := range srv.Sessions() {
+		seen++
+		params := ss.InitializeParams()
+		require.NotNil(t, params.Capabilities, "server must see client capabilities")
+		ext, ok := params.Capabilities.Extensions[A2UIExtensionID]
+		require.True(t, ok,
+			"server must observe the A2UI capability under %q; extensions=%v",
+			A2UIExtensionID, params.Capabilities.Extensions)
+
+		// The payload survives intact, version key and catalog included.
+		raw, err := json.Marshal(ext)
+		require.NoError(t, err)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(raw, &payload))
+		clientCaps, ok := payload["clientCapabilities"].(map[string]any)
+		require.True(t, ok, "extension payload must carry clientCapabilities, got %v", payload)
+		_, ok = clientCaps[a2ui.Version]
+		require.True(t, ok, "clientCapabilities must be keyed by %q, got %v", a2ui.Version, clientCaps)
+	}
+	require.Equal(t, 1, seen, "expected exactly one server session")
+}
+
+// TestA2UISDKCapabilitiesDisabled pins the opt-out: a deployment that set
+// disable_a2ui must not advertise the capability at all.
+func TestA2UISDKCapabilitiesDisabled(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, a2uiSDKCapabilities(true))
+}
+
+// TestA2UIRequestMetaGates pins both halves of the per-request claim: the
+// deployment opt-out (disable_a2ui) and the per-turn render check. Before
+// these gates existed, a headless `crush run` advertised a2ui and got back a
+// surface payload it folded into model-facing content as raw JSON.
+func TestA2UIRequestMetaGates(t *testing.T) {
+	t.Parallel()
+
+	const enabled, disabled = false, true
+
+	t.Run("enabled and capable claims a2ui", func(t *testing.T) {
+		t.Parallel()
+		meta := a2uiRequestMeta(context.Background(), enabled)
+		require.NotNil(t, meta)
+		require.Contains(t, map[string]any(meta), "a2ui")
+	})
+	t.Run("disable_a2ui suppresses the claim", func(t *testing.T) {
+		t.Parallel()
+		require.Nil(t, a2uiRequestMeta(context.Background(), disabled))
+	})
+	t.Run("a turn that will not render suppresses the claim", func(t *testing.T) {
+		t.Parallel()
+		ctx := WithA2UICapable(context.Background(), false)
+		require.Nil(t, a2uiRequestMeta(ctx, enabled),
+			"headless and channel turns must not claim a capability crush will not honor")
+	})
+	t.Run("explicitly capable claims a2ui", func(t *testing.T) {
+		t.Parallel()
+		ctx := WithA2UICapable(context.Background(), true)
+		require.NotNil(t, a2uiRequestMeta(ctx, enabled))
+	})
+}
+
+// TestA2UIBasicCatalogIDTracksVersion pins the catalog ID to the compiled-in
+// a2ui version. A dependency bump that moves a2ui.Version must move the
+// advertised catalog with it, or crush advertises a stale catalog under a
+// newer version key and a server negotiates against components it will not
+// receive.
+func TestA2UIBasicCatalogIDTracksVersion(t *testing.T) {
+	t.Parallel()
+	slug := strings.ReplaceAll(a2ui.Version, ".", "_")
+	require.Contains(t, A2UIBasicCatalogID, "/"+slug+"/",
+		"catalog ID must carry the compiled-in a2ui version %q", a2ui.Version)
 }

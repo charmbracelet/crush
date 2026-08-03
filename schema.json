@@ -574,7 +574,24 @@
         },
         "disable_a2ui": {
           "type": "boolean",
-          "description": "Disable the A2UI prompt section that invites the model to emit renderable \u003ca2ui-json\u003e UI surfaces in chat",
+          "description": "Disable A2UI entirely: drops the prompt section inviting the model to emit renderable \u003ca2ui-json\u003e surfaces and stops advertising the a2ui capability to MCP servers",
+          "default": false
+        },
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "ssh",
+              "curl",
+              "scp"
+            ]
+          },
+          "type": "array",
+          "description": "List of commands to allow that are normally banned. Only affects the exact-command block list; package-manager argument blocks (e.g. 'apt install') are unaffected. Allowed commands still require permission approval."
+        },
+        "allow_all_commands": {
+          "type": "boolean",
+          "description": "Remove all command restrictions from the bash tool",
           "default": false
         }
       },

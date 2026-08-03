@@ -291,6 +291,19 @@ type MCPResourceContents struct {
 	Blob     []byte `json:"blob,omitempty"`
 }
 
+// MCPToolCallResult holds the model-facing text and any A2UI surface
+// payloads from an MCP tool call.
+type MCPToolCallResult struct {
+	Content  string               `json:"content"`
+	Surfaces []MCPToolCallSurface `json:"surfaces,omitempty"`
+}
+
+// MCPToolCallSurface is a single A2UI surface payload from a tool call.
+type MCPToolCallSurface struct {
+	Payload string `json:"payload"`
+	URI     string `json:"uri"`
+}
+
 // EnableDockerMCP enables the Docker MCP server on the workspace.
 func (c *Client) EnableDockerMCP(ctx context.Context, id string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/docker/enable", id), nil, nil, nil)
@@ -381,6 +394,27 @@ func (c *Client) ListMCPPrompts(ctx context.Context, id string) ([]proto.MCPProm
 		return nil, fmt.Errorf("failed to decode MCP prompts: %w", err)
 	}
 	return prompts, nil
+}
+
+// CallMCPTool calls a tool on a named MCP server.
+func (c *Client) CallMCPTool(ctx context.Context, id, name, toolName string, args map[string]any) (MCPToolCallResult, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/call-tool", id), nil, jsonBody(struct {
+		Name     string         `json:"name"`
+		ToolName string         `json:"tool_name"`
+		Args     map[string]any `json:"args"`
+	}{Name: name, ToolName: toolName, Args: args}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return MCPToolCallResult{}, fmt.Errorf("failed to call MCP tool: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return MCPToolCallResult{}, fmt.Errorf("failed to call MCP tool: status code %d", rsp.StatusCode)
+	}
+	var result MCPToolCallResult
+	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
+		return MCPToolCallResult{}, fmt.Errorf("failed to decode MCP tool result: %w", err)
+	}
+	return result, nil
 }
 
 // GetMCPPrompt retrieves a prompt from a named MCP server.

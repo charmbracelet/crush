@@ -28,8 +28,33 @@ type a2uiSurfaceHost struct {
 	// part has no renderable surface), so a ButtonClicked event's
 	// SurfaceID can be routed back to the model that emitted it.
 	surfaceIDs []string
+	// surfaceOwners holds the MCP server that served each entry (empty for
+	// chat-scanned surfaces). It is the item-scoped provenance the action
+	// round-trip resolves through, so two servers using the same surface ID
+	// cannot route each other's clicks.
+	surfaceOwners []string
 	// sty themes the surfaces with the crush palette.
 	sty *styles.Styles
+}
+
+// ownerFor returns the MCP server that served the surface at index i, and
+// whether one is known.
+func (h *a2uiSurfaceHost) ownerFor(i int) (string, bool) {
+	if i < 0 || i >= len(h.surfaceOwners) {
+		return "", false
+	}
+	name := h.surfaceOwners[i]
+	return name, name != ""
+}
+
+// drop releases the surface at index i, which the server deleted. The entry
+// is kept (indexes stay parallel to surfaceIDs) but nils out, so hasLive and
+// findByID stop reporting it and it can no longer take focus or keys.
+func (h *a2uiSurfaceHost) drop(i int) {
+	if i < 0 || i >= len(h.surfaces) {
+		return
+	}
+	h.surfaces[i] = nil
 }
 
 // buildSurfaces renders each part's messages into a live a2tea model,

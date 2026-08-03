@@ -731,6 +731,57 @@ func a2uiPartSurfaceID(msgs []a2ui.ServerMessage) string {
 	return ""
 }
 
+// A2UIMessagesFromPayload converts a raw A2UI JSON payload (the body of an
+// MCP-served surface) into the server messages it encodes, so a follow-up
+// payload can be applied to a live surface. The payload is wrapped in the
+// wire tags before scanning because a2tea's scanner treats a bare JSON array
+// of messages as several separate bare objects; the tags make it one block.
+// An error means the payload could not be parsed at all.
+func A2UIMessagesFromPayload(payload string) ([]a2ui.ServerMessage, error) {
+	parts, err := a2tea.Scan(a2uiOpenTag + payload + a2uiCloseTag)
+	if err != nil {
+		return nil, err
+	}
+	var msgs []a2ui.ServerMessage
+	for _, p := range parts {
+		msgs = append(msgs, p.Messages...)
+	}
+	return msgs, nil
+}
+
+// A2UIMessagesSurfaceID reports the surface a batch of server messages
+// targets — the first surfaceId any of them names, whichever payload field
+// carries it. A response to an a2ui_action may update a sibling surface
+// rather than the clicked one, so the payload's own target wins over the
+// surface the interaction came from. Empty means the batch names none.
+func A2UIMessagesSurfaceID(msgs []a2ui.ServerMessage) string {
+	for _, m := range msgs {
+		switch {
+		case m.UpdateComponents != nil:
+			return m.UpdateComponents.SurfaceID
+		case m.CreateSurface != nil:
+			return m.CreateSurface.SurfaceID
+		case m.DeleteSurface != nil:
+			return m.DeleteSurface.SurfaceID
+		case m.UpdateDataModel != nil:
+			return m.UpdateDataModel.SurfaceID
+		}
+	}
+	return ""
+}
+
+// A2UIMessagesDeleteSurface reports whether a batch of server messages
+// deletes a surface. A delete that lands on a surface already gone is the
+// expected end of its life, not a mismatch worth reporting to the server.
+func A2UIMessagesDeleteSurface(msgs []a2ui.ServerMessage) bool {
+	for _, m := range msgs {
+		if m.DeleteSurface != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // a2uiSurfaceRetired reports whether the surface at part-index i has been
 // retired after a submission (#45). Retired surfaces still render (showing
 // their final state) but no longer receive focus or keys.

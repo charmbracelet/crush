@@ -766,6 +766,20 @@ func (w *ClientWorkspace) GetMCPPrompt(clientID, promptID string, args map[strin
 	return w.client.GetMCPPrompt(context.Background(), w.workspaceID(), clientID, promptID, args)
 }
 
+// CallMCPTool invokes a tool on a named MCP server via the server and
+// returns its text content plus any A2UI surface payload it embedded.
+func (w *ClientWorkspace) CallMCPTool(ctx context.Context, name, toolName string, args map[string]any) (MCPToolCallResult, error) {
+	res, err := w.client.CallMCPTool(ctx, w.workspaceID(), name, toolName, args)
+	if err != nil {
+		return MCPToolCallResult{}, err
+	}
+	out := MCPToolCallResult{Content: res.Content}
+	for _, s := range res.Surfaces {
+		out.Surfaces = append(out.Surfaces, MCPToolCallSurface{Payload: s.Payload, URI: s.URI})
+	}
+	return out, nil
+}
+
 func (w *ClientWorkspace) EnableDockerMCP(ctx context.Context) error {
 	return w.client.EnableDockerMCP(ctx, w.workspaceID())
 }

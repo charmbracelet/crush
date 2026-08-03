@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -821,4 +822,141 @@ func TestTruncateUTF8(t *testing.T) {
 			require.True(t, utf8.ValidString(got))
 		})
 	}
+}
+
+// TestParallelCoderDoesNotStarveReadOnlyTasks pins the lock-order fix: with
+// MaxConcurrent=2 and a mixed batch of 2 coders + 2 tasks, both tasks must
+// start while the coder is still blocked on the batch lock. The old code
+// acquired the global semaphore first, so blocked coders consumed the global
+// slots and the read-only tasks never started.
+//
+// GOMAXPROCS is pinned to 1 so goroutine scheduling is strictly FIFO: the
+// first coder goroutine (created first) acquires a semaphore slot before the
+// tasks ever run. Without the pin the task goroutines can win a slot early,
+// finish, and mask the starvation on the old code.
+func TestParallelCoderDoesNotStarveReadOnlyTasks(t *testing.T) {
+	oldMaxProcs := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(oldMaxProcs) })
+
+	script := `
+		local res = parallel({
+			{prompt = "c1", agent = "coder"},
+			{prompt = "c2", agent = "coder"},
+			{prompt = "t1"},
+			{prompt = "t2"}
+		})
+		return res
+	`
+	var mu sync.Mutex
+	started := map[int]bool{}
+	coderGate := make(chan struct{})
+	spawn := func(_ context.Context, index int, _, prompt string, opts SpawnOpts) (string, error) {
+		mu.Lock()
+		started[index] = true
+		isCoder := opts.Agent == "coder"
+		mu.Unlock()
+		if isCoder {
+			<-coderGate // hold every coder blocked until the test releases it
+		}
+		return "ok", nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(context.Background(), script, spawn, Options{MaxConcurrent: 2, MaxAgents: 10})
+		done <- err
+	}()
+
+	// With GOMAXPROCS=1 the first coder (index 0) runs first: it takes the
+	// batch lock, a global slot, and blocks on the gate. The second coder is
+	// queued on the batch lock and the tasks are queued on the free global
+	// slot. Wait for coder 0 to be blocked before checking the tasks.
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return started[0]
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Tasks are entries 3 and 4, i.e. global indices 2 and 3 (reserveIndices
+	// assigns sequentially from 0). With the coder blocked they must still
+	// start.
+	tasksStarted := false
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		t1, t2 := started[2], started[3]
+		mu.Unlock()
+		if t1 && t2 {
+			tasksStarted = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(coderGate) // release coders so the run can finish
+	require.NoError(t, <-done)
+	require.True(t, tasksStarted,
+		"read-only tasks must start while coders are serialised; blocked coders starved them")
+}
+
+// TestParallelMixedBatchInterleavesTaskBetweenCoders asserts both halves of
+// the fix at once: the two coders never overlap (Safety 3b still holds) and a
+// read-only task runs concurrently with a coder (the batch lock is not
+// applied to the whole batch).
+func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
+	t.Parallel()
+	script := `
+		local res = parallel({
+			{prompt = "c1", agent = "coder"},
+			{prompt = "c2", agent = "coder"},
+			{prompt = "t1"},
+			{prompt = "t2"}
+		})
+		return res
+	`
+	type interval struct{ start, end time.Time }
+	var mu sync.Mutex
+	coderIntervals := map[int]interval{}
+	taskStarts := map[int]time.Time{}
+	spawn := func(_ context.Context, index int, _, prompt string, opts SpawnOpts) (string, error) {
+		start := time.Now()
+		if opts.Agent == "coder" {
+			mu.Lock()
+			coderIntervals[index] = interval{start: start}
+			mu.Unlock()
+			time.Sleep(50 * time.Millisecond)
+			mu.Lock()
+			iv := coderIntervals[index]
+			iv.end = time.Now()
+			coderIntervals[index] = iv
+			mu.Unlock()
+		} else {
+			mu.Lock()
+			taskStarts[index] = start
+			mu.Unlock()
+		}
+		return "ok", nil
+	}
+
+	res, err := Run(context.Background(), script, spawn, Options{MaxConcurrent: 2, MaxAgents: 10})
+	require.NoError(t, err)
+	require.Equal(t, 4, res.AgentCount)
+
+	mu.Lock()
+	c1, c2 := coderIntervals[0], coderIntervals[1]
+	t1, t2 := taskStarts[2], taskStarts[3]
+	mu.Unlock()
+
+	require.True(t, !c1.end.IsZero() && !c2.end.IsZero(), "both coders must have run")
+	// Safety 3b: the two coder executions must not overlap.
+	if c1.start.Before(c2.start) {
+		require.False(t, c2.start.Before(c1.end), "coder executions must not overlap")
+	} else {
+		require.False(t, c1.start.Before(c2.end), "coder executions must not overlap")
+	}
+	// A read-only task must have run concurrently with a coder.
+	concurrent := (!t1.IsZero() && !t1.Before(c1.start) && t1.Before(c1.end)) ||
+		(!t2.IsZero() && !t2.Before(c1.start) && t2.Before(c1.end)) ||
+		(!t1.IsZero() && !t1.Before(c2.start) && t1.Before(c2.end)) ||
+		(!t2.IsZero() && !t2.Before(c2.start) && t2.Before(c2.end))
+	require.True(t, concurrent, "a read-only task must run while a coder is executing")
 }

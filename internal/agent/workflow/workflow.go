@@ -497,18 +497,13 @@ func registerParallel(L *lua.LState, st *runState) {
 			go func(i int, pc parsedCall) {
 				defer wg.Done()
 
-				// Acquire the global concurrency semaphore.
-				select {
-				case st.sem <- struct{}{}:
-					defer func() { <-st.sem }()
-				case <-st.ctx.Done():
-					results[i] = spawnResult{err: st.ctx.Err()}
-					return
-				}
-
-				// For coder batches, also acquire the batch-level
-				// serialisation semaphore.
-				if batchSem != nil {
+				// Coder entries serialise against each other (Safety 3b:
+				// concurrent writers corrupt the shared working tree). Acquire
+				// the batch lock BEFORE the global semaphore so a blocked coder
+				// does not sit on a global slot and starve read-only tasks.
+				// Read-only "task" agents never touch the working tree and are
+				// not gated here.
+				if batchSem != nil && pc.spawnOpts.Agent == "coder" {
 					select {
 					case batchSem <- struct{}{}:
 						defer func() { <-batchSem }()
@@ -516,6 +511,15 @@ func registerParallel(L *lua.LState, st *runState) {
 						results[i] = spawnResult{err: st.ctx.Err()}
 						return
 					}
+				}
+
+				// Acquire the global concurrency semaphore.
+				select {
+				case st.sem <- struct{}{}:
+					defer func() { <-st.sem }()
+				case <-st.ctx.Done():
+					results[i] = spawnResult{err: st.ctx.Err()}
+					return
 				}
 
 				st.progress("agent_start", pc.index, pc.label, "")

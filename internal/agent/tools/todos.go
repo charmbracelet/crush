@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/session"
@@ -166,15 +167,26 @@ func buildTodosResponse(todos []session.Todo, completedCount, inProgressCount in
 	}
 
 	pendingCount := 0
+	var inProgressItems, pendingItems []string
 	for _, todo := range todos {
-		if todo.Status == session.TodoStatusPending {
+		switch todo.Status {
+		case session.TodoStatusPending:
 			pendingCount++
+			pendingItems = append(pendingItems, todo.Content)
+		case session.TodoStatusInProgress:
+			inProgressItems = append(inProgressItems, todo.Content)
 		}
 	}
 
 	response := "Todo list updated successfully.\n\n"
 	response += fmt.Sprintf("Status: %d pending, %d in progress, %d completed\n",
 		pendingCount, inProgressCount, completedCount)
+	if len(inProgressItems) > 0 {
+		response += "In progress: " + strings.Join(inProgressItems, ", ") + "\n"
+	}
+	if len(pendingItems) > 0 {
+		response += "Remaining: " + strings.Join(pendingItems, ", ") + "\n"
+	}
 
 	switch {
 	case len(todos) == 0:

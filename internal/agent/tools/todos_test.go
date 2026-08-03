@@ -35,6 +35,7 @@ func TestBuildTodosResponse(t *testing.T) {
 		}
 		got := buildTodosResponse(todos, 1, 0, false, false, nil)
 		require.Contains(t, got, "No task is in_progress")
+		require.Contains(t, got, "Remaining: b")
 	})
 
 	t.Run("healthy in_progress list", func(t *testing.T) {
@@ -46,6 +47,20 @@ func TestBuildTodosResponse(t *testing.T) {
 		got := buildTodosResponse(todos, 1, 1, false, false, nil)
 		require.Contains(t, got, "1 in progress")
 		require.Contains(t, got, "clears automatically")
+		require.Contains(t, got, "In progress: b")
+	})
+
+	t.Run("names all remaining items", func(t *testing.T) {
+		t.Parallel()
+		todos := []session.Todo{
+			{Content: "a", Status: session.TodoStatusCompleted},
+			{Content: "b", Status: session.TodoStatusInProgress},
+			{Content: "c", Status: session.TodoStatusPending},
+			{Content: "d", Status: session.TodoStatusPending},
+		}
+		got := buildTodosResponse(todos, 1, 1, false, false, nil)
+		require.Contains(t, got, "In progress: b")
+		require.Contains(t, got, "Remaining: c, d")
 	})
 }
 

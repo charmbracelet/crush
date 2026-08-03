@@ -179,3 +179,105 @@ func TestConcurrentSendsDoNotPanic(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestReconnectDuringCloseDoesNotRace hammers Connect and Close from several
+// goroutines against a live relay. The old code reassigned c.closeOnce under
+// c.mu while lock-free callers ran Do on it, a data race the race detector
+// flags; this test is the load generator. It is deterministic-passing on the
+// fix and exercises the exact interleaving on CI with -race -count=20.
+func TestReconnectDuringCloseDoesNotRace(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/login", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"token":"test-token"}`))
+	})
+	mux.HandleFunc("/ws/cli", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		for {
+			var msg EventMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	wsBase := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	c := NewClient(Config{RelayURL: wsBase, Username: "u", Password: "not-default-pass"})
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				_ = c.Connect(ctx)
+				cancel()
+				_ = c.Close()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestStaleReadLoopDoesNotTearDownNewConnection forces the first
+// connection's readLoop to exit and reconnects before its teardown can run.
+// The old readLoop defer cleared connected/ws unconditionally, so a dying old
+// connection could mark a brand-new healthy one as down.
+func TestStaleReadLoopDoesNotTearDownNewConnection(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	var (
+		mu    sync.Mutex
+		conns []*websocket.Conn
+	)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/login", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"token":"test-token"}`))
+	})
+	mux.HandleFunc("/ws/cli", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		mu.Lock()
+		conns = append(conns, conn)
+		mu.Unlock()
+		for {
+			var msg EventMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	wsBase := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	c := NewClient(Config{RelayURL: wsBase, Username: "u", Password: "not-default-pass"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	require.NoError(t, c.Connect(ctx))
+	cancel()
+	require.True(t, c.IsConnected())
+
+	mu.Lock()
+	first := conns[0]
+	mu.Unlock()
+	// Kill the first connection server-side so the client readLoop exits.
+	_ = first.Close()
+
+	// Reconnect immediately, while the old readLoop's teardown may still be
+	// in flight. Give a straggler teardown time to fire, then require the new
+	// connection to be up.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	require.NoError(t, c.Connect(ctx2))
+	cancel2()
+	time.Sleep(200 * time.Millisecond)
+	require.True(t, c.IsConnected(),
+		"a stale readLoop must not tear down a brand-new connection")
+}

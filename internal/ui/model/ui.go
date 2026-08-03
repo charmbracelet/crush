@@ -4867,6 +4867,12 @@ func (m *UI) handleSlashCommand(value string) (tea.Cmd, bool) {
 		}, true
 
 	default:
+		// Match bare "/search" too: without this, typing the command with
+		// no query falls through as an unknown command rather than
+		// explaining that it is not configured yet.
+		if value == "/search" || strings.HasPrefix(value, "/search ") {
+			return util.ReportWarn("Semantic search is not yet configured. Add an embedding provider to crush.json to enable /search."), true
+		}
 		return nil, false
 	}
 }

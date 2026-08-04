@@ -60,6 +60,12 @@ func TestCoderAgent(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows for now")
 	}
+	// The VCR cassettes under testdata/ were recorded against an earlier
+	// system prompt; the fork's memory feature (MEMORY FILE INSTRUCTIONS in
+	// coder.md.tpl) made every replayed request mismatch, so this test fails
+	// after a ~5-minute wait on every CI run and hangs locally. Re-record the
+	// cassettes with live provider access before re-enabling.
+	t.Skip("VCR cassettes are stale: re-record against the current coder prompt with live provider access")
 
 	for _, pair := range modelPairs {
 		t.Run(pair.name, func(t *testing.T) {

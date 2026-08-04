@@ -43,7 +43,16 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	if err != nil {
 		return ToolResult{}, err
 	}
-	result, err := c.CallTool(ctx, &mcp.CallToolParams{
+
+	// Apply per-tool-call timeout to prevent indefinite hangs on large
+	// payloads (e.g. write_file with 15KB+ content over stdio).
+	// Default: 120s, configurable via "tool_timeout" in MCP config.
+	m := cfg.Config().MCP[name]
+	toolTimeout := mcpToolTimeout(m)
+	toolCtx, cancel := context.WithTimeout(ctx, toolTimeout)
+	defer cancel()
+
+	result, err := c.CallTool(toolCtx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
 	})

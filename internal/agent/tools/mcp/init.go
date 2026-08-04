@@ -1255,6 +1255,10 @@ func clearMCPData(name string) {
 	}
 }
 
+func mcpToolTimeout(m config.MCPConfig) time.Duration {
+	return time.Duration(cmp.Or(m.ToolTimeout, 120)) * time.Second
+}
+
 func stdioCheck(old *exec.Cmd) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()

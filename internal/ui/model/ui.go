@@ -2085,8 +2085,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		exported, err := styles.ExportResolvedPalette(base)
 		if err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
+			// Fall back to charmtone when the base theme is no longer
+			// resolvable (e.g. a user theme that was since deleted).
+			base = "charmtone"
+			exported, err = styles.ExportResolvedPalette(base)
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
 		}
 		dirs := styles.ThemeDirs()
 		if len(dirs) == 0 {

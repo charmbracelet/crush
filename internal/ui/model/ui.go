@@ -2073,6 +2073,37 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportInfo("Theme "+msg.Name+" reset to builtin"))
 		}
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
+	case dialog.ActionCreateTheme:
+		base := msg.Base
+		if base == "" {
+			base = "charmtone"
+		}
+		exported, err := styles.ExportResolvedPalette(base)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		name := generateThemeName(base)
+		dirs := styles.ThemeDirs()
+		if len(dirs) == 0 {
+			cmds = append(cmds, util.ReportError(fmt.Errorf("no theme directory available")))
+			break
+		}
+		savePath := filepath.Join(dirs[len(dirs)-1], name+".json")
+		exported.Base = base
+		if err := styles.SaveThemeFile(savePath, exported); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
+			"options.tui.active_theme": name,
+		}); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Created new theme: "+name))
+		m.dialog.CloseDialog(dialog.ThemeID)
+		m.openThemeEditorDialog()
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
@@ -4021,6 +4052,18 @@ func (m *UI) renderEditorView(width int) string {
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+}
+
+// generateThemeName creates a unique theme name based on the given base
+// theme. It appends a numeric suffix if the name already exists.
+func generateThemeName(base string) string {
+	candidate := "my-" + base
+	for i := 1; ; i++ {
+		if _, err := styles.FindThemeFile(candidate); err != nil {
+			return candidate
+		}
+		candidate = fmt.Sprintf("my-%s-%d", base, i)
+	}
 }
 
 func themePaletteConfigValue(base string, palette styles.Palette) (map[string]any, error) {

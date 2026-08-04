@@ -78,6 +78,9 @@ type (
 	ActionDeleteThemeFile    struct {
 		Name string
 	}
+	ActionCreateTheme struct {
+		Base string
+	}
 	ActionInitializeProject  struct{}
 	ActionSummarize          struct {
 		SessionID string

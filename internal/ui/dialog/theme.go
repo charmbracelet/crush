@@ -31,6 +31,7 @@ type Theme struct {
 		Previous key.Binding
 		UpDown   key.Binding
 		Close    key.Binding
+		NewTheme key.Binding
 	}
 }
 
@@ -91,6 +92,10 @@ func NewTheme(com *common.Common) *Theme {
 		key.WithHelp("↑/↓", "choose"),
 	)
 	th.keyMap.Close = CloseKey
+	th.keyMap.NewTheme = key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "new theme"),
+	)
 
 	th.setThemeItems()
 	return th
@@ -106,6 +111,12 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, th.keyMap.Close):
 			return ActionRevertThemePreview{}
+		case key.Matches(msg, th.keyMap.NewTheme):
+			currentTheme := "charmtone"
+			if cfg := th.com.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.ActiveTheme != "" {
+				currentTheme = cfg.Options.TUI.ActiveTheme
+			}
+			return ActionCreateTheme{Base: currentTheme}
 		case key.Matches(msg, th.keyMap.Previous):
 			th.list.Focus()
 			if th.list.IsSelectedFirst() {
@@ -206,6 +217,7 @@ func (th *Theme) ShortHelp() []key.Binding {
 	return []key.Binding{
 		th.keyMap.UpDown,
 		th.keyMap.Select,
+		th.keyMap.NewTheme,
 		th.keyMap.Close,
 	}
 }
@@ -216,6 +228,7 @@ func (th *Theme) FullHelp() [][]key.Binding {
 		th.keyMap.Select,
 		th.keyMap.Next,
 		th.keyMap.Previous,
+		th.keyMap.NewTheme,
 		th.keyMap.Close,
 	}
 	for i := 0; i < len(slice); i += 4 {

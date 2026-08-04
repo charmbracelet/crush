@@ -8,12 +8,12 @@ import (
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
+	"github.com/charmbracelet/crush/internal/ui/textarea"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -165,6 +165,11 @@ type Styles struct {
 		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
 		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
 		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
+
+		// Inline token highlighting in the prompt textarea: @file mentions
+		// and /skill references typed into the prompt.
+		TokenFile  lipgloss.Style
+		TokenSkill lipgloss.Style
 	}
 
 	// Radio

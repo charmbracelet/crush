@@ -105,6 +105,11 @@ func (m *UserMessageItem) RawRender(width int) string {
 				content = strings.TrimSuffix(result, "\n")
 			}
 
+			// Carry the prompt editor's @file / /skill colours into the
+			// posted message, so a token does not lose its highlight the
+			// moment it leaves the editor.
+			content = highlightPromptTokens(content, m.sty)
+
 			if len(m.message.BinaryContent()) > 0 {
 				attachmentsStr := m.renderAttachments(cappedWidth)
 				if content == "" {

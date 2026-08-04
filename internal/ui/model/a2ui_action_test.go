@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"charm.land/bubbles/v2/textarea"
+	"github.com/charmbracelet/crush/internal/ui/textarea"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"

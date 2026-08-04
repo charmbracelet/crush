@@ -23,7 +23,6 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
@@ -58,6 +57,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/textarea"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
@@ -136,9 +136,12 @@ type shellStreamMsg struct {
 type (
 	// cancelTimerExpiredMsg is sent when the cancel timer expires.
 	cancelTimerExpiredMsg struct{}
-	// userCommandsLoadedMsg is sent when user commands are loaded.
+	// userCommandsLoadedMsg is sent when user commands are loaded. It also
+	// carries the skill catalog the command list was built from, so the
+	// '/' completions popup gets descriptions off the same single load.
 	userCommandsLoadedMsg struct {
-		Commands []commands.CustomCommand
+		Commands     []commands.CustomCommand
+		SkillEntries []skills.CatalogEntry
 	}
 	// mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
 	mcpPromptsLoadedMsg struct {
@@ -278,9 +281,10 @@ type UI struct {
 	// Completions state
 	completions              *completions.Completions
 	completionsOpen          bool
+	completionsTrigger       completions.Trigger
 	completionsStartIndex    int
 	completionsQuery         string
-	completionsPositionStart image.Point // x,y where user typed '@'
+	completionsPositionStart image.Point // x,y where user typed the trigger
 
 	// lastCompletionEnd tracks the end index of the most recently
 	// inserted completion text so that a single backspace can delete
@@ -292,6 +296,10 @@ type UI struct {
 	lastCompletionStart int
 	lastCompletionEnd   int
 	lastCompletionText  string
+
+	// promptHighlighter styles @file and /skill tokens inline as the user
+	// types. Installed on the textarea via SetHighlighter.
+	promptHighlighter *promptHighlighter
 
 	// Chat components
 	chat *Chat
@@ -309,6 +317,11 @@ type UI struct {
 
 	// skills
 	skillStates []*skills.SkillState
+
+	// skillCatalog is the effective visible skill set (post-override,
+	// post-disable) with frontmatter descriptions, refreshed alongside the
+	// custom commands. It backs the '/' completions popup.
+	skillCatalog []skills.CatalogEntry
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
@@ -400,6 +413,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.MaxHeight = TextareaMaxHeight
 	ta.Focus()
 
+	promptHL := newPromptHighlighter(
+		com.Styles.Editor.TokenFile,
+		com.Styles.Editor.TokenSkill,
+	)
+	ta.SetHighlighter(promptHL)
+
 	scrollbarMode := config.ScrollbarDefault
 	if cfg := com.Config(); cfg.Options.TUI != nil && cfg.Options.TUI.Scrollbar != "" {
 		scrollbarMode = cfg.Options.TUI.Scrollbar
@@ -449,6 +468,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		completions:         comp,
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
+		promptHighlighter:   promptHL,
 		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
@@ -457,6 +477,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
 	}
+	ui.refreshSkillNames()
 
 	status := NewStatus(com, ui)
 
@@ -664,7 +685,7 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 			slog.Error("Failed to load skill commands", "error", err)
 		}
 		customCommands = append(customCommands, commands.FromSkillCatalog(skillEntries)...)
-		return userCommandsLoadedMsg{Commands: customCommands}
+		return userCommandsLoadedMsg{Commands: customCommands, SkillEntries: skillEntries}
 	}
 }
 
@@ -805,6 +826,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
+		m.skillCatalog = msg.SkillEntries
+		m.refreshSkillNames()
 		dia := m.dialog.Dialog(dialog.CommandsID)
 		if dia == nil {
 			break
@@ -937,6 +960,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lspStates = m.com.Workspace.LSPGetStates()
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+		m.refreshSkillNames()
+		// Discovery states carry no descriptions and no override/disable
+		// resolution, so re-read the catalog too: a ctrl+r reload in the
+		// skills dialog must move both the command palette and the '/'
+		// completions popup.
+		cmds = append(cmds, m.loadCustomCommands())
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -1363,7 +1392,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
 	case completions.CompletionItemsLoadedMsg:
-		if m.completionsOpen {
+		// Guard against a stale async file load landing after the popup
+		// switched to (or was reopened in) skill mode.
+		if m.completionsOpen && m.completionsTrigger == completions.TriggerFile {
 			m.completions.SetItems(msg.Files, msg.Resources)
 		}
 	case uv.KittyGraphicsEvent:
@@ -2485,6 +2516,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if m.completionsOpen {
 				if msg, ok := m.completions.Update(msg); ok {
 					switch msg := msg.(type) {
+					case completions.SelectionMsg[completions.SkillCompletionValue]:
+						cmds = append(cmds, m.insertSkillCompletion(msg.Value))
+						if !msg.KeepOpen {
+							m.closeCompletions()
+						}
 					case completions.SelectionMsg[completions.FileCompletionValue]:
 						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
 						if !msg.KeepOpen {
@@ -2497,6 +2533,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						}
 					case completions.ClosedMsg:
 						m.completionsOpen = false
+						m.completionsTrigger = completions.TriggerNone
 					}
 					return tea.Batch(cmds...)
 				}
@@ -2674,20 +2711,43 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.clearCompletionRange()
 				}
 
-				// Check for @ trigger before passing to textarea.
+				// Check for completion triggers before passing to textarea.
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
 
-				// Trigger completions on @.
+				// Trigger file completions on @.
 				if msg.String() == "@" && !m.completionsOpen {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 						m.completionsOpen = true
+						m.completionsTrigger = completions.TriggerFile
 						m.completionsQuery = ""
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
 						cmds = append(cmds, m.completions.Open(depth, limit))
+					}
+				}
+
+				// Trigger skill completions on / mid-prompt. At the start of
+				// an empty prompt the commands dialog handles '/' instead
+				// (see the Editor.Commands binding above), so here we only
+				// fire when the textarea already has content and '/' begins
+				// a new word.
+				//
+				// curIdx is the length of the value, not the cursor, and
+				// insertCompletionText splices at completionsStartIndex and
+				// then MoveToEnd()s — so opening the popup with the cursor
+				// anywhere but the end would append the chosen skill to the
+				// end of the prompt and strand the '/' the user typed where
+				// the cursor actually was. Requiring the two to agree keeps
+				// the index honest; the '@' trigger above has the same
+				// end-of-value assumption, and #250's atomic backspace
+				// depends on it as well.
+				if msg.String() == "/" && !m.completionsOpen && !m.bangMode &&
+					m.textarea.ByteOffset() == curIdx {
+					if curIdx > 0 && isWhitespace(curValue[curIdx-1]) {
+						m.openSkillCompletions(curIdx)
 					}
 				}
 
@@ -2731,8 +2791,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.updateHistoryDraft(curValue)
 
 				// After updating textarea, check if we need to filter completions.
-				// Skip filtering on the initial @ keystroke since items are loading async.
-				if m.completionsOpen && msg.String() != "@" {
+				// Skip filtering on the initial trigger keystroke since items
+				// are loading async.
+				if m.completionsOpen && msg.String() != string(m.completionsTrigger) {
 					newValue := m.textarea.Value()
 					newIdx := len(newValue)
 
@@ -2745,11 +2806,36 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					} else {
 						// Extract current word and filter.
 						word := m.textareaWord()
-						if strings.HasPrefix(word, "@") {
+						switch {
+						case !strings.HasPrefix(word, string(m.completionsTrigger)):
+							m.closeCompletions()
+						case m.completionsTrigger == completions.TriggerSkill &&
+							!wordCanBeSkillToken(word):
+							// '/' also begins every absolute path, and the
+							// trigger cannot tell the two apart from the
+							// slash alone. A second separator settles it:
+							// skill names never contain one, so the user is
+							// typing a path and the popup must get out of
+							// the way.
+							m.closeCompletions()
+						default:
 							m.completionsQuery = word[1:]
 							m.completions.Filter(m.completionsQuery)
-						} else if m.completionsOpen {
-							m.closeCompletions()
+							// An open popup with nothing in it still swallows
+							// enter and the arrow keys — the prompt cannot be
+							// submitted until the user finds escape. Nothing
+							// is drawn in that state either, so there is no
+							// hint as to what is eating the key.
+							//
+							// Only the skill popup is closed on an empty
+							// filter: its items are installed synchronously
+							// by SetSkillItems, so empty really means "no
+							// match". The file popup loads asynchronously and
+							// is legitimately empty until the walk returns.
+							if m.completionsTrigger == completions.TriggerSkill &&
+								!m.completions.HasItems() {
+								m.closeCompletions()
+							}
 						}
 					}
 				}
@@ -3835,9 +3921,85 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 // closeCompletions closes the completions popup and resets state.
 func (m *UI) closeCompletions() {
 	m.completionsOpen = false
+	m.completionsTrigger = completions.TriggerNone
 	m.completionsQuery = ""
 	m.completionsStartIndex = 0
 	m.completions.Close()
+}
+
+// skillCompletionValues returns the skills offered by the '/' popup.
+//
+// The catalog is the right source: it is the effective, post-dedup,
+// post-disable set, it includes the builtin skills the raw discovery states
+// omit, and it carries each skill's frontmatter description. The discovery
+// states are only a fallback for the window between startup and the first
+// catalog load, where a name-only list still beats an empty popup.
+func (m *UI) skillCompletionValues() []completions.SkillCompletionValue {
+	var values []completions.SkillCompletionValue
+	if len(m.skillCatalog) > 0 {
+		for _, entry := range m.skillCatalog {
+			if entry.Name == "" {
+				continue
+			}
+			values = append(values, completions.SkillCompletionValue{
+				Name:        entry.Name,
+				Description: entry.Description,
+				Path:        entry.ID,
+			})
+		}
+	} else {
+		seen := make(map[string]struct{}, len(m.skillStates))
+		for _, s := range m.skillStates {
+			if s == nil || s.Name == "" || s.State != skills.StateNormal {
+				continue
+			}
+			if _, dup := seen[s.Name]; dup {
+				continue
+			}
+			seen[s.Name] = struct{}{}
+			values = append(values, completions.SkillCompletionValue{
+				Name: s.Name,
+				Path: s.Path,
+			})
+		}
+	}
+	slices.SortFunc(values, func(a, b completions.SkillCompletionValue) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return values
+}
+
+// openSkillCompletions opens the completions popup in skill mode at the
+// given trigger index. Skills are already in memory, so no async load is
+// needed.
+// wordCanBeSkillToken reports whether word — the token beginning at the '/'
+// that opened the skill popup — can still be a skill reference.
+//
+// '/' opens both a skill token and every absolute path, and at the moment it
+// is typed the two are indistinguishable. They diverge on the next
+// separator: a skill name is a single segment (plugin skills qualify with a
+// colon, as in "sdd:plan"), so a second '/' means the user is typing a path
+// like /tmp/out.log and the popup must stop claiming their keystrokes.
+func wordCanBeSkillToken(word string) bool {
+	return !strings.Contains(strings.TrimPrefix(word, "/"), "/")
+}
+
+func (m *UI) openSkillCompletions(startIndex int) {
+	values := m.skillCompletionValues()
+	if len(values) == 0 {
+		// An open-but-empty popup still consumes enter and the arrow keys,
+		// so a user with no skills configured could not submit a prompt
+		// containing a '/'. Unlike '@' there is nothing to wait on here —
+		// no skills means no popup.
+		return
+	}
+
+	m.completionsOpen = true
+	m.completionsTrigger = completions.TriggerSkill
+	m.completionsQuery = ""
+	m.completionsStartIndex = startIndex
+	m.completionsPositionStart = m.completionsPosition()
+	m.completions.SetSkillItems(values)
 }
 
 // insertCompletionText replaces the @query in the textarea with the given text.
@@ -3989,6 +4151,17 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 	return tea.Batch(heightCmd, resourceCmd)
 }
 
+// insertSkillCompletion inserts the selected skill name into the textarea,
+// replacing the /query. Unlike files, skills are not attached — the
+// "/skill-name" text in the prompt is the signal to load the skill.
+func (m *UI) insertSkillCompletion(skill completions.SkillCompletionValue) tea.Cmd {
+	prevHeight := m.textarea.Height()
+	if !m.insertCompletionText("/" + skill.Name) {
+		return nil
+	}
+	return m.handleTextareaHeightChange(prevHeight)
+}
+
 // completionsPosition returns the X and Y position for the completions popup.
 func (m *UI) completionsPosition() image.Point {
 	cur := m.textarea.Cursor()
@@ -4109,6 +4282,19 @@ func (m *UI) renderEditorView(width int) string {
 	if len(m.attachments.List()) > 0 {
 		attachmentsView = m.attachments.Render(width)
 	}
+	// Retokenize @file and /skill tokens on every render. The scan is
+	// linear in prompt length and render happens every frame anyway, so
+	// this is the single seam that stays correct for every value-mutation
+	// path (typing, paste, history, completion inserts). Bang mode is a
+	// shell prompt — its slashes are paths, not skills — so tokens are
+	// suppressed there.
+	if m.promptHighlighter != nil {
+		if m.bangMode {
+			m.promptHighlighter.Rescan("")
+		} else {
+			m.promptHighlighter.Rescan(m.textarea.Value())
+		}
+	}
 	return strings.Join([]string{
 		attachmentsView,
 		m.textarea.View(),
@@ -4157,6 +4343,12 @@ func (m *UI) refreshStyles() {
 		m.cacheSidebarLogo(m.layout.sidebar.Dx())
 	}
 	m.textarea.SetStyles(t.Editor.Textarea)
+	// The highlighter copies its styles at construction, so it needs the
+	// same re-push every other value-copying subcomponent here gets.
+	if m.promptHighlighter != nil {
+		m.promptHighlighter.SetStyles(t.Editor.TokenFile, t.Editor.TokenSkill)
+		m.promptHighlighter.Rescan(m.textarea.Value())
+	}
 	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
 	m.attachments.Renderer().SetStyles(
 		t.Attachments.Normal,

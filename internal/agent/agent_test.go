@@ -1479,7 +1479,10 @@ func TestFormatProviderErrorForAssistant(t *testing.T) {
 			Message: `{"error":{"message":"Resource limit reached"}}`,
 		}
 		title, body := formatProviderErrorForAssistant(pe)
-		require.Equal(t, "Quota Exceeded / Out of Credits", title)
+		// None of the quota keywords ("quota", "resource_exhausted",
+		// "usage_limit", ...) match "resource limit reached", so the category
+		// stays empty and the title falls back to the provider's own text.
+		require.Equal(t, "Resource Exhausted", title)
 		require.Equal(t, "Resource limit reached", body)
 	})
 }

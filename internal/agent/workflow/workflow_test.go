@@ -867,14 +867,13 @@ func TestParallelCoderDoesNotStarveReadOnlyTasks(t *testing.T) {
 		done <- err
 	}()
 
-	// With GOMAXPROCS=1 the first coder (index 0) runs first: it takes the
-	// batch lock, a global slot, and blocks on the gate. The second coder is
-	// queued on the batch lock and the tasks are queued on the free global
-	// slot. Wait for coder 0 to be blocked before checking the tasks.
+	// Wait for *a* coder to be blocked on the gate. Which one wins is not
+	// deterministic even at GOMAXPROCS=1 (runnext biases toward the most
+	// recently readied goroutine), and the property does not care.
 	require.Eventually(t, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return started[0]
+		return started[0] || started[1]
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Tasks are entries 3 and 4, i.e. global indices 2 and 3 (reserveIndices
@@ -901,8 +900,11 @@ func TestParallelCoderDoesNotStarveReadOnlyTasks(t *testing.T) {
 // TestParallelMixedBatchInterleavesTaskBetweenCoders asserts both halves of
 // the fix at once: the two coders never overlap (Safety 3b still holds) and a
 // read-only task runs concurrently with a coder (the batch lock is not
-// applied to the whole batch). Counters, not timestamps: the assertions hold
-// regardless of goroutine scheduling order.
+// applied to the whole batch).
+//
+// The overlap is forced, not sampled: a coder is held resident on a gate and
+// the task waits for it. Pre-fix, batchSem gated the whole batch, so a task
+// would block on it and never reach the check.
 func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
 	t.Parallel()
 	script := `
@@ -918,9 +920,9 @@ func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
 		coderRuns      atomic.Int32
 		coderActive    atomic.Int32
 		maxCoderActive atomic.Int32
-		taskActive     atomic.Int32
 		sawOverlap     atomic.Bool
 	)
+	coderGate := make(chan struct{})
 	spawn := func(_ context.Context, _ int, _, prompt string, opts SpawnOpts) (string, error) {
 		if opts.Agent == "coder" {
 			coderRuns.Add(1)
@@ -931,30 +933,47 @@ func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
 					break
 				}
 			}
-			if taskActive.Load() > 0 {
-				sawOverlap.Store(true)
-			}
-			time.Sleep(50 * time.Millisecond)
+			<-coderGate // stay resident until a task has run alongside
 			coderActive.Add(-1)
 		} else {
-			taskActive.Add(1)
-			if coderActive.Load() > 0 {
-				sawOverlap.Store(true)
+			// Wait for a coder to be resident rather than sampling once: a
+			// task can otherwise be admitted and finish before any coder
+			// registers. With one coder on the gate and one waiting on the
+			// batch lock, a slot is always free, so this cannot deadlock.
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) {
+				if coderActive.Load() > 0 {
+					sawOverlap.Store(true)
+					break
+				}
+				time.Sleep(time.Millisecond)
 			}
-			time.Sleep(50 * time.Millisecond)
-			taskActive.Add(-1)
 		}
 		return "ok", nil
 	}
 
-	res, err := Run(context.Background(), script, spawn, Options{MaxConcurrent: 2, MaxAgents: 10})
-	require.NoError(t, err)
-	require.Equal(t, 4, res.AgentCount)
+	type runOutcome struct {
+		res Result
+		err error
+	}
+	done := make(chan runOutcome, 1)
+	go func() {
+		// 3 slots so a waiting task never holds the last one away from a
+		// coder. Pre-fix this still fails: the task blocks on batchSem.
+		res, err := Run(context.Background(), script, spawn, Options{MaxConcurrent: 3, MaxAgents: 10})
+		done <- runOutcome{res, err}
+	}()
+
+	require.Eventually(t, sawOverlap.Load, 2*time.Second, 10*time.Millisecond,
+		"a read-only task must run while a coder holds the batch lock")
+	close(coderGate)
+
+	got := <-done
+	require.NoError(t, got.err)
+	require.Equal(t, 4, got.res.AgentCount)
 	require.Equal(t, int32(2), coderRuns.Load(), "both coders must have run")
 	require.LessOrEqual(t, maxCoderActive.Load(), int32(1),
 		"coder executions must not overlap (Safety 3b)")
-	require.True(t, sawOverlap.Load(),
-		"a read-only task must run while a coder is executing")
 }
 
 // TestParallelRejectsNamedKeys pins W3: a stray named key in the parallel()

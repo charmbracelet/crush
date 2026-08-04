@@ -2712,27 +2712,22 @@ type parsedErrorJSON struct {
 	RetryAfter time.Duration `json:"retryAfter"`
 }
 
-// epochThreshold distinguishes a relative duration in seconds from a Unix
-// epoch timestamp. Providers return both shapes in Retry-After and
-// x-ratelimit-reset-* headers with no way to tell them apart other than
-// magnitude. 1e9 seconds is ~31 years as a relative delay -- never a real
-// backoff -- and 1e9 as an epoch is 2001-09-09, safely in the past, so
-// anything above it is a timestamp.
+// epochThreshold separates a relative delay from a Unix epoch, which
+// providers send interchangeably in Retry-After and x-ratelimit-reset-*
+// with only magnitude to tell them apart. 1e9s is ~31 years as a delay
+// (never a real backoff) and 2001-09-09 as an epoch (safely past).
 const epochThreshold = 1e9
 
 // timeNow is overridable so tests can fix the wall clock for the epoch
 // and HTTP-date duration maths in secondsOrEpoch and parseFlexDuration.
 var timeNow = time.Now
 
-// secondsOrEpoch interprets a positive number of seconds as either a relative
-// delay or a Unix epoch timestamp, depending on magnitude. An epoch already in
-// the past yields a zero duration, which callers would silently treat as
-// "no value"; clamp it to 0 explicitly.
+// secondsOrEpoch reads a positive second count as a relative delay or a Unix
+// epoch by magnitude, clamping an already-past epoch to 0.
 func secondsOrEpoch(sec float64) time.Duration {
 	if sec > epochThreshold {
-		// One clock read: sampling twice lets the wall clock advance between
-		// the comparison and the subtraction, which can yield a small
-		// negative duration for an epoch landing right about now.
+		// One clock read: sampling twice can yield a small negative
+		// duration for an epoch landing right about now.
 		now := timeNow()
 		if t := time.Unix(int64(sec), 0); t.After(now) {
 			return t.Sub(now)
@@ -2770,10 +2765,8 @@ func parseFlexDuration(v any) time.Duration {
 		if d, err := time.ParseDuration(val); err == nil && d > 0 {
 			return d
 		}
-		// Retry-After may also be an HTTP-date (RFC 9110) rather than
-		// delta-seconds. Try it last: a date can never be parsed as a
-		// number, so the numeric forms above take precedence with no
-		// ambiguity.
+		// Retry-After may be an HTTP-date (RFC 9110), not delta-seconds.
+		// Last, since a date never parses as a number.
 		if t, err := http.ParseTime(val); err == nil {
 			if d := t.Sub(timeNow()); d > 0 {
 				return d
@@ -2816,12 +2809,9 @@ func parseJSONErrorString(input string) *parsedErrorJSON {
 	}
 	jsonSub := input[start : end+1]
 
-	// The "error" field is kept as raw JSON because providers disagree on
-	// its shape: OpenAI-style gateways nest an object, while OAuth 2.0
-	// (RFC 6749 §5.2) and several proxy endpoints emit a plain string code
-	// (e.g. "rate_limit_exceeded"). Declaring it as a typed object would
-	// make json.Unmarshal fail on the string form and discard every sibling
-	// field, even ones that parsed fine.
+	// "error" stays raw JSON: OpenAI-style gateways nest an object, OAuth 2.0
+	// (RFC 6749 §5.2) and some proxies send a plain string code. Typing it as
+	// an object makes the string form fail and discards every sibling field.
 	var payload struct {
 		Type            string          `json:"type"`
 		Message         string          `json:"message"`

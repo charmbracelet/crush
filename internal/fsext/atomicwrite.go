@@ -12,19 +12,13 @@ const renameRetryBudget = 2 * time.Second
 
 // AtomicWriteFile writes data to path atomically and durably.
 //
-// Atomicity: it writes to a unique temporary file in the same directory and
-// renames it into place, so concurrent readers observe either the whole old
-// file or the whole new one, never a partial write. This is what prevents a
-// prompt layer reading MEMORY.md at launch from seeing a torn file while the
-// agent rewrites it.
-//
-// Durability: the temp file is fsynced before close and the parent directory
-// is fsynced after the rename. On ext4 with the default data=ordered mode the
-// rename can become durable while the file's data blocks are still in page
-// cache, leaving a zero-length file after a power loss; the file fsync closes
-// that window, and the directory fsync closes the opposite one where a crash
-// loses the rename itself. A directory fsync failure does not fail the write:
-// the data is already renamed into place and visible, so it is only logged.
+// Temp file in the same directory, fsync, rename, then fsync the directory.
+// The rename keeps readers from seeing a torn file (the prompt layer reads
+// MEMORY.md while the agent rewrites it). Both fsyncs are needed: on ext4
+// data=ordered the rename can land while the data blocks are still in page
+// cache, leaving a zero-length file after power loss, and the directory fsync
+// covers the opposite case where the crash loses the rename. A directory
+// fsync failure is only logged -- the data is already visible.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	path = filepath.Clean(path)
 	dir := filepath.Dir(path)
@@ -65,14 +59,12 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-// renameFile renames tmp over path. On Windows the rename fails with
-// ERROR_ACCESS_DENIED while another handle has the destination open, which is
-// exactly the case AtomicWriteFile exists to serve: the prompt layer reads
-// MEMORY.md at launch while the agent may be rewriting it, so without a retry
-// the write surfaces as a failed memory_write ("Access is denied") even
-// though nothing is wrong. On other platforms isTransientRenameError is
-// always false and this is a plain os.Rename. Bounded by renameRetryBudget so
-// a contended rename cannot become an unbounded wait.
+// renameFile renames tmp over path. On Windows this fails with
+// ERROR_ACCESS_DENIED while another handle holds the destination -- the
+// prompt layer reading MEMORY.md at launch -- surfacing as a spurious
+// memory_write "Access is denied" without a retry. Elsewhere
+// isTransientRenameError is always false and this is a plain os.Rename.
+// Bounded by renameRetryBudget so contention cannot hang the write.
 func renameFile(tmp, path string) error {
 	var slept time.Duration
 	delay := time.Millisecond

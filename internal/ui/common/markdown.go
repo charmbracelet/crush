@@ -29,6 +29,7 @@ var (
 	mdCacheMu    sync.Mutex
 	mdCache      = map[int]*glamour.TermRenderer{}
 	quietMDCache = map[int]*glamour.TermRenderer{}
+	userMDCache  = map[int]*glamour.TermRenderer{}
 )
 
 // MarkdownRenderer returns a glamour [glamour.TermRenderer] configured with
@@ -54,6 +55,38 @@ func MarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 		glamour.WithChromaFormatter(formatterName),
 	)
 	mdCache[width] = r
+	return r
+}
+
+// UserMarkdownRenderer returns a glamour [glamour.TermRenderer] configured like
+// [MarkdownRenderer] but with single line breaks preserved. Renderers are
+// memoized per width and shared across callers; call
+// InvalidateMarkdownRendererCache when the active styles change. Same
+// concurrency contract as [MarkdownRenderer]: serialize via
+// [LockMarkdownRenderer].
+//
+// User input is authored in a plain textarea, not written as Markdown source,
+// so a lone newline is a line the user deliberately typed. Standard Markdown
+// treats it as a soft break and joins the lines when rendering, which makes a
+// submitted message display differently from what was typed (see
+// charmbracelet/crush#3502). Preserving newlines keeps the display faithful.
+//
+// This is deliberately NOT applied to [MarkdownRenderer]: assistant output and
+// dialog copy are genuine Markdown, where soft-wrapping a paragraph across
+// source lines is normal and collapsing it is the correct rendering.
+func UserMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
+	mdCacheMu.Lock()
+	defer mdCacheMu.Unlock()
+	if r, ok := userMDCache[width]; ok {
+		return r
+	}
+	r, _ := glamour.NewTermRenderer(
+		glamour.WithStyles(sty.Markdown),
+		glamour.WithWordWrap(width),
+		glamour.WithChromaFormatter(formatterName),
+		glamour.WithPreservedNewLines(),
+	)
+	userMDCache[width] = r
 	return r
 }
 
@@ -96,6 +129,7 @@ func InvalidateMarkdownRendererCache() {
 
 	mdCache = map[int]*glamour.TermRenderer{}
 	quietMDCache = map[int]*glamour.TermRenderer{}
+	userMDCache = map[int]*glamour.TermRenderer{}
 	rendererLocks = map[*glamour.TermRenderer]*sync.Mutex{}
 }
 

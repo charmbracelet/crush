@@ -1160,9 +1160,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusPaymentRequired {
-			url := hyper.BaseURL()
-			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
-			currentAssistant.AddFinish(message.FinishReasonError, "No credits", "You're out of credits. Add more at "+link)
+			var (
+				url   = hyper.BaseURL()
+				link  = linkStyle.Hyperlink(url, "id=hyper").Render(url)
+				title string
+				msg   string
+			)
+			switch {
+			case strings.Contains(err.Error(), "quota"):
+				title = "Monthly quota reached"
+				msg = "You reached your monthly spending quota. A team admin can manage quotas in the dashboard: " + link
+			default:
+				title = "No credits"
+				msg = "You're out of credits. Add more at " + link
+			}
+			currentAssistant.AddFinish(message.FinishReasonError, title, msg)
 		} else if errors.As(err, &providerErr) {
 			if providerErr.Message == "The requested model is not supported." {
 				url := "https://github.com/settings/copilot/features"

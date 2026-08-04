@@ -72,8 +72,9 @@ return findings
 
 ### Coder fan-out (serialised)
 ```lua
--- NOTE: parallel batches with any agent="coder" entry run at
--- concurrency 1 to prevent concurrent writers corrupting files.
+-- NOTE: agent="coder" entries run one at a time relative to each other,
+-- to prevent concurrent writers corrupting files. Other entries in the
+-- same batch are unaffected and still run concurrently.
 -- Worktree isolation (out of scope) would lift this limitation.
 local tasks = {
   {prompt = "Fix the typo in README.md", agent = "coder"},
@@ -97,11 +98,11 @@ return items
 
 ## Constraints and Caps
 - **Max Agents**: 100 agents per workflow.
-- **Max Concurrent**: 5 agents running concurrently (1 when any `parallel()` entry uses `agent = "coder"` — see below).
+- **Max Concurrent**: 5 agents running concurrently (`agent = "coder"` entries additionally run one at a time — see below).
 - **Max Script Size**: 64 KiB.
 - **Timeout**: 30 minutes wall-clock per workflow.
 - **No nested workflows**: subagents cannot call the `workflow` tool themselves, regardless of profile.
-- **Coder batches serialise**: if any entry in a `parallel()` batch requests `agent = "coder"`, that batch runs at concurrency 1 to prevent concurrent writers from corrupting files in the shared working tree. Future work: worktree isolation would remove this restriction.
+- **Coder entries serialise**: within a `parallel()` batch, entries requesting `agent = "coder"` run one at a time relative to each other, to prevent concurrent writers from corrupting files in the shared working tree. Entries that do not request `agent = "coder"` are unaffected and still run concurrently up to Max Concurrent, so mixing read-only `task` entries into a coder batch costs you nothing. Future work: worktree isolation would remove this restriction.
 - Prefer one `parallel` round per stage. Put data transforms between rounds in plain Lua.
 - You must always `return` a JSON-serializable summary.
 - Use `pcall` to catch errors from `agent()` and `parallel()`.

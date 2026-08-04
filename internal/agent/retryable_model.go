@@ -145,6 +145,39 @@ func idleStreamTimeoutError() error {
 	}
 }
 
+// isLongRetryDelay reports whether the provider asked us to wait a minute or
+// more before retrying, by inspecting the error's JSON body, response body,
+// cause chain, and Retry-After / x-ratelimit-reset-* headers.
+//
+// Callers use this to SUPPRESS automatic retry (clearing StatusCode and
+// TransientError) rather than to schedule one: silently sleeping for minutes
+// inside a turn looks like a hang, so a long provider-mandated backoff is
+// surfaced to the user as a terminal error they can act on instead.
+func isLongRetryDelay(err *fantasy.ProviderError) bool {
+	if err == nil {
+		return false
+	}
+	var causeStr string
+	if err.Cause != nil {
+		causeStr = err.Cause.Error()
+	}
+	for _, raw := range []string{err.Message, string(err.ResponseBody), causeStr} {
+		if parsed := parseJSONErrorString(raw); parsed != nil && parsed.RetryAfter >= 1*time.Minute {
+			return true
+		}
+	}
+	if err.ResponseHeaders != nil {
+		for _, k := range []string{"retry-after", "Retry-After", "x-ratelimit-reset-requests", "X-RateLimit-Reset-Requests"} {
+			if val, ok := err.ResponseHeaders[k]; ok {
+				if d := parseFlexDuration(val); d >= 1*time.Minute {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // mapRetryableStreamErr promotes mid-stream provider failures that
 // fantasy's openai adapter leaves unwrapped into retryable
 // ProviderErrors. OpenAI-compatible gateways (Hyper, xAI, …) often
@@ -158,6 +191,10 @@ func mapRetryableStreamErr(err error) error {
 	// Already a ProviderError: leave classification to fantasy.
 	var pe *fantasy.ProviderError
 	if errors.As(err, &pe) {
+		if isLongRetryDelay(pe) {
+			pe.StatusCode = 0
+			pe.TransientError = false
+		}
 		return err
 	}
 	if fantasy.IsTransportError(err) {
@@ -166,32 +203,39 @@ func mapRetryableStreamErr(err error) error {
 
 	var streamErr *ssestream.StreamError
 	if errors.As(err, &streamErr) {
-		if status, retryable, title, msg := classifyStreamError(streamErr); retryable {
-			return &fantasy.ProviderError{
-				Title:      title,
-				Message:    msg,
-				Cause:      err,
-				StatusCode: status,
-			}
+		status, retryable, title, msg := classifyStreamError(streamErr)
+		pErr := &fantasy.ProviderError{
+			Title:      title,
+			Message:    msg,
+			Cause:      err,
+			StatusCode: status,
+		}
+		if isLongRetryDelay(pErr) {
+			pErr.StatusCode = 0
+			pErr.TransientError = false
+			return pErr
+		}
+		if retryable {
+			return pErr
 		}
 		// Non-retryable stream error still gets a clean ProviderError
 		// so the UI shows a title instead of the raw SDK string.
-		title, msg := streamErrorDisplay(streamErr)
-		return &fantasy.ProviderError{
-			Title:   title,
-			Message: msg,
-			Cause:   err,
-		}
+		return pErr
 	}
 
 	// Fallback for wrappers that string-ify the stream error.
 	if isRateLimitMessage(err.Error()) {
-		return &fantasy.ProviderError{
+		pErr := &fantasy.ProviderError{
 			Title:      "rate limit",
 			Message:    err.Error(),
 			Cause:      err,
 			StatusCode: http.StatusTooManyRequests,
 		}
+		if isLongRetryDelay(pErr) {
+			pErr.StatusCode = 0
+			pErr.TransientError = false
+		}
+		return pErr
 	}
 	return err
 }

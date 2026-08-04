@@ -491,6 +491,91 @@ func (c *controllerV1) handleGetWorkspaceMCPStates(w http.ResponseWriter, r *htt
 	jsonEncode(w, result)
 }
 
+// handleGetWorkspaceMCPPendingAuth returns the MCP servers awaiting OAuth
+// authentication for a workspace.
+//
+//	@Summary		Get MCP servers pending OAuth
+//	@Tags			mcp
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Success		200	{array}		proto.MCPPendingAuthServer
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/pending-auth [get]
+func (c *controllerV1) handleGetWorkspaceMCPPendingAuth(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	pending, err := c.backend.MCPPendingAuth(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	result := make([]proto.MCPPendingAuthServer, len(pending))
+	for i, p := range pending {
+		result[i] = proto.MCPPendingAuthServer{Name: p.Name, URL: p.URL}
+	}
+	jsonEncode(w, result)
+}
+
+// handleGetWorkspaceMCPAuthURL returns the current OAuth authorization URL
+// for a named MCP server, if a flow is in progress.
+//
+//	@Summary		Get MCP OAuth authorization URL
+//	@Tags			mcp
+//	@Produce		json
+//	@Param			id		path	string	true	"Workspace ID"
+//	@Param			name	query	string	true	"MCP server name"
+//	@Success		200		{object}	proto.MCPAuthResponse
+//	@Failure		400		{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/auth-url [get]
+func (c *controllerV1) handleGetWorkspaceMCPAuthURL(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		jsonError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	jsonEncode(w, proto.MCPAuthResponse{AuthURL: c.backend.MCPAuthURL(name)})
+}
+
+// handlePostWorkspaceMCPAuth runs the OAuth flow for a named MCP server.
+// The local browser is suppressed on the server; the client polls
+// pending-auth / auth-url to surface the authorization URL on the user's
+// machine. The call blocks until the flow completes or the request context
+// is cancelled.
+//
+//	@Summary		Authenticate an MCP server
+//	@Tags			mcp
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			request	body	proto.MCPNameRequest	true	"MCP name request"
+//	@Success		200		{object}	proto.MCPAuthResponse
+//	@Failure		400		{object}	proto.Error
+//	@Failure		404		{object}	proto.Error
+//	@Failure		500		{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/auth [post]
+func (c *controllerV1) handlePostWorkspaceMCPAuth(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.MCPNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.MCPAuthenticate(r.Context(), id, req.Name); err != nil {
+		// If the client went away the request context was cancelled;
+		// the error is still surfaced for logging but no response can
+		// be written.
+		c.handleError(w, r, err)
+		return
+	}
+	// The flow has finished by the time this returns, so there is no
+	// in-progress authorization URL to report; the client polls
+	// /mcp/auth-url for that while the flow runs.
+	jsonEncode(w, proto.MCPAuthResponse{})
+}
+
 // handlePostWorkspaceMCPRefreshPrompts refreshes prompts for a named MCP server.
 //
 //	@Summary		Refresh MCP prompts

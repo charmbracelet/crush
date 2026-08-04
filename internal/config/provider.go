@@ -136,10 +136,16 @@ var (
 // 2. load the cached providers
 // 3. try to get the fresh list of providers, and return either this new list,
 // the cached list, or the embedded list if all others fail.
+//
+// A returned error is advisory: it reports that the catalog could not be
+// cached, or that an upstream returned nothing usable. It never means that no
+// providers are available, so callers should surface it as a warning and keep
+// using the returned list. A refresh that simply could not reach the network
+// is not an error at all: the cached or embedded catalog is a sound answer, so
+// those are logged and the fallback is returned.
 func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup
-		var errs []error
 		providers := csync.NewSlice[catwalk.Provider]()
 		autoupdate := !cfg.Options.DisableProviderAutoUpdate
 		customProvidersOnly := cfg.Options.DisableDefaultProviders
@@ -147,8 +153,10 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
+		// Each goroutine owns its own error so the two can report
+		// independently without racing on a shared slice.
+		var catwalkErr, hyperErr error
 		var hyperProvider catwalk.Provider
-		var hyperFound bool
 
 		wg.Go(func() {
 			if customProvidersOnly {
@@ -159,11 +167,14 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 			path := cachePathFor("providers")
 			catwalkSyncer.Init(client, path, autoupdate)
 
+			// A failure to refresh or cache the catalog is worth
+			// reporting, but the syncer still hands back the cached or
+			// embedded list. Dropping that would leave the user with no
+			// providers at all over a transient disk or network problem.
 			items, err := catwalkSyncer.Get(ctx)
 			if err != nil {
 				catwalkURL := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
-				errs = append(errs, fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help.\n\nCause: %w", catwalkURL, err)) //nolint:staticcheck
-				return
+				catwalkErr = fmt.Errorf("Crush was unable to fetch an updated list of providers from %s. Consider setting CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Crush release. You can also update providers manually. For more info see crush update-providers --help.\n\nCause: %w", catwalkURL, err) //nolint:staticcheck
 			}
 			providers.Append(items...)
 		})
@@ -175,23 +186,27 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 			path := cachePathFor("hyper")
 			hyperSyncer.Init(realHyperClient{baseURL: hyper.BaseURL()}, path, autoupdate)
 
+			// As above: keep whatever provider we were handed. The syncer
+			// already falls back to the cached or embedded copy, so an
+			// error here means "could not refresh", not "no Hyper". This
+			// matters more than for other providers because Hyper's
+			// endpoint and model list live in the catalog rather than in
+			// the user's config: dropping it signs a logged-in user out.
 			item, err := hyperSyncer.Get(ctx)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("Crush was unable to fetch updated information from Hyper: %w", err)) //nolint:staticcheck
-				return
+				hyperErr = fmt.Errorf("Crush was unable to fetch updated information from Hyper: %w", err) //nolint:staticcheck
 			}
 			hyperProvider = item
-			hyperFound = true
 		})
 
 		wg.Wait()
 
-		if hyperFound {
+		if hyperProvider.ID != "" {
 			providerList = append([]catwalk.Provider{hyperProvider}, slices.Collect(providers.Seq())...)
 		} else {
 			providerList = slices.Collect(providers.Seq())
 		}
-		providerErr = errors.Join(errs...)
+		providerErr = errors.Join(catwalkErr, hyperErr)
 	})
 	return providerList, providerErr
 }
@@ -229,7 +244,11 @@ func (c cache[T]) Store(v T) error {
 		return fmt.Errorf("failed to marshal provider data: %w", err)
 	}
 
-	if err := os.WriteFile(c.path, data, 0o644); err != nil {
+	// Written through a temporary file and renamed into place. Several Crush
+	// instances start independently and race to refresh this cache, and a
+	// truncating write would let one of them read a half-written catalog and
+	// silently fall back to the bundled copy.
+	if err := atomicWriteFile(c.path, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write provider data to cache: %w", err)
 	}
 	return nil

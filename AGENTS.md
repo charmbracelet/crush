@@ -20,7 +20,7 @@ internal/
   cmd/                             CLI commands (root, run, login, models, stats, sessions)
   config/
     config.go                      Config struct, context file paths, agent definitions
-    load.go                        crush.json and crushrc loading and validation
+    load.go                        crushrc and crush.json loading and validation
     provider.go                    Provider configuration and model resolution
   shellconfig/                      Bash-powered config format (crushrc builtins)
   agent/
@@ -72,23 +72,26 @@ internal/
 - **Context files**: Crush reads AGENTS.md, CRUSH.md, CLAUDE.md, GEMINI.md
   (and `.local` variants) from the working directory for project-specific
   instructions.
-- **Bash config format**: In addition to `crush.json`, Crush supports
-  `crushrc` — a Bash script using builtins (`provider`, `model`, `mcp`,
-  `lsp`, `permissions`, `hook`, `options`) to define config. Shell config
-  files are discovered alongside JSON configs and deep-merged through the
-  same pipeline. Builtins are registered via `shell.RegisterBuiltin` and
-  gated by a `ConfigBuilder` on the context — they are no-ops during
-  normal bash tool execution. See `internal/shellconfig/`.
+- **Bash config format**: Crush's primary config format is `crushrc` — a
+  Bash script using builtins (`provider`, `model`, `mcp`, `lsp`,
+  `permissions`, `hook`, `options`) to define config. `crush.json` is still
+  supported but is deprecated in favor of `crushrc` and may be removed in a
+  future release. Shell config files are discovered alongside JSON configs
+  and deep-merged through the same pipeline. Builtins are registered via
+  `shell.RegisterBuiltin` and gated by a `ConfigBuilder` on the context —
+  they are no-ops during normal bash tool execution. See
+  `internal/shellconfig/`.
 - **Persistence**: SQLite + sqlc. All queries live in `internal/db/sql/`,
   generated code in `internal/db/`. Migrations in `internal/db/migrations/`.
 - **Pub/sub**: `internal/pubsub` for decoupled communication between agent,
   UI, and services.
-- **Hooks**: User-defined shell commands in `crush.json` that fire before
-  tool execution. The engine (`internal/hooks/`) is independent of fantasy
-  and agent — it takes inputs, runs commands, returns decisions. The
-  `hookedTool` decorator in `internal/agent/hooked_tool.go` wraps tools at
-  the coordinator level. Hooks run before permission checks. See
-  `HOOKS.md` for the user-facing protocol.
+- **Hooks**: User-defined shell commands in `crushrc` (or `crush.json`)
+  that fire before tool execution. The engine (`internal/hooks/`) is
+  independent of fantasy and agent — it takes inputs, runs commands,
+  returns decisions. The `hookedTool` decorator in
+  `internal/agent/hooked_tool.go` wraps tools at the coordinator level.
+  Hooks run before permission checks. See `HOOKS.md` for the user-facing
+  protocol.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
 

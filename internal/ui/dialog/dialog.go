@@ -54,7 +54,7 @@ type LoadingDialog interface {
 const (
 	// graceQuietPeriod is how long input must be quiet before the dialog
 	// arms. Each absorbed keystroke resets this timer.
-	graceQuietPeriod = 200 * time.Millisecond
+	graceQuietPeriod = 425 * time.Millisecond
 	// graceMaxDelay is the absolute ceiling: the dialog always arms after
 	// this duration regardless of input activity. Prevents auto-repeat
 	// from keeping the dialog disarmed indefinitely.

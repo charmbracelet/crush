@@ -88,6 +88,12 @@ type Handler struct {
 	authURL        string
 	serverURL      string
 	onTokenRefresh func(*oauth.Token)
+
+	// suppressBrowser, when true, prevents openURL from being invoked
+	// (the authorization URL is still recorded and logged). Used when
+	// the flow is driven remotely, e.g. by a connected client that opens
+	// the browser on its own machine.
+	suppressBrowser bool
 }
 
 var _ auth.OAuthHandler = (*Handler)(nil)
@@ -267,6 +273,23 @@ func (h *Handler) AuthURL() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.authURL
+}
+
+// SetBrowserSuppress controls whether the browser is opened automatically
+// when the authorization URL is generated. Pass an unlock function that
+// restores the previous behavior; the handler re-enables the browser when
+// the returned function is called. This is used by the server-driven flow
+// where a remote client opens the browser locally.
+func (h *Handler) SetBrowserSuppress(suppress bool) func() {
+	h.mu.Lock()
+	prev := h.suppressBrowser
+	h.suppressBrowser = suppress
+	h.mu.Unlock()
+	return func() {
+		h.mu.Lock()
+		h.suppressBrowser = prev
+		h.mu.Unlock()
+	}
 }
 
 // Token returns the current OAuth token, or nil if not yet authorized.
@@ -504,9 +527,12 @@ func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *aut
 	r.handler.mu.Lock()
 	r.handler.authURL = authURL
 	open := r.handler.openURL
+	suppress := r.handler.suppressBrowser
 	r.handler.mu.Unlock()
 
-	if err := open(authURL); err != nil {
+	if suppress {
+		slog.Info("Browser suppressed; remote client must open the authorization URL", "url", authURL)
+	} else if err := open(authURL); err != nil {
 		// If the browser can't be opened (headless, remote SSH), keep
 		// the callback listener running and tell the user to open the
 		// URL manually.

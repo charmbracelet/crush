@@ -30,6 +30,7 @@ func xdgIsolate(t *testing.T) {
 // runtimeServer wires the production server handler around an
 // httptest.NewServer for integration testing.
 type runtimeServer struct {
+	srv     *server.Server
 	httpSrv *httptest.Server
 	host    string
 }
@@ -42,13 +43,20 @@ func newRuntimeServer(t *testing.T) *runtimeServer {
 
 	u, err := url.Parse(hs.URL)
 	require.NoError(t, err)
-	return &runtimeServer{httpSrv: hs, host: u.Host}
+	return &runtimeServer{srv: s, httpSrv: hs, host: u.Host}
 }
 
 func (r *runtimeServer) newClient(t *testing.T, path string) *client.Client {
 	t.Helper()
 	c, err := client.NewClient(path, "tcp", r.host)
 	require.NoError(t, err)
+	// Retire the client during cleanup so the server releases every
+	// claim it holds and tears the workspace down at once, closing the
+	// pooled DB connection. Without this a test that leaves clients
+	// attached (the SSE cache tests never shut theirs down) keeps the
+	// workspace, and its open crush.db, alive past t.TempDir cleanup,
+	// which Windows cannot remove while the file is locked.
+	t.Cleanup(func() { _ = c.RetireClient(context.Background()) })
 	return c
 }
 
@@ -173,4 +181,182 @@ loop:
 		}
 	}
 	require.True(t, gotConfigChanged, "expected ConfigChanged event over SSE")
+}
+
+// -- Concurrent session lifecycle --
+//
+// These drive the real HTTP surface, because the bug they cover only
+// appears when two sessions share a server: the first client's workspace
+// died, and the sibling kept the server (and its 404s) alive so the first
+// client never got a fresh start.
+
+// TestServer_ConcurrentSessionsSameDirShareOneWorkspace checks the
+// baseline for two sessions in one directory: they share a workspace, and
+// one of them leaving must not disturb the other.
+func TestServer_ConcurrentSessionsSameDirShareOneWorkspace(t *testing.T) {
+	xdgIsolate(t)
+	rt := newRuntimeServer(t)
+	rt.srv.Backend().SetDetachGrace(0)
+
+	cwd, dataDir := t.TempDir(), t.TempDir()
+	cA, cB := rt.newClient(t, cwd), rt.newClient(t, cwd)
+	ctx := t.Context()
+
+	wsA, err := cA.CreateWorkspace(ctx, proto.Workspace{Path: cwd, DataDir: dataDir})
+	require.NoError(t, err)
+	wsB, err := cB.CreateWorkspace(ctx, proto.Workspace{Path: cwd, DataDir: dataDir})
+	require.NoError(t, err)
+	require.Equal(t, wsA.ID, wsB.ID, "same directory must share one workspace")
+
+	// A leaves. B's claim must keep the workspace addressable.
+	require.NoError(t, cA.RetireClient(ctx))
+	got, err := cB.GetWorkspace(ctx, wsB.ID)
+	require.NoError(t, err, "one client leaving must not destroy the shared workspace")
+	require.Equal(t, wsB.ID, got.ID)
+}
+
+// TestServer_ConcurrentSessionsDifferentDirsAreIndependent is the other
+// half: two directories get two workspaces on one server, and retiring
+// one client must leave the other's workspace completely alone.
+func TestServer_ConcurrentSessionsDifferentDirsAreIndependent(t *testing.T) {
+	xdgIsolate(t)
+	rt := newRuntimeServer(t)
+	rt.srv.Backend().SetDetachGrace(0)
+
+	cwdA, cwdB := t.TempDir(), t.TempDir()
+	cA, cB := rt.newClient(t, cwdA), rt.newClient(t, cwdB)
+	ctx := t.Context()
+
+	wsA, err := cA.CreateWorkspace(ctx, proto.Workspace{Path: cwdA, DataDir: t.TempDir()})
+	require.NoError(t, err)
+	wsB, err := cB.CreateWorkspace(ctx, proto.Workspace{Path: cwdB, DataDir: t.TempDir()})
+	require.NoError(t, err)
+	require.NotEqual(t, wsA.ID, wsB.ID)
+
+	require.NoError(t, cA.RetireClient(ctx))
+
+	_, err = cB.GetWorkspace(ctx, wsB.ID)
+	require.NoError(t, err, "a sibling session's workspace must survive")
+	_, err = cB.GetWorkspace(ctx, wsA.ID)
+	require.ErrorIs(t, err, client.ErrNotFound, "the retired client's workspace must be gone")
+}
+
+// TestServer_RefusesShutdownWhileWorkspaceLive is the invariant that keeps
+// an upgrading client from killing a running session. The refusal has to
+// come from the server: a client checking idleness itself needs a second
+// round trip that a new session can slip into.
+func TestServer_RefusesShutdownWhileWorkspaceLive(t *testing.T) {
+	xdgIsolate(t)
+	rt := newRuntimeServer(t)
+
+	cwd := t.TempDir()
+	cLive := rt.newClient(t, cwd)
+	ctx := t.Context()
+
+	ws, err := cLive.CreateWorkspace(ctx, proto.Workspace{Path: cwd, DataDir: t.TempDir()})
+	require.NoError(t, err)
+
+	// A second client, standing in for one that found a version mismatch.
+	err = rt.newClient(t, t.TempDir()).ShutdownServerIfIdle(ctx)
+	require.ErrorIs(t, err, client.ErrServerBusy,
+		"a server hosting a workspace must refuse to stand down")
+
+	_, err = cLive.GetWorkspace(ctx, ws.ID)
+	require.NoError(t, err, "the live session's workspace must be untouched")
+}
+
+// TestServer_DetachGraceSurvivesStreamBlip is the server-side half of the
+// SSE regression. Cutting the stream used to destroy the workspace
+// instantly, so the client's reconnect — 250ms later — came back to an ID
+// the server no longer knew, and 404'd from then on.
+func TestServer_DetachGraceSurvivesStreamBlip(t *testing.T) {
+	xdgIsolate(t)
+	rt := newRuntimeServer(t)
+	rt.srv.Backend().SetDetachGrace(30 * time.Second)
+
+	cwd := t.TempDir()
+	c := rt.newClient(t, cwd)
+
+	ws, err := c.CreateWorkspace(t.Context(), proto.Workspace{Path: cwd, DataDir: t.TempDir()})
+	require.NoError(t, err)
+
+	streamCtx, killStream := context.WithCancel(t.Context())
+	evc, err := c.SubscribeEvents(streamCtx, ws.ID)
+	require.NoError(t, err)
+
+	// Cut the stream the way a network blip does: no release first.
+	killStream()
+	for range evc { //nolint:revive // Drain until the server closes it.
+	}
+
+	require.Eventually(t, func() bool {
+		_, err := c.GetWorkspace(t.Context(), ws.ID)
+		return err == nil
+	}, 3*time.Second, 25*time.Millisecond,
+		"the workspace must survive the drop so the reconnect can re-attach")
+
+	// The reconnect lands and the workspace is still the same one.
+	evc2, err := c.SubscribeEvents(t.Context(), ws.ID)
+	require.NoError(t, err, "the client must be able to re-attach to its workspace")
+	require.NotNil(t, evc2)
+}
+
+// TestClientWorkspace_RecoversAfterServerSideTeardown is the whole bug,
+// end to end: the server drops the client's workspace while the server
+// itself stays up (a sibling session keeps it alive). The client must
+// notice the 404, re-register, and end up on a workspace it can use again
+// rather than 404ing forever.
+func TestClientWorkspace_RecoversAfterServerSideTeardown(t *testing.T) {
+	xdgIsolate(t)
+	t.Cleanup(workspace.SetSSEBackoffForTest(5*time.Millisecond, 25*time.Millisecond))
+
+	rt := newRuntimeServer(t)
+	rt.srv.Backend().SetDetachGrace(0)
+
+	cwd, dataDir := t.TempDir(), t.TempDir()
+	// A sibling session in another directory keeps the server alive, which
+	// is what made the 404s permanent instead of self-healing.
+	sibling := rt.newClient(t, t.TempDir())
+	siblingCwd := t.TempDir()
+	_, err := sibling.CreateWorkspace(t.Context(), proto.Workspace{
+		Path: siblingCwd, DataDir: t.TempDir(),
+	})
+	require.NoError(t, err)
+
+	c := rt.newClient(t, cwd)
+	wsProto, err := c.CreateWorkspace(t.Context(), proto.Workspace{Path: cwd, DataDir: dataDir})
+	require.NoError(t, err)
+	originalID := wsProto.ID
+
+	// The server drops the workspace while the client still holds the
+	// snapshot naming it. That is what an upgrade, or a teardown racing a
+	// stream drop, leaves behind: a live server that answers 404 for the
+	// only workspace ID this client knows.
+	require.NoError(t, c.DeleteWorkspace(t.Context(), originalID))
+	_, err = c.GetWorkspace(t.Context(), originalID)
+	require.ErrorIs(t, err, client.ErrNotFound, "the workspace must really be gone")
+
+	ws := workspace.NewClientWorkspace(c, *wsProto)
+	done := make(chan struct{})
+	go func() {
+		ws.RunSubscriptionForTest(func(tea.Msg) {})
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		id := ws.WorkspaceIDForTest()
+		return id != "" && id != originalID
+	}, 10*time.Second, 25*time.Millisecond,
+		"the client must re-register instead of retrying a workspace the server forgot")
+
+	// The recovered workspace is usable, which is what 404s prevented.
+	_, err = ws.ListSessions(t.Context())
+	require.NoError(t, err, "the recovered workspace must serve requests again")
+
+	ws.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the subscription loop did not stop after Shutdown")
+	}
 }

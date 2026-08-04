@@ -761,9 +761,61 @@ func setDistinct(typ reflect.Type, field reflect.Value) {
 		m := reflect.MakeMap(typ)
 		m.SetMapIndex(reflect.Zero(typ.Key()), reflect.Zero(typ.Elem()))
 		field.Set(m)
-	case reflect.Ptr:
+	case reflect.Pointer:
 		field.Set(reflect.New(typ.Elem()))
 	default:
 		panic("setDistinct: unhandled kind " + typ.Kind().String())
 	}
+}
+
+// TestBeginAuth_UnknownServer proves BeginAuth rejects a server that is not
+// present in the configuration.
+func TestBeginAuth_UnknownServer(t *testing.T) {
+	cfg := config.NewTestStore(&config.Config{})
+	_, _, err := BeginAuth(cfg, "missing")
+	require.ErrorContains(t, err, "not found")
+}
+
+// TestBeginAuth_NonOAuth proves BeginAuth rejects a server that does not use
+// OAuth over HTTP.
+func TestBeginAuth_NonOAuth(t *testing.T) {
+	cfg := config.NewTestStore(&config.Config{
+		MCP: config.MCPs{
+			"stdio": {Type: config.MCPStdio},
+			"plain": {Type: config.MCPHttp, URL: "https://example.com/mcp"},
+		},
+	})
+	for _, name := range []string{"stdio", "plain"} {
+		_, _, err := BeginAuth(cfg, name)
+		require.ErrorContains(t, err, "does not use OAuth", "name %q", name)
+	}
+}
+
+// TestBeginAuth_Concurrent proves only one browser-suppressed flow per
+// server may be in progress at a time; a second BeginAuth fails fast while
+// the first is outstanding, and succeeds once the first has finished.
+func TestBeginAuth_Concurrent(t *testing.T) {
+	const name = "oauth-http"
+	cfg := config.NewTestStore(&config.Config{
+		MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.com/mcp", OAuth: true}},
+	})
+
+	finish, cancel, err := BeginAuth(cfg, name)
+	require.NoError(t, err)
+	t.Cleanup(cancel)
+
+	// A second flow for the same server must fail fast while the first is
+	// still outstanding.
+	_, _, err = BeginAuth(cfg, name)
+	require.ErrorContains(t, err, "already has an authentication in progress")
+
+	// Finishing the first flow frees the slot for the next caller. Cancel
+	// the request context so finish returns promptly without dialing.
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	cancelCtx()
+	_ = finish(ctx)
+
+	_, cancel2, err := BeginAuth(cfg, name)
+	require.NoError(t, err)
+	cancel2()
 }

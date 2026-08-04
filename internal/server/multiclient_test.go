@@ -196,7 +196,10 @@ func TestPostCurrentSession_UnknownClient(t *testing.T) {
 	ws := installSyntheticWorkspace(t, c)
 
 	rec := postCurrentSession(t, c, ws.ID, uuid.New().String(), "S1")
-	require.Equal(t, http.StatusNotFound, rec.Code)
+	// 409, not 404: the workspace is fine, this client just has no stream
+	// on it. A 404 would look like "workspace gone" and send a recovering
+	// client off to re-register for no reason.
+	require.Equal(t, http.StatusConflict, rec.Code)
 }
 
 func TestPostCurrentSession_HoldOnly(t *testing.T) {
@@ -209,7 +212,7 @@ func TestPostCurrentSession_HoldOnly(t *testing.T) {
 	t.Cleanup(func() { _ = c.backend.DeleteWorkspace(ws.ID, cid) })
 
 	rec := postCurrentSession(t, c, ws.ID, cid, "S1")
-	require.Equal(t, http.StatusNotFound, rec.Code, "hold-only client must be rejected")
+	require.Equal(t, http.StatusConflict, rec.Code, "hold-only client must be rejected")
 }
 
 func TestPostCurrentSession_AttachedClientSucceeds(t *testing.T) {

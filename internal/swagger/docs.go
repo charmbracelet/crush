@@ -22,6 +22,34 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/clients/{client_id}": {
+            "delete": {
+                "tags": [
+                    "system"
+                ],
+                "summary": "Retire a client",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Client ID (UUID)",
+                        "name": "client_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/config": {
             "get": {
                 "produces": [
@@ -52,7 +80,7 @@ const docTemplate = `{
                 "summary": "Send server control command",
                 "parameters": [
                     {
-                        "description": "Control command (e.g. shutdown)",
+                        "description": "Control command (e.g. shutdown, shutdown_if_idle)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -67,6 +95,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
                         }

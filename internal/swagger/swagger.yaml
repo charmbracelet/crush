@@ -1046,6 +1046,24 @@ info:
   title: Crush API
   version: "1.0"
 paths:
+  /clients/{client_id}:
+    delete:
+      parameters:
+      - description: Client ID (UUID)
+        in: path
+        name: client_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Retire a client
+      tags:
+      - system
   /config:
     get:
       produces:
@@ -1063,7 +1081,7 @@ paths:
       consumes:
       - application/json
       parameters:
-      - description: Control command (e.g. shutdown)
+      - description: Control command (e.g. shutdown, shutdown_if_idle)
         in: body
         name: request
         required: true
@@ -1074,6 +1092,10 @@ paths:
           description: OK
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Send server control command

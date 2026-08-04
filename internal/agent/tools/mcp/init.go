@@ -1200,9 +1200,9 @@ func mcpTimeout(m config.MCPConfig) time.Duration {
 	// OAuth flows require user interaction in a browser, so use a
 	// generous default to avoid timing out mid-auth.
 	if m.OAuth {
-		return 5 * time.Minute
+		return 30 * time.Second
 	}
-	return 15 * time.Second
+	return 10 * time.Second
 }
 
 // hasUsableToken returns true if the saved OAuth token has an access

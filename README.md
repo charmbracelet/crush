@@ -370,16 +370,16 @@ for Server-Sent Events.
 
 # Add a local MCP server that runs a Node.js script.
 mcp add filesystem --command node --args /path/to/mcp-server.js \
-  --timeout 120 --disabled-tools some-tool-name --env NODE_ENV production
+  --timeout 10 --disabled-tools some-tool-name --env NODE_ENV production
 
 # Add a GitHub MCP server that uses an API token.
 mcp add github --type http --url "https://api.githubcopilot.com/mcp/" \
-  --timeout 120 --header Authorization "Bearer $GH_PAT" \
+  --timeout 10 --header Authorization "Bearer $GH_PAT" \
   --disabled-tools create_issue --disabled-tools create_pull_request
 
 # Add a streaming MCP server that uses SSE.
 mcp add streaming-service --type sse --url "https://example.com/mcp/sse" \
-  --timeout 120 --header API-Key "$API_KEY"
+  --timeout 10 --header API-Key "$API_KEY"
 ```
 
 #### MCP OAuth

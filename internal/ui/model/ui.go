@@ -293,9 +293,10 @@ type UI struct {
 	// is only honoured while the textarea still holds it, so a whole-value
 	// replacement (history recall, paste) cannot make a stale range point
 	// at unrelated text that happens to be the same length.
-	lastCompletionStart int
-	lastCompletionEnd   int
-	lastCompletionText  string
+	lastCompletionStart    int
+	lastCompletionEnd      int
+	lastCompletionText     string
+	lastCompletionFilePath string // non-empty when the last completion attached a file
 
 	// promptHighlighter styles @file and /skill tokens inline as the user
 	// types. Installed on the textarea via SetHighlighter.
@@ -2686,6 +2687,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						prevHeight := m.textarea.Height()
 						m.textarea.SetValue(val[:m.lastCompletionStart])
 						m.textarea.MoveToEnd()
+						// Remove the attachment that was added alongside
+						// this @file mention, so the chip disappears with
+						// the text.
+						if m.lastCompletionFilePath != "" {
+							m.attachments.RemoveByFilePath(m.lastCompletionFilePath)
+						}
 						m.clearCompletionRange()
 						// Deleting a wrapped completion changes the editor's
 						// height, and the deletion is a draft edit like any
@@ -4032,15 +4039,17 @@ func (m *UI) clearCompletionRange() {
 	m.lastCompletionStart = 0
 	m.lastCompletionEnd = 0
 	m.lastCompletionText = ""
+	m.lastCompletionFilePath = ""
 }
 
 // insertFileCompletion inserts the selected file path into the textarea,
 // replacing the @query, and adds the file as an attachment.
 func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	prevHeight := m.textarea.Height()
-	if !m.insertCompletionText(path) {
+	if !m.insertCompletionText("@" + path) {
 		return nil
 	}
+	m.lastCompletionFilePath = path
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
 
 	fileCmd := func() tea.Msg {
@@ -4100,7 +4109,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 	}
 
 	prevHeight := m.textarea.Height()
-	if !m.insertCompletionText(displayText) {
+	if !m.insertCompletionText("@" + displayText) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)

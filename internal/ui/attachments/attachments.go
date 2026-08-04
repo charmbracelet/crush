@@ -39,6 +39,18 @@ type Attachments struct {
 func (m *Attachments) List() []message.Attachment { return m.list }
 func (m *Attachments) Reset()                     { m.list = nil }
 
+// RemoveByFilePath removes the first attachment whose FilePath matches path.
+// Used when an atomic backspace deletes a @file mention from the prompt so
+// the corresponding attachment chip is removed alongside it.
+func (m *Attachments) RemoveByFilePath(path string) {
+	for i, att := range m.list {
+		if att.FilePath == path {
+			m.list = slices.Delete(m.list, i, i+1)
+			return
+		}
+	}
+}
+
 func (m *Attachments) Update(msg tea.Msg) bool {
 	switch msg := msg.(type) {
 	case message.Attachment:

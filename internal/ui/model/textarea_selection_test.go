@@ -35,8 +35,8 @@ func TestTextareaSelectionKeys(t *testing.T) {
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
 
-	require.True(t, u.textarea.SelectionActive())
-	require.Equal(t, "he", u.textarea.Selection())
+	require.True(t, u.textarea.HasSelection())
+	require.Equal(t, "he", u.textarea.SelectedText())
 }
 
 func TestTextareaMouseSelection(t *testing.T) {
@@ -65,8 +65,8 @@ func TestTextareaMouseSelection(t *testing.T) {
 	_, _ = u.Update(tea.MouseReleaseMsg(tea.Mouse{X: startX + 5, Y: y, Button: uv.MouseLeft}))
 	require.False(t, u.textareaMouseSelecting)
 
-	require.True(t, u.textarea.SelectionActive())
-	require.Equal(t, "hello", u.textarea.Selection())
+	require.True(t, u.textarea.HasSelection())
+	require.Equal(t, "hello", u.textarea.SelectedText())
 }
 
 func TestTextareaMouseClickOutsideDoesNotSelect(t *testing.T) {
@@ -86,5 +86,5 @@ func TestTextareaMouseClickOutsideDoesNotSelect(t *testing.T) {
 	}))
 
 	require.False(t, u.textareaMouseSelecting)
-	require.False(t, u.textarea.SelectionActive())
+	require.False(t, u.textarea.HasSelection())
 }

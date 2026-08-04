@@ -2674,9 +2674,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.closeCompletions()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 			case key.Matches(msg, m.keyMap.Editor.CopySelection):
-				if m.textarea.SelectionActive() {
+				if m.textarea.HasSelection() {
 					cmds = append(cmds, common.CopyToClipboardWithCallback(
-						m.textarea.Selection(),
+						m.textarea.SelectedText(),
 						"Selection copied to clipboard",
 						nil,
 					))
@@ -3511,11 +3511,18 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 			return false, nil
 		}
 		m.textareaMouseSelecting = true
-		fwd = tea.MouseClickMsg(rel)
+		m.textarea.BeginSelection(rel.X, rel.Y)
+		return true, nil
 	case tea.MouseMotionMsg:
-		fwd = tea.MouseMotionMsg(rel)
+		if !m.textareaMouseSelecting {
+			return true, nil
+		}
+		m.textarea.ExtendSelection(rel.X, rel.Y)
+		return true, nil
 	case tea.MouseReleaseMsg:
-		fwd = tea.MouseReleaseMsg(rel)
+		m.textarea.EndSelection()
+		m.textareaMouseSelecting = false
+		return true, nil
 	default:
 		return false, nil
 	}

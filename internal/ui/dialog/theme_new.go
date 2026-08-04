@@ -105,7 +105,9 @@ func (d *ThemeNew) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Title = "New Theme"
 	rc.AddPart(t.Dialog.InputPrompt.Render(d.input.View()))
 	if d.err != "" {
-		rc.AddPart(t.Dialog.TitleError.Render(d.err))
+		errWidth := innerWidth - 2 // account for left and right margins
+		errStyle := t.Dialog.TitleError.Margin(0, 1).MarginBottom(1).Width(errWidth)
+		rc.AddPart(errStyle.Render(d.err))
 	}
 	rc.Help = renderDialogHelp(t, &d.help, d, innerWidth)
 

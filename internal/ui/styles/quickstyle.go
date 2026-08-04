@@ -145,6 +145,10 @@ func quickStyle(o quickStyleOpts) Styles {
 			Shape: tea.CursorBlock,
 			Blink: true,
 		},
+		Selection: textarea.SelectionStyle{
+			Foreground: o.onPrimary,
+			Background: o.secondary,
+		},
 	}
 
 	s.Markdown = ansi.StyleConfig{

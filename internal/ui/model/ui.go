@@ -246,6 +246,11 @@ type UI struct {
 	// Editor components
 	textarea textarea.Model
 
+	// textareaMouseSelecting tracks whether a mouse selection gesture is
+	// currently in progress within the textarea (left button held after a
+	// click inside the textarea region).
+	textareaMouseSelecting bool
+
 	// Active inline editor replaces the textarea when non-nil.
 	activeInline dialog.InlineEditor
 	// inlineCursor stores the cursor from the last inline editor
@@ -391,6 +396,21 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.DynamicHeight = true
 	ta.MinHeight = TextareaMinHeight
 	ta.MaxHeight = TextareaMaxHeight
+	// "ctrl+a" is bound to line-start in the textarea; crush uses "ctrl+g"
+	// for help, so bind select-all to "ctrl+a" instead (line-start remains
+	// available via "home").
+	ta.KeyMap.LineStart = key.NewBinding(
+		key.WithKeys("home"),
+		key.WithHelp("home", "line start"),
+	)
+	ta.KeyMap.SelectAll = key.NewBinding(
+		key.WithKeys("ctrl+a"),
+		key.WithHelp("ctrl+a", "select all"),
+	)
+	// Copying is handled by crush's keymap (Editor.CopySelection) so it can
+	// use crush's clipboard backend and user feedback; disable the
+	// textarea's built-in copy binding.
+	ta.KeyMap.CopySelection = key.NewBinding()
 	ta.Focus()
 
 	scrollbarMode := config.ScrollbarDefault
@@ -1037,6 +1057,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Forward clicks within the textarea region to the textarea so it
+		// can position the cursor and start a selection.
+		if m.activeInline == nil {
+			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
+			}
+		}
+
 		switch m.state {
 		case uiChat:
 			x, y := msg.X, msg.Y
@@ -1069,6 +1098,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					clickable.SetHover(msg.X, msg.Y)
 				}
 			}
+		}
+
+		// While a mouse selection is in progress in the textarea, forward
+		// motion events to it and skip chat drag handling.
+		if m.activeInline == nil && m.textareaMouseSelecting {
+			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
 		}
 
 		switch m.state {
@@ -1112,6 +1150,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+
+		// End any in-progress textarea mouse selection.
+		if m.textareaMouseSelecting {
+			m.textareaMouseSelecting = false
+			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
+				cmds = append(cmds, cmd)
+			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -2550,6 +2597,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+			case key.Matches(msg, m.keyMap.Editor.CopySelection):
+				if m.textarea.SelectionActive() {
+					cmds = append(cmds, common.CopyToClipboardWithCallback(
+						m.textarea.Selection(),
+						"Selection copied to clipboard",
+						nil,
+					))
+					m.textarea.ClearSelection()
+				}
 			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 				cmd := m.handleHistoryUp(msg)
 				if cmd != nil {
@@ -3344,6 +3400,51 @@ func (m *UI) handleTextareaHeightChange(prevHeight int) tea.Cmd {
 // the textarea height changed as a result.
 func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
 	return m.updateTextareaWithPrevHeight(msg, m.textarea.Height())
+}
+
+// forwardMouseToTextarea forwards a mouse event to the textarea with
+// coordinates translated into the textarea's local space. It reports whether
+// the event landed within the textarea's rendered region and was forwarded.
+func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
+	mouse := msg.Mouse()
+
+	// The textarea is rendered inside layout.editor below the attachments
+	// row. renderEditorView always reserves the first row for attachments
+	// (an empty line when there are none), so the textarea always starts
+	// one row below the editor top.
+	const attachmentsRow = 1
+	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+attachmentsRow)
+
+	// The textarea occupies its own height starting at the origin.
+	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
+	if !image.Pt(mouse.X, mouse.Y).In(area) {
+		return false, nil
+	}
+
+	rel := tea.Mouse{
+		X:      mouse.X - origin.X,
+		Y:      mouse.Y - origin.Y,
+		Button: mouse.Button,
+		Mod:    mouse.Mod,
+	}
+
+	var fwd tea.Msg
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		if rel.Button != uv.MouseLeft {
+			return false, nil
+		}
+		m.textareaMouseSelecting = true
+		fwd = tea.MouseClickMsg(rel)
+	case tea.MouseMotionMsg:
+		fwd = tea.MouseMotionMsg(rel)
+	case tea.MouseReleaseMsg:
+		fwd = tea.MouseReleaseMsg(rel)
+	default:
+		return false, nil
+	}
+
+	return true, m.updateTextarea(fwd)
 }
 
 // updateTextareaWithPrevHeight is for cases when the height of the layout may

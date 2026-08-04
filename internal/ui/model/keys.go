@@ -20,6 +20,10 @@ type KeyMap struct {
 		// History navigation
 		HistoryPrev key.Binding
 		HistoryNext key.Binding
+
+		// CopySelection copies the current textarea selection to the
+		// clipboard.
+		CopySelection key.Binding
 	}
 
 	Chat struct {
@@ -154,6 +158,10 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.HistoryNext = key.NewBinding(
 		key.WithKeys("down"),
+	)
+	km.Editor.CopySelection = key.NewBinding(
+		key.WithKeys("ctrl+shift+c"),
+		key.WithHelp("ctrl+shift+c", "copy selection"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(

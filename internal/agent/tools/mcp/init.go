@@ -198,6 +198,20 @@ type ClientInfo struct {
 	// Channel reports whether this server is an active channel, for the MCP
 	// list marker and the channels dialog.
 	Channel bool
+	// A2UITools lists the a2ui_* tools this server exposes. It rides on the
+	// state rather than being read from the tool registry via HasTool
+	// because the registry only exists in the process that owns the MCP
+	// sessions: a client/server TUI has an empty one, so a HasTool gate
+	// there is permanently false and the surface round-trip it guards can
+	// never fire. Only the a2ui_* subset is carried — the UI asks nothing
+	// else, and a full tool list would put every server's whole catalog on
+	// the wire on every state change.
+	A2UITools []string
+}
+
+// ServesA2UITool reports whether the server exposes the named a2ui_* tool.
+func (c ClientInfo) ServesA2UITool(toolName string) bool {
+	return slices.Contains(c.A2UITools, toolName)
 }
 
 // SubscribeEvents returns a channel for MCP events, including channel-message
@@ -501,6 +515,19 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 
 	updatePrompts(name, prompts)
 
+	// Fetch resources and templates eagerly so the status display reflects
+	// the real count from the first connection, not a stale zero.  Both
+	// helpers are no-ops when the server doesn't advertise the resources
+	// capability, and gracefully handle "method not found". Bound the
+	// listing with the same per-server timeout createSession enforces:
+	// initClient runs on the startup critical path under the per-name
+	// lock, and a server that connects but then hangs on resources/list
+	// would otherwise stall WaitForInit indefinitely — with the bound it
+	// degrades to a warn and a zero count.
+	listCtx, cancelList := context.WithTimeout(ctx, mcpTimeout(m))
+	resourceCount, _ := refreshSessionResources(listCtx, name, session)
+	cancelList()
+
 	// A repeated init must not overwrite a live session without closing it —
 	// that leaks the child process and pipes.
 	if old, ok := sessions.Take(name); ok && old != session {
@@ -509,8 +536,9 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 	sessions.Set(name, session)
 
 	updateState(name, StateConnected, nil, session, Counts{
-		Tools:   toolCount,
-		Prompts: len(prompts),
+		Tools:     toolCount,
+		Prompts:   len(prompts),
+		Resources: resourceCount,
 	})
 
 	return session, nil
@@ -522,7 +550,7 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 		closeSession(name, session)
 	}
 
-	// Clear tools, prompts, resources, and auth state for this MCP.
+	// Clear tools, prompts, resources, templates, and auth state for this MCP.
 	clearMCPData(name)
 
 	// Update state to disabled.
@@ -591,12 +619,12 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 		return nil, err
 	}
 
-	// StateError cleared this server's tools, prompts, and resources from the
-	// registry. Re-list and re-register them all on the fresh session and
-	// recompute the counts from what actually registered; otherwise the agent
-	// reconnects but the registries stay empty (the next tool call fails with
-	// "tool not found") while the reported counts still advertise capabilities
-	// that are no longer there.
+	// StateError cleared this server's tools, prompts, resources, and resource
+	// templates from the registry. Re-list and re-register them all on the
+	// fresh session and recompute the counts from what actually registered;
+	// otherwise the agent reconnects but the registries stay empty (the next
+	// tool call fails with "tool not found") while the reported counts still
+	// advertise capabilities that are no longer there.
 	var counts Counts
 	counts.Tools, err = registerSessionTools(ctx, cfg, name, newSess)
 	if err != nil {
@@ -614,13 +642,23 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	updatePrompts(name, prompts)
 	counts.Prompts = len(prompts)
 
-	resources, err := getResources(ctx, newSess)
+	// The StateError transition also purged this server's resources and
+	// resource templates, but counts still carries the pre-error value.
+	// Re-fetch both on the fresh session so the registries and the status
+	// count agree with what the reconnected server actually serves,
+	// instead of advertising N resources over an empty registry.
+	//
+	// A listing failure here is fatal, exactly as it is for tools and
+	// prompts above: this is a renewal of a session we already refused
+	// once, so handing the caller a server that reports StateConnected
+	// with an empty resource registry hides the breakage behind a healthy
+	// status while every '@' completion for it silently disappears.
+	counts.Resources, err = refreshSessionResources(ctx, name, newSess)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		closeSession(name, newSess)
 		return nil, err
 	}
-	counts.Resources = updateResources(name, resources)
 
 	sessions.Set(name, newSess)
 	updateState(name, StateConnected, nil, newSess, counts)
@@ -657,6 +695,9 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		// Channel marks a server that is an active channel, for the MCP list
 		// marker and the channels dialog.
 		Channel: client != nil && client.channel,
+		// Snapshot the a2ui_* capability alongside the counts so a remote
+		// client learns it without reading this process's tool registry.
+		A2UITools: a2uiToolNames(name),
 	}
 	switch state {
 	case StateConnected:
@@ -672,13 +713,14 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		if old, ok := sessions.Take(name); ok {
 			closeSession(name, old)
 		}
-		// Drop every registry entry for the dead server. Leaving prompts or
-		// resources behind lets a disconnected server keep advertising
-		// capabilities the agent can no longer fulfil, the same divergence the
-		// tool clear prevents.
+		// Drop every registry entry for the dead server. Leaving prompts,
+		// resources, or resource templates behind lets a disconnected server
+		// keep advertising capabilities the agent can no longer fulfil, the
+		// same divergence the tool clear prevents.
 		allTools.Del(name)
 		allPrompts.Del(name)
 		allResources.Del(name)
+		allResourceTemplates.Del(name)
 	}
 	states.Set(name, info)
 
@@ -1085,12 +1127,13 @@ func clearOAuthToken(cfg *config.ConfigStore, name string) {
 }
 
 // clearMCPData removes a stale MCP server's tools, prompts,
-// resources, and auth handlers from global state so they are not
-// served to the agent.
+// resources, resource templates, and auth handlers from global state so they
+// are not served to the agent.
 func clearMCPData(name string) {
 	allTools.Del(name)
 	allPrompts.Del(name)
 	allResources.Del(name)
+	allResourceTemplates.Del(name)
 	if h, ok := authURLs.Get(name); ok {
 		h.Close()
 		authURLs.Del(name)

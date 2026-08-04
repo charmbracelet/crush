@@ -122,7 +122,7 @@ func (b *Backend) MCPPendingAuth(workspaceID string) ([]mcptools.PendingAuthServ
 // MCPAuthURL returns the current OAuth authorization URL for a named
 // server, if a flow is in progress.
 func (b *Backend) MCPAuthURL(name string) string {
-	return mcptools.AuthURLFor(name)
+	return mcptools.MCPAuthURL(name)
 }
 
 // MCPAuthenticate runs the OAuth flow for a named MCP server with the

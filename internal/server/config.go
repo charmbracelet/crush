@@ -570,7 +570,10 @@ func (c *controllerV1) handlePostWorkspaceMCPAuth(w http.ResponseWriter, r *http
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, proto.MCPAuthResponse{AuthURL: c.backend.MCPAuthURL(req.Name)})
+	// The flow has finished by the time this returns, so there is no
+	// in-progress authorization URL to report; the client polls
+	// /mcp/auth-url for that while the flow runs.
+	jsonEncode(w, proto.MCPAuthResponse{})
 }
 
 // handlePostWorkspaceMCPRefreshPrompts refreshes prompts for a named MCP server.

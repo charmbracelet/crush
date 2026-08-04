@@ -399,16 +399,9 @@ func PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer {
 	return pending
 }
 
-// AuthURLFor returns the current OAuth authorization URL for the named MCP,
-// or empty if none is in progress. It is the exported counterpart to
-// MCPAuthURL for callers outside the mcp tools package (e.g. the backend).
-func AuthURLFor(name string) string {
-	return MCPAuthURL(name)
-}
-
 // BeginAuth starts the OAuth flow for a server in StateNeedsAuth but
 // suppresses opening a local browser; the caller is responsible for
-// surfacing the authorization URL (via [AuthURLFor]) to the user. It returns
+// surfacing the authorization URL (via [MCPAuthURL]) to the user. It returns
 // a finish function that must be called exactly once with the request
 // context: finish blocks until the flow completes and returns the result.
 //
@@ -872,7 +865,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 
 	// If the caller requested a browser-suppressed flow (server-driven
 	// remote auth), suppress the handler's local browser open; the caller
-	// surfaces AuthURLFor(name) to the user on their own machine.
+	// surfaces MCPAuthURL(name) to the user on their own machine.
 	if oauthHandler != nil {
 		if suppress, _ := ctx.Value(suppressBrowserKey{}).(bool); suppress {
 			oauthHandler.SetBrowserSuppress(true)

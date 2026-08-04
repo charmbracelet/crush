@@ -56,6 +56,7 @@ type ProgressFunc func(Progress)
 
 // Progress carries a snapshot of workflow engine state at one point in time.
 type Progress struct {
+	Seq       int64  // monotonic, assigned under the engine lock
 	Kind      string // "log" | "agent_start" | "agent_done" | "agent_error"
 	Index     int    // agent index, -1 for log events
 	Label     string // agent label if set
@@ -64,6 +65,10 @@ type Progress struct {
 	Completed int    // agents finished (success or error)
 	Total     int    // agents started so far
 }
+
+// Progress has a monotonic Seq: events may be delivered out of order because
+// the engine unlocks before invoking the Progress callback, and consumers
+// must drop any event whose Seq is not greater than the last one they applied.
 
 // Options configures workflow execution limits.
 type Options struct {
@@ -90,6 +95,7 @@ type runState struct {
 	agentIndex     int
 	runningCount   int
 	completedCount int
+	seq            int64
 
 	sem chan struct{}
 }
@@ -125,7 +131,9 @@ func (st *runState) progress(kind string, idx int, label, msg string) {
 		st.runningCount--
 		st.completedCount++
 	}
+	st.seq++
 	p := Progress{
+		Seq:       st.seq,
 		Kind:      kind,
 		Index:     idx,
 		Label:     label,
@@ -425,7 +433,18 @@ func registerParallel(L *lua.LState, st *runState) {
 			L.RaiseError("parallel() requires an array of calls")
 		}
 		t := L.CheckTable(1)
-		calls := tableToSlice(t)
+		calls, err := tableToSlice(t)
+		if err != nil {
+			L.RaiseError("parallel() argument: %s", err.Error())
+		}
+		// Reject stray named keys (e.g. parallel({...}, timeout=30))
+		// deterministically; ForEach would have appended them at a random
+		// position in Go map order.
+		keyCount := 0
+		t.ForEach(func(_, _ lua.LValue) { keyCount++ })
+		if keyCount > len(calls) {
+			L.RaiseError("parallel() expects an array of call objects, got a table with named keys")
+		}
 		if len(calls) == 0 {
 			L.RaiseError("parallel() requires a non-empty array of call objects")
 		}
@@ -497,18 +516,13 @@ func registerParallel(L *lua.LState, st *runState) {
 			go func(i int, pc parsedCall) {
 				defer wg.Done()
 
-				// Acquire the global concurrency semaphore.
-				select {
-				case st.sem <- struct{}{}:
-					defer func() { <-st.sem }()
-				case <-st.ctx.Done():
-					results[i] = spawnResult{err: st.ctx.Err()}
-					return
-				}
-
-				// For coder batches, also acquire the batch-level
-				// serialisation semaphore.
-				if batchSem != nil {
+				// Coder entries serialise against each other (Safety 3b:
+				// concurrent writers corrupt the shared working tree). Acquire
+				// the batch lock BEFORE the global semaphore so a blocked coder
+				// does not sit on a global slot and starve read-only tasks.
+				// Read-only "task" agents never touch the working tree and are
+				// not gated here.
+				if batchSem != nil && pc.spawnOpts.Agent == "coder" {
 					select {
 					case batchSem <- struct{}{}:
 						defer func() { <-batchSem }()
@@ -516,6 +530,15 @@ func registerParallel(L *lua.LState, st *runState) {
 						results[i] = spawnResult{err: st.ctx.Err()}
 						return
 					}
+				}
+
+				// Acquire the global concurrency semaphore.
+				select {
+				case st.sem <- struct{}{}:
+					defer func() { <-st.sem }()
+				case <-st.ctx.Done():
+					results[i] = spawnResult{err: st.ctx.Err()}
+					return
 				}
 
 				st.progress("agent_start", pc.index, pc.label, "")
@@ -577,12 +600,24 @@ func registerLog(L *lua.LState, st *runState) {
 	}))
 }
 
-func tableToSlice(t *lua.LTable) []lua.LValue {
-	var out []lua.LValue
-	t.ForEach(func(_, v lua.LValue) {
+// tableToSlice returns the 1..MaxN array part of t in index order.
+//
+// gopher-lua's ForEach walks the array part in order but then appends the
+// string and hash parts in Go map order, which silently turns a stray named
+// key into an extra positional entry at a random position. Iterating by
+// index instead makes both a hole and a stray key a deterministic error
+// rather than a confusing downstream one.
+func tableToSlice(t *lua.LTable) ([]lua.LValue, error) {
+	n := t.MaxN()
+	out := make([]lua.LValue, 0, n)
+	for i := 1; i <= n; i++ {
+		v := t.RawGetInt(i)
+		if v == lua.LNil {
+			return nil, fmt.Errorf("array has a nil hole at index %d", i)
+		}
 		out = append(out, v)
-	})
-	return out
+	}
+	return out, nil
 }
 
 // luaToGo converts a Lua value to a Go any suitable for json.Marshal.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -821,4 +822,225 @@ func TestTruncateUTF8(t *testing.T) {
 			require.True(t, utf8.ValidString(got))
 		})
 	}
+}
+
+// TestParallelCoderDoesNotStarveReadOnlyTasks pins the lock-order fix: with
+// MaxConcurrent=2 and a mixed batch of 2 coders + 2 tasks, both tasks must
+// start while the coder is still blocked on the batch lock. The old code
+// acquired the global semaphore first, so blocked coders consumed the global
+// slots and the read-only tasks never started.
+//
+// GOMAXPROCS is pinned to 1 so goroutine scheduling is strictly FIFO: the
+// first coder goroutine (created first) acquires a semaphore slot before the
+// tasks ever run. Without the pin the task goroutines can win a slot early,
+// finish, and mask the starvation on the old code.
+func TestParallelCoderDoesNotStarveReadOnlyTasks(t *testing.T) {
+	oldMaxProcs := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(oldMaxProcs) })
+
+	script := `
+		local res = parallel({
+			{prompt = "c1", agent = "coder"},
+			{prompt = "c2", agent = "coder"},
+			{prompt = "t1"},
+			{prompt = "t2"}
+		})
+		return res
+	`
+	var mu sync.Mutex
+	started := map[int]bool{}
+	coderGate := make(chan struct{})
+	spawn := func(_ context.Context, index int, _, prompt string, opts SpawnOpts) (string, error) {
+		mu.Lock()
+		started[index] = true
+		isCoder := opts.Agent == "coder"
+		mu.Unlock()
+		if isCoder {
+			<-coderGate // hold every coder blocked until the test releases it
+		}
+		return "ok", nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(context.Background(), script, spawn, Options{MaxConcurrent: 2, MaxAgents: 10})
+		done <- err
+	}()
+
+	// With GOMAXPROCS=1 the first coder (index 0) runs first: it takes the
+	// batch lock, a global slot, and blocks on the gate. The second coder is
+	// queued on the batch lock and the tasks are queued on the free global
+	// slot. Wait for coder 0 to be blocked before checking the tasks.
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return started[0]
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Tasks are entries 3 and 4, i.e. global indices 2 and 3 (reserveIndices
+	// assigns sequentially from 0). With the coder blocked they must still
+	// start.
+	tasksStarted := false
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		t1, t2 := started[2], started[3]
+		mu.Unlock()
+		if t1 && t2 {
+			tasksStarted = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(coderGate) // release coders so the run can finish
+	require.NoError(t, <-done)
+	require.True(t, tasksStarted,
+		"read-only tasks must start while coders are serialised; blocked coders starved them")
+}
+
+// TestParallelMixedBatchInterleavesTaskBetweenCoders asserts both halves of
+// the fix at once: the two coders never overlap (Safety 3b still holds) and a
+// read-only task runs concurrently with a coder (the batch lock is not
+// applied to the whole batch). Counters, not timestamps: the assertions hold
+// regardless of goroutine scheduling order.
+func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
+	t.Parallel()
+	script := `
+		local res = parallel({
+			{prompt = "c1", agent = "coder"},
+			{prompt = "c2", agent = "coder"},
+			{prompt = "t1"},
+			{prompt = "t2"}
+		})
+		return res
+	`
+	var (
+		coderRuns      atomic.Int32
+		coderActive    atomic.Int32
+		maxCoderActive atomic.Int32
+		taskActive     atomic.Int32
+		sawOverlap     atomic.Bool
+	)
+	spawn := func(_ context.Context, _ int, _, prompt string, opts SpawnOpts) (string, error) {
+		if opts.Agent == "coder" {
+			coderRuns.Add(1)
+			v := coderActive.Add(1)
+			for {
+				cur := maxCoderActive.Load()
+				if v <= cur || maxCoderActive.CompareAndSwap(cur, v) {
+					break
+				}
+			}
+			if taskActive.Load() > 0 {
+				sawOverlap.Store(true)
+			}
+			time.Sleep(50 * time.Millisecond)
+			coderActive.Add(-1)
+		} else {
+			taskActive.Add(1)
+			if coderActive.Load() > 0 {
+				sawOverlap.Store(true)
+			}
+			time.Sleep(50 * time.Millisecond)
+			taskActive.Add(-1)
+		}
+		return "ok", nil
+	}
+
+	res, err := Run(context.Background(), script, spawn, Options{MaxConcurrent: 2, MaxAgents: 10})
+	require.NoError(t, err)
+	require.Equal(t, 4, res.AgentCount)
+	require.Equal(t, int32(2), coderRuns.Load(), "both coders must have run")
+	require.LessOrEqual(t, maxCoderActive.Load(), int32(1),
+		"coder executions must not overlap (Safety 3b)")
+	require.True(t, sawOverlap.Load(),
+		"a read-only task must run while a coder is executing")
+}
+
+// TestParallelRejectsNamedKeys pins W3: a stray named key in the parallel()
+// table must be a deterministic error naming the problem, not a silent extra
+// positional entry at a random Go-map-order position. Run with -count=20 the
+// message must be identical every run.
+func TestParallelRejectsNamedKeys(t *testing.T) {
+	t.Parallel()
+	script := `
+		local ok, err = pcall(function()
+			parallel({ {prompt = "a"}, foo = "bar" })
+		end)
+		if ok then return "fail" end
+		return err
+	`
+	var called atomic.Bool
+	spawn := func(_ context.Context, _ int, _, _ string, _ SpawnOpts) (string, error) {
+		called.Store(true)
+		return "", nil
+	}
+	res, err := Run(context.Background(), script, spawn, Options{})
+	require.NoError(t, err)
+	require.Contains(t, res.Value, "named keys")
+	require.Contains(t, res.Value, "parallel()")
+	require.False(t, called.Load(), "no agent may spawn for a malformed parallel() table")
+}
+
+// TestParallelRejectsNilHole pins W3: a sparse array must be a deterministic
+// error naming the hole index, not a silently compacted list that renumbers
+// the caller's indices.
+func TestParallelRejectsNilHole(t *testing.T) {
+	t.Parallel()
+	script := `
+		local ok, err = pcall(function()
+			parallel({ [1] = {prompt = "a"}, [3] = {prompt = "b"} })
+		end)
+		if ok then return "fail" end
+		return err
+	`
+	res, err := Run(context.Background(), script, nil, Options{})
+	require.NoError(t, err)
+	require.Contains(t, res.Value, "nil hole at index 2")
+}
+
+// TestWorkflowRun_ProgressSeqsContiguous pins the monotonic Seq assignment:
+// across a parallel() of N agents the multiset of Seq values must be exactly
+// 1..2N (each agent emits agent_start and agent_done), with no gaps and no
+// duplicates. Delivery order may vary, assignment must not.
+func TestWorkflowRun_ProgressSeqsContiguous(t *testing.T) {
+	t.Parallel()
+	script := `
+		local calls = {}
+		for i = 1, 4 do
+			calls[i] = {prompt = "p" .. i}
+		end
+		parallel(calls)
+	`
+	var mu sync.Mutex
+	var seqs []int64
+	spawn := func(_ context.Context, _ int, _, _ string, _ SpawnOpts) (string, error) {
+		return "ok", nil
+	}
+
+	_, err := Run(context.Background(), script, spawn, Options{
+		MaxConcurrent: 2,
+		MaxAgents:     10,
+		Progress: func(p Progress) {
+			mu.Lock()
+			seqs = append(seqs, p.Seq)
+			mu.Unlock()
+		},
+	})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, seqs, 8, "4 agents must emit exactly 8 progress events")
+	want := make(map[int64]bool)
+	for i := int64(1); i <= 8; i++ {
+		want[i] = true
+	}
+	for _, s := range seqs {
+		if !want[s] {
+			t.Fatalf("progress Seq %d outside 1..8 or duplicated", s)
+		}
+		delete(want, s)
+	}
+	require.Empty(t, want, "every Seq 1..8 must appear exactly once")
 }

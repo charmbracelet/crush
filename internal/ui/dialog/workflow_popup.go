@@ -45,6 +45,7 @@ type WorkflowPopup struct {
 	running   int
 	completed int
 	total     int
+	lastSeq   int64
 
 	agents     []*WorkflowAgentInfo
 	agentMap   map[int]*WorkflowAgentInfo
@@ -148,6 +149,17 @@ func (w *WorkflowPopup) HandleProgress(wp *notify.WorkflowProgress) {
 	if wp == nil {
 		return
 	}
+
+	// Seq restarts at 1 for each workflow run. Treat that as the start of a
+	// new stream so a retained popup (same tool call ID) cannot swallow it.
+	if wp.Seq == 1 {
+		w.lastSeq = 0
+	}
+	if wp.Seq != 0 && wp.Seq <= w.lastSeq {
+		return
+	}
+	w.lastSeq = wp.Seq
+
 	w.running = wp.Running
 	w.completed = wp.Completed
 	w.total = wp.Total

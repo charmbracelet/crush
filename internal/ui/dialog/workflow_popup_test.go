@@ -142,3 +142,93 @@ func TestWorkflowPopup_Draw(t *testing.T) {
 	cur := wp.Draw(scr, scr.Bounds())
 	require.Nil(t, cur)
 }
+
+// TestWorkflowPopup_DropsStaleSeq pins the out-of-order guard: a packet whose
+// Seq is not greater than the last applied one must be dropped, so a stale
+// agent_start cannot resurrect an agent that already reported done.
+func TestWorkflowPopup_DropsStaleSeq(t *testing.T) {
+	wp := newTestWorkflowPopup(t)
+
+	wp.HandleProgress(&notify.WorkflowProgress{
+		ToolCallID: "call_123",
+		Seq:        1,
+		Kind:       "agent_start",
+		Index:      0,
+		Running:    1,
+		Total:      2,
+	})
+	wp.HandleProgress(&notify.WorkflowProgress{
+		ToolCallID: "call_123",
+		Seq:        2,
+		Kind:       "agent_done",
+		Index:      0,
+		Running:    0,
+		Completed:  1,
+		Total:      2,
+	})
+	require.Equal(t, "done", wp.agents[0].Status)
+
+	// Stale packet: Seq 2 is not greater than the last applied Seq 3.
+	// (Seq 1 would be treated as a new stream start, by design.)
+	wp.HandleProgress(&notify.WorkflowProgress{
+		ToolCallID: "call_123",
+		Seq:        3,
+		Kind:       "agent_error",
+		Index:      1,
+		Message:    "stale-now",
+		Running:    0,
+		Completed:  1,
+		Total:      2,
+	})
+	require.Equal(t, "error", wp.agents[1].Status)
+	wp.HandleProgress(&notify.WorkflowProgress{
+		ToolCallID: "call_123",
+		Seq:        2,
+		Kind:       "agent_start",
+		Index:      1,
+		Message:    "stale",
+		Running:    0,
+		Completed:  1,
+		Total:      2,
+	})
+	require.Equal(t, "done", wp.agents[0].Status,
+		"a stale packet must not resurrect a finished agent")
+	require.Equal(t, "error", wp.agents[1].Status,
+		"a stale packet must not resurrect a finished agent")
+	require.NotEqual(t, "running", wp.agents[1].Status,
+		"a stale agent_start must not be applied")
+	require.Equal(t, 1, wp.completed, "a stale packet must not rewind the counters")
+}
+
+// TestWorkflowPopup_AcceptsRestartedSeq pins the Seq==1 reset: a second
+// workflow run reusing the same tool call ID restarts its sequence at 1 and
+// must be accepted, not swallowed by the retained popup's lastSeq.
+func TestWorkflowPopup_AcceptsRestartedSeq(t *testing.T) {
+	wp := newTestWorkflowPopup(t)
+
+	for seq := int64(1); seq <= 4; seq++ {
+		wp.HandleProgress(&notify.WorkflowProgress{
+			ToolCallID: "call_123",
+			Seq:        seq,
+			Kind:       "agent_start",
+			Index:      0,
+			Running:    1,
+			Total:      1,
+		})
+	}
+	require.Equal(t, int64(4), wp.lastSeq)
+
+	// Second run on the same tool call ID: Seq restarts at 1 and must be
+	// applied, not swallowed.
+	wp.HandleProgress(&notify.WorkflowProgress{
+		ToolCallID: "call_123",
+		Seq:        1,
+		Kind:       "agent_start",
+		Index:      0,
+		Label:      "second run",
+		Running:    1,
+		Total:      1,
+	})
+	require.Equal(t, "running", wp.agents[0].Status)
+	require.Equal(t, "second run", wp.agents[0].Label)
+}

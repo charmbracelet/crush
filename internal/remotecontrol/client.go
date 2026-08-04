@@ -32,16 +32,26 @@ type Handlers struct {
 	OnRequestSnapshot func(sessionID string)
 }
 
+// connState is the per-connection lifetime state. It is immutable once
+// constructed: Connect swaps in a fresh one, and goroutines started for a
+// given connection capture their own pointer. That way a readLoop, pingLoop,
+// or Close belonging to a previous connection can never race a reconnect over
+// the same closeCh / closeOnce, and a dying old readLoop cannot tear down a
+// brand-new connection's state.
+type connState struct {
+	ws        *websocket.Conn
+	closeCh   chan struct{}
+	closeOnce sync.Once
+}
+
 // Client is a multi-session CLI WebSocket client for the crush-remote relay.
 type Client struct {
 	cfg      Config
 	handlers Handlers
 
 	mu        sync.RWMutex
-	ws        *websocket.Conn
+	conn      *connState
 	writeMu   sync.Mutex
-	closeCh   chan struct{}
-	closeOnce sync.Once
 	connected bool
 
 	// sessions maps session id → last advertised info (for reconnect).
@@ -60,7 +70,6 @@ func NewClient(cfg Config) *Client {
 	return &Client{
 		cfg:            cfg,
 		sessions:       make(map[string]SessionInfo),
-		closeCh:        make(chan struct{}),
 		pongWait:       defaultPongWait,
 		pingPeriod:     defaultPingPeriod,
 		writeWait:      defaultWriteWait,
@@ -81,7 +90,7 @@ func (c *Client) SetHandlers(h Handlers) {
 func (c *Client) IsConnected() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.connected && c.ws != nil
+	return c.connected && c.conn != nil
 }
 
 // Connect authenticates and opens the CLI WebSocket. It does not register
@@ -122,20 +131,21 @@ func (c *Client) Connect(ctx context.Context) error {
 		return ws.SetReadDeadline(time.Now().Add(c.pongWait))
 	})
 
-	c.mu.Lock()
-	// Reset close coordination if this is a reconnect after Close.
-	select {
-	case <-c.closeCh:
-		c.closeCh = make(chan struct{})
-		c.closeOnce = sync.Once{}
-	default:
+	// A fresh connState per connection: old goroutines keep operating on the
+	// state they were born with, so a reconnect can never race the previous
+	// connection's closeCh / closeOnce.
+	cs := &connState{
+		ws:      ws,
+		closeCh: make(chan struct{}),
 	}
-	c.ws = ws
+
+	c.mu.Lock()
+	c.conn = cs
 	c.connected = true
 	c.mu.Unlock()
 
-	go c.readLoop()
-	go c.pingLoop(ws)
+	go c.readLoop(cs)
+	go c.pingLoop(cs)
 	// Do not watch ctx here: callers often pass a short dial timeout.
 	// Lifetime is owned by Close() (bridge cancel).
 
@@ -195,9 +205,9 @@ func (c *Client) SessionCount() int {
 // SendEvent writes a typed frame for sessionID.
 func (c *Client) SendEvent(evtType, sessionID string, payload json.RawMessage) error {
 	c.mu.RLock()
-	ws := c.ws
+	cs := c.conn
 	c.mu.RUnlock()
-	if ws == nil {
+	if cs == nil {
 		return fmt.Errorf("remote control not connected")
 	}
 
@@ -211,10 +221,10 @@ func (c *Client) SendEvent(evtType, sessionID string, payload json.RawMessage) e
 
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	if err := ws.SetWriteDeadline(time.Now().Add(c.writeWait)); err != nil {
+	if err := cs.ws.SetWriteDeadline(time.Now().Add(c.writeWait)); err != nil {
 		return err
 	}
-	return ws.WriteJSON(msg)
+	return cs.ws.WriteJSON(msg)
 }
 
 // SendStreamChunk sends a live text chunk for a session.
@@ -265,16 +275,31 @@ func (c *Client) SendError(sessionID string, errp ErrorPayload) error {
 // Close tears down the WebSocket.
 func (c *Client) Close() error {
 	c.mu.Lock()
-	ws := c.ws
-	c.ws = nil
+	cs := c.conn
+	c.conn = nil
 	c.connected = false
 	c.mu.Unlock()
 
-	c.closeOnce.Do(func() { close(c.closeCh) })
-	if ws != nil {
-		return ws.Close()
+	if cs == nil {
+		return nil
 	}
-	return nil
+	cs.closeOnce.Do(func() { close(cs.closeCh) })
+	return cs.ws.Close()
+}
+
+// teardownConn closes a connection's own lifetime state and clears the
+// client's current-connection pointers only if they still point at that
+// connection. An old connection finishing late must not mark a healthy
+// newer connection as down.
+func (c *Client) teardownConn(cs *connState) {
+	cs.closeOnce.Do(func() { close(cs.closeCh) })
+	_ = cs.ws.Close()
+	c.mu.Lock()
+	if c.conn == cs {
+		c.conn = nil
+		c.connected = false
+	}
+	c.mu.Unlock()
 }
 
 func (c *Client) login(ctx context.Context) (string, error) {
@@ -326,48 +351,35 @@ func (c *Client) login(ctx context.Context) (string, error) {
 	return lResp.Token, nil
 }
 
-func (c *Client) pingLoop(ws *websocket.Conn) {
+func (c *Client) pingLoop(cs *connState) {
 	ticker := time.NewTicker(c.pingPeriod)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-c.closeCh:
+		case <-cs.closeCh:
 			return
 		case <-ticker.C:
 			c.writeMu.Lock()
-			err := ws.SetWriteDeadline(time.Now().Add(c.writeWait))
+			err := cs.ws.SetWriteDeadline(time.Now().Add(c.writeWait))
 			if err == nil {
-				err = ws.WriteMessage(websocket.PingMessage, nil)
+				err = cs.ws.WriteMessage(websocket.PingMessage, nil)
 			}
 			c.writeMu.Unlock()
 			if err != nil {
 				slog.Debug("Remote control ping failed", "err", err)
-				_ = c.Close()
+				c.teardownConn(cs)
 				return
 			}
 		}
 	}
 }
 
-func (c *Client) readLoop() {
-	defer func() {
-		c.mu.Lock()
-		c.connected = false
-		c.ws = nil
-		c.mu.Unlock()
-		c.closeOnce.Do(func() { close(c.closeCh) })
-	}()
+func (c *Client) readLoop(cs *connState) {
+	defer c.teardownConn(cs)
 
 	for {
-		c.mu.RLock()
-		ws := c.ws
-		c.mu.RUnlock()
-		if ws == nil {
-			return
-		}
-
 		var msg EventMessage
-		if err := ws.ReadJSON(&msg); err != nil {
+		if err := cs.ws.ReadJSON(&msg); err != nil {
 			slog.Debug("Remote control websocket closed", "err", err)
 			return
 		}

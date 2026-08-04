@@ -116,11 +116,9 @@ func Register(workingDir, dataDir string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Serialise against other processes' Registers (concurrent crush
-	// launches). Acquired inside mu so the lock order is total (mu -> file
-	// lock), matching every other path. If the lock cannot be acquired within
-	// the timeout, log and continue rather than fail startup: losing an LRU
-	// entry is cosmetic, refusing to launch crush is not.
+	// Serialise against other processes' Registers. Acquired inside mu so the
+	// lock order is total (mu -> file lock). On timeout, log and continue:
+	// losing an LRU entry is cosmetic, refusing to launch is not.
 	release, err := lockProjects(context.Background())
 	if err != nil {
 		slog.Debug("Failed to acquire cross-process projects lock; registering without it", "err", err)

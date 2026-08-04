@@ -66,9 +66,8 @@ type Progress struct {
 	Total     int    // agents started so far
 }
 
-// Progress has a monotonic Seq: events may be delivered out of order because
-// the engine unlocks before invoking the Progress callback, and consumers
-// must drop any event whose Seq is not greater than the last one they applied.
+// Progress has a monotonic Seq so out-of-order delivery cannot rewind
+// consumers; drop any event whose Seq is not greater than the last applied.
 
 // Options configures workflow execution limits.
 type Options struct {

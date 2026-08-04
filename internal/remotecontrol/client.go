@@ -32,12 +32,9 @@ type Handlers struct {
 	OnRequestSnapshot func(sessionID string)
 }
 
-// connState is the per-connection lifetime state. It is immutable once
-// constructed: Connect swaps in a fresh one, and goroutines started for a
-// given connection capture their own pointer. That way a readLoop, pingLoop,
-// or Close belonging to a previous connection can never race a reconnect over
-// the same closeCh / closeOnce, and a dying old readLoop cannot tear down a
-// brand-new connection's state.
+// connState is immutable per-connection lifetime state. Each goroutine
+// captures its own pointer, so an old connection's loops and Close can never
+// race a reconnect or tear down its replacement.
 type connState struct {
 	ws        *websocket.Conn
 	closeCh   chan struct{}
@@ -287,10 +284,9 @@ func (c *Client) Close() error {
 	return cs.ws.Close()
 }
 
-// teardownConn closes a connection's own lifetime state and clears the
-// client's current-connection pointers only if they still point at that
-// connection. An old connection finishing late must not mark a healthy
-// newer connection as down.
+// teardownConn closes the connection's own state and clears the client's
+// pointers only if they still point at it, so a late old connection cannot
+// mark a healthy replacement as closed.
 func (c *Client) teardownConn(cs *connState) {
 	cs.closeOnce.Do(func() { close(cs.closeCh) })
 	_ = cs.ws.Close()

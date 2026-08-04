@@ -235,20 +235,26 @@ func (th *Theme) setThemeItems() {
 		currentTheme = "charmtone"
 	}
 
-	builtins := styles.BuiltinThemeNames()
-	items := make([]list.FilterableItem, 0, len(builtins))
+	allThemes := styles.ListAllThemes()
+	items := make([]list.FilterableItem, 0, len(allThemes))
 	selectedIndex := 0
 
-	for i, name := range builtins {
+	for i, info := range allThemes {
+		label := info.Name
+		if info.Overridden {
+			label += " (overridden)"
+		} else if info.Source != styles.ThemeSourceBuiltin {
+			label += " (" + info.Source.String() + ")"
+		}
 		item := &ThemeItem{
 			Versioned: &list.Versioned{},
-			name:      name,
-			label:     name,
-			isCurrent: name == currentTheme,
+			name:      info.Name,
+			label:     label,
+			isCurrent: info.Name == currentTheme,
 			t:         th.com.Styles,
 		}
 		items = append(items, item)
-		if name == currentTheme {
+		if info.Name == currentTheme {
 			selectedIndex = i
 		}
 	}

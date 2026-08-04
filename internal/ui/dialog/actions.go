@@ -75,6 +75,9 @@ type (
 		Palette styles.Palette
 	}
 	ActionRevertThemePalette struct{}
+	ActionDeleteThemeFile    struct {
+		Name string
+	}
 	ActionInitializeProject  struct{}
 	ActionSummarize          struct {
 		SessionID string

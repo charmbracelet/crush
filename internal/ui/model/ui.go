@@ -2033,6 +2033,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.applyTheme(newStyles)
 		m.preThemeStyles = nil
+
+		// Save to user theme file.
+		dirs := styles.ThemeDirs()
+		if len(dirs) > 0 {
+			savePath := filepath.Join(dirs[len(dirs)-1], msg.Base+".json")
+			tf := &styles.ThemeFile{Base: msg.Base, Palette: msg.Palette}
+			if err := styles.SaveThemeFile(savePath, tf); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+		}
+
 		value, err := themePaletteConfigValue(msg.Base, msg.Palette)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
@@ -2050,6 +2062,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if m.preThemeStyles != nil {
 			m.applyTheme(*m.preThemeStyles)
 			m.preThemeStyles = nil
+		}
+		m.dialog.CloseDialog(dialog.ThemeEditorID)
+	case dialog.ActionDeleteThemeFile:
+		if path, err := styles.FindThemeFile(msg.Name); err == nil {
+			if err := os.Remove(path); err != nil {
+				cmds = append(cmds, util.ReportError(fmt.Errorf("delete theme file: %w", err)))
+				break
+			}
+			cmds = append(cmds, util.ReportInfo("Theme "+msg.Name+" reset to builtin"))
 		}
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
 	case dialog.ActionQuit:

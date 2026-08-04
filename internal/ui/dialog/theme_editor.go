@@ -193,6 +193,23 @@ func (ed *ThemeEditor) loadCurrentTheme() {
 	if activeTheme == "" {
 		activeTheme = "charmtone"
 	}
+
+	// Check for a user theme file first.
+	if path, err := styles.FindThemeFile(activeTheme); err == nil {
+		if tf, terr := styles.LoadThemeFile(path); terr == nil {
+			base := tf.Base
+			if base == "" {
+				base = "charmtone"
+			}
+			merged, merr := styles.MergePalette(base, tf.Palette)
+			if merr == nil {
+				ed.base = base
+				ed.palette = merged
+				return
+			}
+		}
+	}
+
 	theme, ok := cfg.Options.TUI.Theme[activeTheme]
 	if !ok {
 		ed.loadBuiltin(activeTheme)

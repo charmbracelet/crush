@@ -2078,12 +2078,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if base == "" {
 			base = "charmtone"
 		}
+		name := msg.Name
+		if err := styles.ValidateThemeName(name); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
 		exported, err := styles.ExportResolvedPalette(base)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		name := generateThemeName(base)
 		dirs := styles.ThemeDirs()
 		if len(dirs) == 0 {
 			cmds = append(cmds, util.ReportError(fmt.Errorf("no theme directory available")))
@@ -2102,6 +2106,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, util.ReportInfo("Created new theme: "+name))
+		m.dialog.CloseDialog(dialog.ThemeNewID)
 		m.dialog.CloseDialog(dialog.ThemeID)
 		m.openThemeEditorDialog()
 	case dialog.ActionQuit:
@@ -4054,18 +4059,6 @@ func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
 }
 
-// generateThemeName creates a unique theme name based on the given base
-// theme. It appends a numeric suffix if the name already exists.
-func generateThemeName(base string) string {
-	candidate := "my-" + base
-	for i := 1; ; i++ {
-		if _, err := styles.FindThemeFile(candidate); err != nil {
-			return candidate
-		}
-		candidate = fmt.Sprintf("my-%s-%d", base, i)
-	}
-}
-
 func themePaletteConfigValue(base string, palette styles.Palette) (map[string]any, error) {
 	data, err := json.Marshal(palette)
 	if err != nil {
@@ -4155,6 +4148,17 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 			Content:  content,
 		}
 	}
+}
+
+// openThemeNewDialog opens the new theme naming dialog. The new theme
+// inherits its palette from the currently active theme.
+func (m *UI) openThemeNewDialog() {
+	if m.dialog.ContainsDialog(dialog.ThemeNewID) {
+		m.dialog.BringToFront(dialog.ThemeNewID)
+		return
+	}
+	base := common.ThemeNameFromConfig(m.com.Config())
+	m.dialog.OpenDialog(dialog.NewThemeNew(m.com, base))
 }
 
 // openThemeDialog opens the theme picker dialog.
@@ -4423,6 +4427,8 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		}
 	case dialog.ThemeID:
 		m.openThemeDialog()
+	case dialog.ThemeNewID:
+		m.openThemeNewDialog()
 	case dialog.ThemeEditorID:
 		m.openThemeEditorDialog()
 	case dialog.QuitID:

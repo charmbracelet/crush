@@ -16,10 +16,6 @@ const (
 	ThemeID              = "theme"
 	themeDialogMaxWidth  = 50
 	themeDialogMaxHeight = 20
-
-	// newThemeItemID identifies the synthetic "New Theme" list entry so it
-	// can be distinguished from real theme names.
-	newThemeItemID = "\x00new-theme"
 )
 
 // Theme is the theme picker dialog.
@@ -44,7 +40,6 @@ type ThemeItem struct {
 	name      string
 	label     string
 	isCurrent bool
-	isNew     bool
 	t         *styles.Styles
 	m         fuzzy.Match
 	cache     map[int]string
@@ -140,9 +135,6 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 			if !ok {
 				break
 			}
-			if themeItem.isNew {
-				return ActionCreateTheme{Base: th.currentThemeName()}
-			}
 			return ActionSwitchTheme{Theme: themeItem.name}
 		default:
 			var cmd tea.Cmd
@@ -164,9 +156,6 @@ func (th *Theme) previewAction() Action {
 	}
 	themeItem, ok := selectedItem.(*ThemeItem)
 	if !ok {
-		return nil
-	}
-	if themeItem.isNew {
 		return nil
 	}
 	return ActionPreviewTheme{Theme: themeItem.name}
@@ -250,7 +239,7 @@ func (th *Theme) setThemeItems() {
 	currentTheme := th.currentThemeName()
 
 	allThemes := styles.ListAllThemes()
-	items := make([]list.FilterableItem, 0, len(allThemes)+1)
+	items := make([]list.FilterableItem, 0, len(allThemes))
 	selectedIndex := 0
 
 	for i, info := range allThemes {
@@ -272,15 +261,6 @@ func (th *Theme) setThemeItems() {
 			selectedIndex = i
 		}
 	}
-
-	// Append the "New Theme" entry at the end of the list.
-	items = append(items, &ThemeItem{
-		Versioned: &list.Versioned{},
-		name:      newThemeItemID,
-		label:     "New Theme…",
-		isNew:     true,
-		t:         th.com.Styles,
-	})
 
 	th.list.SetItems(items...)
 	th.list.SetSelected(selectedIndex)

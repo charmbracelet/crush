@@ -79,10 +79,11 @@ type (
 		Name string
 	}
 	ActionCreateTheme struct {
+		Name string
 		Base string
 	}
-	ActionInitializeProject  struct{}
-	ActionSummarize          struct {
+	ActionInitializeProject struct{}
+	ActionSummarize         struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

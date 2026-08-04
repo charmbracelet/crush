@@ -2,10 +2,12 @@ package styles
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -128,6 +130,29 @@ func FindThemeFile(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("theme file %q not found in %v", name, ThemeDirs())
+}
+
+// validThemeName matches safe theme names: lowercase alphanumerics
+// separated by single hyphens or underscores.
+var validThemeName = regexp.MustCompile(`^[a-z0-9]+([-_][a-z0-9]+)*$`)
+
+// ValidateThemeName reports whether name is usable as a theme file name.
+// It rejects empty names, names with characters that are unsafe in file
+// paths, and names that collide with an existing theme.
+func ValidateThemeName(name string) error {
+	if name == "" {
+		return errors.New("theme name cannot be empty")
+	}
+	if !validThemeName.MatchString(strings.ToLower(name)) {
+		return errors.New("use lowercase letters, numbers, hyphens, and underscores only")
+	}
+	if IsBuiltinTheme(name) {
+		return fmt.Errorf("%q is a built-in theme; edit it instead", name)
+	}
+	if _, err := FindThemeFile(name); err == nil {
+		return fmt.Errorf("theme %q already exists", name)
+	}
+	return nil
 }
 
 // ListUserThemes returns the names of all user-defined themes found

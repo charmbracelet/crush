@@ -195,3 +195,52 @@ func TestIsBuiltinTheme(t *testing.T) {
 	require.True(t, IsBuiltinTheme("Gruvbox-Dark"))
 	require.False(t, IsBuiltinTheme("my-custom"))
 }
+
+func TestValidateThemeName_Valid(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	for _, name := range []string{"neon", "my-theme", "my_theme", "theme2", "a1-b2_c3"} {
+		require.NoError(t, ValidateThemeName(name), "expected %q to be valid", name)
+	}
+}
+
+func TestValidateThemeName_Empty(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	err := ValidateThemeName("")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty")
+}
+
+func TestValidateThemeName_UnsafeCharacters(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	// Path traversal and separators must be rejected so a theme name can
+	// never escape the themes directory.
+	for _, name := range []string{"../evil", "a/b", "a\\b", "my theme", "Theme!", "-lead", "trail-", "a--b"} {
+		require.Error(t, ValidateThemeName(name), "expected %q to be rejected", name)
+	}
+}
+
+func TestValidateThemeName_RejectsBuiltin(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	err := ValidateThemeName("charmtone")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "built-in")
+}
+
+func TestValidateThemeName_RejectsExisting(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "taken.json"), &ThemeFile{Base: "charmtone"}))
+
+	err := ValidateThemeName("taken")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already exists")
+}

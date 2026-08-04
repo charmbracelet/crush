@@ -297,34 +297,12 @@ func (ed *ThemeEditor) renderSlots(width, height int) string {
 }
 
 func newPaletteSlots() []paletteSlot {
-	return []paletteSlot{
-		{name: "primary", get: func(p styles.Palette) string { return p.Primary }, set: func(p *styles.Palette, v string) { p.Primary = v }},
-		{name: "secondary", get: func(p styles.Palette) string { return p.Secondary }, set: func(p *styles.Palette, v string) { p.Secondary = v }},
-		{name: "accent", get: func(p styles.Palette) string { return p.Accent }, set: func(p *styles.Palette, v string) { p.Accent = v }},
-		{name: "keyword", get: func(p styles.Palette) string { return p.Keyword }, set: func(p *styles.Palette, v string) { p.Keyword = v }},
-		{name: "fg_base", get: func(p styles.Palette) string { return p.FgBase }, set: func(p *styles.Palette, v string) { p.FgBase = v }},
-		{name: "fg_subtle", get: func(p styles.Palette) string { return p.FgSubtle }, set: func(p *styles.Palette, v string) { p.FgSubtle = v }},
-		{name: "fg_more_subtle", get: func(p styles.Palette) string { return p.FgMoreSubtle }, set: func(p *styles.Palette, v string) { p.FgMoreSubtle = v }},
-		{name: "fg_most_subtle", get: func(p styles.Palette) string { return p.FgMostSubtle }, set: func(p *styles.Palette, v string) { p.FgMostSubtle = v }},
-		{name: "bg_base", get: func(p styles.Palette) string { return p.BgBase }, set: func(p *styles.Palette, v string) { p.BgBase = v }},
-		{name: "bg_most_visible", get: func(p styles.Palette) string { return p.BgMostVisible }, set: func(p *styles.Palette, v string) { p.BgMostVisible = v }},
-		{name: "bg_less_visible", get: func(p styles.Palette) string { return p.BgLessVisible }, set: func(p *styles.Palette, v string) { p.BgLessVisible = v }},
-		{name: "bg_least_visible", get: func(p styles.Palette) string { return p.BgLeastVisible }, set: func(p *styles.Palette, v string) { p.BgLeastVisible = v }},
-		{name: "on_primary", get: func(p styles.Palette) string { return p.OnPrimary }, set: func(p *styles.Palette, v string) { p.OnPrimary = v }},
-		{name: "separator", get: func(p styles.Palette) string { return p.Separator }, set: func(p *styles.Palette, v string) { p.Separator = v }},
-		{name: "destructive", get: func(p styles.Palette) string { return p.Destructive }, set: func(p *styles.Palette, v string) { p.Destructive = v }},
-		{name: "error", get: func(p styles.Palette) string { return p.Error }, set: func(p *styles.Palette, v string) { p.Error = v }},
-		{name: "warning", get: func(p styles.Palette) string { return p.Warning }, set: func(p *styles.Palette, v string) { p.Warning = v }},
-		{name: "warning_subtle", get: func(p styles.Palette) string { return p.WarningSubtle }, set: func(p *styles.Palette, v string) { p.WarningSubtle = v }},
-		{name: "attention", get: func(p styles.Palette) string { return p.Attention }, set: func(p *styles.Palette, v string) { p.Attention = v }},
-		{name: "busy", get: func(p styles.Palette) string { return p.Busy }, set: func(p *styles.Palette, v string) { p.Busy = v }},
-		{name: "info", get: func(p styles.Palette) string { return p.Info }, set: func(p *styles.Palette, v string) { p.Info = v }},
-		{name: "info_more_subtle", get: func(p styles.Palette) string { return p.InfoMoreSubtle }, set: func(p *styles.Palette, v string) { p.InfoMoreSubtle = v }},
-		{name: "info_most_subtle", get: func(p styles.Palette) string { return p.InfoMostSubtle }, set: func(p *styles.Palette, v string) { p.InfoMostSubtle = v }},
-		{name: "success", get: func(p styles.Palette) string { return p.Success }, set: func(p *styles.Palette, v string) { p.Success = v }},
-		{name: "success_more_subtle", get: func(p styles.Palette) string { return p.SuccessMoreSubtle }, set: func(p *styles.Palette, v string) { p.SuccessMoreSubtle = v }},
-		{name: "success_most_subtle", get: func(p styles.Palette) string { return p.SuccessMostSubtle }, set: func(p *styles.Palette, v string) { p.SuccessMostSubtle = v }},
+	fields := styles.PaletteFields()
+	slots := make([]paletteSlot, len(fields))
+	for i, f := range fields {
+		slots[i] = paletteSlot{name: f.Name, get: f.Get, set: f.Set}
 	}
+	return slots
 }
 
 var _ help.KeyMap = (*ThemeEditor)(nil)

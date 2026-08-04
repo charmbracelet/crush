@@ -30,6 +30,51 @@ func init() {
 	charmtoneByName["charcoal"] = charmtone.Char.Hex()
 }
 
+// PaletteField describes a single customizable color token in a Palette.
+// It pairs the JSON field name with getter/setter accessors so that
+// validation, serialization checks, and UI editors can all iterate
+// over the same ordered list without duplicating field names.
+type PaletteField struct {
+	Name string
+	Get  func(Palette) string
+	Set  func(*Palette, string)
+}
+
+// PaletteFields returns the ordered list of all customizable color
+// tokens in a Palette. This is the single source of truth for field
+// names, ordering, and access; Validate, knownThemeFields, and the
+// theme editor all derive from it.
+func PaletteFields() []PaletteField {
+	return []PaletteField{
+		{"primary", func(p Palette) string { return p.Primary }, func(p *Palette, v string) { p.Primary = v }},
+		{"secondary", func(p Palette) string { return p.Secondary }, func(p *Palette, v string) { p.Secondary = v }},
+		{"accent", func(p Palette) string { return p.Accent }, func(p *Palette, v string) { p.Accent = v }},
+		{"keyword", func(p Palette) string { return p.Keyword }, func(p *Palette, v string) { p.Keyword = v }},
+		{"fg_base", func(p Palette) string { return p.FgBase }, func(p *Palette, v string) { p.FgBase = v }},
+		{"fg_subtle", func(p Palette) string { return p.FgSubtle }, func(p *Palette, v string) { p.FgSubtle = v }},
+		{"fg_more_subtle", func(p Palette) string { return p.FgMoreSubtle }, func(p *Palette, v string) { p.FgMoreSubtle = v }},
+		{"fg_most_subtle", func(p Palette) string { return p.FgMostSubtle }, func(p *Palette, v string) { p.FgMostSubtle = v }},
+		{"bg_base", func(p Palette) string { return p.BgBase }, func(p *Palette, v string) { p.BgBase = v }},
+		{"bg_most_visible", func(p Palette) string { return p.BgMostVisible }, func(p *Palette, v string) { p.BgMostVisible = v }},
+		{"bg_less_visible", func(p Palette) string { return p.BgLessVisible }, func(p *Palette, v string) { p.BgLessVisible = v }},
+		{"bg_least_visible", func(p Palette) string { return p.BgLeastVisible }, func(p *Palette, v string) { p.BgLeastVisible = v }},
+		{"on_primary", func(p Palette) string { return p.OnPrimary }, func(p *Palette, v string) { p.OnPrimary = v }},
+		{"separator", func(p Palette) string { return p.Separator }, func(p *Palette, v string) { p.Separator = v }},
+		{"destructive", func(p Palette) string { return p.Destructive }, func(p *Palette, v string) { p.Destructive = v }},
+		{"error", func(p Palette) string { return p.Error }, func(p *Palette, v string) { p.Error = v }},
+		{"warning", func(p Palette) string { return p.Warning }, func(p *Palette, v string) { p.Warning = v }},
+		{"warning_subtle", func(p Palette) string { return p.WarningSubtle }, func(p *Palette, v string) { p.WarningSubtle = v }},
+		{"attention", func(p Palette) string { return p.Attention }, func(p *Palette, v string) { p.Attention = v }},
+		{"busy", func(p Palette) string { return p.Busy }, func(p *Palette, v string) { p.Busy = v }},
+		{"info", func(p Palette) string { return p.Info }, func(p *Palette, v string) { p.Info = v }},
+		{"info_more_subtle", func(p Palette) string { return p.InfoMoreSubtle }, func(p *Palette, v string) { p.InfoMoreSubtle = v }},
+		{"info_most_subtle", func(p Palette) string { return p.InfoMostSubtle }, func(p *Palette, v string) { p.InfoMostSubtle = v }},
+		{"success", func(p Palette) string { return p.Success }, func(p *Palette, v string) { p.Success = v }},
+		{"success_more_subtle", func(p Palette) string { return p.SuccessMoreSubtle }, func(p *Palette, v string) { p.SuccessMoreSubtle = v }},
+		{"success_most_subtle", func(p Palette) string { return p.SuccessMostSubtle }, func(p *Palette, v string) { p.SuccessMostSubtle = v }},
+	}
+}
+
 // Palette is a JSON-serializable theme palette. Each field maps to a
 // quickStyleOpts color, stored as a hex string ("#rrggbb"). Empty
 // strings mean "inherit from base" when merging.
@@ -214,42 +259,11 @@ func ParseColor(s string) string {
 // error listing all invalid fields.
 func (p Palette) Validate() error {
 	var errs []string
-	validate := func(field, value string) {
-		if value == "" {
-			return
-		}
-		if !IsValidColor(value) {
-			errs = append(errs, fmt.Sprintf("%s: invalid color %q", field, value))
+	for _, f := range PaletteFields() {
+		if v := f.Get(p); v != "" && !IsValidColor(v) {
+			errs = append(errs, fmt.Sprintf("%s: invalid color %q", f.Name, v))
 		}
 	}
-
-	validate("primary", p.Primary)
-	validate("secondary", p.Secondary)
-	validate("accent", p.Accent)
-	validate("keyword", p.Keyword)
-	validate("fg_base", p.FgBase)
-	validate("fg_subtle", p.FgSubtle)
-	validate("fg_more_subtle", p.FgMoreSubtle)
-	validate("fg_most_subtle", p.FgMostSubtle)
-	validate("bg_base", p.BgBase)
-	validate("bg_most_visible", p.BgMostVisible)
-	validate("bg_less_visible", p.BgLessVisible)
-	validate("bg_least_visible", p.BgLeastVisible)
-	validate("on_primary", p.OnPrimary)
-	validate("separator", p.Separator)
-	validate("destructive", p.Destructive)
-	validate("error", p.Error)
-	validate("warning", p.Warning)
-	validate("warning_subtle", p.WarningSubtle)
-	validate("attention", p.Attention)
-	validate("busy", p.Busy)
-	validate("info", p.Info)
-	validate("info_more_subtle", p.InfoMoreSubtle)
-	validate("info_most_subtle", p.InfoMostSubtle)
-	validate("success", p.Success)
-	validate("success_more_subtle", p.SuccessMoreSubtle)
-	validate("success_most_subtle", p.SuccessMostSubtle)
-
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid palette colors: %s", strings.Join(errs, "; "))
 	}

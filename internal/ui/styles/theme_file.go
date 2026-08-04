@@ -21,35 +21,16 @@ type ThemeFile struct {
 }
 
 // knownThemeFields is the set of valid JSON field names in a theme file.
-// Used to warn about unknown fields during loading.
-var knownThemeFields = map[string]bool{
-	"base":                true,
-	"primary":             true,
-	"secondary":           true,
-	"accent":              true,
-	"keyword":             true,
-	"fg_base":             true,
-	"fg_subtle":           true,
-	"fg_more_subtle":      true,
-	"fg_most_subtle":      true,
-	"bg_base":             true,
-	"bg_most_visible":     true,
-	"bg_less_visible":     true,
-	"bg_least_visible":    true,
-	"on_primary":          true,
-	"separator":           true,
-	"destructive":         true,
-	"error":               true,
-	"warning":             true,
-	"warning_subtle":      true,
-	"attention":           true,
-	"busy":                true,
-	"info":                true,
-	"info_more_subtle":    true,
-	"info_most_subtle":    true,
-	"success":             true,
-	"success_more_subtle": true,
-	"success_most_subtle": true,
+// Derived from PaletteFields at init time so it stays in sync with the
+// Palette struct automatically.
+var knownThemeFields map[string]bool
+
+func init() {
+	knownThemeFields = make(map[string]bool, len(PaletteFields())+1)
+	knownThemeFields["base"] = true
+	for _, f := range PaletteFields() {
+		knownThemeFields[f.Name] = true
+	}
 }
 
 // LoadThemeFile reads and validates a theme file from disk. Unknown

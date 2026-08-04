@@ -16,6 +16,10 @@ const (
 	ThemeID              = "theme"
 	themeDialogMaxWidth  = 50
 	themeDialogMaxHeight = 20
+
+	// newThemeItemID identifies the synthetic "New Theme" list entry so it
+	// can be distinguished from real theme names.
+	newThemeItemID = "\x00new-theme"
 )
 
 // Theme is the theme picker dialog.
@@ -31,7 +35,6 @@ type Theme struct {
 		Previous key.Binding
 		UpDown   key.Binding
 		Close    key.Binding
-		NewTheme key.Binding
 	}
 }
 
@@ -41,6 +44,7 @@ type ThemeItem struct {
 	name      string
 	label     string
 	isCurrent bool
+	isNew     bool
 	t         *styles.Styles
 	m         fuzzy.Match
 	cache     map[int]string
@@ -92,10 +96,6 @@ func NewTheme(com *common.Common) *Theme {
 		key.WithHelp("↑/↓", "choose"),
 	)
 	th.keyMap.Close = CloseKey
-	th.keyMap.NewTheme = key.NewBinding(
-		key.WithKeys("n"),
-		key.WithHelp("n", "new theme"),
-	)
 
 	th.setThemeItems()
 	return th
@@ -111,12 +111,6 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, th.keyMap.Close):
 			return ActionRevertThemePreview{}
-		case key.Matches(msg, th.keyMap.NewTheme):
-			currentTheme := "charmtone"
-			if cfg := th.com.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.ActiveTheme != "" {
-				currentTheme = cfg.Options.TUI.ActiveTheme
-			}
-			return ActionCreateTheme{Base: currentTheme}
 		case key.Matches(msg, th.keyMap.Previous):
 			th.list.Focus()
 			if th.list.IsSelectedFirst() {
@@ -146,6 +140,9 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 			if !ok {
 				break
 			}
+			if themeItem.isNew {
+				return ActionCreateTheme{Base: th.currentThemeName()}
+			}
 			return ActionSwitchTheme{Theme: themeItem.name}
 		default:
 			var cmd tea.Cmd
@@ -169,7 +166,20 @@ func (th *Theme) previewAction() Action {
 	if !ok {
 		return nil
 	}
+	if themeItem.isNew {
+		return nil
+	}
 	return ActionPreviewTheme{Theme: themeItem.name}
+}
+
+// currentThemeName returns the active theme name from config, defaulting
+// to charmtone when unset.
+func (th *Theme) currentThemeName() string {
+	cfg := th.com.Config()
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.ActiveTheme == "" {
+		return "charmtone"
+	}
+	return cfg.Options.TUI.ActiveTheme
 }
 
 func (th *Theme) Cursor() *tea.Cursor {
@@ -217,7 +227,6 @@ func (th *Theme) ShortHelp() []key.Binding {
 	return []key.Binding{
 		th.keyMap.UpDown,
 		th.keyMap.Select,
-		th.keyMap.NewTheme,
 		th.keyMap.Close,
 	}
 }
@@ -228,7 +237,6 @@ func (th *Theme) FullHelp() [][]key.Binding {
 		th.keyMap.Select,
 		th.keyMap.Next,
 		th.keyMap.Previous,
-		th.keyMap.NewTheme,
 		th.keyMap.Close,
 	}
 	for i := 0; i < len(slice); i += 4 {
@@ -239,17 +247,10 @@ func (th *Theme) FullHelp() [][]key.Binding {
 }
 
 func (th *Theme) setThemeItems() {
-	currentTheme := ""
-	cfg := th.com.Config()
-	if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-		currentTheme = cfg.Options.TUI.ActiveTheme
-	}
-	if currentTheme == "" {
-		currentTheme = "charmtone"
-	}
+	currentTheme := th.currentThemeName()
 
 	allThemes := styles.ListAllThemes()
-	items := make([]list.FilterableItem, 0, len(allThemes))
+	items := make([]list.FilterableItem, 0, len(allThemes)+1)
 	selectedIndex := 0
 
 	for i, info := range allThemes {
@@ -271,6 +272,15 @@ func (th *Theme) setThemeItems() {
 			selectedIndex = i
 		}
 	}
+
+	// Append the "New Theme" entry at the end of the list.
+	items = append(items, &ThemeItem{
+		Versioned: &list.Versioned{},
+		name:      newThemeItemID,
+		label:     "New Theme…",
+		isNew:     true,
+		t:         th.com.Styles,
+	})
 
 	th.list.SetItems(items...)
 	th.list.SetSelected(selectedIndex)

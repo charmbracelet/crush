@@ -351,16 +351,20 @@ func TestGenerateTitleUsageIsAttributable(t *testing.T) {
 	// its priced message, and the parent's cost row each commit
 	// asynchronously, after Run returns. Poll for every stage instead of
 	// racing the writes.
-	var children []session.Session
+	var childID string
 	require.Eventually(t, func() bool {
-		children, err = env.sessions.ListChildren(t.Context(), sess.ID)
-		return err == nil && len(children) == 1 && children[0].Cost > 0
+		children, err := env.sessions.ListChildren(t.Context(), sess.ID)
+		if err != nil || len(children) != 1 {
+			return false
+		}
+		childID = children[0].ID
+		return children[0].Cost > 0
 	}, 5*time.Second, 20*time.Millisecond,
 		"title generation must record its usage in a sub-session")
 
 	var titleFin *message.Finish
 	require.Eventually(t, func() bool {
-		titleMsgs := assistantMessages(t, env, children[0].ID)
+		titleMsgs := assistantMessages(t, env, childID)
 		if len(titleMsgs) != 1 {
 			return false
 		}
@@ -368,6 +372,11 @@ func TestGenerateTitleUsageIsAttributable(t *testing.T) {
 		return titleFin != nil && titleFin.PromptTokens > 0
 	}, 5*time.Second, 20*time.Millisecond,
 		"title generation must write a priced message")
+	// Re-read the child so the cost comparison uses a fresh row, not a stale
+	// capture from inside the polling closure.
+	children, err := env.sessions.ListChildren(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, childID, children[0].ID)
 	require.InDelta(t, children[0].Cost, titleFin.Cost, 1e-9)
 
 	var recorded float64

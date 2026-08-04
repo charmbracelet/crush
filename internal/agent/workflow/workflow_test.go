@@ -915,11 +915,11 @@ func TestParallelMixedBatchInterleavesTaskBetweenCoders(t *testing.T) {
 		return res
 	`
 	var (
-		coderRuns     atomic.Int32
-		coderActive   atomic.Int32
+		coderRuns      atomic.Int32
+		coderActive    atomic.Int32
 		maxCoderActive atomic.Int32
-		taskActive    atomic.Int32
-		sawOverlap    atomic.Bool
+		taskActive     atomic.Int32
+		sawOverlap     atomic.Bool
 	)
 	spawn := func(_ context.Context, _ int, _, prompt string, opts SpawnOpts) (string, error) {
 		if opts.Agent == "coder" {

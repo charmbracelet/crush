@@ -2,6 +2,7 @@ package styles
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -229,13 +230,30 @@ func BuiltinThemeNames() []string {
 	return names
 }
 
-// LoadTheme loads a theme by built-in name. Returns CharmtonePantera styles
-// for an empty name. Returns an error if the name is not recognized.
+// LoadTheme loads a theme by name. User theme files (in ThemeDirs) take
+// precedence over built-in themes of the same name. Returns
+// CharmtonePantera styles for an empty name. Returns an error if the
+// name is not recognized as either a user file or a built-in.
 func LoadTheme(name string) (Styles, error) {
 	if name == "" {
 		return CharmtonePantera(), nil
 	}
 	key := strings.ToLower(name)
+
+	// Check user theme files first (project-local, then global).
+	if path, err := FindThemeFile(key); err == nil {
+		tf, err := LoadThemeFile(path)
+		if err != nil {
+			return Styles{}, err
+		}
+		base := tf.Base
+		if base == "" {
+			base = "charmtone"
+		}
+		return LoadPaletteTheme(base, tf.Palette)
+	}
+
+	// Fall back to built-in themes.
 	optsFn, ok := builtinThemes[key]
 	if !ok {
 		return Styles{}, fmt.Errorf("unknown theme %q; available themes: %s", name, strings.Join(BuiltinThemeNames(), ", "))
@@ -245,4 +263,131 @@ func LoadTheme(name string) (Styles, error) {
 		s = override(s)
 	}
 	return s, nil
+}
+
+// ThemeSource indicates where a theme definition comes from.
+type ThemeSource int
+
+const (
+	// ThemeSourceBuiltin is a theme compiled into the binary.
+	ThemeSourceBuiltin ThemeSource = iota
+	// ThemeSourceUser is a theme file in ~/.config/crush/themes/.
+	ThemeSourceUser
+	// ThemeSourceProject is a theme file in ./.crush/themes/.
+	ThemeSourceProject
+)
+
+// String returns a human-readable label for the theme source.
+func (s ThemeSource) String() string {
+	switch s {
+	case ThemeSourceUser:
+		return "user"
+	case ThemeSourceProject:
+		return "project"
+	default:
+		return "builtin"
+	}
+}
+
+// ThemeInfo describes an available theme for listing purposes.
+type ThemeInfo struct {
+	Name       string
+	Source     ThemeSource
+	Overridden bool // true if a user/project file shadows a builtin
+}
+
+// ListAllThemes returns all available themes (built-in + user files),
+// sorted by name. Built-in themes that are shadowed by a user file are
+// marked as Overridden and appear with the user/project source instead.
+func ListAllThemes() []ThemeInfo {
+	userThemes, _ := ListUserThemes()
+	userSet := make(map[string]bool, len(userThemes))
+	for _, n := range userThemes {
+		userSet[n] = true
+	}
+
+	// Determine which user themes shadow builtins.
+	overridden := make(map[string]bool)
+	for _, n := range userThemes {
+		if _, ok := builtinThemes[n]; ok {
+			overridden[n] = true
+		}
+	}
+
+	var infos []ThemeInfo
+
+	// Add built-in themes (mark overridden ones).
+	for _, name := range BuiltinThemeNames() {
+		infos = append(infos, ThemeInfo{
+			Name:       name,
+			Source:     ThemeSourceBuiltin,
+			Overridden: overridden[name],
+		})
+	}
+
+	// Add user themes that don't shadow a builtin.
+	for _, name := range userThemes {
+		if _, isBuiltin := builtinThemes[name]; isBuiltin {
+			continue
+		}
+		source := ThemeSourceUser
+		// Check if it's project-local by looking at the first match.
+		if path, err := FindThemeFile(name); err == nil {
+			dirs := ThemeDirs()
+			if len(dirs) > 0 && filepath.Dir(path) == dirs[0] {
+				source = ThemeSourceProject
+			}
+		}
+		infos = append(infos, ThemeInfo{
+			Name:   name,
+			Source: source,
+		})
+	}
+
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].Name < infos[j].Name
+	})
+	return infos
+}
+
+// ExportResolvedPalette resolves a theme fully (all palette tokens
+// filled) and returns it as a ThemeFile suitable for writing to disk.
+// This is used when forking a built-in theme or exporting the current
+// palette. The returned ThemeFile has Base set to the source theme name
+// and all Palette fields populated with resolved color values.
+func ExportResolvedPalette(name string) (*ThemeFile, error) {
+	key := strings.ToLower(name)
+
+	// Check if there's a user theme file first.
+	if path, err := FindThemeFile(key); err == nil {
+		tf, err := LoadThemeFile(path)
+		if err != nil {
+			return nil, err
+		}
+		baseName := tf.Base
+		if baseName == "" {
+			baseName = "charmtone"
+		}
+		resolved, err := MergePalette(baseName, tf.Palette)
+		if err != nil {
+			return nil, err
+		}
+		return &ThemeFile{Base: baseName, Palette: resolved}, nil
+	}
+
+	// Built-in theme: extract full palette from its opts.
+	optsFn, ok := builtinThemes[key]
+	if !ok {
+		return nil, fmt.Errorf("unknown theme %q", name)
+	}
+	return &ThemeFile{
+		Base:    key,
+		Palette: PaletteFromOpts(optsFn()),
+	}, nil
+}
+
+// IsBuiltinTheme reports whether the given name matches a built-in theme.
+func IsBuiltinTheme(name string) bool {
+	_, ok := builtinThemes[strings.ToLower(name)]
+	return ok
 }

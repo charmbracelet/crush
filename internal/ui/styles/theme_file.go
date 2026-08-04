@@ -84,12 +84,19 @@ func SaveThemeFile(path string, tf *ThemeFile) error {
 	return nil
 }
 
+// themeDirsOverride allows tests to replace the default theme directories.
+var themeDirsOverride []string
+
 // ThemeDirs returns the theme search paths in priority order. The first
 // directory that contains a matching theme file wins.
 //
 //   - Project-local: ./.crush/themes/
 //   - User global: ~/.config/crush/themes/ (or platform equivalent)
 func ThemeDirs() []string {
+	if themeDirsOverride != nil {
+		return themeDirsOverride
+	}
+
 	dirs := make([]string, 0, 2)
 
 	// Project-local themes.

@@ -22,10 +22,14 @@ type controlServerOpts struct {
 	// legacy makes the server reject the conditional shutdown command as
 	// unknown, the way every server released before the idleness guard
 	// does. Such a server obeys a plain shutdown unconditionally, so a
-	// client must never send it one.
+	// client must never send it one without first verifying idleness.
 	legacy bool
 	// busy makes the server decline the shutdown because it is in use.
 	busy bool
+	// workspaces is the count the server reports for GET /workspaces,
+	// used by the legacy fallback to decide whether it is safe to send
+	// the unconditional shutdown. Defaults to 0 (idle).
+	workspaces int
 }
 
 // controlLog records the control commands a server received.
@@ -47,6 +51,9 @@ func newControlServer(t *testing.T, opts controlServerOpts) (*url.URL, *controlL
 		switch r.URL.Path {
 		case "/v1/version":
 			require.NoError(t, json.NewEncoder(w).Encode(opts.vi))
+		case "/v1/workspaces":
+			ws := make([]proto.Workspace, opts.workspaces)
+			require.NoError(t, json.NewEncoder(w).Encode(ws))
 		case "/v1/control":
 			var req proto.ServerControl
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
@@ -108,13 +115,32 @@ func TestRestartIfStale_HonorsRefusedShutdown(t *testing.T) {
 		"the request must be the conditional one the server can veto")
 }
 
-// TestRestartIfStale_LeavesLegacyServerRunning is the upgrade-transition
+// TestRestartIfStale_LeavesLegacyServerBusy is the upgrade-transition
 // case. A server predating the idleness guard rejects the conditional
 // command, and the only command it does understand is unconditional —
-// sending that would kill every session it hosts. It has to be left
-// alone; it shuts itself down when it goes idle, and the client after that
-// finds no socket and spawns a current server.
-func TestRestartIfStale_LeavesLegacyServerRunning(t *testing.T) {
+// sending that would kill every session it hosts. When the server
+// reports active workspaces, it must be left alone.
+func TestRestartIfStale_LeavesLegacyServerBusy(t *testing.T) {
+	t.Parallel()
+
+	hostURL, log := newControlServer(t, controlServerOpts{
+		vi:         staleVersion(),
+		legacy:     true,
+		workspaces: 3,
+	})
+
+	restarted, err := restartIfStale(versionCheckCmd(t), hostURL)
+	require.NoError(t, err)
+	require.False(t, restarted, "a legacy server with workspaces must be reused, not replaced")
+	require.Equal(t, []string{proto.ServerControlShutdownIfIdle}, log.all(),
+		"the unconditional shutdown must never be sent when workspaces are active")
+}
+
+// TestRestartIfStale_ShutsDownLegacyServerWhenIdle covers the case where
+// a legacy server (predating shutdown_if_idle) is idle. The client
+// verifies idleness via ListWorkspaces, then sends the unconditional
+// shutdown the old server understands.
+func TestRestartIfStale_ShutsDownLegacyServerWhenIdle(t *testing.T) {
 	t.Parallel()
 
 	hostURL, log := newControlServer(t, controlServerOpts{
@@ -124,9 +150,11 @@ func TestRestartIfStale_LeavesLegacyServerRunning(t *testing.T) {
 
 	restarted, err := restartIfStale(versionCheckCmd(t), hostURL)
 	require.NoError(t, err)
-	require.False(t, restarted, "a legacy server must be reused, not replaced")
-	require.Equal(t, []string{proto.ServerControlShutdownIfIdle}, log.all(),
-		"the unconditional shutdown must never be sent")
+	require.True(t, restarted, "an idle legacy server must be replaced")
+	require.Equal(t,
+		[]string{proto.ServerControlShutdownIfIdle, proto.ServerControlShutdown},
+		log.all(),
+		"the conditional shutdown is tried first, then the unconditional fallback")
 }
 
 // TestRestartIfStale_RestartsWhenServerAgrees preserves the upgrade path:

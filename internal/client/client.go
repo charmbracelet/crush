@@ -148,6 +148,34 @@ func (c *Client) ShutdownServerIfIdle(ctx context.Context) error {
 	return failure
 }
 
+// ShutdownServer sends the original, unconditional "shutdown" command.
+// It exists for backward compatibility with servers that predate
+// [ServerControlShutdownIfIdle]: those servers reject the idle-checked
+// variant with [ErrUnsupported], so a client that has already verified
+// the server is idle (e.g. via [Client.ListWorkspaces]) can fall back to
+// this command to replace an old server.
+//
+// New servers apply the same idleness check to this command as they do
+// to [ServerControlShutdownIfIdle], so it is never more dangerous.
+func (c *Client) ShutdownServer(ctx context.Context) error {
+	rsp, err := c.post(ctx, "/control", nil, jsonBody(proto.ServerControl{
+		Command: proto.ServerControlShutdown,
+	}), nil)
+	if err != nil {
+		return err
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode == http.StatusOK {
+		return nil
+	}
+	failure := fmt.Errorf("server shutdown failed: %s", rsp.Status)
+	switch rsp.StatusCode {
+	case http.StatusConflict:
+		return fmt.Errorf("%w: %w", ErrServerBusy, failure)
+	}
+	return failure
+}
+
 // RetireClient tells the server this client has exited, releasing every
 // claim it holds on every workspace. It is the client's authoritative
 // goodbye: after it returns, the server refuses further workspace

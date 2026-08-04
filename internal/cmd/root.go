@@ -769,9 +769,34 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 	// the same safe outcome: keep using the running server. The wrapped
 	// error says which it was.
 	if err := c.ShutdownServerIfIdle(cmd.Context()); err != nil {
-		slog.Warn("Server version differs but it will not stand down; reusing it",
-			append(versionFields, "error", err)...)
-		return false, nil
+		if errors.Is(err, client.ErrUnsupported) {
+			// The server predates shutdown_if_idle. It still accepts
+			// the unconditional "shutdown" command, but that command
+			// is unconditional on old servers: it will take live
+			// sessions down. Only use it when we can verify the server
+			// is idle by listing workspaces.
+			workspaces, listErr := c.ListWorkspaces(cmd.Context())
+			if listErr != nil {
+				slog.Warn("Server version differs but it will not stand down; reusing it",
+					append(versionFields, "error", err, "list_error", listErr)...)
+				return false, nil
+			}
+			if len(workspaces) > 0 {
+				slog.Warn("Server version differs and has active workspaces; reusing it",
+					append(versionFields, "workspaces", len(workspaces))...)
+				return false, nil
+			}
+			if err := c.ShutdownServer(cmd.Context()); err != nil {
+				slog.Warn("Server version differs but it will not stand down; reusing it",
+					append(versionFields, "error", err)...)
+				return false, nil
+			}
+			// Fall through to the socket-gone wait below.
+		} else {
+			slog.Warn("Server version differs but it will not stand down; reusing it",
+				append(versionFields, "error", err)...)
+			return false, nil
+		}
 	}
 	slog.Info("Stale server accepted shutdown, restarting", versionFields...)
 	if err := awaitSocketGone(cmd.Context(), hostURL); err != nil {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lock"
 )
 
@@ -115,7 +116,7 @@ func NewMemoryTool(dataDir string) fantasy.AgentTool {
 				}
 
 				body := formatMemoryFile(params.Description, params.Content)
-				if err := atomicWriteFile(path, []byte(body), 0o644); err != nil {
+				if err := fsext.AtomicWriteFile(path, []byte(body), 0o644); err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("write memory file: %w", err)
 				}
 
@@ -127,7 +128,7 @@ func NewMemoryTool(dataDir string) fantasy.AgentTool {
 					// The prompt layer would truncate this entry away, so the
 					// save would silently do nothing. Undo it and say so.
 					if hadPrev {
-						err = atomicWriteFile(path, prev, 0o644)
+						err = fsext.AtomicWriteFile(path, prev, 0o644)
 					} else {
 						err = os.Remove(path)
 					}
@@ -263,7 +264,7 @@ func writeMemoryIndex(memoryDir, index string) error {
 		return nil
 	}
 	index = clampMemoryIndex(index)
-	return atomicWriteFile(filepath.Join(memoryDir, memoryIndexFileName), []byte(index), 0o644)
+	return fsext.AtomicWriteFile(filepath.Join(memoryDir, memoryIndexFileName), []byte(index), 0o644)
 }
 
 // clampMemoryIndex trims index to whole lines within MaxMemoryIndexBytes.
@@ -364,64 +365,4 @@ func lockMemoryDir(ctx context.Context, dataDir string) (func(), error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return lock.File(ctx, lockPath)
-}
-
-// atomicWriteFile writes data to path atomically by writing to a temporary
-// file in the same directory and renaming it into place.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Chmod(perm); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := renameWithRetry(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
-}
-
-// renameRetries bounds the rename retry loop. Kept small and finite: a
-// contended rename must not turn into an unbounded wait.
-const (
-	renameRetries = 20
-	renameBackoff = 25 * time.Millisecond
-)
-
-// renameWithRetry renames tmp over path, retrying briefly on failure.
-//
-// On POSIX the rename succeeds first time and this is a plain os.Rename. On
-// Windows it can fail with ERROR_ACCESS_DENIED while another handle has the
-// destination open, which is exactly the case atomicWriteFile exists to
-// serve: the prompt layer reads MEMORY.md at launch while the agent may be
-// rewriting it. Without a retry that surfaces to the user as a failed
-// memory_write ("write memory file: ... Access is denied") even though
-// nothing is wrong. Bounded at renameRetries*renameBackoff, after which the
-// original error is returned.
-func renameWithRetry(tmp, path string) error {
-	var err error
-	for i := range renameRetries {
-		if err = os.Rename(tmp, path); err == nil {
-			return nil
-		}
-		if i < renameRetries-1 {
-			time.Sleep(renameBackoff)
-		}
-	}
-	return err
 }

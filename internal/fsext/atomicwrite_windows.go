@@ -1,6 +1,6 @@
 //go:build windows
 
-package config
+package fsext
 
 import (
 	"errors"
@@ -16,3 +16,10 @@ func isTransientRenameError(err error) bool {
 	return errors.Is(err, windows.ERROR_ACCESS_DENIED) ||
 		errors.Is(err, windows.ERROR_SHARING_VIOLATION)
 }
+
+// syncDir is a documented no-op on Windows: opening a directory handle and
+// calling Sync on it fails there, and there is no portable equivalent. The
+// data blocks are already fsynced by AtomicWriteFile, so the only loss is the
+// rename itself surviving a crash, which Windows journals at the filesystem
+// level for NTFS.
+func syncDir(string) error { return nil }

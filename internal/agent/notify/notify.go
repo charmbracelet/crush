@@ -42,6 +42,7 @@ const TypeWorkflowProgress Type = "workflow_progress"
 // WorkflowProgress carries live progress for a running workflow tool.
 type WorkflowProgress struct {
 	ToolCallID string
+	Seq        int64  // monotonic per workflow run; consumers drop non-increasing events
 	Kind       string // "log" | "agent_start" | "agent_done" | "agent_error"
 	Index      int
 	Label      string
@@ -111,6 +112,19 @@ type RunComplete struct {
 	Cancelled bool
 }
 
+// FormatRetryReason returns the formatted provider reason string with provider ID prefix.
+func FormatRetryReason(n Notification) string {
+	reason := strings.TrimSpace(n.Message)
+	provider := strings.TrimSpace(n.ProviderID)
+	if provider != "" && reason != "" && !strings.Contains(strings.ToLower(reason), strings.ToLower(provider)) {
+		return "[" + provider + "] " + reason
+	}
+	if provider != "" && reason == "" {
+		return "[" + provider + "]"
+	}
+	return reason
+}
+
 // FormatRetryStatus builds the user-facing retry countdown line shown in
 // the status bar and on the assistant working spinner while the agent
 // backs off before the next provider attempt.
@@ -125,7 +139,28 @@ func FormatRetryStatus(n Notification, remaining time.Duration) string {
 	secs := int((remaining + time.Second - 1) / time.Second)
 	left := n.MaxRetries - n.Attempt + 1
 	msg := fmt.Sprintf("Retrying in %ds (%d/%d retries left)", secs, left, n.MaxRetries)
-	reason := strings.TrimSpace(n.Message)
+	reason := FormatRetryReason(n)
+	if reason != "" {
+		msg += " - " + reason
+	}
+	return msg
+}
+
+// FormatRetryStatusCompact builds an ultra-concise retry string tailored for narrow terminal windows.
+func FormatRetryStatusCompact(n Notification, remaining time.Duration) string {
+	if remaining < time.Second {
+		remaining = time.Second
+	}
+	secs := int((remaining + time.Second - 1) / time.Second)
+	msg := fmt.Sprintf("Retrying in %ds", secs)
+
+	// Strip HTTP status prefix to save horizontal space in narrow split terminals
+	nCompact := n
+	cleanMsg := strings.TrimPrefix(nCompact.Message, "HTTP 429 - ")
+	cleanMsg = strings.TrimPrefix(cleanMsg, "HTTP 503 - ")
+	nCompact.Message = cleanMsg
+
+	reason := FormatRetryReason(nCompact)
 	if reason != "" {
 		msg += " - " + reason
 	}

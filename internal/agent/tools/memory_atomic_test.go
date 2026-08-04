@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +32,7 @@ func TestAtomicWriteFileIsAtomicUnderConcurrentReads(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, memoryIndexFileName)
 	want := []byte(strings.Repeat("A", 1<<20)) // large enough that a non-atomic write is observably torn
-	require.NoError(t, atomicWriteFile(path, want, 0o644))
+	require.NoError(t, fsext.AtomicWriteFile(path, want, 0o644))
 
 	stop := make(chan struct{})
 	short := make(chan int, 1024)
@@ -59,7 +60,7 @@ func TestAtomicWriteFileIsAtomicUnderConcurrentReads(t *testing.T) {
 
 	denied := 0
 	for range 200 {
-		if err := atomicWriteFile(path, want, 0o644); err != nil {
+		if err := fsext.AtomicWriteFile(path, want, 0o644); err != nil {
 			// Availability, not atomicity. See the doc comment.
 			denied++
 			continue
@@ -176,22 +177,20 @@ func TestRegenerateMemoryIndexStaysWithinPromptBudget(t *testing.T) {
 		string(written[max(0, len(written)-40):]))
 }
 
-// TestRenameWithRetryGivesUpAndReturnsTheError pins the retry bound. A
-// contended rename must not become an unbounded wait, and a rename that can
-// never succeed must surface its error rather than spin.
-func TestRenameWithRetryGivesUpAndReturnsTheError(t *testing.T) {
+// TestAtomicWriteFileGivesUpAndReturnsTheError pins the retry bound on the
+// shared helper: a write that can never succeed must surface its error rather
+// than spin, and the retry budget in fsext keeps the wait bounded.
+func TestAtomicWriteFileGivesUpAndReturnsTheError(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "src")
-	require.NoError(t, os.WriteFile(src, []byte("x"), 0o644))
 	// Destination directory does not exist, so the rename can never succeed.
 	dst := filepath.Join(dir, "no-such-dir", "dst")
 
 	start := time.Now()
-	err := renameWithRetry(src, dst)
+	err := fsext.AtomicWriteFile(dst, []byte("x"), 0o644)
 	elapsed := time.Since(start)
 
-	require.Error(t, err, "an impossible rename must return its error")
-	upper := time.Duration(renameRetries) * renameBackoff * 4
+	require.Error(t, err, "an impossible write must return its error")
+	upper := 10 * time.Second
 	require.Less(t, elapsed, upper,
-		"renameWithRetry took %s; the retry loop must stay bounded", elapsed)
+		"AtomicWriteFile took %s; the retry loop must stay bounded", elapsed)
 }

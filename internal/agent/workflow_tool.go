@@ -272,6 +272,7 @@ func (c *coordinator) workflowTool(ctx context.Context) (fantasy.AgentTool, erro
 					ProviderID: "",
 					WorkflowProgress: &notify.WorkflowProgress{
 						ToolCallID: call.ID,
+						Seq:        p.Seq,
 						Kind:       p.Kind,
 						Index:      p.Index,
 						Label:      p.Label,

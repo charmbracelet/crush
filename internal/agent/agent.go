@@ -1165,7 +1165,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				// The TUI owns the display copy; we only persist the
 				// reason so the UI can show a REFUSED banner.
 				finishReason = message.FinishReasonContentFilter
-				slog.Warn("Provider content filter stopped the model",
+				slog.Warn(
+					"Provider content filter stopped the model",
 					"session_id", call.SessionID,
 					"finish_reason", string(stepResult.FinishReason),
 				)
@@ -1343,7 +1344,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
 				)
 			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+				title, body := formatProviderErrorForAssistant(providerErr)
+				currentAssistant.AddFinish(message.FinishReasonError, title, body)
 			}
 		} else if errors.As(err, &fantasyErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
@@ -2704,16 +2706,364 @@ func newRetryAttemptReporter(a *sessionAgent, sessionID, providerID string, maxR
 	}
 }
 
+type parsedErrorJSON struct {
+	Type       string        `json:"type"`
+	Message    string        `json:"message"`
+	RetryAfter time.Duration `json:"retryAfter"`
+}
+
+// epochThreshold separates a relative delay from a Unix epoch, which
+// providers send interchangeably in Retry-After and x-ratelimit-reset-*
+// with only magnitude to tell them apart. 1e9s is ~31 years as a delay
+// (never a real backoff) and 2001-09-09 as an epoch (safely past).
+const epochThreshold = 1e9
+
+// timeNow is overridable so tests can fix the wall clock for the epoch
+// and HTTP-date duration maths in secondsOrEpoch and parseFlexDuration.
+var timeNow = time.Now
+
+// secondsOrEpoch reads a positive second count as a relative delay or a Unix
+// epoch by magnitude, clamping an already-past epoch to 0.
+func secondsOrEpoch(sec float64) time.Duration {
+	if sec > epochThreshold {
+		// One clock read: sampling twice can yield a small negative
+		// duration for an epoch landing right about now.
+		now := timeNow()
+		if t := time.Unix(int64(sec), 0); t.After(now) {
+			return t.Sub(now)
+		}
+		return 0
+	}
+	return time.Duration(sec * float64(time.Second))
+}
+
+func parseFlexDuration(v any) time.Duration {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		if val > 0 {
+			return secondsOrEpoch(val)
+		}
+	case int64:
+		if val > 0 {
+			return secondsOrEpoch(float64(val))
+		}
+	case int:
+		if val > 0 {
+			return secondsOrEpoch(float64(val))
+		}
+	case string:
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return 0
+		}
+		if sec, err := strconv.ParseFloat(val, 64); err == nil && sec > 0 {
+			return secondsOrEpoch(sec)
+		}
+		if d, err := time.ParseDuration(val); err == nil && d > 0 {
+			return d
+		}
+		// Retry-After may be an HTTP-date (RFC 9110), not delta-seconds.
+		// Last, since a date never parses as a number.
+		if t, err := http.ParseTime(val); err == nil {
+			if d := t.Sub(timeNow()); d > 0 {
+				return d
+			}
+			return 0
+		}
+	}
+	return 0
+}
+
+func formatDurationHuman(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	d = d.Truncate(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("resets in %ds", int(d.Seconds()))
+	}
+	hours := int(d.Hours())
+	mins := int(d.Minutes()) % 60
+	secs := int(d.Seconds()) % 60
+	if hours > 0 {
+		if mins > 0 {
+			return fmt.Sprintf("resets in %dh%dm", hours, mins)
+		}
+		return fmt.Sprintf("resets in %dh", hours)
+	}
+	if secs > 0 {
+		return fmt.Sprintf("resets in %dm%ds", mins, secs)
+	}
+	return fmt.Sprintf("resets in %dm", mins)
+}
+
+func parseJSONErrorString(input string) *parsedErrorJSON {
+	input = strings.TrimSpace(input)
+	start := strings.Index(input, "{")
+	end := strings.LastIndex(input, "}")
+	if start == -1 || end == -1 || end <= start {
+		return nil
+	}
+	jsonSub := input[start : end+1]
+
+	// "error" stays raw JSON: OpenAI-style gateways nest an object, OAuth 2.0
+	// (RFC 6749 §5.2) and some proxies send a plain string code. Typing it as
+	// an object makes the string form fail and discards every sibling field.
+	var payload struct {
+		Type            string          `json:"type"`
+		Message         string          `json:"message"`
+		RetryAfter      any             `json:"retryAfter"`
+		RetryAfterSnake any             `json:"retry_after"`
+		RetryAfterSecs  any             `json:"retry_after_seconds"`
+		ResetsIn        any             `json:"resets_in"`
+		ResetIn         any             `json:"reset_in"`
+		Error           json.RawMessage `json:"error"`
+		Detail          string          `json:"detail"`
+	}
+	if json.Unmarshal([]byte(jsonSub), &payload) != nil {
+		return nil
+	}
+
+	// Try the object form first, then the string code.
+	type errorObj struct {
+		Type            string `json:"type"`
+		Message         string `json:"message"`
+		Code            any    `json:"code"`
+		Status          string `json:"status"`
+		Detail          string `json:"detail"`
+		RetryAfter      any    `json:"retryAfter"`
+		RetryAfterSnake any    `json:"retry_after"`
+		RetryAfterSecs  any    `json:"retry_after_seconds"`
+		ResetsIn        any    `json:"resets_in"`
+		ResetIn         any    `json:"reset_in"`
+	}
+	var errObj errorObj
+	errCode := ""
+	if len(payload.Error) > 0 {
+		if json.Unmarshal(payload.Error, &errObj) != nil {
+			if err := json.Unmarshal(payload.Error, &errCode); err != nil {
+				// Neither shape: keep the sibling fields that did parse.
+				errCode = ""
+			}
+		}
+	}
+
+	res := &parsedErrorJSON{}
+	if payload.Type != "" {
+		res.Type = payload.Type
+	} else if errObj.Type != "" {
+		res.Type = errObj.Type
+	} else if errCode != "" {
+		res.Type = errCode
+	}
+
+	if payload.Message != "" {
+		res.Message = payload.Message
+	} else if errObj.Message != "" {
+		res.Message = errObj.Message
+	} else if payload.Detail != "" {
+		res.Message = payload.Detail
+	} else if errObj.Detail != "" {
+		res.Message = errObj.Detail
+	}
+
+	for _, rawVal := range []any{
+		payload.RetryAfter, payload.RetryAfterSnake, payload.RetryAfterSecs, payload.ResetsIn, payload.ResetIn,
+		errObj.RetryAfter, errObj.RetryAfterSnake, errObj.RetryAfterSecs, errObj.ResetsIn, errObj.ResetIn,
+	} {
+		if dur := parseFlexDuration(rawVal); dur > 0 {
+			res.RetryAfter = dur
+			break
+		}
+	}
+
+	return res
+}
+
+func cleanErrorString(s string) string {
+	s = strings.TrimSpace(s)
+	// Strip Go HTTP client request URL prefix (e.g. `POST "https://...": 429 Too Many Requests ...`)
+	if idx := strings.Index(s, "\": "); idx != -1 {
+		s = strings.TrimSpace(s[idx+3:])
+	}
+	// Strip trailing embedded JSON substring if present after non-JSON text
+	if start := strings.Index(s, "{"); start > 0 {
+		s = strings.TrimSpace(s[:start])
+	} else if start == 0 {
+		// Pure JSON string
+		s = ""
+	}
+	return s
+}
+
+// formatProviderError returns a detailed, human-readable description of a provider failure.
+// It inspects status codes, response bodies, error messages, and cause chains to clearly
+// distinguish rate limits vs quota exhaustion vs provider outages, and includes the full
+// underlying error message.
+func formatProviderError(err *fantasy.ProviderError) string {
+	if err == nil {
+		return "provider error"
+	}
+
+	title := strings.TrimSpace(err.Title)
+	msg := strings.TrimSpace(err.Message)
+	var causeStr string
+	if err.Cause != nil {
+		causeStr = strings.TrimSpace(err.Cause.Error())
+	}
+
+	var jsonParsed *parsedErrorJSON
+	for _, raw := range []string{msg, string(err.ResponseBody), causeStr} {
+		if parsed := parseJSONErrorString(raw); parsed != nil {
+			jsonParsed = parsed
+			break
+		}
+	}
+
+	detail := ""
+	jsonType := ""
+	var retryAfterDur time.Duration
+	if jsonParsed != nil {
+		jsonType = jsonParsed.Type
+		detail = jsonParsed.Message
+		retryAfterDur = jsonParsed.RetryAfter
+	}
+
+	if retryAfterDur == 0 && err.ResponseHeaders != nil {
+		for _, k := range []string{"retry-after", "Retry-After", "x-ratelimit-reset-requests", "X-RateLimit-Reset-Requests"} {
+			if val, ok := err.ResponseHeaders[k]; ok {
+				if d := parseFlexDuration(val); d > 0 {
+					retryAfterDur = d
+					break
+				}
+			}
+		}
+	}
+
+	retryAfterStr := formatDurationHuman(retryAfterDur)
+
+	// Build full text across all available error fields for categorization
+	fullText := strings.Join([]string{title, msg, detail, jsonType, causeStr}, " ")
+	lowerFull := strings.ToLower(fullText)
+
+	isQuota := strings.Contains(lowerFull, "quota") ||
+		strings.Contains(lowerFull, "credit") ||
+		strings.Contains(lowerFull, "billing") ||
+		strings.Contains(lowerFull, "insufficient_quota") ||
+		strings.Contains(lowerFull, "resource_exhausted") ||
+		strings.Contains(lowerFull, "freeusage") ||
+		strings.Contains(lowerFull, "usage_limit") ||
+		strings.Contains(lowerFull, "limiterror") ||
+		strings.Contains(lowerFull, "payment_required") ||
+		err.StatusCode == http.StatusPaymentRequired
+
+	isRateLimit := strings.Contains(lowerFull, "rate limit") ||
+		strings.Contains(lowerFull, "rate_limit") ||
+		strings.Contains(lowerFull, "too many requests") ||
+		err.StatusCode == http.StatusTooManyRequests
+
+	isServerDown := strings.Contains(lowerFull, "overloaded") ||
+		strings.Contains(lowerFull, "service unavailable") ||
+		strings.Contains(lowerFull, "bad gateway") ||
+		strings.Contains(lowerFull, "internal server error") ||
+		err.StatusCode == http.StatusServiceUnavailable ||
+		err.StatusCode == http.StatusBadGateway ||
+		err.StatusCode == http.StatusInternalServerError
+
+	var category string
+	if isQuota {
+		category = "Quota Exceeded / Out of Credits"
+	} else if isServerDown {
+		category = "Provider Server Down / Overloaded"
+	} else if isRateLimit {
+		category = "Rate Limit Reached"
+	} else if err.StatusCode == http.StatusUnauthorized || err.StatusCode == http.StatusForbidden {
+		category = "Authentication / Access Denied"
+	}
+
+	// Pick the most specific explanation string
+	explanation := detail
+	if explanation == "" && causeStr != "" {
+		explanation = cleanErrorString(causeStr)
+	}
+	if explanation == "" {
+		explanation = cleanErrorString(msg)
+	}
+	if explanation == "" {
+		explanation = cleanErrorString(title)
+	}
+
+	var parts []string
+	if err.StatusCode > 0 {
+		parts = append(parts, fmt.Sprintf("HTTP %d", err.StatusCode))
+	}
+	if category != "" {
+		catStr := category
+		if retryAfterStr != "" {
+			catStr += fmt.Sprintf(" (%s)", retryAfterStr)
+		}
+		parts = append(parts, catStr)
+	} else if retryAfterStr != "" {
+		parts = append(parts, retryAfterStr)
+	}
+
+	// Add explanation if it provides additional information beyond the category name
+	if explanation != "" {
+		cleanExp := strings.TrimSpace(explanation)
+		if !strings.EqualFold(cleanExp, category) {
+			// Suppress generic "too many requests" / "rate limit" text when category already explains it
+			if (isRateLimit || isQuota) && (strings.EqualFold(cleanExp, "too many requests") || strings.EqualFold(cleanExp, "rate limit")) {
+				// Suppress redundant generic string
+			} else {
+				parts = append(parts, cleanExp)
+			}
+		}
+	}
+
+	if len(parts) > 0 {
+		return strings.Join(parts, " - ")
+	}
+	return "provider error"
+}
+
+func formatProviderErrorForAssistant(err *fantasy.ProviderError) (string, string) {
+	if err == nil {
+		return "Provider Error", "An unknown error occurred."
+	}
+	formatted := formatProviderError(err)
+	parts := strings.Split(formatted, " - ")
+	if len(parts) >= 2 {
+		if strings.HasPrefix(parts[0], "HTTP ") {
+			title := parts[1]
+			var body string
+			if len(parts) >= 3 {
+				body = strings.Join(parts[2:], " - ")
+			} else {
+				body = parts[0]
+			}
+			return title, body
+		}
+		title := parts[0]
+		body := strings.Join(parts[1:], " - ")
+		return title, body
+	}
+	return cmp.Or(stringext.Capitalize(err.Title), "Provider Error"), formatted
+}
+
 // publishRetry notifies the UI that a provider request failed and the
 // agent is backing off before the next attempt.
 func (a *sessionAgent) publishRetry(sessionID, sessionTitle, providerID string, err *fantasy.ProviderError, delay time.Duration, attempt, maxRetries int) {
 	if a.notify == nil {
 		return
 	}
-	msg := "provider error"
-	if err != nil {
-		msg = cmp.Or(err.Title, err.Message, msg)
+	if providerID == "" && a.largeModel != nil {
+		m := a.largeModel.Get()
+		providerID = m.ModelCfg.Provider
 	}
+	msg := formatProviderError(err)
 	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 		SessionID:    sessionID,
 		SessionTitle: sessionTitle,

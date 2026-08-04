@@ -1,11 +1,17 @@
 package projects
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/crush/internal/lock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegisterAndList(t *testing.T) {
@@ -420,4 +426,86 @@ func TestRegisterCapNeverEvictsJustRegistered(t *testing.T) {
 	if !slices.ContainsFunc(projects, func(p Project) bool { return p.Path == "/current-project" }) {
 		t.Error("Register dropped the project it was asked to register")
 	}
+}
+
+// TestRegisterConcurrentNoLostUpdates pins the Register read-modify-write
+// against lost updates. 50 concurrent Registrations must all survive; the old
+// code (Load releases mu, mutate, Save re-acquires mu) let a second goroutine
+// read the stale list and clobber the first's entry.
+func TestRegisterConcurrentNoLostUpdates(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(tmpDir, "crush"))
+
+	const n = 50
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			p := fmt.Sprintf("/p/%d", i)
+			errs <- Register(p, p+"/.crush")
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Register failed: %v", err)
+		}
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(loaded.Projects) != n {
+		t.Fatalf("got %d projects, want all %d (lost updates)", len(loaded.Projects), n)
+	}
+	for i := range n {
+		p := fmt.Sprintf("/p/%d", i)
+		if !slices.ContainsFunc(loaded.Projects, func(pr Project) bool { return pr.Path == p }) {
+			t.Errorf("registered path %s missing from list", p)
+		}
+	}
+}
+
+// TestRegisterBlocksOnCrossProcessLock pins the projects.lock serialisation:
+// a Register must block while another holder has the lock, and succeed once
+// it is released. Uses a fresh lock.TryFile to simulate the second process,
+// as internal/db/connect_test.go does.
+func TestRegisterBlocksOnCrossProcessLock(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(tmpDir, "crush"))
+
+	// Take the cross-process lock as a stand-in for another crush process.
+	lockPath := filepath.Join(tmpDir, "crush", "projects.lock")
+	require.NoError(t, os.MkdirAll(filepath.Dir(lockPath), 0o700))
+	release, err := lock.File(context.Background(), lockPath)
+	require.NoError(t, err)
+	t.Cleanup(release)
+
+	errc := make(chan error, 1)
+	go func() { errc <- Register("/blocked", "/blocked/.crush") }()
+
+	select {
+	case err := <-errc:
+		t.Fatalf("Register returned %v while the cross-process lock was held; it did not take the lock", err)
+	case <-time.After(300 * time.Millisecond):
+		// Correct: blocked on the lock.
+	}
+
+	release()
+	select {
+	case err := <-errc:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Register did not complete after the lock was released")
+	}
+
+	loaded, err := Load()
+	require.NoError(t, err)
+	require.True(t, slices.ContainsFunc(loaded.Projects, func(p Project) bool { return p.Path == "/blocked" }))
 }

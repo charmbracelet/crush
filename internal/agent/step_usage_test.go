@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"errors"
+	"math"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -345,19 +347,38 @@ func TestGenerateTitleUsageIsAttributable(t *testing.T) {
 	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "go"})
 	require.NoError(t, err)
 
+	// Title generation runs on the agent's own goroutine: the sub-session,
+	// its priced message, and the parent's cost row each commit
+	// asynchronously, after Run returns. Poll for every stage instead of
+	// racing the writes.
+	var childID string
+	require.Eventually(t, func() bool {
+		children, err := env.sessions.ListChildren(t.Context(), sess.ID)
+		if err != nil || len(children) != 1 {
+			return false
+		}
+		childID = children[0].ID
+		return children[0].Cost > 0
+	}, 5*time.Second, 20*time.Millisecond,
+		"title generation must record its usage in a sub-session")
+
+	var titleFin *message.Finish
+	require.Eventually(t, func() bool {
+		titleMsgs := assistantMessages(t, env, childID)
+		if len(titleMsgs) != 1 {
+			return false
+		}
+		titleFin = titleMsgs[0].FinishPart()
+		return titleFin != nil && titleFin.PromptTokens > 0
+	}, 5*time.Second, 20*time.Millisecond,
+		"title generation must write a priced message")
+	// Re-read the child so the cost comparison uses a fresh row, not a stale
+	// capture from inside the polling closure.
 	children, err := env.sessions.ListChildren(t.Context(), sess.ID)
 	require.NoError(t, err)
-	require.Len(t, children, 1, "title generation must record its usage in a sub-session")
-	require.Greater(t, children[0].Cost, 0.0)
-
-	titleMsgs := assistantMessages(t, env, children[0].ID)
-	require.Len(t, titleMsgs, 1)
-	titleFin := titleMsgs[0].FinishPart()
-	require.NotNil(t, titleFin)
+	require.Equal(t, childID, children[0].ID)
 	require.InDelta(t, children[0].Cost, titleFin.Cost, 1e-9)
-	require.NotZero(t, titleFin.PromptTokens)
 
-	// The whole subtree's own costs must add up to the parent's recorded cost.
 	var recorded float64
 	for _, msg := range assistantMessages(t, env, sess.ID) {
 		if f := msg.FinishPart(); f != nil {
@@ -366,8 +387,12 @@ func TestGenerateTitleUsageIsAttributable(t *testing.T) {
 	}
 	recorded += titleFin.Cost
 
-	updated, err := env.sessions.Get(t.Context(), sess.ID)
-	require.NoError(t, err)
-	require.InDelta(t, updated.Cost, recorded, 1e-9,
+	require.Eventually(t, func() bool {
+		updated, err := env.sessions.Get(t.Context(), sess.ID)
+		if err != nil {
+			return false
+		}
+		return math.Abs(updated.Cost-recorded) <= 1e-9
+	}, 5*time.Second, 20*time.Millisecond,
 		"title generation cost must be attributable to the model that incurred it")
 }

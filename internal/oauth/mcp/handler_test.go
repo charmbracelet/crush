@@ -3,6 +3,7 @@ package mcpoauth
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -513,10 +514,18 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 	base := "http://" + listener.Addr().String()
 
 	// Stand in for the browser: record the open, then redirect back as the
-	// authorization server would once the user consents.
+	// authorization server would once the user consents. The gate makes any
+	// second concurrent open a failure, so the exactly-once property is checked
+	// deterministically instead of relying on the redirect goroutine winning a
+	// race against the callers.
 	var opens atomic.Int64
+	var openGate sync.Mutex
 	r.handler = &Handler{openURL: func(string) error {
-		opens.Add(1)
+		openGate.Lock()
+		defer openGate.Unlock()
+		if opens.Add(1) != 1 {
+			return errors.New("browser opened more than once")
+		}
 		go func() {
 			resp, gerr := http.Get(base + callbackPath + "?code=abc&state=xyz") //nolint:noctx
 			if gerr == nil {

@@ -1391,34 +1391,34 @@ func TestParseFlexDuration_EpochAndHTTPDate(t *testing.T) {
 	defer func() { timeNow = old }()
 
 	cases := []struct {
-		name string
 		in   any
 		want time.Duration
 	}{
-		{"float seconds", float64(30), 30 * time.Second},
-		{"int64 seconds", int64(30), 30 * time.Second},
-		{"int seconds", 30, 30 * time.Second},
-		{"string seconds", "30", 30 * time.Second},
-		{"string duration", "30s", 30 * time.Second},
+		{float64(30), 30 * time.Second},
+		{int64(30), 30 * time.Second},
+		{30, 30 * time.Second},
+		{"30", 30 * time.Second},
+		{"30s", 30 * time.Second},
 		// 90 seconds past the fixed clock: an epoch in the future becomes a
 		// relative delay, never a ~54-year gap.
-		{"future epoch", fixed.Add(90 * time.Second).Unix(), 90 * time.Second},
+		{fixed.Add(90 * time.Second).Unix(), 90 * time.Second},
 		// 1722715000 is July 2024: an epoch in the past yields zero, not a
 		// negative duration callers would misread as "no value".
-		{"past epoch float", float64(1722715000), 0},
-		{"past epoch string", "1722715000", 0},
-		{"past epoch int64", int64(1722715000), 0},
-		{"http date", fixed.Add(2 * time.Hour).Format(http.TimeFormat), 2 * time.Hour},
-		{"empty", "", 0},
-		{"nil", nil, 0},
-		{"garbage", "garbage", 0},
-		{"negative", -1, 0},
+		{float64(1722715000), 0},
+		{"1722715000", 0},
+		{int64(1722715000), 0},
+		{fixed.Add(2 * time.Hour).Format(http.TimeFormat), 2 * time.Hour},
+		{"", 0},
+		{nil, 0},
+		{"garbage", 0},
+		{-1, 0},
 	}
 
+	// No t.Run subtests here: they share the injected clock above, which the
+	// parent restores on return, and parallel subtests resume only after that
+	// restore runs.
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			require.Equal(t, c.want, parseFlexDuration(c.in))
-		})
+		require.Equal(t, c.want, parseFlexDuration(c.in), "input %v", c.in)
 	}
 }
 
@@ -1469,6 +1469,7 @@ func TestFormatProviderErrorForAssistant(t *testing.T) {
 	t.Parallel()
 
 	t.Run("with HTTP status code", func(t *testing.T) {
+		t.Parallel()
 		pe := &fantasy.ProviderError{
 			Title:      "too many requests",
 			Message:    `{"error":{"message":"Quota exceeded"}}`,
@@ -1480,6 +1481,7 @@ func TestFormatProviderErrorForAssistant(t *testing.T) {
 	})
 
 	t.Run("without HTTP status code", func(t *testing.T) {
+		t.Parallel()
 		pe := &fantasy.ProviderError{
 			Title:   "resource exhausted",
 			Message: `{"error":{"message":"Resource limit reached"}}`,

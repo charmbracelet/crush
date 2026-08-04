@@ -58,7 +58,6 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		os.Remove(tmp)
 		return err
 	}
-	// codeql[go/path-injection]
 	if err := renameFile(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err
@@ -84,6 +83,11 @@ func renameFile(tmp, path string) error {
 	var slept time.Duration
 	delay := time.Millisecond
 	for {
+		// vetted path: see AtomicWriteFile. The rename target is a trusted
+		// internal path, never user-derived; the temp name came from
+		// os.CreateTemp in the same directory.
+		//
+		// codeql[go/path-injection]
 		err := os.Rename(tmp, path)
 		if err == nil || !isTransientRenameError(err) || slept >= renameRetryBudget {
 			return err

@@ -20,11 +20,9 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/subagents"
 )
 
 // Reasons the coder agent may be unavailable, returned by
@@ -220,12 +218,10 @@ type Workspace interface {
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
 	ActiveSubagents() []SubagentInfo
 	RunningSubagents(parentSessionID string) []RunningSubagentInfo
-	SubscribeSubagentRuntime(ctx context.Context) <-chan pubsub.Event[subagents.RuntimeEvent]
 	CancelSubagent(childSessionID string)
 	AllSubagents() []SubagentDefInfo
 	DeleteUserSubagent(name string) error
 	SetSubagentDisabled(name string, disabled bool) error
-	SessionTokens(ctx context.Context, sessionID string) (prompt, completion int64, err error)
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo

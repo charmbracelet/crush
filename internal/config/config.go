@@ -799,6 +799,16 @@ func (c *Config) SmallModel() *catwalk.Model {
 
 const maxRecentModelsPerType = 5
 
+// AllToolNames returns every built-in tool name an agent's AllowedTools may
+// contain. MCP tools are not included: they bypass AllowedTools entirely and
+// are gated by AllowedMCP instead (see the agent coordinator's buildTools).
+// Exported so callers that accept user-authored tool allowlists — subagent
+// `tools:` / `disallowedTools:` frontmatter — can reject unknown names instead
+// of silently intersecting them away to nothing.
+func AllToolNames() []string {
+	return allToolNames()
+}
+
 func allToolNames() []string {
 	return []string{
 		"agent",

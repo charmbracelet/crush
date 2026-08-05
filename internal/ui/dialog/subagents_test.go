@@ -224,9 +224,10 @@ func TestSubagentsDialog_ToggleLibraryItem(t *testing.T) {
 }
 
 // TestSubagentsDialog_RuntimeEventRefreshesRunningTab verifies that a
-// RuntimeEvent for the dialog's own parent session causes the running tab to
-// be rebuilt from a fresh call to com.Workspace.RunningSubagents, reflecting
-// entries added after the dialog was constructed.
+// RuntimeEvent for the dialog's own parent session rebuilds the running tab
+// from a fresh call to com.Workspace.RunningSubagents, reflecting entries added
+// after the dialog was constructed. The fetch happens in a tea.Cmd rather than
+// inline, so the event yields a command whose message carries the new list.
 func TestSubagentsDialog_RuntimeEventRefreshesRunningTab(t *testing.T) {
 	t.Parallel()
 
@@ -242,13 +243,23 @@ func TestSubagentsDialog_RuntimeEventRefreshesRunningTab(t *testing.T) {
 		{ChildSessionID: "child-2", Name: "agent-two", Color: "red", Model: "claude-sonnet"},
 	}
 
-	d.HandleMsg(pubsub.Event[subagents.RuntimeEvent]{
+	action := d.HandleMsg(pubsub.Event[subagents.RuntimeEvent]{
 		Type: pubsub.UpdatedEvent,
 		Payload: subagents.RuntimeEvent{
 			ParentSessionID: "parent-session-id",
 			Entries:         nil,
 		},
 	})
+
+	ac, ok := action.(ActionCmd)
+	require.True(t, ok, "a matching RuntimeEvent must dispatch the fetch as a command, not query inline")
+	require.NotNil(t, ac.Cmd)
+
+	fetched, ok := ac.Cmd().(RunningSubagentsFetchedMsg)
+	require.True(t, ok, "the command must deliver a RunningSubagentsFetchedMsg")
+	require.Len(t, d.runningItems, 1, "the list must not change until the fetch is applied")
+
+	d.HandleMsg(fetched)
 
 	require.Len(t, d.runningItems, 2, "running tab should be rebuilt from the workspace after a matching RuntimeEvent")
 
@@ -258,6 +269,30 @@ func TestSubagentsDialog_RuntimeEventRefreshesRunningTab(t *testing.T) {
 	}
 	require.Contains(t, ids, "child-1")
 	require.Contains(t, ids, "child-2")
+}
+
+// TestSubagentsDialog_StaleRunningFetchDiscarded verifies the fetch reply is
+// scoped to the dialog's parent session, mirroring the sidebar's guard.
+func TestSubagentsDialog_StaleRunningFetchDiscarded(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		running: []workspace.RunningSubagentInfo{
+			{ChildSessionID: "child-1", Name: "agent-one", Color: "blue", Model: "claude-opus-4-7"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(RunningSubagentsFetchedMsg{
+		ParentSessionID: "some-other-session",
+		List: []workspace.RunningSubagentInfo{
+			{ChildSessionID: "child-9", Name: "wrong-agent"},
+			{ChildSessionID: "child-8", Name: "also-wrong"},
+		},
+	})
+
+	require.Len(t, d.runningItems, 1, "a fetch for another parent session must not replace this dialog's list")
+	require.Equal(t, "child-1", d.runningItems[0].ID())
 }
 
 // TestSubagentsDialog_RuntimeEventIgnoresOtherParentSession verifies that a

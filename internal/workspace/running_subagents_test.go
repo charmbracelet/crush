@@ -187,30 +187,6 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	require.Equal(t, int64(200), got[0].CompletionTokens)
 }
 
-// TestAppWorkspace_SubscribeSubagentRuntime_NilRuntime verifies that a nil
-// SubagentRuntime returns a closed channel without panicking.
-func TestAppWorkspace_SubscribeSubagentRuntime_NilRuntime(t *testing.T) {
-	t.Parallel()
-
-	w := &AppWorkspace{
-		app:   &app.App{SubagentRuntime: nil},
-		store: config.NewTestStore(&config.Config{}),
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	ch := w.SubscribeSubagentRuntime(ctx)
-	require.NotNil(t, ch)
-
-	select {
-	case _, ok := <-ch:
-		require.False(t, ok, "channel must be closed when SubagentRuntime is nil")
-	default:
-		t.Fatal("channel was not immediately closed for nil SubagentRuntime")
-	}
-}
-
 // TestAppWorkspace_CancelSubagent_NilCoordinator verifies that calling
 // CancelSubagent with a nil AgentCoordinator does not panic.
 func TestAppWorkspace_CancelSubagent_NilCoordinator(t *testing.T) {
@@ -464,50 +440,6 @@ func TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Equal(t, "project", got[0].Scope, "a worktree-root subagent must be project scope")
 	require.Error(t, w.DeleteUserSubagent("root-agent"), "a worktree-root subagent must not be deletable")
-}
-
-// TestAppWorkspace_SessionTokens_Found verifies that SessionTokens returns the
-// correct token counts for an existing session.
-func TestAppWorkspace_SessionTokens_Found(t *testing.T) {
-	t.Parallel()
-
-	sessions := &stubSessionService{
-		sessions: map[string]session.Session{
-			"sess-1": {
-				ID:               "sess-1",
-				PromptTokens:     42,
-				CompletionTokens: 77,
-			},
-		},
-	}
-
-	w := &AppWorkspace{
-		app:   &app.App{Sessions: sessions},
-		store: config.NewTestStore(&config.Config{}),
-	}
-
-	prompt, completion, err := w.SessionTokens(context.Background(), "sess-1")
-	require.NoError(t, err)
-	require.Equal(t, int64(42), prompt)
-	require.Equal(t, int64(77), completion)
-}
-
-// TestAppWorkspace_SessionTokens_NotFound verifies that SessionTokens returns
-// an error when the session does not exist.
-func TestAppWorkspace_SessionTokens_NotFound(t *testing.T) {
-	t.Parallel()
-
-	sessions := &stubSessionService{
-		sessions: map[string]session.Session{},
-	}
-
-	w := &AppWorkspace{
-		app:   &app.App{Sessions: sessions},
-		store: config.NewTestStore(&config.Config{}),
-	}
-
-	_, _, err := w.SessionTokens(context.Background(), "does-not-exist")
-	require.Error(t, err)
 }
 
 // TestAddOrRemove covers the pure list helper backing SetSubagentDisabled.

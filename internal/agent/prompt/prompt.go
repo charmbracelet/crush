@@ -29,6 +29,11 @@ type Prompt struct {
 	subagentBody       string
 	preloadedSkillsXML string
 	availSubagentXML   string
+	availSkillXML      string
+	// availSkillXMLSet records that the caller supplied availSkillXML, so an
+	// intentionally empty block is distinguishable from "not provided" and
+	// still skips discovery.
+	availSkillXMLSet bool
 	// suppressAvailableSkills omits the <available_skills> discovery list. Set
 	// for subagents that pin an explicit skills set, so the preloaded skills are
 	// their only skill exposure.
@@ -97,6 +102,20 @@ func WithPreloadedSkillsXML(xml string) Option {
 // snapshot.
 func WithAvailableSubagentsXML(xml string) Option {
 	return func(p *Prompt) { p.availSubagentXML = xml }
+}
+
+// WithAvailableSkillsXML sets the pre-rendered <available_skills> block from a
+// skill set the caller already holds (see skills.ToPromptXML), skipping this
+// package's own discovery walk. Callers that dispatch frequently — every
+// subagent dispatch builds a fresh prompt — should pass this rather than pay a
+// recursive walk of every configured skills path per build. The supplied list
+// must already be deduplicated and filtered by disabled_skills, which is what
+// skills.Manager.ActiveSkills returns.
+func WithAvailableSkillsXML(xml string) Option {
+	return func(p *Prompt) {
+		p.availSkillXML = xml
+		p.availSkillXMLSet = true
+	}
 }
 
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
@@ -214,9 +233,14 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	// Discover and load skills metadata. Skipped entirely when the prompt
 	// suppresses the available-skills list (subagents that pin an explicit
-	// skills set), which also avoids the discovery filesystem walk.
+	// skills set) or when the caller already supplied the rendered block, both
+	// of which also avoid the discovery filesystem walk.
 	var availSkillXML string
-	if !p.suppressAvailableSkills {
+	switch {
+	case p.suppressAvailableSkills:
+	case p.availSkillXMLSet:
+		availSkillXML = p.availSkillXML
+	default:
 		// Start with builtin skills.
 		allSkills := skills.DiscoverBuiltin()
 		builtinNames := make(map[string]bool, len(allSkills))

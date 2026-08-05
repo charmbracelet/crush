@@ -9,11 +9,20 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // SubagentsID is the identifier for the subagents dialog.
 const SubagentsID = "subagents"
+
+// RunningSubagentsFetchedMsg delivers a running-subagent list resolved off the
+// Update path. Exported because the UI model has to route it back into the
+// dialog: dialogs only receive message types the model forwards explicitly.
+type RunningSubagentsFetchedMsg struct {
+	ParentSessionID string
+	List            []workspace.RunningSubagentInfo
+}
 
 // SubagentsTab identifies which tab of the subagents dialog is active.
 type SubagentsTab int
@@ -177,7 +186,14 @@ func (s *Subagents) HandleMsg(msg tea.Msg) Action {
 	switch ev := msg.(type) {
 	case pubsub.Event[subagents.RuntimeEvent]:
 		if ev.Payload.ParentSessionID == s.parentSessionID {
-			s.refreshRunning()
+			return ActionCmd{s.fetchRunningCmd()}
+		}
+		return nil
+	case RunningSubagentsFetchedMsg:
+		// Drop a fetch that raced a session switch, matching the guard the
+		// sidebar's runningSubagentsMsg handler applies.
+		if ev.ParentSessionID == s.parentSessionID {
+			s.applyRunning(ev.List)
 		}
 		return nil
 	case pubsub.Event[subagents.Event]:
@@ -312,16 +328,32 @@ func (s *Subagents) cancelSelectedRunning() {
 	s.com.Workspace.CancelSubagent(ri.ID())
 }
 
-// refreshRunning rebuilds the running tab from the workspace, preserving the
-// selected item's identity (by child session ID) across the rebuild when it
-// still exists in the new set.
-func (s *Subagents) refreshRunning() {
+// fetchRunningCmd resolves the running-subagent list off the Update path.
+// RunningSubagents issues one DB query per running entry to enrich token
+// counts, and a RuntimeEvent arrives for every register, status change and
+// finish — doing that work inline would block input handling and rendering on
+// N round trips per event. The closure captures only locals, never s, so it is
+// safe off-thread.
+func (s *Subagents) fetchRunningCmd() tea.Cmd {
+	ws := s.com.Workspace
+	parentSessionID := s.parentSessionID
+	return func() tea.Msg {
+		return RunningSubagentsFetchedMsg{
+			ParentSessionID: parentSessionID,
+			List:            ws.RunningSubagents(parentSessionID),
+		}
+	}
+}
+
+// applyRunning rebuilds the running tab from an already-fetched list,
+// preserving the selected item's identity (by child session ID) across the
+// rebuild when it still exists in the new set.
+func (s *Subagents) applyRunning(running []workspace.RunningSubagentInfo) {
 	var selectedID string
 	if item, ok := s.runningList.SelectedItem().(ListItem); ok {
 		selectedID = item.ID()
 	}
 
-	running := s.com.Workspace.RunningSubagents(s.parentSessionID)
 	s.runningItems = make([]*RunningSubagentItem, len(running))
 	filterable := make([]list.FilterableItem, len(running))
 	selectedIdx := 0

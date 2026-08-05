@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"charm.land/fantasy"
 	"golang.org/x/sync/errgroup"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/subagents"
 )
 
@@ -143,7 +145,10 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 	}
 }
 
-func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
+// agentTool builds the dispatcher tool. The context parameter is retained for
+// call-site symmetry with the other buildTools helpers; the task agent is now
+// built from the dispatch context instead, so nothing here consumes it.
+func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 	taskCfg, ok := c.cfg.Config().Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
@@ -156,17 +161,36 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if err != nil {
 		return nil, err
 	}
-	// The task agent's async prompt/tool builds go on a dispatcher-local
-	// group, not c.readyWg: UpdateModels rebuilds this tool at the start of
-	// every turn — after that turn's readyWg.Wait — so a readyWg-spawned
-	// build could still be pending when a task dispatch runs (starting the
-	// agent promptless/toolless), and a build failure would stick in readyWg,
-	// failing every later turn. The dispatch closure waits lazily on the task
-	// path, so turn start pays nothing.
-	taskBuildWg := &errgroup.Group{}
-	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, taskBuildWg)
-	if err != nil {
-		return nil, err
+	// The task agent is built on first dispatch, not here. Two reasons it does
+	// not go on c.readyWg: UpdateModels rebuilds this tool at the start of
+	// every turn — after that turn's readyWg.Wait — so a readyWg-spawned build
+	// could still be pending when a task dispatch runs (starting the agent
+	// promptless/toolless), and a build failure would stick in readyWg, failing
+	// every later turn.
+	//
+	// It is not built eagerly here either. buildAgent spawns a full skills
+	// discovery walk plus an MCP-init wait, and nothing joins those goroutines
+	// unless a task is actually dispatched — so eagerly building meant every
+	// turn started a generation of work that the great majority of turns threw
+	// away, with no backpressure across a burst of turns. Building on demand
+	// makes an unused tool free and matches the subagent dispatch path below,
+	// which also builds at dispatch time. sync.Once serializes the concurrent
+	// dispatches this tool allows (Parallel: true) onto one build.
+	var (
+		taskOnce  sync.Once
+		taskAgent SessionAgent
+		taskErr   error
+	)
+	buildTaskAgent := func(ctx context.Context) (SessionAgent, error) {
+		taskOnce.Do(func() {
+			var wg errgroup.Group
+			taskAgent, taskErr = c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, &wg)
+			if taskErr != nil {
+				return
+			}
+			taskErr = wg.Wait()
+		})
+		return taskAgent, taskErr
 	}
 
 	// The subagent_type enum is a point-in-time snapshot baked into the tool
@@ -193,7 +217,8 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 
 			subagentType := params.SubagentType
 			if subagentType == "" || subagentType == config.AgentTask {
-				if err := taskBuildWg.Wait(); err != nil {
+				taskAgent, err := buildTaskAgent(ctx)
+				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("build task agent: %v", err)), nil
 				}
 				return c.runSubAgent(ctx, subAgentParams{
@@ -223,7 +248,18 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			// passed discovery but fails at build) are surfaced as tool-error
 			// responses so the parent agent can report them and continue; a
 			// bare error would abort the whole turn.
-			subPr, err := subagentPrompt(sa, c.activeSkills, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+			activeSkills := c.activeSkillsList()
+			subPr, err := subagentPrompt(
+				sa,
+				activeSkills,
+				prompt.WithWorkingDir(c.cfg.WorkingDir()),
+				// Reuse the skills the coordinator already holds instead of
+				// letting prompt.Build re-walk every configured skills path.
+				// This tool is Parallel, so N concurrent dispatches would
+				// otherwise each pay a full recursive walk before their first
+				// token.
+				prompt.WithAvailableSkillsXML(skills.ToPromptXML(activeSkills)),
+			)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent prompt %q: %v", sa.Name, err)), nil
 			}

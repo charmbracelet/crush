@@ -127,6 +127,10 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
+	// toolSearch holds the deferred-tool catalog + activation state for the
+	// current session when tool_search (deferred loading) is enabled.
+	toolSearch *toolSearch
+
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
@@ -794,6 +798,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 
+	// Deferred tool loading: for the top-level agent, optionally keep MCP tool
+	// schemas out of context until the model requests them via tool_search.
+	if opts := c.cfg.Config().Options.ToolSearch; opts != nil && opts.Enabled && !isSubAgent {
+		if deferred, ok := c.buildDeferredTools(filteredTools, hookRunner, opts); ok {
+			return deferred, nil
+		}
+	}
+
 	// Wrap tools with hook interception for the top-level agent only.
 	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
 	// without hook interception to avoid firing the user's hook N times
@@ -802,6 +814,56 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
 
 	return filteredTools, nil
+}
+
+// buildDeferredTools partitions the assembled tool list into an always-loaded
+// core (built-in tools) and a deferred catalog (MCP tools). When the number of
+// MCP tools exceeds the configured threshold, it returns the core set plus a
+// tool_search meta-tool the model uses to load catalog tools on demand; the
+// deferred tools stay out of context until then. It returns ok=false when there
+// are too few MCP tools to be worth deferring, so the caller loads everything.
+func (c *coordinator) buildDeferredTools(all []fantasy.AgentTool, hookRunner *hooks.Runner, opts *config.ToolSearchOptions) ([]fantasy.AgentTool, bool) {
+	var coreRaw, mcpRaw []fantasy.AgentTool
+	for _, t := range all {
+		if _, ok := t.(interface{ MCP() string }); ok {
+			mcpRaw = append(mcpRaw, t)
+		} else {
+			coreRaw = append(coreRaw, t)
+		}
+	}
+
+	threshold := opts.Threshold
+	if threshold <= 0 {
+		threshold = defaultToolSearchThreshold
+	}
+	if len(mcpRaw) <= threshold {
+		return nil, false
+	}
+
+	// Wrap each partition so PreToolUse hooks still fire on deferred MCP tools
+	// once they are activated.
+	core := wrapToolsWithHooks(coreRaw, hookRunner, false)
+	catalog := wrapToolsWithHooks(mcpRaw, hookRunner, false)
+
+	ts := newToolSearch(catalog, c.toolSearch)
+	// apply pushes the new effective tool set onto the running agent; the next
+	// PrepareStep picks it up. currentAgent may be unset at build time, so it
+	// is resolved lazily when a search actually runs.
+	apply := func(tools []fantasy.AgentTool) {
+		if c.currentAgent != nil {
+			c.currentAgent.SetTools(tools)
+		}
+	}
+	core = append(core, ts.tool(apply))
+	slices.SortFunc(core, func(a, b fantasy.AgentTool) int {
+		return strings.Compare(a.Info().Name, b.Info().Name)
+	})
+	ts.core = core
+	c.toolSearch = ts
+
+	slog.Debug("tool search enabled: deferring MCP tools",
+		"deferred", len(catalog), "core", len(core), "threshold", threshold)
+	return ts.effective(), true
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config

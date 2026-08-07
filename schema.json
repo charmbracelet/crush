@@ -593,6 +593,28 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        },
+        "blocked_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "kubectl",
+              "terraform"
+            ]
+          },
+          "type": "array",
+          "description": "Extra shell commands to treat as dangerous (prompted for even in yolo mode)"
+        },
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "ssh"
+            ]
+          },
+          "type": "array",
+          "description": "Shell commands to drop from the dangerous list so they stop prompting in yolo mode"
         }
       },
       "additionalProperties": false,

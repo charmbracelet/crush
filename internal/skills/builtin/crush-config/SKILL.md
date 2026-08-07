@@ -208,9 +208,11 @@ option ui diff unified
 
 ## Hooks runtime
 
-Hooks are user-defined shell commands that fire on agent events. Currently only
-`PreToolUse` is supported, which runs before a tool executes. This behavior is
-the same however the hook is defined (`hook add` or JSON).
+Hooks are user-defined shell commands that fire on agent events. Crush supports
+12 events: `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`,
+`TurnStart`, `TurnEnd`, `StopFailure`, `Interrupt`, `PermissionRequest`,
+`PermissionResult`, `PreCompact`, and `PostCompact`. This behavior is the same
+however the hook is defined (`hook add` or JSON).
 
 ### How hooks work
 

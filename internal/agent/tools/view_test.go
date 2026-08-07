@@ -236,6 +236,9 @@ func (m *mockViewPermissionService) SubscribeNotifications(ctx context.Context) 
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
+func (m *mockViewPermissionService) SetLifecycleHooks(_ permission.LifecycleHookRunner) {
+}
+
 type mockFileTracker struct{}
 
 func (m mockFileTracker) RecordRead(ctx context.Context, sessionID, path string) {}

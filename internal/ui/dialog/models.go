@@ -454,7 +454,12 @@ func (m *Models) setProviderItems() error {
 	if len(recentItems) > 0 {
 		recentGroup := NewModelGroup(t, "Recently used", false)
 
-		var validRecentItems []config.SelectedModel
+		// Recents that cannot be resolved right now are skipped for
+		// display but left in the config. Whether a provider is available
+		// depends on the environment Crush happened to be launched from, so
+		// pruning the stored list here would permanently discard history
+		// over a temporarily missing API key. The list is already bounded
+		// when entries are added.
 		for _, recent := range recentItems {
 			key := modelKey(recent.Provider, recent.Model)
 			item, ok := itemsMap[key]
@@ -466,17 +471,9 @@ func (m *Models) setProviderItems() error {
 			item = NewModelItem(t, item.prov, item.model, m.modelType, true)
 			item.showProvider = true
 
-			validRecentItems = append(validRecentItems, recent)
 			recentGroup.AppendItems(item)
 			if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
 				selectedItemID = item.ID()
-			}
-		}
-
-		if len(validRecentItems) != len(recentItems) {
-			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
-				return fmt.Errorf("failed to update recent models: %w", err)
 			}
 		}
 
@@ -487,10 +484,14 @@ func (m *Models) setProviderItems() error {
 
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
-	m.list.SetSelectedItem(selectedItemID)
 	if selectedItemID != "" {
+		m.list.SetSelectedItem(selectedItemID)
 		m.list.ScrollToSelected()
 	} else {
+		// With nothing selected yet, highlight the first actual model.
+		// Index 0 is a group header, which is not selectable, so leaving
+		// the highlight there would make the first Enter do nothing.
+		m.list.SelectFirst()
 		m.list.ScrollToTop()
 	}
 

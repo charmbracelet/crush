@@ -136,28 +136,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return store, nil
 	}
 
-	resolved, err := resolveSelectedModels(cfg, store.knownProviders)
-	if err != nil {
-		return nil, fmt.Errorf("failed to configure selected models: %w", err)
-	}
-	cfg.Models[SelectedModelTypeLarge] = resolved.Large
-	cfg.Models[SelectedModelTypeSmall] = resolved.Small
-
-	// Persist any fallback corrections while we still hold writeMu.
-	if resolved.LargeFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
-		}); err != nil {
-			return nil, fmt.Errorf("failed to update preferred large model: %w", err)
-		}
-	}
-	if resolved.SmallFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
-		}); err != nil {
-			return nil, fmt.Errorf("failed to update preferred small model: %w", err)
-		}
-	}
+	cfg.applySelectedModels(resolveSelectedModels(cfg, store.knownProviders))
 	store.SetupAgents()
 
 	// Capture initial staleness snapshot
@@ -693,214 +672,92 @@ func (c *Config) applyLSPDefaults() {
 	}
 }
 
-func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
-	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
-		err = fmt.Errorf("no providers configured, please configure at least one provider")
-		return largeModel, smallModel, err
-	}
-
-	// Use the first provider enabled based on the known providers order
-	// if no provider found that is known use the first provider configured
-	for _, p := range knownProviders {
-		providerConfig, ok := c.Providers.Get(string(p.ID))
-		if !ok || providerConfig.Disable {
-			continue
-		}
-		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
-		if defaultLargeModel == nil {
-			slog.Warn("Default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
-			if len(providerConfig.Models) == 0 {
-				return largeModel, smallModel, fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
-			}
-			defaultLargeModel = &providerConfig.Models[0]
-		}
-		largeModel = SelectedModel{
-			Provider:        string(p.ID),
-			Model:           defaultLargeModel.ID,
-			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
-			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
-		}
-
-		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
-		if defaultSmallModel == nil {
-			slog.Warn("Default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			if len(providerConfig.Models) == 0 {
-				return largeModel, smallModel, fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			}
-			defaultSmallModel = &providerConfig.Models[0]
-		}
-		smallModel = SelectedModel{
-			Provider:        string(p.ID),
-			Model:           defaultSmallModel.ID,
-			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
-			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
-		}
-		return largeModel, smallModel, err
-	}
-
-	enabledProviders := c.EnabledProviders()
-	slices.SortFunc(enabledProviders, func(a, b ProviderConfig) int {
-		return strings.Compare(a.ID, b.ID)
-	})
-
-	if len(enabledProviders) == 0 {
-		err = fmt.Errorf("no providers configured, please configure at least one provider")
-		return largeModel, smallModel, err
-	}
-
-	providerConfig := enabledProviders[0]
-	if len(providerConfig.Models) == 0 {
-		err = fmt.Errorf("provider %s has no models configured", providerConfig.ID)
-		return largeModel, smallModel, err
-	}
-	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
-	largeModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultLargeModel.ID,
-		MaxTokens: defaultLargeModel.DefaultMaxTokens,
-	}
-	defaultSmallModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
-	smallModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultSmallModel.ID,
-		MaxTokens: defaultSmallModel.DefaultMaxTokens,
-	}
-	return largeModel, smallModel, err
-}
-
 // resolvedModels holds the result of resolving user-configured model
 // selections against the provider catalog.
 type resolvedModels struct {
-	Large         SelectedModel
-	Small         SelectedModel
-	LargeFallback bool // true if Large was corrected to a default
-	SmallFallback bool // true if Small was corrected to a default
+	Large    SelectedModel
+	Small    SelectedModel
+	HasLarge bool
+	HasSmall bool
 }
 
 // resolveSelectedModels validates the user's configured model selections
-// against the provider catalog, falling back to defaults when a model ID is
-// invalid. It is pure resolution logic: it does not mutate the store or
-// touch disk. The caller assigns the results to c.Models and persists any
-// fallback corrections as appropriate.
-func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (resolvedModels, error) {
+// against the provider catalog. Selections that are missing or no longer
+// resolvable are dropped rather than replaced with a guess: Crush never
+// picks a provider on the user's behalf just because credentials for it
+// happen to be present in the environment. When only the large model is
+// configured, the small model is derived from the same provider.
+//
+// It is pure resolution logic: it does not mutate the store or touch disk.
+func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) resolvedModels {
 	var result resolvedModels
-	defaultLarge, defaultSmall, err := cfg.defaultModelSelection(knownProviders)
-	if err != nil {
-		return result, fmt.Errorf("failed to select default models: %w", err)
-	}
-	large, small := defaultLarge, defaultSmall
+	result.Large, result.HasLarge = resolveSelectedModel(cfg, knownProviders, cfg.Models[SelectedModelTypeLarge])
+	result.Small, result.HasSmall = resolveSelectedModel(cfg, knownProviders, cfg.Models[SelectedModelTypeSmall])
 
-	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
-	if largeModelConfigured {
-		if largeModelSelected.Model != "" {
-			large.Model = largeModelSelected.Model
+	if result.HasLarge && !result.HasSmall {
+		result.Small, result.HasSmall = deriveSmallModel(cfg, knownProviders, result.Large)
+	}
+	return result
+}
+
+// resolveSelectedModel validates a single model selection against the
+// provider catalog, filling in catalog defaults for unset fields. A
+// selection that names a model but no provider is matched to the first
+// provider offering that model. It returns false when the selection is
+// empty or the provider or model no longer exists, in which case the caller
+// must drop the selection.
+func resolveSelectedModel(cfg *Config, knownProviders []catwalk.Provider, selected SelectedModel) (SelectedModel, bool) {
+	if selected.Model == "" {
+		return SelectedModel{}, false
+	}
+	if selected.Provider == "" {
+		provider, ok := cfg.providerForModel(knownProviders, selected.Model)
+		if !ok {
+			return SelectedModel{}, false
 		}
-		if largeModelSelected.Provider != "" {
-			large.Provider = largeModelSelected.Provider
+		selected.Provider = provider
+	}
+	providerConfig, ok := cfg.Providers.Get(selected.Provider)
+	if !ok || providerConfig.Disable {
+		return SelectedModel{}, false
+	}
+	model := cfg.GetModel(selected.Provider, selected.Model)
+	if model == nil {
+		return SelectedModel{}, false
+	}
+	resolved := selected
+	resolved.ProviderOptions = maps.Clone(selected.ProviderOptions)
+	if resolved.MaxTokens <= 0 {
+		resolved.MaxTokens = model.DefaultMaxTokens
+	}
+	if resolved.ReasoningEffort == "" {
+		resolved.ReasoningEffort = model.DefaultReasoningEffort
+	}
+	return resolved, true
+}
+
+// deriveSmallModel picks the small model for a large model selection whose
+// small counterpart isn't configured. Providers outside the catalog reuse
+// the large model, which keeps local and OpenAI-compatible setups from
+// requesting two different models concurrently.
+func deriveSmallModel(cfg *Config, knownProviders []catwalk.Provider, large SelectedModel) (SelectedModel, bool) {
+	for _, p := range knownProviders {
+		if string(p.ID) != large.Provider {
+			continue
 		}
-		model := cfg.GetModel(large.Provider, large.Model)
+		model := cfg.GetModel(large.Provider, p.DefaultSmallModelID)
 		if model == nil {
-			large = defaultLarge
-			result.LargeFallback = true
-		} else {
-			if largeModelSelected.MaxTokens > 0 {
-				large.MaxTokens = largeModelSelected.MaxTokens
-			} else {
-				large.MaxTokens = model.DefaultMaxTokens
-			}
-			if largeModelSelected.ReasoningEffort != "" {
-				large.ReasoningEffort = largeModelSelected.ReasoningEffort
-			} else {
-				large.ReasoningEffort = model.DefaultReasoningEffort
-			}
-			large.Think = largeModelSelected.Think
-			if largeModelSelected.Temperature != nil {
-				large.Temperature = largeModelSelected.Temperature
-			}
-			if largeModelSelected.TopP != nil {
-				large.TopP = largeModelSelected.TopP
-			}
-			if largeModelSelected.TopK != nil {
-				large.TopK = largeModelSelected.TopK
-			}
-			if largeModelSelected.FrequencyPenalty != nil {
-				large.FrequencyPenalty = largeModelSelected.FrequencyPenalty
-			}
-			if largeModelSelected.PresencePenalty != nil {
-				large.PresencePenalty = largeModelSelected.PresencePenalty
-			}
-			if largeModelSelected.ProviderOptions != nil {
-				large.ProviderOptions = maps.Clone(largeModelSelected.ProviderOptions)
-			}
+			break
 		}
+		return SelectedModel{
+			Provider:        large.Provider,
+			Model:           p.DefaultSmallModelID,
+			MaxTokens:       model.DefaultMaxTokens,
+			ReasoningEffort: model.DefaultReasoningEffort,
+		}, true
 	}
-	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
-	if smallModelConfigured {
-		if smallModelSelected.Model != "" {
-			small.Model = smallModelSelected.Model
-		}
-		if smallModelSelected.Provider != "" {
-			small.Provider = smallModelSelected.Provider
-		}
-
-		model := cfg.GetModel(small.Provider, small.Model)
-		if model == nil {
-			small = defaultSmall
-			result.SmallFallback = true
-		} else {
-			if smallModelSelected.MaxTokens > 0 {
-				small.MaxTokens = smallModelSelected.MaxTokens
-			} else {
-				small.MaxTokens = model.DefaultMaxTokens
-			}
-			if smallModelSelected.ReasoningEffort != "" {
-				small.ReasoningEffort = smallModelSelected.ReasoningEffort
-			} else {
-				small.ReasoningEffort = model.DefaultReasoningEffort
-			}
-			if smallModelSelected.Temperature != nil {
-				small.Temperature = smallModelSelected.Temperature
-			}
-			if smallModelSelected.TopP != nil {
-				small.TopP = smallModelSelected.TopP
-			}
-			if smallModelSelected.TopK != nil {
-				small.TopK = smallModelSelected.TopK
-			}
-			if smallModelSelected.FrequencyPenalty != nil {
-				small.FrequencyPenalty = smallModelSelected.FrequencyPenalty
-			}
-			if smallModelSelected.PresencePenalty != nil {
-				small.PresencePenalty = smallModelSelected.PresencePenalty
-			}
-			if smallModelSelected.ProviderOptions != nil {
-				small.ProviderOptions = maps.Clone(smallModelSelected.ProviderOptions)
-			}
-			small.Think = smallModelSelected.Think
-		}
-	}
-
-	// When small isn't explicitly configured and the provider isn't a
-	// known built-in, use the large model as the small model. This
-	// prevents two different models from being requested concurrently
-	// for local/openai-compat providers.
-	if !smallModelConfigured {
-		isKnownProvider := false
-		for _, kp := range knownProviders {
-			if string(kp.ID) == small.Provider {
-				isKnownProvider = true
-				break
-			}
-		}
-		if !isKnownProvider {
-			slog.Warn("Using large model as small model for unknown provider", "provider", large.Provider, "model", large.Model)
-			small = large
-		}
-	}
-
-	result.Large = large
-	result.Small = small
-	return result, nil
+	slog.Warn("Using large model as small model", "provider", large.Provider, "model", large.Model)
+	return large, true
 }
 
 // lookupConfigs searches config files starting at cwd and walking up

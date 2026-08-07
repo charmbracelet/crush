@@ -423,3 +423,56 @@ func ExitCode(err error) int {
 	}
 	return 1
 }
+
+// ContainsCommandChaining reports whether command does anything beyond
+// running a single simple command with redirections: pipelines, `&&`/`||`,
+// `;`, backgrounding, subshells, and command or process substitution all
+// count.
+//
+// Callers use it to decide whether a command is simple enough for its leading
+// words to be matched against a safe-command list. Matching a prefix is only
+// meaningful when the prefix is the whole command, so anything that can smuggle
+// a second command past the prefix has to report true.
+//
+// Redirection alone (`ls > out`, `ls &> /dev/null`) is not chaining: it changes
+// where output goes, not which commands run.
+//
+// Unparseable input reports true, matching IsCommandBlocked: if we cannot tell
+// what the command does, we do not get to call it simple.
+func ContainsCommandChaining(command string) bool {
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return true
+	}
+	if len(file.Stmts) == 0 {
+		return false
+	}
+	if len(file.Stmts) > 1 {
+		return true
+	}
+
+	stmt := file.Stmts[0]
+	// `ls &` backgrounds ls and lets whatever follows run on its own; the
+	// parser reports it as one statement, so check the flag directly.
+	if stmt.Background || stmt.Negated {
+		return true
+	}
+	// Anything that is not a plain call (pipelines, `&&`, subshells, blocks,
+	// loops, conditionals, function definitions) can run more than one thing.
+	if _, ok := stmt.Cmd.(*syntax.CallExpr); !ok {
+		return true
+	}
+
+	// A substitution anywhere in the arguments or redirections runs a command
+	// whose text we cannot see.
+	chained := false
+	syntax.Walk(stmt, func(node syntax.Node) bool {
+		switch node.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			chained = true
+			return false
+		}
+		return !chained
+	})
+	return chained
+}

@@ -62,23 +62,11 @@
       "id": "gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B A4B",
       "cost_per_1m_in": 0.124,
-      "cost_per_1m_out": 0.4,
+      "cost_per_1m_out": 0.42,
       "cost_per_1m_in_cached": 0.062,
       "cost_per_1m_out_cached": 0,
       "context_window": 256000,
       "default_max_tokens": 25600,
-      "can_reason": true,
-      "supports_attachments": false
-    },
-    {
-      "id": "glm-5",
-      "name": "GLM-5",
-      "cost_per_1m_in": 0.82,
-      "cost_per_1m_out": 2.548,
-      "cost_per_1m_in_cached": 0.41,
-      "cost_per_1m_out_cached": 0,
-      "context_window": 202752,
-      "default_max_tokens": 20275,
       "can_reason": true,
       "supports_attachments": false
     },
@@ -119,9 +107,9 @@
     {
       "id": "gpt-oss-120b",
       "name": "gpt-oss-120b",
-      "cost_per_1m_in": 0.166,
-      "cost_per_1m_out": 0.632,
-      "cost_per_1m_in_cached": 0.083,
+      "cost_per_1m_in": 0.178,
+      "cost_per_1m_out": 0.71,
+      "cost_per_1m_in_cached": 0.089,
       "cost_per_1m_out_cached": 0,
       "context_window": 131072,
       "default_max_tokens": 13107,
@@ -137,9 +125,9 @@
     {
       "id": "kimi-k2.5",
       "name": "Kimi K2.5",
-      "cost_per_1m_in": 0.558,
-      "cost_per_1m_out": 2.94,
-      "cost_per_1m_in_cached": 0.279,
+      "cost_per_1m_in": 0.55,
+      "cost_per_1m_out": 2.89,
+      "cost_per_1m_in_cached": 0.275,
       "cost_per_1m_out_cached": 0,
       "context_window": 262144,
       "default_max_tokens": 26214,
@@ -209,9 +197,9 @@
     {
       "id": "llama-4-maverick-17b-128e-instruct-fp8",
       "name": "Llama 4 Maverick 17B 128E Instruct FP8",
-      "cost_per_1m_in": 0.284,
-      "cost_per_1m_out": 0.934,
-      "cost_per_1m_in_cached": 0.142,
+      "cost_per_1m_in": 0.274,
+      "cost_per_1m_out": 0.8992,
+      "cost_per_1m_in_cached": 0.137,
       "cost_per_1m_out_cached": 0,
       "context_window": 430000,
       "default_max_tokens": 43000,
@@ -330,7 +318,7 @@
       "context_window": 1000000,
       "default_max_tokens": 65536,
       "can_reason": true,
-      "supports_attachments": false
+      "supports_attachments": true
     },
     {
       "id": "qwen3-coder-480b-a35b-instruct-int4-mixed-ar",

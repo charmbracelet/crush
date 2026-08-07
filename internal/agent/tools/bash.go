@@ -265,9 +265,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 
 			// Check whether the command is dangerous so we can surface a
-			// warning in the permission dialog and skip re-blocking after
-			// explicit approval.
-			var approvedDangerous bool
+			// warning in the permission dialog.
 			if !isSafeReadOnly {
 				isDangerous := shell.IsCommandBlocked(params.Command, blockFuncs(blocked))
 
@@ -289,14 +287,19 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				if !approved {
 					return NewPermissionDeniedResponse(), nil
 				}
-				approvedDangerous = isDangerous
 			}
 
-			// Enforce the block list unless sysadmin mode drops all shell-level
-			// restrictions, or the user explicitly approved a dangerous
-			// command (which must not be re-blocked at exec time).
+			// The permission layer is the gate. Anything that reaches here
+			// was approved, explicitly or by the active permission mode, so
+			// re-blocking it at exec time would just override the answer the
+			// user already gave.
+			//
+			// The safe-read-only path is the one branch that never asks, so
+			// it is the only one that still enforces the block list, as a
+			// backstop against a dangerous command smuggled past the
+			// safe-prefix match.
 			var blocksToUse []shell.BlockFunc
-			if permissions.PermissionMode() != permission.PermissionModeSysadmin && !approvedDangerous {
+			if isSafeReadOnly {
 				blocksToUse = blockFuncs(blocked)
 			}
 			return executeBashCommand(ctx, params, execWorkingDir, blocksToUse)

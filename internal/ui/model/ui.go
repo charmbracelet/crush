@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -364,6 +365,9 @@ type UI struct {
 	// Todo spinner
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
+
+	// preThemeStyles stores the styles before a theme preview so we can revert.
+	preThemeStyles *styles.Styles
 
 	// mouse highlighting related state
 	lastClickTime time.Time
@@ -1980,6 +1984,77 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Transparent background " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSwitchTheme:
+		themeName := msg.Theme
+		newStyles, err := styles.LoadTheme(themeName)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		m.applyTheme(newStyles)
+		m.preThemeStyles = nil
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
+			"options.tui.active_theme":       themeName,
+			"options.tui.theme." + themeName: map[string]any{},
+		}); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Theme switched to "+themeName))
+		m.dialog.CloseDialog(dialog.ThemeID)
+	case dialog.ActionPreviewTheme:
+		newStyles, err := styles.LoadTheme(msg.Theme)
+		if err != nil {
+			break
+		}
+		if m.preThemeStyles == nil {
+			saved := m.com.Styles.Clone()
+			m.preThemeStyles = &saved
+		}
+		m.applyTheme(newStyles)
+	case dialog.ActionRevertThemePreview:
+		if m.preThemeStyles != nil {
+			m.applyTheme(*m.preThemeStyles)
+			m.preThemeStyles = nil
+		}
+		m.dialog.CloseDialog(dialog.ThemeID)
+	case dialog.ActionPreviewThemePalette:
+		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
+		if err != nil {
+			break
+		}
+		if m.preThemeStyles == nil {
+			saved := m.com.Styles.Clone()
+			m.preThemeStyles = &saved
+		}
+		m.applyTheme(newStyles)
+	case dialog.ActionSaveThemePalette:
+		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		m.applyTheme(newStyles)
+		m.preThemeStyles = nil
+		value, err := themePaletteConfigValue(msg.Base, msg.Palette)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
+			"options.tui.theme." + msg.Base: value,
+		}); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Theme saved"))
+		m.dialog.CloseDialog(dialog.ThemeEditorID)
+	case dialog.ActionRevertThemePalette:
+		if m.preThemeStyles != nil {
+			m.applyTheme(*m.preThemeStyles)
+			m.preThemeStyles = nil
+		}
+		m.dialog.CloseDialog(dialog.ThemeEditorID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
@@ -3930,13 +4005,33 @@ func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
 }
 
+func themePaletteConfigValue(base string, palette styles.Palette) (map[string]any, error) {
+	data, err := json.Marshal(palette)
+	if err != nil {
+		return nil, err
+	}
+	value := map[string]any{}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return nil, err
+	}
+	if base != "" {
+		value["base"] = base
+	}
+	return value, nil
+}
+
 // applyThemeForProvider swaps the active theme to the one associated with
 // the given provider, but only when that theme differs from the one
 // already applied. Most providers share a single theme, so re-selecting a
 // model from the same theme family would otherwise pay the full cost of
 // invalidating the markdown renderer cache and re-rendering the entire
 // transcript for no visible change.
+// A theme explicitly selected in the config always wins, so provider
+// changes never discard the user's choice.
 func (m *UI) applyThemeForProvider(providerID string) {
+	if common.ThemeNameFromConfig(m.com.Config()) != "" {
+		return
+	}
 	key := styles.ThemeKeyForProvider(providerID)
 	if key == m.themeKey {
 		return
@@ -3946,11 +4041,11 @@ func (m *UI) applyThemeForProvider(providerID string) {
 }
 
 // applyTheme replaces the active styles with the given theme, drops the
-// shared markdown renderer cache, and refreshes every component that
-// caches style data.
+// shared style caches, and refreshes every component that caches style
+// data.
 func (m *UI) applyTheme(s styles.Styles) {
 	*m.com.Styles = s
-	common.InvalidateMarkdownRendererCache()
+	common.InvalidateStyleCaches()
 	m.refreshStyles()
 }
 
@@ -3999,6 +4094,26 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 			Content:  content,
 		}
 	}
+}
+
+// openThemeDialog opens the theme picker dialog.
+func (m *UI) openThemeDialog() {
+	if m.dialog.ContainsDialog(dialog.ThemeID) {
+		m.dialog.BringToFront(dialog.ThemeID)
+		return
+	}
+	themeDialog := dialog.NewTheme(m.com)
+	m.dialog.OpenDialog(themeDialog)
+}
+
+// openThemeEditorDialog opens the theme editor dialog.
+func (m *UI) openThemeEditorDialog() {
+	if m.dialog.ContainsDialog(dialog.ThemeEditorID) {
+		m.dialog.BringToFront(dialog.ThemeEditorID)
+		return
+	}
+	themeDialog := dialog.NewThemeEditor(m.com)
+	m.dialog.OpenDialog(themeDialog)
 }
 
 // sendMessage sends a message with the given content and attachments.
@@ -4245,6 +4360,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ThemeID:
+		m.openThemeDialog()
+	case dialog.ThemeEditorID:
+		m.openThemeEditorDialog()
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)

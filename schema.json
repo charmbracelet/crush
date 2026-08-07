@@ -810,6 +810,11 @@
           ],
           "description": "Chat scrollbar visibility",
           "default": "default"
+        },
+        "mouse": {
+          "type": "boolean",
+          "description": "Enable terminal mouse capture for selection, clicks, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste",
+          "default": true
         }
       },
       "additionalProperties": false,

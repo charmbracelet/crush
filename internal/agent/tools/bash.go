@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -72,7 +73,10 @@ type bashDescriptionData struct {
 	GhAvailable     bool
 }
 
-var bannedCommands = []string{
+// defaultBlockedCommands is the built-in dangerous-command list. It is a
+// default, not a hardcoded policy: the `permissions` config block can add
+// to it and take away from it (see resolveBlockedCommands).
+var defaultBlockedCommands = []string{
 	// Network/Download tools
 	"alias",
 	"aria2c",
@@ -145,11 +149,41 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution, modelID string) string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+// resolveBlockedCommands returns the effective dangerous-command list:
+// the built-in defaults plus perms.BlockedCommands, minus
+// perms.AllowedCommands.
+//
+// The built-in order is preserved and user additions are appended. The list is
+// embedded verbatim in the tool description, so it has to be deterministic, but
+// sorting it would scramble the category grouping the defaults are written in
+// and churn the prompt for every existing user.
+func resolveBlockedCommands(perms *config.Permissions) []string {
+	if perms == nil {
+		return slices.Clone(defaultBlockedCommands)
+	}
+	blocked := make([]string, 0, len(defaultBlockedCommands)+len(perms.BlockedCommands))
+	blocked = append(blocked, defaultBlockedCommands...)
+	blocked = append(blocked, perms.BlockedCommands...)
+	blocked = slices.DeleteFunc(blocked, func(c string) bool {
+		return slices.Contains(perms.AllowedCommands, c)
+	})
+
+	seen := make(map[string]struct{}, len(blocked))
+	deduped := blocked[:0]
+	for _, cmd := range blocked {
+		if _, dup := seen[cmd]; dup {
+			continue
+		}
+		seen[cmd] = struct{}{}
+		deduped = append(deduped, cmd)
+	}
+	return deduped
+}
+
+func bashDescription(attribution *config.Attribution, modelID string, blocked []string) string {
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
-		BannedCommands:  bannedCommandsStr,
+		BannedCommands:  strings.Join(blocked, ", "),
 		MaxOutputLength: MaxOutputLength,
 		Attribution:     *attribution,
 		ModelID:         modelID,
@@ -162,9 +196,13 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 	return out.String()
 }
 
-func blockFuncs() []shell.BlockFunc {
+// blockFuncs builds the block list from the resolved dangerous commands.
+// The flat command list is configurable; the argument blockers below are
+// structural rules about specific flags rather than a list of binaries, so
+// they stay built in.
+func blockFuncs(blocked []string) []shell.BlockFunc {
 	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
+		shell.CommandsBlocker(blocked),
 
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
@@ -194,10 +232,11 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, perms *config.Permissions) fantasy.AgentTool {
+	blocked := resolveBlockedCommands(perms)
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution, modelID)),
+		string(bashDescription(attribution, modelID, blocked)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
@@ -230,7 +269,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// explicit approval.
 			var approvedDangerous bool
 			if !isSafeReadOnly {
-				isDangerous := shell.IsCommandBlocked(params.Command, blockFuncs())
+				isDangerous := shell.IsCommandBlocked(params.Command, blockFuncs(blocked))
 
 				approved, err := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
@@ -258,7 +297,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// command (which must not be re-blocked at exec time).
 			var blocksToUse []shell.BlockFunc
 			if permissions.PermissionMode() != permission.PermissionModeSysadmin && !approvedDangerous {
-				blocksToUse = blockFuncs()
+				blocksToUse = blockFuncs(blocked)
 			}
 			return executeBashCommand(ctx, params, execWorkingDir, blocksToUse)
 		})

@@ -702,6 +702,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateNotificationBackend()
 	case tea.FocusMsg:
 		m.notifyWindowFocused = true
+		// Force a full repaint when regaining focus. The terminal content
+		// may be stale or corrupted after switching away from the workspace
+		// and back, and the renderer's no-op check would otherwise skip the
+		// repaint if the view content hasn't changed.
+		cmds = append(cmds, func() tea.Msg { return tea.ClearScreen() })
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
 	case pubsub.Event[notify.Notification]:

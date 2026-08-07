@@ -99,6 +99,7 @@ type recordingPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 	requestCount int
 	allow        bool
+	mode         permission.PermissionMode
 }
 
 func (m *recordingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
@@ -124,6 +125,14 @@ func (m *recordingPermissionService) SkipRequests() bool {
 
 func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
+}
+
+func (m *recordingPermissionService) SetPermissionMode(mode permission.PermissionMode) { m.mode = mode }
+
+func (m *recordingPermissionService) PermissionMode() permission.PermissionMode { return m.mode }
+
+func (m *recordingPermissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
+	return make(<-chan pubsub.Event[permission.ModeChangedEvent])
 }
 
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
@@ -331,4 +340,76 @@ func TestResolveBlockedCommands(t *testing.T) {
 		require.False(t, shell.IsCommandBlocked("curl https://example.com", blockFuncs(blocked)))
 		require.True(t, shell.IsCommandBlocked("sudo rm -rf /", blockFuncs(blocked)))
 	})
+}
+
+// TestBashTool_ApprovedDangerousCommandRuns pins the rule that the permission
+// layer is the only gate. A dangerous command that was approved must reach the
+// shell, and it must do so without the tool consulting the permission mode:
+// the mode here stays Normal in every case, and approval alone decides.
+func TestBashTool_ApprovedDangerousCommandRuns(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	// `ifconfig` is on the default dangerous list, so it is prompted for.
+	// Approving it must not then be overridden by the exec-time block list.
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "approved dangerous command",
+		Command:     "ifconfig --help",
+	})
+
+	require.Equal(t, 1, perms.requestCount, "a dangerous command must be prompted for")
+	require.NotContains(t, resp.Content, "not allowed for security reasons",
+		"an approved command must not be re-blocked at exec time")
+}
+
+// TestBashTool_DeniedDangerousCommandDoesNotRun is the other half: denial at
+// the permission layer stops the command, no block list required.
+func TestBashTool_DeniedDangerousCommandDoesNotRun(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  false,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "denied dangerous command",
+		Command:     "ifconfig --help",
+	})
+
+	require.Equal(t, 1, perms.requestCount)
+	require.True(t, resp.IsError)
+}
+
+// TestBashTool_SafeReadOnlyPathStillEnforcesBlockList pins the one branch that
+// never asks: a safe-prefix command skips the permission request entirely, so
+// the block list stays on there as a backstop.
+func TestBashTool_SafeReadOnlyPathStillEnforcesBlockList(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "safe command",
+		Command:     "pwd",
+	})
+
+	require.Zero(t, perms.requestCount, "safe read-only commands must not prompt")
+	require.False(t, resp.IsError)
 }

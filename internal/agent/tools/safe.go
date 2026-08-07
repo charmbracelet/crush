@@ -2,8 +2,8 @@ package tools
 
 import (
 	"runtime"
-	"slices"
-	"strings"
+
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 var safeCommands = []string{
@@ -58,20 +58,11 @@ var safeCommands = []string{
 	"git tag",
 }
 
-var chainingMetacharacters = []string{
-	";",
-	"|",
-	"&&",
-	"$(",
-	"`",
-}
-
-// containsCommandChaining reports whether s contains shell metacharacters
-// that enable command chaining or substitution.
+// containsCommandChaining reports whether s runs anything beyond a single
+// simple command, in which case its leading words must not be matched against
+// safeCommands. See shell.ContainsCommandChaining.
 func containsCommandChaining(s string) bool {
-	return slices.ContainsFunc(chainingMetacharacters, func(c string) bool {
-		return strings.Contains(s, c)
-	})
+	return shell.ContainsCommandChaining(s)
 }
 
 func init() {

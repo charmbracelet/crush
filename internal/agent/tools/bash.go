@@ -65,15 +65,20 @@ var bashDescriptionTpl = template.Must(
 )
 
 type bashDescriptionData struct {
-	BannedCommands  string
-	MaxOutputLength int
-	Attribution     config.Attribution
-	ModelID         string
-	RgAvailable     bool
-	GhAvailable     bool
+	SensitiveCommands string
+	MaxOutputLength   int
+	Attribution       config.Attribution
+	ModelID           string
+	RgAvailable       bool
+	GhAvailable       bool
 }
 
-var bannedCommands = []string{
+// sensitiveCommands are commands that require explicit human approval
+// before they can run. Unlike a hard blocklist, they are not forbidden
+// outright: they are routed through the permission prompt and can never
+// be auto-approved (by yolo mode, the allowlist, hooks, or session
+// grants). Only an interactive human grant authorizes them.
+var sensitiveCommands = []string{
 	// Network/Download tools
 	"alias",
 	"aria2c",
@@ -147,15 +152,15 @@ var bannedCommands = []string{
 }
 
 func bashDescription(attribution *config.Attribution, modelID string) string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+	sensitiveCommandsStr := strings.Join(sensitiveCommands, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
-		BannedCommands:  bannedCommandsStr,
-		MaxOutputLength: MaxOutputLength,
-		Attribution:     *attribution,
-		ModelID:         modelID,
-		RgAvailable:     getRg() != "",
-		GhAvailable:     ghAvailable,
+		SensitiveCommands: sensitiveCommandsStr,
+		MaxOutputLength:   MaxOutputLength,
+		Attribution:       *attribution,
+		ModelID:           modelID,
+		RgAvailable:       getRg() != "",
+		GhAvailable:       ghAvailable,
 	}); err != nil {
 		// this should never happen.
 		panic("failed to execute bash description template: " + err.Error())
@@ -163,9 +168,14 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 	return out.String()
 }
 
+// blockFuncs returns matchers that identify sensitive commands. They are
+// used to flag permission requests that require explicit human approval;
+// they no longer hard-block execution. A command whose token sequence
+// matches any matcher can never be auto-approved (yolo mode, allowlist,
+// hooks, or session grants) — only an interactive human grant runs it.
 func blockFuncs() []shell.BlockFunc {
 	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
+		shell.CommandsBlocker(sensitiveCommands),
 
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
@@ -193,6 +203,22 @@ func blockFuncs() []shell.BlockFunc {
 		// `go test -exec` can run arbitrary commands
 		shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
 	}
+}
+
+// isSensitiveCommand reports whether any token position of the command
+// matches a sensitive-command matcher. It checks every position rather
+// than only the first so that chained commands (e.g. `ls; sudo rm -rf /`)
+// are also flagged for explicit approval.
+func isSensitiveCommand(command string) bool {
+	fields := strings.Fields(command)
+	for i := range fields {
+		for _, f := range blockFuncs() {
+			if f(fields[i:]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
@@ -236,6 +262,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						Action:      "execute",
 						Description: fmt.Sprintf("Execute command: %s", params.Command),
 						Params:      BashPermissionsParams(params),
+						// Sensitive commands must be explicitly approved
+						// by the human user: they bypass yolo mode, the
+						// allowlist, hooks, and session grants.
+						RequiresExplicitApproval: isSensitiveCommand(params.Command),
 					},
 				)
 				if err != nil {
@@ -252,7 +282,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, nil, params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -307,7 +337,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, nil, params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

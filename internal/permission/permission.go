@@ -45,6 +45,11 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	// RequiresExplicitApproval marks a request that can never be
+	// auto-approved. Yolo mode, the allowlist, hooks, auto-approve
+	// sessions and persistent session grants are all bypassed; only an
+	// interactive human grant or deny resolves the request.
+	RequiresExplicitApproval bool `json:"requires_explicit_approval"`
 }
 
 type PermissionNotification struct {
@@ -191,18 +196,24 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	if s.skip.Load() {
-		// Yolo mode returns before the notification broker is touched, so
-		// no UI and no audit subscriber ever observes that consent was
-		// skipped -- unlike the plan-mode, hook-approval and
-		// session-auto-approve paths below, which all publish. `crush run
-		// --yolo` has no editor prompt or status indicator either, so this
-		// line is the ONLY record that a bypass happened. Info keeps it in
-		// the log at the default level (see internal/log.Setup).
-		slog.Info("Permission auto-granted: yolo mode is skipping permission requests",
-			"tool", opts.ToolName, "action", opts.Action, "path", opts.Path,
-			"session_id", opts.SessionID, "tool_call_id", opts.ToolCallID)
-		return true, nil
+	// Requests that require explicit human approval bypass every
+	// auto-approval path (yolo mode, allowlist, hooks, auto-approve
+	// sessions, persistent session grants). Only an interactive human
+	// grant or deny resolves them.
+	if !opts.RequiresExplicitApproval {
+		if s.skip.Load() {
+			// Yolo mode returns before the notification broker is touched, so
+			// no UI and no audit subscriber ever observes that consent was
+			// skipped -- unlike the plan-mode, hook-approval and
+			// session-auto-approve paths below, which all publish. `crush run
+			// --yolo` has no editor prompt or status indicator either, so this
+			// line is the ONLY record that a bypass happened. Info keeps it in
+			// the log at the default level (see internal/log.Setup).
+			slog.Info("Permission auto-granted: yolo mode is skipping permission requests",
+				"tool", opts.ToolName, "action", opts.Action, "path", opts.Path,
+				"session_id", opts.SessionID, "tool_call_id", opts.ToolCallID)
+			return true, nil
+		}
 	}
 
 	// Plan mode denies mutating actions before allowlists or hooks can
@@ -218,15 +229,17 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+	if !opts.RequiresExplicitApproval &&
+		(slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName)) {
 		return true, nil
 	}
 
 	// A PreToolUse hook that returned decision=allow stamps the context
 	// with the tool call ID. Treat that as a pre-approval and skip the
 	// prompt entirely. We still publish a granted notification so the UI
-	// and audit subscribers see the outcome.
-	if hookApproved(ctx, opts.ToolCallID) {
+	// and audit subscribers see the outcome. Explicit-approval requests
+	// never honour hook approval.
+	if !opts.RequiresExplicitApproval && hookApproved(ctx, opts.ToolCallID) {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
@@ -256,7 +269,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	autoApprove := s.autoApproveSessions[opts.SessionID]
 	s.autoApproveSessionsMu.RUnlock()
 
-	if autoApprove {
+	if !opts.RequiresExplicitApproval && autoApprove {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
@@ -288,17 +301,19 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Params:      opts.Params,
 	}
 
-	if _, ok := s.sessionPermissions.Get(PermissionKey{
-		SessionID: permission.SessionID,
-		ToolName:  permission.ToolName,
-		Action:    permission.Action,
-		Path:      permission.Path,
-	}); ok {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-			ToolCallID: opts.ToolCallID,
-			Granted:    true,
-		})
-		return true, nil
+	if !opts.RequiresExplicitApproval {
+		if _, ok := s.sessionPermissions.Get(PermissionKey{
+			SessionID: permission.SessionID,
+			ToolName:  permission.ToolName,
+			Action:    permission.Action,
+			Path:      permission.Path,
+		}); ok {
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				ToolCallID: opts.ToolCallID,
+				Granted:    true,
+			})
+			return true, nil
+		}
 	}
 
 	s.activeRequestMu.Lock()

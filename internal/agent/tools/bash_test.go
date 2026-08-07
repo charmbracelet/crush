@@ -93,10 +93,14 @@ type recordingPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 	requestCount int
 	allow        bool
+	// lastExplicit records the RequiresExplicitApproval flag of the most
+	// recent permission request.
+	lastExplicit bool
 }
 
 func (m *recordingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
 	m.requestCount++
+	m.lastExplicit = req.RequiresExplicitApproval
 	return m.allow, nil
 }
 
@@ -178,6 +182,70 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 
 	require.Equal(t, 1, perms.requestCount)
 	require.Contains(t, resp.Content, "User denied permission")
+}
+
+func TestBashTool_SensitiveCommandsRequireExplicitApproval(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   string
+		sensitive bool
+		// expectsRequest is true when the command should reach the
+		// permission layer at all. Safe read-only commands skip it.
+		expectsRequest bool
+	}{
+		{name: "sudo flags explicit approval", command: "sudo docker ps", sensitive: true, expectsRequest: true},
+		{name: "curl flags explicit approval", command: "curl -s https://example.com", sensitive: true, expectsRequest: true},
+		{name: "chained sudo flags explicit approval", command: "ls && sudo systemctl status", sensitive: true, expectsRequest: true},
+		{name: "apt install flags explicit approval", command: "apt install -y vim", sensitive: true, expectsRequest: true},
+		{name: "plain command does not", command: "ls -la", sensitive: false, expectsRequest: false},
+		{name: "git status does not", command: "git status", sensitive: false, expectsRequest: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workingDir := t.TempDir()
+			tool, perms := newBashToolWithRecordingPerms(workingDir, true)
+			ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+			resp := runBashTool(t, tool, ctx, BashParams{
+				Description: "sensitive check",
+				Command:     tt.command,
+			})
+
+			require.False(t, resp.IsError)
+			require.Equal(t, tt.expectsRequest, perms.requestCount == 1,
+				"permission request count mismatch for %q", tt.command)
+			if tt.expectsRequest {
+				require.Equal(t, tt.sensitive, perms.lastExplicit,
+					"RequiresExplicitApproval mismatch for %q", tt.command)
+			}
+		})
+	}
+}
+
+func TestIsSensitiveCommand(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: "sudo ls", want: true},
+		{command: "ls", want: false},
+		{command: "curl -s example.com", want: true},
+		{command: "echo hello", want: false},
+		{command: "docker ps", want: false},
+		{command: "docker exec -it x bash", want: false},
+		{command: "ssh host", want: true},
+		{command: "git log", want: false},
+		{command: "npm install -g foo", want: true},
+		{command: "npm install foo", want: false},
+		{command: "go test -exec 'echo x'", want: true},
+		{command: "go build ./...", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			require.Equal(t, tt.want, isSensitiveCommand(tt.command))
+		})
+	}
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {

@@ -36,12 +36,12 @@ func swapInitGate(t *testing.T) chan struct{} {
 
 // TestWaitForInit_BlocksUntilInitCompletes pins the contract the
 // non-interactive path relies on: WaitForInit blocks while MCP initialization
-// is still in flight and returns once it completes. App.RunNonInteractive
-// calls it before reading the tool registry so slow-to-start servers (e.g.
-// stdio Python via uv) have registered their tools first. The interactive
-// coordinator no longer gates on it (a slow server froze the TUI's first
-// prompt); it builds the tool palette from whatever is registered at send
-// time and picks up late servers on later runs.
+// is still in flight and returns once it completes. Non-interactive runs
+// (`crush run`) wait on it before reading the tool registry so slow-to-start
+// servers (e.g. stdio Python via uv) have registered their tools first.
+// Interactive runs deliberately do not gate on it (a slow server froze the
+// TUI's first prompt); they build the tool palette from whatever is registered
+// at send time and pick up late servers on later runs. See coordinator.run.
 func TestWaitForInit_BlocksUntilInitCompletes(t *testing.T) {
 	gate := swapInitGate(t)
 
@@ -85,7 +85,7 @@ func TestWaitForInit_ReturnsWhenNotArmed(t *testing.T) {
 // initialization completes must be visible once WaitForInit returns. The
 // interactive coordinator deliberately no longer relies on this (it reads the
 // registry ungated and picks up late tools on subsequent runs); this test
-// keeps the guarantee for RunNonInteractive, which still waits.
+// keeps the guarantee for non-interactive runs, which still wait.
 func TestWaitForInit_ToolsVisibleAfterInit(t *testing.T) {
 	const name = "test-waitforinit-tools"
 	t.Cleanup(func() {

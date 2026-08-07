@@ -311,7 +311,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
-	// Wait for MCP initialization to complete before reading MCP tools.
+	// Non-interactive runs get a single shot at the tool palette, so wait for
+	// MCP initialization to settle before reading MCP tools. The coordinator
+	// waits again for the same reason (it is the gate the client/server path
+	// goes through); doing it here too surfaces the failure before we create a
+	// session, and lets the UpdateModels below see every MCP tool.
 	if err := mcp.WaitForInit(ctx); err != nil {
 		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}

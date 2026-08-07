@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
@@ -224,14 +225,25 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, err
 	}
 
-	// Build the tool list from whatever is registered right now. MCP
-	// servers may still be starting (see mcp.Initialize); their tools are
-	// simply absent from this run's palette and appear in later runs once
-	// they finish connecting and publish EventToolsListChanged. Blocking
-	// here on mcp.WaitForInit froze the interactive UI for the duration of
-	// the slowest server's connect timeout whenever a prompt was sent
-	// before initialization finished. The non-interactive path still waits
-	// explicitly in App.RunNonInteractive before starting work.
+	// MCP servers connect asynchronously (see mcp.Initialize).
+	//
+	// Interactive runs never wait for that to finish: the tool list below
+	// is built from whatever is registered right now, servers still
+	// connecting are simply absent from this run's palette, and they are
+	// picked up by later runs once they register and publish
+	// EventToolsListChanged. Blocking here froze the TUI for the duration
+	// of the slowest server's connect timeout whenever a prompt was sent
+	// before initialization finished — most visibly on the first message.
+	//
+	// Non-interactive runs get a single shot at the tool palette, so they
+	// do wait for initialization to settle. The wait is bounded by each
+	// server's own connect timeout, so a hung server cannot stall the run
+	// indefinitely.
+	if !c.interactive {
+		if err := mcp.WaitForInit(ctx); err != nil {
+			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
+		}
+	}
 
 	// refresh models before each run
 	if err := c.UpdateModels(ctx); err != nil {

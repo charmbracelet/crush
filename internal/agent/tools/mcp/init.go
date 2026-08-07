@@ -113,6 +113,16 @@ func ArmInit() {
 	initMu.Unlock()
 }
 
+// DisarmInit undoes ArmInit so WaitForInit stops blocking and returns
+// immediately. It exists for tests in other packages that arm the gate
+// without ever running Initialize and must not leak a permanently-blocking
+// gate into the rest of the test binary. Production code never needs it.
+func DisarmInit() {
+	initMu.Lock()
+	initStarted = false
+	initMu.Unlock()
+}
+
 // renewLock returns the per-server mutex used to serialize session renewals,
 // creating it on first use.
 func renewLock(name string) *sync.Mutex {

@@ -67,6 +67,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	// must not care, since they build the tool list from the registry as it
 	// stands rather than waiting for initialization to finish.
 	mcp.ArmInit()
+	t.Cleanup(mcp.DisarmInit)
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)

@@ -137,7 +137,7 @@ func (m *recordingPermissionService) SubscribeModeChanges(ctx context.Context) <
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, workingDir, attribution, "test-model")
+	return NewBashTool(permissions, workingDir, workingDir, attribution, "test-model", nil)
 }
 
 func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.AgentTool, *recordingPermissionService) {
@@ -146,7 +146,7 @@ func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.Agent
 		allow:  allow,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(perms, workingDir, workingDir, attribution, "test-model"), perms
+	return NewBashTool(perms, workingDir, workingDir, attribution, "test-model", nil), perms
 }
 
 func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
@@ -282,7 +282,7 @@ func TestIsDangerousCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shell.IsCommandBlocked(tt.command, blockFuncs())
+			result := shell.IsCommandBlocked(tt.command, blockFuncs(defaultBlockedCommands))
 			require.Equal(t, tt.dangerous, result, "command: %s", tt.command)
 		})
 	}
@@ -330,4 +330,61 @@ func TestTruncateOutputEmoji(t *testing.T) {
 	out := TruncateOutput(content, t.TempDir())
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
 	require.Contains(t, out, "lines truncated")
+}
+
+func TestResolveBlockedCommands(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config uses the defaults", func(t *testing.T) {
+		t.Parallel()
+		require.ElementsMatch(t, defaultBlockedCommands, resolveBlockedCommands(nil))
+	})
+
+	t.Run("blocked_commands adds to the defaults", func(t *testing.T) {
+		t.Parallel()
+		got := resolveBlockedCommands(&config.Permissions{
+			BlockedCommands: []string{"kubectl", "terraform"},
+		})
+		require.Contains(t, got, "kubectl")
+		require.Contains(t, got, "terraform")
+		require.Contains(t, got, "curl", "defaults must still apply")
+	})
+
+	t.Run("allowed_commands removes defaults", func(t *testing.T) {
+		t.Parallel()
+		got := resolveBlockedCommands(&config.Permissions{
+			AllowedCommands: []string{"curl", "wget"},
+		})
+		require.NotContains(t, got, "curl")
+		require.NotContains(t, got, "wget")
+		require.Contains(t, got, "sudo", "unrelated defaults must stay")
+	})
+
+	t.Run("allowed_commands wins over blocked_commands", func(t *testing.T) {
+		t.Parallel()
+		got := resolveBlockedCommands(&config.Permissions{
+			BlockedCommands: []string{"kubectl"},
+			AllowedCommands: []string{"kubectl"},
+		})
+		require.NotContains(t, got, "kubectl")
+	})
+
+	t.Run("built-in order is preserved and duplicates collapsed", func(t *testing.T) {
+		t.Parallel()
+		got := resolveBlockedCommands(&config.Permissions{
+			BlockedCommands: []string{"curl", "kubectl", "kubectl"},
+		})
+		// The list is embedded verbatim in the tool description, so the
+		// defaults must keep their hand-grouped order and additions go last.
+		require.Equal(t, defaultBlockedCommands, got[:len(defaultBlockedCommands)])
+		require.Equal(t, []string{"kubectl"}, got[len(defaultBlockedCommands):],
+			"additions append once; a duplicate of a default is dropped")
+	})
+
+	t.Run("unblocking a command stops it reading as dangerous", func(t *testing.T) {
+		t.Parallel()
+		blocked := resolveBlockedCommands(&config.Permissions{AllowedCommands: []string{"curl"}})
+		require.False(t, shell.IsCommandBlocked("curl https://example.com", blockFuncs(blocked)))
+		require.True(t, shell.IsCommandBlocked("sudo rm -rf /", blockFuncs(blocked)))
+	})
 }

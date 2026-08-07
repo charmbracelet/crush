@@ -823,3 +823,60 @@ func TestPermissionService_RequiresExplicitApproval(t *testing.T) {
 		assert.True(t, granted)
 	})
 }
+
+func TestPermissionService_SensitiveSessionGrantPersists(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", false, nil)
+	events := service.Subscribe(t.Context())
+
+	// First call: yolo/allowlist can't grant; the user must approve.
+	var (
+		wg      sync.WaitGroup
+		granted bool
+		err     error
+	)
+	wg.Go(func() {
+		granted, err = service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:                "s1",
+			ToolCallID:               "call-sudo-1",
+			ToolName:                 "bash",
+			Action:                   "execute",
+			Path:                     "/tmp",
+			Description:              "sudo command 1",
+			RequiresExplicitApproval: true,
+		})
+	})
+	event := <-events
+	service.GrantPersistent(event.Payload) // user clicks "Allow for session"
+	wg.Wait()
+	require.NoError(t, err)
+	assert.True(t, granted)
+
+	// Second call with identical key: session grant is remembered,
+	// no prompt is published.
+	events = service.Subscribe(t.Context())
+	var (
+		wg2      sync.WaitGroup
+		granted2 bool
+		err2     error
+	)
+	wg2.Go(func() {
+		granted2, err2 = service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:                "s1",
+			ToolCallID:               "call-sudo-2",
+			ToolName:                 "bash",
+			Action:                   "execute",
+			Path:                     "/tmp",
+			Description:              "sudo command 2",
+			RequiresExplicitApproval: true,
+		})
+	})
+	select {
+	case <-events:
+		t.Fatal("persistent session grant should not re-prompt for sensitive commands")
+	case <-time.After(100 * time.Millisecond):
+	}
+	wg2.Wait()
+	require.NoError(t, err2)
+	assert.True(t, granted2)
+}

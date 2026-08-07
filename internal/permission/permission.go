@@ -196,10 +196,12 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	// Requests that require explicit human approval bypass every
-	// auto-approval path (yolo mode, allowlist, hooks, auto-approve
-	// sessions, persistent session grants). Only an interactive human
-	// grant or deny resolves them.
+	// Requests that require explicit human approval bypass the yolo-mode
+	// skip, the allowlist and hooks. They can still be resolved by an
+	// interactive human grant or deny, and by a persistent session grant
+	// created through one (see GrantPersistent below), so that after the
+	// user approves a sensitive command once it does not re-prompt for
+	// the rest of the session.
 	if !opts.RequiresExplicitApproval {
 		if s.skip.Load() {
 			// Yolo mode returns before the notification broker is touched, so
@@ -301,19 +303,24 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Params:      opts.Params,
 	}
 
-	if !opts.RequiresExplicitApproval {
-		if _, ok := s.sessionPermissions.Get(PermissionKey{
-			SessionID: permission.SessionID,
-			ToolName:  permission.ToolName,
-			Action:    permission.Action,
-			Path:      permission.Path,
-		}); ok {
-			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-				ToolCallID: opts.ToolCallID,
-				Granted:    true,
-			})
-			return true, nil
-		}
+	// Session grants (GrantPersistent, the "Allow for session" dialog
+	// action) apply to explicit-approval requests too: an interactive
+	// human grant is the only way one can be created, and once granted it
+	// is remembered for the session so sensitive commands don't prompt on
+	// every call. The yolo skip, allowlist and hook paths above never
+	// touch this map, so sensitive commands can still never be
+	// auto-approved by anything but a human.
+	if _, ok := s.sessionPermissions.Get(PermissionKey{
+		SessionID: permission.SessionID,
+		ToolName:  permission.ToolName,
+		Action:    permission.Action,
+		Path:      permission.Path,
+	}); ok {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			ToolCallID: opts.ToolCallID,
+			Granted:    true,
+		})
+		return true, nil
 	}
 
 	s.activeRequestMu.Lock()

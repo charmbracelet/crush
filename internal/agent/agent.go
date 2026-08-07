@@ -83,7 +83,12 @@ type SessionAgentCall struct {
 	// reliable completion contract (e.g. `crush run` against a
 	// session that may be busy) MUST set it; SessionID alone is
 	// ambiguous when concurrent turns share the same session.
-	RunID            string
+	RunID string
+	// ContentWidth is the UI's chat content width hint in cells (0 when
+	// the turn has no interactive UI). Tools rendering width-sensitive
+	// remote content (e.g. A2UI surfaces with pre-sized bar geometry)
+	// use it to ask the server for exactly the right size.
+	ContentWidth     int
 	Prompt           string
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
@@ -874,6 +879,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+			callContext = context.WithValue(callContext, tools.ContentWidthContextKey, call.ContentWidth)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},

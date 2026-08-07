@@ -15,6 +15,8 @@ type (
 	messageIDContextKey string
 	supportsImagesKey   string
 	modelNameKey        string
+	channelContextKey   string
+	contentWidthKey     string
 )
 
 const (
@@ -26,6 +28,10 @@ const (
 	SupportsImagesContextKey supportsImagesKey = "supports_images"
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
+	// ChannelContextKey is the key for the channel that originated the turn.
+	ChannelContextKey channelContextKey = "channel"
+	// ContentWidthContextKey is the key for the UI content width hint in cells.
+	ContentWidthContextKey contentWidthKey = "content_width"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -46,6 +52,11 @@ func GetSessionFromContext(ctx context.Context) string {
 	return getContextValue(ctx, SessionIDContextKey, "")
 }
 
+// GetChannelFromContext retrieves the channel that originated the current turn.
+func GetChannelFromContext(ctx context.Context) string {
+	return getContextValue(ctx, ChannelContextKey, "")
+}
+
 // GetMessageFromContext retrieves the message ID from the context.
 func GetMessageFromContext(ctx context.Context) string {
 	return getContextValue(ctx, MessageIDContextKey, "")
@@ -59,6 +70,12 @@ func GetSupportsImagesFromContext(ctx context.Context) bool {
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
+}
+
+// GetContentWidthFromContext retrieves the UI content width hint in cells,
+// or 0 when no hint was provided for this turn.
+func GetContentWidthFromContext(ctx context.Context) int {
+	return getContextValue(ctx, ContentWidthContextKey, 0)
 }
 
 // NewPermissionDeniedResponse returns a tool response indicating the user

@@ -330,6 +330,12 @@ const (
 
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	// BlockedCommands adds to the built-in list of commands treated as
+	// dangerous. Dangerous commands are prompted for even in yolo mode.
+	BlockedCommands []string `json:"blocked_commands,omitempty" jsonschema:"description=Extra shell commands to treat as dangerous (prompted for even in yolo mode),example=kubectl,example=terraform"`
+	// AllowedCommands removes entries from the effective dangerous list,
+	// including the built-in defaults.
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=Shell commands to drop from the dangerous list so they stop prompting in yolo mode,example=curl,example=ssh"`
 }
 
 type TrailerStyle string

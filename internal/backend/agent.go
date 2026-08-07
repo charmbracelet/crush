@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -44,6 +45,15 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	}); err != nil {
 		return err
 	}
+	var permissionPolicy permission.RequestPolicy
+	switch msg.PermissionPolicy {
+	case proto.PermissionRequestPolicyPrompt:
+		permissionPolicy = permission.RequestPolicyPrompt
+	case proto.PermissionRequestPolicyAutoApprove:
+		permissionPolicy = permission.RequestPolicyAutoApprove
+	default:
+		return ErrInvalidPermissionPolicy
+	}
 
 	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
 
@@ -56,7 +66,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	ws.runWG.Add(1)
 	ws.runMu.Unlock()
 
-	go b.runAgent(ws, msg, accept)
+	go b.runAgent(ws, msg, accept, permissionPolicy)
 	return nil
 }
 
@@ -84,11 +94,11 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // notify.RunComplete event with that correlator. A run-complete marker
 // is also attached so the coordinator can report whether it published
 // the terminal event, letting runAgent avoid a duplicate fallback.
-func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun) {
+func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun, permissionPolicy permission.RequestPolicy) {
 	defer ws.runWG.Done()
 	defer accept.Close()
 
-	ctx := ws.ctx
+	ctx := permission.WithRequestPolicy(ws.ctx, permissionPolicy)
 	if msg.RunID != "" {
 		ctx = agent.WithRunID(ctx, msg.RunID)
 	}

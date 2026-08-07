@@ -127,6 +127,20 @@ func (a AgentInfo) IsZero() bool {
 	return !a.IsBusy && !a.IsReady && a.Model.ID == ""
 }
 
+// PermissionRequestPolicy controls how permission requests are handled for
+// one submitted agent turn. The zero value prompts for permission so requests
+// from clients that predate this field retain their existing behavior.
+type PermissionRequestPolicy string
+
+const (
+	// PermissionRequestPolicyPrompt asks an interactive client to resolve each
+	// permission request.
+	PermissionRequestPolicyPrompt PermissionRequestPolicy = ""
+	// PermissionRequestPolicyAutoApprove approves permission requests for the
+	// submitted turn and its descendants.
+	PermissionRequestPolicyAutoApprove PermissionRequestPolicy = "auto_approve"
+)
+
 // AgentMessage represents a message sent to the agent.
 //
 // RunID, when non-empty, is echoed back on the [RunComplete] event
@@ -142,10 +156,11 @@ func (a AgentInfo) IsZero() bool {
 // remains correct only when no other turns are in flight for the
 // same session.
 type AgentMessage struct {
-	SessionID   string       `json:"session_id"`
-	RunID       string       `json:"run_id,omitempty"`
-	Prompt      string       `json:"prompt"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	SessionID        string                  `json:"session_id"`
+	RunID            string                  `json:"run_id,omitempty"`
+	Prompt           string                  `json:"prompt"`
+	PermissionPolicy PermissionRequestPolicy `json:"permission_policy,omitempty"`
+	Attachments      []Attachment            `json:"attachments,omitempty"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.

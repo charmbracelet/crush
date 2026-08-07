@@ -33,6 +33,7 @@ var (
 	ErrAgentNotInitialized     = errors.New("agent coordinator not initialized")
 	ErrPathRequired            = errors.New("path is required")
 	ErrInvalidPermissionAction = errors.New("invalid permission action")
+	ErrInvalidPermissionPolicy = errors.New("invalid permission policy")
 	ErrUnknownCommand          = errors.New("unknown command")
 	ErrInvalidClientID         = errors.New("invalid client_id")
 	ErrClientNotAttached       = errors.New("client not attached")

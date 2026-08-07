@@ -558,11 +558,24 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 	}
 
 	updatePrompts(name, prompts)
+
+	// Fetch resources and resource templates eagerly so the status display
+	// reflects the real count from the first connection, not a stale zero.
+	// Both helpers are no-ops when the server doesn't advertise the
+	// resources capability, and gracefully handle "method not found". Bound
+	// the listing with the same per-server timeout createSession enforces: a
+	// server that connects but then hangs on resources/list would otherwise
+	// stall startup — with the bound it degrades to a warn and a zero count.
+	listCtx, cancelList := context.WithTimeout(ctx, mcpTimeout(m))
+	resourceCount := refreshSessionResources(listCtx, name, session)
+	cancelList()
+
 	sessions.Set(name, session)
 
 	updateState(name, StateConnected, nil, session, Counts{
-		Tools:   toolCount,
-		Prompts: len(prompts),
+		Tools:     toolCount,
+		Prompts:   len(prompts),
+		Resources: resourceCount,
 	}, withConfig(m))
 
 	return session, nil

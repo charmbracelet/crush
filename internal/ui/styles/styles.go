@@ -312,6 +312,10 @@ type Styles struct {
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+
+		// A2UISurface is the themed container wrapped around rendered A2UI
+		// surfaces so they read as part of the chat.
+		A2UISurface lipgloss.Style
 	}
 
 	// Tool - styles for tool call rendering

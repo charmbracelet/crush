@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/permission/testutil"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -232,8 +233,18 @@ func (m *mockViewPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockViewPermissionService) SetPermissionMode(mode permission.PermissionMode) {}
+
+func (m *mockViewPermissionService) PermissionMode() permission.PermissionMode {
+	return permission.PermissionModeNormal
+}
+
 func (m *mockViewPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
+}
+
+func (m *mockViewPermissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
+	return make(<-chan pubsub.Event[permission.ModeChangedEvent])
 }
 
 type mockFileTracker struct{}
@@ -249,7 +260,7 @@ func (m mockFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([
 }
 
 func newViewToolForTest(workingDir string) fantasy.AgentTool {
-	permissions := &mockViewPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	permissions := &testutil.MockPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	return NewViewTool(nil, permissions, mockFileTracker{}, nil, workingDir)
 }
 

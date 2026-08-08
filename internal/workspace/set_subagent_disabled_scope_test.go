@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/app"
@@ -29,20 +30,36 @@ func isolateConfigHome(t *testing.T) {
 // the workspace config file, bypassing the merged in-memory view.
 func workspaceDisabledSubagents(t *testing.T, store *config.ConfigStore) []string {
 	t.Helper()
+	return workspaceSubagentOptions(t, store).DisabledSubagents
+}
+
+// workspaceSubagentOptions reads the subagent enable/disable lists straight
+// out of the workspace config file.
+func workspaceSubagentOptions(t *testing.T, store *config.ConfigStore) (opts struct {
+	DisabledSubagents []string `json:"disabled_subagents"`
+	EnabledSubagents  []string `json:"enabled_subagents"`
+},
+) {
+	t.Helper()
 	data, err := os.ReadFile(filepath.Join(store.Config().Options.DataDirectory, "crush.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return opts
 		}
 		require.NoError(t, err)
 	}
 	var parsed struct {
-		Options struct {
+		Options *struct {
 			DisabledSubagents []string `json:"disabled_subagents"`
+			EnabledSubagents  []string `json:"enabled_subagents"`
 		} `json:"options"`
 	}
 	require.NoError(t, json.Unmarshal(data, &parsed))
-	return parsed.Options.DisabledSubagents
+	if parsed.Options != nil {
+		opts.DisabledSubagents = parsed.Options.DisabledSubagents
+		opts.EnabledSubagents = parsed.Options.EnabledSubagents
+	}
+	return opts
 }
 
 // TestSetSubagentDisabled_DoesNotCopyOtherScopes is the regression test for the
@@ -103,6 +120,10 @@ func TestSetSubagentDisabled_RoundTripsWithinScope(t *testing.T) {
 
 	require.NoError(t, w.SetSubagentDisabled("alpha", false))
 	require.Equal(t, []string{"beta"}, workspaceDisabledSubagents(t, store))
+	// Only the workspace disabled alpha, so removing that entry is enough; a
+	// lingering enabled_subagents entry would silently override any later
+	// global disable.
+	require.Empty(t, workspaceSubagentOptions(t, store).EnabledSubagents)
 }
 
 // TestSetSubagentDisabled_EnableOverridesBroaderScope is the regression test
@@ -150,7 +171,12 @@ func TestSetSubagentDisabled_EnableOverridesBroaderScope(t *testing.T) {
 		store: store,
 	}
 
+	// Disabled at workspace scope as well: enabling must still record the
+	// override, since dropping the workspace entry alone leaves the global
+	// one in effect.
+	require.NoError(t, w.SetSubagentDisabled("global-agent", true))
 	require.NoError(t, w.SetSubagentDisabled("global-agent", false))
+	require.Equal(t, []string{"global-agent"}, workspaceSubagentOptions(t, store).EnabledSubagents)
 
 	var found *SubagentDefInfo
 	for _, info := range w.AllSubagents() {
@@ -163,4 +189,44 @@ func TestSetSubagentDisabled_EnableOverridesBroaderScope(t *testing.T) {
 	require.NotNil(t, found, "global-agent should still be discovered")
 	require.False(t, found.Disabled,
 		"enabling at workspace scope must override an entry disabled at a broader scope")
+}
+
+// TestSetSubagentDisabled_ConcurrentTogglesKeepEveryWrite verifies that
+// concurrent Library toggles, which run as separate commands, do not
+// overwrite each other's read-modify-write of the workspace config.
+func TestSetSubagentDisabled_ConcurrentTogglesKeepEveryWrite(t *testing.T) {
+	isolateConfigHome(t)
+
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+	mgr := subagents.NewManager(nil, nil, nil)
+	t.Cleanup(mgr.Shutdown)
+	w := &AppWorkspace{app: &app.App{Subagents: mgr}, store: store}
+
+	names := []string{"a", "b", "c", "d", "e", "f"}
+	var wg sync.WaitGroup
+	for _, name := range names {
+		wg.Go(func() {
+			require.NoError(t, w.SetSubagentDisabled(name, true))
+		})
+	}
+	wg.Wait()
+	require.ElementsMatch(t, names, workspaceDisabledSubagents(t, store))
+}
+
+// TestSetSubagentDisabled_BroaderEnableRefusesDisable verifies that the
+// Library reports an error instead of writing a disable that an
+// enabled_subagents entry from another scope would silently override.
+func TestSetSubagentDisabled_BroaderEnableRefusesDisable(t *testing.T) {
+	isolateConfigHome(t)
+
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+	require.NoError(t, store.SetConfigField(config.ScopeGlobal, "options.enabled_subagents", []string{"reviewer"}))
+	mgr := subagents.NewManager(nil, nil, nil)
+	t.Cleanup(mgr.Shutdown)
+	w := &AppWorkspace{app: &app.App{Subagents: mgr}, store: store}
+
+	require.ErrorContains(t, w.SetSubagentDisabled("reviewer", true), "enabled_subagents")
+	require.Empty(t, workspaceDisabledSubagents(t, store))
 }

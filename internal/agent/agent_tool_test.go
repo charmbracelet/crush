@@ -108,16 +108,16 @@ func TestDispatcherTool_Info_ReturnsBuildInfo(t *testing.T) {
 func TestDispatcherTool_Run_ParsesJSONAndCallsDispatch(t *testing.T) {
 	t.Parallel()
 
-	var capturedParams AgentDispatchParams
+	var capturedParams AgentParams
 	dt := &dispatcherTool{
 		info: buildAgentDispatchInfo(nil),
-		dispatch: func(_ context.Context, params AgentDispatchParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			capturedParams = params
 			return fantasy.NewTextResponse("ok"), nil
 		},
 	}
 
-	input, _ := json.Marshal(AgentDispatchParams{SubagentType: "my-agent", Prompt: "do the thing"})
+	input, _ := json.Marshal(AgentParams{SubagentType: "my-agent", Prompt: "do the thing"})
 	resp, err := dt.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
 
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestDispatcherTool_Run_InvalidJSON_ReturnsErrorResponse(t *testing.T) {
 
 	dt := &dispatcherTool{
 		info: buildAgentDispatchInfo(nil),
-		dispatch: func(_ context.Context, _ AgentDispatchParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		dispatch: func(_ context.Context, _ AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			t.Fatal("dispatch should not be called for invalid JSON")
 			return fantasy.ToolResponse{}, nil
 		},
@@ -146,16 +146,16 @@ func TestDispatcherTool_Run_InvalidJSON_ReturnsErrorResponse(t *testing.T) {
 func TestDispatcherTool_Run_EmptySubagentType_RoutesToTask(t *testing.T) {
 	t.Parallel()
 
-	var capturedParams AgentDispatchParams
+	var capturedParams AgentParams
 	dt := &dispatcherTool{
 		info: buildAgentDispatchInfo(nil),
-		dispatch: func(_ context.Context, params AgentDispatchParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			capturedParams = params
 			return fantasy.NewTextResponse("ok"), nil
 		},
 	}
 
-	input, _ := json.Marshal(AgentDispatchParams{Prompt: "search for something"})
+	input, _ := json.Marshal(AgentParams{Prompt: "search for something"})
 	_, err := dt.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
 
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
 
 	dt := &dispatcherTool{
 		info: buildAgentDispatchInfo(active),
-		dispatch: func(_ context.Context, params AgentDispatchParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		dispatch: func(_ context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sa := findSubagentByName(active, params.SubagentType)
 			if sa == nil {
 				return fantasy.NewTextErrorResponse("unknown subagent type: \"" + params.SubagentType + "\""), nil
@@ -210,7 +210,7 @@ func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
 		},
 	}
 
-	input, _ := json.Marshal(AgentDispatchParams{SubagentType: "imaginary", Prompt: "do thing"})
+	input, _ := json.Marshal(AgentParams{SubagentType: "imaginary", Prompt: "do thing"})
 	resp, err := dt.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
 
 	require.NoError(t, err)
@@ -329,7 +329,7 @@ func TestAgentTool_SubagentToolsCappedByOwner(t *testing.T) {
 	ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
 
-	input, err := json.Marshal(AgentDispatchParams{SubagentType: "custom", Prompt: "do something"})
+	input, err := json.Marshal(AgentParams{SubagentType: "custom", Prompt: "do something"})
 	require.NoError(t, err)
 
 	_, err = dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
@@ -454,7 +454,7 @@ func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "sess-1")
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
 
-	input, err := json.Marshal(AgentDispatchParams{SubagentType: "broken", Prompt: "do it"})
+	input, err := json.Marshal(AgentParams{SubagentType: "broken", Prompt: "do it"})
 	require.NoError(t, err)
 
 	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
@@ -599,7 +599,7 @@ func TestAgentTool_TaskDispatch_BuildsOnLocalGroup(t *testing.T) {
 	ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
 
-	input, err := json.Marshal(AgentDispatchParams{Prompt: "find something"})
+	input, err := json.Marshal(AgentParams{Prompt: "find something"})
 	require.NoError(t, err)
 
 	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
@@ -608,4 +608,55 @@ func TestAgentTool_TaskDispatch_BuildsOnLocalGroup(t *testing.T) {
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "Failed to generate response")
 	require.NoError(t, coord.readyWg.Wait(), "the coordinator-wide readyWg must stay clean after a task dispatch")
+}
+
+// TestAgentTool_TaskBuildFailureIsRetryable verifies that a failed task-agent
+// build does not stick for the tool's lifetime: once the config problem is
+// fixed, the next dispatch builds and runs instead of replaying the cached
+// error (sync.Once semantics would fail every later dispatch the same way).
+func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	coderCfg := coord.cfg.Config().Agents[config.AgentCoder]
+	tool, err := coord.agentTool(t.Context(), coderCfg)
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	input, err := json.Marshal(AgentParams{Prompt: "find something"})
+	require.NoError(t, err)
+
+	// Break the task build: no small model selected.
+	smallModel := coord.cfg.Config().Models[config.SelectedModelTypeSmall]
+	delete(coord.cfg.Config().Models, config.SelectedModelTypeSmall)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err, "a task build failure must not abort the turn")
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "build task agent")
+
+	// Fix the config; the next dispatch must retry the build instead of
+	// replaying the cached failure.
+	coord.cfg.Config().Models[config.SelectedModelTypeSmall] = smallModel
+
+	runCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	ctx = context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-2")
+
+	resp, err = dt.Run(ctx, fantasy.ToolCall{ID: "call-2", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.NotContains(t, resp.Content, "build task agent",
+		"the task build must be retried after a failure, not replay the cached error")
+	require.Contains(t, resp.Content, "Failed to generate response")
 }

@@ -24,6 +24,13 @@ type RunningSubagentsFetchedMsg struct {
 	List            []workspace.RunningSubagentInfo
 }
 
+// subagentMutationFailedMsg reports that a Library toggle or delete failed.
+// The optimistic list mutation must be rolled back by re-syncing from the
+// (unchanged) workspace, and the error surfaced to the user.
+type subagentMutationFailedMsg struct {
+	err error
+}
+
 // SubagentsTab identifies which tab of the subagents dialog is active.
 type SubagentsTab int
 
@@ -107,6 +114,7 @@ func NewSubagents(com *common.Common, parentSessionID string) *Subagents {
 			FilePath:    d.FilePath,
 			Scope:       d.Scope,
 			Disabled:    d.Disabled,
+			Deletable:   d.Deletable,
 			Error:       d.Error,
 		})
 		s.libraryItems[i] = item
@@ -200,6 +208,11 @@ func (s *Subagents) HandleMsg(msg tea.Msg) Action {
 	case pubsub.Event[subagents.Event]:
 		s.refreshLibrary()
 		return nil
+	case subagentMutationFailedMsg:
+		// The failed mutation left the workspace unchanged, so re-syncing
+		// rolls back the optimistic toggle/delete.
+		s.refreshLibrary()
+		return ActionCmd{util.ReportError(ev.err)}
 	}
 
 	keyMsg, ok := msg.(tea.KeyPressMsg)
@@ -281,12 +294,13 @@ func (s *Subagents) toggleSelectedLibrary() Action {
 	return ActionCmd{s.setDisabledCmd(li.ID(), li.data.Disabled)}
 }
 
-// setDisabledCmd returns a cmd that persists the disabled state for name and
-// reports any error back to the program.
+// setDisabledCmd returns a cmd that persists the disabled state for name.
+// Failures come back as a subagentMutationFailedMsg so the optimistic flip
+// is rolled back and the error reported.
 func (s *Subagents) setDisabledCmd(name string, disabled bool) tea.Cmd {
 	return func() tea.Msg {
 		if err := s.com.Workspace.SetSubagentDisabled(name, disabled); err != nil {
-			return util.ReportError(err)()
+			return subagentMutationFailedMsg{err: err}
 		}
 		return nil
 	}
@@ -403,6 +417,7 @@ func (s *Subagents) refreshLibrary() {
 			FilePath:    d.FilePath,
 			Scope:       d.Scope,
 			Disabled:    d.Disabled,
+			Deletable:   d.Deletable,
 			Error:       d.Error,
 		})
 		s.libraryItems[i] = item
@@ -416,7 +431,7 @@ func (s *Subagents) refreshLibrary() {
 }
 
 // enterConfirmDelete sets confirm-delete mode for the currently selected
-// library item, if it has user scope.
+// library item, if the workspace will honor a delete for it.
 func (s *Subagents) enterConfirmDelete() {
 	item := s.libraryList.SelectedItem()
 	if item == nil {
@@ -426,7 +441,7 @@ func (s *Subagents) enterConfirmDelete() {
 	if !ok {
 		return
 	}
-	if li.data.Error != "" || li.data.Scope != "user" {
+	if li.data.Error != "" || !li.data.Deletable {
 		return
 	}
 	s.confirmDelete = true
@@ -449,12 +464,13 @@ func (s *Subagents) confirmDeleteSelected() Action {
 	return ActionCmd{s.deleteSubagentCmd(name)}
 }
 
-// deleteSubagentCmd returns a cmd that calls DeleteUserSubagent and reports any
-// error back to the program.
+// deleteSubagentCmd returns a cmd that calls DeleteUserSubagent. Failures
+// come back as a subagentMutationFailedMsg so the optimistic removal is
+// rolled back and the error reported.
 func (s *Subagents) deleteSubagentCmd(name string) tea.Cmd {
 	return func() tea.Msg {
 		if err := s.com.Workspace.DeleteUserSubagent(name); err != nil {
-			return util.ReportError(err)()
+			return subagentMutationFailedMsg{err: err}
 		}
 		return nil
 	}

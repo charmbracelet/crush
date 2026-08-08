@@ -294,7 +294,7 @@ type UI struct {
 	// skills
 	skillStates []*skills.SkillState
 
-	// subagents — cached at init, static for session lifetime
+	// Subagents — cached at init, static for session lifetime.
 	activeSubagentItems []completions.SubagentCompletionValue
 	activeSubagentNames map[string]bool
 
@@ -458,13 +458,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 
 	// Cache active subagents once — they are static for the session.
-	activeSubagents := com.Workspace.ActiveSubagents()
-	ui.activeSubagentItems = make([]completions.SubagentCompletionValue, len(activeSubagents))
-	ui.activeSubagentNames = make(map[string]bool, len(activeSubagents))
-	for i, sa := range activeSubagents {
-		ui.activeSubagentItems[i] = completions.SubagentCompletionValue{Name: sa.Name, Description: sa.Description}
-		ui.activeSubagentNames[sa.Name] = true
-	}
+	ui.activeSubagentItems, ui.activeSubagentNames = buildSubagentCaches(com.Workspace.ActiveSubagents())
 
 	status := NewStatus(com, ui)
 

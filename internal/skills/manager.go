@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -205,10 +206,10 @@ type DiscoveryConfig struct {
 	Resolver func(string) (string, error)
 }
 
-// ResolvePaths expands home-directory and $VAR references in
-// SkillsPaths. This is the canonical path-resolution logic used by
-// DiscoverFromConfig; callers that need the resolved list (e.g. for
-// Catalog labels) can call this directly.
+// ResolvePaths expands home-directory and $VAR references in SkillsPaths,
+// then resolves relative paths from WorkingDir. This is the canonical
+// path-resolution logic used by DiscoverFromConfig; callers that need the
+// resolved list (e.g. for Catalog labels) can call this directly.
 func (c DiscoveryConfig) ResolvePaths() []string {
 	if len(c.SkillsPaths) == 0 {
 		return nil
@@ -220,6 +221,12 @@ func (c DiscoveryConfig) ResolvePaths() []string {
 			if resolved, err := c.Resolver(expanded); err == nil {
 				expanded = resolved
 			}
+		}
+		if expanded != "" {
+			if c.WorkingDir != "" && !filepath.IsAbs(expanded) {
+				expanded = filepath.Join(c.WorkingDir, expanded)
+			}
+			expanded = filepath.Clean(expanded)
 		}
 		out = append(out, expanded)
 	}

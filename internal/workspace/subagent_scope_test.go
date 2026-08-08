@@ -21,7 +21,7 @@ func TestSubagentScope_GlobalDirWinsOverAncestorWorkingDir(t *testing.T) {
 	// workingDir) is true and the buggy code misclassifies this as "project".
 	workingDir := filepath.Dir(globalDir)
 
-	got := subagentScope(filePath, workingDir)
+	got := subagentScope(filePath, workingDir, nil)
 	require.Equal(t, "user", got,
 		"a file under a global subagents dir must be scoped \"user\" even when workingDir is an ancestor of that dir")
 }
@@ -36,6 +36,6 @@ func TestSubagentScope_ProjectDirStillClassifiedAsProject(t *testing.T) {
 	workingDir := t.TempDir()
 	filePath := filepath.Join(workingDir, ".crush", "subagents", "bar.md")
 
-	got := subagentScope(filePath, workingDir)
+	got := subagentScope(filePath, workingDir, nil)
 	require.Equal(t, "project", got)
 }

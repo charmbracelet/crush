@@ -1028,6 +1028,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if f := msg.Payload.Finished; f != nil && m.session != nil && f.ParentSessionID == m.session.ID {
 			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
 		}
+		if m.dialog.HasDialogs() {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case runningSubagentsMsg:
 		// Discard a fetch that raced a session switch: the user navigated
 		// away from forSession before it resolved, so applying it here would

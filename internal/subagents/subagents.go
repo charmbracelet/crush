@@ -30,21 +30,39 @@ const (
 // hyphens, no leading or trailing hyphens, no consecutive hyphens.
 var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-// reservedNames is the set of names that may not be used for subagents: the
-// built-in agent names, every built-in tool name (so a subagent can shadow
-// neither in prompts nor dispatch), and "mcp". Both source lists are fixed,
-// so the set is built once.
-var reservedNames = func() map[string]bool {
-	set := map[string]bool{
-		"coder": true,
-		"task":  true,
-		"mcp":   true,
+// reservedNames is the set of names that may not be used for subagents. It
+// covers the agent-identifier namespace, which is the only one a subagent name
+// enters: a name becomes a subagent_type enum value and a config.Agent ID,
+// never a tool name. "task" is the one that genuinely breaks — dispatch
+// resolves it to the built-in task agent before it ever consults the subagent
+// list, so a subagent claiming it is unreachable — and the rest keep the agent
+// identifiers unambiguous.
+//
+// Built-in tool names are deliberately absent. Deriving this set from
+// config.AllToolNames would bind subagent naming to the permission allowlist,
+// an unrelated namespace that grows: every tool added later would retroactively
+// invalidate definition files that load fine today. A name that matches a tool
+// is a prompt-clarity problem, not a collision, so discovery warns about it
+// instead. See warnIfShadowsToolName.
+var reservedNames = map[string]bool{
+	"agent": true,
+	"task":  true,
+	"coder": true,
+	"mcp":   true,
+}
+
+// warnIfShadowsToolName logs when a subagent's name matches a built-in tool
+// name. Nothing breaks — the two live in separate namespaces — but both are
+// presented to the model in the same turn, so an instruction like "use fetch"
+// stops being unambiguous. This warns and never rejects: the tool list grows
+// over time, and a definition file must not stop loading because Crush shipped
+// a new tool that happens to share its name.
+func warnIfShadowsToolName(name, path string) {
+	if slices.Contains(config.AllToolNames(), name) {
+		slog.Warn("Subagent name matches a built-in tool name; the model may confuse the two",
+			"name", name, "path", path)
 	}
-	for _, name := range config.AllToolNames() {
-		set[name] = true
-	}
-	return set
-}()
+}
 
 // ToolList is a []string that YAML-unmarshals from either a comma-separated
 // scalar string ("view, grep, bash") or a YAML sequence (["view","grep"]).
@@ -91,7 +109,27 @@ func (t *ToolList) UnmarshalYAML(value *yaml.Node) error {
 	default:
 		// A mapping (or other structure) is a user error; treating it as
 		// absent would silently inherit the base tool pool.
-		return fmt.Errorf("expected a list or comma-separated string, got %v", value.Kind)
+		return fmt.Errorf("expected a list or comma-separated string, got %s", yamlKindName(value.Kind))
+	}
+}
+
+// yamlKindName names a yaml.Kind for error messages. yaml.Kind is a bare
+// uint32 with no String method, so formatting one directly renders an opaque
+// number — and these errors are surfaced to users in the Library tab.
+func yamlKindName(k yaml.Kind) string {
+	switch k {
+	case yaml.DocumentNode:
+		return "a document"
+	case yaml.SequenceNode:
+		return "a list"
+	case yaml.MappingNode:
+		return "a mapping"
+	case yaml.ScalarNode:
+		return "a scalar"
+	case yaml.AliasNode:
+		return "an alias"
+	default:
+		return "an unknown value"
 	}
 }
 
@@ -446,20 +484,27 @@ func cloneStates(states []*SubagentState) []*SubagentState {
 }
 
 // DeduplicateStates removes duplicate subagent states by name. When duplicates
-// exist, the last occurrence wins (consistent with Deduplicate for subagents).
+// exist, the last occurrence wins (consistent with Deduplicate for subagents),
+// so the surviving state describes the file whose agent survived.
+//
+// Error states are exempt from that collapse. They are per-file diagnostics —
+// paths are unique, names are not — and the Library renders one row per error
+// state. Name-keying them means a valid definition elsewhere silently hides
+// the broken file the user is trying to fix, which is the failure surfacing
+// error states was meant to end.
 func DeduplicateStates(all []*SubagentState) []*SubagentState {
 	seen := make(map[string]int, len(all))
 	for i, s := range all {
-		if s.Name != "" {
+		if s.Name != "" && s.State != StateError {
 			seen[s.Name] = i
 		}
 	}
 
-	result := make([]*SubagentState, 0, len(seen))
+	result := make([]*SubagentState, 0, len(all))
 	for i, s := range all {
-		// Keep the last occurrence of this name, or anything without a
-		// name (error state).
-		if s.Name == "" || seen[s.Name] == i {
+		// Keep every error state and anything without a name, plus the last
+		// non-error occurrence of each name.
+		if s.Name == "" || s.State == StateError || seen[s.Name] == i {
 			result = append(result, s)
 		}
 	}
@@ -530,6 +575,7 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 				return nil
 			}
 			slog.Debug("Successfully loaded subagent", "name", agent.Name, "path", path)
+			warnIfShadowsToolName(agent.Name, path)
 			mu.Lock()
 			baseAgents = append(baseAgents, agent)
 			mu.Unlock()
@@ -553,7 +599,8 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 		// agents above. Deduplicate and DeduplicateStates both keep the last
 		// occurrence of a name, so the two lists must agree on what "last"
 		// means — otherwise a name collision can resolve to one file's agent
-		// while the Library shows the other file's (possibly errored) state.
+		// while the Library shows the other file's state. (Error states opt
+		// out of that collapse entirely; see DeduplicateStates.)
 		slices.SortStableFunc(baseStates, func(a, b *SubagentState) int {
 			return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
 		})

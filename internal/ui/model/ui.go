@@ -972,8 +972,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.setSessionMessages(msgs); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		if cmd := m.restoreModelFromSession(msgs); cmd != nil {
-			cmds = append(cmds, cmd)
+		// A child (subagent) session's model reflects whatever the
+		// subagent happened to run, not the user's preference, so
+		// loading one must not overwrite the user's preferred model.
+		if msg.session.ParentSessionID == "" {
+			if cmd := m.restoreModelFromSession(msgs); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		if cmd := m.autoExpandPillsIfReasonable(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2226,6 +2231,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
 
+	// Subagents dialog messages.
+	case dialog.ActionLoadSubagentSession:
+		m.dialog.CloseDialog(dialog.SubagentsID)
+		cmds = append(cmds, m.loadSession(msg.SessionID))
+
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -3202,6 +3212,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.loadSession(m.session.ParentSessionID))
 				return true
 			}
+		case key.Matches(msg, m.keyMap.Subagents):
+			m.openSubagentsDialog()
+			return true
 		}
 		return false
 	}
@@ -3340,6 +3353,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
+					break
+				}
+
+				// Refuse before the editor is cleared so the typed prompt
+				// survives, and before bang mode can run in the child session.
+				if cmd := m.readOnlySessionCmd(); cmd != nil {
+					cmds = append(cmds, cmd)
 					break
 				}
 
@@ -3965,6 +3985,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			k.ShiftTab,
 			commands,
 			k.Models,
+			k.Subagents,
 		)
 		if m.session != nil && m.session.ParentSessionID != "" {
 			binds = append(binds, k.ParentSession)
@@ -4008,6 +4029,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			commands,
 			k.ShiftTab,
 			k.Models,
+			k.Subagents,
 			k.Editor.Newline,
 		)
 	}
@@ -4089,6 +4111,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.ShiftTab,
 			commands,
 			k.Models,
+			k.Subagents,
 			k.Sessions,
 			k.ToggleYolo,
 		)
@@ -4178,6 +4201,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.ShiftTab,
 					commands,
 					k.Models,
+					k.Subagents,
 					k.Sessions,
 					k.ToggleYolo,
 				},
@@ -5361,8 +5385,23 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	return m.sendMessageInternal(content, false, attachments...)
 }
 
+// readOnlySessionCmd reports that the current session is read-only when it
+// is a subagent child session, and returns nil otherwise. A child session's
+// transcript belongs to the subagent run that produced it, not to the
+// user's conversation.
+func (m *UI) readOnlySessionCmd() tea.Cmd {
+	if m.session == nil || m.session.ParentSessionID == "" {
+		return nil
+	}
+	return util.ReportInfo("Subagent sessions are read-only. Press " + m.keyMap.ParentSession.Help().Key + " to return to the parent session.")
+}
+
 // sendMessageInternal can hide a generated continuation from the chat.
 func (m *UI) sendMessageInternal(content string, hidden bool, attachments ...message.Attachment) tea.Cmd {
+	if cmd := m.readOnlySessionCmd(); cmd != nil {
+		return cmd
+	}
+
 	if err := m.com.Workspace.AgentReadyErr(); err != nil {
 		return util.ReportError(err)
 	}
@@ -5469,6 +5508,11 @@ func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
 	// doing so would race with the coordinator's own write and
 	// publish a duplicate session update.
 	sessionID := m.session.ID
+	// A subagent child session is read-only; the event belongs to the
+	// conversation it was dispatched from.
+	if m.session.ParentSessionID != "" {
+		sessionID = m.session.ParentSessionID
+	}
 	channel := ev.Name
 	content := ev.ChannelMessage
 	runCmd := func() tea.Msg {
@@ -5644,6 +5688,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openSessionsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SubagentsID:
+		if cmd := m.openSubagentsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ModelsID:
 		if cmd := m.openModelsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -5793,6 +5841,22 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(dialog)
+	return nil
+}
+
+// openSubagentsDialog opens the subagents dialog. If the dialog is already
+// open, it brings it to the front.
+func (m *UI) openSubagentsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SubagentsID) {
+		m.dialog.BringToFront(dialog.SubagentsID)
+		return nil
+	}
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID
+	}
+	d := dialog.NewSubagents(m.com, sessionID)
+	m.dialog.OpenDialog(d)
 	return nil
 }
 

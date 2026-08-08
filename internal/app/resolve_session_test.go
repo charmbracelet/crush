@@ -56,11 +56,19 @@ func (m *mockSessionService) List(context.Context) ([]session.Session, error) {
 	return m.sessions, nil
 }
 
+func (m *mockSessionService) ListChildSessions(context.Context, string) ([]session.Session, error) {
+	return nil, nil
+}
+
 func (m *mockSessionService) Save(_ context.Context, s session.Session) (session.Session, error) {
 	return s, nil
 }
 
 func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
+	return nil
+}
+
+func (m *mockSessionService) AddCost(context.Context, string, float64) error {
 	return nil
 }
 

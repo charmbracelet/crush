@@ -29,13 +29,14 @@ import (
 type countingWorkspace struct {
 	workspace.Workspace
 
-	ready     bool
-	agentBusy bool
-	yolo      bool
-	queued    []string
-	model     workspace.AgentModel
-	lspStates map[string]workspace.LSPClientInfo
-	lspDiags  map[string]lsp.DiagnosticCounts
+	ready           bool
+	agentBusy       bool
+	yolo            bool
+	queued          []string
+	model           workspace.AgentModel
+	lspStates       map[string]workspace.LSPClientInfo
+	lspDiags        map[string]lsp.DiagnosticCounts
+	runningSubagent []workspace.RunningSubagentInfo
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -105,6 +106,10 @@ func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message
 }
 
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
+
+func (w *countingWorkspace) RunningSubagents(string) []workspace.RunningSubagentInfo {
+	return w.runningSubagent
+}
 
 func (w *countingWorkspace) Config() *config.Config { return nil }
 
@@ -178,7 +183,7 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmds(m, c)
 		}
-	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg:
+	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg, runningSubagentsMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	}
@@ -328,6 +333,145 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	runCmds(m, cmd)
 	require.Equal(t, 2, m.promptQueue, "the new session's queue must be fetched")
 	require.Equal(t, []string{"a", "b"}, m.promptQueueItems)
+}
+
+// TestSessionSwitchDropsAndRefreshesRunningSubagents is the regression test
+// for the sidebar showing a stale "Active subagents" panel after a session
+// switch: runningSubagents was otherwise only refreshed by a live
+// RuntimeEvent for the current session's parent, never on session load, so
+// switching to a session with no subagent activity of its own kept showing
+// the previous session's list indefinitely.
+func TestSessionSwitchDropsAndRefreshesRunningSubagents(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:           true,
+		runningSubagent: []workspace.RunningSubagentInfo{{Name: "s2-active-agent"}},
+	}
+	m := newBusyUI(ws)
+	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "stale-from-s1"}}
+
+	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
+	require.Empty(t, m.runningSubagents, "switching sessions must drop the old session's subagent list immediately")
+
+	runCmds(m, cmd)
+	require.Equal(t, []workspace.RunningSubagentInfo{{Name: "s2-active-agent"}}, m.runningSubagents,
+		"the new session's own running subagents must be fetched and applied")
+}
+
+// TestStaleRunningSubagentsFetchDiscarded is the regression test for a
+// runningSubagentsMsg racing a session switch: a fetch dispatched for a
+// session the user has since navigated away from must not clobber the
+// newly-loaded session's list with stale data.
+func TestStaleRunningSubagentsFetchDiscarded(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s2"}
+	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "s2-current"}}
+
+	// A fetch dispatched while the user was still on s1, resolving after
+	// they've already switched to s2, must be discarded rather than applied.
+	stale := runningSubagentsMsg{forSession: "s1", list: []workspace.RunningSubagentInfo{{Name: "s1-stale"}}}
+	m.Update(stale)
+
+	require.Equal(t, []workspace.RunningSubagentInfo{{Name: "s2-current"}}, m.runningSubagents,
+		"a runningSubagentsMsg scoped to a departed session must not overwrite the current session's list")
+}
+
+// TestNewSessionClearsSubagentState is the regression test for ctrl+n leaving
+// the previous session's subagent state on screen. loadSessionMsg clears
+// runningSubagents, parentTitle and subagentColor on a session switch, but
+// newSession() cleared only knownChildSessionIDs — so starting a new session
+// from a child kept rendering the old parent breadcrumb and Subagents panel.
+func TestNewSessionClearsSubagentState(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "child-1"}
+	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "still-running"}}
+	m.parentTitle = "Parent Session"
+	m.subagentColor = "purple"
+	m.knownChildSessionIDs = map[string]bool{"child-1": true}
+
+	m.newSession()
+
+	require.Empty(t, m.runningSubagents, "a new session has no running subagents")
+	require.Empty(t, m.parentTitle, "a new session has no parent breadcrumb")
+	require.Empty(t, m.subagentColor)
+	require.Empty(t, m.knownChildSessionIDs)
+}
+
+// TestRunningSubagentsFetchSeedsKnownChildren is the regression test for
+// subagent file edits vanishing from the Modified Files panel after a session
+// switch. loadSessionMsg clears knownChildSessionIDs and refetches the running
+// list; if that reply does not re-seed the set, handleFileEvent rejects every
+// history.File event from an already-running subagent until it publishes its
+// next RuntimeEvent — which for a quiet subagent is only its Finish.
+func TestRunningSubagentsFetchSeedsKnownChildren(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s1"}
+	m.knownChildSessionIDs = nil
+
+	m.Update(runningSubagentsMsg{
+		forSession: "s1",
+		list: []workspace.RunningSubagentInfo{
+			{Name: "agent-a", ChildSessionID: "child-A"},
+			{Name: "agent-b", ChildSessionID: "child-B"},
+		},
+	})
+
+	require.True(t, m.knownChildSessionIDs["child-A"],
+		"a running subagent from the fetch must be recognized as a child session")
+	require.True(t, m.knownChildSessionIDs["child-B"])
+}
+
+// TestStaleRunningSubagentsFetchDoesNotSeedKnownChildren verifies the seeding
+// above stays behind the same stale-session guard as the list itself.
+func TestStaleRunningSubagentsFetchDoesNotSeedKnownChildren(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s2"}
+	m.knownChildSessionIDs = nil
+
+	m.Update(runningSubagentsMsg{
+		forSession: "s1",
+		list:       []workspace.RunningSubagentInfo{{Name: "agent-a", ChildSessionID: "child-A"}},
+	})
+
+	require.Empty(t, m.knownChildSessionIDs,
+		"a fetch scoped to a departed session must not seed the current session's child set")
+}
+
+// TestStaleParentTitleFetchDiscarded is the regression test for a
+// parentTitleMsg racing a session switch: a fetch dispatched for a child
+// session the user has since navigated away from must not overwrite the
+// newly-loaded session's breadcrumb with a stale one.
+func TestStaleParentTitleFetchDiscarded(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s2"}
+	m.parentTitle = "Current Parent"
+	m.subagentColor = "green"
+
+	// A fetch dispatched while the user was still viewing s1 (a child
+	// session), resolving after they've already switched to s2, must be
+	// discarded rather than applied.
+	stale := parentTitleMsg{forSession: "s1", title: "Stale Parent", color: "purple"}
+	m.Update(stale)
+
+	require.Equal(t, "Current Parent", m.parentTitle,
+		"a parentTitleMsg scoped to a departed session must not overwrite the current breadcrumb")
+	require.Equal(t, "green", m.subagentColor)
 }
 
 // TestToggleYoloWritesThroughCache: both yolo toggle paths share

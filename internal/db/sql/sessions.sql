@@ -40,6 +40,12 @@ FROM sessions
 WHERE parent_session_id is NULL
 ORDER BY updated_at DESC;
 
+-- name: ListChildSessions :many
+SELECT *
+FROM sessions
+WHERE parent_session_id = ?
+ORDER BY updated_at DESC;
+
 -- name: UpdateSession :one
 UPDATE sessions
 SET

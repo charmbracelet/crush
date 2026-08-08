@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const createFile = `-- name: CreateFile :one
@@ -169,6 +170,50 @@ ORDER BY version ASC, created_at ASC
 
 func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]File, error) {
 	rows, err := q.query(ctx, q.listFilesBySessionStmt, listFilesBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []File{}
+	for rows.Next() {
+		var i File
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Path,
+			&i.Content,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFilesBySessionWithChildren = `-- name: ListFilesBySessionWithChildren :many
+SELECT id, session_id, path, content, version, created_at, updated_at
+FROM files
+WHERE session_id = ?
+   OR session_id IN (SELECT id FROM sessions WHERE parent_session_id = ?)
+ORDER BY version ASC, created_at ASC
+`
+
+type ListFilesBySessionWithChildrenParams struct {
+	SessionID       string         `json:"session_id"`
+	ParentSessionID sql.NullString `json:"parent_session_id"`
+}
+
+func (q *Queries) ListFilesBySessionWithChildren(ctx context.Context, arg ListFilesBySessionWithChildrenParams) ([]File, error) {
+	rows, err := q.query(ctx, q.listFilesBySessionWithChildrenStmt, listFilesBySessionWithChildren, arg.SessionID, arg.ParentSessionID)
 	if err != nil {
 		return nil, err
 	}

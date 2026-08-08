@@ -190,7 +190,10 @@ func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
 // handleFileEvent processes file change events and updates the session file
 // list with new or updated file information.
 func (m *UI) handleFileEvent(file history.File) tea.Cmd {
-	if m.session == nil || file.SessionID != m.session.ID {
+	if m.session == nil {
+		return nil
+	}
+	if file.SessionID != m.session.ID && !m.knownChildSessionIDs[file.SessionID] {
 		return nil
 	}
 

@@ -810,6 +810,13 @@ func (app *App) Shutdown() {
 	// Close herdr client to stop its background writer.
 	app.herdrClient.Close()
 
+	// Release the subagent brokers and their subscriber goroutines. Agents were
+	// cancelled above, so nothing is still publishing. Both are per-workspace,
+	// and in server mode workspaces are created and torn down repeatedly for
+	// the life of the process. Both calls tolerate a nil receiver.
+	app.Subagents.Shutdown()
+	app.SubagentRuntime.Shutdown()
+
 	// Shutdown all LSP clients.
 	wg.Go(func() {
 		app.LSPManager.KillAll(shutdownCtx)

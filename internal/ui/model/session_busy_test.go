@@ -382,6 +382,76 @@ func TestStaleRunningSubagentsFetchDiscarded(t *testing.T) {
 		"a runningSubagentsMsg scoped to a departed session must not overwrite the current session's list")
 }
 
+// TestNewSessionClearsSubagentState is the regression test for ctrl+n leaving
+// the previous session's subagent state on screen. loadSessionMsg clears
+// runningSubagents, parentTitle and subagentColor on a session switch, but
+// newSession() cleared only knownChildSessionIDs — so starting a new session
+// from a child kept rendering the old parent breadcrumb and Subagents panel.
+func TestNewSessionClearsSubagentState(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "child-1"}
+	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "still-running"}}
+	m.parentTitle = "Parent Session"
+	m.subagentColor = "purple"
+	m.knownChildSessionIDs = map[string]bool{"child-1": true}
+
+	m.newSession()
+
+	require.Empty(t, m.runningSubagents, "a new session has no running subagents")
+	require.Empty(t, m.parentTitle, "a new session has no parent breadcrumb")
+	require.Empty(t, m.subagentColor)
+	require.Empty(t, m.knownChildSessionIDs)
+}
+
+// TestRunningSubagentsFetchSeedsKnownChildren is the regression test for
+// subagent file edits vanishing from the Modified Files panel after a session
+// switch. loadSessionMsg clears knownChildSessionIDs and refetches the running
+// list; if that reply does not re-seed the set, handleFileEvent rejects every
+// history.File event from an already-running subagent until it publishes its
+// next RuntimeEvent — which for a quiet subagent is only its Finish.
+func TestRunningSubagentsFetchSeedsKnownChildren(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s1"}
+	m.knownChildSessionIDs = nil
+
+	m.Update(runningSubagentsMsg{
+		forSession: "s1",
+		list: []workspace.RunningSubagentInfo{
+			{Name: "agent-a", ChildSessionID: "child-A"},
+			{Name: "agent-b", ChildSessionID: "child-B"},
+		},
+	})
+
+	require.True(t, m.knownChildSessionIDs["child-A"],
+		"a running subagent from the fetch must be recognized as a child session")
+	require.True(t, m.knownChildSessionIDs["child-B"])
+}
+
+// TestStaleRunningSubagentsFetchDoesNotSeedKnownChildren verifies the seeding
+// above stays behind the same stale-session guard as the list itself.
+func TestStaleRunningSubagentsFetchDoesNotSeedKnownChildren(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.session = &session.Session{ID: "s2"}
+	m.knownChildSessionIDs = nil
+
+	m.Update(runningSubagentsMsg{
+		forSession: "s1",
+		list:       []workspace.RunningSubagentInfo{{Name: "agent-a", ChildSessionID: "child-A"}},
+	})
+
+	require.Empty(t, m.knownChildSessionIDs,
+		"a fetch scoped to a departed session must not seed the current session's child set")
+}
+
 // TestStaleParentTitleFetchDiscarded is the regression test for a
 // parentTitleMsg racing a session switch: a fetch dispatched for a child
 // session the user has since navigated away from must not overwrite the

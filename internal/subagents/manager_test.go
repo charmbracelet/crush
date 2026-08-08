@@ -78,30 +78,6 @@ func TestManager_States(t *testing.T) {
 	require.Equal(t, "x", got[0].Name)
 }
 
-func TestManager_SetLatestStates_UpdatesCacheWithoutPublishing(t *testing.T) {
-	t.Parallel()
-
-	mgr := NewManager(nil, nil, []*SubagentState{{Name: "old"}})
-	t.Cleanup(mgr.Shutdown)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	ch := mgr.SubscribeEvents(ctx)
-
-	mgr.SetLatestStates([]*SubagentState{{Name: "new"}})
-
-	got := mgr.States()
-	require.Len(t, got, 1)
-	require.Equal(t, "new", got[0].Name)
-
-	select {
-	case ev := <-ch:
-		t.Fatalf("SetLatestStates must not publish events, got %+v", ev)
-	case <-time.After(50 * time.Millisecond):
-		// expected: no event delivered
-	}
-}
-
 func TestManager_Shutdown_IsIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -110,31 +86,6 @@ func TestManager_Shutdown_IsIdempotent(t *testing.T) {
 		mgr.Shutdown()
 		mgr.Shutdown()
 	})
-}
-
-func TestManager_PublishStatesUpdatesCache(t *testing.T) {
-	t.Parallel()
-
-	mgr := NewManager(nil, nil, []*SubagentState{{Name: "old"}})
-	t.Cleanup(mgr.Shutdown)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	ch := mgr.SubscribeEvents(ctx)
-
-	mgr.PublishStates([]*SubagentState{{Name: "new"}})
-
-	got := mgr.States()
-	require.Len(t, got, 1)
-	require.Equal(t, "new", got[0].Name)
-
-	select {
-	case ev := <-ch:
-		require.Len(t, ev.Payload.States, 1)
-		require.Equal(t, "new", ev.Payload.States[0].Name)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for published states event")
-	}
 }
 
 func TestManager_ConcurrentWorkspacesAreIsolated(t *testing.T) {
@@ -150,7 +101,7 @@ func TestManager_ConcurrentWorkspacesAreIsolated(t *testing.T) {
 	chA := mgrA.SubscribeEvents(ctx)
 	chB := mgrB.SubscribeEvents(ctx)
 
-	go mgrA.PublishStates([]*SubagentState{{Name: "from-a"}})
+	go mgrA.Reload(nil, nil, []*SubagentState{{Name: "from-a"}})
 
 	select {
 	case ev := <-chA:

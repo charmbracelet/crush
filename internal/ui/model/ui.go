@@ -1035,6 +1035,27 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// list with a stale one.
 		if msg.forSession == m.currentSessionID() {
 			m.runningSubagents = msg.list
+			// Seed the child-session set from the fetch as well. On a session
+			// switch loadSessionMsg clears knownChildSessionIDs, and the only
+			// other place it is filled is the RuntimeEvent case — so a subagent
+			// that was already running before the switch would have its
+			// history.File events rejected by handleFileEvent until it next
+			// published an event, losing its edits from the Modified Files
+			// panel in the meantime.
+			for _, info := range msg.list {
+				if m.knownChildSessionIDs == nil {
+					m.knownChildSessionIDs = make(map[string]bool)
+				}
+				m.knownChildSessionIDs[info.ChildSessionID] = true
+			}
+		}
+	case dialog.RunningSubagentsFetchedMsg:
+		// The subagents dialog resolves its running list off the Update path;
+		// dialogs only see message types routed here, so hand it back.
+		if m.dialog.HasDialogs() {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention
@@ -4828,6 +4849,13 @@ func (m *UI) newSession() tea.Cmd {
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
 	m.knownChildSessionIDs = nil
+	// Same reset the loadSessionMsg handler performs on a session switch. A new
+	// session has no parent and no children, so leaving these set would keep
+	// rendering the previous session's parent breadcrumb and "Active subagents"
+	// panel on an empty screen until an unrelated event happened to clear them.
+	m.runningSubagents = nil
+	m.parentTitle = ""
+	m.subagentColor = ""
 	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()

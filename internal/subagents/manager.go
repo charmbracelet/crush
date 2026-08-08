@@ -67,22 +67,6 @@ func (m *Manager) States() []*SubagentState {
 	return cloneStates(m.states)
 }
 
-// SetLatestStates updates the manager's cached discovery snapshot.
-func (m *Manager) SetLatestStates(states []*SubagentState) {
-	m.mu.Lock()
-	m.states = cloneStates(states)
-	m.mu.Unlock()
-}
-
-// PublishStates updates the manager's cached snapshot and publishes a
-// discovery event to subscribers.
-func (m *Manager) PublishStates(states []*SubagentState) {
-	m.mu.Lock()
-	m.states = cloneStates(states)
-	m.mu.Unlock()
-	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
-}
-
 // SubscribeEvents returns a channel of discovery events for the
 // manager's workspace.
 func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
@@ -109,8 +93,12 @@ func (m *Manager) Reload(all, active []*Subagent, states []*SubagentState) {
 	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
 }
 
-// Shutdown releases broker resources.
+// Shutdown releases broker resources. It is a no-op when m is nil, matching
+// SubscribeEvents and Reload — app.New documents that the manager may be nil.
 func (m *Manager) Shutdown() {
+	if m == nil {
+		return
+	}
 	if m.broker != nil {
 		m.broker.Shutdown()
 	}

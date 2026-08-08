@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -452,17 +451,6 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 	return result
 }
 
-// SubscribeSubagentRuntime returns a channel of RuntimeEvents from the
-// SubagentRuntime. Returns a closed channel when SubagentRuntime is nil.
-func (w *AppWorkspace) SubscribeSubagentRuntime(ctx context.Context) <-chan pubsub.Event[subagents.RuntimeEvent] {
-	if w.app.SubagentRuntime == nil {
-		ch := make(chan pubsub.Event[subagents.RuntimeEvent])
-		close(ch)
-		return ch
-	}
-	return w.app.SubagentRuntime.Subscribe(ctx)
-}
-
 // CancelSubagent cancels the subagent session with the given childSessionID.
 // It is a no-op when AgentCoordinator is nil.
 func (w *AppWorkspace) CancelSubagent(childSessionID string) {
@@ -564,10 +552,10 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 // @-rewrite all derive from — so it can be neither auto-selected by the main
 // agent nor invoked manually.
 func (w *AppWorkspace) SetSubagentDisabled(name string, disabled bool) error {
-	var current []string
-	if cfg := w.store.Config(); cfg.Options != nil {
-		current = cfg.Options.DisabledSubagents
-	}
+	// Read from the same scope this writes to. w.store.Config() is the merged
+	// view, so using it here would copy entries the user disabled globally into
+	// the workspace file, pinning them at workspace scope forever.
+	current := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.disabled_subagents")
 	next := addOrRemove(current, name, disabled)
 	if err := w.store.SetConfigField(config.ScopeWorkspace, "options.disabled_subagents", next); err != nil {
 		return err
@@ -601,16 +589,6 @@ func addOrRemove(list []string, name string, add bool) []string {
 		next = append(next, name)
 	}
 	return next
-}
-
-// SessionTokens returns the prompt and completion token counts for the given
-// session. It delegates to the session service and propagates any error.
-func (w *AppWorkspace) SessionTokens(ctx context.Context, sessionID string) (prompt, completion int64, err error) {
-	sess, err := w.app.Sessions.Get(ctx, sessionID)
-	if err != nil {
-		return 0, 0, err
-	}
-	return sess.PromptTokens, sess.CompletionTokens, nil
 }
 
 // -- MCP operations --

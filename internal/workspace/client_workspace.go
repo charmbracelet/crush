@@ -29,7 +29,6 @@ import (
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
@@ -651,13 +650,6 @@ func (w *ClientWorkspace) RunningSubagents(_ string) []RunningSubagentInfo {
 	return nil
 }
 
-// SubscribeSubagentRuntime returns a closed channel in client mode.
-func (w *ClientWorkspace) SubscribeSubagentRuntime(_ context.Context) <-chan pubsub.Event[subagents.RuntimeEvent] {
-	ch := make(chan pubsub.Event[subagents.RuntimeEvent])
-	close(ch)
-	return ch
-}
-
 // CancelSubagent is a no-op in client mode.
 func (w *ClientWorkspace) CancelSubagent(_ string) {}
 
@@ -674,11 +666,6 @@ func (w *ClientWorkspace) DeleteUserSubagent(name string) error {
 // SetSubagentDisabled returns an error in client mode.
 func (w *ClientWorkspace) SetSubagentDisabled(name string, _ bool) error {
 	return fmt.Errorf("toggling subagent %q is not supported in client/server mode", name)
-}
-
-// SessionTokens returns zero token counts in client mode.
-func (w *ClientWorkspace) SessionTokens(_ context.Context, _ string) (int64, int64, error) {
-	return 0, 0, nil
 }
 
 // -- MCP operations --

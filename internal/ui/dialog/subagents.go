@@ -4,14 +4,25 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // SubagentsID is the identifier for the subagents dialog.
 const SubagentsID = "subagents"
+
+// RunningSubagentsFetchedMsg delivers a running-subagent list resolved off the
+// Update path. Exported because the UI model has to route it back into the
+// dialog: dialogs only receive message types the model forwards explicitly.
+type RunningSubagentsFetchedMsg struct {
+	ParentSessionID string
+	List            []workspace.RunningSubagentInfo
+}
 
 // SubagentsTab identifies which tab of the subagents dialog is active.
 type SubagentsTab int
@@ -172,6 +183,24 @@ func (s *Subagents) activeList() *list.FilterableList {
 
 // HandleMsg implements [Dialog].
 func (s *Subagents) HandleMsg(msg tea.Msg) Action {
+	switch ev := msg.(type) {
+	case pubsub.Event[subagents.RuntimeEvent]:
+		if ev.Payload.ParentSessionID == s.parentSessionID {
+			return ActionCmd{s.fetchRunningCmd()}
+		}
+		return nil
+	case RunningSubagentsFetchedMsg:
+		// Drop a fetch that raced a session switch, matching the guard the
+		// sidebar's runningSubagentsMsg handler applies.
+		if ev.ParentSessionID == s.parentSessionID {
+			s.applyRunning(ev.List)
+		}
+		return nil
+	case pubsub.Event[subagents.Event]:
+		s.refreshLibrary()
+		return nil
+	}
+
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return nil
@@ -297,6 +326,86 @@ func (s *Subagents) cancelSelectedRunning() {
 		return
 	}
 	s.com.Workspace.CancelSubagent(ri.ID())
+}
+
+// fetchRunningCmd resolves the running-subagent list off the Update path.
+// RunningSubagents issues one DB query per running entry to enrich token
+// counts, and a RuntimeEvent arrives for every register, status change and
+// finish — doing that work inline would block input handling and rendering on
+// N round trips per event. The closure captures only locals, never s, so it is
+// safe off-thread.
+func (s *Subagents) fetchRunningCmd() tea.Cmd {
+	ws := s.com.Workspace
+	parentSessionID := s.parentSessionID
+	return func() tea.Msg {
+		return RunningSubagentsFetchedMsg{
+			ParentSessionID: parentSessionID,
+			List:            ws.RunningSubagents(parentSessionID),
+		}
+	}
+}
+
+// applyRunning rebuilds the running tab from an already-fetched list,
+// preserving the selected item's identity (by child session ID) across the
+// rebuild when it still exists in the new set.
+func (s *Subagents) applyRunning(running []workspace.RunningSubagentInfo) {
+	var selectedID string
+	if item, ok := s.runningList.SelectedItem().(ListItem); ok {
+		selectedID = item.ID()
+	}
+
+	s.runningItems = make([]*RunningSubagentItem, len(running))
+	filterable := make([]list.FilterableItem, len(running))
+	selectedIdx := 0
+	for i, r := range running {
+		item := NewRunningSubagentItem(s.com.Styles, RunningSubagentItemData{
+			ChildSessionID:   r.ChildSessionID,
+			Name:             r.Name,
+			Color:            r.Color,
+			Model:            r.Model,
+			PromptTokens:     r.PromptTokens,
+			CompletionTokens: r.CompletionTokens,
+		})
+		s.runningItems[i] = item
+		filterable[i] = item
+		if selectedID != "" && r.ChildSessionID == selectedID {
+			selectedIdx = i
+		}
+	}
+	s.runningList.SetItems(filterable...)
+	s.runningList.SetSelected(selectedIdx)
+}
+
+// refreshLibrary rebuilds the library tab from the workspace, preserving the
+// selected item's identity (by name) across the rebuild when it still
+// exists in the new set.
+func (s *Subagents) refreshLibrary() {
+	var selectedID string
+	if item, ok := s.libraryList.SelectedItem().(ListItem); ok {
+		selectedID = item.ID()
+	}
+
+	defs := s.com.Workspace.AllSubagents()
+	s.libraryItems = make([]*LibrarySubagentItem, len(defs))
+	filterable := make([]list.FilterableItem, len(defs))
+	selectedIdx := 0
+	for i, d := range defs {
+		item := NewLibrarySubagentItem(s.com.Styles, LibrarySubagentItemData{
+			Name:        d.Name,
+			Description: d.Description,
+			Color:       d.Color,
+			FilePath:    d.FilePath,
+			Scope:       d.Scope,
+			Disabled:    d.Disabled,
+		})
+		s.libraryItems[i] = item
+		filterable[i] = item
+		if selectedID != "" && d.Name == selectedID {
+			selectedIdx = i
+		}
+	}
+	s.libraryList.SetItems(filterable...)
+	s.libraryList.SetSelected(selectedIdx)
 }
 
 // enterConfirmDelete sets confirm-delete mode for the currently selected

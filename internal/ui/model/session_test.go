@@ -184,8 +184,9 @@ func TestFetchParentMeta_NotFoundReturnsNil(t *testing.T) {
 // fetchParentMeta tests.
 type getSessionWorkspace struct {
 	workspace.Workspace
-	sessions map[string]session.Session
-	running  map[string][]workspace.RunningSubagentInfo
+	sessions     map[string]session.Session
+	running      map[string][]workspace.RunningSubagentInfo
+	sessionFiles []history.File
 }
 
 func (w *getSessionWorkspace) RunningSubagents(parentSessionID string) []workspace.RunningSubagentInfo {
@@ -197,4 +198,77 @@ func (w *getSessionWorkspace) GetSession(_ context.Context, sessionID string) (s
 		return sess, nil
 	}
 	return session.Session{}, errors.New("not found")
+}
+
+// ListSessionHistory returns the stubbed sessionFiles regardless of the
+// sessionID requested, so handleFileEvent's follow-up load never panics on
+// a nil workspace.
+func (w *getSessionWorkspace) ListSessionHistory(_ context.Context, _ string) ([]history.File, error) {
+	return w.sessionFiles, nil
+}
+
+func TestHandleFileEvent_NilSession_Ignored(t *testing.T) {
+	t.Parallel()
+
+	m := &UI{session: nil}
+
+	cmd := m.handleFileEvent(history.File{SessionID: "anything"})
+
+	require.Nil(t, cmd)
+}
+
+func TestHandleFileEvent_MatchingSessionID_Allowed(t *testing.T) {
+	t.Parallel()
+
+	ws := &getSessionWorkspace{sessionFiles: []history.File{}}
+	m := &UI{
+		session: &session.Session{ID: "parent-1"},
+		com:     &common.Common{Workspace: ws},
+	}
+
+	cmd := m.handleFileEvent(history.File{SessionID: "parent-1"})
+
+	require.NotNil(t, cmd)
+	_, ok := cmd().(sessionFilesUpdatesMsg)
+	require.True(t, ok, "expected sessionFilesUpdatesMsg")
+}
+
+func TestHandleFileEvent_KnownChildSessionID_Allowed(t *testing.T) {
+	t.Parallel()
+
+	ws := &getSessionWorkspace{sessionFiles: []history.File{}}
+	m := &UI{
+		session:              &session.Session{ID: "parent-1"},
+		knownChildSessionIDs: map[string]bool{"child-1": true},
+		com:                  &common.Common{Workspace: ws},
+	}
+
+	cmd := m.handleFileEvent(history.File{SessionID: "child-1"})
+
+	require.NotNil(t, cmd)
+	_, ok := cmd().(sessionFilesUpdatesMsg)
+	require.True(t, ok, "expected sessionFilesUpdatesMsg")
+}
+
+func TestHandleFileEvent_UnknownSessionID_Ignored(t *testing.T) {
+	t.Parallel()
+
+	m := &UI{
+		session:              &session.Session{ID: "parent-1"},
+		knownChildSessionIDs: map[string]bool{"child-1": true},
+	}
+
+	cmd := m.handleFileEvent(history.File{SessionID: "some-unrelated-session"})
+
+	require.Nil(t, cmd)
+}
+
+func TestHandleFileEvent_NilKnownChildSessionIDs_DoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	m := &UI{session: &session.Session{ID: "parent-1"}}
+
+	cmd := m.handleFileEvent(history.File{SessionID: "some-other-session"})
+
+	require.Nil(t, cmd)
 }

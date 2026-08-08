@@ -56,6 +56,10 @@ func (s *stubSessionService) List(context.Context) ([]session.Session, error) {
 	return nil, nil
 }
 
+func (s *stubSessionService) ListChildSessions(context.Context, string) ([]session.Session, error) {
+	return nil, nil
+}
+
 func (s *stubSessionService) Save(_ context.Context, sess session.Session) (session.Session, error) {
 	return sess, nil
 }

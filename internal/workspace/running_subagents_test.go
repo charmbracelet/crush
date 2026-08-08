@@ -25,6 +25,9 @@ import (
 
 type stubSessionService struct {
 	sessions map[string]session.Session
+	// onListChildren, when set, runs inside ListChildSessions to simulate
+	// work that races the query.
+	onListChildren func()
 }
 
 func (s *stubSessionService) Subscribe(context.Context) <-chan pubsub.Event[session.Session] {
@@ -58,8 +61,17 @@ func (s *stubSessionService) List(context.Context) ([]session.Session, error) {
 	return nil, nil
 }
 
-func (s *stubSessionService) ListChildSessions(context.Context, string) ([]session.Session, error) {
-	return nil, nil
+func (s *stubSessionService) ListChildSessions(_ context.Context, parentID string) ([]session.Session, error) {
+	if s.onListChildren != nil {
+		s.onListChildren()
+	}
+	var out []session.Session
+	for _, sess := range s.sessions {
+		if sess.ParentSessionID == parentID {
+			out = append(out, sess)
+		}
+	}
+	return out, nil
 }
 
 func (s *stubSessionService) Save(_ context.Context, sess session.Session) (session.Session, error) {
@@ -169,9 +181,39 @@ func TestAppWorkspace_RunningSubagents_WithEntries(t *testing.T) {
 	require.Equal(t, "red", b.Color)
 }
 
+// TestAppWorkspace_RunningSubagents_FinishDuringQuery verifies that a
+// subagent finishing while the token query runs is not returned: an older
+// refresh landing after the Finish event's refresh would otherwise leave a
+// finished subagent shown as running.
+func TestAppWorkspace_RunningSubagents_FinishDuringQuery(t *testing.T) {
+	t.Parallel()
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	rt.Register("parent-1", "child-A", "agent-alpha", "blue", "")
+	rt.Register("parent-1", "child-B", "agent-beta", "red", "")
+
+	sessions := &stubSessionService{
+		sessions:       map[string]session.Session{},
+		onListChildren: func() { rt.Finish("child-A", subagents.StatusCompleted) },
+	}
+	w := &AppWorkspace{
+		app:   &app.App{SubagentRuntime: rt, Sessions: sessions},
+		store: config.NewTestStore(&config.Config{}),
+	}
+
+	got := w.RunningSubagents("parent-1")
+	require.Len(t, got, 1)
+	require.Equal(t, "child-B", got[0].ChildSessionID)
+}
+
 // TestAppWorkspace_RunningSubagents_TokenEnrichment verifies that when a child
 // session exists, its PromptTokens and CompletionTokens are included in the
-// returned RunningSubagentInfo.
+// returned RunningSubagentInfo. Enrichment comes from one ListChildSessions
+// query for the parent (not a Get per entry), so children that are not
+// registered on the runtime must not appear, and a registered entry without a
+// child session keeps zero counts.
 func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	t.Parallel()
 
@@ -179,13 +221,22 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	t.Cleanup(rt.Shutdown)
 
 	rt.Register("parent-1", "child-tok", "agent-tok", "green", "")
+	rt.Register("parent-1", "child-nosession", "agent-lost", "blue", "")
 
 	sessions := &stubSessionService{
 		sessions: map[string]session.Session{
 			"child-tok": {
 				ID:               "child-tok",
+				ParentSessionID:  "parent-1",
 				PromptTokens:     100,
 				CompletionTokens: 200,
+			},
+			// A finished sibling child: returned by ListChildSessions but
+			// not registered on the runtime, so it must not be enriched.
+			"child-done": {
+				ID:              "child-done",
+				ParentSessionID: "parent-1",
+				PromptTokens:    500,
 			},
 		},
 	}
@@ -199,9 +250,17 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	}
 
 	got := w.RunningSubagents("parent-1")
-	require.Len(t, got, 1)
-	require.Equal(t, int64(100), got[0].PromptTokens)
-	require.Equal(t, int64(200), got[0].CompletionTokens)
+	require.Len(t, got, 2)
+
+	byID := map[string]RunningSubagentInfo{}
+	for _, info := range got {
+		byID[info.ChildSessionID] = info
+	}
+
+	require.Equal(t, int64(100), byID["child-tok"].PromptTokens)
+	require.Equal(t, int64(200), byID["child-tok"].CompletionTokens)
+	require.Zero(t, byID["child-nosession"].PromptTokens)
+	require.Zero(t, byID["child-nosession"].CompletionTokens)
 }
 
 // TestAppWorkspace_CancelSubagent_NilCoordinator verifies that calling
@@ -331,6 +390,53 @@ func TestAppWorkspace_AllSubagents_IncludesErrorEntries(t *testing.T) {
 	unnamed := byPath[filepath.Join(workDir, "garbage.md")]
 	require.Equal(t, "garbage", unnamed.Name)
 	require.Equal(t, "no YAML frontmatter found", unnamed.Error)
+
+	// Broken entries are merged into the sort, not appended after it, so the
+	// Library reads as one alphabetical list.
+	names := make([]string, len(got))
+	for i, info := range got {
+		names[i] = info.Name
+	}
+	require.Equal(t, []string{"broken", "garbage", "good"}, names)
+}
+
+// TestAppWorkspace_AllSubagents_NameCollisionKeepsBothRows verifies that a
+// broken definition claiming a name a valid definition already owns is still
+// listed, and sorts next to it. Both rows carry the same name, so the Library
+// distinguishes them by scope and by the diagnostic on the broken one.
+func TestAppWorkspace_AllSubagents_NameCollisionKeepsBothRows(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	validFile := filepath.Join(workDir, "valid", "reviewer.md")
+	brokenFile := filepath.Join(workDir, "broken", "reviewer.md")
+
+	validAgent := &subagents.Subagent{Name: "reviewer", Description: "Valid.", FilePath: validFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{validAgent},
+		[]*subagents.Subagent{validAgent},
+		[]*subagents.SubagentState{
+			{Name: "reviewer", Path: validFile, State: subagents.StateNormal},
+			{Name: "reviewer", Path: brokenFile, State: subagents.StateError, Err: errors.New("unknown model")},
+		},
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
+	}
+
+	got := w.AllSubagents()
+	require.Len(t, got, 2, "the broken file must not be hidden by its valid namesake")
+	for _, info := range got {
+		require.Equal(t, "reviewer", info.Name)
+	}
+	// Sorted by path within the name, so "broken/" precedes "valid/".
+	require.Equal(t, brokenFile, got[0].FilePath)
+	require.Equal(t, "unknown model", got[0].Error)
+	require.Equal(t, validFile, got[1].FilePath)
+	require.Empty(t, got[1].Error)
 }
 
 // TestAppWorkspace_AllSubagents_Deletable verifies that Deletable reflects the

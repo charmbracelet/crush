@@ -15,6 +15,9 @@ type LibrarySubagentItemData struct {
 	FilePath    string
 	Scope       string
 	Disabled    bool
+	// Deletable reports whether the workspace will honor a delete for this
+	// definition (user-owned global dir only).
+	Deletable bool
 	// Error carries the discovery diagnostic for a definition file that
 	// failed to parse or validate; such items are informational only.
 	Error string

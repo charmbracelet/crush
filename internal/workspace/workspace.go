@@ -271,6 +271,11 @@ type SubagentDefInfo struct {
 	FilePath    string
 	Scope       string // "user", "project", or "builtin"
 	Disabled    bool
+	// Deletable reports whether the definition lives in a user-owned global
+	// subagents directory and may be removed via DeleteUserSubagent. Scope is
+	// display-oriented and does not imply this; broken (Error) entries are
+	// never deletable.
+	Deletable bool
 	// Error carries the discovery diagnostic when the definition file failed
 	// to parse or validate. Such entries are informational only: they cannot
 	// be dispatched, toggled, or deleted.

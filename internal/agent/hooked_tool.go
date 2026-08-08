@@ -25,11 +25,13 @@ func newHookedTool(inner fantasy.AgentTool, runner *hooks.Runner) *hookedTool {
 }
 
 // wrapToolsWithHooks returns a tool slice with each entry wrapped in a
-// hookedTool. Returns the original slice unchanged when runner is nil or
-// when isSubAgent is true — sub-agents never fire hooks, the top-level
-// invocation of the sub-agent tool itself is wrapped on the caller's side.
-func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
-	if runner == nil || isSubAgent {
+// hookedTool, or the original slice when runner is nil or skipHooks is set.
+// Only the built-in task agent skips: it is read-only and its dispatch is
+// already hooked on the caller's side, so wrapping it would fire the user's
+// hook N times per delegated turn. Custom subagents can hold write tools,
+// so they are hooked like any top-level agent.
+func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, skipHooks bool) []fantasy.AgentTool {
+	if runner == nil || skipHooks {
 		return tools
 	}
 	out := make([]fantasy.AgentTool, len(tools))

@@ -3,9 +3,19 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
+	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
 )
@@ -204,4 +214,131 @@ func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
+}
+
+// TestAgentTool_SubagentToolsCappedByOwner verifies that a custom subagent's
+// tool pool is capped by the AllowedTools of the agent that dispatched it
+// (the "owner" passed to agentTool), not always the coder's full tool set.
+// In plan mode the plan agent's read-only tool pool owns the dispatcher, so
+// its subagents must not inherit coder-only tools such as edit/write/bash.
+//
+// The dispatcher is built with the plan agent's config as owner. The custom
+// subagent has no tools:/disallowed_tools: restrictions of its own, so its
+// effective tool pool is exactly what ToConfigAgent copies from the owner.
+// The subagent is actually dispatched end-to-end against a local fake
+// OpenAI-compatible server so the real request payload's tool list — the
+// ground truth for what the built agent could actually call — can be
+// inspected directly, rather than trusting an intermediate config value.
+func TestAgentTool_SubagentToolsCappedByOwner(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+
+	var (
+		mu        sync.Mutex
+		sawTools  bool
+		toolNames []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		if len(payload.Tools) > 0 {
+			mu.Lock()
+			if !sawTools {
+				sawTools = true
+				for _, tl := range payload.Tools {
+					toolNames = append(toolNames, tl.Function.Name)
+				}
+			}
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"z\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"z\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"z\",\"created\":1,\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	const (
+		providerID = "test-openai-compat"
+		modelID    = "test-model"
+	)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
+		ID:      providerID,
+		Name:    "Test",
+		Type:    openaicompat.Name,
+		BaseURL: srv.URL,
+		APIKey:  "test",
+		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
+	})
+	selected := config.SelectedModel{Provider: providerID, Model: modelID}
+	cfg.Config().Models[config.SelectedModelTypeLarge] = selected
+	cfg.Config().Models[config.SelectedModelTypeSmall] = selected
+	cfg.SetupAgents()
+
+	// Coder/task are irrelevant to this test; clear their AllowedTools like
+	// newOfflineCoordinator does, keeping the run cheap.
+	for _, agentID := range []string{config.AgentCoder, config.AgentTask} {
+		a := cfg.Config().Agents[agentID]
+		a.AllowedTools = nil
+		cfg.Config().Agents[agentID] = a
+	}
+
+	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
+		Config:      cfg,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		Permissions: permission.NewPermissionService(env.workingDir, true, nil),
+	})
+	require.NoError(t, err)
+	coord := c.(*coordinator)
+	require.NoError(t, coord.readyWg.Wait())
+
+	owner := cfg.Config().Agents[config.AgentPlan]
+	require.Contains(t, owner.AllowedTools, AgentToolName,
+		"precondition: the plan agent must retain the dispatcher tool")
+	require.NotContains(t, owner.AllowedTools, "edit")
+	require.NotContains(t, owner.AllowedTools, "write")
+	require.NotContains(t, owner.AllowedTools, "bash")
+
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "custom", Description: "a custom subagent with no tool restrictions of its own"},
+	}
+
+	tool, err := coord.agentTool(t.Context(), owner)
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	runCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	input, err := json.Marshal(AgentDispatchParams{SubagentType: "custom", Prompt: "do something"})
+	require.NoError(t, err)
+
+	_, err = dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.True(t, sawTools, "expected at least one request carrying a tool list")
+	require.NotContains(t, toolNames, "edit",
+		"a subagent's tools must be capped by the dispatching (owner) agent's AllowedTools, not the coder's")
+	require.NotContains(t, toolNames, "write")
+	require.NotContains(t, toolNames, "bash")
 }

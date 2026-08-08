@@ -860,7 +860,7 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
-		agentTool, err := c.agentTool(ctx)
+		agentTool, err := c.agentTool(ctx, agent)
 		if err != nil {
 			return nil, err
 		}
@@ -931,7 +931,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		)
 	}
 
-	if len(c.cfg.Config().MCP) > 0 {
+	// Scoped agents (non-nil AllowedMCP) lose MCP resource browsing
+	// entirely; per-server filtering inside the resource tools would
+	// restore it.
+	if len(c.cfg.Config().MCP) > 0 && agent.AllowedMCP == nil {
 		allTools = append(
 			allTools,
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
@@ -973,12 +976,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 
-	// Wrap tools with hook interception for the top-level agent only.
-	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
-	// without hook interception to avoid firing the user's hook N times
-	// per delegated turn. The top-level invocation of the sub-agent tool
-	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	// Only the built-in task agent skips hooks; see wrapToolsWithHooks.
+	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent && agent.ID == config.AgentTask)
 
 	return filteredTools, nil
 }

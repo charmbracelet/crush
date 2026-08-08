@@ -103,7 +103,9 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 	}
 }
 
-func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
+// agentTool builds the dispatcher tool for owner, whose tools cap every
+// custom subagent it dispatches (plan-mode subagents stay read-only).
+func (c *coordinator) agentTool(ctx context.Context, owner config.Agent) (fantasy.AgentTool, error) {
 	taskCfg, ok := c.cfg.Config().Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
@@ -152,7 +154,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
 			}
 
-			agentCfg := sa.ToConfigAgent(taskCfg)
+			agentCfg := sa.ToConfigAgent(owner)
 			subPr, err := subagentPrompt(sa, c.activeSkills, prompt.WithWorkingDir(c.cfg.WorkingDir()))
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent prompt %q: %w", sa.Name, err)

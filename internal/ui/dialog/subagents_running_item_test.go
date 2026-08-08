@@ -28,6 +28,32 @@ func TestRunningSubagentItem_RenderContainsName(t *testing.T) {
 	require.Contains(t, plain, "claude-opus-4-7")
 }
 
+// TestRunningSubagentItem_RenderShowsNonRunningStatus verifies that a live
+// status other than "running" (e.g. retrying during a credential refresh) is
+// spelled out, while plain running entries show no status suffix.
+func TestRunningSubagentItem_RenderShowsNonRunningStatus(t *testing.T) {
+	t.Parallel()
+
+	st := uistyles.CharmtonePantera()
+
+	retrying := NewRunningSubagentItem(&st, RunningSubagentItemData{
+		Name:   "my-agent",
+		Color:  "blue",
+		Model:  "claude-opus-4-7",
+		Status: "retrying",
+	})
+	// Parenthesized to match the sidebar panel's rendering of the same field.
+	require.Contains(t, stripANSIDialog(retrying.Render(80)), "(retrying)")
+
+	running := NewRunningSubagentItem(&st, RunningSubagentItemData{
+		Name:   "my-agent",
+		Color:  "blue",
+		Model:  "claude-opus-4-7",
+		Status: "running",
+	})
+	require.NotContains(t, stripANSIDialog(running.Render(80)), "running")
+}
+
 // TestRunningSubagentItem_RenderContainsTokenCount verifies that the rendered
 // output contains the sum of prompt and completion tokens formatted as "N tok".
 func TestRunningSubagentItem_RenderContainsTokenCount(t *testing.T) {

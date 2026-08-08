@@ -53,6 +53,9 @@ crush run --quiet "Generate a README for this project"
 # Run in verbose mode (show logs)
 crush run --verbose "Generate a README for this project"
 
+# Show tool calls and results during the run
+crush run --show-events "Fix the typo in main.go"
+
 # Continue a previous session
 crush run --session {session-id} "Follow up on your last response"
 
@@ -64,6 +67,7 @@ crush run --continue "Follow up on your last response"
 		var (
 			quiet, _      = cmd.Flags().GetBool("quiet")
 			verbose, _    = cmd.Flags().GetBool("verbose")
+			showEvents, _ = cmd.Flags().GetBool("show-events")
 			largeModel, _ = cmd.Flags().GetString("model")
 			smallModel, _ = cmd.Flags().GetString("small-model")
 			sessionID, _  = cmd.Flags().GetString("session")
@@ -125,7 +129,7 @@ crush run --continue "Follow up on your last response"
 				slog.SetDefault(slog.New(log.New(os.Stderr)))
 			}
 
-			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
+			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, quiet || verbose || showEvents, sessionID, useLast, showEvents)
 		}
 
 		ws, cleanup, err := setupLocalWorkspace(cmd)
@@ -154,13 +158,14 @@ crush run --continue "Follow up on your last response"
 			sessionID = sess.ID
 		}
 
-		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
+		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose || showEvents, sessionID, useLast, showEvents)
 	},
 }
 
 func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
 	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
+	runCmd.Flags().BoolP("show-events", "e", false, "Show tool calls and results during the run")
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
 	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
@@ -178,6 +183,7 @@ func runNonInteractive(
 	hideSpinner bool,
 	continueSessionID string,
 	useLast bool,
+	showEvents bool,
 ) error {
 	slog.Info("Running in non-interactive mode")
 
@@ -258,10 +264,12 @@ func runNonInteractive(
 	}
 
 	stream := &runStream{
-		sessionID: sess.ID,
-		runID:     runID,
-		out:       os.Stdout,
-		read:      make(map[string]int),
+		sessionID:  sess.ID,
+		runID:      runID,
+		out:        os.Stdout,
+		read:       make(map[string]int),
+		showEvents: showEvents,
+		events:     format.NewEventPrinter(os.Stderr),
 	}
 
 	// Start herdr integration when running inside a herdr pane.
@@ -324,11 +332,13 @@ func runNonInteractive(
 // and live message streaming, which is still correct for the
 // single-turn case.
 type runStream struct {
-	sessionID string
-	runID     string
-	out       io.Writer
-	read      map[string]int
-	printed   bool
+	sessionID  string
+	runID      string
+	out        io.Writer
+	read       map[string]int
+	printed    bool
+	showEvents bool
+	events     *format.EventPrinter
 }
 
 // handle processes one SSE event. Returns done=true when the run
@@ -346,9 +356,28 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 	switch e := ev.(type) {
 	case pubsub.Event[proto.Message]:
 		msg := e.Payload
-		if msg.SessionID != s.sessionID || msg.Role != proto.Assistant || len(msg.Parts) == 0 {
+		if msg.SessionID != s.sessionID || len(msg.Parts) == 0 {
 			return false, nil
 		}
+
+		// When showEvents is on, print tool calls and results to
+		// stderr as compact one-line summaries. This works in both
+		// the runID-correlated and fallback streaming paths.
+		if s.showEvents && s.events != nil {
+			for _, tc := range msg.ToolCalls() {
+				s.events.PrintToolCall(tc.Name, tc.ID, tc.Input, tc.Finished)
+			}
+			for _, tr := range msg.ToolResults() {
+				s.events.PrintToolResult(tr.Name, tr.Content, tr.IsError)
+			}
+		}
+
+		// Only Assistant messages carry streamable text to stdout.
+		if msg.Role != proto.Assistant {
+			return false, nil
+		}
+		// When we have a RunID, suppress live text streaming — the
+		// RunComplete reconciliation path handles stdout.
 		if s.runID != "" {
 			return false, nil
 		}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -414,4 +415,149 @@ func TestRunStream_NoRunIDFallsBackToSessionID(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Equal(t, "DONE", buf.String())
+}
+
+// TestRunStream_ShowEventsPrintsToolCall verifies that when showEvents
+// is enabled, tool calls in assistant messages are printed as compact
+// one-line summaries to the events writer (stderr), even when a RunID
+// is set (which normally suppresses live message streaming to stdout).
+func TestRunStream_ShowEventsPrintsToolCall(t *testing.T) {
+	t.Parallel()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	s := &runStream{
+		sessionID:  "S",
+		runID:      "run-mine",
+		out:        stdout,
+		read:       map[string]int{},
+		showEvents: true,
+		events:     format.NewEventPrinter(stderr),
+	}
+
+	// Assistant message with a finished tool call.
+	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
+		ID:        "m1",
+		SessionID: "S",
+		Role:      proto.Assistant,
+		Parts: []proto.ContentPart{
+			proto.ToolCall{
+				ID:       "tc1",
+				Name:     "bash",
+				Input:    `{"command":"ls -la"}`,
+				Finished: true,
+			},
+			proto.Finish{Reason: proto.FinishReasonToolUse},
+		},
+	}}, nil)
+	require.NoError(t, err)
+	require.False(t, done)
+	require.Empty(t, stdout.String(), "stdout must stay clean when RunID is set")
+	require.Contains(t, stderr.String(), "BASH")
+	require.Contains(t, stderr.String(), "ls -la")
+}
+
+// TestRunStream_ShowEventsPrintsToolResult verifies that tool results
+// in tool-role messages are printed as compact summaries when
+// showEvents is enabled.
+func TestRunStream_ShowEventsPrintsToolResult(t *testing.T) {
+	t.Parallel()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	s := &runStream{
+		sessionID:  "S",
+		out:        stdout,
+		read:       map[string]int{},
+		showEvents: true,
+		events:     format.NewEventPrinter(stderr),
+	}
+
+	// Tool result message.
+	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
+		ID:        "m2",
+		SessionID: "S",
+		Role:      proto.Tool,
+		Parts: []proto.ContentPart{
+			proto.ToolResult{
+				ToolCallID: "tc1",
+				Name:       "bash",
+				Content:    "3 files found",
+				IsError:    false,
+			},
+		},
+	}}, nil)
+	require.NoError(t, err)
+	require.False(t, done)
+	require.Empty(t, stdout.String(), "tool messages must not write to stdout")
+	require.Contains(t, stderr.String(), "BASH")
+	require.Contains(t, stderr.String(), "3 files found")
+}
+
+// TestRunStream_ShowEventsPrintsToolError verifies that errored tool
+// results are formatted with the error prefix.
+func TestRunStream_ShowEventsPrintsToolError(t *testing.T) {
+	t.Parallel()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	s := &runStream{
+		sessionID:  "S",
+		out:        stdout,
+		read:       map[string]int{},
+		showEvents: true,
+		events:     format.NewEventPrinter(stderr),
+	}
+
+	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
+		ID:        "m3",
+		SessionID: "S",
+		Role:      proto.Tool,
+		Parts: []proto.ContentPart{
+			proto.ToolResult{
+				ToolCallID: "tc2",
+				Name:       "bash",
+				Content:    "command not found",
+				IsError:    true,
+			},
+		},
+	}}, nil)
+	require.NoError(t, err)
+	require.False(t, done)
+	require.Contains(t, stderr.String(), "BASH")
+	require.Contains(t, stderr.String(), "command not found")
+}
+
+// TestRunStream_ShowEventsOffSkipsToolMessages verifies that when
+// showEvents is false, tool-role messages are silently ignored (the
+// pre-existing behavior).
+func TestRunStream_ShowEventsOffSkipsToolMessages(t *testing.T) {
+	t.Parallel()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	s := &runStream{
+		sessionID:  "S",
+		out:        stdout,
+		read:       map[string]int{},
+		showEvents: false,
+	}
+
+	done, err := s.handle(pubsub.Event[proto.Message]{Payload: proto.Message{
+		ID:        "m4",
+		SessionID: "S",
+		Role:      proto.Tool,
+		Parts: []proto.ContentPart{
+			proto.ToolResult{
+				ToolCallID: "tc3",
+				Name:       "bash",
+				Content:    "output",
+				IsError:    false,
+			},
+		},
+	}}, nil)
+	require.NoError(t, err)
+	require.False(t, done)
+	require.Empty(t, stdout.String())
+	require.Empty(t, stderr.String())
 }

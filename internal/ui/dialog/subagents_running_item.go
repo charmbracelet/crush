@@ -3,6 +3,7 @@ package dialog
 import (
 	"fmt"
 
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -15,6 +16,7 @@ type RunningSubagentItemData struct {
 	Name             string
 	Color            string
 	Model            string
+	Status           string
 	PromptTokens     int64
 	CompletionTokens int64
 }
@@ -48,7 +50,7 @@ func (r *RunningSubagentItem) Finished() bool {
 
 // Filter implements [list.FilterableItem].
 func (r *RunningSubagentItem) Filter() string {
-	return r.data.Name
+	return r.data.Name + " " + r.data.Model
 }
 
 // ID implements [ListItem].
@@ -91,6 +93,11 @@ func (r *RunningSubagentItem) Render(width int) string {
 	}
 
 	content := dot + " " + r.data.Name + "  " + r.data.Model + "  " + tokStr
+	// A live entry is "running"; anything else (retrying while credentials
+	// refresh) is worth spelling out.
+	if r.data.Status != "" && r.data.Status != subagents.StatusRunning {
+		content += "  " + r.data.Status
+	}
 	content = ansi.Truncate(content, max(0, width-itemStyle.GetHorizontalFrameSize()), "…")
 	return itemStyle.Render(content)
 }

@@ -336,6 +336,20 @@ func TestValidate(t *testing.T) {
 			errMsg:  "reserved",
 		},
 		{
+			// Reserved names derive from config.AllToolNames, so every
+			// built-in tool name is covered, not just the original subset.
+			name:    "reserved_name_multiedit",
+			agent:   Subagent{Name: "multiedit", Description: "Something."},
+			wantErr: true,
+			errMsg:  "reserved",
+		},
+		{
+			name:    "reserved_name_fetch",
+			agent:   Subagent{Name: "fetch", Description: "Something."},
+			wantErr: true,
+			errMsg:  "reserved",
+		},
+		{
 			name: "tools_disallowed_overlap",
 			agent: Subagent{
 				Name:            "my-agent",
@@ -1093,6 +1107,19 @@ func TestParseContent_EmptyToolListIsNotAbsent(t *testing.T) {
 	require.Empty(t, emptyStr.Tools)
 }
 
+// TestParseContent_ToolListRejectsMapping verifies that a mapping value for
+// tools/disallowedTools is a parse error rather than reading as absent, which
+// would silently inherit the base tool pool.
+func TestParseContent_ToolListRejectsMapping(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseContent([]byte("---\nname: a\ndescription: d.\ntools:\n  view: true\n---\n"))
+	require.Error(t, err, "a mapping tools: value must not parse as absent")
+
+	_, err = ParseContent([]byte("---\nname: a\ndescription: d.\ndisallowedTools:\n  bash: yes\n---\n"))
+	require.Error(t, err, "a mapping disallowedTools: value must not parse as absent")
+}
+
 // TestValidate_RejectsUnknownToolNames verifies that a tool name that is not a
 // real built-in fails validation instead of silently intersecting to nothing.
 func TestValidate_RejectsUnknownToolNames(t *testing.T) {
@@ -1167,7 +1194,7 @@ func TestValidateAgainst_SkillsValidated(t *testing.T) {
 
 	err := s.ValidateAgainst(nil, isKnown)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `skill "unknown-skill" is not a known active skill`)
+	require.Contains(t, err.Error(), `skill "unknown-skill" is not an invocable active skill`)
 	require.NotContains(t, err.Error(), `skill "known-skill"`)
 
 	require.NoError(t, s.ValidateAgainst(nil, nil), "nil resolver must skip the skills check")

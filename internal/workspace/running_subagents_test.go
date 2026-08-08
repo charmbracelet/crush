@@ -58,8 +58,14 @@ func (s *stubSessionService) List(context.Context) ([]session.Session, error) {
 	return nil, nil
 }
 
-func (s *stubSessionService) ListChildSessions(context.Context, string) ([]session.Session, error) {
-	return nil, nil
+func (s *stubSessionService) ListChildSessions(_ context.Context, parentID string) ([]session.Session, error) {
+	var out []session.Session
+	for _, sess := range s.sessions {
+		if sess.ParentSessionID == parentID {
+			out = append(out, sess)
+		}
+	}
+	return out, nil
 }
 
 func (s *stubSessionService) Save(_ context.Context, sess session.Session) (session.Session, error) {
@@ -155,7 +161,10 @@ func TestAppWorkspace_RunningSubagents_WithEntries(t *testing.T) {
 
 // TestAppWorkspace_RunningSubagents_TokenEnrichment verifies that when a child
 // session exists, its PromptTokens and CompletionTokens are included in the
-// returned RunningSubagentInfo.
+// returned RunningSubagentInfo. Enrichment comes from one ListChildSessions
+// query for the parent (not a Get per entry), so children that are not
+// registered on the runtime must not appear, and a registered entry without a
+// child session keeps zero counts.
 func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	t.Parallel()
 
@@ -163,13 +172,22 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	t.Cleanup(rt.Shutdown)
 
 	rt.Register("parent-1", "child-tok", "agent-tok", "green", "")
+	rt.Register("parent-1", "child-nosession", "agent-lost", "blue", "")
 
 	sessions := &stubSessionService{
 		sessions: map[string]session.Session{
 			"child-tok": {
 				ID:               "child-tok",
+				ParentSessionID:  "parent-1",
 				PromptTokens:     100,
 				CompletionTokens: 200,
+			},
+			// A finished sibling child: returned by ListChildSessions but
+			// not registered on the runtime, so it must not be enriched.
+			"child-done": {
+				ID:              "child-done",
+				ParentSessionID: "parent-1",
+				PromptTokens:    500,
 			},
 		},
 	}
@@ -183,9 +201,17 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	}
 
 	got := w.RunningSubagents("parent-1")
-	require.Len(t, got, 1)
-	require.Equal(t, int64(100), got[0].PromptTokens)
-	require.Equal(t, int64(200), got[0].CompletionTokens)
+	require.Len(t, got, 2)
+
+	byID := map[string]RunningSubagentInfo{}
+	for _, info := range got {
+		byID[info.ChildSessionID] = info
+	}
+
+	require.Equal(t, int64(100), byID["child-tok"].PromptTokens)
+	require.Equal(t, int64(200), byID["child-tok"].CompletionTokens)
+	require.Zero(t, byID["child-nosession"].PromptTokens)
+	require.Zero(t, byID["child-nosession"].CompletionTokens)
 }
 
 // TestAppWorkspace_CancelSubagent_NilCoordinator verifies that calling

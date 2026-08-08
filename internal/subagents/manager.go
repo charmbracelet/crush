@@ -146,17 +146,20 @@ func DiscoveryConfigFromStore(store *config.ConfigStore, skillsMgr *skills.Manag
 	}
 }
 
-// knownSkillFunc returns a name-membership check over the manager's active
-// skills at call time, or nil when no manager is available (skipping skill
-// validation).
+// knownSkillFunc returns a name-membership check over the manager's active,
+// model-invocable skills at call time, or nil when no manager is available
+// (skipping skill validation). Skills that disable model invocation are
+// excluded: a subagent pinning one would pass validation only to have the
+// skill silently skipped at dispatch, so the pin fails discovery instead.
 func knownSkillFunc(mgr *skills.Manager) func(name string) bool {
 	if mgr == nil {
 		return nil
 	}
-	active := mgr.ActiveSkills()
-	names := make(map[string]bool, len(active))
-	for _, s := range active {
-		names[s.Name] = true
+	names := make(map[string]bool)
+	for _, s := range mgr.ActiveSkills() {
+		if !s.DisableModelInvocation {
+			names[s.Name] = true
+		}
 	}
 	return func(name string) bool { return names[name] }
 }

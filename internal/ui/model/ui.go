@@ -2514,7 +2514,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Subagents):
-			m.openSubagentsDialog()
+			if cmd := m.openSubagentsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return true
 		}
 		return false
@@ -4539,8 +4541,9 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 	return nil
 }
 
-// openSubagentsDialog opens the subagents dialog. If the dialog is already
-// open, it brings it to the front. Subagent surfaces are local-mode only: in
+// openSubagentsDialog opens the subagents dialog and returns the command that
+// populates its tabs off the Update path. If the dialog is already open, it
+// brings it to the front. Subagent surfaces are local-mode only: in
 // client/server mode the ClientWorkspace stubs return empty, so the dialog
 // opens with no running or library entries.
 func (m *UI) openSubagentsDialog() tea.Cmd {
@@ -4554,7 +4557,7 @@ func (m *UI) openSubagentsDialog() tea.Cmd {
 	}
 	d := dialog.NewSubagents(m.com, sessionID)
 	m.dialog.OpenDialog(d)
-	return nil
+	return d.InitialFetchCmd()
 }
 
 // openFilesDialog opens the file picker dialog.

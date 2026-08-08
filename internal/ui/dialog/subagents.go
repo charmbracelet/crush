@@ -24,6 +24,27 @@ type RunningSubagentsFetchedMsg struct {
 	List            []workspace.RunningSubagentInfo
 }
 
+// subagentsInitialDataMsg carries the dialog's initial data, resolved off the
+// Update path by InitialFetchCmd.
+type subagentsInitialDataMsg struct {
+	running []workspace.RunningSubagentInfo
+	library []workspace.SubagentDefInfo
+}
+
+// InitialFetchCmd resolves the running and library data off the Update path
+// and returns the message that populates both tabs. The dialog opens empty
+// and fills in when this lands; see NewSubagents.
+func (s *Subagents) InitialFetchCmd() tea.Cmd {
+	ws := s.com.Workspace
+	parentSessionID := s.parentSessionID
+	return func() tea.Msg {
+		return subagentsInitialDataMsg{
+			running: ws.RunningSubagents(parentSessionID),
+			library: ws.AllSubagents(),
+		}
+	}
+}
+
 // subagentMutationFailedMsg reports that a Library toggle or delete failed.
 // The optimistic list mutation must be rolled back by re-syncing from the
 // (unchanged) workspace, and the error surfaced to the user.
@@ -68,9 +89,11 @@ type Subagents struct {
 
 var _ Dialog = (*Subagents)(nil)
 
-// NewSubagents creates a new [Subagents] dialog. It populates the running tab
-// from com.Workspace.RunningSubagents(parentSessionID) and the library tab
-// from com.Workspace.AllSubagents().
+// NewSubagents creates a new [Subagents] dialog with both tabs empty. The
+// caller must run [Subagents.InitialFetchCmd] to populate them; the fetch
+// happens off the Update path because RunningSubagents is DB-backed and
+// AllSubagents computes scopes, so opening the dialog must not block input
+// handling on that work.
 func NewSubagents(com *common.Common, parentSessionID string) *Subagents {
 	s := &Subagents{
 		com:             com,
@@ -82,46 +105,10 @@ func NewSubagents(com *common.Common, parentSessionID string) *Subagents {
 	h.Styles = com.Styles.DialogHelpStyles()
 	s.help = h
 
-	// Build running items.
-	running := com.Workspace.RunningSubagents(parentSessionID)
-	runningFilterable := make([]list.FilterableItem, len(running))
-	s.runningItems = make([]*RunningSubagentItem, len(running))
-	for i, r := range running {
-		item := NewRunningSubagentItem(com.Styles, RunningSubagentItemData{
-			ChildSessionID:   r.ChildSessionID,
-			Name:             r.Name,
-			Color:            r.Color,
-			Model:            r.Model,
-			PromptTokens:     r.PromptTokens,
-			CompletionTokens: r.CompletionTokens,
-		})
-		s.runningItems[i] = item
-		runningFilterable[i] = item
-	}
-	s.runningList = list.NewFilterableList(runningFilterable...)
+	s.runningList = list.NewFilterableList()
 	s.runningList.Focus()
-	s.runningList.SetSelected(0)
 
-	// Build library items.
-	defs := com.Workspace.AllSubagents()
-	libraryFilterable := make([]list.FilterableItem, len(defs))
-	s.libraryItems = make([]*LibrarySubagentItem, len(defs))
-	for i, d := range defs {
-		item := NewLibrarySubagentItem(com.Styles, LibrarySubagentItemData{
-			Name:        d.Name,
-			Description: d.Description,
-			Color:       d.Color,
-			FilePath:    d.FilePath,
-			Scope:       d.Scope,
-			Disabled:    d.Disabled,
-			Deletable:   d.Deletable,
-			Error:       d.Error,
-		})
-		s.libraryItems[i] = item
-		libraryFilterable[i] = item
-	}
-	s.libraryList = list.NewFilterableList(libraryFilterable...)
-	s.libraryList.SetSelected(0)
+	s.libraryList = list.NewFilterableList()
 
 	s.keyMap.Tab = key.NewBinding(
 		key.WithKeys("tab", "shift+tab"),
@@ -204,6 +191,10 @@ func (s *Subagents) HandleMsg(msg tea.Msg) Action {
 		if ev.ParentSessionID == s.parentSessionID {
 			s.applyRunning(ev.List)
 		}
+		return nil
+	case subagentsInitialDataMsg:
+		s.applyRunning(ev.running)
+		s.setLibrary(ev.library)
 		return nil
 	case pubsub.Event[subagents.Event]:
 		s.refreshLibrary()
@@ -383,6 +374,7 @@ func (s *Subagents) applyRunning(running []workspace.RunningSubagentInfo) {
 			Name:             r.Name,
 			Color:            r.Color,
 			Model:            r.Model,
+			Status:           r.Status,
 			PromptTokens:     r.PromptTokens,
 			CompletionTokens: r.CompletionTokens,
 		})
@@ -396,16 +388,21 @@ func (s *Subagents) applyRunning(running []workspace.RunningSubagentInfo) {
 	s.runningList.SetSelected(selectedIdx)
 }
 
-// refreshLibrary rebuilds the library tab from the workspace, preserving the
-// selected item's identity (by name) across the rebuild when it still
-// exists in the new set.
+// refreshLibrary rebuilds the library tab from the workspace's current
+// definitions.
 func (s *Subagents) refreshLibrary() {
+	s.setLibrary(s.com.Workspace.AllSubagents())
+}
+
+// setLibrary rebuilds the library tab from defs, preserving the selected
+// item's identity (by name) across the rebuild when it still exists in the
+// new set.
+func (s *Subagents) setLibrary(defs []workspace.SubagentDefInfo) {
 	var selectedID string
 	if item, ok := s.libraryList.SelectedItem().(ListItem); ok {
 		selectedID = item.ID()
 	}
 
-	defs := s.com.Workspace.AllSubagents()
 	s.libraryItems = make([]*LibrarySubagentItem, len(defs))
 	filterable := make([]list.FilterableItem, len(defs))
 	selectedIdx := 0

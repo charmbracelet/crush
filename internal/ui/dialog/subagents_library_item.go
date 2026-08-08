@@ -50,9 +50,10 @@ func (l *LibrarySubagentItem) Finished() bool {
 	return true
 }
 
-// Filter implements [list.FilterableItem].
+// Filter implements [list.FilterableItem]. Matching includes the description
+// so a library entry can be found by what it does, not just its name.
 func (l *LibrarySubagentItem) Filter() string {
-	return l.data.Name
+	return l.data.Name + " " + l.data.Description
 }
 
 // ID implements [ListItem].

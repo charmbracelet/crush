@@ -58,7 +58,13 @@ func newTestSubagentsDialog(t *testing.T, ws *subagentsWorkspace) *Subagents {
 	t.Helper()
 	st := styles.CharmtonePantera()
 	com := &common.Common{Styles: &st, Workspace: ws}
-	return NewSubagents(com, "parent-session-id")
+	d := NewSubagents(com, "parent-session-id")
+	// Populate the tabs the way openSubagentsDialog does: run the initial
+	// fetch (synchronously, it is a plain closure) and deliver its message.
+	if msg := d.InitialFetchCmd()(); msg != nil {
+		d.HandleMsg(msg)
+	}
+	return d
 }
 
 // TestSubagentsDialog_ImplementsDialogInterface is a compile-time assertion.

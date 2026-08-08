@@ -81,7 +81,7 @@ func (r *RunningSubagentItem) SetMatch(m fuzzy.Match) {
 // Render implements list.Item. It renders the running subagent as a single
 // line showing the colored dot, name, model, and total token count.
 func (r *RunningSubagentItem) Render(width int) string {
-	dot := styles.SubagentDot(r.data.Color)
+	dot := r.t.SubagentDot(r.data.Color)
 	totalTokens := r.data.PromptTokens + r.data.CompletionTokens
 	tokStr := fmt.Sprintf("%d tok", totalTokens)
 

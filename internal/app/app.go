@@ -65,8 +65,9 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
-	Skills    *skills.Manager
-	Subagents *subagents.Manager
+	Skills          *skills.Manager
+	Subagents       *subagents.Manager
+	SubagentRuntime *subagents.Runtime
 
 	config *config.ConfigStore
 
@@ -119,6 +120,15 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
 		Subagents:   subagentsMgr,
+
+		// Created eagerly (rather than lazily in initCoderAgent) so
+		// Subscribe's one-time nil check always finds a live Runtime: on an
+		// unconfigured install, New returns before InitCoderAgent runs, and
+		// Subscribe (already running by the time onboarding finishes and
+		// InitCoderAgent runs for the first time) would otherwise never wire
+		// up the subagent-events forwarding goroutine for the rest of the
+		// process.
+		SubagentRuntime: subagents.NewRuntime(),
 
 		globalCtx: ctx,
 
@@ -698,6 +708,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		RunComplete:  app.runCompletions,
 		Skills:       app.Skills,
 		SubagentsMgr: app.Subagents,
+		Runtime:      app.SubagentRuntime,
 		Interactive:  interactive,
 	})
 	if err != nil {

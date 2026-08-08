@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
@@ -107,4 +108,43 @@ func TestBuildAgent_AsyncBuildFailureStaysOnProvidedGroup(t *testing.T) {
 
 	require.Error(t, buildWg.Wait(), "the provided group must carry the async build failure")
 	require.NoError(t, coord.readyWg.Wait(), "the coordinator-wide readyWg must stay clean so later turns are unaffected")
+}
+
+// TestRefreshCoderSystemPrompt_TracksSubagentReloads verifies that
+// refreshCoderSystemPrompt (called by UpdateModels at the start of every turn)
+// rebuilds the coder system prompt when the active subagent set changes, so
+// the <available_subagents> block tracks Library reloads instead of staying a
+// construction-time snapshot — and that it skips the rebuild when nothing
+// changed.
+func TestRefreshCoderSystemPrompt_TracksSubagentReloads(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	sa := coord.currentAgent.(*sessionAgent)
+	initial := sa.systemPrompt.Get()
+	require.NotContains(t, initial, "<available_subagents>", "no subagents configured at construction")
+
+	// A Library reload adds a subagent (activeSubagentsList falls back to
+	// activeSubagents when no manager is wired).
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "late-arrival", Description: "Added after construction."},
+	}
+	coord.refreshCoderSystemPrompt(t.Context(), coord.currentAgent.Model())
+
+	refreshed := sa.systemPrompt.Get()
+	require.Contains(t, refreshed, "<available_subagents>")
+	require.Contains(t, refreshed, "<name>late-arrival</name>")
+
+	// Unchanged set: the prompt must not be rebuilt (pointer-equal string
+	// content is fine — assert stability instead of identity).
+	coord.refreshCoderSystemPrompt(t.Context(), coord.currentAgent.Model())
+	require.Equal(t, refreshed, sa.systemPrompt.Get())
+
+	// Removing the subagent drops the block again.
+	coord.activeSubagents = nil
+	coord.refreshCoderSystemPrompt(t.Context(), coord.currentAgent.Model())
+	require.NotContains(t, sa.systemPrompt.Get(), "<available_subagents>")
 }

@@ -131,7 +131,7 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 
 	var params tools.JobOutputParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolInvalidParamsError(sty, opts, cappedWidth)
 	}
 
 	var description string
@@ -182,7 +182,7 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 
 	var params tools.JobKillParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolInvalidParamsError(sty, opts, cappedWidth)
 	}
 
 	var description string

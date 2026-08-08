@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -205,4 +206,54 @@ func TestSubagentPrompt_NilSubagentSkills(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, p)
+}
+
+// TestSubagentPrompt_Build_RendersBody confirms that the subagent template
+// actually emits SubagentBody when the prompt is built. A typo in
+// subagent.md.tpl would otherwise pass the existing not-nil tests.
+func TestSubagentPrompt_Build_RendersBody(t *testing.T) {
+	t.Parallel()
+
+	body := "You are a specialist that handles XYZ tasks."
+	sa := newTestSubagent("build-render", nil, body)
+
+	p, err := subagentPrompt(sa, nil)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", nil)
+	require.NoError(t, err)
+	require.Contains(t, got, body)
+}
+
+// TestSubagentPrompt_Build_RendersPreloadedSkillsXML confirms that resolved
+// preloaded skill invocations actually flow through to the rendered prompt.
+func TestSubagentPrompt_Build_RendersPreloadedSkillsXML(t *testing.T) {
+	t.Parallel()
+
+	sk := newTestSkill("preload-me", false)
+	sa := newTestSubagent("with-preload", []string{"preload-me"}, "Body.")
+
+	p, err := subagentPrompt(sa, []*skills.Skill{sk})
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", nil)
+	require.NoError(t, err)
+	require.Contains(t, got, "<loaded_skill>")
+	require.Contains(t, got, "preload-me")
+}
+
+// TestSubagentPrompt_Build_OmitsPreloadWhenEmpty verifies that the template's
+// guard around PreloadedSkillsXML keeps the output clean when no skills are
+// requested. Catches accidental literal `<loaded_skill>` leak.
+func TestSubagentPrompt_Build_OmitsPreloadWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	sa := newTestSubagent("no-preload", nil, "Body.")
+
+	p, err := subagentPrompt(sa, nil)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", nil)
+	require.NoError(t, err)
+	require.NotContains(t, got, "<loaded_skill>")
 }

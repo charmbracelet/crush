@@ -377,7 +377,7 @@ type UI struct {
 	// skills
 	skillStates []*skills.SkillState
 
-	// subagent @-mention completions, cached at init
+	// Subagent @-mention completions, cached at init.
 	activeSubagentItems []completions.SubagentCompletionValue
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
@@ -554,11 +554,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 
 	// Cache active subagents for @-mention completions.
-	activeSubagents := com.Workspace.ActiveSubagents()
-	ui.activeSubagentItems = make([]completions.SubagentCompletionValue, len(activeSubagents))
-	for i, sa := range activeSubagents {
-		ui.activeSubagentItems[i] = completions.SubagentCompletionValue{Name: sa.Name, Description: sa.Description}
-	}
+	ui.activeSubagentItems = buildSubagentCaches(com.Workspace.ActiveSubagents())
 
 	status := NewStatus(com, ui)
 

@@ -91,7 +91,27 @@ func (t *ToolList) UnmarshalYAML(value *yaml.Node) error {
 	default:
 		// A mapping (or other structure) is a user error; treating it as
 		// absent would silently inherit the base tool pool.
-		return fmt.Errorf("expected a list or comma-separated string, got %v", value.Kind)
+		return fmt.Errorf("expected a list or comma-separated string, got %s", yamlKindName(value.Kind))
+	}
+}
+
+// yamlKindName names a yaml.Kind for error messages. yaml.Kind is a bare
+// uint32 with no String method, so formatting one directly renders an opaque
+// number — and these errors are surfaced to users in the Library tab.
+func yamlKindName(k yaml.Kind) string {
+	switch k {
+	case yaml.DocumentNode:
+		return "a document"
+	case yaml.SequenceNode:
+		return "a list"
+	case yaml.MappingNode:
+		return "a mapping"
+	case yaml.ScalarNode:
+		return "a scalar"
+	case yaml.AliasNode:
+		return "an alias"
+	default:
+		return "an unknown value"
 	}
 }
 

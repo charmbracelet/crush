@@ -1169,6 +1169,32 @@ func TestParseContent_ToolListRejectsMapping(t *testing.T) {
 	require.Error(t, err, "a mapping disallowedTools: value must not parse as absent")
 }
 
+// TestParseContent_ToolListErrorNamesTheKind verifies that the rejection
+// message names the offending YAML kind in words. yaml.Kind is a bare uint32,
+// so formatting one directly yields an opaque number — and the Library tab
+// shows this text to the user.
+func TestParseContent_ToolListErrorNamesTheKind(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseContent([]byte("---\nname: a\ndescription: d.\ntools:\n  view: true\n---\n"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "got a mapping")
+	require.NotRegexp(t, `got \d`, err.Error(), "the raw yaml.Kind number must not reach the user")
+}
+
+// TestParseContent_ToolListResolvesAlias verifies that a YAML alias to a tool
+// list is followed to its anchor rather than rejected as an unknown kind.
+func TestParseContent_ToolListResolvesAlias(t *testing.T) {
+	t.Parallel()
+
+	sa, err := ParseContent([]byte(
+		"---\nname: a\ndescription: d.\ntools: &base [view, grep]\ndisallowedTools: *base\n---\n",
+	))
+	require.NoError(t, err)
+	require.Equal(t, ToolList{"view", "grep"}, sa.Tools)
+	require.Equal(t, ToolList{"view", "grep"}, sa.DisallowedTools, "an alias must resolve to its anchor's list")
+}
+
 // TestValidate_RejectsUnknownToolNames verifies that a tool name that is not a
 // real built-in fails validation instead of silently intersecting to nothing.
 func TestValidate_RejectsUnknownToolNames(t *testing.T) {

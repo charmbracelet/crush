@@ -21,6 +21,12 @@ func buildSubagentCaches(active []workspace.SubagentInfo) ([]completions.Subagen
 	return items, names
 }
 
+// rebuildSubagentCaches refreshes the @-mention completion caches from the
+// workspace's current active subagents. Called when Library discovery changes.
+func (m *UI) rebuildSubagentCaches() {
+	m.activeSubagentItems, m.activeSubagentNames = buildSubagentCaches(m.com.Workspace.ActiveSubagents())
+}
+
 // rewriteSubagentPrompt detects the pattern `@name rest` at the start of
 // content and rewrites it to a delegation instruction when name is a known
 // active subagent. Returns content unchanged if the pattern doesn't match.

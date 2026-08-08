@@ -25,8 +25,64 @@ import (
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	// Drop credentials inherited from the developer's shell. They resolve
+	// into provider configs on every load, so a real key silently replaces
+	// the value a test asserts on and the failure diff prints the key.
+	// Tests that need one set it themselves with t.Setenv.
+	for _, name := range inheritedCredentialEnvNames(os.Environ()) {
+		os.Unsetenv(name)
+	}
+
 	exitVal := m.Run()
 	os.Exit(exitVal)
+}
+
+// inheritedCredentialEnvNames returns the names in environ that a test
+// process must not inherit. CRUSH_ prefixed variables count because
+// PushPopCrushEnv copies CRUSH_FOO over FOO on every load, so clearing
+// HYPER_API_KEY alone leaves CRUSH_HYPER_API_KEY to reinstate it.
+func inheritedCredentialEnvNames(environ []string) []string {
+	var names []string
+	for _, ev := range environ {
+		name, _, ok := strings.Cut(ev, "=")
+		if !ok {
+			continue
+		}
+		if strings.HasSuffix(name, "_API_KEY") || strings.HasPrefix(name, "CRUSH_") {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func TestInheritedCredentialEnvNames(t *testing.T) {
+	t.Parallel()
+
+	names := inheritedCredentialEnvNames([]string{
+		"PATH=/usr/bin",
+		"HOME=/home/dev",
+		"HYPER_API_KEY=live-key",
+		"CRUSH_HYPER_API_KEY=live-key",
+		"VENICE_API_KEY=live-key",
+		"CRUSH_GLOBAL_CONFIG=/home/dev/.config/crush",
+		"API_KEY_SUFFIXED_WRONG=x",
+		"MALFORMED",
+	})
+
+	require.ElementsMatch(t, []string{
+		"HYPER_API_KEY",
+		"CRUSH_HYPER_API_KEY",
+		"VENICE_API_KEY",
+		"CRUSH_GLOBAL_CONFIG",
+	}, names)
+}
+
+// TestMainClearedInheritedCredentials is deliberately not parallel: it reads
+// process-wide state, and t.Setenv in other tests is confined to the
+// sequential pass.
+func TestMainClearedInheritedCredentials(t *testing.T) {
+	require.Empty(t, inheritedCredentialEnvNames(os.Environ()),
+		"TestMain must clear inherited credentials before any test runs")
 }
 
 func TestConfig_LoadFromBytes(t *testing.T) {

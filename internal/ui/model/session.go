@@ -95,15 +95,32 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 	return tea.Batch(load, m.reportCurrentSession(sessionID))
 }
 
-// fetchParentTitle fetches the title of the parent session and returns it as a
-// parentTitleMsg for the breadcrumb in the sidebar.
-func (m *UI) fetchParentTitle(parentSessionID string) tea.Cmd {
+// fetchParentMeta fetches the parent session title (for the breadcrumb) and
+// this child's subagent color (from the in-memory runtime). Both lookups run
+// off the Update path. childSessionID may be empty when only the title matters.
+func (m *UI) fetchParentMeta(parentSessionID, childSessionID string) tea.Cmd {
 	return func() tea.Msg {
 		sess, err := m.com.Workspace.GetSession(context.Background(), parentSessionID)
 		if err != nil {
 			return nil
 		}
-		return parentTitleMsg{title: sess.Title}
+		var color string
+		for _, entry := range m.com.Workspace.RunningSubagents(parentSessionID) {
+			if entry.ChildSessionID == childSessionID {
+				color = entry.Color
+				break
+			}
+		}
+		return parentTitleMsg{title: sess.Title, color: color}
+	}
+}
+
+// refreshRunningSubagents resolves the running-subagent list for sessionID off
+// the Update path (RunningSubagents hits the DB to enrich token counts) and
+// delivers it as a runningSubagentsMsg.
+func (m *UI) refreshRunningSubagents(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		return runningSubagentsMsg{list: m.com.Workspace.RunningSubagents(sessionID)}
 	}
 }
 

@@ -3,9 +3,40 @@ package model
 import (
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
+
+// activeSubagentsWorkspace stubs ActiveSubagents for rebuildSubagentCaches.
+type activeSubagentsWorkspace struct {
+	workspace.Workspace
+	active []workspace.SubagentInfo
+}
+
+func (w *activeSubagentsWorkspace) ActiveSubagents() []workspace.SubagentInfo { return w.active }
+
+// TestRebuildSubagentCaches verifies the handler invoked on a subagents.Event
+// rebuilds the @-mention caches from the workspace's current active list, so a
+// removed subagent stops being offered without a restart.
+func TestRebuildSubagentCaches(t *testing.T) {
+	t.Parallel()
+
+	ws := &activeSubagentsWorkspace{active: []workspace.SubagentInfo{{Name: "alpha"}, {Name: "beta"}}}
+	m := &UI{com: &common.Common{Workspace: ws}}
+
+	m.rebuildSubagentCaches()
+	require.True(t, m.activeSubagentNames["alpha"])
+	require.True(t, m.activeSubagentNames["beta"])
+	require.Len(t, m.activeSubagentItems, 2)
+
+	// Discovery change drops beta — cache must reflect it on rebuild.
+	ws.active = []workspace.SubagentInfo{{Name: "alpha"}}
+	m.rebuildSubagentCaches()
+	require.True(t, m.activeSubagentNames["alpha"])
+	require.False(t, m.activeSubagentNames["beta"], "removed subagent must drop from cache")
+	require.Len(t, m.activeSubagentItems, 1)
+}
 
 func TestBuildSubagentCaches(t *testing.T) {
 	t.Parallel()

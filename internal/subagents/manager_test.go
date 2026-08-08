@@ -239,7 +239,7 @@ func TestDiscoverFromConfig_RejectsUnknownModelViaResolver(t *testing.T) {
 	knownModels := map[string]bool{"gpt-4o": true}
 	all, active, states := DiscoverFromConfig(DiscoveryConfig{
 		SubagentsPaths: []string{tmp},
-		IsKnownModelID: func(id string) bool { return knownModels[id] },
+		IsKnownModel:   func(provider, id string) bool { return knownModels[id] },
 	})
 
 	activeNames := make(map[string]bool, len(active))

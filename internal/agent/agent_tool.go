@@ -128,12 +128,16 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if err != nil {
 		return nil, err
 	}
-	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, "")
+	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{})
 	if err != nil {
 		return nil, err
 	}
 
-	info := buildAgentDispatchInfo(c.activeSubagents)
+	// The subagent_type enum is a point-in-time snapshot baked into the tool
+	// schema; a Library reload won't refresh it. Dispatch lookups use the live
+	// list (activeSubagentsList) so a since-removed name fails cleanly and a
+	// newly added one still resolves — the enum is advisory only.
+	info := buildAgentDispatchInfo(c.activeSubagentsList())
 
 	return &dispatcherTool{
 		info: info,
@@ -160,10 +164,13 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 					ToolCallID:     call.ID,
 					Prompt:         params.Prompt,
 					SessionTitle:   "New Agent Session",
+					AgentName:      config.AgentTask,
+					AgentColor:     subagents.AutoColor(config.AgentTask),
+					AgentModel:     taskAgent.Model().ModelCfg.Model,
 				})
 			}
 
-			sa := findSubagentByName(c.activeSubagents, subagentType)
+			sa := findSubagentByName(c.activeSubagentsList(), subagentType)
 			if sa == nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
 			}
@@ -173,7 +180,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent prompt %q: %w", sa.Name, err)
 			}
-			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, sa.Effort)
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider})
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent %q: %w", sa.Name, err)
 			}

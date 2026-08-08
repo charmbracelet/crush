@@ -165,6 +165,12 @@ type coordinator struct {
 	subagentPromptXML   string
 	subagentPromptXMLMu sync.Mutex
 
+	// waitForInit, when non-nil, replaces mcp.WaitForInit for the readiness
+	// waits in run and buildAgent. It is a test seam: it lets a test simulate
+	// a slow MCP initialization without arming the mcp package's process-wide
+	// init gate, whose armed state would otherwise leak into later tests.
+	waitForInit func(ctx context.Context) error
+
 	readyWg errgroup.Group
 }
 
@@ -254,6 +260,15 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	return c, nil
 }
 
+// mcpInitWait blocks until MCP initialization completes: via the waitForInit
+// test seam when one is installed, or mcp.WaitForInit otherwise.
+func (c *coordinator) mcpInitWait(ctx context.Context) error {
+	if c.waitForInit != nil {
+		return c.waitForInit(ctx)
+	}
+	return mcp.WaitForInit(ctx)
+}
+
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	return c.run(ctx, nil, sessionID, prompt, attachments...)
@@ -289,7 +304,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// server's own connect timeout, so a hung server cannot stall the run
 	// indefinitely.
 	if !c.interactive {
-		if err := mcp.WaitForInit(ctx); err != nil {
+		if err := c.mcpInitWait(ctx); err != nil {
 			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 		}
 	}
@@ -833,9 +848,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	var primary Model
 	switch sm.Model {
-	case "small":
+	case subagents.ModelAliasSmall:
 		primary = small
-	case "", "large":
+	case "", subagents.ModelAliasLarge:
 		primary, err = c.buildNamedModel(ctx, config.SelectedModelTypeLarge, isSubAgent)
 	default:
 		primary, err = c.resolveModelByID(ctx, sm.Model, sm.Provider, isSubAgent)

@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/hooks"
@@ -1284,7 +1285,7 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 	case agent.AgentToolName:
 		var params agent.AgentParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
-			if params.SubagentType != "" && params.SubagentType != "task" {
+			if params.SubagentType != "" && params.SubagentType != config.AgentTask {
 				return fmt.Sprintf("**Subagent:** %s\n\n**Task:**\n%s", params.SubagentType, params.Prompt)
 			}
 			return fmt.Sprintf("**Task:**\n%s", params.Prompt)

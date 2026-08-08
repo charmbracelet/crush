@@ -67,7 +67,7 @@ description: A test agent.
 			content: `---
 name: my-agent
 description: A test agent.
-disallowed_tools: Write, Edit
+disallowedTools: Write, Edit
 ---
 `,
 			wantName:        "my-agent",
@@ -83,7 +83,7 @@ model: large
 tools:
   - Read
   - Bash
-disallowed_tools: Write, Edit
+disallowedTools: Write, Edit
 skills:
   - pdf-processing
   - data-analysis
@@ -608,4 +608,25 @@ func TestDiscoverWithStates(t *testing.T) {
 		require.Equal(t, "Nested version.", kept[0].Description,
 			"the nested path was passed after the parent path, so its definition of the colliding name should win")
 	})
+}
+
+// TestValidate_ReportsAllToolOverlaps verifies that when multiple tools appear
+// in both Tools and DisallowedTools, Validate reports every overlapping tool
+// rather than stopping at the first. The fix removed a break so all overlaps
+// are joined via errors.Join.
+func TestValidate_ReportsAllToolOverlaps(t *testing.T) {
+	t.Parallel()
+
+	sa := Subagent{
+		Name:            "reviewer",
+		Description:     "Reviews things.",
+		Tools:           ToolList{"view", "edit", "bash"},
+		DisallowedTools: ToolList{"view", "edit", "bash"},
+	}
+
+	err := sa.Validate()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "view")
+	require.ErrorContains(t, err, "edit")
+	require.ErrorContains(t, err, "bash")
 }

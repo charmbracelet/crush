@@ -100,6 +100,35 @@ func TestToConfigAgent(t *testing.T) {
 			},
 		},
 		{
+			// Plan mode allows no MCP servers; a subagent it dispatches must
+			// not gain the servers its own frontmatter lists.
+			name: "mcp_servers_capped_by_empty_base",
+			subagent: Subagent{
+				Name:        "my-agent",
+				Description: "Does something.",
+				MCPServers:  []string{"github"},
+			},
+			base: config.Agent{AllowedMCP: map[string][]string{}},
+			check: func(t *testing.T, result config.Agent) {
+				t.Helper()
+				require.NotNil(t, result.AllowedMCP)
+				require.Empty(t, result.AllowedMCP)
+			},
+		},
+		{
+			name: "mcp_servers_intersect_base_and_keep_tool_limits",
+			subagent: Subagent{
+				Name:        "my-agent",
+				Description: "Does something.",
+				MCPServers:  []string{"github", "linear"},
+			},
+			base: config.Agent{AllowedMCP: map[string][]string{"github": {"search"}}},
+			check: func(t *testing.T, result config.Agent) {
+				t.Helper()
+				require.Equal(t, map[string][]string{"github": {"search"}}, result.AllowedMCP)
+			},
+		},
+		{
 			name: "mcp_servers_empty",
 			subagent: Subagent{
 				Name:        "my-agent",
@@ -111,7 +140,7 @@ func TestToConfigAgent(t *testing.T) {
 			},
 			check: func(t *testing.T, result config.Agent) {
 				t.Helper()
-				// No mcp_servers: frontmatter must lock the subagent out of
+				// No mcpServers: frontmatter must lock the subagent out of
 				// every MCP server (secure by default), not grant it
 				// unrestricted access — AllowedMCP == nil means "no
 				// restrictions" to buildTools, so it must be a non-nil empty

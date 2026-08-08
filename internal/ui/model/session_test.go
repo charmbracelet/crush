@@ -166,6 +166,8 @@ func TestFetchParentMeta_ReturnsTitleAndColor(t *testing.T) {
 	require.True(t, ok, "expected parentTitleMsg")
 	require.Equal(t, "My Parent Session", ptm.title)
 	require.Equal(t, "purple", ptm.color)
+	require.Equal(t, "child-id", ptm.forSession,
+		"forSession must be the child (currently-viewed) session so a stale result can be discarded on a session switch")
 }
 
 func TestFetchParentMeta_NotFoundReturnsNil(t *testing.T) {

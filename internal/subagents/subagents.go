@@ -30,21 +30,39 @@ const (
 // hyphens, no leading or trailing hyphens, no consecutive hyphens.
 var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-// reservedNames is the set of names that may not be used for subagents: the
-// built-in agent names, every built-in tool name (so a subagent can shadow
-// neither in prompts nor dispatch), and "mcp". Both source lists are fixed,
-// so the set is built once.
-var reservedNames = func() map[string]bool {
-	set := map[string]bool{
-		"coder": true,
-		"task":  true,
-		"mcp":   true,
+// reservedNames is the set of names that may not be used for subagents. It
+// covers the agent-identifier namespace, which is the only one a subagent name
+// enters: a name becomes a subagent_type enum value and a config.Agent ID,
+// never a tool name. "task" is the one that genuinely breaks — dispatch
+// resolves it to the built-in task agent before it ever consults the subagent
+// list, so a subagent claiming it is unreachable — and the rest keep the agent
+// identifiers unambiguous.
+//
+// Built-in tool names are deliberately absent. Deriving this set from
+// config.AllToolNames would bind subagent naming to the permission allowlist,
+// an unrelated namespace that grows: every tool added later would retroactively
+// invalidate definition files that load fine today. A name that matches a tool
+// is a prompt-clarity problem, not a collision, so discovery warns about it
+// instead. See warnIfShadowsToolName.
+var reservedNames = map[string]bool{
+	"agent": true,
+	"task":  true,
+	"coder": true,
+	"mcp":   true,
+}
+
+// warnIfShadowsToolName logs when a subagent's name matches a built-in tool
+// name. Nothing breaks — the two live in separate namespaces — but both are
+// presented to the model in the same turn, so an instruction like "use fetch"
+// stops being unambiguous. This warns and never rejects: the tool list grows
+// over time, and a definition file must not stop loading because Crush shipped
+// a new tool that happens to share its name.
+func warnIfShadowsToolName(name, path string) {
+	if slices.Contains(config.AllToolNames(), name) {
+		slog.Warn("Subagent name matches a built-in tool name; the model may confuse the two",
+			"name", name, "path", path)
 	}
-	for _, name := range config.AllToolNames() {
-		set[name] = true
-	}
-	return set
-}()
+}
 
 // ToolList is a []string that YAML-unmarshals from either a comma-separated
 // scalar string ("view, grep, bash") or a YAML sequence (["view","grep"]).
@@ -557,6 +575,7 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 				return nil
 			}
 			slog.Debug("Successfully loaded subagent", "name", agent.Name, "path", path)
+			warnIfShadowsToolName(agent.Name, path)
 			mu.Lock()
 			baseAgents = append(baseAgents, agent)
 			mu.Unlock()

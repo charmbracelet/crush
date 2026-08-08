@@ -330,24 +330,24 @@ func TestValidate(t *testing.T) {
 			errMsg:  "reserved",
 		},
 		{
-			name:    "reserved_name_bash",
-			agent:   Subagent{Name: "bash", Description: "Something."},
+			name:    "reserved_name_coder",
+			agent:   Subagent{Name: "coder", Description: "Something."},
 			wantErr: true,
 			errMsg:  "reserved",
 		},
 		{
-			// Reserved names derive from config.AllToolNames, so every
-			// built-in tool name is covered, not just the original subset.
-			name:    "reserved_name_multiedit",
-			agent:   Subagent{Name: "multiedit", Description: "Something."},
-			wantErr: true,
-			errMsg:  "reserved",
-		},
-		{
-			name:    "reserved_name_fetch",
+			// Built-in tool names are not reserved: they share no namespace
+			// with subagent names, and reserving them would let a future tool
+			// retroactively invalidate a definition file. Discovery warns
+			// instead — see warnIfShadowsToolName.
+			name:    "tool_name_is_not_reserved",
 			agent:   Subagent{Name: "fetch", Description: "Something."},
-			wantErr: true,
-			errMsg:  "reserved",
+			wantErr: false,
+		},
+		{
+			name:    "tool_name_is_not_reserved_multiedit",
+			agent:   Subagent{Name: "multiedit", Description: "Something."},
+			wantErr: false,
 		},
 		{
 			name: "tools_disallowed_overlap",
@@ -960,6 +960,26 @@ func TestDiscoverWithStates(t *testing.T) {
 			require.Equal(t, keptAgents[0].FilePath, keptStates[0].Path,
 				"the surviving state must describe the surviving agent's file")
 		}
+	})
+
+	t.Run("a_name_matching_a_builtin_tool_still_loads", func(t *testing.T) {
+		t.Parallel()
+
+		// Tool names are not reserved: they share no namespace with subagent
+		// names, and reserving them would mean a tool added in a later release
+		// retroactively breaks a definition file. Discovery only warns.
+		tmp := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "fetch.md"),
+			[]byte("---\nname: fetch\ndescription: Fetches things.\n---\n\nBody.\n"),
+			0o644,
+		))
+
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
+		require.Len(t, agents, 1)
+		require.Equal(t, "fetch", agents[0].Name)
+		require.Len(t, states, 1)
+		require.Equal(t, StateNormal, states[0].State)
 	})
 
 	t.Run("error_states_survive_a_valid_definition_of_the_same_name", func(t *testing.T) {

@@ -496,6 +496,10 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 			FilePath:    s.FilePath,
 			Scope:       subagentScope(s.FilePath, workingDir, projectDirs),
 			Disabled:    disabledSet[s.Name],
+			// Deletion is gated by the same trust rule DeleteUserSubagent
+			// enforces, so the dialog only offers to delete what the
+			// workspace will actually remove.
+			Deletable: subagents.InGlobalDir(s.FilePath),
 		})
 	}
 	for _, st := range mgr.States() {

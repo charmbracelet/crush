@@ -147,7 +147,7 @@ func TestSubagentsDialog_DeleteLibraryItem(t *testing.T) {
 
 	ws := &subagentsWorkspace{
 		defs: []workspace.SubagentDefInfo{
-			{Name: "user-agent", Description: "does stuff", Scope: "user"},
+			{Name: "user-agent", Description: "does stuff", Scope: "user", Deletable: true},
 		},
 	}
 	d := newTestSubagentsDialog(t, ws)
@@ -175,7 +175,7 @@ func TestSubagentsDialog_DeleteLibraryItem_Cancel(t *testing.T) {
 
 	ws := &subagentsWorkspace{
 		defs: []workspace.SubagentDefInfo{
-			{Name: "user-agent", Description: "does stuff", Scope: "user"},
+			{Name: "user-agent", Description: "does stuff", Scope: "user", Deletable: true},
 		},
 	}
 	d := newTestSubagentsDialog(t, ws)
@@ -265,6 +265,27 @@ func TestSubagentsDialog_BrokenItemCannotDelete(t *testing.T) {
 	require.False(t, d.IsConfirmingDelete(), "broken entries must not be deletable")
 }
 
+// TestSubagentsDialog_NonDeletableItemCannotDelete verifies that d on an entry
+// the workspace will not delete (e.g. project scope or a custom path outside
+// the global dirs) never enters confirm-delete mode — the dialog gates on the
+// same trust rule DeleteUserSubagent enforces instead of the display scope.
+func TestSubagentsDialog_NonDeletableItemCannotDelete(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "custom-path-agent", Scope: "user", Deletable: false},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	d.HandleMsg(keyMsg('d'))
+	require.False(t, d.IsConfirmingDelete(), "non-deletable entries must not offer delete")
+}
+
 // TestSubagentsDialog_ToggleFailureRollback verifies that when persisting a
 // toggle fails, the optimistic flip is rolled back by re-syncing from the
 // unchanged workspace and the error is reported.
@@ -303,7 +324,7 @@ func TestSubagentsDialog_DeleteFailureRollback(t *testing.T) {
 	t.Parallel()
 
 	ws := &subagentsWorkspace{
-		defs:          []workspace.SubagentDefInfo{{Name: "user-agent", Description: "does stuff", Scope: "user"}},
+		defs:          []workspace.SubagentDefInfo{{Name: "user-agent", Description: "does stuff", Scope: "user", Deletable: true}},
 		deleteUserErr: errors.New("remove denied"),
 	}
 	d := newTestSubagentsDialog(t, ws)

@@ -114,6 +114,7 @@ func NewSubagents(com *common.Common, parentSessionID string) *Subagents {
 			FilePath:    d.FilePath,
 			Scope:       d.Scope,
 			Disabled:    d.Disabled,
+			Deletable:   d.Deletable,
 			Error:       d.Error,
 		})
 		s.libraryItems[i] = item
@@ -416,6 +417,7 @@ func (s *Subagents) refreshLibrary() {
 			FilePath:    d.FilePath,
 			Scope:       d.Scope,
 			Disabled:    d.Disabled,
+			Deletable:   d.Deletable,
 			Error:       d.Error,
 		})
 		s.libraryItems[i] = item
@@ -429,7 +431,7 @@ func (s *Subagents) refreshLibrary() {
 }
 
 // enterConfirmDelete sets confirm-delete mode for the currently selected
-// library item, if it has user scope.
+// library item, if the workspace will honor a delete for it.
 func (s *Subagents) enterConfirmDelete() {
 	item := s.libraryList.SelectedItem()
 	if item == nil {
@@ -439,7 +441,7 @@ func (s *Subagents) enterConfirmDelete() {
 	if !ok {
 		return
 	}
-	if li.data.Error != "" || li.data.Scope != "user" {
+	if li.data.Error != "" || !li.data.Deletable {
 		return
 	}
 	s.confirmDelete = true

@@ -317,6 +317,52 @@ func TestAppWorkspace_AllSubagents_IncludesErrorEntries(t *testing.T) {
 	require.Equal(t, "no YAML frontmatter found", unnamed.Error)
 }
 
+// TestAppWorkspace_AllSubagents_Deletable verifies that Deletable reflects the
+// same trust rule DeleteUserSubagent enforces (InGlobalDir), not the display
+// scope: a file in the global user dir is deletable, a project file is not.
+// Not parallel: pins the global subagents dir via CRUSH_SUBAGENTS_DIR.
+func TestAppWorkspace_AllSubagents_Deletable(t *testing.T) {
+	workDir := t.TempDir()
+	userDir := t.TempDir()
+	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
+
+	userFile := filepath.Join(userDir, "user-agent.md")
+	require.NoError(t, os.WriteFile(
+		userFile,
+		[]byte("---\nname: user-agent\ndescription: User agent.\n---\n\nBody.\n"),
+		0o644,
+	))
+	projectFile := filepath.Join(workDir, ".crush", "subagents", "proj-agent.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(projectFile), 0o755))
+	require.NoError(t, os.WriteFile(
+		projectFile,
+		[]byte("---\nname: proj-agent\ndescription: Project agent.\n---\n\nBody.\n"),
+		0o644,
+	))
+
+	userAgent := &subagents.Subagent{Name: "user-agent", Description: "User agent.", FilePath: userFile}
+	projAgent := &subagents.Subagent{Name: "proj-agent", Description: "Project agent.", FilePath: projectFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{userAgent, projAgent},
+		[]*subagents.Subagent{userAgent, projAgent},
+		nil,
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: config.NewTestStoreWithWorkingDir(&config.Config{}, workDir),
+	}
+
+	byName := map[string]SubagentDefInfo{}
+	for _, info := range w.AllSubagents() {
+		byName[info.Name] = info
+	}
+
+	require.True(t, byName["user-agent"].Deletable, "global-dir subagent must be deletable")
+	require.False(t, byName["proj-agent"].Deletable, "project subagent must not be deletable")
+}
+
 // TestAppWorkspace_DeleteUserSubagent_SkipsErrorEntries verifies that a broken
 // entry sharing a name with a valid one cannot shadow the valid target.
 func TestAppWorkspace_DeleteUserSubagent_SkipsErrorEntries(t *testing.T) {

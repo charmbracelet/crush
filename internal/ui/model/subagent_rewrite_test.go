@@ -3,8 +3,68 @@ package model
 import (
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBuildSubagentCaches(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty_input", func(t *testing.T) {
+		t.Parallel()
+		items, names := buildSubagentCaches(nil)
+		require.Empty(t, items)
+		require.Empty(t, names)
+		require.NotNil(t, names, "names map must be allocated even when empty")
+	})
+
+	t.Run("populates_both_caches", func(t *testing.T) {
+		t.Parallel()
+		got, names := buildSubagentCaches([]workspace.SubagentInfo{
+			{Name: "code-reviewer", Description: "reviews code"},
+			{Name: "tester", Description: "writes tests"},
+		})
+
+		require.Len(t, got, 2)
+		require.Equal(t, "code-reviewer", got[0].Name)
+		require.Equal(t, "reviews code", got[0].Description)
+		require.Equal(t, "tester", got[1].Name)
+		require.True(t, names["code-reviewer"])
+		require.True(t, names["tester"])
+		require.False(t, names["missing"])
+	})
+
+	t.Run("preserves_input_order", func(t *testing.T) {
+		t.Parallel()
+		got, _ := buildSubagentCaches([]workspace.SubagentInfo{
+			{Name: "zeta"},
+			{Name: "alpha"},
+			{Name: "mu"},
+		})
+		require.Equal(t, "zeta", got[0].Name)
+		require.Equal(t, "alpha", got[1].Name)
+		require.Equal(t, "mu", got[2].Name)
+	})
+}
+
+// TestSendMessageRewriteFlow verifies the integration between the cached
+// activeSubagentNames produced at UI init and the rewriteSubagentPrompt call
+// at the head of sendMessage. Failing this test would mean the caches do not
+// line up with the rewrite logic.
+func TestSendMessageRewriteFlow(t *testing.T) {
+	t.Parallel()
+
+	_, names := buildSubagentCaches([]workspace.SubagentInfo{
+		{Name: "code-reviewer", Description: "Reviews code."},
+	})
+
+	got := rewriteSubagentPrompt("@code-reviewer review staged", names)
+	require.Equal(t, `Use the agent tool with subagent_type="code-reviewer" to handle this request: review staged`, got)
+
+	// Unknown name passes through unchanged.
+	got = rewriteSubagentPrompt("@missing do thing", names)
+	require.Equal(t, "@missing do thing", got)
+}
 
 // TestRewriteSubagentPrompt covers the pure helper rewriteSubagentPrompt which
 // detects an `@name rest` prefix pattern and rewrites it into the canonical
@@ -83,6 +143,12 @@ func TestRewriteSubagentPrompt(t *testing.T) {
 			content:     "@code-reviewer review and @tester test",
 			activeNames: map[string]bool{"code-reviewer": true, "tester": true},
 			want:        `Use the agent tool with subagent_type="code-reviewer" to handle this request: review and @tester test`,
+		},
+		{
+			name:        "tab_after_name_not_supported_as_separator",
+			content:     "@code-reviewer\treview this",
+			activeNames: map[string]bool{"code-reviewer": true},
+			want:        "@code-reviewer\treview this",
 		},
 	}
 

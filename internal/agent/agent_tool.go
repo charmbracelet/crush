@@ -19,9 +19,13 @@ import (
 //go:embed templates/agent_tool.md
 var agentToolDescription string
 
-// AgentParams is kept for backward compatibility; new code uses AgentDispatchParams.
+// AgentParams is the shape consumed by UI tool-call renderers when displaying
+// historical agent tool invocations. New tool-call inputs decode with
+// AgentDispatchParams; AgentParams stays wire-compatible so older inputs still
+// decode cleanly.
 type AgentParams struct {
-	Prompt string `json:"prompt" description:"The task for the agent to perform"`
+	SubagentType string `json:"subagent_type,omitempty"`
+	Prompt       string `json:"prompt" description:"The task for the agent to perform"`
 }
 
 // AgentDispatchParams is the input to the dispatcher agent tool.
@@ -50,6 +54,17 @@ func (d *dispatcherTool) Run(ctx context.Context, call fantasy.ToolCall) (fantas
 		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
 	}
 	return d.dispatch(ctx, params, call)
+}
+
+// findSubagentByName returns the active subagent with the given name, or nil
+// when none matches.
+func findSubagentByName(active []*subagents.Subagent, name string) *subagents.Subagent {
+	for _, sa := range active {
+		if sa.Name == name {
+			return sa
+		}
+	}
+	return nil
 }
 
 // buildAgentDispatchInfo builds the ToolInfo for the agent dispatcher tool with
@@ -132,13 +147,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				})
 			}
 
-			var sa *subagents.Subagent
-			for _, active := range c.activeSubagents {
-				if active.Name == subagentType {
-					sa = active
-					break
-				}
-			}
+			sa := findSubagentByName(c.activeSubagents, subagentType)
 			if sa == nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
 			}

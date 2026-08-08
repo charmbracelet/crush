@@ -1,4 +1,5 @@
-// Package subagents implements parsing and validation of subagent definition files.
+// Package subagents implements parsing and validation of subagent definition
+// files.
 package subagents
 
 import (
@@ -18,14 +19,15 @@ import (
 )
 
 const (
-	// MaxNameLength is the maximum number of characters allowed in a subagent name.
+	// MaxNameLength is the max characters allowed in a subagent name.
 	MaxNameLength = 64
-	// MaxDescriptionLength is the maximum number of characters allowed in a subagent description.
+	// MaxDescriptionLength is the max characters allowed in a subagent
+	// description.
 	MaxDescriptionLength = 1024
 )
 
-// namePattern matches valid subagent names: lowercase alphanumeric with single hyphens,
-// no leading or trailing hyphens, no consecutive hyphens.
+// namePattern matches valid subagent names: lowercase alphanumeric with single
+// hyphens, no leading or trailing hyphens, no consecutive hyphens.
 var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // reservedNames is the set of names that may not be used for subagents.
@@ -189,6 +191,28 @@ func Parse(path string) (*Subagent, error) {
 	return agent, nil
 }
 
+// ValidateAgainst runs Validate plus model-resolution checks. When isKnownModel
+// is non-nil and Model is a non-empty value other than "large"/"small", the
+// resolver must return true or validation fails. A nil resolver skips the
+// model check (used when the caller has no config context).
+func (s *Subagent) ValidateAgainst(isKnownModel func(string) bool) error {
+	err := s.Validate()
+	if isKnownModel == nil {
+		return err
+	}
+	if s.Model == "" || s.Model == "large" || s.Model == "small" {
+		return err
+	}
+	if !isKnownModel(s.Model) {
+		modelErr := fmt.Errorf("model %q is not a known model id; use \"large\", \"small\", or a valid provider model id", s.Model)
+		if err == nil {
+			return modelErr
+		}
+		return errors.Join(err, modelErr)
+	}
+	return err
+}
+
 // Validate checks that the subagent meets all specification requirements.
 // Multiple errors are joined with errors.Join.
 func (s *Subagent) Validate() error {
@@ -294,6 +318,18 @@ type Event struct {
 	States []*SubagentState
 }
 
+// cloneSubagents returns a shallow copy of the slice so callers cannot mutate
+// the manager's internal slice header. The underlying *Subagent pointers are
+// shared — subagents are immutable post-discovery.
+func cloneSubagents(in []*Subagent) []*Subagent {
+	if in == nil {
+		return nil
+	}
+	out := make([]*Subagent, len(in))
+	copy(out, in)
+	return out
+}
+
 // cloneStates returns a deep copy of the given state slice so callers cannot
 // accidentally mutate the source.
 func cloneStates(states []*SubagentState) []*SubagentState {
@@ -320,7 +356,8 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 
 	result := make([]*SubagentState, 0, len(seen))
 	for i, s := range all {
-		// If it's the last occurrence of this name, or it has no name (error state), keep it
+		// Keep the last occurrence of this name, or anything without a
+		// name (error state).
 		if s.Name == "" || seen[s.Name] == i {
 			result = append(result, s)
 		}
@@ -330,8 +367,10 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 
 // DiscoverWithStates finds all valid subagent definition files (*.md) in the
 // given paths recursively, and returns both the discovered subagents and a
-// per-file state slice describing parse/validation outcomes.
-func DiscoverWithStates(paths []string) ([]*Subagent, []*SubagentState) {
+// per-file state slice describing parse/validation outcomes. When
+// isKnownModelID is non-nil it is used to validate non-alias model ids; nil
+// skips that check.
+func DiscoverWithStates(paths []string, isKnownModelID func(string) bool) ([]*Subagent, []*SubagentState) {
 	var agents []*Subagent
 	var states []*SubagentState
 	var mu sync.Mutex
@@ -376,7 +415,7 @@ func DiscoverWithStates(paths []string) ([]*Subagent, []*SubagentState) {
 				addState("", path, StateError, err)
 				return nil
 			}
-			if err := agent.Validate(); err != nil {
+			if err := agent.ValidateAgainst(isKnownModelID); err != nil {
 				slog.Warn("Subagent validation failed", "path", path, "error", err)
 				addState(agent.Name, path, StateError, err)
 				return nil

@@ -72,7 +72,6 @@ func subagentPrompt(sa *subagents.Subagent, activeSkills []*skills.Skill, opts .
 	return prompt.NewPrompt("subagent", string(subagentPromptTmpl), allOpts...)
 }
 
-
 func InitializePrompt(cfg *config.ConfigStore) (string, error) {
 	systemPrompt, err := prompt.NewPrompt("initialize", string(initializePromptTmpl))
 	if err != nil {

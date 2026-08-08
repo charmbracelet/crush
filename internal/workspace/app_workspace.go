@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,7 +23,6 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -36,6 +36,9 @@ import (
 type AppWorkspace struct {
 	app   *app.App
 	store *config.ConfigStore
+	// subagentToggleMu serializes SetSubagentDisabled's read-modify-write
+	// of the workspace config; Library toggles run as concurrent commands.
+	subagentToggleMu sync.Mutex
 }
 
 // NewAppWorkspace creates a new AppWorkspace wrapping the given app
@@ -480,17 +483,6 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 	return result
 }
 
-// SubscribeSubagentRuntime returns a channel of RuntimeEvents from the
-// SubagentRuntime. Returns a closed channel when SubagentRuntime is nil.
-func (w *AppWorkspace) SubscribeSubagentRuntime(ctx context.Context) <-chan pubsub.Event[subagents.RuntimeEvent] {
-	if w.app.SubagentRuntime == nil {
-		ch := make(chan pubsub.Event[subagents.RuntimeEvent])
-		close(ch)
-		return ch
-	}
-	return w.app.SubagentRuntime.Subscribe(ctx)
-}
-
 // CancelSubagent cancels the subagent session with the given childSessionID.
 // It is a no-op when AgentCoordinator is nil.
 func (w *AppWorkspace) CancelSubagent(childSessionID string) {
@@ -542,10 +534,8 @@ func subagentScope(filePath, workingDir string, projectDirs []string) string {
 	if filePath == "" {
 		return "builtin"
 	}
-	for _, dir := range config.GlobalSubagentsDirs() {
-		if fsext.HasPrefix(filePath, dir) {
-			return "user"
-		}
+	if subagents.InGlobalDir(filePath) {
+		return "user"
 	}
 	if workingDir != "" && fsext.HasPrefix(filePath, workingDir) {
 		return "project"
@@ -594,23 +584,41 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 // dispatcher enum, dispatch lookup and @-mention completions all derive from,
 // so it can be neither auto-selected by the main agent nor invoked manually.
 // Enabling always writes workspace scope only; it never rewrites whichever
-// scope actually disabled the name. Instead it records the name in
-// options.enabled_subagents, which config.EffectiveDisabledSubagents
-// subtracts from disabled_subagents at read time — the only way a narrower
-// scope can cancel out a disable set at a broader one, since jsons.Merge
-// concatenates arrays across scopes rather than overriding them.
+// scope actually disabled the name. When a broader scope still disables it,
+// the name is recorded in options.enabled_subagents, which
+// config.EffectiveDisabledSubagents subtracts from disabled_subagents at
+// read time — the only way a narrower scope can cancel out a disable set at
+// a broader one, since jsons.Merge concatenates arrays across scopes rather
+// than overriding them. An enabled_subagents entry wins over a disable at
+// any scope, so it is only written when needed.
 func (w *AppWorkspace) SetSubagentDisabled(name string, disabled bool) error {
-	var currentDisabled, currentEnabled []string
-	if cfg := w.store.Config(); cfg.Options != nil {
-		currentDisabled = cfg.Options.DisabledSubagents
-		currentEnabled = cfg.Options.EnabledSubagents
-	}
+	w.subagentToggleMu.Lock()
+	defer w.subagentToggleMu.Unlock()
+
+	// Read from the same scope this writes to. w.store.Config() is the merged
+	// view, so using it here would copy entries the user disabled globally into
+	// the workspace file, pinning them at workspace scope forever.
+	currentDisabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.disabled_subagents")
+	currentEnabled := w.store.StringSliceConfigField(config.ScopeWorkspace, "options.enabled_subagents")
 	// enabled_subagents cancels out a disable set at a broader scope (see
 	// config.EffectiveDisabledSubagents); jsons.Merge concatenates arrays
 	// across scopes rather than overriding them, so subtracting from
 	// disabled_subagents alone can never re-enable a name disabled globally.
 	nextDisabled := addOrRemove(currentDisabled, name, disabled)
-	nextEnabled := addOrRemove(currentEnabled, name, !disabled)
+	// The merged list holds every scope's entries, so more occurrences there
+	// than in the workspace file means another scope disables the name too.
+	var mergedDisabled, mergedEnabled []string
+	if opts := w.store.Config().Options; opts != nil {
+		mergedDisabled = opts.DisabledSubagents
+		mergedEnabled = opts.EnabledSubagents
+	}
+	// An enabled_subagents entry from another scope wins over any disable
+	// written here, so the toggle would silently flip back.
+	if disabled && countOf(mergedEnabled, name) > countOf(currentEnabled, name) {
+		return fmt.Errorf("subagent %q is enabled by options.enabled_subagents in another config; remove it there to disable it", name)
+	}
+	disabledElsewhere := countOf(mergedDisabled, name) > countOf(currentDisabled, name)
+	nextEnabled := addOrRemove(currentEnabled, name, !disabled && disabledElsewhere)
 	if err := w.store.SetConfigFields(config.ScopeWorkspace, map[string]any{
 		"options.disabled_subagents": nextDisabled,
 		"options.enabled_subagents":  nextEnabled,
@@ -633,6 +641,17 @@ func (w *AppWorkspace) reloadSubagents() {
 	w.app.Subagents.Reload(all, active, states)
 }
 
+// countOf returns how many times name occurs in list.
+func countOf(list []string, name string) int {
+	n := 0
+	for _, s := range list {
+		if s == name {
+			n++
+		}
+	}
+	return n
+}
+
 // addOrRemove returns list with name added (when add) or all occurrences
 // removed (when !add). The result is a fresh slice; order is otherwise stable.
 func addOrRemove(list []string, name string, add bool) []string {
@@ -646,16 +665,6 @@ func addOrRemove(list []string, name string, add bool) []string {
 		next = append(next, name)
 	}
 	return next
-}
-
-// SessionTokens returns the prompt and completion token counts for the given
-// session. It delegates to the session service and propagates any error.
-func (w *AppWorkspace) SessionTokens(ctx context.Context, sessionID string) (prompt, completion int64, err error) {
-	sess, err := w.app.Sessions.Get(ctx, sessionID)
-	if err != nil {
-		return 0, 0, err
-	}
-	return sess.PromptTokens, sess.CompletionTokens, nil
 }
 
 // -- MCP operations --

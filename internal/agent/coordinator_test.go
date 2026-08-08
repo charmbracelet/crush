@@ -568,7 +568,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("concurrent updates never lose an increment", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 

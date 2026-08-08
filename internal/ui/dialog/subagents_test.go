@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -17,12 +18,13 @@ import (
 // Subagents dialog.
 type subagentsWorkspace struct {
 	workspace.Workspace
-	running       []workspace.RunningSubagentInfo
-	defs          []workspace.SubagentDefInfo
-	cancelledIDs  []string
-	deletedNames  []string
-	deleteUserErr error
-	disabledCalls []disabledCall
+	running        []workspace.RunningSubagentInfo
+	defs           []workspace.SubagentDefInfo
+	cancelledIDs   []string
+	deletedNames   []string
+	deleteUserErr  error
+	setDisabledErr error
+	disabledCalls  []disabledCall
 }
 
 type disabledCall struct {
@@ -32,7 +34,7 @@ type disabledCall struct {
 
 func (w *subagentsWorkspace) SetSubagentDisabled(name string, disabled bool) error {
 	w.disabledCalls = append(w.disabledCalls, disabledCall{name: name, disabled: disabled})
-	return nil
+	return w.setDisabledErr
 }
 
 func (w *subagentsWorkspace) RunningSubagents(_ string) []workspace.RunningSubagentInfo {
@@ -261,6 +263,70 @@ func TestSubagentsDialog_BrokenItemCannotDelete(t *testing.T) {
 
 	d.HandleMsg(keyMsg('d'))
 	require.False(t, d.IsConfirmingDelete(), "broken entries must not be deletable")
+}
+
+// TestSubagentsDialog_ToggleFailureRollback verifies that when persisting a
+// toggle fails, the optimistic flip is rolled back by re-syncing from the
+// unchanged workspace and the error is reported.
+func TestSubagentsDialog_ToggleFailureRollback(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs:           []workspace.SubagentDefInfo{{Name: "lib-agent", Description: "does stuff", Scope: "user"}},
+		setDisabledErr: errors.New("write denied"),
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	action := d.HandleMsg(keyMsg(' '))
+	ac, ok := action.(ActionCmd)
+	require.True(t, ok, "toggle must return an ActionCmd")
+	require.True(t, d.libraryItems[0].data.Disabled, "optimistic flip applied immediately")
+
+	// Running the cmd surfaces the failure; feeding the message back rolls
+	// the optimistic flip back and reports the error.
+	msg := ac.Cmd()
+	require.IsType(t, subagentMutationFailedMsg{}, msg)
+
+	action = d.HandleMsg(msg)
+	require.False(t, d.libraryItems[0].data.Disabled, "failed toggle must be rolled back")
+	_, ok = action.(ActionCmd)
+	require.True(t, ok, "the failure must be reported via an ActionCmd")
+}
+
+// TestSubagentsDialog_DeleteFailureRollback verifies that when a delete fails,
+// the optimistically removed item is restored by re-syncing from the unchanged
+// workspace and the error is reported.
+func TestSubagentsDialog_DeleteFailureRollback(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs:          []workspace.SubagentDefInfo{{Name: "user-agent", Description: "does stuff", Scope: "user"}},
+		deleteUserErr: errors.New("remove denied"),
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	d.HandleMsg(keyMsg('d'))
+	require.True(t, d.IsConfirmingDelete())
+
+	action := d.HandleMsg(keyMsg('y'))
+	ac, ok := action.(ActionCmd)
+	require.True(t, ok, "confirm delete must return an ActionCmd")
+	require.Empty(t, d.libraryItems, "optimistic removal applied immediately")
+
+	msg := ac.Cmd()
+	require.IsType(t, subagentMutationFailedMsg{}, msg)
+
+	action = d.HandleMsg(msg)
+	require.Len(t, d.libraryItems, 1, "failed delete must restore the item")
+	require.Equal(t, "user-agent", d.libraryItems[0].data.Name)
+	_, ok = action.(ActionCmd)
+	require.True(t, ok, "the failure must be reported via an ActionCmd")
 }
 
 // TestSubagentsDialog_RuntimeEventRefreshesRunningTab verifies that a

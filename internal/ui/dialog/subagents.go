@@ -24,11 +24,12 @@ type RunningSubagentsFetchedMsg struct {
 	List            []workspace.RunningSubagentInfo
 }
 
-// subagentsInitialDataMsg carries the dialog's initial data, resolved off the
-// Update path by InitialFetchCmd.
-type subagentsInitialDataMsg struct {
-	running []workspace.RunningSubagentInfo
-	library []workspace.SubagentDefInfo
+// SubagentsInitialDataMsg carries the dialog's initial data, resolved off the
+// Update path by InitialFetchCmd. Exported for the same reason as
+// [RunningSubagentsFetchedMsg]: the UI model routes it back into the dialog.
+type SubagentsInitialDataMsg struct {
+	Running []workspace.RunningSubagentInfo
+	Library []workspace.SubagentDefInfo
 }
 
 // InitialFetchCmd resolves the running and library data off the Update path
@@ -38,19 +39,19 @@ func (s *Subagents) InitialFetchCmd() tea.Cmd {
 	ws := s.com.Workspace
 	parentSessionID := s.parentSessionID
 	return func() tea.Msg {
-		return subagentsInitialDataMsg{
-			running: ws.RunningSubagents(parentSessionID),
-			library: ws.AllSubagents(),
+		return SubagentsInitialDataMsg{
+			Running: ws.RunningSubagents(parentSessionID),
+			Library: ws.AllSubagents(),
 		}
 	}
 }
 
-// subagentMutationFailedMsg reports that a Library toggle or delete failed.
-// The optimistic list mutation must be rolled back by re-syncing from the
-// (unchanged) workspace, and the error surfaced to the user.
-type subagentMutationFailedMsg struct {
-	err error
-}
+// SubagentMutationFailedMsg reports that a Library toggle or delete failed, so
+// the optimistic list mutation must be rolled back by re-syncing from the
+// (unchanged) workspace. The error itself travels separately, as its own
+// top-level command, so it is reported even when this dialog has since closed;
+// see setDisabledCmd.
+type SubagentMutationFailedMsg struct{}
 
 // SubagentsTab identifies which tab of the subagents dialog is active.
 type SubagentsTab int
@@ -192,18 +193,19 @@ func (s *Subagents) HandleMsg(msg tea.Msg) Action {
 			s.applyRunning(ev.List)
 		}
 		return nil
-	case subagentsInitialDataMsg:
-		s.applyRunning(ev.running)
-		s.setLibrary(ev.library)
+	case SubagentsInitialDataMsg:
+		s.applyRunning(ev.Running)
+		s.setLibrary(ev.Library)
 		return nil
 	case pubsub.Event[subagents.Event]:
 		s.refreshLibrary()
 		return nil
-	case subagentMutationFailedMsg:
+	case SubagentMutationFailedMsg:
 		// The failed mutation left the workspace unchanged, so re-syncing
-		// rolls back the optimistic toggle/delete.
+		// rolls back the optimistic toggle/delete. The error was reported by
+		// the command that produced this message.
 		s.refreshLibrary()
-		return ActionCmd{util.ReportError(ev.err)}
+		return nil
 	}
 
 	keyMsg, ok := msg.(tea.KeyPressMsg)
@@ -282,18 +284,30 @@ func (s *Subagents) toggleSelectedLibrary() Action {
 	}
 	li.data.Disabled = !li.data.Disabled
 	li.Bump()
-	return ActionCmd{s.setDisabledCmd(li.ID(), li.data.Disabled)}
+	return ActionCmd{s.setDisabledCmd(li.data.Name, li.data.Disabled)}
 }
 
 // setDisabledCmd returns a cmd that persists the disabled state for name.
-// Failures come back as a subagentMutationFailedMsg so the optimistic flip
-// is rolled back and the error reported.
+// A failure fans out into two commands: the error report, which reaches the
+// status bar whether or not this dialog is still open, and the rollback
+// message, which only matters while it is.
 func (s *Subagents) setDisabledCmd(name string, disabled bool) tea.Cmd {
 	return func() tea.Msg {
 		if err := s.com.Workspace.SetSubagentDisabled(name, disabled); err != nil {
-			return subagentMutationFailedMsg{err: err}
+			return mutationFailed(err)
 		}
 		return nil
+	}
+}
+
+// mutationFailed pairs an error report with the Library rollback signal. The
+// report is a top-level command so it survives the dialog closing or another
+// dialog opening on top before the write failed; the rollback is routed to the
+// subagents dialog by ID.
+func mutationFailed(err error) tea.Msg {
+	return tea.BatchMsg{
+		util.ReportError(err),
+		func() tea.Msg { return SubagentMutationFailedMsg{} },
 	}
 }
 
@@ -456,18 +470,17 @@ func (s *Subagents) confirmDeleteSelected() Action {
 	if !ok {
 		return nil
 	}
-	name := li.ID()
-	s.removeLibraryItem(name)
-	return ActionCmd{s.deleteSubagentCmd(name)}
+	s.removeLibraryItem(li.ID())
+	return ActionCmd{s.deleteSubagentCmd(li.data.Name)}
 }
 
-// deleteSubagentCmd returns a cmd that calls DeleteUserSubagent. Failures
-// come back as a subagentMutationFailedMsg so the optimistic removal is
-// rolled back and the error reported.
+// deleteSubagentCmd returns a cmd that calls DeleteUserSubagent. Failures fan
+// out the same way setDisabledCmd's do: the error is reported at top level and
+// the optimistic removal is rolled back if the dialog is still open.
 func (s *Subagents) deleteSubagentCmd(name string) tea.Cmd {
 	return func() tea.Msg {
 		if err := s.com.Workspace.DeleteUserSubagent(name); err != nil {
-			return subagentMutationFailedMsg{err: err}
+			return mutationFailed(err)
 		}
 		return nil
 	}

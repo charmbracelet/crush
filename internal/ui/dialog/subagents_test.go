@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -312,15 +313,32 @@ func TestSubagentsDialog_ToggleFailureRollback(t *testing.T) {
 	require.True(t, ok, "toggle must return an ActionCmd")
 	require.True(t, d.libraryItems[0].data.Disabled, "optimistic flip applied immediately")
 
-	// Running the cmd surfaces the failure; feeding the message back rolls
-	// the optimistic flip back and reports the error.
-	msg := ac.Cmd()
-	require.IsType(t, subagentMutationFailedMsg{}, msg)
+	// The failure fans out into an error report and a rollback signal. The
+	// report is its own top-level command so it lands even if this dialog has
+	// closed by the time the write fails.
+	rollback := requireMutationFailure(t, ac.Cmd())
 
-	action = d.HandleMsg(msg)
+	d.HandleMsg(rollback)
 	require.False(t, d.libraryItems[0].data.Disabled, "failed toggle must be rolled back")
-	_, ok = action.(ActionCmd)
-	require.True(t, ok, "the failure must be reported via an ActionCmd")
+}
+
+// requireMutationFailure asserts that msg is the two-command fan-out a failed
+// Library mutation produces — an error report plus a rollback signal — and
+// returns the rollback message for delivery to the dialog.
+func requireMutationFailure(t *testing.T, msg tea.Msg) tea.Msg {
+	t.Helper()
+
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok, "a failed mutation must fan out into a batch")
+	require.Len(t, batch, 2, "the batch must carry the error report and the rollback")
+
+	report := batch[0]()
+	require.IsType(t, util.InfoMsg{}, report, "the first command must report the error")
+	require.Equal(t, util.InfoTypeError, report.(util.InfoMsg).Type)
+
+	rollback := batch[1]()
+	require.IsType(t, SubagentMutationFailedMsg{}, rollback)
+	return rollback
 }
 
 // TestSubagentsDialog_DeleteFailureRollback verifies that when a delete fails,
@@ -346,14 +364,9 @@ func TestSubagentsDialog_DeleteFailureRollback(t *testing.T) {
 	require.True(t, ok, "confirm delete must return an ActionCmd")
 	require.Empty(t, d.libraryItems, "optimistic removal applied immediately")
 
-	msg := ac.Cmd()
-	require.IsType(t, subagentMutationFailedMsg{}, msg)
-
-	action = d.HandleMsg(msg)
+	d.HandleMsg(requireMutationFailure(t, ac.Cmd()))
 	require.Len(t, d.libraryItems, 1, "failed delete must restore the item")
 	require.Equal(t, "user-agent", d.libraryItems[0].data.Name)
-	_, ok = action.(ActionCmd)
-	require.True(t, ok, "the failure must be reported via an ActionCmd")
 }
 
 // TestSubagentsDialog_RuntimeEventRefreshesRunningTab verifies that a

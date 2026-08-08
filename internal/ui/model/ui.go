@@ -1054,19 +1054,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialog.RunningSubagentsFetchedMsg:
 		// The subagents dialog resolves its running list off the Update path;
 		// dialogs only see message types routed here, so hand it back.
-		if m.dialog.HasDialogs() {
-			if cmd := m.handleDialogMsg(msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+		if cmd := m.handleSubagentsDialogMsg(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.SubagentsInitialDataMsg:
+		if cmd := m.handleSubagentsDialogMsg(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.SubagentMutationFailedMsg:
+		if cmd := m.handleSubagentsDialogMsg(msg); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention
 		// caches so removed subagents stop being offered without a restart.
 		m.rebuildSubagentCaches()
-		if m.dialog.HasDialogs() {
-			if cmd := m.handleDialogMsg(msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+		if cmd := m.handleSubagentsDialogMsg(msg); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
@@ -1959,6 +1963,29 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	}
 
 	return tea.Sequence(cmds...)
+}
+
+// handleSubagentsDialogMsg delivers msg to the subagents dialog by ID rather
+// than to whichever dialog happens to be front. Its data arrives
+// asynchronously — the initial fetch, a running-list refresh, a failed
+// mutation's rollback — and anything can open on top while that work is in
+// flight (a permission prompt during exactly the agent run the user opened
+// this dialog to watch). Routing to the front dialog would drop those
+// messages, leaving the dialog empty or showing state the workspace rejected,
+// with nothing to re-request them.
+//
+// The subagents dialog answers these messages with an ActionCmd or nil, never
+// a close or navigation action, so none of handleDialogMsg's front-dialog
+// bookkeeping applies here.
+func (m *UI) handleSubagentsDialogMsg(msg tea.Msg) tea.Cmd {
+	d := m.dialog.Dialog(dialog.SubagentsID)
+	if d == nil {
+		return nil
+	}
+	if action, ok := d.HandleMsg(msg).(dialog.ActionCmd); ok {
+		return action.Cmd
+	}
+	return nil
 }
 
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {

@@ -63,7 +63,7 @@ func TestRunningSubagentItem_RenderContainsDot(t *testing.T) {
 	})
 
 	rendered := item.Render(60)
-	dot := uistyles.SubagentDot("blue")
+	dot := st.SubagentDot("blue")
 
 	require.Contains(t, rendered, dot)
 }

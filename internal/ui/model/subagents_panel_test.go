@@ -40,7 +40,7 @@ func TestSubagentsInfo_SingleEntry(t *testing.T) {
 	got := m.subagentsInfo(40, 10, false)
 
 	require.Contains(t, stripANSI(got), "test-agent")
-	dot := uistyles.SubagentDot("blue")
+	dot := st.SubagentDot("blue")
 	require.Contains(t, got, dot)
 }
 

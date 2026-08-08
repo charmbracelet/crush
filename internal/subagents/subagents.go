@@ -123,6 +123,15 @@ const (
 	PermissionModeBypassPermissions = "bypassPermissions"
 )
 
+// Model aliases accepted in the `model:` frontmatter field. They map a
+// subagent onto the globally selected model of the same name instead of a
+// specific provider model id, and deliberately match the
+// config.SelectedModelType values.
+const (
+	ModelAliasLarge = string(config.SelectedModelTypeLarge)
+	ModelAliasSmall = string(config.SelectedModelTypeSmall)
+)
+
 // ToConfigAgent converts the Subagent into a config.Agent by applying the
 // subagent's tool restrictions and model preference on top of the provided
 // base agent configuration.
@@ -228,15 +237,15 @@ func Parse(path string) (*Subagent, error) {
 }
 
 // ValidateAgainst runs Validate plus model- and skill-resolution checks. When
-// validateModel is non-nil and Model is a non-empty value other than
-// "large"/"small", its error (unknown id, or an id several providers offer
-// with no `provider:` set) fails validation. When isKnownSkill is non-nil,
-// every name in Skills must resolve to a known skill. A nil resolver skips
-// the corresponding check (used when the caller has no config or skills
-// context).
+// validateModel is non-nil and Model is a non-empty value other than the
+// "large"/"small" aliases, its error (unknown id, or an id several providers
+// offer with no `provider:` set) fails validation. When isKnownSkill is
+// non-nil, every name in Skills must resolve to a known skill. A nil
+// resolver skips the corresponding check (used when the caller has no config
+// or skills context).
 func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) error, isKnownSkill func(name string) bool) error {
 	errs := []error{s.Validate()}
-	if validateModel != nil && s.Model != "" && s.Model != "large" && s.Model != "small" {
+	if validateModel != nil && s.Model != "" && s.Model != ModelAliasLarge && s.Model != ModelAliasSmall {
 		if err := validateModel(s.Provider, s.Model); err != nil {
 			errs = append(errs, err)
 		}
@@ -347,8 +356,8 @@ func (s *Subagent) Validate() error {
 		errs = append(errs, fmt.Errorf("color %q is not valid; use one of: %s", s.Color, strings.Join(colorPalette[:], ", ")))
 	}
 
-	if s.Provider != "" && (s.Model == "" || s.Model == "large" || s.Model == "small") {
-		errs = append(errs, fmt.Errorf("provider requires a specific model id; use a valid provider model id (not empty, %q, or %q)", "large", "small"))
+	if s.Provider != "" && (s.Model == "" || s.Model == ModelAliasLarge || s.Model == ModelAliasSmall) {
+		errs = append(errs, fmt.Errorf("provider requires a specific model id; use a valid provider model id (not empty, %q, or %q)", ModelAliasLarge, ModelAliasSmall))
 	}
 
 	return errors.Join(errs...)

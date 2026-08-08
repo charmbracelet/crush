@@ -1,6 +1,8 @@
 package subagents
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -386,7 +388,12 @@ func TestValidateAgainst(t *testing.T) {
 	t.Parallel()
 
 	knownModels := map[string]bool{"gpt-4o": true, "claude-opus-4-7": true}
-	isKnown := func(provider, id string) bool { return knownModels[id] }
+	isKnown := func(provider, id string) error {
+		if knownModels[id] {
+			return nil
+		}
+		return fmt.Errorf("model %q is not offered by any configured provider", id)
+	}
 
 	tests := []struct {
 		name    string
@@ -439,6 +446,24 @@ func TestValidateAgainst(t *testing.T) {
 	}
 }
 
+// TestValidateAgainst_SurfacesResolverError verifies the resolver's own
+// message (e.g. an id several providers offer) reaches the Library error.
+func TestValidateAgainst_SurfacesResolverError(t *testing.T) {
+	t.Parallel()
+
+	ambiguous := func(provider, model string) error {
+		if provider != "" {
+			return nil
+		}
+		return errors.New(`model "gpt-5" is offered by multiple providers (azure, openai); set provider to choose one`)
+	}
+	s := Subagent{Name: "a", Description: "d", Model: "gpt-5"}
+	require.ErrorContains(t, s.ValidateAgainst(ambiguous), "offered by multiple providers (azure, openai)")
+
+	s.Provider = "openai"
+	require.NoError(t, s.ValidateAgainst(ambiguous))
+}
+
 func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
 	t.Parallel()
 
@@ -454,10 +479,10 @@ func TestValidateAgainst_ProviderPropagated(t *testing.T) {
 	t.Parallel()
 
 	var capturedProvider, capturedModel string
-	isKnown := func(provider, model string) bool {
+	isKnown := func(provider, model string) error {
 		capturedProvider = provider
 		capturedModel = model
-		return true
+		return nil
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "openai", Model: "gpt-4o"}
@@ -473,9 +498,9 @@ func TestValidateAgainst_EmptyProviderPropagated(t *testing.T) {
 	t.Parallel()
 
 	var capturedProvider string
-	isKnown := func(provider, model string) bool {
+	isKnown := func(provider, model string) error {
 		capturedProvider = provider
-		return true
+		return nil
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "", Model: "gpt-4o"}
@@ -960,10 +985,10 @@ func TestDiscoverWithStates(t *testing.T) {
 		))
 
 		var capturedProvider, capturedModel string
-		isKnown := func(provider, model string) bool {
+		isKnown := func(provider, model string) error {
 			capturedProvider = provider
 			capturedModel = model
-			return true
+			return nil
 		}
 
 		agents, states := DiscoverWithStates([]string{tmp}, isKnown)
@@ -985,7 +1010,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		isKnown := func(provider, model string) bool { return false }
+		isKnown := func(provider, model string) error { return errors.New("unknown model") }
 
 		agents, states := DiscoverWithStates([]string{tmp}, isKnown)
 

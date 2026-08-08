@@ -22,53 +22,89 @@ func newConfigWithProviders(t *testing.T, providers map[string][]string) *Config
 	return &Config{Providers: pMap}
 }
 
-func TestConfig_IsKnownModelID(t *testing.T) {
+func TestConfig_FindModelProvider(t *testing.T) {
 	t.Parallel()
 
 	cfg := newConfigWithProviders(t, map[string][]string{
-		"openai":    {"gpt-4o", "gpt-4o-mini"},
+		"openai":    {"gpt-4o", "gpt-4o-mini", "shared"},
+		"azure":     {"shared"},
 		"anthropic": {"claude-opus-4-7", "claude-sonnet-4-6"},
 	})
 
 	tests := []struct {
-		name string
-		id   string
-		want bool
+		name         string
+		provider     string
+		modelID      string
+		wantProvider string
+		wantErr      string
 	}{
-		{"empty_string", "", false},
-		{"unknown_id", "imaginary-99", false},
-		{"first_provider_first_model", "gpt-4o", true},
-		{"first_provider_second_model", "gpt-4o-mini", true},
-		{"second_provider", "claude-opus-4-7", true},
-		{"case_sensitive", "GPT-4o", false},
+		{name: "empty_model", wantErr: "model id is empty"},
+		{name: "unique_id_no_provider", modelID: "gpt-4o", wantProvider: "openai"},
+		{name: "second_provider_no_provider", modelID: "claude-opus-4-7", wantProvider: "anthropic"},
+		{name: "unknown_id_no_provider", modelID: "imaginary-99", wantErr: "not offered by any configured provider"},
+		{name: "case_sensitive", modelID: "GPT-4o", wantErr: "not offered by any configured provider"},
+		{name: "ambiguous_id_no_provider", modelID: "shared", wantErr: `offered by multiple providers (azure, openai); set provider`},
+		{name: "ambiguous_id_with_provider", provider: "azure", modelID: "shared", wantProvider: "azure"},
+		{name: "specific_provider_match", provider: "openai", modelID: "gpt-4o", wantProvider: "openai"},
+		{name: "specific_provider_wrong_model", provider: "openai", modelID: "claude-opus-4-7", wantErr: `not offered by provider "openai"`},
+		{name: "unknown_provider", provider: "nonexistent", modelID: "gpt-4o", wantErr: "not configured or is disabled"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tt.want, cfg.IsKnownModelID(tt.id))
+			p, m, err := cfg.FindModelProvider(tt.provider, tt.modelID)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				require.ErrorContains(t, cfg.ValidateModel(tt.provider, tt.modelID), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, cfg.ValidateModel(tt.provider, tt.modelID))
+			require.Equal(t, tt.wantProvider, p.ID)
+			require.Equal(t, tt.modelID, m.ID)
 		})
 	}
 }
 
-func TestConfig_IsKnownModelID_IgnoresDisabledProvider(t *testing.T) {
-	t.Parallel()
-
-	pMap := csync.NewMap[string, ProviderConfig]()
-	pMap.Set("disabled-provider", ProviderConfig{
-		ID:      "disabled-provider",
-		Disable: true,
-		Models:  []catwalk.Model{{ID: "only-here-model"}},
-	})
-	cfg := &Config{Providers: pMap}
-
-	require.False(t, cfg.IsKnownModelID("only-here-model"))
-}
-
-func TestConfig_IsKnownModelID_NoProviders(t *testing.T) {
+func TestConfig_FindModelProvider_NoProviders(t *testing.T) {
 	t.Parallel()
 
 	cfg := newConfigWithProviders(t, nil)
-	require.False(t, cfg.IsKnownModelID("gpt-4o"))
-	require.False(t, cfg.IsKnownModelID(""))
+	require.Error(t, cfg.ValidateModel("", "gpt-4o"))
+	require.Error(t, cfg.ValidateModel("openai", "gpt-4o"))
+	require.Error(t, cfg.ValidateModel("", ""))
+}
+
+// TestConfig_FindModelProvider_SubscriptionCatalogs covers models that only
+// exist in a provider's ChatGPT or Grok subscription catalog: they must
+// resolve with and without an explicit provider, like GetModel.
+func TestConfig_FindModelProvider_SubscriptionCatalogs(t *testing.T) {
+	t.Parallel()
+
+	pMap := csync.NewMap[string, ProviderConfig]()
+	pMap.Set("openai", ProviderConfig{ID: "openai", ChatGPTModels: []catwalk.Model{{ID: "gpt-sub"}}})
+	pMap.Set("xai", ProviderConfig{ID: "xai", GrokModels: []catwalk.Model{{ID: "grok-sub"}}})
+	cfg := &Config{Providers: pMap}
+
+	for _, tc := range []struct{ provider, model string }{
+		{"", "gpt-sub"}, {"openai", "gpt-sub"}, {"", "grok-sub"}, {"xai", "grok-sub"},
+	} {
+		_, m, err := cfg.FindModelProvider(tc.provider, tc.model)
+		require.NoError(t, err, "provider=%q model=%q", tc.provider, tc.model)
+		require.Equal(t, tc.model, m.ID)
+	}
+}
+
+// TestConfig_FindModelProvider_IgnoresDisabledProvider ensures a disabled
+// provider's models are never resolved, whether scanned or named explicitly.
+func TestConfig_FindModelProvider_IgnoresDisabledProvider(t *testing.T) {
+	t.Parallel()
+
+	pMap := csync.NewMap[string, ProviderConfig]()
+	pMap.Set("openai", ProviderConfig{ID: "openai", Disable: true, Models: []catwalk.Model{{ID: "gpt-4o"}}})
+	cfg := &Config{Providers: pMap}
+
+	require.Error(t, cfg.ValidateModel("", "gpt-4o"))
+	require.Error(t, cfg.ValidateModel("openai", "gpt-4o"))
 }

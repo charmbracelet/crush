@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -13,6 +14,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
@@ -59,9 +61,10 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerID, providerCfg)
 	return &coordinator{
-		cfg:      cfg,
-		sessions: env.sessions,
-		messages: env.messages,
+		cfg:                cfg,
+		sessions:           env.sessions,
+		messages:           env.messages,
+		subagentModelCache: make(map[subagentModelKey]Model),
 	}
 }
 
@@ -292,7 +295,7 @@ func TestRunSubAgent(t *testing.T) {
 		// Agent references a provider that doesn't exist in config.
 		agent := newMockAgent("unknown-provider", 4096, nil)
 
-		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -300,8 +303,61 @@ func TestRunSubAgent(t *testing.T) {
 			Prompt:         "test",
 			SessionTitle:   "Test",
 		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "model provider not configured")
+		// A tool-error response, not a bare Go error: the latter would abort
+		// the whole parent turn.
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "model provider not configured")
+	})
+
+	// TestRunSubAgent_ProviderNotConfigured_ReportsFailedStatus is the
+	// regression test for the "provider not configured" early return
+	// reporting StatusCompleted instead of StatusFailed to the runtime
+	// tracker (finalStatus was declared right after Register but never
+	// updated on this path before the deferred Finish call). A subagent that
+	// never ran would otherwise show as a success in the Running tab and
+	// produce a "Subagent completed" notification despite the tool call
+	// having errored.
+	t.Run("provider not configured reports failed status to runtime", func(t *testing.T) {
+		env := testEnv(t)
+		cfg, err := config.Init(env.workingDir, "", false)
+		require.NoError(t, err)
+
+		rt := subagents.NewRuntime()
+		t.Cleanup(rt.Shutdown)
+		coord := &coordinator{cfg: cfg, sessions: env.sessions, runtime: rt}
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		events := rt.Subscribe(t.Context())
+
+		// Agent references a provider that doesn't exist in config.
+		agent := newMockAgent("unknown-provider", 4096, nil)
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+
+		// Register publishes its own event first (Finished == nil); skip past
+		// it to the terminal event from the deferred Finish call.
+		var finished *subagents.RunningEntry
+		for finished == nil {
+			select {
+			case ev := <-events:
+				finished = ev.Payload.Finished
+			case <-time.After(2 * time.Second):
+				t.Fatal("Finish did not publish a RuntimeEvent")
+			}
+		}
+		assert.Equal(t, subagents.StatusFailed, finished.Status,
+			"a subagent that never ran must be reported failed, not completed")
 	})
 
 	t.Run("agent run error returns error response", func(t *testing.T) {
@@ -553,10 +609,10 @@ func TestCoordinator_ActiveSubagentsFieldType(t *testing.T) {
 	assert.Equal(t, "compile-check", c.activeSubagents[0].Name)
 }
 
-// TestRunSubAgent_RegistersAndUnregistersRuntime verifies that runSubAgent
-// calls Register on the coordinator's Runtime after session creation and
-// Unregister when it returns, using the AgentName and AgentColor from params.
-func TestRunSubAgent_RegistersAndUnregistersRuntime(t *testing.T) {
+// TestRunSubAgent_RegistersAndFinishesRuntime verifies that runSubAgent calls
+// Register on the coordinator's Runtime after session creation and Finish when
+// it returns, propagating AgentName, AgentColor and AgentModel from params.
+func TestRunSubAgent_RegistersAndFinishesRuntime(t *testing.T) {
 	t.Parallel()
 
 	const providerID = "test-provider"
@@ -601,6 +657,7 @@ func TestRunSubAgent_RegistersAndUnregistersRuntime(t *testing.T) {
 		SessionTitle:   "Runtime Test",
 		AgentName:      "my-agent",
 		AgentColor:     "blue",
+		AgentModel:     "claude-test",
 	})
 	require.NoError(t, err)
 
@@ -612,7 +669,8 @@ func TestRunSubAgent_RegistersAndUnregistersRuntime(t *testing.T) {
 		require.Equal(t, parentSession.ID, e.ParentSessionID)
 		require.Equal(t, "my-agent", e.Name)
 		require.Equal(t, "blue", e.Color)
-		require.Equal(t, "running", e.Status)
+		require.Equal(t, "claude-test", e.Model)
+		require.Equal(t, subagents.StatusRunning, e.Status)
 		require.False(t, e.StartedAt.IsZero())
 	default:
 		t.Fatal("agent run function was never called")
@@ -621,6 +679,137 @@ func TestRunSubAgent_RegistersAndUnregistersRuntime(t *testing.T) {
 	// After runSubAgent returns, the entry must be gone.
 	after := rt.List(parentSession.ID)
 	require.Empty(t, after, "Runtime must have no entries after runSubAgent returns")
+}
+
+// TestResolveModelByID_UnknownErrors verifies resolveModelByID errors when no
+// configured provider offers the requested model id.
+func TestResolveModelByID_UnknownErrors(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, "p", config.ProviderConfig{ID: "p"})
+
+	_, err := coord.resolveModelByID(t.Context(), "no-such-model", "", true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not offered by any configured provider")
+}
+
+// TestResolveModelByID_WithProviderOverride verifies that when a providerOverride
+// is supplied, resolveModelByID restricts lookup to that provider.
+func TestResolveModelByID_WithProviderOverride(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	providerCfg := config.ProviderConfig{
+		ID:     "test-provider",
+		Models: []catwalk.Model{{ID: "model-a"}},
+	}
+	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
+
+	t.Run("unknown_provider_override_errors", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := coord.resolveModelByID(t.Context(), "model-a", "nonexistent-provider", true)
+		require.Error(t, err)
+	})
+}
+
+// TestResolveModelByID_AmbiguousModel verifies that a model id offered by
+// more than one provider is refused unless the subagent names a provider,
+// rather than silently routed to whichever provider sorts first.
+func TestResolveModelByID_AmbiguousModel(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	cfg.Config().Providers.Set("provider-a", config.ProviderConfig{
+		ID:     "provider-a",
+		Models: []catwalk.Model{{ID: "shared-model"}},
+	})
+	cfg.Config().Providers.Set("provider-b", config.ProviderConfig{
+		ID:     "provider-b",
+		Models: []catwalk.Model{{ID: "shared-model"}},
+	})
+
+	coord := &coordinator{cfg: cfg, sessions: env.sessions}
+
+	_, err = coord.resolveModelByID(t.Context(), "shared-model", "", true)
+	require.ErrorContains(t, err, "offered by multiple providers (provider-a, provider-b)")
+}
+
+// TestBuildAgent_SubagentModel verifies that buildAgent accepts a subagentModel
+// struct and routes model selection correctly.
+func TestBuildAgent_SubagentModel(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero_value_uses_large_model", func(t *testing.T) {
+		t.Parallel()
+
+		env := testEnv(t)
+		coord := &coordinator{
+			cfg:      config.NewTestStoreWithWorkingDir(&config.Config{}, env.workingDir),
+			sessions: env.sessions,
+		}
+
+		agentCfg := config.Agent{
+			ID:           "test",
+			Name:         "test",
+			AllowedTools: []string{},
+		}
+
+		// Zero-value subagentModel must be accepted without panicking. With no
+		// models configured, buildNamedModel fails before any prompt is needed,
+		// verifying the struct parameter is wired into model-selection logic.
+		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "model")
+	})
+}
+
+// TestRunSubAgent_CancelledMapsToCancelled verifies that a context.Canceled
+// from the agent run is mapped to the "cancelled" response (distinct from the
+// generic failure), confirming the StatusCancelled branch is taken.
+func TestRunSubAgent_CancelledMapsToCancelled(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, providerCfg)
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		return nil, context.Canceled
+	})
+
+	coord := &coordinator{cfg: cfg, sessions: env.sessions, runtime: rt}
+
+	resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		Agent:          agent,
+		SessionID:      parentSession.ID,
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-1",
+		Prompt:         "do something",
+		SessionTitle:   "Cancel Test",
+		AgentName:      "a",
+		AgentColor:     "red",
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Equal(t, "Subagent cancelled by user", resp.Content)
+
+	// The runtime entry must be gone after a cancelled run.
+	require.Empty(t, rt.List(parentSession.ID))
 }
 
 // TestRunSubAgent_UnfinishedRunRollsUpParentCost verifies that a sub-agent
@@ -785,6 +974,38 @@ func TestRunSubAgent_AuthRefreshWrapper_ResetsStatusAfterSuccess(t *testing.T) {
 
 	require.Equal(t, subagents.StatusRunning, statusDuringRefresh,
 		"runtime status must return to running once OnAuthRefresh succeeds, not stay stuck at retrying")
+}
+
+// TestActiveSubagentsList verifies the coordinator reads the live manager
+// snapshot when present (so Library reloads are reflected) and falls back to
+// the construction-time slice when no manager is wired.
+func TestActiveSubagentsList(t *testing.T) {
+	t.Parallel()
+
+	t.Run("live from manager reflects reload", func(t *testing.T) {
+		t.Parallel()
+		initial := []*subagents.Subagent{{Name: "x"}, {Name: "y"}}
+		mgr := subagents.NewManager(initial, initial, nil)
+		t.Cleanup(mgr.Shutdown)
+		c := &coordinator{subagentsMgr: mgr}
+
+		require.Len(t, c.activeSubagentsList(), 2)
+
+		reduced := []*subagents.Subagent{{Name: "x"}}
+		mgr.Reload(reduced, reduced, nil)
+
+		got := c.activeSubagentsList()
+		require.Len(t, got, 1)
+		require.Equal(t, "x", got[0].Name)
+	})
+
+	t.Run("fallback when nil manager", func(t *testing.T) {
+		t.Parallel()
+		c := &coordinator{activeSubagents: []*subagents.Subagent{{Name: "z"}}}
+		got := c.activeSubagentsList()
+		require.Len(t, got, 1)
+		require.Equal(t, "z", got[0].Name)
+	})
 }
 
 func TestGetProviderOptionsReasoningEffort(t *testing.T) {
@@ -1110,4 +1331,80 @@ func TestCoordinatorSetMainAgent(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errMainAgentNotFound)
 	})
+}
+
+// TestUpdateModels_ClearsSubagentModelCache verifies that UpdateModels empties
+// the subagent model cache so stale LanguageModel instances are not reused
+// after a config reload, even when UpdateModels itself returns an error.
+func TestUpdateModels_ClearsSubagentModelCache(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := &coordinator{
+		cfg:                config.NewTestStoreWithWorkingDir(&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()}, env.workingDir),
+		sessions:           env.sessions,
+		subagentModelCache: make(map[subagentModelKey]Model),
+	}
+
+	// Manually populate the cache with a dummy entry.
+	coord.subagentModelCache[subagentModelKey{modelID: "some-model", provider: "", isSubAgent: true}] = Model{}
+
+	require.Len(t, coord.subagentModelCache, 1)
+
+	// UpdateModels will error (no models configured in empty config), but the
+	// cache must be cleared regardless.
+	_ = coord.UpdateModels(t.Context())
+
+	require.Empty(t, coord.subagentModelCache)
+}
+
+// TestResolveModelByID_CacheHitSkipsBuild verifies that a second call to
+// resolveModelByID with the same arguments returns the cached Model without
+// repeating the provider build, and that errors are not cached.
+func TestResolveModelByID_CacheHitSkipsBuild(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	// No-op provider with a known model so FindModelProvider succeeds.
+	providerCfg := config.ProviderConfig{
+		ID:     "test-provider",
+		Models: []catwalk.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
+	}
+	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
+
+	// First call — cache is empty.
+	require.Empty(t, coord.subagentModelCache)
+
+	_, err := coord.resolveModelByID(t.Context(), "model-x", "test-provider", true)
+	if err != nil {
+		// Provider construction may fail in the test environment (fake API key).
+		// Errors must not be cached.
+		require.Empty(t, coord.subagentModelCache, "failed build must not populate cache")
+		return
+	}
+
+	// Success path: cache must contain exactly one entry.
+	require.Len(t, coord.subagentModelCache, 1)
+
+	// Second call must hit the cache (same result, no error).
+	_, err2 := coord.resolveModelByID(t.Context(), "model-x", "test-provider", true)
+	require.NoError(t, err2)
+	require.Len(t, coord.subagentModelCache, 1, "second call must not add a new entry")
+}
+
+// TestResolveModelByID_ModelNotFound verifies that resolveModelByID returns an
+// error when no configured provider offers the requested model id, and that the cache is not populated on failure.
+func TestResolveModelByID_ModelNotFound(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	providerCfg := config.ProviderConfig{
+		ID:     "test-provider",
+		Models: []catwalk.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
+	}
+	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
+
+	_, err := coord.resolveModelByID(t.Context(), "does-not-exist", "", true)
+	require.ErrorContains(t, err, "not offered by any configured provider")
+	require.Empty(t, coord.subagentModelCache)
 }

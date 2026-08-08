@@ -987,22 +987,57 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	return false
 }
 
-// IsKnownModelID reports whether modelID matches the ID of any model offered
-// by any provider in the config. Walks every provider since model IDs are
-// unique per provider but callers identifying a model by ID alone do not have
-// provider context.
-func (c *Config) IsKnownModelID(modelID string) bool {
+// FindModelProvider resolves a model id to the enabled provider that offers
+// it, searching every catalog GetModel does (including the ChatGPT and Grok
+// subscription lists). A non-empty providerID restricts the search to that
+// provider. With no providerID the id must be offered by exactly one enabled
+// provider: an id several providers share is an error rather than a guess,
+// so the caller has to name the provider.
+func (c *Config) FindModelProvider(providerID, modelID string) (ProviderConfig, catwalk.Model, error) {
 	if modelID == "" {
-		return false
+		return ProviderConfig{}, catwalk.Model{}, errors.New("model id is empty")
 	}
+	if providerID != "" {
+		p, ok := c.Providers.Get(providerID)
+		if !ok || p.Disable {
+			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("provider %q is not configured or is disabled", providerID)
+		}
+		m := c.GetModel(providerID, modelID)
+		if m == nil {
+			return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by provider %q", modelID, providerID)
+		}
+		return p, *m, nil
+	}
+	var (
+		found ProviderConfig
+		model catwalk.Model
+		ids   []string
+	)
 	for _, p := range c.EnabledProviders() {
-		for _, m := range p.Models {
-			if m.ID == modelID {
-				return true
-			}
+		if m := c.GetModel(p.ID, modelID); m != nil {
+			found, model = p, *m
+			ids = append(ids, p.ID)
 		}
 	}
-	return false
+	switch len(ids) {
+	case 0:
+		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf("model %q is not offered by any configured provider", modelID)
+	case 1:
+		return found, model, nil
+	default:
+		slices.Sort(ids)
+		return ProviderConfig{}, catwalk.Model{}, fmt.Errorf(
+			"model %q is offered by multiple providers (%s); set provider to choose one",
+			modelID, strings.Join(ids, ", "),
+		)
+	}
+}
+
+// ValidateModel reports why a model id (optionally pinned to a provider)
+// cannot be resolved, or nil when FindModelProvider would succeed.
+func (c *Config) ValidateModel(providerID, modelID string) error {
+	_, _, err := c.FindModelProvider(providerID, modelID)
+	return err
 }
 
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {

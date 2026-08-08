@@ -437,7 +437,7 @@ func TestAppWorkspace_SessionTokens_NotFound(t *testing.T) {
 }
 
 // TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel verifies that the
-// reload after a delete validates model ids (passes cfg.IsKnownModelID, not
+// reload after a delete validates model ids (passes cfg.ValidateModel, not
 // nil). A subagent referencing an unknown model must NOT become active after
 // the reload — with a nil validator it would be wrongly accepted.
 func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
@@ -468,7 +468,7 @@ func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
 	)
 	t.Cleanup(mgr.Shutdown)
 
-	// Empty (but non-nil) providers => IsKnownModelID returns false for any
+	// Empty (but non-nil) providers => ValidateModel rejects any
 	// specific id, so bad-agent must be rejected on reload. SubagentsPaths
 	// drives rediscovery.
 	cfg := &config.Config{

@@ -211,9 +211,17 @@ type (
 	// gitBranchPollMsg is sent by the git branch poll timer.
 	gitBranchPollMsg struct{}
 
-	// parentTitleMsg is sent when the parent session title has been fetched.
+	// parentTitleMsg is sent when the parent session metadata has been
+	// fetched: the title for the breadcrumb and this child's subagent color.
 	parentTitleMsg struct {
 		title string
+		color string
+	}
+
+	// runningSubagentsMsg carries the refreshed running-subagent list,
+	// resolved off the Update path to keep DB IO out of the message loop.
+	runningSubagentsMsg struct {
+		list []workspace.RunningSubagentInfo
 	}
 )
 
@@ -387,7 +395,7 @@ type UI struct {
 	// refreshed on each RuntimeEvent.
 	runningSubagents []workspace.RunningSubagentInfo
 
-	// Subagent @-mention completions, cached at init.
+	// Subagent @-mention completions, rebuilt on subagents.Event.
 	activeSubagentItems []completions.SubagentCompletionValue
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
@@ -569,7 +577,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		skillStates:         skills.GetLatestStates(),
 	}
 
-	// Cache active subagents for @-mention completions.
+	// Cache active subagents; rebuilt on subagents.Event.
 	ui.activeSubagentItems = buildSubagentCaches(com.Workspace.ActiveSubagents())
 
 	status := NewStatus(com, ui)
@@ -979,20 +987,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		if m.session.ParentSessionID != "" {
-			// Look up this child session's subagent color from the in-memory
-			// runtime (sync, not IO).
-			for _, entry := range m.com.Workspace.RunningSubagents(m.session.ParentSessionID) {
-				if entry.ChildSessionID == m.session.ID {
-					m.subagentColor = entry.Color
-					break
-				}
-			}
-			cmds = append(cmds, m.fetchParentTitle(m.session.ParentSessionID))
+			cmds = append(cmds, m.fetchParentMeta(m.session.ParentSessionID, m.session.ID))
 		}
 		m.updateLayoutAndSize()
 
 	case parentTitleMsg:
 		m.parentTitle = msg.title
+		m.subagentColor = msg.color
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -1150,10 +1151,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
 	case pubsub.Event[subagents.RuntimeEvent]:
-		if m.session != nil {
-			m.runningSubagents = m.com.Workspace.RunningSubagents(m.session.ID)
-		} else {
+		switch {
+		case m.session == nil:
 			m.runningSubagents = nil
+		case msg.Payload.ParentSessionID == m.session.ID:
+			// Only the current session's children populate the panel; ignore
+			// events for other parents to avoid spurious DB refreshes.
+			cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 		}
 		// A successful result already shows as the tool result; only report
 		// failed and cancelled runs, or every agentic_fetch and task call
@@ -1161,6 +1165,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if f := msg.Payload.Finished; f != nil && m.session != nil && f.ParentSessionID == m.session.ID && f.Status != subagents.StatusCompleted {
 			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
 		}
+	case runningSubagentsMsg:
+		m.runningSubagents = msg.list
+	case pubsub.Event[subagents.Event]:
+		// Library discovery changed (e.g. a delete) — rebuild the @-mention
+		// caches so removed subagents stop being offered without a restart.
+		m.rebuildSubagentCaches()
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -5709,7 +5719,9 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 }
 
 // openSubagentsDialog opens the subagents dialog. If the dialog is already
-// open, it brings it to the front.
+// open, it brings it to the front. Subagent surfaces are local-mode only: in
+// client/server mode the ClientWorkspace stubs return empty, so the dialog
+// opens with no running or library entries.
 func (m *UI) openSubagentsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SubagentsID) {
 		m.dialog.BringToFront(dialog.SubagentsID)

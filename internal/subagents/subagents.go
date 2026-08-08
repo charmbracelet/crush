@@ -217,23 +217,20 @@ func Parse(path string) (*Subagent, error) {
 	return agent, nil
 }
 
-// ValidateAgainst runs Validate plus model-resolution checks. When isKnownModel
-// is non-nil and Model is a non-empty value other than "large"/"small", the
-// resolver must return true or validation fails. A nil resolver skips the
-// model check (used when the caller has no config context).
-func (s *Subagent) ValidateAgainst(isKnownModel func(provider, model string) bool) error {
+// ValidateAgainst runs Validate plus model-resolution checks. When
+// validateModel is non-nil and Model is a non-empty value other than
+// "large"/"small", its error (unknown id, or an id several providers offer
+// with no `provider:` set) fails validation. A nil resolver skips the model
+// check (used when the caller has no config context).
+func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) error) error {
 	err := s.Validate()
-	if isKnownModel == nil {
+	if validateModel == nil {
 		return err
 	}
 	if s.Model == "" || s.Model == "large" || s.Model == "small" {
 		return err
 	}
-	if !isKnownModel(s.Provider, s.Model) {
-		modelErr := fmt.Errorf("model %q is not a known model id; use \"large\", \"small\", or a valid provider model id", s.Model)
-		if err == nil {
-			return modelErr
-		}
+	if modelErr := validateModel(s.Provider, s.Model); modelErr != nil {
 		return errors.Join(err, modelErr)
 	}
 	return err
@@ -413,7 +410,7 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // DiscoverWithStates finds all valid subagent definition files (*.md) in the
 // given paths recursively, and returns both the discovered subagents and a
 // per-file state slice describing parse/validation outcomes. When
-// isKnownModel is non-nil it is used to validate non-alias model ids; nil
+// validateModel is non-nil it is used to validate non-alias model ids; nil
 // skips that check.
 //
 // The returned agents preserve the caller's path order: all subagents from
@@ -421,7 +418,7 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // the last occurrence of a name, so this ordering is what makes later paths —
 // the working directory, per ProjectSubagentsDir — override earlier ones
 // (monorepo root, global dirs) on a name collision.
-func DiscoverWithStates(paths []string, isKnownModel func(provider, model string) bool) ([]*Subagent, []*SubagentState) {
+func DiscoverWithStates(paths []string, validateModel func(provider, model string) error) ([]*Subagent, []*SubagentState) {
 	var agents []*Subagent
 	var states []*SubagentState
 	var mu sync.Mutex
@@ -467,7 +464,7 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 				addState("", path, StateError, err)
 				return nil
 			}
-			if err := agent.ValidateAgainst(isKnownModel); err != nil {
+			if err := agent.ValidateAgainst(validateModel); err != nil {
 				slog.Warn("Subagent validation failed", "path", path, "error", err)
 				addState(agent.Name, path, StateError, err)
 				return nil

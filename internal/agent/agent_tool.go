@@ -174,23 +174,34 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 	// turn started a generation of work that the great majority of turns threw
 	// away, with no backpressure across a burst of turns. Building on demand
 	// makes an unused tool free and matches the subagent dispatch path below,
-	// which also builds at dispatch time. sync.Once serializes the concurrent
-	// dispatches this tool allows (Parallel: true) onto one build.
+	// which also builds at dispatch time. The mutex serializes the concurrent
+	// dispatches this tool allows (Parallel: true) onto one build, but unlike
+	// sync.Once a failed build does not stick: the next dispatch retries.
 	var (
-		taskOnce  sync.Once
+		taskMu    sync.Mutex
 		taskAgent SessionAgent
-		taskErr   error
+		taskBuilt bool
 	)
 	buildTaskAgent := func(ctx context.Context) (SessionAgent, error) {
-		taskOnce.Do(func() {
-			var wg errgroup.Group
-			taskAgent, taskErr = c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, &wg)
-			if taskErr != nil {
-				return
-			}
-			taskErr = wg.Wait()
-		})
-		return taskAgent, taskErr
+		taskMu.Lock()
+		defer taskMu.Unlock()
+		if taskBuilt {
+			return taskAgent, nil
+		}
+		var wg errgroup.Group
+		agent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, &wg)
+		if err == nil {
+			err = wg.Wait()
+		}
+		if err != nil {
+			// Leave taskBuilt unset so a transient build failure (a cancelled
+			// dispatch context, a provider hiccup) is retried by the next
+			// dispatch instead of sticking for the tool's whole lifetime.
+			return nil, err
+		}
+		taskAgent = agent
+		taskBuilt = true
+		return taskAgent, nil
 	}
 
 	// The subagent_type enum is a point-in-time snapshot baked into the tool

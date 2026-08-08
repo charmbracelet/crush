@@ -223,6 +223,46 @@ func TestSubagentsDialog_ToggleLibraryItem(t *testing.T) {
 	require.False(t, ws.disabledCalls[1].disabled, "second toggle must re-enable")
 }
 
+// TestSubagentsDialog_BrokenItemCannotToggle verifies that space on a library
+// entry whose definition failed discovery is a no-op: there is no active
+// subagent to enable or disable.
+func TestSubagentsDialog_BrokenItemCannotToggle(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "broken-agent", Scope: "user", Error: "unclosed frontmatter"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	action := d.HandleMsg(keyMsg(' '))
+	require.Nil(t, action, "toggling a broken entry must be a no-op")
+	require.Empty(t, ws.disabledCalls)
+}
+
+// TestSubagentsDialog_BrokenItemCannotDelete verifies that d on a broken
+// library entry never enters confirm-delete mode, even when user-scoped.
+func TestSubagentsDialog_BrokenItemCannotDelete(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "broken-agent", Scope: "user", Error: "unclosed frontmatter"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	d.HandleMsg(keyMsg('d'))
+	require.False(t, d.IsConfirmingDelete(), "broken entries must not be deletable")
+}
+
 // TestSubagentsDialog_RuntimeEventRefreshesRunningTab verifies that a
 // RuntimeEvent for the dialog's own parent session rebuilds the running tab
 // from a fresh call to com.Workspace.RunningSubagents, reflecting entries added

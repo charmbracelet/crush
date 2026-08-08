@@ -15,6 +15,9 @@ type LibrarySubagentItemData struct {
 	FilePath    string
 	Scope       string
 	Disabled    bool
+	// Error carries the discovery diagnostic for a definition file that
+	// failed to parse or validate; such items are informational only.
+	Error string
 }
 
 // LibrarySubagentItem wraps [LibrarySubagentItemData] to implement the
@@ -78,12 +81,13 @@ func (l *LibrarySubagentItem) SetMatch(m fuzzy.Match) {
 
 // Render implements list.Item. It renders the library subagent as two lines:
 // the first line shows an enabled/disabled status icon, the colored dot,
-// name, and scope badge; the second line shows the description.
+// name, and scope badge; the second line shows the description, or the
+// discovery diagnostic for broken definitions.
 func (l *LibrarySubagentItem) Render(width int) string {
 	dot := styles.SubagentDot(l.data.Color)
 
 	status := l.t.Tool.IconSuccess.String()
-	if l.data.Disabled {
+	if l.data.Disabled || l.data.Error != "" {
 		status = l.t.Tool.IconError.String()
 	}
 
@@ -102,10 +106,14 @@ func (l *LibrarySubagentItem) Render(width int) string {
 	firstLine := status + " " + dot + " " + l.data.Name + "  " + scope
 	firstLine = ansi.Truncate(firstLine, innerWidth, "…")
 
+	details := l.data.Description
+	if l.data.Error != "" {
+		details = l.data.Error
+	}
+
 	var content string
-	if l.data.Description != "" {
-		desc := ansi.Truncate(l.data.Description, innerWidth, "…")
-		content = firstLine + "\n" + desc
+	if details != "" {
+		content = firstLine + "\n" + ansi.Truncate(details, innerWidth, "…")
 	} else {
 		content = firstLine
 	}

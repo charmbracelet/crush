@@ -42,7 +42,8 @@ func TestRunningSubagentItem_RenderShowsNonRunningStatus(t *testing.T) {
 		Model:  "claude-opus-4-7",
 		Status: "retrying",
 	})
-	require.Contains(t, stripANSIDialog(retrying.Render(80)), "retrying")
+	// Parenthesized to match the sidebar panel's rendering of the same field.
+	require.Contains(t, stripANSIDialog(retrying.Render(80)), "(retrying)")
 
 	running := NewRunningSubagentItem(&st, RunningSubagentItemData{
 		Name:   "my-agent",

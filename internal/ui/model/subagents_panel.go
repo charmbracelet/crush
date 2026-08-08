@@ -40,7 +40,14 @@ func (m *UI) subagentsInfo(width, maxItems int, isSection bool) string {
 		// A live entry is "running"; anything else (retrying while
 		// credentials refresh) is worth surfacing in the panel too.
 		if e.Status != "" && e.Status != subagents.StatusRunning {
-			desc = fmt.Sprintf("%s %s", desc, t.Resource.AdditionalText.Render("("+e.Status+")"))
+			status := t.Resource.AdditionalText.Render("(" + e.Status + ")")
+			// An entry registered without a model has no description yet;
+			// joining unconditionally would indent it by a stray space.
+			if desc == "" {
+				desc = status
+			} else {
+				desc = desc + " " + status
+			}
 		}
 		items = append(items, subagentStatusItem{
 			icon:        t.SubagentDot(e.Color),

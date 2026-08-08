@@ -94,9 +94,10 @@ func (r *RunningSubagentItem) Render(width int) string {
 
 	content := dot + " " + r.data.Name + "  " + r.data.Model + "  " + tokStr
 	// A live entry is "running"; anything else (retrying while credentials
-	// refresh) is worth spelling out.
+	// refresh) is worth spelling out. Parenthesized to match the sidebar
+	// panel, which renders the same status alongside the same fields.
 	if r.data.Status != "" && r.data.Status != subagents.StatusRunning {
-		content += "  " + r.data.Status
+		content += "  (" + r.data.Status + ")"
 	}
 	content = ansi.Truncate(content, max(0, width-itemStyle.GetHorizontalFrameSize()), "…")
 	return itemStyle.Render(content)

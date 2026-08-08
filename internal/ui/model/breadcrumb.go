@@ -15,7 +15,7 @@ func parentBreadcrumbLine(t *styles.Styles, color, title string, width int) stri
 		return ""
 	}
 
-	dot := styles.SubagentDot(color)
+	dot := t.SubagentDot(color)
 	prefix := " ↑ parent: "
 	maxTitleWidth := max(width-lipgloss.Width(dot)-lipgloss.Width(prefix), 0)
 	truncated := ansi.Truncate(title, maxTitleWidth, "…")

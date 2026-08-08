@@ -8,14 +8,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newTestStore returns a config store for prompt-rendering tests. It builds
+// the store directly instead of calling config.Init, which reads the host's
+// HOME/XDG locations: a developer with a populated ~/.config/crush would
+// otherwise have their own context files and skill paths rendered into the
+// prompt under test.
+func newTestStore(t *testing.T) *config.ConfigStore {
+	t.Helper()
+	return config.NewTestStoreWithWorkingDir(&config.Config{Options: &config.Options{}}, t.TempDir())
+}
+
 // TestWithSuppressAvailableSkills verifies the option omits <available_skills>
-// from the rendered prompt even though builtin skills exist. Needs a real store
-// because the nil-store path never computes AvailSkillXML.
+// from the rendered prompt even though builtin skills exist.
 func TestWithSuppressAvailableSkills(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newTestStore(t)
 
 	const tmpl = `{{.AvailSkillXML}}`
 
@@ -39,14 +47,14 @@ func TestWithSubagentBody(t *testing.T) {
 
 	const body = "You are a specialist agent that does things."
 
+	store := newTestStore(t)
+
 	// Use a template that renders SubagentBody so we can observe the value
 	// without needing access to the unexported promptData method.
 	p, err := NewPrompt("test", `{{.SubagentBody}}`, WithSubagentBody(body))
 	require.NoError(t, err)
 
-	// A nil store makes promptData return a minimal PromptDat (it otherwise
-	// needs store.WorkingDir()), which still carries the subagent option fields.
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, body, result)
 }
@@ -58,10 +66,12 @@ func TestWithPreloadedSkillsXML(t *testing.T) {
 
 	const xml = "<loaded_skill>\n  <name>my-skill</name>\n</loaded_skill>"
 
+	store := newTestStore(t)
+
 	p, err := NewPrompt("test", `{{.PreloadedSkillsXML}}`, WithPreloadedSkillsXML(xml))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, xml, result)
 }
@@ -78,10 +88,13 @@ func TestSubagentPromptOptions_BothFieldsInTemplate(t *testing.T) {
 	)
 
 	tmpl := `{{.SubagentBody}}|{{.PreloadedSkillsXML}}`
+
+	store := newTestStore(t)
+
 	p, err := NewPrompt("test", tmpl, WithSubagentBody(body), WithPreloadedSkillsXML(xml))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, body+"|"+xml, result)
 }
@@ -92,10 +105,13 @@ func TestSubagentPromptOptions_DefaultsToEmpty(t *testing.T) {
 	t.Parallel()
 
 	tmpl := `body=«{{.SubagentBody}}»xml=«{{.PreloadedSkillsXML}}»`
+
+	store := newTestStore(t)
+
 	p, err := NewPrompt("test", tmpl)
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, "body=«»xml=«»", result)
 }
@@ -108,7 +124,9 @@ func TestWithSubagentBody_EmptyString(t *testing.T) {
 	p, err := NewPrompt("test", `{{.SubagentBody}}`, WithSubagentBody(""))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	store := newTestStore(t)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, "", result)
 }
@@ -121,7 +139,9 @@ func TestWithPreloadedSkillsXML_EmptyString(t *testing.T) {
 	p, err := NewPrompt("test", `{{.PreloadedSkillsXML}}`, WithPreloadedSkillsXML(""))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	store := newTestStore(t)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, "", result)
 }
@@ -134,10 +154,12 @@ func TestWithAvailableSubagentsXML(t *testing.T) {
 
 	const xml = "<available_subagents>\n  <subagent>\n    <name>my-agent</name>\n  </subagent>\n</available_subagents>"
 
+	store := newTestStore(t)
+
 	p, err := NewPrompt("test", `{{.AvailSubagentXML}}`, WithAvailableSubagentsXML(xml))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, xml, result)
 }
@@ -150,19 +172,19 @@ func TestWithAvailableSubagentsXML_EmptyString(t *testing.T) {
 	p, err := NewPrompt("test", `{{.AvailSubagentXML}}`, WithAvailableSubagentsXML(""))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	store := newTestStore(t)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, "", result)
 }
 
 // TestWithAvailableSkillsXML verifies the caller-supplied block replaces the
-// discovery walk's output. A real store is required because the nil-store path
-// never computes AvailSkillXML at all.
+// discovery walk's output.
 func TestWithAvailableSkillsXML(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newTestStore(t)
 
 	const tmpl = `{{.AvailSkillXML}}`
 	const xml = "<available_skills>\n  <skill><name>supplied</name></skill>\n</available_skills>"
@@ -180,8 +202,7 @@ func TestWithAvailableSkillsXML(t *testing.T) {
 func TestWithAvailableSkillsXML_EmptyStringSkipsDiscovery(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newTestStore(t)
 
 	const tmpl = `{{.AvailSkillXML}}`
 
@@ -204,8 +225,7 @@ func TestWithAvailableSkillsXML_EmptyStringSkipsDiscovery(t *testing.T) {
 func TestWithSuppressAvailableSkills_BeatsSuppliedXML(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newTestStore(t)
 
 	p, err := NewPrompt("t", `{{.AvailSkillXML}}`,
 		WithAvailableSkillsXML("<available_skills><skill><name>leak</name></skill></available_skills>"),

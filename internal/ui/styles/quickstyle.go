@@ -106,6 +106,11 @@ type quickStyleOpts struct {
 	ansiBrightMagenta color.Color
 	ansiBrightCyan    color.Color
 	ansiBrightWhite   color.Color
+
+	// Subagent identity palette: eight distinct hues used to tell running
+	// subagents apart in the UI (dots in the running panel, Library rows,
+	// breadcrumbs), in SubagentColorNames order.
+	subagentPalette [8]color.Color
 }
 
 // Diff tint blend ratios: the fraction of the insert/delete foreground
@@ -1022,6 +1027,9 @@ func quickStyle(o quickStyleOpts) Styles {
 		o.ansiBrightBlack, o.ansiBrightRed, o.ansiBrightGreen, o.ansiBrightYellow,
 		o.ansiBrightBlue, o.ansiBrightMagenta, o.ansiBrightCyan, o.ansiBrightWhite,
 	}
+
+	// Subagent identity palette. See [Styles.SubagentPalette].
+	s.SubagentPalette = o.subagentPalette
 
 	// Shell (bang mode) item styles.
 	s.Messages.ShellBarFocused = lipgloss.NewStyle().PaddingLeft(1).

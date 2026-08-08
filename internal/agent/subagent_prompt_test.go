@@ -224,7 +224,9 @@ func TestSubagentPrompt_Build_RendersBody(t *testing.T) {
 	p, err := subagentPrompt(sa, nil)
 	require.NoError(t, err)
 
-	got, err := p.Build(context.Background(), "p", "m", nil)
+	store := newPromptTestStore(t)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
 	require.NoError(t, err)
 	require.Contains(t, got, body)
 }
@@ -266,7 +268,9 @@ func TestSubagentPrompt_Build_RendersPreloadedSkillsXML(t *testing.T) {
 	p, err := subagentPrompt(sa, []*skills.Skill{sk})
 	require.NoError(t, err)
 
-	got, err := p.Build(context.Background(), "p", "m", nil)
+	store := newPromptTestStore(t)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
 	require.NoError(t, err)
 	require.Contains(t, got, "<loaded_skill>")
 	require.Contains(t, got, "preload-me")
@@ -283,7 +287,9 @@ func TestSubagentPrompt_Build_OmitsPreloadWhenEmpty(t *testing.T) {
 	p, err := subagentPrompt(sa, nil)
 	require.NoError(t, err)
 
-	got, err := p.Build(context.Background(), "p", "m", nil)
+	store := newPromptTestStore(t)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
 	require.NoError(t, err)
 	require.NotContains(t, got, "<loaded_skill>")
 }
@@ -295,8 +301,7 @@ func TestSubagentPrompt_Build_OmitsPreloadWhenEmpty(t *testing.T) {
 func TestSubagentPrompt_Build_SuppressesAvailableWhenSkillsPinned(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newPromptTestStore(t)
 
 	sk := newTestSkill("preload-me", false)
 	sa := newTestSubagent("scoped", []string{"preload-me"}, "Body.")
@@ -316,8 +321,7 @@ func TestSubagentPrompt_Build_SuppressesAvailableWhenSkillsPinned(t *testing.T) 
 func TestSubagentPrompt_Build_RendersAvailableWhenNoSkillsPinned(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newPromptTestStore(t)
 
 	sa := newTestSubagent("open", nil, "Body.")
 
@@ -336,8 +340,7 @@ func TestSubagentPrompt_Build_RendersAvailableWhenNoSkillsPinned(t *testing.T) {
 func TestSubagentPrompt_Build_SuppressesEvenWhenSkillsUnresolved(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newPromptTestStore(t)
 
 	sa := newTestSubagent("scoped-typo", []string{"does-not-exist"}, "Body.")
 

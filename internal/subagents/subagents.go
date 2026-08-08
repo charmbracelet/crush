@@ -223,23 +223,28 @@ func Parse(path string) (*Subagent, error) {
 	return agent, nil
 }
 
-// ValidateAgainst runs Validate plus model-resolution checks. When
+// ValidateAgainst runs Validate plus model- and skill-resolution checks. When
 // validateModel is non-nil and Model is a non-empty value other than
 // "large"/"small", its error (unknown id, or an id several providers offer
-// with no `provider:` set) fails validation. A nil resolver skips the model
-// check (used when the caller has no config context).
-func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) error) error {
-	err := s.Validate()
-	if validateModel == nil {
-		return err
+// with no `provider:` set) fails validation. When isKnownSkill is non-nil,
+// every name in Skills must resolve to a known skill. A nil resolver skips
+// the corresponding check (used when the caller has no config or skills
+// context).
+func (s *Subagent) ValidateAgainst(validateModel func(provider, model string) error, isKnownSkill func(name string) bool) error {
+	errs := []error{s.Validate()}
+	if validateModel != nil && s.Model != "" && s.Model != "large" && s.Model != "small" {
+		if err := validateModel(s.Provider, s.Model); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	if s.Model == "" || s.Model == "large" || s.Model == "small" {
-		return err
+	if isKnownSkill != nil {
+		for _, name := range s.Skills {
+			if !isKnownSkill(name) {
+				errs = append(errs, fmt.Errorf("skill %q is not a known active skill", name))
+			}
+		}
 	}
-	if modelErr := validateModel(s.Provider, s.Model); modelErr != nil {
-		return errors.Join(err, modelErr)
-	}
-	return err
+	return errors.Join(errs...)
 }
 
 // Validate checks that the subagent meets all specification requirements.
@@ -416,15 +421,16 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // DiscoverWithStates finds all valid subagent definition files (*.md) in the
 // given paths recursively, and returns both the discovered subagents and a
 // per-file state slice describing parse/validation outcomes. When
-// validateModel is non-nil it is used to validate non-alias model ids; nil
-// skips that check.
+// validateModel is non-nil it is used to validate non-alias model ids; when
+// isKnownSkill is non-nil it is used to validate skills references; a nil
+// func skips the corresponding check.
 //
 // The returned agents preserve the caller's path order: all subagents from
 // paths[0] (sorted by file path), then paths[1], and so on. Deduplicate keeps
 // the last occurrence of a name, so this ordering is what makes later paths —
 // the working directory, per ProjectSubagentsDir — override earlier ones
 // (monorepo root, global dirs) on a name collision.
-func DiscoverWithStates(paths []string, validateModel func(provider, model string) error) ([]*Subagent, []*SubagentState) {
+func DiscoverWithStates(paths []string, validateModel func(provider, model string) error, isKnownSkill func(name string) bool) ([]*Subagent, []*SubagentState) {
 	var agents []*Subagent
 	var states []*SubagentState
 	var mu sync.Mutex
@@ -470,7 +476,7 @@ func DiscoverWithStates(paths []string, validateModel func(provider, model strin
 				addState("", path, StateError, err)
 				return nil
 			}
-			if err := agent.ValidateAgainst(validateModel); err != nil {
+			if err := agent.ValidateAgainst(validateModel, isKnownSkill); err != nil {
 				slog.Warn("Subagent validation failed", "path", path, "error", err)
 				addState(agent.Name, path, StateError, err)
 				return nil

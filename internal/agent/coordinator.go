@@ -188,6 +188,13 @@ type coordinator struct {
 	// registry to reach them.
 	subagentCancels *csync.Map[string, context.CancelFunc]
 
+	// subagentPromptXML is the <available_subagents> XML currently baked into
+	// the coder system prompt. refreshCoderSystemPrompt compares against it
+	// each turn so Library reloads reach the prompt without a rebuild when
+	// nothing changed. Guarded by subagentPromptXMLMu.
+	subagentPromptXML   string
+	subagentPromptXMLMu sync.Mutex
+
 	readyWg errgroup.Group
 }
 
@@ -257,10 +264,9 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	coderPrompt, err := coderPrompt(
-		prompt.WithWorkingDir(c.cfg.WorkingDir()),
-		prompt.WithAvailableSubagentsXML(subagents.ToPromptXML(c.activeSubagentsList())),
-	)
+	subagentXML := c.subagentsPromptXML(agentCfg.AllowedTools)
+	c.subagentPromptXML = subagentXML
+	coderPrompt, err := c.newCoderPrompt(subagentXML)
 	if err != nil {
 		return nil, err
 	}
@@ -1013,6 +1019,17 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 	return slices.Contains(allowed, AgentToolName)
 }
 
+// subagentsPromptXML returns the <available_subagents> XML for the coder
+// agent's system prompt, or "" when the dispatcher tool isn't exposed to it
+// — telling the model about subagents it has no dispatcher to reach would be
+// a prompt/tool-list inconsistency.
+func (c *coordinator) subagentsPromptXML(allowedTools []string) string {
+	if !shouldExposeDispatcher(allowedTools, false) {
+		return ""
+	}
+	return subagents.ToPromptXML(c.activeSubagentsList())
+}
+
 // buildTools assembles the agent's tool set. modelID is the catwalk id of the
 // model the agent actually runs on (the resolved primary), used for
 // model-specific tool guidance such as the bash tool description.
@@ -1582,7 +1599,68 @@ func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent,
 		return err
 	}
 	agent.SetTools(tools)
+
+	c.refreshCoderSystemPrompt(ctx, large)
 	return nil
+}
+
+// newCoderPrompt builds the coder prompt around the given
+// <available_subagents> block. Construction and the post-reload refresh share
+// it so their option lists cannot drift.
+func (c *coordinator) newCoderPrompt(subagentXML string) (*prompt.Prompt, error) {
+	return coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithAvailableSubagentsXML(subagentXML),
+	)
+}
+
+// refreshCoderSystemPrompt rebuilds the coder system prompt when the active
+// subagent set changed since the prompt was last built, so the
+// <available_subagents> block tracks Library reloads like the subagent_type
+// enum (rebuilt by buildTools above) and the dispatch lookup already do.
+// updateAgentModels runs it at the start of every turn, and the rebuild is
+// skipped when nothing changed, so the steady-state cost is one string
+// compare. A rebuild failure keeps the current prompt and only logs: a stale
+// subagent list is better than failing the turn.
+func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model) {
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		slog.Warn("Failed to rebuild coder system prompt after subagent reload", "error", errCoderAgentNotConfigured)
+		return
+	}
+	xml := c.subagentsPromptXML(agentCfg.AllowedTools)
+
+	// The compare, the SetSystemPrompt and the store are one critical section.
+	// Releasing the lock across the rebuild lets two concurrent refreshes both
+	// see a difference and install their prompts in completion order: the older
+	// subagent list can land last and then be recorded as current, so every
+	// later call short-circuits on "unchanged" and never corrects it. The
+	// serialized loser re-reads the stored value and returns immediately, so
+	// the cost is one redundant wait rather than a duplicate build.
+	c.subagentPromptXMLMu.Lock()
+	unchanged := xml == c.subagentPromptXML
+	c.subagentPromptXMLMu.Unlock()
+	if unchanged {
+		return
+	}
+
+	pr, err := c.newCoderPrompt(xml)
+	if err != nil {
+		slog.Warn("Failed to rebuild coder prompt after subagent reload", "error", err)
+		return
+	}
+	systemPrompt, err := pr.Build(ctx, model.Model.Provider(), model.Model.Model(), c.cfg)
+	if err != nil {
+		slog.Warn("Failed to rebuild coder system prompt after subagent reload", "error", err)
+		return
+	}
+	// Not currentAgent(): in plan mode that is the plan agent. c.agents is
+	// fixed at construction, which fails without a coder, so no lock.
+	c.agents[config.AgentCoder].SetSystemPrompt(systemPrompt)
+
+	c.subagentPromptXMLMu.Lock()
+	c.subagentPromptXML = xml
+	c.subagentPromptXMLMu.Unlock()
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {

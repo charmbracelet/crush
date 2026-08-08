@@ -181,14 +181,24 @@ type (
 	// parentTitleMsg is sent when the parent session metadata has been
 	// fetched: the title for the breadcrumb and this child's subagent color.
 	parentTitleMsg struct {
-		title string
-		color string
+		// forSession is the child session the fetch was scoped to; a result
+		// that raced a session switch (the user navigated away before it
+		// resolved) is discarded rather than applied, mirroring
+		// promptQueueMsg.forSession.
+		forSession string
+		title      string
+		color      string
 	}
 
 	// runningSubagentsMsg carries the refreshed running-subagent list,
 	// resolved off the Update path to keep DB IO out of the message loop.
 	runningSubagentsMsg struct {
-		list []workspace.RunningSubagentInfo
+		// forSession is the session the fetch was scoped to; a result that
+		// raced a session switch (the user navigated away before this
+		// resolved) is discarded rather than applied, mirroring
+		// promptQueueMsg.forSession.
+		forSession string
+		list       []workspace.RunningSubagentInfo
 	}
 )
 
@@ -803,6 +813,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.parentTitle = ""
 		m.subagentColor = ""
 		m.knownChildSessionIDs = nil
+		// runningSubagents is otherwise only refreshed by a live RuntimeEvent
+		// for the current session's parent — drop the previous session's
+		// list and re-fetch for the new one so the sidebar doesn't keep
+		// showing a stale "Active subagents" panel until one happens to
+		// arrive (or never, if nothing is dispatched under the new session).
+		m.runningSubagents = nil
+		cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {
@@ -841,8 +858,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateLayoutAndSize()
 
 	case parentTitleMsg:
-		m.parentTitle = msg.title
-		m.subagentColor = msg.color
+		// Discard a fetch that raced a session switch: the user navigated
+		// away from forSession before it resolved, so applying it here would
+		// show a breadcrumb that belongs to a different (departed) session.
+		if msg.forSession == m.currentSessionID() {
+			m.parentTitle = msg.title
+			m.subagentColor = msg.color
+		}
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -1007,7 +1029,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
 		}
 	case runningSubagentsMsg:
-		m.runningSubagents = msg.list
+		// Discard a fetch that raced a session switch: the user navigated
+		// away from forSession before it resolved, so applying it here would
+		// clobber the newly-loaded session's (possibly already-refreshed)
+		// list with a stale one.
+		if msg.forSession == m.currentSessionID() {
+			m.runningSubagents = msg.list
+		}
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention
 		// caches so removed subagents stop being offered without a restart.

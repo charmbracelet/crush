@@ -104,6 +104,25 @@ func TestHandleChannelMessageExistingSession(t *testing.T) {
 	}
 }
 
+// TestHandleChannelMessageChildSessionTargetsParent verifies that a channel
+// event arriving while a read-only subagent session is open is injected into
+// the parent conversation, not the subagent's transcript.
+func TestHandleChannelMessageChildSessionTargetsParent(t *testing.T) {
+	t.Parallel()
+	ws := &channelWorkspace{ready: true}
+	m := newChannelUI(ws)
+	m.session = &session.Session{ID: "child", ParentSessionID: "parent"}
+
+	cmd := m.handleChannelMessage(mcp.Event{Name: "s", ChannelMessage: "hi"})
+	if cmd == nil {
+		t.Fatal("expected a command for a child-session channel event")
+	}
+	cmd()
+	if len(ws.runCalls) != 1 || ws.runCalls[0].sessionID != "parent" {
+		t.Fatalf("AgentRun calls = %+v, want one call on parent", ws.runCalls)
+	}
+}
+
 func TestHandleChannelMessageCreatesSessionWhenNoneActive(t *testing.T) {
 	t.Parallel()
 	ws := &channelWorkspace{ready: true, newSession: session.Session{ID: "new-sess"}}

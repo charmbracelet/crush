@@ -452,6 +452,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
+		NewCommandItem(c.com.Styles, "subagents", "Subagents", "ctrl+x", ActionOpenDialog{SubagentsID}),
 	}
 	if c.parentSessionID != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "parent_session", "Go to Parent Session", "ctrl/alt+up", ActionGoToParentSession{SessionID: c.parentSessionID}))

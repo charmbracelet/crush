@@ -1694,8 +1694,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
+		// A tool-error response, not a bare error: the provider set can
+		// change under a running dispatch (config reload), and a bare error
+		// would abort the whole parent turn where the parent agent could
+		// otherwise report the failure and continue.
 		finalStatus = subagents.StatusFailed
-		return fantasy.ToolResponse{}, errModelProviderNotConfigured
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to run subagent: %s", errModelProviderNotConfigured)), nil
 	}
 
 	// Surface a "retrying" status on the subagent while OnAuthRefresh

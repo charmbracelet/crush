@@ -285,7 +285,7 @@ func TestRunSubAgent(t *testing.T) {
 		// Agent references a provider that doesn't exist in config.
 		agent := newMockAgent("unknown-provider", 4096, nil)
 
-		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -293,8 +293,11 @@ func TestRunSubAgent(t *testing.T) {
 			Prompt:         "test",
 			SessionTitle:   "Test",
 		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "model provider not configured")
+		// A tool-error response, not a bare Go error: the latter would abort
+		// the whole parent turn.
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+		assert.Contains(t, resp.Content, "model provider not configured")
 	})
 
 	// TestRunSubAgent_ProviderNotConfigured_ReportsFailedStatus is the
@@ -321,7 +324,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		// Agent references a provider that doesn't exist in config.
 		agent := newMockAgent("unknown-provider", 4096, nil)
-		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -329,7 +332,8 @@ func TestRunSubAgent(t *testing.T) {
 			Prompt:         "test",
 			SessionTitle:   "Test",
 		})
-		require.Error(t, err)
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
 
 		// Register publishes its own event first (Finished == nil); skip past
 		// it to the terminal event from the deferred Finish call.

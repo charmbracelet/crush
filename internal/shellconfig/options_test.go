@@ -107,6 +107,56 @@ option reset skill-path`
 	require.Empty(t, opts["skills_paths"].([]any))
 }
 
+func TestOption_Subagents(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option subagent-path ./agents-a
+option subagent-path ./agents-b
+option disable-subagent code-reviewer
+option disable-subagent flaky-agent`
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+
+	paths := opts["subagents_paths"].([]any)
+	require.Len(t, paths, 2)
+	require.Equal(t, "./agents-a", paths[0])
+	require.Equal(t, "./agents-b", paths[1])
+
+	disabled := opts["disabled_subagents"].([]any)
+	require.Len(t, disabled, 2)
+	require.Equal(t, "code-reviewer", disabled[0])
+	require.Equal(t, "flaky-agent", disabled[1])
+}
+
+func TestOption_ResetSubagentPath(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option subagent-path ./inherited
+option reset subagent-path
+option subagent-path ./mine`
+	path := filepath.Join(dir, "crushrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	paths := opts["subagents_paths"].([]any)
+	require.Len(t, paths, 1)
+	require.Equal(t, "./mine", paths[0])
+}
+
 func TestOption_ResetThenReadd(t *testing.T) {
 	t.Parallel()
 

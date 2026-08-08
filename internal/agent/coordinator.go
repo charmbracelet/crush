@@ -517,6 +517,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				if !strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
 					mergedOptions["reasoning_effort"] = reasoningEffort
 				}
+			case "friendli":
+				// Friendli does not accept reasoning_effort; it uses
+				// chat_template_kwargs.enable_thinking instead.
 			default:
 				mergedOptions["reasoning_effort"] = reasoningEffort
 			}
@@ -576,6 +579,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
 			if model.CatwalkCfg.CanReason {
 				extraBody["enable_thinking"] = model.ModelCfg.Think || reasoningEffort != ""
+			}
+
+		case "friendli":
+			extraBody["parse_reasoning"] = true
+			extraBody["include_reasoning"] = true
+			extraBody["chat_template_kwargs"] = map[string]any{
+				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "" && reasoningEffort != "none",
 			}
 		}
 

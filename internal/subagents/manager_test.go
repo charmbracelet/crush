@@ -286,6 +286,42 @@ func TestDiscoverFromConfig_Resolver(t *testing.T) {
 	require.True(t, found, "DiscoverFromConfig must expand $VAR via Resolver")
 }
 
+// TestDiscoverFromConfig_SameDirTwiceReportsBrokenFileOnce verifies that one
+// directory listed under two spellings ($VAR and its expansion, with a
+// trailing slash) is walked once, and that a broken file under a base nested
+// in another is reported once rather than per overlapping walk.
+func TestDiscoverFromConfig_SameDirTwiceReportsBrokenFileOnce(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	nested := filepath.Join(tmp, "nested")
+	require.NoError(t, os.MkdirAll(nested, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "broken.md"), []byte("no frontmatter"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(nested, "broken-nested.md"), []byte("no frontmatter"), 0o644))
+
+	cfg := DiscoveryConfig{
+		SubagentsPaths: []string{"$AGENTS_DIR", tmp + "/", nested},
+		Resolver: func(s string) (string, error) {
+			if s == "$AGENTS_DIR" {
+				return tmp, nil
+			}
+			return s, errors.New("unknown variable")
+		},
+	}
+	require.Equal(t, []string{tmp, nested}, cfg.ResolvePaths())
+
+	_, _, states := DiscoverFromConfig(cfg)
+	paths := make([]string, 0, len(states))
+	for _, s := range states {
+		require.Equal(t, StateError, s.State)
+		paths = append(paths, s.Path)
+	}
+	require.ElementsMatch(t, []string{
+		filepath.ToSlash(filepath.Join(tmp, "broken.md")),
+		filepath.ToSlash(filepath.Join(nested, "broken-nested.md")),
+	}, paths)
+}
+
 func TestDiscoverFromConfig_EmptyPaths(t *testing.T) {
 	t.Parallel()
 

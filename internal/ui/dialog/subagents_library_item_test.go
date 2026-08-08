@@ -105,11 +105,35 @@ func TestLibrarySubagentItem_SelectedStyleReappliedAfterIcon(t *testing.T) {
 	bg := st.Dialog.SelectedItem.GetBackground()
 	icon := ansi.Strip(st.Tool.IconSuccess.String())
 	scr := drawItem(item.Render(60), 60, 2)
-	for _, text := range []string{icon, "●", "my-agent", "user", "does stuff"} {
+	for _, text := range []string{icon, uistyles.SubagentIcon, "my-agent", "user", "does stuff"} {
 		requirePlanHandoffColorEqual(t, bg, screenCell(t, scr, text).Style.Bg)
 	}
 
 	// A truncated row keeps the highlight through the ellipsis.
 	scr = drawItem(item.Render(12), 12, 2)
 	requirePlanHandoffColorEqual(t, bg, screenCell(t, scr, "…").Style.Bg)
+}
+
+// TestLibrarySubagentItem_ErrorIDIsFilePath verifies that a broken definition
+// identifies itself by path. Several files can claim one name — only one wins
+// discovery — so keying rows by name would collapse a broken entry and the
+// valid namesake it shadows into a single list identity.
+func TestLibrarySubagentItem_ErrorIDIsFilePath(t *testing.T) {
+	t.Parallel()
+
+	st := uistyles.CharmtonePantera()
+
+	broken := NewLibrarySubagentItem(&st, LibrarySubagentItemData{
+		Name:     "reviewer",
+		FilePath: "/project/.crush/subagents/reviewer.md",
+		Error:    "unknown model",
+	})
+	valid := NewLibrarySubagentItem(&st, LibrarySubagentItemData{
+		Name:     "reviewer",
+		FilePath: "/home/me/.config/crush/subagents/reviewer.md",
+	})
+
+	require.Equal(t, "/project/.crush/subagents/reviewer.md", broken.ID())
+	require.Equal(t, "reviewer", valid.ID(), "valid rows keep the name as their identity")
+	require.NotEqual(t, valid.ID(), broken.ID())
 }

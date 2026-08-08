@@ -492,7 +492,22 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 	if app.AgentCoordinator == nil {
 		return fmt.Errorf("agent configuration is missing")
 	}
+	// A model, provider or login change can make a subagent's model: valid,
+	// invalid or ambiguous, so rerun discovery against the new config.
+	app.reloadSubagents()
 	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// reloadSubagents reruns subagent discovery from the current config and
+// swaps the Manager's snapshot, publishing a discovery event.
+func (app *App) reloadSubagents() {
+	if app.Subagents == nil {
+		return
+	}
+	all, active, states := subagents.DiscoverFromConfig(
+		subagents.DiscoveryConfigFromStore(app.config, app.Skills),
+	)
+	app.Subagents.Reload(all, active, states)
 }
 
 // restoreModelFromSession reads the last assistant message in the

@@ -200,6 +200,8 @@ var optionSpecs = map[string]optionSpec{
 	"global-context-path": {jsonKey: "global_context_paths", kind: optList},
 	"skill-path":          {jsonKey: "skills_paths", kind: optList},
 	"disable-skill":       {jsonKey: "disabled_skills", kind: optList},
+	"subagent-path":       {jsonKey: "subagents_paths", kind: optList},
+	"disable-subagent":    {jsonKey: "disabled_subagents", kind: optList},
 }
 
 // optionUI implements "option ui <key> <value>" for TUI-specific settings

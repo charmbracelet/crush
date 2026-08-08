@@ -30,17 +30,3 @@ func TestAgentParams_OmitsSubagentTypeWhenAbsent(t *testing.T) {
 	require.Empty(t, params.SubagentType)
 	require.Equal(t, "search for things", params.Prompt)
 }
-
-// AgentParams and AgentDispatchParams must share a wire-compatible shape so
-// historical tool-call inputs decode cleanly under both types.
-func TestAgentParams_WireCompatibleWithDispatchParams(t *testing.T) {
-	t.Parallel()
-
-	wire, err := json.Marshal(AgentDispatchParams{SubagentType: "tester", Prompt: "x"})
-	require.NoError(t, err)
-
-	var ap AgentParams
-	require.NoError(t, json.Unmarshal(wire, &ap))
-	require.Equal(t, "tester", ap.SubagentType)
-	require.Equal(t, "x", ap.Prompt)
-}

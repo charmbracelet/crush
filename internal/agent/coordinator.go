@@ -164,7 +164,11 @@ type coordinator struct {
 	mainAgentName string
 	agents        map[string]SessionAgent
 
-	// Skills discovery results (session-start snapshot).
+	// Skills discovery. skillsMgr is the live source of truth (its snapshot
+	// changes when the skills Library reloads); allSkills/activeSkills are the
+	// construction-time snapshot, used as a fallback when no manager was
+	// supplied (e.g. tests) — mirroring subagentsMgr/activeSubagents below.
+	skillsMgr    *skills.Manager
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
@@ -244,6 +248,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		notify:             opts.Notify,
 		runComplete:        opts.RunComplete,
 		agents:             make(map[string]SessionAgent),
+		skillsMgr:          opts.Skills,
 		allSkills:          allSkills,
 		activeSkills:       activeSkills,
 		skillTracker:       skillTracker,
@@ -831,6 +836,19 @@ func (c *coordinator) activeSubagentsList() []*subagents.Subagent {
 		return c.subagentsMgr.ActiveSubagents()
 	}
 	return c.activeSubagents
+}
+
+// activeSkillsList returns the current active skills. It reads the live manager
+// snapshot when available (so skills Library reloads are reflected without a
+// restart) and falls back to the construction-time snapshot otherwise. Dispatch
+// resolves subagents from the live manager, so its skills view must be live
+// too — otherwise a `skills:` pin silently misses after a reload and, because
+// pinning also suppresses <available_skills>, the subagent runs with no skills.
+func (c *coordinator) activeSkillsList() []*skills.Skill {
+	if c.skillsMgr != nil {
+		return c.skillsMgr.ActiveSkills()
+	}
+	return c.activeSkills
 }
 
 // buildModel constructs a Model from an already-resolved provider, selected
@@ -1638,9 +1656,8 @@ func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model)
 	// serialized loser re-reads the stored value and returns immediately, so
 	// the cost is one redundant wait rather than a duplicate build.
 	c.subagentPromptXMLMu.Lock()
-	unchanged := xml == c.subagentPromptXML
-	c.subagentPromptXMLMu.Unlock()
-	if unchanged {
+	defer c.subagentPromptXMLMu.Unlock()
+	if xml == c.subagentPromptXML {
 		return
 	}
 
@@ -1657,10 +1674,7 @@ func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model)
 	// Not currentAgent(): in plan mode that is the plan agent. c.agents is
 	// fixed at construction, which fails without a coder, so no lock.
 	c.agents[config.AgentCoder].SetSystemPrompt(systemPrompt)
-
-	c.subagentPromptXMLMu.Lock()
 	c.subagentPromptXML = xml
-	c.subagentPromptXMLMu.Unlock()
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {

@@ -893,6 +893,146 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	require.Equal(t, 1, syntheticCount, "expected exactly one synthetic result for the orphaned call")
 }
 
+func TestPreparePrompt_MessageBetweenToolCallAndResult(t *testing.T) {
+	// Anything persisted while a tool call is in flight lands between the call
+	// and its result; the reordering must not depend on what that was.
+	tests := []struct {
+		name        string
+		interleaved message.ContentPart
+	}{
+		{"bang-mode shell command", message.ShellCommand{Command: "make deploy", Output: "deploying"}},
+		{"prompt submitted mid-turn", message.TextContent{Text: "actually, stop"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			sa := testSessionAgent(env, nil, nil, "test prompt")
+			agent := sa.(*sessionAgent)
+
+			ctx := t.Context()
+			sess, err := env.sessions.Create(ctx, "test")
+			require.NoError(t, err)
+
+			_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+				Role: message.Assistant,
+				Parts: []message.ContentPart{
+					message.ToolCall{
+						ID:       "call_in_flight",
+						Name:     "view",
+						Input:    `{"path":"/foo"}`,
+						Finished: true,
+					},
+				},
+			})
+			require.NoError(t, err)
+
+			_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+				Role:  message.User,
+				Parts: []message.ContentPart{tc.interleaved},
+			})
+			require.NoError(t, err)
+
+			_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+				Role:  message.Tool,
+				Parts: []message.ContentPart{message.ToolResult{ToolCallID: "call_in_flight", Name: "view", Content: "file contents"}},
+			})
+			require.NoError(t, err)
+
+			msgs, err := env.messages.List(ctx, sess.ID)
+			require.NoError(t, err)
+
+			history, _ := agent.preparePrompt(msgs, true)
+
+			// The result has to come before the interleaved message: providers
+			// merge consecutive same-role messages into one turn, so leaving it
+			// behind that message also leaves it behind that message's content,
+			// and the call counts as unanswered.
+			roles := make([]fantasy.MessageRole, 0, len(history))
+			for _, msg := range history {
+				roles = append(roles, msg.Role)
+			}
+			require.Equal(t, []fantasy.MessageRole{
+				fantasy.MessageRoleUser, // the todo reminder preparePrompt prepends
+				fantasy.MessageRoleAssistant,
+				fantasy.MessageRoleTool,
+				fantasy.MessageRoleUser,
+			}, roles)
+		})
+	}
+}
+
+func TestPreparePrompt_MultipleCallsKeepOrder(t *testing.T) {
+	// Two calls answered across two turns, each with a message interleaved
+	// before its result. Every result must land behind its own call, and the
+	// relative order of the two turns must be preserved.
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	call := func(id string) message.CreateMessageParams {
+		return message.CreateMessageParams{
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.ToolCall{ID: id, Name: "view", Input: `{"path":"/foo"}`, Finished: true},
+			},
+		}
+	}
+	interleave := func(text string) message.CreateMessageParams {
+		return message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: text}},
+		}
+	}
+	result := func(id string) message.CreateMessageParams {
+		return message.CreateMessageParams{
+			Role:  message.Tool,
+			Parts: []message.ContentPart{message.ToolResult{ToolCallID: id, Name: "view", Content: "file contents"}},
+		}
+	}
+
+	// First turn: call, interleaved message, result. Then the same again.
+	for _, params := range []message.CreateMessageParams{
+		call("call_1"), interleave("first"), result("call_1"),
+		call("call_2"), interleave("second"), result("call_2"),
+	} {
+		_, err = env.messages.Create(ctx, sess.ID, params)
+		require.NoError(t, err)
+	}
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs, true)
+
+	// Each result sits directly behind its own call, and the two turns keep
+	// their original order.
+	roles := make([]fantasy.MessageRole, 0, len(history))
+	for _, msg := range history {
+		roles = append(roles, msg.Role)
+	}
+	require.Equal(t, []fantasy.MessageRole{
+		fantasy.MessageRoleUser, // the todo reminder preparePrompt prepends
+		fantasy.MessageRoleAssistant,
+		fantasy.MessageRoleTool,
+		fantasy.MessageRoleUser,
+		fantasy.MessageRoleAssistant,
+		fantasy.MessageRoleTool,
+		fantasy.MessageRoleUser,
+	}, roles)
+
+	// The result behind each call answers that call, not the other one.
+	firstResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](history[2].Content[0])
+	require.True(t, ok)
+	require.Equal(t, "call_1", firstResult.ToolCallID)
+	secondResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](history[5].Content[0])
+	require.True(t, ok)
+	require.Equal(t, "call_2", secondResult.ToolCallID)
+}
+
 func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, nil, "test prompt")

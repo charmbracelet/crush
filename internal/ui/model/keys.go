@@ -85,6 +85,7 @@ type KeyMap struct {
 	Tab           key.Binding
 	ToggleYolo    key.Binding
 	ParentSession key.Binding
+	Subagents     key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -124,6 +125,10 @@ func DefaultKeyMap() KeyMap {
 		ParentSession: key.NewBinding(
 			key.WithKeys("ctrl+up"),
 			key.WithHelp("ctrl+up", "go to parent session"),
+		),
+		Subagents: key.NewBinding(
+			key.WithKeys("ctrl+x"),
+			key.WithHelp("ctrl+x", "subagents"),
 		),
 	}
 

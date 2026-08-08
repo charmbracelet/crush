@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
@@ -107,4 +108,121 @@ func TestBuildAgent_AsyncBuildFailureStaysOnProvidedGroup(t *testing.T) {
 
 	require.Error(t, buildWg.Wait(), "the provided group must carry the async build failure")
 	require.NoError(t, coord.readyWg.Wait(), "the coordinator-wide readyWg must stay clean so later turns are unaffected")
+}
+
+// TestRefreshCoderSystemPrompt_TracksSubagentReloads verifies that
+// refreshCoderSystemPrompt (called by UpdateModels at the start of every turn)
+// rebuilds the coder system prompt when the active subagent set changes, so
+// the <available_subagents> block tracks Library reloads instead of staying a
+// construction-time snapshot — and that it skips the rebuild when nothing
+// changed.
+func TestRefreshCoderSystemPrompt_TracksSubagentReloads(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	// newOfflineCoordinator clears AllowedTools for cheap/offline buildTools
+	// runs, but that also hides the dispatcher tool, which would make
+	// refreshCoderSystemPrompt omit <available_subagents> regardless of the
+	// active subagent set. Restore just the dispatcher tool here — this test
+	// only calls refreshCoderSystemPrompt directly, never buildTools, so it
+	// never triggers the real (non-offline) dispatcher tool construction.
+	coderCfg := coord.cfg.Config().Agents[config.AgentCoder]
+	coderCfg.AllowedTools = []string{AgentToolName}
+	coord.cfg.Config().Agents[config.AgentCoder] = coderCfg
+
+	sa := coord.currentAgent().(*sessionAgent)
+	initial := sa.systemPrompt.Get()
+	require.NotContains(t, initial, "<available_subagents>", "no subagents configured at construction")
+
+	// A Library reload adds a subagent (activeSubagentsList falls back to
+	// activeSubagents when no manager is wired).
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "late-arrival", Description: "Added after construction."},
+	}
+	coord.refreshCoderSystemPrompt(t.Context(), coord.currentAgent().Model())
+
+	refreshed := sa.systemPrompt.Get()
+	require.Contains(t, refreshed, "<available_subagents>")
+	require.Contains(t, refreshed, "<name>late-arrival</name>")
+
+	// Unchanged set: the prompt must not be rebuilt (pointer-equal string
+	// content is fine — assert stability instead of identity).
+	coord.refreshCoderSystemPrompt(t.Context(), coord.currentAgent().Model())
+	require.Equal(t, refreshed, sa.systemPrompt.Get())
+
+	// Removing the subagent drops the block again.
+	coord.activeSubagents = nil
+	coord.refreshCoderSystemPrompt(t.Context(), coord.currentAgent().Model())
+	require.NotContains(t, sa.systemPrompt.Get(), "<available_subagents>")
+}
+
+// TestRefreshCoderSystemPrompt_InstallsOnCoderAgentInPlanMode verifies that
+// refreshCoderSystemPrompt always installs the rebuilt prompt on the coder
+// agent, even when SetMainAgent has switched the current main agent to plan
+// mode. refreshCoderSystemPrompt builds a CODER-specific prompt (with the
+// <available_subagents> block), so installing it via currentAgent() would
+// overwrite the plan agent's own system prompt whenever a refresh runs while
+// plan mode is active.
+func TestRefreshCoderSystemPrompt_InstallsOnCoderAgentInPlanMode(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	coderCfg := coord.cfg.Config().Agents[config.AgentCoder]
+	coderCfg.AllowedTools = []string{AgentToolName}
+	coord.cfg.Config().Agents[config.AgentCoder] = coderCfg
+
+	planAgent := coord.agents[config.AgentPlan].(*sessionAgent)
+	planPromptBefore := planAgent.systemPrompt.Get()
+
+	require.NoError(t, coord.SetMainAgent(config.AgentPlan))
+
+	// Change the active subagent set so the refresh actually rebuilds the
+	// prompt instead of short-circuiting on "unchanged".
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "late-arrival", Description: "Added after construction."},
+	}
+	coord.refreshCoderSystemPrompt(t.Context(), coord.currentAgent().Model())
+
+	coderAgent := coord.agents[config.AgentCoder].(*sessionAgent)
+	require.Contains(t, coderAgent.systemPrompt.Get(), "<available_subagents>",
+		"the coder agent must receive the rebuilt prompt regardless of which agent is main")
+
+	require.Equal(t, planPromptBefore, planAgent.systemPrompt.Get(),
+		"the plan agent's system prompt must be untouched by a coder prompt refresh")
+}
+
+// TestRefreshCoderSystemPrompt_HidesXMLWhenDispatcherNotAllowed verifies that
+// refreshCoderSystemPrompt omits the <available_subagents> block when the
+// coder agent's AllowedTools does not include the dispatcher tool
+// (AgentToolName) — the same gate shouldExposeDispatcher already applies to
+// the tool itself via buildTools. Without this, the system prompt tells the
+// model it has subagents to dispatch to even though the tool that would let
+// it do so was removed from AllowedTools.
+func TestRefreshCoderSystemPrompt_HidesXMLWhenDispatcherNotAllowed(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	coderCfg := coord.cfg.Config().Agents[config.AgentCoder]
+	require.NotContains(t, coderCfg.AllowedTools, AgentToolName,
+		"precondition: dispatcher tool must not be allowed for this test")
+
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "helper", Description: "A helper subagent."},
+	}
+	coord.refreshCoderSystemPrompt(t.Context(), coord.currentAgent().Model())
+
+	require.Empty(t, coord.subagentPromptXML,
+		"subagent XML must not be baked in when the dispatcher tool isn't exposed to this agent")
+
+	sa := coord.currentAgent().(*sessionAgent)
+	require.NotContains(t, sa.systemPrompt.Get(), "<available_subagents>")
 }

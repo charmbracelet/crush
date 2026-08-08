@@ -81,15 +81,8 @@ type quickStyleOpts struct {
 
 	// Subagent identity palette: eight distinct hues used to tell running
 	// subagents apart in the UI (dots in the running panel, Library rows,
-	// breadcrumbs).
-	subagentRed    color.Color
-	subagentOrange color.Color
-	subagentYellow color.Color
-	subagentGreen  color.Color
-	subagentCyan   color.Color
-	subagentBlue   color.Color
-	subagentPurple color.Color
-	subagentPink   color.Color
+	// breadcrumbs), in SubagentColorNames order.
+	subagentPalette [8]color.Color
 }
 
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
@@ -900,14 +893,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	}
 
 	// Subagent identity palette. See [Styles.SubagentPalette].
-	s.SubagentPalette.Red = o.subagentRed
-	s.SubagentPalette.Orange = o.subagentOrange
-	s.SubagentPalette.Yellow = o.subagentYellow
-	s.SubagentPalette.Green = o.subagentGreen
-	s.SubagentPalette.Cyan = o.subagentCyan
-	s.SubagentPalette.Blue = o.subagentBlue
-	s.SubagentPalette.Purple = o.subagentPurple
-	s.SubagentPalette.Pink = o.subagentPink
+	s.SubagentPalette = o.subagentPalette
 
 	// Shell (bang mode) item styles.
 	s.Messages.ShellBarFocused = lipgloss.NewStyle().PaddingLeft(1).

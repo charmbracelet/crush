@@ -4,6 +4,7 @@ package styles
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/filepicker"
@@ -75,18 +76,10 @@ type Styles struct {
 	ANSI [16]color.Color
 
 	// SubagentPalette holds the eight distinct hues used to identify
-	// subagents in the running panel, Library, and breadcrumbs. Themes set
-	// these from their own palette; see [Styles.SubagentDot].
-	SubagentPalette struct {
-		Red    color.Color
-		Orange color.Color
-		Yellow color.Color
-		Green  color.Color
-		Cyan   color.Color
-		Blue   color.Color
-		Purple color.Color
-		Pink   color.Color
-	}
+	// subagents in the running panel, Library, and breadcrumbs, indexed by
+	// [SubagentColorNames]. Themes set these from their own palette; see
+	// [Styles.SubagentDot].
+	SubagentPalette [8]color.Color
 
 	// Header
 	Header struct {
@@ -653,33 +646,18 @@ func (s *Styles) DialogHelpStyles() help.Styles {
 	return help.Styles(s.Dialog.Help)
 }
 
+// SubagentColorNames are the palette color names accepted in a subagent's
+// `color:` frontmatter, in [Styles.SubagentPalette] order.
+var SubagentColorNames = [8]string{"red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink"}
+
 // SubagentDot returns a colored "●" marker for the named subagent palette
-// color: red, orange, yellow, green, cyan, blue, purple, or pink.
-// Unrecognized names return an unstyled dot.
+// color; see [SubagentColorNames]. Unrecognized names return an unstyled dot.
 func (s *Styles) SubagentDot(name string) string {
-	p := s.SubagentPalette
-	var c color.Color
-	switch name {
-	case "red":
-		c = p.Red
-	case "orange":
-		c = p.Orange
-	case "yellow":
-		c = p.Yellow
-	case "green":
-		c = p.Green
-	case "cyan":
-		c = p.Cyan
-	case "blue":
-		c = p.Blue
-	case "purple":
-		c = p.Purple
-	case "pink":
-		c = p.Pink
-	default:
+	idx := slices.Index(SubagentColorNames[:], name)
+	if idx < 0 {
 		return SubagentIcon
 	}
-	return lipgloss.NewStyle().Foreground(c).SetString(SubagentIcon).String()
+	return lipgloss.NewStyle().Foreground(s.SubagentPalette[idx]).SetString(SubagentIcon).String()
 }
 
 // hex returns a pointer to the "#rrggbb" representation of c. It's used to

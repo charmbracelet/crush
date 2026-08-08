@@ -86,3 +86,24 @@ func TestSubagentsInfo_TruncatesAtMaxItems(t *testing.T) {
 
 	require.Contains(t, plain, "…and 2 more")
 }
+
+// TestSubagentsInfo_ShowsNonRunningStatus verifies that a live status other
+// than "running" (e.g. retrying during a credential refresh) is surfaced in
+// the panel, while plain running entries show no status suffix.
+func TestSubagentsInfo_ShowsNonRunningStatus(t *testing.T) {
+	t.Parallel()
+
+	st := uistyles.CharmtonePantera()
+	m := &UI{
+		com: &common.Common{Styles: &st},
+		runningSubagents: []workspace.RunningSubagentInfo{
+			{Name: "busy-agent", Color: "red", Model: "m", Status: "retrying"},
+			{Name: "calm-agent", Color: "blue", Model: "m", Status: "running"},
+		},
+	}
+
+	plain := stripANSI(m.subagentsInfo(60, 10, false))
+
+	require.Contains(t, plain, "(retrying)")
+	require.NotContains(t, plain, "(running)")
+}

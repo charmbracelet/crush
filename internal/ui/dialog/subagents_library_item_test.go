@@ -66,6 +66,27 @@ func TestLibrarySubagentItem_DisabledItemRendered(t *testing.T) {
 	require.Contains(t, plain, "my-agent")
 }
 
+// TestLibrarySubagentItem_ErrorRendered verifies that a broken definition
+// renders its discovery diagnostic in place of the description.
+func TestLibrarySubagentItem_ErrorRendered(t *testing.T) {
+	t.Parallel()
+
+	st := uistyles.CharmtonePantera()
+	item := NewLibrarySubagentItem(&st, LibrarySubagentItemData{
+		Name:        "broken-agent",
+		Description: "does stuff",
+		Scope:       "user",
+		Error:       "unclosed frontmatter",
+	})
+
+	rendered := item.Render(80)
+	plain := stripANSIDialog(rendered)
+
+	require.Contains(t, plain, "broken-agent")
+	require.Contains(t, plain, "unclosed frontmatter")
+	require.NotContains(t, plain, "does stuff")
+}
+
 // TestLibrarySubagentItem_SelectedStyleReappliedAfterIcon verifies that the
 // selected-row highlight survives past the status icon and dot. Both are
 // pre-styled segments ending in an SGR reset, so text concatenated raw after

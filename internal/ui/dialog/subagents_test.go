@@ -228,6 +228,46 @@ func TestSubagentsDialog_ToggleLibraryItem(t *testing.T) {
 	require.False(t, ws.disabledCalls[1].disabled, "second toggle must re-enable")
 }
 
+// TestSubagentsDialog_BrokenItemCannotToggle verifies that space on a library
+// entry whose definition failed discovery is a no-op: there is no active
+// subagent to enable or disable.
+func TestSubagentsDialog_BrokenItemCannotToggle(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "broken-agent", Scope: "user", Error: "unclosed frontmatter"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	action := d.HandleMsg(keyMsg(' '))
+	require.Nil(t, action, "toggling a broken entry must be a no-op")
+	require.Empty(t, ws.disabledCalls)
+}
+
+// TestSubagentsDialog_BrokenItemCannotDelete verifies that d on a broken
+// library entry never enters confirm-delete mode, even when user-scoped.
+func TestSubagentsDialog_BrokenItemCannotDelete(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "broken-agent", Scope: "user", Error: "unclosed frontmatter"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	d.HandleMsg(keyMsg('d'))
+	require.False(t, d.IsConfirmingDelete(), "broken entries must not be deletable")
+}
+
 // TestSubagentsDialog_RuntimeEventRefreshesRunningTab verifies that a
 // RuntimeEvent for the dialog's own parent session rebuilds the running tab
 // from a fresh call to com.Workspace.RunningSubagents, reflecting entries added
@@ -420,6 +460,48 @@ func TestSubagentsDialog_LibraryEventPreservesSelection(t *testing.T) {
 	selected, ok := d.libraryList.SelectedItem().(ListItem)
 	require.True(t, ok, "an item should remain selected after refresh")
 	require.Equal(t, "agent-b", selected.ID(), "selection should follow the same logical item across a reorder")
+}
+
+// TestSubagentsDialog_LibraryEventPreservesSelection_ErrorRow verifies that
+// selection tracking across a refresh also works for an error-state item,
+// whose ID is its file path rather than its name.
+func TestSubagentsDialog_LibraryEventPreservesSelection_ErrorRow(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "agent-a", Scope: "user"},
+			{Name: "broken", FilePath: "/some/path/broken.md", Error: "parse error", Scope: "user"},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	var brokenIdx int
+	for i, item := range d.libraryItems {
+		if item.ID() == "/some/path/broken.md" {
+			brokenIdx = i
+			break
+		}
+	}
+	d.libraryList.SetSelected(brokenIdx)
+
+	// Insert a new item ahead of the broken one so its post-refresh index is
+	// not 0. This rules out the buggy code's index-0 fallback coincidentally
+	// matching the expected item.
+	ws.defs = []workspace.SubagentDefInfo{
+		{Name: "agent-a", Scope: "user"},
+		{Name: "agent-c", Scope: "user"},
+		{Name: "broken", FilePath: "/some/path/broken.md", Error: "parse error", Scope: "user"},
+	}
+
+	d.HandleMsg(pubsub.Event[subagents.Event]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: subagents.Event{},
+	})
+
+	selected, ok := d.libraryList.SelectedItem().(ListItem)
+	require.True(t, ok, "an item should remain selected after refresh")
+	require.Equal(t, "/some/path/broken.md", selected.ID(), "selection should follow the same error-state item across a reorder")
 }
 
 // stripANSIDialog strips ANSI escape sequences from a string for plain-text

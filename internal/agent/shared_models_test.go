@@ -74,7 +74,7 @@ func TestSubAgentRetriesWithRenewedCredential(t *testing.T) {
 	}
 	p, err := taskPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
-	sub, err := coord.buildAgent(t.Context(), p, cfg.Config().Agents[config.AgentTask], true, "")
+	sub, err := coord.buildAgent(t.Context(), p, cfg.Config().Agents[config.AgentTask], true, subagentModel{})
 	require.NoError(t, err)
 	require.NoError(t, coord.readyWg.Wait())
 

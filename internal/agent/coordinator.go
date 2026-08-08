@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -176,11 +177,21 @@ type coordinator struct {
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
 
-	// Subagents discovery results (session-start snapshot).
+	// Subagents discovery. subagentsMgr is the live source of truth (its
+	// snapshot changes when the Library reloads); activeSubagents is a
+	// fallback snapshot used only when no manager was supplied (e.g. tests).
+	subagentsMgr    *subagents.Manager
 	activeSubagents []*subagents.Subagent
 
 	// runtime tracks which sub-agents are currently running.
 	runtime *subagents.Runtime
+
+	// subagentModelCache memoizes resolveModelByID results. rebuildModels
+	// clears it through resetSubagentModelCache, which also bumps
+	// subagentModelCacheGen so an in-flight build cannot store a stale model.
+	subagentModelCache    map[subagentModelKey]Model
+	subagentModelCacheGen uint64
+	subagentModelCacheMu  sync.RWMutex
 
 	readyWg errgroup.Group
 }
@@ -220,23 +231,25 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          opts.Config,
-		sessions:     opts.Sessions,
-		messages:     opts.Messages,
-		permissions:  opts.Permissions,
-		questions:    opts.Questions,
-		history:      opts.History,
-		filetracker:  opts.FileTracker,
-		lspManager:   opts.LSPManager,
-		notify:       opts.Notify,
-		runComplete:  opts.RunComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
-		interactive:  opts.Interactive,
+		cfg:                opts.Config,
+		sessions:           opts.Sessions,
+		messages:           opts.Messages,
+		permissions:        opts.Permissions,
+		questions:          opts.Questions,
+		history:            opts.History,
+		filetracker:        opts.FileTracker,
+		lspManager:         opts.LSPManager,
+		notify:             opts.Notify,
+		runComplete:        opts.RunComplete,
+		agents:             make(map[string]SessionAgent),
+		allSkills:          allSkills,
+		activeSkills:       activeSkills,
+		skillTracker:       skillTracker,
+		interactive:        opts.Interactive,
+		subagentModelCache: make(map[subagentModelKey]Model),
 	}
 
+	c.subagentsMgr = opts.SubagentsMgr
 	if opts.SubagentsMgr != nil {
 		c.activeSubagents = opts.SubagentsMgr.ActiveSubagents()
 	}
@@ -252,7 +265,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, coderPrompt, agentCfg, false, "")
+	agent, err := c.buildAgent(ctx, coderPrompt, agentCfg, false, subagentModel{})
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +281,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	planAgent, err := c.buildAgent(ctx, planSystemPrompt, planCfg, false, "")
+	planAgent, err := c.buildAgent(ctx, planSystemPrompt, planCfg, false, subagentModel{})
 	if err != nil {
 		return nil, err
 	}
@@ -811,41 +824,146 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-// applyEffortToBuiltModels returns copies of large and small with the given
-// effort level applied to the large model's config. The small model is returned
-// unchanged. It is a no-op when effort is empty.
-func applyEffortToBuiltModels(effort string, large, small Model) (Model, Model) {
-	if effort == "" {
-		return large, small
+// activeSubagentsList returns the current active subagents. It reads the live
+// manager snapshot when available (so Library reloads are reflected without a
+// restart) and falls back to the construction-time snapshot otherwise.
+func (c *coordinator) activeSubagentsList() []*subagents.Subagent {
+	if c.subagentsMgr != nil {
+		return c.subagentsMgr.ActiveSubagents()
 	}
-	large.ModelCfg = subagents.ApplyEffortToModel(effort, large.ModelCfg, large.CatwalkCfg)
-	return large, small
+	return c.activeSubagents
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, effort string) (SessionAgent, error) {
+// resolveModelByID finds the provider that offers modelID and builds a Model
+// for it. It lets a subagent run on the specific model named in its `model:`
+// frontmatter (validated at discovery via Config.ValidateModel). When
+// providerOverride is non-empty only that provider is searched.
+//
+// Results are memoized in subagentModelCache until the shared models are next
+// rebuilt (see resetSubagentModelCache), so a refreshed credential is picked up
+// by the next call.
+func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
+	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent}
+
+	c.subagentModelCacheMu.RLock()
+	m, ok := c.subagentModelCache[key]
+	gen := c.subagentModelCacheGen
+	c.subagentModelCacheMu.RUnlock()
+	if ok {
+		return m, nil
+	}
+
+	providerCfg, catwalkModel, err := c.cfg.Config().FindModelProvider(providerOverride, modelID)
+	if err != nil {
+		return Model{}, err
+	}
+	selModel := config.SelectedModel{Provider: providerCfg.ID, Model: modelID}
+	provider, err := c.buildProvider(providerCfg, selModel, isSubAgent)
+	if err != nil {
+		return Model{}, err
+	}
+	m, err = c.assembleModel(ctx, provider, providerCfg, selModel, catwalkModel)
+	if err != nil {
+		return Model{}, err
+	}
+
+	// Skip the write when a rebuild cleared the cache while this one was
+	// building from the older credential.
+	c.subagentModelCacheMu.Lock()
+	if c.subagentModelCache != nil && c.subagentModelCacheGen == gen {
+		c.subagentModelCache[key] = m
+	}
+	c.subagentModelCacheMu.Unlock()
+	return m, nil
+}
+
+// resetSubagentModelCache drops every memoized subagent model so the next
+// resolveModelByID builds from the live config and credentials.
+func (c *coordinator) resetSubagentModelCache() {
+	c.subagentModelCacheMu.Lock()
+	c.subagentModelCache = make(map[subagentModelKey]Model)
+	c.subagentModelCacheGen++
+	c.subagentModelCacheMu.Unlock()
+}
+
+// subagentModels returns the model source for an agent built from sm, layered
+// on base (the shared main or sub-agent models). sm.Model is "" or "large"
+// (the shared large), "small" (the shared small), or a specific model id. A
+// specific model is re-resolved on every read, which is a cache hit until the
+// shared models are rebuilt, so it follows credential refreshes like the shared
+// ones do. If a rebuild fails the last good build is kept.
+func (c *coordinator) subagentModels(ctx context.Context, base func() ModelSet, sm subagentModel, isSubAgent bool) (func() ModelSet, error) {
+	switch sm.Model {
+	case "", "large":
+		return base, nil
+	case "small":
+		return func() ModelSet {
+			set := base()
+			set.Large = set.Small
+			return set
+		}, nil
+	}
+
+	initial, err := c.resolveModelByID(ctx, sm.Model, sm.Provider, isSubAgent)
+	if err != nil {
+		return nil, err
+	}
+	var last atomic.Pointer[Model]
+	last.Store(&initial)
+	// The func outlives ctx, which may be a short-lived request context.
+	loadCtx := context.WithoutCancel(ctx)
+	return func() ModelSet {
+		set := base()
+		m, err := c.resolveModelByID(loadCtx, sm.Model, sm.Provider, isSubAgent)
+		if err != nil {
+			slog.Warn("Failed to rebuild subagent model, keeping the last build",
+				"model", sm.Model, "error", err)
+			set.Large = *last.Load()
+			return set
+		}
+		last.Store(&m)
+		set.Large = m
+		return set
+	}, nil
+}
+
+// buildAgent constructs a SessionAgent. sm carries the model-selection fields
+// from subagent frontmatter (zero value for the coder/task agents); see
+// subagentModels. sm.Effort is applied to the resolved large model on every
+// read.
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel) (SessionAgent, error) {
 	if c.models.Get().large.Model == nil {
 		if err := c.rebuildModels(ctx); err != nil {
 			return nil, err
 		}
 	}
-	models := c.mainModels
+	base := c.mainModels
 	if isSubAgent {
-		models = c.subAgentModels
+		base = c.subAgentModels
 	}
-	if effort != "" {
+	models, err := c.subagentModels(ctx, base, sm, isSubAgent)
+	if err != nil {
+		return nil, err
+	}
+	primary := models().Large
+
+	if subagents.EffortIgnored(sm.Effort, primary.CatwalkCfg) {
+		slog.Warn("Subagent effort ignored: model does not support reasoning",
+			"model", primary.ModelCfg.Model, "effort", sm.Effort)
+	}
+	if sm.Effort != "" {
 		shared := models
 		models = func() ModelSet {
 			set := shared()
-			set.Large, set.Small = applyEffortToBuiltModels(effort, set.Large, set.Small)
+			set.Large.ModelCfg = subagents.ApplyEffortToModel(sm.Effort, set.Large.ModelCfg, set.Large.CatwalkCfg)
 			return set
 		}
 	}
-	large := models().Large
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	primaryProviderCfg, _ := c.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
 		Models:               models,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
@@ -871,7 +989,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	initCtx := context.WithoutCancel(ctx)
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := prompt.Build(initCtx, primary.Model.Provider(), primary.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
@@ -880,7 +998,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		tools, err := c.buildTools(initCtx, agent, isSubAgent)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent, primary.CatwalkCfg.ID)
 		if err != nil {
 			return err
 		}
@@ -901,7 +1019,10 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 	return slices.Contains(allowed, AgentToolName)
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
+// buildTools assembles the agent's tool set. modelID is the catwalk id of the
+// model the agent actually runs on (the resolved primary), used for
+// model-specific tool guidance such as the bash tool description.
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, modelID string) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
 		agentTool, err := c.agentTool(ctx, agent)
@@ -917,14 +1038,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			return nil, err
 		}
 		allTools = append(allTools, agenticFetchTool)
-	}
-
-	// Get the model name for the agent
-	modelID := ""
-	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
-		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
-			modelID = model.ID
-		}
 	}
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
@@ -1051,6 +1164,12 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 		return Model{}, fmt.Errorf("%s %w", slot, errModelNotFound)
 	}
 
+	return c.assembleModel(ctx, provider, providerCfg, modelCfg, *catwalkModel)
+}
+
+// assembleModel turns a built provider and its resolved config into a Model.
+// Shared by buildModel and resolveModelByID.
+func (c *coordinator) assembleModel(ctx context.Context, provider fantasy.Provider, providerCfg config.ProviderConfig, modelCfg config.SelectedModel, catwalkModel catwalk.Model) (Model, error) {
 	modelID := modelCfg.Model
 	if modelCfg.Provider == openrouter.Name && isExactoSupported(modelID) {
 		modelID += ":exacto"
@@ -1073,7 +1192,7 @@ func (c *coordinator) buildModel(ctx context.Context, slot config.SelectedModelT
 
 	return Model{
 		Model:        languageModel,
-		CatwalkCfg:   *catwalkModel,
+		CatwalkCfg:   catwalkModel,
 		ModelCfg:     modelCfg,
 		FlatRate:     providerCfg.FlatRate,
 		OAuth:        providerCfg.OAuthToken != nil,
@@ -1485,7 +1604,7 @@ func (c *coordinator) updateAgentModels(ctx context.Context, agent SessionAgent,
 		return fmt.Errorf("%w: %s", errMainAgentNotFound, name)
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false)
+	tools, err := c.buildTools(ctx, agentCfg, false, c.mainModels().Large.CatwalkCfg.ID)
 	if err != nil {
 		return err
 	}
@@ -1660,6 +1779,21 @@ func (c *coordinator) askToSignInAgain(err error, model Model) {
 	})
 }
 
+// subagentModel carries the model-selection fields from subagent frontmatter.
+// The zero value selects the global large model.
+type subagentModel struct {
+	Effort   string
+	Model    string
+	Provider string
+}
+
+// subagentModelKey is the cache key for resolveModelByID results.
+type subagentModelKey struct {
+	modelID    string
+	provider   string
+	isSubAgent bool
+}
+
 // subAgentParams holds the parameters for running a sub-agent.
 type subAgentParams struct {
 	Agent          SessionAgent
@@ -1718,7 +1852,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
-		return fantasy.ToolResponse{}, errModelProviderNotConfigured
+		// A tool-error response, not a bare error: the provider set can
+		// change under a running dispatch (config reload), and a bare error
+		// would abort the whole parent turn where the parent agent could
+		// otherwise report the failure and continue.
+		finalStatus = subagents.StatusFailed
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to run subagent: %s", errModelProviderNotConfigured)), nil
 	}
 
 	// Surface a "retrying" status on the subagent while OnAuthRefresh

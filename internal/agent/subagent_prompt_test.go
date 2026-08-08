@@ -221,7 +221,10 @@ func TestSubagentPrompt_Build_RendersBody(t *testing.T) {
 	p, err := subagentPrompt(sa, nil)
 	require.NoError(t, err)
 
-	got, err := p.Build(context.Background(), "p", "m", nil)
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
 	require.NoError(t, err)
 	require.Contains(t, got, body)
 }
@@ -237,7 +240,10 @@ func TestSubagentPrompt_Build_RendersPreloadedSkillsXML(t *testing.T) {
 	p, err := subagentPrompt(sa, []*skills.Skill{sk})
 	require.NoError(t, err)
 
-	got, err := p.Build(context.Background(), "p", "m", nil)
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
 	require.NoError(t, err)
 	require.Contains(t, got, "<loaded_skill>")
 	require.Contains(t, got, "preload-me")
@@ -254,7 +260,10 @@ func TestSubagentPrompt_Build_OmitsPreloadWhenEmpty(t *testing.T) {
 	p, err := subagentPrompt(sa, nil)
 	require.NoError(t, err)
 
-	got, err := p.Build(context.Background(), "p", "m", nil)
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	got, err := p.Build(context.Background(), "p", "m", store)
 	require.NoError(t, err)
 	require.NotContains(t, got, "<loaded_skill>")
 }

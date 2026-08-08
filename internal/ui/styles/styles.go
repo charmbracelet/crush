@@ -47,6 +47,8 @@ const (
 	SkillIcon  string = "▲"
 	RemoveIcon string = "✕"
 
+	SubagentIcon string = "●"
+
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
 
@@ -71,6 +73,20 @@ type Styles struct {
 	// Crush's background. Defining them here keeps output readable and
 	// on-brand regardless of terminal configuration.
 	ANSI [16]color.Color
+
+	// SubagentPalette holds the eight distinct hues used to identify
+	// subagents in the running panel, Library, and breadcrumbs. Themes set
+	// these from their own palette; see [Styles.SubagentDot].
+	SubagentPalette struct {
+		Red    color.Color
+		Orange color.Color
+		Yellow color.Color
+		Green  color.Color
+		Cyan   color.Color
+		Blue   color.Color
+		Purple color.Color
+		Pink   color.Color
+	}
 
 	// Header
 	Header struct {
@@ -635,6 +651,35 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 // DialogHelpStyles returns the styles for dialog help.
 func (s *Styles) DialogHelpStyles() help.Styles {
 	return help.Styles(s.Dialog.Help)
+}
+
+// SubagentDot returns a colored "●" marker for the named subagent palette
+// color: red, orange, yellow, green, cyan, blue, purple, or pink.
+// Unrecognized names return an unstyled dot.
+func (s *Styles) SubagentDot(name string) string {
+	p := s.SubagentPalette
+	var c color.Color
+	switch name {
+	case "red":
+		c = p.Red
+	case "orange":
+		c = p.Orange
+	case "yellow":
+		c = p.Yellow
+	case "green":
+		c = p.Green
+	case "cyan":
+		c = p.Cyan
+	case "blue":
+		c = p.Blue
+	case "purple":
+		c = p.Purple
+	case "pink":
+		c = p.Pink
+	default:
+		return SubagentIcon
+	}
+	return lipgloss.NewStyle().Foreground(c).SetString(SubagentIcon).String()
 }
 
 // hex returns a pointer to the "#rrggbb" representation of c. It's used to

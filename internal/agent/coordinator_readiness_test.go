@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -28,9 +27,9 @@ import (
 //
 // The fix detaches the readiness work from the caller context via
 // context.WithoutCancel, so canceling the context that triggered the build no
-// longer poisons readyWg. Here we arm MCP init so WaitForInit blocks, build an
-// agent with a cancelable context, cancel it, and require that readyWg keeps
-// waiting for init instead of failing with context.Canceled.
+// longer poisons readyWg. Here we install a blocking waitForInit seam, build
+// an agent with a cancelable context, cancel it, and require that readyWg
+// keeps waiting for init instead of failing with context.Canceled.
 func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	env := testEnv(t)
 
@@ -60,17 +59,21 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		permissions: env.permissions,
 		history:     env.history,
 		filetracker: *env.filetracker,
+		// Simulate a slow MCP initialization through the coordinator's
+		// waitForInit seam instead of arming the mcp package's process-wide
+		// init gate: the armed flag would otherwise leak into later tests
+		// that build a coordinator and block forever on a gate this test
+		// never completes. buildAgent detaches the readiness context from
+		// the caller via context.WithoutCancel, so this wait stays blocked
+		// for the whole assertion, mirroring an MCP server that never
+		// finishes initializing. The goroutine parked here is leaked; the
+		// agent package's TestMain does not enforce goleak, so that is
+		// harmless.
+		waitForInit: func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
 	}
-
-	// Arm the MCP init gate so buildAgent's readiness goroutine blocks in
-	// WaitForInit. We never complete init, so the goroutine that observes this
-	// specific call stays parked; the agent package's TestMain does not
-	// enforce goleak, so that one leaked goroutine is harmless. The armed flag
-	// itself is reset in cleanup so it doesn't leak into other tests in this
-	// package that build a coordinator and would otherwise block forever on a
-	// gate this test never completes.
-	mcp.ArmInit()
-	t.Cleanup(mcp.ResetInitStateForTests)
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)

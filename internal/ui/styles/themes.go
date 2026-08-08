@@ -86,6 +86,16 @@ func CharmtonePantera() Styles {
 		ansiBrightMagenta: charmtone.Blush,
 		ansiBrightCyan:    charmtone.Sardine,
 		ansiBrightWhite:   charmtone.Salt,
+
+		// Subagent identity palette.
+		subagentRed:    charmtone.Cherry,
+		subagentOrange: charmtone.Tang,
+		subagentYellow: charmtone.Citron,
+		subagentGreen:  charmtone.Julep,
+		subagentCyan:   charmtone.Guppy,
+		subagentBlue:   charmtone.Sapphire,
+		subagentPurple: charmtone.Mauve,
+		subagentPink:   charmtone.Flamingo,
 	})
 
 	// Bang ! prompt overrides - use Salt/Hazy/Larple colors.

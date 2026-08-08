@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,10 @@ func TestCoderPrompt_RendersAvailableSubagents(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 
 	require.Contains(t, systemPrompt, "<available_subagents>")
@@ -45,7 +49,10 @@ func TestCoderPrompt_OmitsAvailableSubagentsWhenEmpty(t *testing.T) {
 	p, err := coderPrompt()
 	require.NoError(t, err)
 
-	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 
 	require.NotContains(t, systemPrompt, "<available_subagents>")

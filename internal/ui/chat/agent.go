@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -127,7 +128,7 @@ type AgentToolRenderContext struct {
 // "Agent" string for the default task agent, or "Agent: <name>" when a
 // specialized subagent has been dispatched.
 func agentRenderLabel(subagentType string) string {
-	if subagentType == "" || subagentType == "task" {
+	if subagentType == "" || subagentType == config.AgentTask {
 		return "Agent"
 	}
 	return "Agent: " + subagentType

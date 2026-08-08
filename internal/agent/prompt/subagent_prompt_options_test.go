@@ -39,14 +39,15 @@ func TestWithSubagentBody(t *testing.T) {
 
 	const body = "You are a specialist agent that does things."
 
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
 	// Use a template that renders SubagentBody so we can observe the value
 	// without needing access to the unexported promptData method.
 	p, err := NewPrompt("test", `{{.SubagentBody}}`, WithSubagentBody(body))
 	require.NoError(t, err)
 
-	// A nil store makes promptData return a minimal PromptDat (it otherwise
-	// needs store.WorkingDir()), which still carries the subagent option fields.
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, body, result)
 }
@@ -58,10 +59,13 @@ func TestWithPreloadedSkillsXML(t *testing.T) {
 
 	const xml = "<loaded_skill>\n  <name>my-skill</name>\n</loaded_skill>"
 
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
 	p, err := NewPrompt("test", `{{.PreloadedSkillsXML}}`, WithPreloadedSkillsXML(xml))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, xml, result)
 }
@@ -78,10 +82,14 @@ func TestSubagentPromptOptions_BothFieldsInTemplate(t *testing.T) {
 	)
 
 	tmpl := `{{.SubagentBody}}|{{.PreloadedSkillsXML}}`
+
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
 	p, err := NewPrompt("test", tmpl, WithSubagentBody(body), WithPreloadedSkillsXML(xml))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, body+"|"+xml, result)
 }
@@ -92,10 +100,14 @@ func TestSubagentPromptOptions_DefaultsToEmpty(t *testing.T) {
 	t.Parallel()
 
 	tmpl := `body=«{{.SubagentBody}}»xml=«{{.PreloadedSkillsXML}}»`
+
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
 	p, err := NewPrompt("test", tmpl)
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, "body=«»xml=«»", result)
 }
@@ -108,7 +120,10 @@ func TestWithSubagentBody_EmptyString(t *testing.T) {
 	p, err := NewPrompt("test", `{{.SubagentBody}}`, WithSubagentBody(""))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, "", result)
 }
@@ -121,7 +136,10 @@ func TestWithPreloadedSkillsXML_EmptyString(t *testing.T) {
 	p, err := NewPrompt("test", `{{.PreloadedSkillsXML}}`, WithPreloadedSkillsXML(""))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, "", result)
 }
@@ -134,10 +152,13 @@ func TestWithAvailableSubagentsXML(t *testing.T) {
 
 	const xml = "<available_subagents>\n  <subagent>\n    <name>my-agent</name>\n  </subagent>\n</available_subagents>"
 
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
 	p, err := NewPrompt("test", `{{.AvailSubagentXML}}`, WithAvailableSubagentsXML(xml))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, xml, result)
 }
@@ -150,7 +171,10 @@ func TestWithAvailableSubagentsXML_EmptyString(t *testing.T) {
 	p, err := NewPrompt("test", `{{.AvailSubagentXML}}`, WithAvailableSubagentsXML(""))
 	require.NoError(t, err)
 
-	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	result, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
 	require.Equal(t, "", result)
 }

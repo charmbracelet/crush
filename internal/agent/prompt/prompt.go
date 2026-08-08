@@ -214,16 +214,6 @@ func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]Co
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
-	if store == nil {
-		return PromptDat{
-			Provider:           provider,
-			Model:              model,
-			SubagentBody:       p.subagentBody,
-			PreloadedSkillsXML: p.preloadedSkillsXML,
-			AvailSubagentXML:   p.availSubagentXML,
-		}, nil
-	}
-
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 

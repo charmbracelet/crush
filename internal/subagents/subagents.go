@@ -122,6 +122,15 @@ const (
 	PermissionModeBypassPermissions = "bypassPermissions"
 )
 
+// Model aliases accepted in the `model:` frontmatter field. They map a
+// subagent onto the globally selected model of the same name instead of a
+// specific provider model id, and deliberately match the
+// config.SelectedModelType values.
+const (
+	ModelAliasLarge = string(config.SelectedModelTypeLarge)
+	ModelAliasSmall = string(config.SelectedModelTypeSmall)
+)
+
 // ToConfigAgent converts the Subagent into a config.Agent by applying the
 // subagent's tool restrictions and model preference on top of the provided
 // base agent configuration.
@@ -218,15 +227,15 @@ func Parse(path string) (*Subagent, error) {
 }
 
 // ValidateAgainst runs Validate plus model- and skill-resolution checks. When
-// isKnownModel is non-nil and Model is a non-empty value other than
-// "large"/"small", the resolver must return true or validation fails. When
-// isKnownSkill is non-nil, every name in Skills must resolve to a known skill.
-// A nil resolver skips the corresponding check (used when the caller has no
-// config or skills context).
+// isKnownModel is non-nil and Model is a non-empty value other than the
+// "large"/"small" aliases, the resolver must return true or validation fails.
+// When isKnownSkill is non-nil, every name in Skills must resolve to a known
+// skill. A nil resolver skips the corresponding check (used when the caller
+// has no config or skills context).
 func (s *Subagent) ValidateAgainst(isKnownModel func(provider, model string) bool, isKnownSkill func(name string) bool) error {
 	errs := []error{s.Validate()}
-	if isKnownModel != nil && s.Model != "" && s.Model != "large" && s.Model != "small" && !isKnownModel(s.Provider, s.Model) {
-		errs = append(errs, fmt.Errorf("model %q is not a known model id; use \"large\", \"small\", or a valid provider model id", s.Model))
+	if isKnownModel != nil && s.Model != "" && s.Model != ModelAliasLarge && s.Model != ModelAliasSmall && !isKnownModel(s.Provider, s.Model) {
+		errs = append(errs, fmt.Errorf("model %q is not a known model id; use %q, %q, or a valid provider model id", s.Model, ModelAliasLarge, ModelAliasSmall))
 	}
 	if isKnownSkill != nil {
 		for _, name := range s.Skills {
@@ -334,8 +343,8 @@ func (s *Subagent) Validate() error {
 		errs = append(errs, fmt.Errorf("color %q is not valid; use one of: red, orange, yellow, green, cyan, blue, purple, pink", s.Color))
 	}
 
-	if s.Provider != "" && (s.Model == "" || s.Model == "large" || s.Model == "small") {
-		errs = append(errs, fmt.Errorf("provider requires a specific model id; use a valid provider model id (not empty, %q, or %q)", "large", "small"))
+	if s.Provider != "" && (s.Model == "" || s.Model == ModelAliasLarge || s.Model == ModelAliasSmall) {
+		errs = append(errs, fmt.Errorf("provider requires a specific model id; use a valid provider model id (not empty, %q, or %q)", ModelAliasLarge, ModelAliasSmall))
 	}
 
 	return errors.Join(errs...)

@@ -37,7 +37,7 @@ func (m *UI) subagentsInfo(width, maxItems int, isSection bool) string {
 			desc = fmt.Sprintf("%s %s", e.Model, t.Resource.AdditionalText.Render(fmt.Sprintf("%d tok", tokens)))
 		}
 		items = append(items, subagentStatusItem{
-			icon:        styles.SubagentDot(e.Color),
+			icon:        t.SubagentDot(e.Color),
 			name:        e.Name,
 			title:       t.Resource.Name.Render(e.Name),
 			description: desc,

@@ -87,7 +87,7 @@ func (l *LibrarySubagentItem) SetMatch(m fuzzy.Match) {
 // name, and scope badge; the second line shows the description, or the
 // discovery diagnostic for broken definitions.
 func (l *LibrarySubagentItem) Render(width int) string {
-	dot := styles.SubagentDot(l.data.Color)
+	dot := l.t.SubagentDot(l.data.Color)
 
 	status := l.t.Tool.IconSuccess.String()
 	if l.data.Disabled || l.data.Error != "" {

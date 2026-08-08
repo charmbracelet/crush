@@ -1,6 +1,8 @@
 package styles
 
 import (
+	"image/color"
+
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -86,6 +88,19 @@ func CharmtonePantera() Styles {
 		ansiBrightMagenta: charmtone.Blush,
 		ansiBrightCyan:    charmtone.Sardine,
 		ansiBrightWhite:   charmtone.Salt,
+
+		// Subagent identity palette, in SubagentColorNames order:
+		// red, orange, yellow, green, cyan, blue, purple, pink.
+		subagentPalette: [8]color.Color{
+			charmtone.Cherry,
+			charmtone.Tang,
+			charmtone.Citron,
+			charmtone.Julep,
+			charmtone.Guppy,
+			charmtone.Sapphire,
+			charmtone.Mauve,
+			charmtone.Flamingo,
+		},
 	})
 
 	// Bang ! prompt overrides - use Salt/Hazy/Larple colors.

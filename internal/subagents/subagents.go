@@ -30,20 +30,21 @@ const (
 // hyphens, no leading or trailing hyphens, no consecutive hyphens.
 var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
-// reservedNames is the set of names that may not be used for subagents.
-var reservedNames = map[string]bool{
-	"agent": true,
-	"task":  true,
-	"coder": true,
-	"bash":  true,
-	"view":  true,
-	"edit":  true,
-	"grep":  true,
-	"glob":  true,
-	"write": true,
-	"ls":    true,
-	"mcp":   true,
-}
+// reservedNames is the set of names that may not be used for subagents: the
+// built-in agent names, every built-in tool name (so a subagent can shadow
+// neither in prompts nor dispatch), and "mcp". Both source lists are fixed,
+// so the set is built once.
+var reservedNames = func() map[string]bool {
+	set := map[string]bool{
+		"coder": true,
+		"task":  true,
+		"mcp":   true,
+	}
+	for _, name := range config.AllToolNames() {
+		set[name] = true
+	}
+	return set
+}()
 
 // ToolList is a []string that YAML-unmarshals from either a comma-separated
 // scalar string ("view, grep, bash") or a YAML sequence (["view","grep"]).
@@ -85,8 +86,12 @@ func (t *ToolList) UnmarshalYAML(value *yaml.Node) error {
 		}
 		*t = result
 		return nil
+	case yaml.AliasNode:
+		return t.UnmarshalYAML(value.Alias)
 	default:
-		return nil
+		// A mapping (or other structure) is a user error; treating it as
+		// absent would silently inherit the base tool pool.
+		return fmt.Errorf("expected a list or comma-separated string, got %v", value.Kind)
 	}
 }
 
@@ -144,7 +149,7 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 		for _, t := range s.DisallowedTools {
 			disallowed[t] = true
 		}
-		filtered := pool[:0:0]
+		filtered := pool[:0]
 		for _, t := range pool {
 			if !disallowed[t] {
 				filtered = append(filtered, t)
@@ -161,7 +166,7 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 		for _, t := range s.Tools {
 			allowed[t] = true
 		}
-		filtered := pool[:0:0]
+		filtered := pool[:0]
 		for _, t := range pool {
 			if allowed[t] {
 				filtered = append(filtered, t)
@@ -240,7 +245,7 @@ func (s *Subagent) ValidateAgainst(isKnownModel func(provider, model string) boo
 	if isKnownSkill != nil {
 		for _, name := range s.Skills {
 			if !isKnownSkill(name) {
-				errs = append(errs, fmt.Errorf("skill %q is not a known active skill", name))
+				errs = append(errs, fmt.Errorf("skill %q is not an invocable active skill (unknown or model-invocation disabled)", name))
 			}
 		}
 	}

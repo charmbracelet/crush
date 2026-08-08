@@ -431,6 +431,21 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 	if len(entries) == 0 {
 		return nil
 	}
+
+	// Enrich token counts with one query for every child of the parent
+	// rather than a Get per running entry: this runs on every
+	// RuntimeEvent-driven refresh (register, status change, finish), so the
+	// N round trips per event added up. A lookup failure leaves the counts
+	// at zero, matching the previous per-entry behavior.
+	tokensByID := make(map[string]session.Session)
+	if w.app.Sessions != nil {
+		if children, err := w.app.Sessions.ListChildSessions(context.Background(), parentSessionID); err == nil {
+			for _, child := range children {
+				tokensByID[child.ID] = child
+			}
+		}
+	}
+
 	result := make([]RunningSubagentInfo, len(entries))
 	for i, e := range entries {
 		info := RunningSubagentInfo{
@@ -442,11 +457,9 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 			Status:          e.Status,
 			StartedAt:       e.StartedAt,
 		}
-		if w.app.Sessions != nil {
-			if sess, err := w.app.Sessions.Get(context.Background(), e.ChildSessionID); err == nil {
-				info.PromptTokens = sess.PromptTokens
-				info.CompletionTokens = sess.CompletionTokens
-			}
+		if sess, ok := tokensByID[e.ChildSessionID]; ok {
+			info.PromptTokens = sess.PromptTokens
+			info.CompletionTokens = sess.CompletionTokens
 		}
 		result[i] = info
 	}

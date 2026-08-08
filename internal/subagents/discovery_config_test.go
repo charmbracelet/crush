@@ -80,13 +80,21 @@ func TestDiscoveryConfigFromStore_ResolverExpandsEnvVar(t *testing.T) {
 
 // TestDiscoveryConfigFromStore_KnownSkillFromManager verifies that the
 // IsKnownSkill check reflects the skills manager's active set: active skill
-// names pass, anything else fails.
+// names pass, anything else fails. A skill that disables model invocation is
+// excluded even though it is active — pinning one would pass validation only
+// to be skipped at dispatch, so the pin fails discovery instead.
 func TestDiscoveryConfigFromStore_KnownSkillFromManager(t *testing.T) {
 	t.Parallel()
 
 	mgr := skills.NewManager(
-		[]*skills.Skill{{Name: "pdf-processing"}},
-		[]*skills.Skill{{Name: "pdf-processing"}},
+		[]*skills.Skill{
+			{Name: "pdf-processing"},
+			{Name: "manual-only", DisableModelInvocation: true},
+		},
+		[]*skills.Skill{
+			{Name: "pdf-processing"},
+			{Name: "manual-only", DisableModelInvocation: true},
+		},
 		nil,
 	)
 	t.Cleanup(mgr.Shutdown)
@@ -95,4 +103,6 @@ func TestDiscoveryConfigFromStore_KnownSkillFromManager(t *testing.T) {
 	require.NotNil(t, got.IsKnownSkill)
 	require.True(t, got.IsKnownSkill("pdf-processing"))
 	require.False(t, got.IsKnownSkill("nonexistent-skill"))
+	require.False(t, got.IsKnownSkill("manual-only"),
+		"skills that disable model invocation must not be pinnable")
 }

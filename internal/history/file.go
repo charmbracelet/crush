@@ -36,6 +36,9 @@ type Service interface {
 	Get(ctx context.Context, id string) (File, error)
 	GetByPathAndSession(ctx context.Context, path, sessionID string) (File, error)
 	ListBySession(ctx context.Context, sessionID string) ([]File, error)
+	// ListBySessionWithChildren returns the file history for sessionID plus
+	// its direct child (subagent) sessions in a single query.
+	ListBySessionWithChildren(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
@@ -155,6 +158,24 @@ func (s *service) GetByPathAndSession(ctx context.Context, path, sessionID strin
 
 func (s *service) ListBySession(ctx context.Context, sessionID string) ([]File, error) {
 	dbFiles, err := s.q.ListFilesBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]File, len(dbFiles))
+	for i, dbFile := range dbFiles {
+		files[i] = s.fromDBItem(dbFile)
+	}
+	return files, nil
+}
+
+// ListBySessionWithChildren returns the file history for sessionID plus the
+// file history of its direct child (subagent) sessions, in a single query
+// instead of one round trip per child.
+func (s *service) ListBySessionWithChildren(ctx context.Context, sessionID string) ([]File, error) {
+	dbFiles, err := s.q.ListFilesBySessionWithChildren(ctx, db.ListFilesBySessionWithChildrenParams{
+		SessionID:       sessionID,
+		ParentSessionID: sql.NullString{String: sessionID, Valid: true},
+	})
 	if err != nil {
 		return nil, err
 	}

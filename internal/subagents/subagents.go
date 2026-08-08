@@ -446,20 +446,27 @@ func cloneStates(states []*SubagentState) []*SubagentState {
 }
 
 // DeduplicateStates removes duplicate subagent states by name. When duplicates
-// exist, the last occurrence wins (consistent with Deduplicate for subagents).
+// exist, the last occurrence wins (consistent with Deduplicate for subagents),
+// so the surviving state describes the file whose agent survived.
+//
+// Error states are exempt from that collapse. They are per-file diagnostics —
+// paths are unique, names are not — and the Library renders one row per error
+// state. Name-keying them means a valid definition elsewhere silently hides
+// the broken file the user is trying to fix, which is the failure surfacing
+// error states was meant to end.
 func DeduplicateStates(all []*SubagentState) []*SubagentState {
 	seen := make(map[string]int, len(all))
 	for i, s := range all {
-		if s.Name != "" {
+		if s.Name != "" && s.State != StateError {
 			seen[s.Name] = i
 		}
 	}
 
-	result := make([]*SubagentState, 0, len(seen))
+	result := make([]*SubagentState, 0, len(all))
 	for i, s := range all {
-		// Keep the last occurrence of this name, or anything without a
-		// name (error state).
-		if s.Name == "" || seen[s.Name] == i {
+		// Keep every error state and anything without a name, plus the last
+		// non-error occurrence of each name.
+		if s.Name == "" || s.State == StateError || seen[s.Name] == i {
 			result = append(result, s)
 		}
 	}
@@ -553,7 +560,8 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 		// agents above. Deduplicate and DeduplicateStates both keep the last
 		// occurrence of a name, so the two lists must agree on what "last"
 		// means — otherwise a name collision can resolve to one file's agent
-		// while the Library shows the other file's (possibly errored) state.
+		// while the Library shows the other file's state. (Error states opt
+		// out of that collapse entirely; see DeduplicateStates.)
 		slices.SortStableFunc(baseStates, func(a, b *SubagentState) int {
 			return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
 		})

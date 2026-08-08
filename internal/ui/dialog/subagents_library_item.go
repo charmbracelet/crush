@@ -56,8 +56,15 @@ func (l *LibrarySubagentItem) Filter() string {
 	return l.data.Name + " " + l.data.Description
 }
 
-// ID implements [ListItem].
+// ID implements [ListItem]. It is the row's identity for selection tracking,
+// not the subagent's name: a broken definition can claim a name that a valid
+// definition elsewhere already owns, so those rows key on their file path to
+// stay distinguishable. Mutations pass data.Name explicitly and are gated on
+// Error being empty, so they never see a path here.
 func (l *LibrarySubagentItem) ID() string {
+	if l.data.Error != "" && l.data.FilePath != "" {
+		return l.data.FilePath
+	}
 	return l.data.Name
 }
 

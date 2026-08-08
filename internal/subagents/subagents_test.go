@@ -962,6 +962,55 @@ func TestDiscoverWithStates(t *testing.T) {
 		}
 	})
 
+	t.Run("error_states_survive_a_valid_definition_of_the_same_name", func(t *testing.T) {
+		t.Parallel()
+
+		// A broken file and a valid file claiming one name. Name-keyed
+		// dedup would drop whichever came first, so — depending on path
+		// order — either the broken file vanishes from the Library (the
+		// silent drop error states exist to prevent) or it survives only by
+		// luck. Error states opt out of the collapse, so the diagnostic is
+		// kept either way.
+		for _, tc := range []struct{ name, brokenFile, validFile string }{
+			{"broken_sorts_first", "a.md", "z.md"},
+			{"broken_sorts_last", "z.md", "a.md"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				tmp := t.TempDir()
+				require.NoError(t, os.WriteFile(
+					filepath.Join(tmp, tc.brokenFile),
+					[]byte("---\nname: reviewer\ndescription: Broken.\nmodel: no-such-model\n---\n\nBody.\n"),
+					0o644,
+				))
+				require.NoError(t, os.WriteFile(
+					filepath.Join(tmp, tc.validFile),
+					[]byte("---\nname: reviewer\ndescription: Valid.\n---\n\nBody.\n"),
+					0o644,
+				))
+
+				noModels := func(provider, model string) bool { return false }
+				all, active, states := DiscoverFromConfig(DiscoveryConfig{
+					SubagentsPaths: []string{tmp},
+					IsKnownModel:   noModels,
+				})
+
+				require.Len(t, all, 1, "only the valid file yields a subagent")
+				require.Len(t, active, 1)
+
+				var errStates []*SubagentState
+				for _, s := range states {
+					if s.State == StateError {
+						errStates = append(errStates, s)
+					}
+				}
+				require.Len(t, errStates, 1, "the broken file must keep its diagnostic")
+				require.Equal(t, filepath.Join(tmp, tc.brokenFile), errStates[0].Path)
+			})
+		}
+	})
+
 	t.Run("invalid_agent_no_frontmatter_appears_as_error_not_in_agents", func(t *testing.T) {
 		t.Parallel()
 

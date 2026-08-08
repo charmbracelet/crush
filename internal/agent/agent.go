@@ -1435,18 +1435,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	var openrouterCost *float64
-	for _, step := range resp.Steps {
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
-			}
-			openrouterCost = &newCost
-		}
-		extractHyperCredits(step.ProviderMetadata)
-	}
+	openrouterCost := a.accumulateStepCosts(resp.Steps)
 
 	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
 
@@ -1829,18 +1818,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	}
 
 	// Calculate usage and cost.
-	var openrouterCost *float64
-	for _, step := range resp.Steps {
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
-			}
-			openrouterCost = &newCost
-		}
-		extractHyperCredits(step.ProviderMetadata)
-	}
+	openrouterCost := a.accumulateStepCosts(resp.Steps)
 
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
@@ -1869,6 +1847,25 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 	titleSaved = true
+}
+
+// accumulateStepCosts iterates over provider step metadata to accumulate
+// OpenRouter costs and extract Hyper credits. It returns the total OpenRouter
+// cost, or nil if none was reported.
+func (a *sessionAgent) accumulateStepCosts(steps []fantasy.StepResult) *float64 {
+	var total *float64
+	for _, step := range steps {
+		stepCost := a.openrouterCost(step.ProviderMetadata)
+		if stepCost != nil {
+			newCost := *stepCost
+			if total != nil {
+				newCost += *total
+			}
+			total = &newCost
+		}
+		extractHyperCredits(step.ProviderMetadata)
+	}
+	return total
 }
 
 func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float64 {

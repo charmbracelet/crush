@@ -330,24 +330,24 @@ func TestValidate(t *testing.T) {
 			errMsg:  "reserved",
 		},
 		{
-			name:    "reserved_name_bash",
-			agent:   Subagent{Name: "bash", Description: "Something."},
+			name:    "reserved_name_coder",
+			agent:   Subagent{Name: "coder", Description: "Something."},
 			wantErr: true,
 			errMsg:  "reserved",
 		},
 		{
-			// Reserved names derive from config.AllToolNames, so every
-			// built-in tool name is covered, not just the original subset.
-			name:    "reserved_name_multiedit",
-			agent:   Subagent{Name: "multiedit", Description: "Something."},
-			wantErr: true,
-			errMsg:  "reserved",
-		},
-		{
-			name:    "reserved_name_fetch",
+			// Built-in tool names are not reserved: they share no namespace
+			// with subagent names, and reserving them would let a future tool
+			// retroactively invalidate a definition file. Discovery warns
+			// instead — see warnIfShadowsToolName.
+			name:    "tool_name_is_not_reserved",
 			agent:   Subagent{Name: "fetch", Description: "Something."},
-			wantErr: true,
-			errMsg:  "reserved",
+			wantErr: false,
+		},
+		{
+			name:    "tool_name_is_not_reserved_multiedit",
+			agent:   Subagent{Name: "multiedit", Description: "Something."},
+			wantErr: false,
 		},
 		{
 			name: "tools_disallowed_overlap",
@@ -962,6 +962,75 @@ func TestDiscoverWithStates(t *testing.T) {
 		}
 	})
 
+	t.Run("a_name_matching_a_builtin_tool_still_loads", func(t *testing.T) {
+		t.Parallel()
+
+		// Tool names are not reserved: they share no namespace with subagent
+		// names, and reserving them would mean a tool added in a later release
+		// retroactively breaks a definition file. Discovery only warns.
+		tmp := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "fetch.md"),
+			[]byte("---\nname: fetch\ndescription: Fetches things.\n---\n\nBody.\n"),
+			0o644,
+		))
+
+		agents, states := DiscoverWithStates([]string{tmp}, nil, nil)
+		require.Len(t, agents, 1)
+		require.Equal(t, "fetch", agents[0].Name)
+		require.Len(t, states, 1)
+		require.Equal(t, StateNormal, states[0].State)
+	})
+
+	t.Run("error_states_survive_a_valid_definition_of_the_same_name", func(t *testing.T) {
+		t.Parallel()
+
+		// A broken file and a valid file claiming one name. Name-keyed
+		// dedup would drop whichever came first, so — depending on path
+		// order — either the broken file vanishes from the Library (the
+		// silent drop error states exist to prevent) or it survives only by
+		// luck. Error states opt out of the collapse, so the diagnostic is
+		// kept either way.
+		for _, tc := range []struct{ name, brokenFile, validFile string }{
+			{"broken_sorts_first", "a.md", "z.md"},
+			{"broken_sorts_last", "z.md", "a.md"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				tmp := t.TempDir()
+				require.NoError(t, os.WriteFile(
+					filepath.Join(tmp, tc.brokenFile),
+					[]byte("---\nname: reviewer\ndescription: Broken.\nmodel: no-such-model\n---\n\nBody.\n"),
+					0o644,
+				))
+				require.NoError(t, os.WriteFile(
+					filepath.Join(tmp, tc.validFile),
+					[]byte("---\nname: reviewer\ndescription: Valid.\n---\n\nBody.\n"),
+					0o644,
+				))
+
+				noModels := func(provider, model string) bool { return false }
+				all, active, states := DiscoverFromConfig(DiscoveryConfig{
+					SubagentsPaths: []string{tmp},
+					IsKnownModel:   noModels,
+				})
+
+				require.Len(t, all, 1, "only the valid file yields a subagent")
+				require.Len(t, active, 1)
+
+				var errStates []*SubagentState
+				for _, s := range states {
+					if s.State == StateError {
+						errStates = append(errStates, s)
+					}
+				}
+				require.Len(t, errStates, 1, "the broken file must keep its diagnostic")
+				require.Equal(t, filepath.Join(tmp, tc.brokenFile), errStates[0].Path)
+			})
+		}
+	})
+
 	t.Run("invalid_agent_no_frontmatter_appears_as_error_not_in_agents", func(t *testing.T) {
 		t.Parallel()
 
@@ -1118,6 +1187,32 @@ func TestParseContent_ToolListRejectsMapping(t *testing.T) {
 
 	_, err = ParseContent([]byte("---\nname: a\ndescription: d.\ndisallowedTools:\n  bash: yes\n---\n"))
 	require.Error(t, err, "a mapping disallowedTools: value must not parse as absent")
+}
+
+// TestParseContent_ToolListErrorNamesTheKind verifies that the rejection
+// message names the offending YAML kind in words. yaml.Kind is a bare uint32,
+// so formatting one directly yields an opaque number — and the Library tab
+// shows this text to the user.
+func TestParseContent_ToolListErrorNamesTheKind(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseContent([]byte("---\nname: a\ndescription: d.\ntools:\n  view: true\n---\n"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "got a mapping")
+	require.NotRegexp(t, `got \d`, err.Error(), "the raw yaml.Kind number must not reach the user")
+}
+
+// TestParseContent_ToolListResolvesAlias verifies that a YAML alias to a tool
+// list is followed to its anchor rather than rejected as an unknown kind.
+func TestParseContent_ToolListResolvesAlias(t *testing.T) {
+	t.Parallel()
+
+	sa, err := ParseContent([]byte(
+		"---\nname: a\ndescription: d.\ntools: &base [view, grep]\ndisallowedTools: *base\n---\n",
+	))
+	require.NoError(t, err)
+	require.Equal(t, ToolList{"view", "grep"}, sa.Tools)
+	require.Equal(t, ToolList{"view", "grep"}, sa.DisallowedTools, "an alias must resolve to its anchor's list")
 }
 
 // TestValidate_RejectsUnknownToolNames verifies that a tool name that is not a

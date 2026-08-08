@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -420,6 +421,11 @@ func (w *AppWorkspace) ActiveSubagents() []SubagentInfo {
 	return result
 }
 
+// runningSubagentsEnrichTimeout bounds the token-count lookup in
+// RunningSubagents. It is generous for a local query and only exists so a
+// wedged database cannot park a refresh goroutine forever.
+const runningSubagentsEnrichTimeout = 5 * time.Second
+
 // RunningSubagents returns info about all subagent sessions currently running
 // under the given parentSessionID, enriched with token counts from the session
 // service where available. Returns nil when SubagentRuntime is nil.
@@ -437,9 +443,17 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 	// RuntimeEvent-driven refresh (register, status change, finish), so the
 	// N round trips per event added up. A lookup failure leaves the counts
 	// at zero, matching the previous per-entry behavior.
+	//
+	// The deadline is the only bound available here: RunningSubagents takes no
+	// context (it is called from tea.Cmd closures that have none to give), and
+	// token counts are decoration — a slow or wedged query must degrade to
+	// zero counts rather than pin the refresh goroutine indefinitely.
 	tokensByID := make(map[string]session.Session)
 	if w.app.Sessions != nil {
-		if children, err := w.app.Sessions.ListChildSessions(context.Background(), parentSessionID); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), runningSubagentsEnrichTimeout)
+		children, err := w.app.Sessions.ListChildSessions(ctx, parentSessionID)
+		cancel()
+		if err == nil {
 			for _, child := range children {
 				tokensByID[child.ID] = child
 			}
@@ -481,6 +495,11 @@ func (w *AppWorkspace) CancelSubagent(childSessionID string) {
 // are included with Error set, so the Library can surface the diagnostic
 // instead of silently dropping the file. Returns nil when the Subagents
 // manager is nil.
+//
+// The result is sorted by name then file path. Broken definitions are merged
+// in from the discovery states rather than appended, so a file that fails to
+// validate lands next to the valid definition whose name it claims instead of
+// in a separate block at the end of the Library.
 func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 	mgr := w.app.Subagents
 	if mgr == nil {
@@ -535,6 +554,15 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 			Error:    errMsg,
 		})
 	}
+	// Name first so a broken file sorts beside the valid definition it
+	// shadows or duplicates; path breaks the tie, since several files may
+	// legitimately claim one name (only one of them wins discovery).
+	slices.SortStableFunc(result, func(a, b SubagentDefInfo) int {
+		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
+		}
+		return strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath))
+	})
 	return result
 }
 

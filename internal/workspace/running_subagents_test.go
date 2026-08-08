@@ -341,6 +341,53 @@ func TestAppWorkspace_AllSubagents_IncludesErrorEntries(t *testing.T) {
 	unnamed := byPath[filepath.Join(workDir, "garbage.md")]
 	require.Equal(t, "garbage", unnamed.Name)
 	require.Equal(t, "no YAML frontmatter found", unnamed.Error)
+
+	// Broken entries are merged into the sort, not appended after it, so the
+	// Library reads as one alphabetical list.
+	names := make([]string, len(got))
+	for i, info := range got {
+		names[i] = info.Name
+	}
+	require.Equal(t, []string{"broken", "garbage", "good"}, names)
+}
+
+// TestAppWorkspace_AllSubagents_NameCollisionKeepsBothRows verifies that a
+// broken definition claiming a name a valid definition already owns is still
+// listed, and sorts next to it. Both rows carry the same name, so the Library
+// distinguishes them by scope and by the diagnostic on the broken one.
+func TestAppWorkspace_AllSubagents_NameCollisionKeepsBothRows(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	validFile := filepath.Join(workDir, "valid", "reviewer.md")
+	brokenFile := filepath.Join(workDir, "broken", "reviewer.md")
+
+	validAgent := &subagents.Subagent{Name: "reviewer", Description: "Valid.", FilePath: validFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{validAgent},
+		[]*subagents.Subagent{validAgent},
+		[]*subagents.SubagentState{
+			{Name: "reviewer", Path: validFile, State: subagents.StateNormal},
+			{Name: "reviewer", Path: brokenFile, State: subagents.StateError, Err: errors.New("unknown model")},
+		},
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
+	}
+
+	got := w.AllSubagents()
+	require.Len(t, got, 2, "the broken file must not be hidden by its valid namesake")
+	for _, info := range got {
+		require.Equal(t, "reviewer", info.Name)
+	}
+	// Sorted by path within the name, so "broken/" precedes "valid/".
+	require.Equal(t, brokenFile, got[0].FilePath)
+	require.Equal(t, "unknown model", got[0].Error)
+	require.Equal(t, validFile, got[1].FilePath)
+	require.Empty(t, got[1].Error)
 }
 
 // TestAppWorkspace_AllSubagents_Deletable verifies that Deletable reflects the

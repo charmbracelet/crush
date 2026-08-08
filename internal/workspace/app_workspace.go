@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -462,7 +464,10 @@ func (w *AppWorkspace) CancelSubagent(childSessionID string) {
 
 // AllSubagents returns all discovered subagent definitions projected to the
 // frontend-facing SubagentDefInfo shape, with scope detection relative to the
-// workspace working directory. Returns nil when the Subagents manager is nil.
+// workspace working directory. Definitions that failed to parse or validate
+// are included with Error set, so the Library can surface the diagnostic
+// instead of silently dropping the file. Returns nil when the Subagents
+// manager is nil.
 func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 	mgr := w.app.Subagents
 	if mgr == nil {
@@ -482,16 +487,36 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 	}
 
 	projectDirs := config.ProjectSubagentsDir(workingDir)
-	result := make([]SubagentDefInfo, len(all))
-	for i, s := range all {
-		result[i] = SubagentDefInfo{
+	result := make([]SubagentDefInfo, 0, len(all))
+	for _, s := range all {
+		result = append(result, SubagentDefInfo{
 			Name:        s.Name,
 			Description: s.Description,
 			Color:       s.ResolvedColor(),
 			FilePath:    s.FilePath,
 			Scope:       subagentScope(s.FilePath, workingDir, projectDirs),
 			Disabled:    disabledSet[s.Name],
+		})
+	}
+	for _, st := range mgr.States() {
+		if st.State != subagents.StateError {
+			continue
 		}
+		name := st.Name
+		if name == "" {
+			name = strings.TrimSuffix(filepath.Base(st.Path), filepath.Ext(st.Path))
+		}
+		errMsg := ""
+		if st.Err != nil {
+			errMsg = st.Err.Error()
+		}
+		result = append(result, SubagentDefInfo{
+			Name:     name,
+			Color:    subagents.AutoColor(name),
+			FilePath: st.Path,
+			Scope:    subagentScope(st.Path, workingDir, projectDirs),
+			Error:    errMsg,
+		})
 	}
 	return result
 }
@@ -523,6 +548,10 @@ func subagentScope(filePath, workingDir string, projectDirs []string) string {
 func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	var target *SubagentDefInfo
 	for _, info := range w.AllSubagents() {
+		// Broken (unparseable/invalid) entries are informational only.
+		if info.Error != "" {
+			continue
+		}
 		if info.Name == name {
 			cp := info
 			target = &cp

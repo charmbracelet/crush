@@ -107,6 +107,7 @@ func NewSubagents(com *common.Common, parentSessionID string) *Subagents {
 			FilePath:    d.FilePath,
 			Scope:       d.Scope,
 			Disabled:    d.Disabled,
+			Error:       d.Error,
 		})
 		s.libraryItems[i] = item
 		libraryFilterable[i] = item
@@ -270,6 +271,11 @@ func (s *Subagents) toggleSelectedLibrary() Action {
 	if !ok {
 		return nil
 	}
+	// Broken definitions are informational only — there is no active
+	// subagent to enable or disable.
+	if li.data.Error != "" {
+		return nil
+	}
 	li.data.Disabled = !li.data.Disabled
 	li.Bump()
 	return ActionCmd{s.setDisabledCmd(li.ID(), li.data.Disabled)}
@@ -397,6 +403,7 @@ func (s *Subagents) refreshLibrary() {
 			FilePath:    d.FilePath,
 			Scope:       d.Scope,
 			Disabled:    d.Disabled,
+			Error:       d.Error,
 		})
 		s.libraryItems[i] = item
 		filterable[i] = item
@@ -419,7 +426,7 @@ func (s *Subagents) enterConfirmDelete() {
 	if !ok {
 		return
 	}
-	if li.data.Scope != "user" {
+	if li.data.Error != "" || li.data.Scope != "user" {
 		return
 	}
 	s.confirmDelete = true

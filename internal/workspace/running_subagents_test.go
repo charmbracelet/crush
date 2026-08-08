@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -270,6 +271,71 @@ func TestAppWorkspace_AllSubagents_ScopeDetection(t *testing.T) {
 	require.Equal(t, "builtin", byName["builtin-agent"].Scope)
 }
 
+// TestAppWorkspace_AllSubagents_IncludesErrorEntries verifies that definition
+// files which failed to parse or validate are still surfaced (with Error set),
+// so the Library can show the diagnostic instead of silently dropping them.
+func TestAppWorkspace_AllSubagents_IncludesErrorEntries(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+
+	goodFile := filepath.Join(workDir, "good.md")
+	brokenFile := filepath.Join(workDir, "broken.md")
+
+	goodAgent := &subagents.Subagent{Name: "good", Description: "Good.", FilePath: goodFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{goodAgent},
+		[]*subagents.Subagent{goodAgent},
+		[]*subagents.SubagentState{
+			{Name: "good", Path: goodFile, State: subagents.StateNormal},
+			{Name: "broken", Path: brokenFile, State: subagents.StateError, Err: errors.New("unclosed frontmatter")},
+			// An unnamed error (parse failure) derives its label from the file name.
+			{Name: "", Path: filepath.Join(workDir, "garbage.md"), State: subagents.StateError, Err: errors.New("no YAML frontmatter found")},
+		},
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: newStoreForWorkDir(workDir),
+	}
+
+	got := w.AllSubagents()
+	byPath := map[string]SubagentDefInfo{}
+	for _, info := range got {
+		byPath[info.FilePath] = info
+	}
+
+	require.Len(t, got, 3)
+
+	require.Empty(t, byPath[goodFile].Error)
+	require.Equal(t, "unclosed frontmatter", byPath[brokenFile].Error)
+	require.Equal(t, "broken", byPath[brokenFile].Name)
+
+	unnamed := byPath[filepath.Join(workDir, "garbage.md")]
+	require.Equal(t, "garbage", unnamed.Name)
+	require.Equal(t, "no YAML frontmatter found", unnamed.Error)
+}
+
+// TestAppWorkspace_DeleteUserSubagent_SkipsErrorEntries verifies that a broken
+// entry sharing a name with a valid one cannot shadow the valid target.
+func TestAppWorkspace_DeleteUserSubagent_SkipsErrorEntries(t *testing.T) {
+	t.Parallel()
+
+	mgr := subagents.NewManager(nil, nil, []*subagents.SubagentState{
+		{Name: "broken", Path: "/nowhere/broken.md", State: subagents.StateError, Err: errors.New("bad")},
+	})
+	t.Cleanup(mgr.Shutdown)
+
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: config.NewTestStore(&config.Config{}),
+	}
+
+	err := w.DeleteUserSubagent("broken")
+	require.ErrorContains(t, err, "not found")
+}
+
 // TestAppWorkspace_DeleteUserSubagent_NotFound verifies that deleting a
 // subagent by a name that doesn't exist returns an error.
 func TestAppWorkspace_DeleteUserSubagent_NotFound(t *testing.T) {
@@ -501,8 +567,13 @@ func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
 
 	require.NoError(t, w.DeleteUserSubagent("keep-agent"))
 
+	// bad-agent must not be a valid entry after the reload. It may still be
+	// surfaced as an error diagnostic (Error set), which is how the Library
+	// reports a definition that failed validation.
 	for _, info := range w.AllSubagents() {
-		require.NotEqual(t, "bad-agent", info.Name,
-			"subagent with an unknown model must stay rejected after reload")
+		if info.Name == "bad-agent" {
+			require.NotEmpty(t, info.Error,
+				"subagent with an unknown model must only appear as an error entry after reload")
+		}
 	}
 }

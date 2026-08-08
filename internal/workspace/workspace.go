@@ -271,6 +271,10 @@ type SubagentDefInfo struct {
 	FilePath    string
 	Scope       string // "user", "project", or "builtin"
 	Disabled    bool
+	// Error carries the discovery diagnostic when the definition file failed
+	// to parse or validate. Such entries are informational only: they cannot
+	// be dispatched, toggled, or deleted.
+	Error string
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

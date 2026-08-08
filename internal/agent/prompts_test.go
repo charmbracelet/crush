@@ -10,6 +10,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newPromptTestStore returns a config store for prompt-rendering tests. It
+// builds the store directly instead of calling config.Init, which reads the
+// host's HOME/XDG locations: a developer with a populated ~/.config/crush
+// would otherwise have their own context files and skill paths rendered into
+// the prompt under test.
+func newPromptTestStore(t *testing.T) *config.ConfigStore {
+	t.Helper()
+	return config.NewTestStoreWithWorkingDir(&config.Config{Options: &config.Options{}}, t.TempDir())
+}
+
 // TestCoderPrompt_RendersAvailableSubagents verifies that wiring
 // subagents.ToPromptXML through prompt.WithAvailableSubagentsXML into
 // coderPrompt produces a system prompt containing the <available_subagents>
@@ -28,8 +38,7 @@ func TestCoderPrompt_RendersAvailableSubagents(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newPromptTestStore(t)
 
 	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)
@@ -49,8 +58,7 @@ func TestCoderPrompt_OmitsAvailableSubagentsWhenEmpty(t *testing.T) {
 	p, err := coderPrompt()
 	require.NoError(t, err)
 
-	store, err := config.Init(t.TempDir(), "", false)
-	require.NoError(t, err)
+	store := newPromptTestStore(t)
 
 	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", store)
 	require.NoError(t, err)

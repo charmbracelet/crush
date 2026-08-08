@@ -337,6 +337,18 @@ func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) 
 	return result, nil
 }
 
+// MCPReconnect restarts a single MCP server by name.
+func (b *Backend) MCPReconnect(ctx context.Context, workspaceID, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := mcptools.DisableSingle(ws.Cfg, name); err != nil {
+		return fmt.Errorf("failed to disconnect MCP %q: %w", name, err)
+	}
+	return mcptools.InitializeSingle(ctx, name, ws.Cfg)
+}
+
 // GetWorkingDir returns the working directory for a workspace.
 func (b *Backend) GetWorkingDir(workspaceID string) (string, error) {
 	ws, err := b.GetWorkspace(workspaceID)

@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
 )
@@ -82,19 +81,6 @@ func (c *coordinator) subagentSessionSetup(sa *subagents.Subagent) func(sessionI
 	}
 }
 
-// subagentIsUserScoped reports whether the subagent definition file lives in
-// one of the user-scope (global) subagents directories. Anything else —
-// project directories, monorepo roots, custom subagents_paths — can arrive
-// with a cloned repository and is not trusted to bypass permissions silently.
-func subagentIsUserScoped(sa *subagents.Subagent) bool {
-	for _, dir := range config.GlobalSubagentsDirs() {
-		if fsext.HasPrefix(sa.FilePath, dir) {
-			return true
-		}
-	}
-	return false
-}
-
 // bypassPermissionsToolName is the permission tool name for confirming a
 // project subagent's bypassPermissions, kept apart from AgentToolName.
 const bypassPermissionsToolName = "agent_bypass_permissions"
@@ -110,7 +96,7 @@ const bypassPermissionsToolName = "agent_bypass_permissions"
 // approves dispatching, not auto-approving the child session, so the prompt
 // uses its own tool name and drops the call's hook approval.
 func (c *coordinator) confirmBypassPermissions(ctx context.Context, sa *subagents.Subagent, sessionID, toolCallID string) (fantasy.ToolResponse, bool) {
-	if sa.PermissionMode != subagents.PermissionModeBypassPermissions || subagentIsUserScoped(sa) {
+	if sa.PermissionMode != subagents.PermissionModeBypassPermissions || subagents.InGlobalDir(sa.FilePath) {
 		return fantasy.ToolResponse{}, true
 	}
 	granted, err := c.permissions.Request(permission.WithHookApproval(ctx, ""), permission.CreatePermissionRequest{
@@ -174,7 +160,15 @@ func (c *coordinator) agentTool(ctx context.Context, owner config.Agent) (fantas
 	if err != nil {
 		return nil, err
 	}
-	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, &c.readyWg)
+	// The task agent's async prompt/tool builds go on a dispatcher-local
+	// group, not c.readyWg: UpdateModels rebuilds this tool at the start of
+	// every turn — after that turn's readyWg.Wait — so a readyWg-spawned
+	// build could still be pending when a task dispatch runs (starting the
+	// agent promptless/toolless), and a build failure would stick in readyWg,
+	// failing every later turn. The dispatch closure waits lazily on the task
+	// path, so turn start pays nothing.
+	taskBuildWg := &errgroup.Group{}
+	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, taskBuildWg)
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +198,9 @@ func (c *coordinator) agentTool(ctx context.Context, owner config.Agent) (fantas
 
 			subagentType := params.SubagentType
 			if subagentType == "" || subagentType == config.AgentTask {
+				if err := taskBuildWg.Wait(); err != nil {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("build task agent: %v", err)), nil
+				}
 				return c.runSubAgent(ctx, subAgentParams{
 					Agent:          taskAgent,
 					SessionID:      sessionID,

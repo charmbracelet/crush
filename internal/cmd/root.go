@@ -328,7 +328,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	subagentsCfg := subagents.DiscoveryConfig{
 		SubagentsPaths:    cfg.Options.SubagentsPaths,
 		DisabledSubagents: cfg.Options.DisabledSubagents,
-		IsKnownModelID:    cfg.IsKnownModelID,
+		ValidateModel:     cfg.ValidateModel,
 	}
 	allSubagents, activeSubagents, subagentStates := subagents.DiscoverFromConfig(subagentsCfg)
 	subagentsMgr := subagents.NewManager(allSubagents, activeSubagents, subagentStates)

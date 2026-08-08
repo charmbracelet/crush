@@ -2,12 +2,17 @@ package agent
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"testing"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/x/vcr"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
@@ -283,4 +288,72 @@ func TestRequestTimeoutRunFinishMessage(t *testing.T) {
 	require.Equal(t, "Request timed out", finish.Message)
 	require.Contains(t, finish.Details, "stopped sending data for 1s")
 	require.Contains(t, finish.Details, "request-timeout")
+}
+
+// TestResolveModelByID_WrapsRequestTimeout is the regression test for
+// buildModel never wrapping the resolved [fantasy.LanguageModel] with
+// newRequestTimeoutModel. resolveModelByID is the funnel subagents use to
+// pick a specific `model:` id, and it must get the same request_timeout
+// protection as the large/small models built via buildNamedModel — both
+// go through buildModel.
+//
+// The provider here never responds, so a call through the resolved model
+// would hang forever without the wrapper. The test's own context bounds
+// the wait so a missing wrapper fails fast (a plain context.DeadlineExceeded)
+// instead of hanging, rather than proving the timeout by hanging: once
+// buildModel wraps the model, the much shorter configured request_timeout
+// fires first and the error surfaces as *requestTimeoutError.
+func TestResolveModelByID_WrapsRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	// unblockHandler, not the request context, releases the handler: closing
+	// the client side (or even the raw connection) doesn't guarantee the
+	// server notices and cancels r.Context(), so relying on that left the
+	// handler goroutine running past the test and Close hanging forever.
+	unblockHandler := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-unblockHandler
+	}))
+	t.Cleanup(func() {
+		close(unblockHandler)
+		srv.Close()
+	})
+
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	requestTimeoutSeconds := 1
+	cfg.Config().Options.RequestTimeout = &requestTimeoutSeconds
+	cfg.Config().Providers.Set("test-provider", config.ProviderConfig{
+		ID:      "test-provider",
+		Type:    openaicompat.Name,
+		BaseURL: srv.URL,
+		APIKey:  "test-key",
+		Models:  []catwalk.Model{{ID: "model-x"}},
+	})
+
+	coord := &coordinator{
+		cfg:      cfg,
+		sessions: env.sessions,
+		messages: env.messages,
+	}
+
+	model, err := coord.resolveModelByID(t.Context(), "model-x", "", true)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	maxTokens := int64(16)
+	_, genErr := model.Model.Generate(ctx, fantasy.Call{
+		Prompt:          fantasy.Prompt{fantasy.NewUserMessage("hi")},
+		MaxOutputTokens: &maxTokens,
+	})
+	require.Error(t, genErr)
+
+	var timeoutErr *requestTimeoutError
+	require.ErrorAs(t, genErr, &timeoutErr,
+		"buildModel must wrap the resolved language model with the request-timeout guard so resolveModelByID (used by subagents) is bounded, not just buildNamedModel")
+	require.Equal(t, time.Second, timeoutErr.timeout)
 }

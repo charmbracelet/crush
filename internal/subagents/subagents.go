@@ -88,7 +88,7 @@ type Subagent struct {
 	Name            string   `yaml:"name"`
 	Description     string   `yaml:"description"`
 	Tools           ToolList `yaml:"tools"`
-	DisallowedTools ToolList `yaml:"disallowed_tools"`
+	DisallowedTools ToolList `yaml:"disallowedTools"`
 	Model           string   `yaml:"model"`
 	Skills          []string `yaml:"skills"`
 	MCPServers      []string `yaml:"mcpServers"`
@@ -134,12 +134,21 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 	}
 
 	// AllowedMCP nil means "no restrictions configured" (full access to every
-	// MCP server) to config.Agent's consumer; a subagent with no mcp_servers:
+	// MCP server) to config.Agent's consumer; a subagent with no mcpServers:
 	// frontmatter must default to the locked-down empty map instead, matching
-	// the built-in task agent's secure-by-default AllowedMCP.
+	// the built-in task agent's secure-by-default AllowedMCP. Like the tool
+	// pool, the requested servers are capped by the dispatching agent: a
+	// restricted base (plan mode allows none) keeps only the servers it
+	// allows, along with its per-server tool limits.
 	allowedMCP := make(map[string][]string, len(s.MCPServers))
 	for _, srv := range s.MCPServers {
-		allowedMCP[srv] = nil
+		if base.AllowedMCP == nil {
+			allowedMCP[srv] = nil
+			continue
+		}
+		if tools, ok := base.AllowedMCP[srv]; ok {
+			allowedMCP[srv] = tools
+		}
 	}
 
 	// Determine model: use subagent preference only for the two recognised values.
@@ -246,8 +255,7 @@ func (s *Subagent) Validate() error {
 		}
 		for _, tool := range s.Tools {
 			if disallowedSet[tool] {
-				errs = append(errs, fmt.Errorf("tool %q appears in both tools and disallowed_tools", tool))
-				break
+				errs = append(errs, fmt.Errorf("tool %q appears in both tools and disallowedTools", tool))
 			}
 		}
 	}

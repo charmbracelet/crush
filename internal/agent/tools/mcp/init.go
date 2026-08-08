@@ -676,8 +676,9 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 
 	state, _ := states.Get(name)
 	// StateError closes the dead session and clears its tools, prompts, and
-	// resources from the registry.
-	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), nil, state.Counts)
+	// resources from the registry. Report the failure against the exact
+	// session that failed the ping so only that session is torn down.
+	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), sess, state.Counts)
 
 	// Capture the generation so a reconcile teardown that lands mid-renewal
 	// invalidates this rebuild instead of letting it clobber the newer one.
@@ -819,23 +820,37 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		info.Config = config.MCPConfig{}
 		info.PendingConfig = nil
 	case StateError:
-		// A session that has errored is dead to us. Atomically remove it and
-		// close it so the child process and its stdio pipes are released — the
-		// bare map delete this used to do leaked both. Clearing the tool
-		// registry keeps the agent from advertising tools it can no longer
-		// call: without it, crush_info / the `/mcp` menu and the tool list
-		// handed to the LLM diverge, so a server still reads "connected, N
-		// tools" while every call fails with "tool not found".
-		if old, ok := sessions.Take(name); ok {
-			closeSession(name, old)
+		// A session that has errored is dead to us: close it so the child
+		// process and its stdio pipes are released, and clear its registry
+		// entries so the agent stops advertising capabilities it can no
+		// longer call (without that, crush_info / the `/mcp` menu and the
+		// tool list handed to the LLM diverge). Crucially, close exactly the
+		// session that errored (the client argument): if the registry
+		// already holds a DIFFERENT session — a newer, healthy one another
+		// path installed — leave it and its registrations alone. Closing
+		// "whatever is in the map" here let a stale error transition (e.g. a
+		// refresh that raced a renewal) tear down the healthy replacement.
+		switch {
+		case client != nil:
+			if cur, ok := sessions.Get(name); ok && cur == client {
+				sessions.Del(name)
+				allTools.Del(name)
+				allPrompts.Del(name)
+				allResources.Del(name)
+			}
+			closeSession(name, client)
+		default:
+			// No specific session errored (e.g. connect itself failed);
+			// anything still registered under this name is unusable.
+			if old, ok := sessions.Take(name); ok {
+				closeSession(name, old)
+			}
+			allTools.Del(name)
+			allPrompts.Del(name)
+			allResources.Del(name)
 		}
-		// Drop every registry entry for the dead server. Leaving prompts or
-		// resources behind lets a disconnected server keep advertising
-		// capabilities the agent can no longer fulfil, the same divergence the
-		// tool clear prevents.
-		allTools.Del(name)
-		allPrompts.Del(name)
-		allResources.Del(name)
+		// Never publish a dead session on the state.
+		info.Client = nil
 	}
 	states.Set(name, info)
 

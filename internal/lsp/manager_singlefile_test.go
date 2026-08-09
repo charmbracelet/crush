@@ -28,11 +28,22 @@ func TestHandlesRespectsSingleFileSupport(t *testing.T) {
 	require.False(t, handles(server, pyFile, tmp), "non-single-file server should be skipped when no root markers present")
 }
 
-func TestNewManagerPreservesDefaultSingleFileSupport(t *testing.T) {
+func TestNewManagerPreservesDefaultCapabilityFlags(t *testing.T) {
 	t.Parallel()
+
+	// Read the curated defaults rather than hardcoding them, so the test still
+	// means "the override preserved them" if powernap's allowlist changes.
+	defaults := powernapconfig.NewManager()
+	defaults.LoadDefaults()
+	defaultPyright, ok := defaults.GetServer("pyright")
+	require.True(t, ok, "pyright should be registered in powernap's defaults")
+
 	cfg := &config.Config{LSP: config.LSPs{"pyright": {Command: "pyright-langserver"}}}
 	mgr := NewManager(config.NewTestStore(cfg))
 	s, ok := mgr.manager.GetServer("pyright")
 	require.True(t, ok, "pyright should be registered")
-	require.True(t, s.SingleFileSupport, "SingleFileSupport must survive user override of a known default")
+	require.Equal(t, defaultPyright.SingleFileSupport, s.SingleFileSupport,
+		"SingleFileSupport must survive user override of a known default")
+	require.Equal(t, defaultPyright.EnableSnippets, s.EnableSnippets,
+		"EnableSnippets must survive user override of a known default")
 }

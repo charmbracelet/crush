@@ -732,6 +732,21 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	return nil
 }
 
+// IsModelAvailable returns true if the provider is enabled and the model
+// exists in its catalog. Unlike GetModel, it rejects disabled providers.
+func (c *Config) IsModelAvailable(provider, model string) bool {
+	providerConfig, ok := c.Providers.Get(provider)
+	if !ok || providerConfig.Disable {
+		return false
+	}
+	for _, m := range providerConfig.Models {
+		if m.ID == model {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
 	model, ok := c.Models[modelType]
 	if !ok {

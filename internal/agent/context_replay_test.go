@@ -238,7 +238,8 @@ func TestRun_ReplaysPersistedHistoryWithoutChangingPromptPrefix(t *testing.T) {
 		"Echo the input.",
 		func(_ context.Context, input struct {
 			Message string `json:"message"`
-		}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		}, _ fantasy.ToolCall,
+		) (fantasy.ToolResponse, error) {
 			return fantasy.NewTextResponse("Echo: " + input.Message), nil
 		},
 	)
@@ -311,7 +312,8 @@ func TestRun_ReplaysLongOpenAIHistoryWithoutChangingWirePrefix(t *testing.T) {
 		"Echo the input.",
 		func(_ context.Context, input struct {
 			Message string `json:"message"`
-		}, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		}, _ fantasy.ToolCall,
+		) (fantasy.ToolResponse, error) {
 			response := fantasy.NewTextResponse("Echo: " + input.Message)
 			return fantasy.WithResponseMetadata(response, map[string]string{"source": input.Message}), nil
 		},

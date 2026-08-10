@@ -169,11 +169,7 @@ var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
 // the TUI exits, so the user can resume the session with `crush -s <id>`.
 // Nothing is printed when there is no active session.
 func printSessionResume(model *ui.UI) {
-	sess := model.CurrentSession()
-	if sess == nil || sess.ID == "" {
-		return
-	}
-	out := colorprofile.NewWriter(os.Stdout, os.Environ())
+	out := colorprofile.NewWriter(os.Stderr, os.Environ())
 
 	t := styles.ThemeForProvider("")
 	crushLogo := logo.Render(t.Logo.GradCanvas, version.Version, true, logo.Opts{
@@ -185,23 +181,30 @@ func printSessionResume(model *ui.UI) {
 		Hyper:        false,
 	})
 
-	hash := session.HashID(sess.ID)[:7]
-	title := strings.ReplaceAll(sess.Title, "\n", " ")
+	sess := model.CurrentSession()
+	hasSession := sess != nil && sess.ID != ""
 
 	tw, _, _ := term.GetSize(os.Stdout.Fd())
 	style := lipgloss.NewStyle().Padding(1, 3)
 	contentWidth := tw - style.GetHorizontalFrameSize()
-	labelWidth := lipgloss.Width("Session  ")
-	titleWidth := contentWidth - labelWidth
-	if titleWidth > 0 {
-		title = ansi.Truncate(title, titleWidth, "…")
-	}
 
 	thanks := lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using Crush!")
+	info := crushLogo + "\n" + thanks
 
-	sessionLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Session  ") + title
-	continueLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Continue ") + "crush -s " + hash
-	info := crushLogo + "\n" + thanks + "\n\n" + sessionLine + "\n" + continueLine
+	if hasSession {
+		title := strings.ReplaceAll(sess.Title, "\n", " ")
+
+		labelWidth := lipgloss.Width("Session  ")
+		titleWidth := contentWidth - labelWidth
+		if titleWidth > 0 {
+			title = ansi.Truncate(title, titleWidth, "…")
+		}
+
+		hash := session.HashID(sess.ID)[:7]
+		sessionLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Session  ") + title
+		continueLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Continue ") + "crush -s " + hash
+		info += "\n" + sessionLine + "\n" + continueLine
+	}
 
 	body := style.Width(tw).Render(info)
 

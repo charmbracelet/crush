@@ -1,6 +1,8 @@
 package herdr
 
 import (
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,10 +11,13 @@ import (
 // recordingSender captures state transitions without connecting to a
 // real Unix socket.
 type recordingSender struct {
+	mu     sync.Mutex
 	states []string
 }
 
 func (r *recordingSender) send(req reportRequest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.states = append(r.states, req.Params.State)
 	return nil
 }
@@ -31,7 +36,10 @@ func newTestClient() *Client {
 
 // reportedStates returns the states recorded by the test sender.
 func reportedStates(c *Client) []string {
-	return c.snd.(*recordingSender).states
+	rec := c.snd.(*recordingSender)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return slices.Clone(rec.states)
 }
 
 func TestBasicLifecycle(t *testing.T) {
@@ -187,6 +195,91 @@ func TestSubSessionSummarizeEventsIgnored(t *testing.T) {
 	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
 }
 
+func TestQuestionBlockAndUnblock(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Start working.
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+
+	// A question blocks, carrying its text as the blocked message.
+	c.HandleEvent(QuestionAsked{Text: "Which file should I edit?"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+	assert.Equal(t, "Which file should I edit?", c.message)
+
+	// Answering the question returns to working (run still active).
+	c.HandleEvent(QuestionResolved{})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateWorking}, reportedStates(c))
+	assert.Empty(t, c.message)
+
+	// Run complete returns to idle.
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestQuestionBeforeAssistantMessage(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A question can only be asked mid-turn, so it implies an active
+	// run even when no assistant message has arrived yet.
+	c.HandleEvent(QuestionAsked{Text: "Proceed?"})
+	assert.Equal(t, []string{stateBlocked}, reportedStates(c))
+
+	// Resolving the question returns to working, not idle.
+	c.HandleEvent(QuestionResolved{})
+	assert.Equal(t, []string{stateBlocked, stateWorking}, reportedStates(c))
+}
+
+func TestOverlappingPermissionAndQuestionBlocks(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A permission prompt opens, then a question arrives while the
+	// permission is still pending.
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	c.HandleEvent(PermissionRequested{})
+	c.HandleEvent(QuestionAsked{Text: "Pick an option"})
+	// The state stays blocked but the message changed from the
+	// permission's empty one to the question's text, and dedup is
+	// on the (state, message) pair: a second blocked report goes
+	// out.
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateBlocked}, reportedStates(c))
+	// The newest block's message wins.
+	assert.Equal(t, "Pick an option", c.message)
+
+	// Resolving only the permission leaves the pane blocked, with
+	// the question's message unchanged, so nothing new is reported.
+	c.HandleEvent(PermissionResolved{})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateBlocked}, reportedStates(c))
+	assert.Equal(t, "Pick an option", c.message)
+
+	// Resolving the question finally unblocks.
+	c.HandleEvent(QuestionResolved{})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateBlocked, stateWorking}, reportedStates(c))
+}
+
+func TestQuestionBlockOutranksRunComplete(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A run starts and a question opens mid-turn.
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	c.HandleEvent(QuestionAsked{Text: "Proceed?"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	// A run completion arriving while the question is still pending
+	// (e.g. the turn errored out) must not drop the pane to idle:
+	// the block wins until it is resolved.
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	// With the run already finished, resolving the question lands
+	// on idle rather than working.
+	c.HandleEvent(QuestionResolved{})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateIdle}, reportedStates(c))
+}
+
 func TestDedupSkipsRedundantState(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
@@ -195,6 +288,22 @@ func TestDedupSkipsRedundantState(t *testing.T) {
 	c.HandleEvent(AssistantMessage{SessionID: "s1"})
 	c.HandleEvent(AssistantMessage{SessionID: "s1"})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+}
+
+func TestDedupReportsChangedBlockMessage(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A repeated block with a different message must still reach
+	// herdr: dedup is on the (state, message) pair, not state alone.
+	c.HandleEvent(QuestionAsked{Text: "First question"})
+	c.HandleEvent(QuestionAsked{Text: "Second question"})
+	assert.Equal(t, []string{stateBlocked, stateBlocked}, reportedStates(c))
+	assert.Equal(t, "Second question", c.message)
+
+	// An identical repeat is deduplicated.
+	c.HandleEvent(QuestionAsked{Text: "Second question"})
+	assert.Equal(t, []string{stateBlocked, stateBlocked}, reportedStates(c))
 }
 
 func TestSummarizeStartFinishReturnsToIdle(t *testing.T) {
@@ -276,6 +385,8 @@ func TestNilClientSafe(t *testing.T) {
 	c.HandleEvent(RunComplete{SessionID: "s1"})
 	c.HandleEvent(PermissionRequested{})
 	c.HandleEvent(PermissionResolved{})
+	c.HandleEvent(QuestionAsked{Text: "Proceed?"})
+	c.HandleEvent(QuestionResolved{})
 	c.HandleEvent(SummarizeStarted{SessionID: "s1"})
 	c.HandleEvent(SummarizeFinished{SessionID: "s1"})
 }

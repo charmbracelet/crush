@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 )
 
 // Translate converts a pub/sub event (domain or proto) into a herdr
@@ -25,6 +26,14 @@ func Translate(ev any) Event {
 		return PermissionRequested{}
 	case pubsub.Event[permission.PermissionNotification]:
 		return PermissionResolved{}
+	case pubsub.Event[question.Request]:
+		var text string
+		if len(e.Payload.Questions) > 0 {
+			text = e.Payload.Questions[0].Text
+		}
+		return QuestionAsked{Text: truncateBlockMessage(text)}
+	case pubsub.Event[question.Notification]:
+		return QuestionResolved{}
 
 	// Proto types (client/server mode). proto.Message carries no
 	// IsSummaryMessage flag, so compaction is not detectable on the
@@ -41,10 +50,32 @@ func Translate(ev any) Event {
 		return PermissionRequested{}
 	case pubsub.Event[proto.PermissionNotification]:
 		return PermissionResolved{}
+	case pubsub.Event[proto.QuestionRequest]:
+		var text string
+		if len(e.Payload.Questions) > 0 {
+			text = e.Payload.Questions[0].Question
+		}
+		return QuestionAsked{Text: truncateBlockMessage(text)}
+	case pubsub.Event[proto.QuestionNotification]:
+		return QuestionResolved{}
 
 	default:
 		return nil
 	}
+}
+
+// maxBlockMessageLength is herdr's 80-character cap on report text
+// fields. Block messages must stay under it.
+const maxBlockMessageLength = 80
+
+// truncateBlockMessage caps a blocked-reason message at herdr's
+// text-field limit, keeping the cut rune-safe.
+func truncateBlockMessage(s string) string {
+	r := []rune(s)
+	if len(r) <= maxBlockMessageLength {
+		return s
+	}
+	return string(r[:maxBlockMessageLength])
 }
 
 // translateMessage maps a domain message event to a herdr event.
@@ -77,14 +108,23 @@ type permNotificationSubscriber interface {
 	SubscribeNotifications(context.Context) <-chan pubsub.Event[permission.PermissionNotification]
 }
 
+// questionNotificationSubscriber is the subset of the question
+// service needed by BridgeLocal to subscribe to resolution
+// notifications.
+type questionNotificationSubscriber interface {
+	SubscribeNotifications(context.Context) <-chan pubsub.Event[question.Notification]
+}
+
 // BridgeSources groups the pub/sub sources that BridgeLocal subscribes
 // to. Adding a new event type means adding a field here rather than
 // growing the function signature.
 type BridgeSources struct {
-	PermRequests      pubsub.Subscriber[permission.PermissionRequest]
-	PermNotifications permNotificationSubscriber
-	RunCompletions    pubsub.Subscriber[notify.RunComplete]
-	Messages          pubsub.Subscriber[message.Message]
+	PermRequests          pubsub.Subscriber[permission.PermissionRequest]
+	PermNotifications     permNotificationSubscriber
+	RunCompletions        pubsub.Subscriber[notify.RunComplete]
+	Messages              pubsub.Subscriber[message.Message]
+	Questions             pubsub.Subscriber[question.Request]
+	QuestionNotifications questionNotificationSubscriber
 }
 
 // BridgeLocal subscribes to local pub/sub brokers and forwards
@@ -114,6 +154,12 @@ func BridgeLocal(ctx context.Context, c *Client, src BridgeSources) {
 	})
 	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[message.Message] {
 		return src.Messages.Subscribe(subCtx)
+	})
+	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[question.Request] {
+		return src.Questions.Subscribe(subCtx)
+	})
+	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[question.Notification] {
+		return src.QuestionNotifications.SubscribeNotifications(subCtx)
 	})
 }
 

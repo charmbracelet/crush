@@ -82,6 +82,24 @@ type PermissionResolved struct{}
 
 func (PermissionResolved) herdrEvent() {}
 
+// QuestionAsked indicates the question tool is waiting for the user
+// to answer. Transitions to blocked.
+type QuestionAsked struct {
+	// Text is the blocked message, derived from the first
+	// question's text and truncated to herdr's text-field cap by
+	// Translate.
+	Text string
+}
+
+func (QuestionAsked) herdrEvent() {}
+
+// QuestionResolved indicates a pending question was answered or
+// cancelled. Transitions back to working if a run is active, idle
+// otherwise.
+type QuestionResolved struct{}
+
+func (QuestionResolved) herdrEvent() {}
+
 // SummarizeStarted indicates context compaction began. Transitions to
 // working until a matching SummarizeFinished arrives. Compaction never
 // publishes a RunComplete, so it must not ride on runActive: that is
@@ -245,6 +263,10 @@ func (c *Client) HandleEvent(ev Event) {
 		c.onPermissionRequest()
 	case PermissionResolved:
 		c.onPermissionResolved()
+	case QuestionAsked:
+		c.onQuestionAsked(e.Text)
+	case QuestionResolved:
+		c.onQuestionResolved()
 	case SummarizeStarted:
 		c.onSummarizeStarted(e.SessionID)
 	case SummarizeFinished:
@@ -324,6 +346,24 @@ func (c *Client) onPermissionResolved() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clearBlockLocked(blockPermission)
+	c.recomputeLocked()
+}
+
+func (c *Client) onQuestionAsked(text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// A question implies a run is active, even if no assistant
+	// message has arrived yet: the tool can only block on user
+	// input mid-turn.
+	c.runActive = true
+	c.setBlockLocked(blockQuestion, text)
+	c.recomputeLocked()
+}
+
+func (c *Client) onQuestionResolved() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clearBlockLocked(blockQuestion)
 	c.recomputeLocked()
 }
 

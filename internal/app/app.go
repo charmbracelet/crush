@@ -147,10 +147,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
 	herdr.BridgeLocal(ctx, app.herdrClient, herdr.BridgeSources{
-		PermRequests:      app.Permissions,
-		PermNotifications: app.Permissions,
-		RunCompletions:    app.runCompletions,
-		Messages:          app.Messages,
+		PermRequests:          app.Permissions,
+		PermNotifications:     app.Permissions,
+		RunCompletions:        app.runCompletions,
+		Messages:              app.Messages,
+		Questions:             app.Questions,
+		QuestionNotifications: app.Questions,
 	})
 
 	// Release the shared database connection on shutdown. The pool

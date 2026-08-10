@@ -570,7 +570,11 @@ func (p *Permissions) renderBashContent(width int) string {
 		return ""
 	}
 
-	return p.renderContentPanel(params.Command, width)
+	command, err := common.SyntaxHighlightLexerName(p.com.Styles, params.Command, "bash", nil)
+	if err != nil {
+		command = params.Command
+	}
+	return p.renderContentPanel(command, width)
 }
 
 func (p *Permissions) renderEditContent(contentWidth int) string {

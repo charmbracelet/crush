@@ -118,6 +118,27 @@ func TestSummarizingTriggersWorking(t *testing.T) {
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 }
 
+func TestBlockOutranksRunComplete(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A run starts and a permission prompt opens mid-turn.
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	c.HandleEvent(PermissionRequested{})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	// A run completion arriving while the block is still pending
+	// (e.g. the turn was cancelled) must not drop the pane to idle:
+	// the block wins until it is resolved.
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	// With the run already finished, resolving the block lands on
+	// idle rather than working.
+	c.HandleEvent(PermissionResolved{})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateIdle}, reportedStates(c))
+}
+
 func TestNilClientSafe(t *testing.T) {
 	t.Parallel()
 	var c *Client

@@ -30,6 +30,18 @@ const (
 	stateBlocked = "blocked"
 )
 
+// blockReason identifies a cause that keeps the agent waiting on the
+// user. The reported state is derived from the set of active blocks
+// plus the run/summarize flags, so overlapping blocks only clear once
+// every one of them is resolved.
+type blockReason string
+
+const (
+	blockPermission blockReason = "permission"
+	blockQuestion   blockReason = "question"
+	blockAuth       blockReason = "auth"
+)
+
 // Event is the herdr-specific event vocabulary. Each type maps to a
 // distinct state transition in the agent lifecycle. Callers translate
 // from proto or domain types into these before calling HandleEvent.
@@ -82,11 +94,24 @@ type Client struct {
 	socketPath string
 	paneID     string
 
-	mu        sync.Mutex
+	mu sync.Mutex
+	// sessionID is the current top-level session, sent along with
+	// every state report.
 	sessionID string
-	state     string
-	runActive bool
-	seq       uint64
+	// state and message hold the last reported pair; reports are
+	// deduplicated on both so a changed blocked reason still reaches
+	// herdr.
+	state   string
+	message string
+	// runActive tracks an in-flight agent turn, summarizing tracks
+	// context compaction. Blocks record reasons the agent is waiting
+	// on the user; blockOrder keeps them oldest-first so the newest
+	// block's message can be picked for the report.
+	runActive   bool
+	summarizing bool
+	blocks      map[blockReason]string
+	blockOrder  []blockReason
+	seq         uint64
 
 	snd sender
 }
@@ -134,6 +159,7 @@ func newFromEnv() *Client {
 		socketPath: socketPath,
 		paneID:     paneID,
 		state:      stateIdle,
+		blocks:     make(map[blockReason]string),
 		seq:        uint64(time.Now().UnixNano()),
 		snd:        newUnixSender(socketPath),
 	}
@@ -222,10 +248,8 @@ func (c *Client) onAssistantMessage(sessionID string) {
 	if sessionID != "" {
 		c.sessionID = sessionID
 	}
-	if !c.runActive {
-		c.runActive = true
-		c.reportLocked(stateWorking)
-	}
+	c.runActive = true
+	c.recomputeLocked()
 }
 
 func (c *Client) onRunComplete(sessionID string) {
@@ -235,7 +259,7 @@ func (c *Client) onRunComplete(sessionID string) {
 	if sessionID != "" {
 		c.sessionID = sessionID
 	}
-	c.reportLocked(stateIdle)
+	c.recomputeLocked()
 }
 
 func (c *Client) onPermissionRequest() {
@@ -244,29 +268,71 @@ func (c *Client) onPermissionRequest() {
 	// A permission request implies a run is active, even if no
 	// assistant message has arrived yet (e.g. tool calls that fire
 	// before any text output).
-	if !c.runActive {
-		c.runActive = true
-	}
-	c.reportLocked(stateBlocked)
+	c.runActive = true
+	c.setBlockLocked(blockPermission, "")
+	c.recomputeLocked()
 }
 
 func (c *Client) onPermissionResolved() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.runActive {
-		c.reportLocked(stateWorking)
-	} else {
-		c.reportLocked(stateIdle)
-	}
+	c.clearBlockLocked(blockPermission)
+	c.recomputeLocked()
 }
 
 func (c *Client) onSummarizing() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.runActive {
-		c.runActive = true
+	// Compaction currently maps onto runActive so a following
+	// RunComplete still returns the pane to idle. TODO-3 replaces
+	// this with explicit summarize start/finish events that drive
+	// the summarizing flag instead.
+	c.runActive = true
+	c.recomputeLocked()
+}
+
+// setBlockLocked records a reason the agent is waiting on the user.
+// Must be called with c.mu held.
+func (c *Client) setBlockLocked(reason blockReason, message string) {
+	if c.blocks == nil {
+		c.blocks = make(map[blockReason]string)
 	}
-	c.reportLocked(stateWorking)
+	if _, ok := c.blocks[reason]; !ok {
+		c.blockOrder = append(c.blockOrder, reason)
+	}
+	c.blocks[reason] = message
+}
+
+// clearBlockLocked drops a block reason. Must be called with c.mu held.
+func (c *Client) clearBlockLocked(reason blockReason) {
+	if _, ok := c.blocks[reason]; !ok {
+		return
+	}
+	delete(c.blocks, reason)
+	for i, r := range c.blockOrder {
+		if r == reason {
+			c.blockOrder = append(c.blockOrder[:i], c.blockOrder[i+1:]...)
+			break
+		}
+	}
+}
+
+// recomputeLocked derives the reported state from the active blocks
+// and the run/summarize flags, then reports it. Must be called with
+// c.mu held. Blocks outrank everything: as long as any block is
+// active the pane is blocked, carrying the newest block's message.
+func (c *Client) recomputeLocked() {
+	var state, message string
+	switch {
+	case len(c.blocks) > 0:
+		state = stateBlocked
+		message = c.blocks[c.blockOrder[len(c.blockOrder)-1]]
+	case c.runActive || c.summarizing:
+		state = stateWorking
+	default:
+		state = stateIdle
+	}
+	c.reportLocked(state, message)
 }
 
 // newRequestLocked builds a seq-stamped JSON-RPC request to herdr.
@@ -291,13 +357,14 @@ func (c *Client) newRequestLocked(method, idPrefix, state string) reportRequest 
 }
 
 // reportLocked sends a pane.report_agent request to herdr. Must be
-// called with c.mu held. Skips redundant reports when the state has
-// not changed.
-func (c *Client) reportLocked(state string) {
-	if state == c.state {
+// called with c.mu held. Skips redundant reports when neither the
+// state nor the message has changed.
+func (c *Client) reportLocked(state, message string) {
+	if state == c.state && message == c.message {
 		return
 	}
 	c.state = state
+	c.message = message
 	c.snd.send(c.newRequestLocked("pane.report_agent", "report", state))
 }
 

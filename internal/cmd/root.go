@@ -37,7 +37,9 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/logo"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -173,13 +175,35 @@ func printSessionResume(model *ui.UI) {
 	}
 	out := colorprofile.NewWriter(os.Stdout, os.Environ())
 
-	labelStyle := lipgloss.NewStyle().Foreground(charmtone.Damson).Bold(true)
-	valueStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
+	t := styles.ThemeForProvider("")
+	crushLogo := logo.Render(t.Logo.GradCanvas, version.Version, true, logo.Opts{
+		FieldColor:   t.Logo.FieldColor,
+		TitleColorA:  t.Logo.TitleColorA,
+		TitleColorB:  t.Logo.TitleColorB,
+		CharmColor:   t.Logo.CharmColor,
+		VersionColor: t.Logo.VersionColor,
+		Hyper:        false,
+	})
+
 	hash := session.HashID(sess.ID)[:7]
 	title := strings.ReplaceAll(sess.Title, "\n", " ")
 
-	fmt.Fprintln(out, labelStyle.Render("Session  ")+valueStyle.Render(title))
-	fmt.Fprintln(out, labelStyle.Render("Continue ")+valueStyle.Render("crush -s "+hash))
+	tw, _, _ := term.GetSize(os.Stdout.Fd())
+	style := lipgloss.NewStyle().Padding(1, 3)
+	contentWidth := tw - style.GetHorizontalFrameSize()
+	labelWidth := lipgloss.Width("Session  ")
+	titleWidth := contentWidth - labelWidth
+	if titleWidth > 0 {
+		title = ansi.Truncate(title, titleWidth, "…")
+	}
+
+	sessionLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Session  ") + title
+	continueLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Continue ") + "crush -s " + hash
+	info := sessionLine + "\n" + continueLine
+
+	body := style.Width(tw).Render(crushLogo + "\n" + info)
+
+	fmt.Fprintln(out, body)
 }
 
 // copied from cobra:

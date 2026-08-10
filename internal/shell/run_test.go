@@ -318,7 +318,7 @@ func TestWithoutHerdrEnv_StripsAllVars(t *testing.T) {
 		"PATH=/usr/bin",
 		"HOME=/home/user",
 	}
-	result := withoutHerdrEnv(env)
+	result := WithoutHerdrEnv(env)
 	for _, e := range result {
 		if strings.HasPrefix(e, "HERDR_") {
 			t.Errorf("herdr var not stripped: %s", e)
@@ -334,7 +334,7 @@ func TestWithoutHerdrEnv_StripsAllVars(t *testing.T) {
 
 func TestWithoutHerdrEnv_EmptyInput(t *testing.T) {
 	t.Parallel()
-	result := withoutHerdrEnv(nil)
+	result := WithoutHerdrEnv(nil)
 	if len(result) != 0 {
 		t.Errorf("expected empty result for nil input, got %v", result)
 	}
@@ -343,7 +343,7 @@ func TestWithoutHerdrEnv_EmptyInput(t *testing.T) {
 func TestWithoutHerdrEnv_SliceIndependence(t *testing.T) {
 	t.Parallel()
 	env := []string{"HERDR_ENV=1", "FOO=bar"}
-	result := withoutHerdrEnv(env)
+	result := WithoutHerdrEnv(env)
 	env[1] = "FOO=baz"
 	for _, e := range result {
 		if e == "FOO=baz" {

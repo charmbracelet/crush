@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -181,7 +182,20 @@ type Client struct {
 var (
 	defaultClient *Client
 	initOnce      sync.Once
+	// disabled, when set, makes Init return nil forever after. Set
+	// via Disable before the first Init call.
+	disabled atomic.Bool
 )
+
+// Disable permanently disables the herdr integration for this
+// process: Init returns nil and no socket connection is ever made.
+// The crush server hosts workspaces on behalf of clients and must
+// never claim the pane of the terminal that launched it, so it calls
+// this at startup. Call before the first Init; an already-created
+// client is not closed.
+func Disable() {
+	disabled.Store(true)
+}
 
 // Init returns the process-wide herdr Client, creating it on first
 // call from environment variables. Returns nil when Crush is not
@@ -194,6 +208,10 @@ func Init() *Client {
 }
 
 func newFromEnv() *Client {
+	if disabled.Load() {
+		slog.Debug("Herdr integration disabled for this process")
+		return nil
+	}
 	if os.Getenv("HERDR_ENV") != "1" {
 		return nil
 	}

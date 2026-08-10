@@ -258,18 +258,19 @@ func withNonInteractiveEnv(env []string) []string {
 // so agents can report state over its Unix socket API. Subprocesses
 // must not inherit these: a child process that calls herdr.Init()
 // would attach to the parent's pane and, on exit, release its agent
-// authority — making the status vanish. Stripping them here closes
-// that gap for every command the bash tool runs.
+// authority — making the status vanish. Stripping them closes that
+// gap for every command the bash tool runs and for the detached
+// crush server (see startDetachedServer).
 var herdrEnvVars = []string{
 	"HERDR_ENV",
 	"HERDR_SOCKET_PATH",
 	"HERDR_PANE_ID",
 }
 
-// withoutHerdrEnv returns env with all HERDR_* variables removed.
+// WithoutHerdrEnv returns env with all HERDR_* variables removed.
 // The returned slice is a new allocation safe to use concurrently
 // with the input.
-func withoutHerdrEnv(env []string) []string {
+func WithoutHerdrEnv(env []string) []string {
 	strip := make(map[string]bool, len(herdrEnvVars))
 	for _, k := range herdrEnvVars {
 		strip[k] = true

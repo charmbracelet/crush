@@ -620,3 +620,19 @@ func TestInitDisabledUnderTest(t *testing.T) {
 	t.Setenv("HERDR_PANE_ID", "test:pane")
 	assert.Nil(t, newFromEnv())
 }
+
+// TestDisable verifies newFromEnv returns nil once Disable was
+// called, even with a complete, valid-looking environment. Mutates
+// process-global state, so it cannot run in parallel; the flag is
+// restored on exit.
+func TestDisable(t *testing.T) {
+	old := disabled.Swap(false)
+	defer disabled.Store(old)
+
+	t.Setenv("HERDR_ENV", "1")
+	t.Setenv("HERDR_SOCKET_PATH", "/tmp/does-not-matter.sock")
+	t.Setenv("HERDR_PANE_ID", "test:pane")
+
+	Disable()
+	assert.Nil(t, newFromEnv())
+}

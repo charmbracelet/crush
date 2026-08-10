@@ -197,11 +197,13 @@ func printSessionResume(model *ui.UI) {
 		title = ansi.Truncate(title, titleWidth, "…")
 	}
 
+	thanks := lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using Crush!")
+
 	sessionLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Session  ") + title
 	continueLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Continue ") + "crush -s " + hash
-	info := sessionLine + "\n" + continueLine
+	info := crushLogo + "\n" + thanks + "\n\n" + sessionLine + "\n" + continueLine
 
-	body := style.Width(tw).Render(crushLogo + "\n" + info)
+	body := style.Width(tw).Render(info)
 
 	fmt.Fprintln(out, body)
 }

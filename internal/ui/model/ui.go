@@ -3504,7 +3504,6 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 		Mod:    mouse.Mod,
 	}
 
-	var fwd tea.Msg
 	switch msg.(type) {
 	case tea.MouseClickMsg:
 		if rel.Button != uv.MouseLeft {
@@ -3526,8 +3525,6 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 	default:
 		return false, nil
 	}
-
-	return true, m.updateTextarea(fwd)
 }
 
 // updateTextareaWithPrevHeight is for cases when the height of the layout may

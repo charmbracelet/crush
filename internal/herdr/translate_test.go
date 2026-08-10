@@ -30,7 +30,7 @@ func TestTranslateDomainSummaryMessage(t *testing.T) {
 			IsSummaryMessage: true,
 		},
 	}
-	assert.Equal(t, Summarizing{}, Translate(ev))
+	assert.Equal(t, Summarizing{SessionID: "s1"}, Translate(ev))
 }
 
 func TestTranslateDomainNonAssistantIgnored(t *testing.T) {
@@ -111,11 +111,12 @@ func TestTranslateProtoSummarizing(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[proto.AgentEvent]{
 		Payload: proto.AgentEvent{
-			Type: proto.AgentEventTypeSummarize,
-			Done: false,
+			Type:    proto.AgentEventTypeSummarize,
+			Message: proto.Message{SessionID: "s1"},
+			Done:    false,
 		},
 	}
-	assert.Equal(t, Summarizing{}, Translate(ev))
+	assert.Equal(t, Summarizing{SessionID: "s1"}, Translate(ev))
 }
 
 func TestTranslateProtoSummarizeDoneIgnored(t *testing.T) {

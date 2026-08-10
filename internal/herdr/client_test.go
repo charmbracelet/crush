@@ -90,9 +90,93 @@ func TestSessionIDPropagation(t *testing.T) {
 	c.SetSessionID("early-session")
 	assert.Equal(t, "early-session", c.sessionID)
 
-	// RunComplete also updates session ID.
-	c.HandleEvent(RunComplete{SessionID: "final-session"})
-	assert.Equal(t, "final-session", c.sessionID)
+	// Events for the current session drive the state.
+	c.HandleEvent(AssistantMessage{SessionID: "early-session"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// A lifecycle event for a different session is ignored: it must
+	// neither overwrite the authoritative session id nor change the
+	// reported state.
+	c.HandleEvent(RunComplete{SessionID: "other-session"})
+	assert.Equal(t, "early-session", c.sessionID)
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// An event for the current session is accepted.
+	c.HandleEvent(RunComplete{SessionID: "early-session"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestSessionIDLearnedFromFirstEvent(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// With no SetSessionID call, the first top-level lifecycle event
+	// establishes the session.
+	c.HandleEvent(AssistantMessage{SessionID: "s1"})
+	assert.Equal(t, "s1", c.sessionID)
+
+	// Events for other sessions are then ignored.
+	c.HandleEvent(AssistantMessage{SessionID: "s2"})
+	c.HandleEvent(RunComplete{SessionID: "s2"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// SetSessionID re-points the client at the new session (session
+	// switch); events for the old one are now the stale ones.
+	c.SetSessionID("s2")
+	c.HandleEvent(RunComplete{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+	c.HandleEvent(RunComplete{SessionID: "s2"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestSubSessionEventsIgnored(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Main session starts a run.
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// A sub-agent (agent tool) run publishes its own lifecycle events
+	// on the shared broker with ids of the form
+	// "messageID$$toolCallID". Its messages must not corrupt the
+	// reported session id.
+	c.HandleEvent(AssistantMessage{SessionID: "msg-1$$tc-1"})
+	assert.Equal(t, "sess-1", c.sessionID)
+
+	// Its RunComplete must not drop the pane to idle while the main
+	// run is still going.
+	c.HandleEvent(RunComplete{SessionID: "msg-1$$tc-1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// The main run's completion still lands on idle.
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestSubSessionNeverEstablishesSessionID(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A sub-session event arriving before any SetSessionID must be
+	// ignored rather than learned as the current session.
+	c.HandleEvent(RunComplete{SessionID: "msg-1$$tc-1"})
+	assert.Empty(t, c.sessionID)
+	assert.Empty(t, reportedStates(c))
+}
+
+func TestSubSessionSummarizingIgnored(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Auto-compaction inside a sub-agent session must not start a
+	// working report the main session never clears.
+	c.HandleEvent(Summarizing{SessionID: "msg-1$$tc-1"})
+	assert.Empty(t, reportedStates(c))
+
+	// A summarize event for the main session is accepted.
+	c.HandleEvent(Summarizing{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 }
 
 func TestDedupSkipsRedundantState(t *testing.T) {

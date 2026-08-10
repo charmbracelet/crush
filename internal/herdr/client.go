@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,6 +42,11 @@ const (
 	blockQuestion   blockReason = "question"
 	blockAuth       blockReason = "auth"
 )
+
+// subSessionSeparator separates the parent message id from the tool
+// call id in agent-tool sub-session ids
+// ("<messageID>$$<toolCallID>", see session.CreateAgentToolSessionID).
+const subSessionSeparator = "$$"
 
 // Event is the herdr-specific event vocabulary. Each type maps to a
 // distinct state transition in the agent lifecycle. Callers translate
@@ -78,7 +84,9 @@ func (PermissionResolved) herdrEvent() {}
 
 // Summarizing indicates the agent is compacting context. Transitions
 // to working if not already active.
-type Summarizing struct{}
+type Summarizing struct {
+	SessionID string
+}
 
 func (Summarizing) herdrEvent() {}
 
@@ -227,11 +235,13 @@ func (c *Client) HandleEvent(ev Event) {
 	case PermissionResolved:
 		c.onPermissionResolved()
 	case Summarizing:
-		c.onSummarizing()
+		c.onSummarizing(e.SessionID)
 	}
 }
 
-// SetSessionID sets the session ID for reporting. Call this when the
+// SetSessionID sets the session ID for reporting. This is the
+// authoritative current session: lifecycle events for any other
+// top-level session are ignored afterwards. Call this when the
 // session is created or resolved, before events start flowing.
 func (c *Client) SetSessionID(id string) {
 	if c == nil {
@@ -242,11 +252,35 @@ func (c *Client) SetSessionID(id string) {
 	c.sessionID = id
 }
 
+// acceptLifecycleLocked applies the session scoping shared by all
+// lifecycle events and reports whether the event should be processed.
+// Events from agent-tool sub-sessions are always ignored: a sub-agent
+// run must not drive the pane state nor overwrite the reported
+// session id. Events from a different top-level session than the
+// current one are stale and ignored as well. While no session is
+// known, the first scoped event establishes it. Must be called with
+// c.mu held.
+func (c *Client) acceptLifecycleLocked(sessionID string) bool {
+	if strings.Contains(sessionID, subSessionSeparator) {
+		return false
+	}
+	if sessionID == "" {
+		// The event carries no session; accept it so the state
+		// transition still happens, but there is nothing to learn.
+		return true
+	}
+	if c.sessionID == "" {
+		c.sessionID = sessionID
+		return true
+	}
+	return sessionID == c.sessionID
+}
+
 func (c *Client) onAssistantMessage(sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if sessionID != "" {
-		c.sessionID = sessionID
+	if !c.acceptLifecycleLocked(sessionID) {
+		return
 	}
 	c.runActive = true
 	c.recomputeLocked()
@@ -255,10 +289,10 @@ func (c *Client) onAssistantMessage(sessionID string) {
 func (c *Client) onRunComplete(sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.runActive = false
-	if sessionID != "" {
-		c.sessionID = sessionID
+	if !c.acceptLifecycleLocked(sessionID) {
+		return
 	}
+	c.runActive = false
 	c.recomputeLocked()
 }
 
@@ -280,9 +314,12 @@ func (c *Client) onPermissionResolved() {
 	c.recomputeLocked()
 }
 
-func (c *Client) onSummarizing() {
+func (c *Client) onSummarizing(sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.acceptLifecycleLocked(sessionID) {
+		return
+	}
 	// Compaction currently maps onto runActive so a following
 	// RunComplete still returns the pane to idle. TODO-3 replaces
 	// this with explicit summarize start/finish events that drive

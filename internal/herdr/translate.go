@@ -45,7 +45,7 @@ func Translate(ev any) Event {
 		return PermissionResolved{}
 	case pubsub.Event[proto.AgentEvent]:
 		if e.Payload.Type == proto.AgentEventTypeSummarize && !e.Payload.Done {
-			return Summarizing{}
+			return Summarizing{SessionID: e.Payload.Message.SessionID}
 		}
 		return nil
 
@@ -61,7 +61,7 @@ func translateMessage(isAssistant bool, sessionID string, isSummary bool) Event 
 		return nil
 	}
 	if isSummary {
-		return Summarizing{}
+		return Summarizing{SessionID: sessionID}
 	}
 	return AssistantMessage{SessionID: sessionID}
 }

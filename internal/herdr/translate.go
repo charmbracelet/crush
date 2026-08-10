@@ -18,11 +18,7 @@ func Translate(ev any) Event {
 	switch e := ev.(type) {
 	// Domain types (TUI / local headless).
 	case pubsub.Event[message.Message]:
-		return translateMessage(
-			e.Payload.Role == message.Assistant,
-			e.Payload.SessionID,
-			e.Payload.IsSummaryMessage,
-		)
+		return translateMessage(e.Type, e.Payload)
 	case pubsub.Event[notify.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}
 	case pubsub.Event[permission.PermissionRequest]:
@@ -30,40 +26,49 @@ func Translate(ev any) Event {
 	case pubsub.Event[permission.PermissionNotification]:
 		return PermissionResolved{}
 
-	// Proto types (client/server mode).
+	// Proto types (client/server mode). proto.Message carries no
+	// IsSummaryMessage flag, so compaction is not detectable on the
+	// wire; client/server mode simply never reports a summarizing
+	// state.
 	case pubsub.Event[proto.Message]:
-		return translateMessage(
-			e.Payload.Role == proto.Assistant,
-			e.Payload.SessionID,
-			false,
-		)
+		if e.Payload.Role == proto.Assistant {
+			return AssistantMessage{SessionID: e.Payload.SessionID}
+		}
+		return nil
 	case pubsub.Event[proto.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}
 	case pubsub.Event[proto.PermissionRequest]:
 		return PermissionRequested{}
 	case pubsub.Event[proto.PermissionNotification]:
 		return PermissionResolved{}
-	case pubsub.Event[proto.AgentEvent]:
-		if e.Payload.Type == proto.AgentEventTypeSummarize && !e.Payload.Done {
-			return Summarizing{SessionID: e.Payload.Message.SessionID}
-		}
-		return nil
 
 	default:
 		return nil
 	}
 }
 
-// translateMessage is the shared message-mapping logic for both domain
-// and proto message types.
-func translateMessage(isAssistant bool, sessionID string, isSummary bool) Event {
-	if !isAssistant {
-		return nil
+// translateMessage maps a domain message event to a herdr event.
+// Compaction never publishes a RunComplete, so the summary message's
+// lifecycle doubles as the compaction signal: an unfinished summary
+// message means compaction is running, a finished one means it
+// completed or errored (sessionAgent.Summarize calls AddFinish on
+// both paths), and a deleted one means the user cancelled (the
+// cancel path removes the summary message).
+func translateMessage(eventType pubsub.EventType, msg message.Message) Event {
+	if msg.IsSummaryMessage {
+		switch {
+		case eventType == pubsub.DeletedEvent:
+			return SummarizeFinished{SessionID: msg.SessionID}
+		case msg.IsFinished():
+			return SummarizeFinished{SessionID: msg.SessionID}
+		default:
+			return SummarizeStarted{SessionID: msg.SessionID}
+		}
 	}
-	if isSummary {
-		return Summarizing{SessionID: sessionID}
+	if msg.Role == message.Assistant {
+		return AssistantMessage{SessionID: msg.SessionID}
 	}
-	return AssistantMessage{SessionID: sessionID}
+	return nil
 }
 
 // permNotificationSubscriber is the subset of the permission service

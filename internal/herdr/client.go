@@ -82,13 +82,24 @@ type PermissionResolved struct{}
 
 func (PermissionResolved) herdrEvent() {}
 
-// Summarizing indicates the agent is compacting context. Transitions
-// to working if not already active.
-type Summarizing struct {
+// SummarizeStarted indicates context compaction began. Transitions to
+// working until a matching SummarizeFinished arrives. Compaction never
+// publishes a RunComplete, so it must not ride on runActive: that is
+// what left the pane stuck in working after a /compact.
+type SummarizeStarted struct {
 	SessionID string
 }
 
-func (Summarizing) herdrEvent() {}
+func (SummarizeStarted) herdrEvent() {}
+
+// SummarizeFinished indicates context compaction ended, whether by
+// success, error, or user cancel. Transitions back to working if a
+// run is still active (auto-compaction mid-turn), idle otherwise.
+type SummarizeFinished struct {
+	SessionID string
+}
+
+func (SummarizeFinished) herdrEvent() {}
 
 // sender abstracts the transport layer for reporting state to herdr.
 // Production uses a Unix socket; tests use a recorder.
@@ -234,8 +245,10 @@ func (c *Client) HandleEvent(ev Event) {
 		c.onPermissionRequest()
 	case PermissionResolved:
 		c.onPermissionResolved()
-	case Summarizing:
-		c.onSummarizing(e.SessionID)
+	case SummarizeStarted:
+		c.onSummarizeStarted(e.SessionID)
+	case SummarizeFinished:
+		c.onSummarizeFinished(e.SessionID)
 	}
 }
 
@@ -314,17 +327,23 @@ func (c *Client) onPermissionResolved() {
 	c.recomputeLocked()
 }
 
-func (c *Client) onSummarizing(sessionID string) {
+func (c *Client) onSummarizeStarted(sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.acceptLifecycleLocked(sessionID) {
 		return
 	}
-	// Compaction currently maps onto runActive so a following
-	// RunComplete still returns the pane to idle. TODO-3 replaces
-	// this with explicit summarize start/finish events that drive
-	// the summarizing flag instead.
-	c.runActive = true
+	c.summarizing = true
+	c.recomputeLocked()
+}
+
+func (c *Client) onSummarizeFinished(sessionID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.acceptLifecycleLocked(sessionID) {
+		return
+	}
+	c.summarizing = false
 	c.recomputeLocked()
 }
 

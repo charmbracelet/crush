@@ -165,18 +165,26 @@ func TestSubSessionNeverEstablishesSessionID(t *testing.T) {
 	assert.Empty(t, reportedStates(c))
 }
 
-func TestSubSessionSummarizingIgnored(t *testing.T) {
+func TestSubSessionSummarizeEventsIgnored(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
 
 	// Auto-compaction inside a sub-agent session must not start a
 	// working report the main session never clears.
-	c.HandleEvent(Summarizing{SessionID: "msg-1$$tc-1"})
+	c.HandleEvent(SummarizeStarted{SessionID: "msg-1$$tc-1"})
 	assert.Empty(t, reportedStates(c))
 
-	// A summarize event for the main session is accepted.
-	c.HandleEvent(Summarizing{SessionID: "sess-1"})
+	// A summarize event for the main session is accepted, and its
+	// finish returns the pane to idle.
+	c.HandleEvent(SummarizeStarted{SessionID: "sess-1"})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+	c.HandleEvent(SummarizeFinished{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+
+	// A sub-session finish arriving while idle must not drive any
+	// state change either.
+	c.HandleEvent(SummarizeFinished{SessionID: "msg-1$$tc-1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
 }
 
 func TestDedupSkipsRedundantState(t *testing.T) {
@@ -189,17 +197,53 @@ func TestDedupSkipsRedundantState(t *testing.T) {
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 }
 
-func TestSummarizingTriggersWorking(t *testing.T) {
+func TestSummarizeStartFinishReturnsToIdle(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
 
-	// Summarizing event should trigger working.
-	c.HandleEvent(Summarizing{})
+	// Regression: compaction never publishes a RunComplete, so the
+	// summarize lifecycle must return the pane to idle by itself.
+	c.HandleEvent(SummarizeStarted{SessionID: "s1"})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 
-	// Second summarizing should not trigger another state change.
-	c.HandleEvent(Summarizing{})
+	// Repeated starts are deduplicated.
+	c.HandleEvent(SummarizeStarted{SessionID: "s1"})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// Finishing the compaction returns the pane to idle.
+	c.HandleEvent(SummarizeFinished{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestSummarizeDuringRunStaysWorking(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Auto-compaction fires mid-turn (agent.go:1194): a run is
+	// already active when the summarize starts.
+	c.HandleEvent(AssistantMessage{SessionID: "s1"})
+	c.HandleEvent(SummarizeStarted{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// Finishing the compaction must not drop the pane to idle while
+	// the turn that triggered it is still running.
+	c.HandleEvent(SummarizeFinished{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// The turn's completion finally lands on idle.
+	c.HandleEvent(RunComplete{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestSummarizeFinishWithoutStartIsNoop(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A finish without a matching start (e.g. a stale summary
+	// message deleted during session cleanup) must not report
+	// anything: idle is already the current state.
+	c.HandleEvent(SummarizeFinished{SessionID: "s1"})
+	assert.Empty(t, reportedStates(c))
 }
 
 func TestBlockOutranksRunComplete(t *testing.T) {
@@ -232,7 +276,8 @@ func TestNilClientSafe(t *testing.T) {
 	c.HandleEvent(RunComplete{SessionID: "s1"})
 	c.HandleEvent(PermissionRequested{})
 	c.HandleEvent(PermissionResolved{})
-	c.HandleEvent(Summarizing{})
+	c.HandleEvent(SummarizeStarted{SessionID: "s1"})
+	c.HandleEvent(SummarizeFinished{SessionID: "s1"})
 }
 
 func TestRegisterInitial(t *testing.T) {

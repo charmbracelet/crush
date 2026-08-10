@@ -21,16 +21,53 @@ func TestTranslateDomainAssistantMessage(t *testing.T) {
 	assert.Equal(t, AssistantMessage{SessionID: "s1"}, Translate(ev))
 }
 
-func TestTranslateDomainSummaryMessage(t *testing.T) {
+func TestTranslateDomainSummaryMessageStarted(t *testing.T) {
 	t.Parallel()
+	// An unfinished summary message (created or mid-stream update)
+	// means compaction is running.
+	for _, eventType := range []pubsub.EventType{pubsub.CreatedEvent, pubsub.UpdatedEvent} {
+		ev := pubsub.Event[message.Message]{
+			Type: eventType,
+			Payload: message.Message{
+				Role:             message.Assistant,
+				SessionID:        "s1",
+				IsSummaryMessage: true,
+			},
+		}
+		assert.Equal(t, SummarizeStarted{SessionID: "s1"}, Translate(ev))
+	}
+}
+
+func TestTranslateDomainSummaryMessageFinished(t *testing.T) {
+	t.Parallel()
+	// Success and error both AddFinish on the summary message.
 	ev := pubsub.Event[message.Message]{
+		Type: pubsub.UpdatedEvent,
+		Payload: message.Message{
+			Role:             message.Assistant,
+			SessionID:        "s1",
+			IsSummaryMessage: true,
+			Parts: []message.ContentPart{
+				message.Finish{Reason: message.FinishReasonEndTurn},
+			},
+		},
+	}
+	assert.Equal(t, SummarizeFinished{SessionID: "s1"}, Translate(ev))
+}
+
+func TestTranslateDomainSummaryMessageDeleted(t *testing.T) {
+	t.Parallel()
+	// The cancel path deletes the summary message, so a DeletedEvent
+	// for one also means compaction is over.
+	ev := pubsub.Event[message.Message]{
+		Type: pubsub.DeletedEvent,
 		Payload: message.Message{
 			Role:             message.Assistant,
 			SessionID:        "s1",
 			IsSummaryMessage: true,
 		},
 	}
-	assert.Equal(t, Summarizing{SessionID: "s1"}, Translate(ev))
+	assert.Equal(t, SummarizeFinished{SessionID: "s1"}, Translate(ev))
 }
 
 func TestTranslateDomainNonAssistantIgnored(t *testing.T) {
@@ -107,24 +144,15 @@ func TestTranslateProtoPermissionNotification(t *testing.T) {
 	assert.Equal(t, PermissionResolved{}, Translate(ev))
 }
 
-func TestTranslateProtoSummarizing(t *testing.T) {
+func TestTranslateProtoAgentEventIgnored(t *testing.T) {
 	t.Parallel()
+	// proto.Message carries no IsSummaryMessage flag and nothing
+	// publishes AgentEventTypeSummarize, so proto agent events never
+	// map to a herdr event.
 	ev := pubsub.Event[proto.AgentEvent]{
 		Payload: proto.AgentEvent{
 			Type:    proto.AgentEventTypeSummarize,
 			Message: proto.Message{SessionID: "s1"},
-			Done:    false,
-		},
-	}
-	assert.Equal(t, Summarizing{SessionID: "s1"}, Translate(ev))
-}
-
-func TestTranslateProtoSummarizeDoneIgnored(t *testing.T) {
-	t.Parallel()
-	ev := pubsub.Event[proto.AgentEvent]{
-		Payload: proto.AgentEvent{
-			Type: proto.AgentEventTypeSummarize,
-			Done: true,
 		},
 	}
 	assert.Nil(t, Translate(ev))

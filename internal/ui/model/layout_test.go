@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // testMessageItem is a minimal chat item used to populate the chat list
@@ -26,6 +27,28 @@ func (m testMessageItem) Version() uint64      { return 0 }
 func (m testMessageItem) Finished() bool       { return true }
 
 var _ chat.MessageItem = testMessageItem{}
+
+// mutableMessageItem is a test message item whose rendered height can grow
+// over time, simulating streaming content that increases the item's height.
+type mutableMessageItem struct {
+	id      string
+	lines   int
+	version uint64
+}
+
+func (m *mutableMessageItem) ID() string { return m.id }
+func (m *mutableMessageItem) Render(width int) string {
+	lines := make([]string, m.lines)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	return strings.Join(lines, "\n")
+}
+func (m *mutableMessageItem) RawRender(width int) string { return m.Render(width) }
+func (m *mutableMessageItem) Version() uint64            { return m.version }
+func (m *mutableMessageItem) Finished() bool             { return false }
+
+var _ chat.MessageItem = (*mutableMessageItem)(nil)
 
 // newTestUI builds a focused uiChat model with dynamic textarea sizing enabled.
 // It intentionally keeps dependencies minimal so layout behavior can be tested
@@ -118,6 +141,87 @@ func TestHandleTextareaHeightChange_FollowModeStaysAtBottom(t *testing.T) {
 	}
 	if !u.chat.AtBottom() {
 		t.Fatal("expected chat to remain at bottom after editor resize in follow mode")
+	}
+}
+
+func TestScrollByDown_EnablesFollowAtBottom(t *testing.T) {
+	t.Parallel()
+
+	// Use enough messages to make the chat scrollable so AtBottom/Follow
+	// assertions are meaningful.
+	u := newTestUI()
+
+	msgs := make([]chat.MessageItem, 0, 60)
+	for i := range 60 {
+		msgs = append(msgs, testMessageItem{
+			id:   "m-" + strconv.Itoa(i),
+			text: "message " + strconv.Itoa(i),
+		})
+	}
+	u.chat.SetMessages(msgs...)
+	u.updateLayoutAndSize()
+
+	// Start at the top with follow disabled, simulating a user that
+	// scrolled up to read earlier messages.
+	u.chat.ScrollToTop()
+	if u.chat.Follow() {
+		t.Fatal("expected follow mode to be disabled after scrolling to top")
+	}
+
+	// Scroll down in small increments (like mouse wheel ticks) until we
+	// reach the bottom. Follow mode should re-enable once the bottom is
+	// reached so the view sticks to new content.
+	for range 200 {
+		if u.chat.AtBottom() {
+			break
+		}
+		u.chat.ScrollBy(3)
+	}
+
+	if !u.chat.AtBottom() {
+		t.Fatal("expected chat to be at bottom after scrolling down")
+	}
+	if !u.chat.Follow() {
+		t.Fatal("expected follow mode to be enabled after scrolling to bottom")
+	}
+}
+
+func TestFollowStaysAtBottomWhenContentGrows(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+
+	// Create enough static messages to make the chat scrollable, plus one
+	// mutable item at the end that will grow (simulating streaming).
+	msgs := make([]chat.MessageItem, 0, 60)
+	for i := range 59 {
+		msgs = append(msgs, testMessageItem{
+			id:   "m-" + strconv.Itoa(i),
+			text: "message " + strconv.Itoa(i),
+		})
+	}
+	streaming := &mutableMessageItem{id: "streaming", lines: 1, version: 1}
+	msgs = append(msgs, streaming)
+	u.chat.SetMessages(msgs...)
+	u.updateLayoutAndSize()
+
+	// Start at the bottom in follow mode.
+	u.chat.ScrollToBottom()
+	if !u.chat.AtBottom() {
+		t.Fatal("expected chat to start at bottom")
+	}
+
+	// Simulate streaming: grow the last item's height.
+	streaming.lines = 20
+	streaming.version++
+
+	// Trigger a draw (which renders the list and updates cached heights).
+	// The follow re-anchor in Draw should keep us pinned to the bottom.
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.chat.Draw(scr, u.layout.main)
+
+	if !u.chat.AtBottom() {
+		t.Fatal("expected chat to remain at bottom after streaming content grew while following")
 	}
 }
 

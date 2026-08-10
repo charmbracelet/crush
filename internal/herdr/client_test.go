@@ -80,6 +80,44 @@ func TestBasicLifecycle(t *testing.T) {
 	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
 }
 
+func TestRunStartedReportsWorkingImmediately(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// The prompt submission itself flips the pane to working; no
+	// assistant output is required first.
+	c.HandleEvent(RunStarted{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// The first assistant message changes nothing (deduped), and
+	// the run's completion returns to idle.
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestRunStartedSessionGating(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A sub-agent's prompt (agent-tool sub-session) must not drive
+	// the pane nor establish the session id.
+	c.HandleEvent(RunStarted{SessionID: "msg-1$$tc-1"})
+	assert.Empty(t, c.sessionID)
+	assert.Empty(t, reportedStates(c))
+
+	// The main session's prompt is accepted and learned.
+	c.HandleEvent(RunStarted{SessionID: "sess-1"})
+	assert.Equal(t, "sess-1", c.sessionID)
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	// A prompt for a different top-level session is stale and
+	// ignored.
+	c.HandleEvent(RunStarted{SessionID: "other-session"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+}
+
 func TestPermissionBlockAndUnblock(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()

@@ -55,6 +55,14 @@ type Event interface {
 	herdrEvent()
 }
 
+// RunStarted indicates the user submitted a prompt. Transitions to
+// working immediately, before the first assistant output arrives.
+type RunStarted struct {
+	SessionID string
+}
+
+func (RunStarted) herdrEvent() {}
+
 // AssistantMessage indicates the agent produced output. Transitions
 // to working if not already active.
 type AssistantMessage struct {
@@ -269,6 +277,8 @@ func (c *Client) HandleEvent(ev Event) {
 		return
 	}
 	switch e := ev.(type) {
+	case RunStarted:
+		c.onRunStarted(e.SessionID)
 	case AssistantMessage:
 		c.onAssistantMessage(e.SessionID)
 	case RunComplete:
@@ -325,6 +335,16 @@ func (c *Client) acceptLifecycleLocked(sessionID string) bool {
 		return true
 	}
 	return sessionID == c.sessionID
+}
+
+func (c *Client) onRunStarted(sessionID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.acceptLifecycleLocked(sessionID) {
+		return
+	}
+	c.runActive = true
+	c.recomputeLocked()
 }
 
 func (c *Client) onAssistantMessage(sessionID string) {

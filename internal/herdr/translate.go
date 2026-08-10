@@ -48,8 +48,17 @@ func Translate(ev any) Event {
 	// wire; client/server mode simply never reports a summarizing
 	// state.
 	case pubsub.Event[proto.Message]:
-		if e.Payload.Role == proto.Assistant {
+		switch e.Payload.Role {
+		case proto.Assistant:
 			return AssistantMessage{SessionID: e.Payload.SessionID}
+		case proto.User:
+			// Same exclusions as the domain mapping: bang-mode
+			// shell records and session-cleanup deletions start
+			// no run.
+			if e.Type == pubsub.DeletedEvent || hasShellCommandPart(e.Payload.Parts) {
+				return nil
+			}
+			return RunStarted{SessionID: e.Payload.SessionID}
 		}
 		return nil
 	case pubsub.Event[proto.RunComplete]:
@@ -96,6 +105,7 @@ func truncateBlockMessage(s string) string {
 }
 
 // translateMessage maps a domain message event to a herdr event.
+// A user message marks prompt submission, the real start of a turn.
 // Compaction never publishes a RunComplete, so the summary message's
 // lifecycle doubles as the compaction signal: an unfinished summary
 // message means compaction is running, a finished one means it
@@ -116,7 +126,29 @@ func translateMessage(eventType pubsub.EventType, msg message.Message) Event {
 	if msg.Role == message.Assistant {
 		return AssistantMessage{SessionID: msg.SessionID}
 	}
+	if msg.Role == message.User {
+		// Bang-mode shell commands are persisted as user messages
+		// (shell.PersistOutput) but start no agent run, and session
+		// cleanup deletes user messages; neither may report
+		// working. Only a real prompt submission does.
+		if eventType == pubsub.DeletedEvent || len(msg.ShellCommands()) > 0 {
+			return nil
+		}
+		return RunStarted{SessionID: msg.SessionID}
+	}
 	return nil
+}
+
+// hasShellCommandPart reports whether a proto message carries a
+// bang-mode shell command part. proto.Message has no ShellCommands
+// helper like the domain type, so check the parts directly.
+func hasShellCommandPart(parts []proto.ContentPart) bool {
+	for _, p := range parts {
+		if _, ok := p.(proto.ShellCommand); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // permNotificationSubscriber is the subset of the permission service

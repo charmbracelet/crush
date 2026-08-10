@@ -83,6 +83,50 @@ func TestTranslateDomainNonAssistantIgnored(t *testing.T) {
 	assert.Nil(t, Translate(ev))
 }
 
+func TestTranslateDomainUserMessage(t *testing.T) {
+	t.Parallel()
+	// A user message marks prompt submission, the real start of a
+	// turn.
+	ev := pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{
+			Role:      message.User,
+			SessionID: "s1",
+			Parts:     []message.ContentPart{message.TextContent{Text: "hi"}},
+		},
+	}
+	assert.Equal(t, RunStarted{SessionID: "s1"}, Translate(ev))
+}
+
+func TestTranslateDomainUserMessageShellCommandIgnored(t *testing.T) {
+	t.Parallel()
+	// Bang-mode shell commands are persisted as user messages
+	// (shell.PersistOutput) but start no agent run; mapping them
+	// would leave the pane stuck in working.
+	ev := pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{
+			Role:      message.User,
+			SessionID: "s1",
+			Parts: []message.ContentPart{
+				message.ShellCommand{Command: "ls", Output: "file.go", ExitCode: 0},
+			},
+		},
+	}
+	assert.Nil(t, Translate(ev))
+}
+
+func TestTranslateDomainUserMessageDeletedIgnored(t *testing.T) {
+	t.Parallel()
+	// Session cleanup deletes user messages; a deletion must not
+	// report working.
+	ev := pubsub.Event[message.Message]{
+		Type:    pubsub.DeletedEvent,
+		Payload: message.Message{Role: message.User, SessionID: "s1"},
+	}
+	assert.Nil(t, Translate(ev))
+}
+
 func TestTranslateDomainRunComplete(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[notify.RunComplete]{
@@ -198,6 +242,45 @@ func TestTranslateProtoAssistantMessage(t *testing.T) {
 func TestTranslateProtoNonAssistantIgnored(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[proto.Message]{
+		Payload: proto.Message{Role: proto.System, SessionID: "s1"},
+	}
+	assert.Nil(t, Translate(ev))
+}
+
+func TestTranslateProtoUserMessage(t *testing.T) {
+	t.Parallel()
+	ev := pubsub.Event[proto.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: proto.Message{
+			Role:      proto.User,
+			SessionID: "s1",
+			Parts:     []proto.ContentPart{proto.TextContent{Text: "hi"}},
+		},
+	}
+	assert.Equal(t, RunStarted{SessionID: "s1"}, Translate(ev))
+}
+
+func TestTranslateProtoUserMessageShellCommandIgnored(t *testing.T) {
+	t.Parallel()
+	// Bang-mode shell records cross the wire with their
+	// ShellCommand part; they start no run.
+	ev := pubsub.Event[proto.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: proto.Message{
+			Role:      proto.User,
+			SessionID: "s1",
+			Parts: []proto.ContentPart{
+				proto.ShellCommand{Command: "ls", Output: "file.go", ExitCode: 0},
+			},
+		},
+	}
+	assert.Nil(t, Translate(ev))
+}
+
+func TestTranslateProtoUserMessageDeletedIgnored(t *testing.T) {
+	t.Parallel()
+	ev := pubsub.Event[proto.Message]{
+		Type:    pubsub.DeletedEvent,
 		Payload: proto.Message{Role: proto.User, SessionID: "s1"},
 	}
 	assert.Nil(t, Translate(ev))

@@ -83,6 +83,65 @@ func TestSummaryMessageLifecycleIntegration(t *testing.T) {
 	)
 }
 
+// TestUserMessageRunStartedIntegration pins the prompt-submission
+// contract between message.Service and Translate that the early
+// working report relies on: creating a user message means a turn
+// started, while a bang-mode shell record (also a user message)
+// means no run. Drives a real SQLite-backed message service and
+// asserts the resulting client state sequence.
+func TestUserMessageRunStartedIntegration(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	conn, err := db.Connect(ctx, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sess, err := session.NewService(q, conn).Create(ctx, "test")
+	require.NoError(t, err)
+
+	svc := message.NewService(q, message.WithDebounce(0))
+	ch := svc.Subscribe(ctx)
+
+	c := newTestClient()
+	c.SetSessionID(sess.ID)
+
+	// drain pops one published event and forwards its translation.
+	drain := func() {
+		t.Helper()
+		select {
+		case ev := <-ch:
+			if hev := Translate(ev); hev != nil {
+				c.HandleEvent(hev)
+			}
+		default:
+			t.Fatal("expected a published message event")
+		}
+	}
+
+	// Prompt submission flips the pane to working before any
+	// assistant output exists (agent.go:713).
+	_, err = svc.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "hi"}},
+	})
+	require.NoError(t, err)
+	drain() // CreatedEvent -> RunStarted.
+
+	// A bang-mode shell command persists a user message but starts
+	// no run (shell.PersistOutput).
+	_, err = svc.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.ShellCommand{Command: "ls", Output: "file.go", ExitCode: 0},
+		},
+	})
+	require.NoError(t, err)
+	drain() // CreatedEvent -> nil.
+
+	require.Equal(t, []string{stateWorking}, reportedStates(c))
+}
+
 // TestTranslateDomainDeletedNonSummary guards the boundary of the
 // delete mapping: deleting a regular assistant message (session
 // cleanup) is not a compaction signal and keeps its pre-existing

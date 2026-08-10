@@ -1,7 +1,7 @@
 package herdr
 
 import (
-	"slices"
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -11,14 +11,14 @@ import (
 // recordingSender captures state transitions without connecting to a
 // real Unix socket.
 type recordingSender struct {
-	mu     sync.Mutex
-	states []string
+	mu       sync.Mutex
+	requests []reportRequest
 }
 
 func (r *recordingSender) send(req reportRequest) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.states = append(r.states, req.Params.State)
+	r.requests = append(r.requests, req)
 	return nil
 }
 
@@ -27,7 +27,7 @@ func (r *recordingSender) close() {}
 // newTestClient creates a Client that records state transitions
 // without connecting to a real Unix socket.
 func newTestClient() *Client {
-	rec := &recordingSender{states: make([]string, 0, 16)}
+	rec := &recordingSender{requests: make([]reportRequest, 0, 16)}
 	return &Client{
 		state: stateIdle,
 		snd:   rec,
@@ -39,7 +39,32 @@ func reportedStates(c *Client) []string {
 	rec := c.snd.(*recordingSender)
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	return slices.Clone(rec.states)
+	states := make([]string, 0, len(rec.requests))
+	for _, req := range rec.requests {
+		states = append(states, req.Params.State)
+	}
+	return states
+}
+
+// reportedMessages returns the messages recorded by the test sender.
+func reportedMessages(c *Client) []string {
+	rec := c.snd.(*recordingSender)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	messages := make([]string, 0, len(rec.requests))
+	for _, req := range rec.requests {
+		messages = append(messages, req.Params.Message)
+	}
+	return messages
+}
+
+// lastRequest returns the most recent request recorded by the test
+// sender.
+func lastRequest(c *Client) reportRequest {
+	rec := c.snd.(*recordingSender)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.requests[len(rec.requests)-1]
 }
 
 func TestBasicLifecycle(t *testing.T) {
@@ -306,6 +331,66 @@ func TestDedupReportsChangedBlockMessage(t *testing.T) {
 	assert.Equal(t, []string{stateBlocked, stateBlocked}, reportedStates(c))
 }
 
+func TestReportCarriesBlockMessage(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Every report carries the current block message on the wire so
+	// herdr can show what the agent is waiting on.
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	c.HandleEvent(QuestionAsked{Text: "Which file should I edit?"})
+	assert.Equal(t,
+		[]string{"", "Which file should I edit?"},
+		reportedMessages(c))
+	req := lastRequest(c)
+	assert.Equal(t, stateBlocked, req.Params.State)
+	assert.Equal(t, "Which file should I edit?", req.Params.Message)
+
+	// Resolving the block clears the message on the very next
+	// report; herdr must not keep showing the stale question.
+	c.HandleEvent(QuestionResolved{})
+	req = lastRequest(c)
+	assert.Equal(t, stateWorking, req.Params.State)
+	assert.Empty(t, req.Params.Message)
+}
+
+func TestPermissionBlockSendsEmptyMessage(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A question leaves its text as the block message; a permission
+	// prompt then takes over with an empty one. The empty message
+	// must go out on the wire, not be dropped, so herdr clears the
+	// stale question text while the state stays blocked.
+	c.HandleEvent(QuestionAsked{Text: "Pick an option"})
+	c.HandleEvent(PermissionRequested{})
+	assert.Equal(t,
+		[]string{"Pick an option", ""},
+		reportedMessages(c))
+	req := lastRequest(c)
+	assert.Equal(t, stateBlocked, req.Params.State)
+	assert.Empty(t, req.Params.Message)
+}
+
+func TestReportRequestAlwaysIncludesMessageKey(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// The message key must be present in the marshaled JSON even
+	// when empty: each report is a complete (state, message)
+	// snapshot, so herdr never has to guess whether a missing key
+	// means "clear" or "keep the last value".
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	raw, err := json.Marshal(lastRequest(c))
+	assert.NoError(t, err)
+	assert.Contains(t, string(raw), `"message":""`)
+
+	c.HandleEvent(QuestionAsked{Text: "Proceed?"})
+	raw, err = json.Marshal(lastRequest(c))
+	assert.NoError(t, err)
+	assert.Contains(t, string(raw), `"message":"Proceed?"`)
+}
+
 func TestSummarizeStartFinishReturnsToIdle(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
@@ -393,14 +478,14 @@ func TestNilClientSafe(t *testing.T) {
 
 func TestRegisterInitial(t *testing.T) {
 	t.Parallel()
-	rec := &recordingSender{states: make([]string, 0, 16)}
+	rec := &recordingSender{requests: make([]reportRequest, 0, 16)}
 	c := &Client{
 		state: stateIdle,
 		seq:   100,
 		snd:   rec,
 	}
 	c.registerInitial()
-	assert.Equal(t, []string{stateIdle}, rec.states)
+	assert.Equal(t, []string{stateIdle}, reportedStates(c))
 	// seq must strictly increase so herdr accepts the report.
 	assert.Equal(t, uint64(101), c.seq)
 }

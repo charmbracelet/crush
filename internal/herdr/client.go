@@ -222,7 +222,7 @@ func (c *Client) registerInitial() {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.snd.send(c.newRequestLocked("pane.report_agent", "init", stateIdle))
+	c.snd.send(c.newRequestLocked("pane.report_agent", "init", stateIdle, ""))
 }
 
 // Close releases the agent's authority on the pane and shuts down
@@ -242,7 +242,7 @@ func (c *Client) Close() {
 func (c *Client) releaseAgent() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	req := c.newRequestLocked("pane.release_agent", "release", "")
+	req := c.newRequestLocked("pane.release_agent", "release", "", "")
 	if err := dialSend(c.socketPath, req); err != nil {
 		slog.Debug("Herdr release_agent failed", "error", err)
 	}
@@ -434,9 +434,10 @@ func (c *Client) recomputeLocked() {
 // newRequestLocked builds a seq-stamped JSON-RPC request to herdr.
 // Must be called with c.mu held. Every request increments c.seq so
 // herdr accepts it as strictly newer than the last (see
-// registerInitial for why monotonic seq matters). State is empty for
-// requests that carry no agent state, such as pane.release_agent.
-func (c *Client) newRequestLocked(method, idPrefix, state string) reportRequest {
+// registerInitial for why monotonic seq matters). State and message
+// are empty for requests that carry no agent state, such as
+// pane.release_agent.
+func (c *Client) newRequestLocked(method, idPrefix, state, message string) reportRequest {
 	c.seq++
 	return reportRequest{
 		ID:     fmt.Sprintf("crush:%s:%d", idPrefix, time.Now().UnixNano()),
@@ -446,6 +447,7 @@ func (c *Client) newRequestLocked(method, idPrefix, state string) reportRequest 
 			Source:         "crush",
 			Agent:          "crush",
 			State:          state,
+			Message:        message,
 			Seq:            c.seq,
 			AgentSessionID: c.sessionID,
 		},
@@ -461,7 +463,7 @@ func (c *Client) reportLocked(state, message string) {
 	}
 	c.state = state
 	c.message = message
-	c.snd.send(c.newRequestLocked("pane.report_agent", "report", state))
+	c.snd.send(c.newRequestLocked("pane.report_agent", "report", state, message))
 }
 
 // reportRequest is the JSON-RPC envelope sent to herdr.
@@ -471,12 +473,16 @@ type reportRequest struct {
 	Params reportParams `json:"params"`
 }
 
-// reportParams carries the agent state payload.
+// reportParams carries the agent state payload. Message is the
+// human-readable reason the agent is blocked (e.g. the question
+// text); it is sent on every report so herdr always has a complete
+// (state, message) snapshot, and is empty when nothing is pending.
 type reportParams struct {
 	PaneID         string `json:"pane_id"`
 	Source         string `json:"source"`
 	Agent          string `json:"agent"`
 	State          string `json:"state"`
+	Message        string `json:"message"`
 	Seq            uint64 `json:"seq"`
 	AgentSessionID string `json:"agent_session_id"`
 }

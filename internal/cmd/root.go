@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -188,8 +189,9 @@ func printSessionResume(model *ui.UI) {
 	style := lipgloss.NewStyle().Padding(1, 3)
 	contentWidth := tw - style.GetHorizontalFrameSize()
 
-	thanks := lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using Crush!")
-	info := crushLogo + "\n" + thanks
+	info := crushLogo +
+		"\nThanks for using Crush! " +
+		lipgloss.NewStyle().Width(contentWidth).Render(randomExitMessage())
 
 	if hasSession {
 		title := strings.ReplaceAll(sess.Title, "\n", " ")
@@ -203,7 +205,7 @@ func printSessionResume(model *ui.UI) {
 		hash := session.HashID(sess.ID)[:7]
 		sessionLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Session  ") + title
 		continueLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Continue ") + "crush -s " + hash
-		info += "\n" + sessionLine + "\n" + continueLine
+		info += "\n\n" + sessionLine + "\n" + continueLine
 	}
 
 	body := style.Width(tw).Render(info)
@@ -214,6 +216,20 @@ func printSessionResume(model *ui.UI) {
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
 `
+
+// randomExitMessage returns a random exit message.
+func randomExitMessage() string {
+	messages := []string{
+		"",
+		"See ya later.",
+		"You look great.",
+		"Have a gorgeous time.",
+		"Get some rest.",
+		"Come back soon.",
+		"You worked handsomely.",
+	}
+	return messages[rand.IntN(len(messages))]
+}
 
 func Execute() {
 	// FIXME: config.Load uses slog internally during provider resolution,

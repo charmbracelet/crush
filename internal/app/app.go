@@ -154,7 +154,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Questions:             app.Questions,
 		QuestionNotifications: app.Questions,
 		Notifications:         app.agentNotifications,
+		Sessions:              app.Sessions,
 	})
+	if model, ok := cfg.Models[config.SelectedModelTypeLarge]; ok {
+		app.herdrClient.ReportModel(model.Model)
+	}
 
 	// Release the shared database connection on shutdown. The pool
 	// closes the underlying *sql.DB when the last reference is released.
@@ -226,12 +230,22 @@ func (app *App) RunCompletions() *pubsub.Broker[notify.RunComplete] {
 }
 
 // ReportCurrentSession tells herdr which session the user is now
-// viewing so it can persist a resumable reference for the pane. Safe
-// to call when not running inside a herdr pane; the underlying client
-// is nil-safe. Call this whenever the active session changes (load,
-// new, or select).
-func (app *App) ReportCurrentSession(sessionID string) {
-	app.herdrClient.SetSessionID(sessionID)
+// viewing so the pane can show its title and persist a resumable
+// reference. Safe to call when not running inside a herdr pane; the
+// underlying client is nil-safe. Call this whenever the active
+// session changes (load, new, or select). An empty sessionID clears
+// the presentation (landing screen).
+func (app *App) ReportCurrentSession(ctx context.Context, sessionID string) {
+	var title string
+	if sessionID != "" {
+		sess, err := app.Sessions.Get(ctx, sessionID)
+		if err != nil {
+			slog.Debug("Failed to look up session title for herdr", "session_id", sessionID, "error", err)
+		} else {
+			title = sess.Title
+		}
+	}
+	app.herdrClient.SetSession(sessionID, title)
 }
 
 // resolveSession resolves which session to use for a non-interactive run
@@ -340,7 +354,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	app.Permissions.AutoApproveSession(sess.ID)
 
 	// Report session identity to herdr.
-	app.ReportCurrentSession(sess.ID)
+	app.ReportCurrentSession(ctx, sess.ID)
 
 	type response struct {
 		result *fantasy.AgentResult

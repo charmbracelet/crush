@@ -68,6 +68,10 @@ func (RunStarted) herdrEvent() {}
 // to working if not already active.
 type AssistantMessage struct {
 	SessionID string
+	// Model is the id of the model that produced the message, when
+	// known. Kept fresh on every assistant message so the pane's
+	// model token self-heals after a mid-session model switch.
+	Model string
 }
 
 func (AssistantMessage) herdrEvent() {}
@@ -142,6 +146,17 @@ type SummarizeFinished struct {
 
 func (SummarizeFinished) herdrEvent() {}
 
+// SessionUpdated carries a session's current title. Not a state
+// transition: it refreshes the pane's presentation metadata when the
+// current session's title changes (auto-titling, rename). Events for
+// any session other than the authoritative current one are ignored.
+type SessionUpdated struct {
+	SessionID string
+	Title     string
+}
+
+func (SessionUpdated) herdrEvent() {}
+
 // sender abstracts the transport layer for reporting state to herdr.
 // Production uses a Unix socket; tests use a recorder.
 type sender interface {
@@ -172,8 +187,24 @@ type Client struct {
 	blocks      map[blockReason]string
 	blockOrder  []blockReason
 	seq         uint64
+	// pres holds the complete desired pane presentation (session
+	// title, session id, model); reportedPres holds the last set
+	// sent. herdr treats presentation fields as replace-all per
+	// source, so every metadata report carries the complete set and
+	// identical sets are deduplicated.
+	pres         presentation
+	reportedPres presentation
 
 	snd sender
+}
+
+// presentation is the pane metadata crush reports to herdr. All
+// fields are strings so the zero value is a valid, comparable
+// "nothing to show" state.
+type presentation struct {
+	title   string
+	session string
+	model   string
 }
 
 // defaultClient is the process-wide herdr client. Initialized once
@@ -298,7 +329,7 @@ func (c *Client) HandleEvent(ev Event) {
 	case RunStarted:
 		c.onRunStarted(e.SessionID)
 	case AssistantMessage:
-		c.onAssistantMessage(e.SessionID)
+		c.onAssistantMessage(e.SessionID, e.Model)
 	case RunComplete:
 		c.onRunComplete(e.SessionID)
 	case PermissionRequested:
@@ -315,20 +346,44 @@ func (c *Client) HandleEvent(ev Event) {
 		c.onSummarizeStarted(e.SessionID)
 	case SummarizeFinished:
 		c.onSummarizeFinished(e.SessionID)
+	case SessionUpdated:
+		c.onSessionUpdated(e.SessionID, e.Title)
 	}
 }
 
-// SetSessionID sets the session ID for reporting. This is the
+// SetSession sets the session ID for reporting. This is the
 // authoritative current session: lifecycle events for any other
 // top-level session are ignored afterwards. Call this when the
-// session is created or resolved, before events start flowing.
-func (c *Client) SetSessionID(id string) {
+// session is created or resolved, before events start flowing. The
+// title refreshes the pane's presentation metadata immediately: no
+// session event fires on a plain switch, so the title must be pushed
+// here. An empty id (landing screen) clears both the title and the
+// session token.
+func (c *Client) SetSession(id, title string) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sessionID = id
+	c.pres.title = title
+	c.pres.session = id
+	c.reportMetadataLocked()
+}
+
+// ReportModel records the active model id for the pane's model
+// token. Called at startup from the loaded config and refreshed from
+// assistant messages afterwards. An empty model is ignored: crush
+// always has a configured model, so clearing the token is never
+// meaningful.
+func (c *Client) ReportModel(model string) {
+	if c == nil || model == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pres.model = model
+	c.reportMetadataLocked()
 }
 
 // acceptLifecycleLocked applies the session scoping shared by all
@@ -365,13 +420,17 @@ func (c *Client) onRunStarted(sessionID string) {
 	c.recomputeLocked()
 }
 
-func (c *Client) onAssistantMessage(sessionID string) {
+func (c *Client) onAssistantMessage(sessionID, model string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.acceptLifecycleLocked(sessionID) {
 		return
 	}
 	c.runActive = true
+	if model != "" {
+		c.pres.model = model
+		c.reportMetadataLocked()
+	}
 	c.recomputeLocked()
 }
 
@@ -462,6 +521,24 @@ func (c *Client) onSummarizeFinished(sessionID string) {
 	c.recomputeLocked()
 }
 
+// onSessionUpdated refreshes the pane title when the current
+// session's title changes. Title events for any other session
+// (background auto-titling of task sessions, sub-sessions) must not
+// clobber the presentation, and with no current session known there
+// is nothing to attach a title to.
+func (c *Client) onSessionUpdated(sessionID, title string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sessionID == "" || strings.Contains(sessionID, subSessionSeparator) {
+		return
+	}
+	if c.sessionID == "" || sessionID != c.sessionID {
+		return
+	}
+	c.pres.title = title
+	c.reportMetadataLocked()
+}
+
 // setBlockLocked records a reason the agent is waiting on the user.
 // Must be called with c.mu held.
 func (c *Client) setBlockLocked(reason blockReason, message string) {
@@ -541,11 +618,55 @@ func (c *Client) reportLocked(state, message string) {
 	c.snd.send(c.newRequestLocked("pane.report_agent", "report", state, message))
 }
 
-// reportRequest is the JSON-RPC envelope sent to herdr.
+// reportMetadataLocked sends a pane.report_metadata request to
+// herdr. Must be called with c.mu held. Skips redundant reports when
+// the complete presentation set is unchanged.
+func (c *Client) reportMetadataLocked() {
+	if c.pres == c.reportedPres {
+		return
+	}
+	c.reportedPres = c.pres
+	c.snd.send(c.newMetadataRequestLocked())
+}
+
+// newMetadataRequestLocked builds a seq-stamped pane.report_metadata
+// request carrying the complete presentation set. Must be called
+// with c.mu held. herdr treats presentation fields as replace-all
+// per source but merges tokens per key, so the title is always sent
+// (omitted when empty, which clears it) and the session token is
+// always sent (null when empty, which clears it). The model token is
+// omitted until known so it is never cleared accidentally.
+func (c *Client) newMetadataRequestLocked() reportRequest {
+	c.seq++
+	tokens := map[string]*string{"session": nil}
+	if c.pres.session != "" {
+		session := truncateBlockMessage(c.pres.session)
+		tokens["session"] = &session
+	}
+	if c.pres.model != "" {
+		model := truncateBlockMessage(c.pres.model)
+		tokens["model"] = &model
+	}
+	return reportRequest{
+		ID:     fmt.Sprintf("crush:metadata:%d", time.Now().UnixNano()),
+		Method: "pane.report_metadata",
+		Params: metadataParams{
+			PaneID: c.paneID,
+			Source: "crush",
+			Title:  truncateBlockMessage(c.pres.title),
+			Tokens: tokens,
+			Seq:    c.seq,
+		},
+	}
+}
+
+// reportRequest is the JSON-RPC envelope sent to herdr. Params is
+// method-specific: reportParams for agent state, metadataParams for
+// pane presentation.
 type reportRequest struct {
-	ID     string       `json:"id"`
-	Method string       `json:"method"`
-	Params reportParams `json:"params"`
+	ID     string `json:"id"`
+	Method string `json:"method"`
+	Params any    `json:"params"`
 }
 
 // reportParams carries the agent state payload. Message is the
@@ -560,6 +681,18 @@ type reportParams struct {
 	Message        string `json:"message"`
 	Seq            uint64 `json:"seq"`
 	AgentSessionID string `json:"agent_session_id"`
+}
+
+// metadataParams carries the pane presentation payload. Title is
+// omitted when empty: herdr's presentation fields are replace-all
+// per source, so omission clears it. Tokens merge per key; a null
+// value clears that token.
+type metadataParams struct {
+	PaneID string             `json:"pane_id"`
+	Source string             `json:"source"`
+	Title  string             `json:"title,omitempty"`
+	Tokens map[string]*string `json:"tokens"`
+	Seq    uint64             `json:"seq"`
 }
 
 // unixSender sends JSON-RPC requests over a Unix domain socket using

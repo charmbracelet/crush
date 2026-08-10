@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +35,7 @@ func TestSummaryMessageLifecycleIntegration(t *testing.T) {
 	ch := svc.Subscribe(ctx)
 
 	c := newTestClient()
-	c.SetSessionID(sess.ID)
+	c.SetSession(sess.ID, sess.Title)
 
 	// drain pops one published event and forwards its translation.
 	drain := func() {
@@ -104,7 +105,7 @@ func TestUserMessageRunStartedIntegration(t *testing.T) {
 	ch := svc.Subscribe(ctx)
 
 	c := newTestClient()
-	c.SetSessionID(sess.ID)
+	c.SetSession(sess.ID, sess.Title)
 
 	// drain pops one published event and forwards its translation.
 	drain := func() {
@@ -153,4 +154,65 @@ func TestTranslateDomainDeletedNonSummary(t *testing.T) {
 		Payload: message.Message{Role: message.Assistant, SessionID: "s1"},
 	}
 	require.Equal(t, AssistantMessage{SessionID: "s1"}, Translate(ev))
+}
+
+// TestSessionTitleChangeIntegration pins the contract between
+// session.Service's publish behaviour and Translate that the pane
+// title refresh relies on: a rename (or auto-title, which shares the
+// same UpdatedEvent path) publishes the session with its new title,
+// and only the current session's event updates the pane metadata.
+// Drives a real SQLite-backed session service.
+func TestSessionTitleChangeIntegration(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	conn, err := db.Connect(ctx, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	svc := session.NewService(q, conn)
+	sess, err := svc.Create(ctx, "Untitled Session")
+	require.NoError(t, err)
+	other, err := svc.Create(ctx, "Other Session")
+	require.NoError(t, err)
+
+	ch := svc.Subscribe(ctx)
+
+	c := newTestClient()
+	c.SetSession(sess.ID, "Untitled Session")
+
+	// drain pops one published event and forwards its translation.
+	drain := func() {
+		t.Helper()
+		select {
+		case ev := <-ch:
+			if hev := Translate(ev); hev != nil {
+				c.HandleEvent(hev)
+			}
+		default:
+			t.Fatal("expected a published session event")
+		}
+	}
+
+	// The two Creates published events for sessions that are not the
+	// current one (the client's SetSession predates them but the
+	// subscription started after, so nothing is drained for them).
+
+	// A title change on a background session must not touch the
+	// pane.
+	require.NoError(t, svc.Rename(ctx, other.ID, "Background Title"))
+	drain() // UpdatedEvent -> SessionUpdated, gated away.
+	meta := reportedMetadata(c)
+	require.Len(t, meta, 1)
+	require.Equal(t, "Untitled Session", meta[0].Title)
+
+	// A rename of the current session refreshes the pane title.
+	require.NoError(t, svc.Rename(ctx, sess.ID, "Generated Title"))
+	drain() // UpdatedEvent -> SessionUpdated, applied.
+	meta = reportedMetadata(c)
+	require.Len(t, meta, 2)
+	require.Equal(t, "Generated Title", meta[1].Title)
+	if assert.NotNil(t, meta[1].Tokens["session"]) {
+		assert.Equal(t, sess.ID, *meta[1].Tokens["session"])
+	}
 }

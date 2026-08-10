@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -35,27 +36,48 @@ func newTestClient() *Client {
 }
 
 // reportedStates returns the states recorded by the test sender.
+// Metadata requests carry no state and are skipped.
 func reportedStates(c *Client) []string {
 	rec := c.snd.(*recordingSender)
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	states := make([]string, 0, len(rec.requests))
 	for _, req := range rec.requests {
-		states = append(states, req.Params.State)
+		if p, ok := req.Params.(reportParams); ok {
+			states = append(states, p.State)
+		}
 	}
 	return states
 }
 
 // reportedMessages returns the messages recorded by the test sender.
+// Metadata requests carry no message and are skipped.
 func reportedMessages(c *Client) []string {
 	rec := c.snd.(*recordingSender)
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	messages := make([]string, 0, len(rec.requests))
 	for _, req := range rec.requests {
-		messages = append(messages, req.Params.Message)
+		if p, ok := req.Params.(reportParams); ok {
+			messages = append(messages, p.Message)
+		}
 	}
 	return messages
+}
+
+// reportedMetadata returns the metadata params recorded by the test
+// sender.
+func reportedMetadata(c *Client) []metadataParams {
+	rec := c.snd.(*recordingSender)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	var out []metadataParams
+	for _, req := range rec.requests {
+		if p, ok := req.Params.(metadataParams); ok {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // lastRequest returns the most recent request recorded by the test
@@ -157,8 +179,8 @@ func TestSessionIDPropagation(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
 
-	// SetSessionID before events.
-	c.SetSessionID("early-session")
+	// SetSession before events.
+	c.SetSession("early-session", "Early")
 	assert.Equal(t, "early-session", c.sessionID)
 
 	// Events for the current session drive the state.
@@ -181,7 +203,7 @@ func TestSessionIDLearnedFromFirstEvent(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
 
-	// With no SetSessionID call, the first top-level lifecycle event
+	// With no SetSession call, the first top-level lifecycle event
 	// establishes the session.
 	c.HandleEvent(AssistantMessage{SessionID: "s1"})
 	assert.Equal(t, "s1", c.sessionID)
@@ -191,9 +213,9 @@ func TestSessionIDLearnedFromFirstEvent(t *testing.T) {
 	c.HandleEvent(RunComplete{SessionID: "s2"})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 
-	// SetSessionID re-points the client at the new session (session
+	// SetSession re-points the client at the new session (session
 	// switch); events for the old one are now the stale ones.
-	c.SetSessionID("s2")
+	c.SetSession("s2", "S2")
 	c.HandleEvent(RunComplete{SessionID: "s1"})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 	c.HandleEvent(RunComplete{SessionID: "s2"})
@@ -229,7 +251,7 @@ func TestSubSessionNeverEstablishesSessionID(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
 
-	// A sub-session event arriving before any SetSessionID must be
+	// A sub-session event arriving before any SetSession must be
 	// ignored rather than learned as the current session.
 	c.HandleEvent(RunComplete{SessionID: "msg-1$$tc-1"})
 	assert.Empty(t, c.sessionID)
@@ -352,14 +374,14 @@ func TestAuthBlockAndUnblock(t *testing.T) {
 	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
 	c.HandleEvent(AuthRequired{ProviderID: "hyper"})
 	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
-	assert.Equal(t, "Re-authentication required: hyper", lastRequest(c).Params.Message)
+	assert.Equal(t, "Re-authentication required: hyper", lastRequest(c).Params.(reportParams).Message)
 
 	// The run that needed auth completes — one way or another, the
 	// auth wait is over. Re-auth success publishes no event, so the
 	// completion is what clears the block.
 	c.HandleEvent(RunComplete{SessionID: "sess-1"})
 	assert.Equal(t, []string{stateWorking, stateBlocked, stateIdle}, reportedStates(c))
-	assert.Empty(t, lastRequest(c).Params.Message)
+	assert.Empty(t, lastRequest(c).Params.(reportParams).Message)
 }
 
 func TestAuthBlockWithoutProvider(t *testing.T) {
@@ -370,7 +392,7 @@ func TestAuthBlockWithoutProvider(t *testing.T) {
 	// message falls back to the generic text.
 	c.HandleEvent(AuthRequired{})
 	assert.Equal(t, []string{stateBlocked}, reportedStates(c))
-	assert.Equal(t, "Re-authentication required", lastRequest(c).Params.Message)
+	assert.Equal(t, "Re-authentication required", lastRequest(c).Params.(reportParams).Message)
 }
 
 func TestAuthBlockBeforeAssistantMessage(t *testing.T) {
@@ -394,7 +416,7 @@ func TestAuthBlockOverlapsPermissionBlock(t *testing.T) {
 	// newest block's message wins.
 	c.HandleEvent(PermissionRequested{})
 	c.HandleEvent(AuthRequired{ProviderID: "hyper"})
-	assert.Equal(t, "Re-authentication required: hyper", lastRequest(c).Params.Message)
+	assert.Equal(t, "Re-authentication required: hyper", lastRequest(c).Params.(reportParams).Message)
 
 	// Resolving the permission keeps the pane blocked on auth. The
 	// (state, message) pair is unchanged, so nothing new is sent.
@@ -460,15 +482,15 @@ func TestReportCarriesBlockMessage(t *testing.T) {
 		[]string{"", "Which file should I edit?"},
 		reportedMessages(c))
 	req := lastRequest(c)
-	assert.Equal(t, stateBlocked, req.Params.State)
-	assert.Equal(t, "Which file should I edit?", req.Params.Message)
+	assert.Equal(t, stateBlocked, req.Params.(reportParams).State)
+	assert.Equal(t, "Which file should I edit?", req.Params.(reportParams).Message)
 
 	// Resolving the block clears the message on the very next
 	// report; herdr must not keep showing the stale question.
 	c.HandleEvent(QuestionResolved{})
 	req = lastRequest(c)
-	assert.Equal(t, stateWorking, req.Params.State)
-	assert.Empty(t, req.Params.Message)
+	assert.Equal(t, stateWorking, req.Params.(reportParams).State)
+	assert.Empty(t, req.Params.(reportParams).Message)
 }
 
 func TestPermissionBlockSendsEmptyMessage(t *testing.T) {
@@ -485,8 +507,8 @@ func TestPermissionBlockSendsEmptyMessage(t *testing.T) {
 		[]string{"Pick an option", ""},
 		reportedMessages(c))
 	req := lastRequest(c)
-	assert.Equal(t, stateBlocked, req.Params.State)
-	assert.Empty(t, req.Params.Message)
+	assert.Equal(t, stateBlocked, req.Params.(reportParams).State)
+	assert.Empty(t, req.Params.(reportParams).Message)
 }
 
 func TestReportRequestAlwaysIncludesMessageKey(t *testing.T) {
@@ -582,7 +604,7 @@ func TestNilClientSafe(t *testing.T) {
 	t.Parallel()
 	var c *Client
 	// These should not panic on a nil receiver.
-	c.SetSessionID("s1")
+	c.SetSession("s1", "S1")
 	c.HandleEvent(AssistantMessage{SessionID: "s1"})
 	c.HandleEvent(RunComplete{SessionID: "s1"})
 	c.HandleEvent(PermissionRequested{})
@@ -592,6 +614,188 @@ func TestNilClientSafe(t *testing.T) {
 	c.HandleEvent(AuthRequired{ProviderID: "hyper"})
 	c.HandleEvent(SummarizeStarted{SessionID: "s1"})
 	c.HandleEvent(SummarizeFinished{SessionID: "s1"})
+	c.HandleEvent(SessionUpdated{SessionID: "s1", Title: "S1"})
+	c.ReportModel("model-1")
+}
+
+func TestSetSessionReportsMetadata(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A session switch publishes the complete presentation set:
+	// title plus the session token. herdr's presentation fields are
+	// replace-all per source, so every report carries both.
+	c.SetSession("s1", "My Title")
+	meta := reportedMetadata(c)
+	assert.Len(t, meta, 1)
+	assert.Equal(t, "My Title", meta[0].Title)
+	if assert.NotNil(t, meta[0].Tokens["session"]) {
+		assert.Equal(t, "s1", *meta[0].Tokens["session"])
+	}
+	assert.NotContains(t, meta[0].Tokens, "model")
+	assert.Equal(t, "pane.report_metadata", lastRequest(c).Method)
+
+	// Identical reports are deduplicated.
+	c.SetSession("s1", "My Title")
+	assert.Len(t, reportedMetadata(c), 1)
+
+	// A switch to another session refreshes title and token.
+	c.SetSession("s2", "Other Title")
+	meta = reportedMetadata(c)
+	assert.Len(t, meta, 2)
+	assert.Equal(t, "Other Title", meta[1].Title)
+	if assert.NotNil(t, meta[1].Tokens["session"]) {
+		assert.Equal(t, "s2", *meta[1].Tokens["session"])
+	}
+
+	// The session id still rides along on state reports.
+	assert.Equal(t, "s2", c.sessionID)
+}
+
+func TestSetSessionClearRemovesPresentation(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Landing on the session picker (empty id) clears the title
+	// (omitted, replace-all) and the session token (explicit null,
+	// tokens merge per key).
+	c.SetSession("s1", "My Title")
+	c.SetSession("", "")
+	meta := reportedMetadata(c)
+	assert.Len(t, meta, 2)
+	assert.Empty(t, meta[1].Title)
+	assert.Nil(t, meta[1].Tokens["session"])
+
+	raw, err := json.Marshal(lastRequest(c))
+	assert.NoError(t, err)
+	assert.NotContains(t, string(raw), `"title"`)
+	assert.Contains(t, string(raw), `"session":null`)
+}
+
+func TestReportModel(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// The model token merges with the rest of the set; before any
+	// session is known the session token goes out as null.
+	c.ReportModel("model-1")
+	meta := reportedMetadata(c)
+	assert.Len(t, meta, 1)
+	if assert.NotNil(t, meta[0].Tokens["model"]) {
+		assert.Equal(t, "model-1", *meta[0].Tokens["model"])
+	}
+	assert.Nil(t, meta[0].Tokens["session"])
+
+	// Dedup, then a model change re-reports the complete set.
+	c.ReportModel("model-1")
+	assert.Len(t, reportedMetadata(c), 1)
+	c.SetSession("s1", "T")
+	c.ReportModel("model-2")
+	meta = reportedMetadata(c)
+	assert.Len(t, meta, 3)
+	assert.Equal(t, "T", meta[2].Title)
+	if assert.NotNil(t, meta[2].Tokens["model"]) {
+		assert.Equal(t, "model-2", *meta[2].Tokens["model"])
+	}
+	if assert.NotNil(t, meta[2].Tokens["session"]) {
+		assert.Equal(t, "s1", *meta[2].Tokens["session"])
+	}
+
+	// An empty model never clears the token.
+	c.ReportModel("")
+	assert.Len(t, reportedMetadata(c), 3)
+}
+
+func TestAssistantMessageRefreshesModelToken(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// The model riding on assistant output keeps the token fresh
+	// after a mid-session model switch, in both run modes.
+	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: "model-1"})
+	meta := reportedMetadata(c)
+	assert.Len(t, meta, 1)
+	if assert.NotNil(t, meta[0].Tokens["model"]) {
+		assert.Equal(t, "model-1", *meta[0].Tokens["model"])
+	}
+
+	// Same model: deduped. New model: re-reported. Empty model: no
+	// change.
+	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: "model-1"})
+	assert.Len(t, reportedMetadata(c), 1)
+	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: "model-2"})
+	assert.Len(t, reportedMetadata(c), 2)
+	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: ""})
+	assert.Len(t, reportedMetadata(c), 2)
+}
+
+func TestSessionUpdatedRefreshesTitle(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Auto-titling and renames arrive as session events; only the
+	// authoritative current session may touch the pane title.
+	c.SetSession("s1", "Old Title")
+	c.HandleEvent(SessionUpdated{SessionID: "s1", Title: "New Title"})
+	meta := reportedMetadata(c)
+	assert.Len(t, meta, 2)
+	assert.Equal(t, "New Title", meta[1].Title)
+
+	// Events for other sessions, sub-sessions, and empty ids are
+	// ignored, as are events while no current session is known.
+	c.HandleEvent(SessionUpdated{SessionID: "s2", Title: "Wrong"})
+	c.HandleEvent(SessionUpdated{SessionID: "msg-1$$tc-1", Title: "Sub"})
+	c.HandleEvent(SessionUpdated{SessionID: "", Title: "Empty"})
+	assert.Len(t, reportedMetadata(c), 2)
+
+	c2 := newTestClient()
+	c2.HandleEvent(SessionUpdated{SessionID: "s1", Title: "Unanchored"})
+	assert.Empty(t, reportedMetadata(c2))
+}
+
+func TestSessionUpdatedTruncatesLongTitle(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// herdr caps text fields at 80 characters; the cut must stay
+	// rune-safe.
+	long := strings.Repeat("é", 100)
+	c.SetSession("s1", long)
+	meta := reportedMetadata(c)
+	assert.Len(t, meta, 1)
+	assert.Equal(t, strings.Repeat("é", 80), meta[0].Title)
+}
+
+func TestMetadataSeqStrictlyIncreases(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+	c.seq = 100
+
+	// State and metadata reports share one seq space; herdr drops
+	// any report whose seq is not strictly greater than the last.
+	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: "m"})
+	c.SetSession("s1", "T")
+	c.HandleEvent(RunComplete{SessionID: "s1"})
+
+	rec := c.snd.(*recordingSender)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	var prev uint64
+	for i, req := range rec.requests {
+		var seq uint64
+		switch p := req.Params.(type) {
+		case reportParams:
+			seq = p.Seq
+		case metadataParams:
+			seq = p.Seq
+		default:
+			t.Fatalf("unexpected params type %T", req.Params)
+		}
+		if i > 0 {
+			assert.Greater(t, seq, prev)
+		}
+		prev = seq
+	}
 }
 
 func TestRegisterInitial(t *testing.T) {

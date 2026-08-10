@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/session"
 )
 
 // Translate converts a pub/sub event (domain or proto) into a herdr
@@ -42,6 +43,8 @@ func Translate(ev any) Event {
 			return AuthRequired{ProviderID: e.Payload.ProviderID}
 		}
 		return nil
+	case pubsub.Event[session.Session]:
+		return translateSession(e.Type, e.Payload.ID, e.Payload.Title)
 
 	// Proto types (client/server mode). proto.Message carries no
 	// IsSummaryMessage flag, so compaction is not detectable on the
@@ -50,7 +53,7 @@ func Translate(ev any) Event {
 	case pubsub.Event[proto.Message]:
 		switch e.Payload.Role {
 		case proto.Assistant:
-			return AssistantMessage{SessionID: e.Payload.SessionID}
+			return AssistantMessage{SessionID: e.Payload.SessionID, Model: e.Payload.Model}
 		case proto.User:
 			// Same exclusions as the domain mapping: bang-mode
 			// shell records and session-cleanup deletions start
@@ -84,6 +87,8 @@ func Translate(ev any) Event {
 			return AuthRequired{}
 		}
 		return nil
+	case pubsub.Event[proto.Session]:
+		return translateSession(e.Type, e.Payload.ID, e.Payload.Title)
 
 	default:
 		return nil
@@ -124,7 +129,7 @@ func translateMessage(eventType pubsub.EventType, msg message.Message) Event {
 		}
 	}
 	if msg.Role == message.Assistant {
-		return AssistantMessage{SessionID: msg.SessionID}
+		return AssistantMessage{SessionID: msg.SessionID, Model: msg.Model}
 	}
 	if msg.Role == message.User {
 		// Bang-mode shell commands are persisted as user messages
@@ -137,6 +142,17 @@ func translateMessage(eventType pubsub.EventType, msg message.Message) Event {
 		return RunStarted{SessionID: msg.SessionID}
 	}
 	return nil
+}
+
+// translateSession maps a session event (domain or proto) to a
+// presentation refresh. Deletions carry no presentation value: when
+// the current session is deleted the UI switches away and SetSession
+// clears the metadata instead.
+func translateSession(eventType pubsub.EventType, id, title string) Event {
+	if eventType == pubsub.DeletedEvent {
+		return nil
+	}
+	return SessionUpdated{SessionID: id, Title: title}
 }
 
 // hasShellCommandPart reports whether a proto message carries a
@@ -175,6 +191,7 @@ type BridgeSources struct {
 	Questions             pubsub.Subscriber[question.Request]
 	QuestionNotifications questionNotificationSubscriber
 	Notifications         pubsub.Subscriber[notify.Notification]
+	Sessions              pubsub.Subscriber[session.Session]
 }
 
 // BridgeLocal subscribes to local pub/sub brokers and forwards
@@ -213,6 +230,9 @@ func BridgeLocal(ctx context.Context, c *Client, src BridgeSources) {
 	})
 	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[notify.Notification] {
 		return src.Notifications.Subscribe(subCtx)
+	})
+	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[session.Session] {
+		return src.Sessions.Subscribe(subCtx)
 	})
 }
 

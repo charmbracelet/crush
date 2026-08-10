@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,9 +22,9 @@ import (
 func TestTranslateDomainAssistantMessage(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[message.Message]{
-		Payload: message.Message{Role: message.Assistant, SessionID: "s1"},
+		Payload: message.Message{Role: message.Assistant, SessionID: "s1", Model: "model-1"},
 	}
-	assert.Equal(t, AssistantMessage{SessionID: "s1"}, Translate(ev))
+	assert.Equal(t, AssistantMessage{SessionID: "s1", Model: "model-1"}, Translate(ev))
 }
 
 func TestTranslateDomainSummaryMessageStarted(t *testing.T) {
@@ -234,9 +235,9 @@ func TestTranslateDomainOtherNotificationsIgnored(t *testing.T) {
 func TestTranslateProtoAssistantMessage(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[proto.Message]{
-		Payload: proto.Message{Role: proto.Assistant, SessionID: "s1"},
+		Payload: proto.Message{Role: proto.Assistant, SessionID: "s1", Model: "model-1"},
 	}
-	assert.Equal(t, AssistantMessage{SessionID: "s1"}, Translate(ev))
+	assert.Equal(t, AssistantMessage{SessionID: "s1", Model: "model-1"}, Translate(ev))
 }
 
 func TestTranslateProtoNonAssistantIgnored(t *testing.T) {
@@ -358,12 +359,45 @@ func TestTranslateProtoAgentEventIgnored(t *testing.T) {
 	assert.Nil(t, Translate(ev))
 }
 
-func TestTranslateProtoSessionIgnored(t *testing.T) {
+func TestTranslateDomainSession(t *testing.T) {
 	t.Parallel()
-	ev := pubsub.Event[proto.Session]{
+
+	// Created and updated sessions carry the title for the pane
+	// presentation; deletions are left to the SetSession clear
+	// path when the UI switches away.
+	created := pubsub.Event[session.Session]{
+		Type:    pubsub.CreatedEvent,
+		Payload: session.Session{ID: "s1", Title: "My Title"},
+	}
+	assert.Equal(t, SessionUpdated{SessionID: "s1", Title: "My Title"}, Translate(created))
+
+	updated := pubsub.Event[session.Session]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: session.Session{ID: "s1", Title: "Renamed"},
+	}
+	assert.Equal(t, SessionUpdated{SessionID: "s1", Title: "Renamed"}, Translate(updated))
+
+	deleted := pubsub.Event[session.Session]{
+		Type:    pubsub.DeletedEvent,
+		Payload: session.Session{ID: "s1"},
+	}
+	assert.Nil(t, Translate(deleted))
+}
+
+func TestTranslateProtoSession(t *testing.T) {
+	t.Parallel()
+
+	updated := pubsub.Event[proto.Session]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: proto.Session{ID: "s1", Title: "My Title"},
+	}
+	assert.Equal(t, SessionUpdated{SessionID: "s1", Title: "My Title"}, Translate(updated))
+
+	deleted := pubsub.Event[proto.Session]{
+		Type:    pubsub.DeletedEvent,
 		Payload: proto.Session{ID: "s1"},
 	}
-	assert.Nil(t, Translate(ev))
+	assert.Nil(t, Translate(deleted))
 }
 
 // Unknown types.
@@ -426,6 +460,7 @@ func TestBridgeLocalForwardsQuestionEvents(t *testing.T) {
 		Questions:             questions,
 		QuestionNotifications: questions,
 		Notifications:         brokerSubscriber[notify.Notification]{pubsub.NewBroker[notify.Notification]()},
+		Sessions:              brokerSubscriber[session.Session]{pubsub.NewBroker[session.Session]()},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -479,6 +514,7 @@ func TestBridgeLocalForwardsAuthNotification(t *testing.T) {
 		Questions:             questions,
 		QuestionNotifications: questions,
 		Notifications:         brokerSubscriber[notify.Notification]{notifications},
+		Sessions:              brokerSubscriber[session.Session]{pubsub.NewBroker[session.Session]()},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

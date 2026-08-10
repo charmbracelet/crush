@@ -266,7 +266,12 @@ func runNonInteractive(
 
 	// Start herdr integration when running inside a herdr pane.
 	hc := herdr.Init()
-	hc.SetSessionID(sess.ID)
+	hc.SetSession(sess.ID, sess.Title)
+	if ws.Config != nil {
+		if model, ok := ws.Config.Models[config.SelectedModelTypeLarge]; ok {
+			hc.ReportModel(model.Model)
+		}
+	}
 	defer hc.Close()
 
 	defer func() {

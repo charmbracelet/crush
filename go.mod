@@ -220,4 +220,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace charm.land/bubbles/v2 => /home/andrinoff/github/charm/bubbles
+replace charm.land/bubbles/v2 => github.com/andrinoff/bubbles/v2 v2.0.0-20260804161509-83763324ccd7

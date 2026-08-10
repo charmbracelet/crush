@@ -156,6 +156,35 @@ func TestTranslateDomainQuestionNotification(t *testing.T) {
 	assert.Equal(t, QuestionResolved{}, Translate(ev))
 }
 
+func TestTranslateDomainReAuthenticateNotification(t *testing.T) {
+	t.Parallel()
+	ev := pubsub.Event[notify.Notification]{
+		Payload: notify.Notification{
+			Type:       notify.TypeReAuthenticate,
+			ProviderID: "hyper",
+		},
+	}
+	assert.Equal(t, AuthRequired{ProviderID: "hyper"}, Translate(ev))
+}
+
+func TestTranslateDomainOtherNotificationsIgnored(t *testing.T) {
+	t.Parallel()
+	// Only re-authentication blocks the pane; the remaining
+	// notification types are informational or own their dialog
+	// flows (AWS SSO).
+	for _, typ := range []notify.Type{
+		notify.TypeAgentFinished,
+		notify.TypeAgentError,
+		notify.TypeAWSSSOAuth,
+		notify.TypeAWSSSOAuthResult,
+	} {
+		ev := pubsub.Event[notify.Notification]{
+			Payload: notify.Notification{Type: typ},
+		}
+		assert.Nil(t, Translate(ev))
+	}
+}
+
 // Proto type translation.
 
 func TestTranslateProtoAssistantMessage(t *testing.T) {
@@ -219,11 +248,24 @@ func TestTranslateProtoQuestionNotification(t *testing.T) {
 	assert.Equal(t, QuestionResolved{}, Translate(ev))
 }
 
+func TestTranslateProtoReAuthenticateAgentEvent(t *testing.T) {
+	t.Parallel()
+	// The server wraps notify.Notification into proto.AgentEvent
+	// with the domain type string, so re_authenticate arrives as a
+	// raw agent event type. ProviderID does not cross the wire.
+	ev := pubsub.Event[proto.AgentEvent]{
+		Payload: proto.AgentEvent{
+			Type: proto.AgentEventType(notify.TypeReAuthenticate),
+		},
+	}
+	assert.Equal(t, AuthRequired{}, Translate(ev))
+}
+
 func TestTranslateProtoAgentEventIgnored(t *testing.T) {
 	t.Parallel()
 	// proto.Message carries no IsSummaryMessage flag and nothing
-	// publishes AgentEventTypeSummarize, so proto agent events never
-	// map to a herdr event.
+	// publishes AgentEventTypeSummarize, so summarize agent events
+	// never map to a herdr event.
 	ev := pubsub.Event[proto.AgentEvent]{
 		Payload: proto.AgentEvent{
 			Type:    proto.AgentEventTypeSummarize,
@@ -300,6 +342,7 @@ func TestBridgeLocalForwardsQuestionEvents(t *testing.T) {
 		Messages:              brokerSubscriber[message.Message]{pubsub.NewBroker[message.Message]()},
 		Questions:             questions,
 		QuestionNotifications: questions,
+		Notifications:         brokerSubscriber[notify.Notification]{pubsub.NewBroker[notify.Notification]()},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -330,4 +373,58 @@ func TestBridgeLocalForwardsQuestionEvents(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return slices.Equal(reportedStates(c), []string{stateBlocked, stateWorking})
 	}, time.Second, time.Millisecond)
+}
+
+func TestBridgeLocalForwardsAuthNotification(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	perms := permStub{
+		brokerSubscriber: brokerSubscriber[permission.PermissionRequest]{pubsub.NewBroker[permission.PermissionRequest]()},
+		notifications:    pubsub.NewBroker[permission.PermissionNotification](),
+	}
+	questions := questionStub{
+		brokerSubscriber: brokerSubscriber[question.Request]{pubsub.NewBroker[question.Request]()},
+		notifications:    pubsub.NewBroker[question.Notification](),
+	}
+	notifications := pubsub.NewBroker[notify.Notification]()
+	src := BridgeSources{
+		PermRequests:          perms,
+		PermNotifications:     perms,
+		RunCompletions:        brokerSubscriber[notify.RunComplete]{pubsub.NewBroker[notify.RunComplete]()},
+		Messages:              brokerSubscriber[message.Message]{pubsub.NewBroker[message.Message]()},
+		Questions:             questions,
+		QuestionNotifications: questions,
+		Notifications:         brokerSubscriber[notify.Notification]{notifications},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	BridgeLocal(ctx, c, src)
+
+	// Wait until the bridge has subscribed before publishing so no
+	// event is lost.
+	assert.Eventually(t, func() bool {
+		return notifications.GetSubscriberCount() > 0
+	}, time.Second, time.Millisecond)
+
+	// A re-authentication notification blocks the pane, naming the
+	// provider.
+	notifications.Publish(pubsub.CreatedEvent, notify.Notification{
+		Type:       notify.TypeReAuthenticate,
+		ProviderID: "hyper",
+	})
+	assert.Eventually(t, func() bool {
+		return slices.Equal(reportedStates(c), []string{stateBlocked})
+	}, time.Second, time.Millisecond)
+	c.mu.Lock()
+	assert.Equal(t, "Re-authentication required: hyper", c.message)
+	c.mu.Unlock()
+
+	// Other notification types pass through without a report.
+	notifications.Publish(pubsub.CreatedEvent, notify.Notification{
+		Type: notify.TypeAgentFinished,
+	})
+	time.Sleep(50 * time.Millisecond)
+	assert.Equal(t, []string{stateBlocked}, reportedStates(c))
 }

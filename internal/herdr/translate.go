@@ -34,6 +34,14 @@ func Translate(ev any) Event {
 		return QuestionAsked{Text: truncateBlockMessage(text)}
 	case pubsub.Event[question.Notification]:
 		return QuestionResolved{}
+	case pubsub.Event[notify.Notification]:
+		// Only re-authentication blocks the pane; every other
+		// notification type is informational. AWS SSO is handled
+		// transparently by its own dialog flow and never blocks.
+		if e.Payload.Type == notify.TypeReAuthenticate {
+			return AuthRequired{ProviderID: e.Payload.ProviderID}
+		}
+		return nil
 
 	// Proto types (client/server mode). proto.Message carries no
 	// IsSummaryMessage flag, so compaction is not detectable on the
@@ -58,6 +66,15 @@ func Translate(ev any) Event {
 		return QuestionAsked{Text: truncateBlockMessage(text)}
 	case pubsub.Event[proto.QuestionNotification]:
 		return QuestionResolved{}
+	case pubsub.Event[proto.AgentEvent]:
+		// The server wraps notify.Notification into proto.AgentEvent
+		// with the domain type string, so re_authenticate arrives
+		// here in client/server mode. ProviderID does not cross the
+		// wire, so the block message carries no provider name.
+		if notify.Type(e.Payload.Type) == notify.TypeReAuthenticate {
+			return AuthRequired{}
+		}
+		return nil
 
 	default:
 		return nil
@@ -125,6 +142,7 @@ type BridgeSources struct {
 	Messages              pubsub.Subscriber[message.Message]
 	Questions             pubsub.Subscriber[question.Request]
 	QuestionNotifications questionNotificationSubscriber
+	Notifications         pubsub.Subscriber[notify.Notification]
 }
 
 // BridgeLocal subscribes to local pub/sub brokers and forwards
@@ -160,6 +178,9 @@ func BridgeLocal(ctx context.Context, c *Client, src BridgeSources) {
 	})
 	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[question.Notification] {
 		return src.QuestionNotifications.SubscribeNotifications(subCtx)
+	})
+	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[notify.Notification] {
+		return src.Notifications.Subscribe(subCtx)
 	})
 }
 

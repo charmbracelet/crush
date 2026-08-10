@@ -100,6 +100,20 @@ type QuestionResolved struct{}
 
 func (QuestionResolved) herdrEvent() {}
 
+// AuthRequired indicates the agent hit an authentication error and is
+// waiting for the user to re-authenticate. Transitions to blocked
+// until the run that needed auth completes: re-auth resolution
+// publishes no event, so the block's lifetime is tied to the run to
+// avoid leaking a permanent blocked state.
+type AuthRequired struct {
+	// ProviderID names the provider needing re-authentication, when
+	// known. Client/server mode does not carry it on the wire, so
+	// it may be empty.
+	ProviderID string
+}
+
+func (AuthRequired) herdrEvent() {}
+
 // SummarizeStarted indicates context compaction began. Transitions to
 // working until a matching SummarizeFinished arrives. Compaction never
 // publishes a RunComplete, so it must not ride on runActive: that is
@@ -267,6 +281,8 @@ func (c *Client) HandleEvent(ev Event) {
 		c.onQuestionAsked(e.Text)
 	case QuestionResolved:
 		c.onQuestionResolved()
+	case AuthRequired:
+		c.onAuthRequired(e.ProviderID)
 	case SummarizeStarted:
 		c.onSummarizeStarted(e.SessionID)
 	case SummarizeFinished:
@@ -328,6 +344,12 @@ func (c *Client) onRunComplete(sessionID string) {
 		return
 	}
 	c.runActive = false
+	// The run that needed re-authentication is over, one way or
+	// another: the auth wait happened inside it, or it ended with
+	// the 401 that raised the prompt. Successful re-auth publishes
+	// no event, so this is the only reliable point to drop the
+	// block without leaking a permanent blocked state.
+	c.clearBlockLocked(blockAuth)
 	c.recomputeLocked()
 }
 
@@ -364,6 +386,21 @@ func (c *Client) onQuestionResolved() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clearBlockLocked(blockQuestion)
+	c.recomputeLocked()
+}
+
+func (c *Client) onAuthRequired(providerID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// An auth prompt implies a run is active: the coordinator only
+	// requests re-authentication from within a failed or waiting
+	// turn.
+	c.runActive = true
+	msg := "Re-authentication required"
+	if providerID != "" {
+		msg = "Re-authentication required: " + providerID
+	}
+	c.setBlockLocked(blockAuth, truncateBlockMessage(msg))
 	c.recomputeLocked()
 }
 

@@ -305,6 +305,85 @@ func TestQuestionBlockOutranksRunComplete(t *testing.T) {
 	assert.Equal(t, []string{stateWorking, stateBlocked, stateIdle}, reportedStates(c))
 }
 
+func TestAuthBlockAndUnblock(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A run starts and hits an auth error mid-turn (e.g. a revoked
+	// OAuth refresh token): the pane blocks on re-authentication.
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	c.HandleEvent(AuthRequired{ProviderID: "hyper"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+	assert.Equal(t, "Re-authentication required: hyper", lastRequest(c).Params.Message)
+
+	// The run that needed auth completes — one way or another, the
+	// auth wait is over. Re-auth success publishes no event, so the
+	// completion is what clears the block.
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateIdle}, reportedStates(c))
+	assert.Empty(t, lastRequest(c).Params.Message)
+}
+
+func TestAuthBlockWithoutProvider(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Client/server mode carries no provider id on the wire, so the
+	// message falls back to the generic text.
+	c.HandleEvent(AuthRequired{})
+	assert.Equal(t, []string{stateBlocked}, reportedStates(c))
+	assert.Equal(t, "Re-authentication required", lastRequest(c).Params.Message)
+}
+
+func TestAuthBlockBeforeAssistantMessage(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// The 401 can arrive before any assistant output. The block
+	// still reports, and the completing run lands on idle.
+	c.HandleEvent(AuthRequired{ProviderID: "hyper"})
+	assert.Equal(t, []string{stateBlocked}, reportedStates(c))
+
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateBlocked, stateIdle}, reportedStates(c))
+}
+
+func TestAuthBlockOverlapsPermissionBlock(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A permission prompt and an auth prompt can both be open; the
+	// newest block's message wins.
+	c.HandleEvent(PermissionRequested{})
+	c.HandleEvent(AuthRequired{ProviderID: "hyper"})
+	assert.Equal(t, "Re-authentication required: hyper", lastRequest(c).Params.Message)
+
+	// Resolving the permission keeps the pane blocked on auth. The
+	// (state, message) pair is unchanged, so nothing new is sent.
+	c.HandleEvent(PermissionResolved{})
+	assert.Equal(t, []string{stateBlocked, stateBlocked}, reportedStates(c))
+
+	// Run completion clears the auth block and returns to idle.
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateBlocked, stateBlocked, stateIdle}, reportedStates(c))
+}
+
+func TestSubSessionRunCompleteKeepsAuthBlock(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	c.HandleEvent(AuthRequired{ProviderID: "hyper"})
+
+	// A sub-agent's run completion is session-filtered, so it must
+	// not clear the top-level auth block.
+	c.HandleEvent(RunComplete{SessionID: "msg-1$$call-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateIdle}, reportedStates(c))
+}
+
 func TestDedupSkipsRedundantState(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
@@ -472,6 +551,7 @@ func TestNilClientSafe(t *testing.T) {
 	c.HandleEvent(PermissionResolved{})
 	c.HandleEvent(QuestionAsked{Text: "Proceed?"})
 	c.HandleEvent(QuestionResolved{})
+	c.HandleEvent(AuthRequired{ProviderID: "hyper"})
 	c.HandleEvent(SummarizeStarted{SessionID: "s1"})
 	c.HandleEvent(SummarizeFinished{SessionID: "s1"})
 }

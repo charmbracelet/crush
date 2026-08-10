@@ -153,6 +153,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Messages:              app.Messages,
 		Questions:             app.Questions,
 		QuestionNotifications: app.Questions,
+		Notifications:         app.agentNotifications,
 	})
 
 	// Release the shared database connection on shutdown. The pool

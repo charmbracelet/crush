@@ -359,16 +359,31 @@ func (c *Client) HandleEvent(ev Event) {
 // session event fires on a plain switch, so the title must be pushed
 // here. An empty id (landing screen) clears both the title and the
 // session token.
+//
+// A switch to a different session also resets the lifecycle flags.
+// They describe the session being left, whose terminal events
+// acceptLifecycleLocked drops from this point on, so nothing else
+// could ever clear them: switching sessions mid-run would strand the
+// pane in working forever. The cost is that a run still going in the
+// session we left reports idle until it emits its next assistant
+// message, which is transient and self-healing. Blocks survive the
+// switch: they are not session-scoped, and a dialog raised by any
+// session still waits on the user.
 func (c *Client) SetSession(id, title string) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if id != c.sessionID {
+		c.runActive = false
+		c.summarizing = false
+	}
 	c.sessionID = id
 	c.pres.title = title
 	c.pres.session = id
 	c.reportMetadataLocked()
+	c.recomputeLocked()
 }
 
 // ReportModel records the active model id for the pane's model

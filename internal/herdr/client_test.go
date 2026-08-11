@@ -214,12 +214,20 @@ func TestSessionIDLearnedFromFirstEvent(t *testing.T) {
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 
 	// SetSession re-points the client at the new session (session
-	// switch); events for the old one are now the stale ones.
+	// switch). The run flag described the session we left, so the
+	// switch clears it and the pane drops to idle; events for the
+	// old session are now the stale ones.
 	c.SetSession("s2", "S2")
-	c.HandleEvent(RunComplete{SessionID: "s1"})
-	assert.Equal(t, []string{stateWorking}, reportedStates(c))
-	c.HandleEvent(RunComplete{SessionID: "s2"})
 	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+	c.HandleEvent(RunComplete{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+	c.HandleEvent(RunStarted{SessionID: "s2"})
+	c.HandleEvent(RunComplete{SessionID: "s2"})
+	assert.Equal(
+		t,
+		[]string{stateWorking, stateIdle, stateWorking, stateIdle},
+		reportedStates(c),
+	)
 }
 
 func TestSubSessionEventsIgnored(t *testing.T) {
@@ -650,6 +658,84 @@ func TestSetSessionReportsMetadata(t *testing.T) {
 
 	// The session id still rides along on state reports.
 	assert.Equal(t, "s2", c.sessionID)
+}
+
+func TestSetSessionClearsStaleRunState(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A run is in flight in s1 when the user switches to s2. The
+	// old session's RunComplete is dropped by the session gate, so
+	// the switch itself has to clear the run flag or the pane stays
+	// working forever.
+	c.SetSession("s1", "S1")
+	c.HandleEvent(RunStarted{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	c.SetSession("s2", "S2")
+	assert.False(t, c.runActive)
+	assert.False(t, c.summarizing)
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+
+	// The stale terminal event changes nothing, and a fresh turn in
+	// s2 still drives the pane normally.
+	c.HandleEvent(RunComplete{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+	c.HandleEvent(RunStarted{SessionID: "s2"})
+	c.HandleEvent(RunComplete{SessionID: "s2"})
+	assert.Equal(
+		t,
+		[]string{stateWorking, stateIdle, stateWorking, stateIdle},
+		reportedStates(c),
+	)
+}
+
+func TestSetSessionClearsStaleSummarizing(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Compaction is per-session too: its SummarizeFinished would be
+	// gated out after the switch.
+	c.SetSession("s1", "S1")
+	c.HandleEvent(SummarizeStarted{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	c.SetSession("s2", "S2")
+	assert.False(t, c.summarizing)
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestSetSessionSameIDKeepsRunState(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Re-asserting the same session (reconnect, reload) is not a
+	// switch and must not interrupt the in-flight run.
+	c.SetSession("s1", "S1")
+	c.HandleEvent(RunStarted{SessionID: "s1"})
+	c.SetSession("s1", "S1 renamed")
+	assert.True(t, c.runActive)
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+}
+
+func TestSetSessionKeepsBlocks(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Blocks are not session-scoped: the dialog is still on screen
+	// after the switch, so the pane stays blocked.
+	c.SetSession("s1", "S1")
+	c.HandleEvent(QuestionAsked{Text: "Proceed?"})
+	assert.Equal(t, []string{stateBlocked}, reportedStates(c))
+
+	c.SetSession("s2", "S2")
+	assert.Equal(t, []string{stateBlocked}, reportedStates(c))
+	assert.Equal(t, []string{"Proceed?"}, reportedMessages(c))
+
+	// Resolving it lands on idle, since the run it belonged to is
+	// no longer being tracked.
+	c.HandleEvent(QuestionResolved{})
+	assert.Equal(t, []string{stateBlocked, stateIdle}, reportedStates(c))
 }
 
 func TestSetSessionClearRemovesPresentation(t *testing.T) {

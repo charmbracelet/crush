@@ -231,6 +231,41 @@ func TestSessionIDLearnedFromFirstEvent(t *testing.T) {
 	)
 }
 
+func TestLearnedSessionIDReachesMetadataToken(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A prompt's RunStarted can beat the SetSession that follows the
+	// session load: sendMessage batches loadSession and AgentRun as
+	// concurrent commands (internal/ui/model/ui.go). The id learned
+	// from the event rides on every state report from then on, so the
+	// metadata token must name that session too, not stay on the
+	// empty value the landing screen wrote.
+	c.SetSession("s1", "S1")
+	c.SetSession("", "")
+	c.HandleEvent(RunStarted{SessionID: "s2"})
+
+	params, ok := lastRequest(c).Params.(reportParams)
+	if assert.True(t, ok) {
+		assert.Equal(t, "s2", params.AgentSessionID)
+	}
+	meta := reportedMetadata(c)
+	if assert.Len(t, meta, 3) && assert.NotNil(t, meta[2].Tokens["session"]) {
+		assert.Equal(t, "s2", *meta[2].Tokens["session"])
+	}
+
+	// The SetSession that eventually lands only adds the title: the
+	// token it carries already matches.
+	c.SetSession("s2", "S2")
+	meta = reportedMetadata(c)
+	if assert.Len(t, meta, 4) {
+		assert.Equal(t, "S2", meta[3].Title)
+		if assert.NotNil(t, meta[3].Tokens["session"]) {
+			assert.Equal(t, "s2", *meta[3].Tokens["session"])
+		}
+	}
+}
+
 func TestSubSessionEventsIgnored(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
@@ -933,22 +968,27 @@ func TestAssistantMessageRefreshesModelToken(t *testing.T) {
 	c := newTestClient()
 
 	// The model riding on assistant output keeps the token fresh
-	// after a mid-session model switch, in both run modes.
+	// after a mid-session model switch, in both run modes. The
+	// session is known up front here, as it is in production, so
+	// every further metadata report comes from the model alone.
+	c.SetSession("s1", "S1")
+	assert.Len(t, reportedMetadata(c), 1)
+
 	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: "model-1"})
 	meta := reportedMetadata(c)
-	assert.Len(t, meta, 1)
-	if assert.NotNil(t, meta[0].Tokens["model"]) {
-		assert.Equal(t, "model-1", *meta[0].Tokens["model"])
+	assert.Len(t, meta, 2)
+	if assert.NotNil(t, meta[1].Tokens["model"]) {
+		assert.Equal(t, "model-1", *meta[1].Tokens["model"])
 	}
 
 	// Same model: deduped. New model: re-reported. Empty model: no
 	// change.
 	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: "model-1"})
-	assert.Len(t, reportedMetadata(c), 1)
+	assert.Len(t, reportedMetadata(c), 2)
 	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: "model-2"})
-	assert.Len(t, reportedMetadata(c), 2)
+	assert.Len(t, reportedMetadata(c), 3)
 	c.HandleEvent(AssistantMessage{SessionID: "s1", Model: ""})
-	assert.Len(t, reportedMetadata(c), 2)
+	assert.Len(t, reportedMetadata(c), 3)
 }
 
 func TestSessionUpdatedRefreshesTitle(t *testing.T) {

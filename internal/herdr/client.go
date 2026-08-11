@@ -466,7 +466,8 @@ func (c *Client) Notify(title, body string) {
 // run must not drive the pane state nor overwrite the reported
 // session id. Events from a different top-level session than the
 // current one are stale and ignored as well. While no session is
-// known, the first scoped event establishes it. Must be called with
+// known, the first scoped event establishes it, for the reported
+// session id and the presentation token alike. Must be called with
 // c.mu held.
 func (c *Client) acceptLifecycleLocked(sessionID string) bool {
 	if strings.Contains(sessionID, subSessionSeparator) {
@@ -478,7 +479,15 @@ func (c *Client) acceptLifecycleLocked(sessionID string) bool {
 		return true
 	}
 	if c.sessionID == "" {
+		// The learned id rides on every state report from here on,
+		// so the session token has to move with it: both name the
+		// current session, and writing them together is what keeps
+		// pane.report_agent and pane.report_metadata from
+		// disagreeing. The title is unknown here; it arrives with
+		// the SetSession call that follows the session load.
 		c.sessionID = sessionID
+		c.pres.session = sessionID
+		c.reportMetadataLocked()
 		return true
 	}
 	return sessionID == c.sessionID

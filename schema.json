@@ -557,9 +557,10 @@
             "native",
             "osc",
             "bell",
+            "herdr",
             "disabled"
           ],
-          "description": "Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).",
+          "description": "Notification style to use. Options: auto (default), native, osc, bell, herdr, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection). Herdr surfaces toasts in herdr's UI and requires running inside a herdr pane.",
           "default": "auto"
         },
         "disabled_skills": {

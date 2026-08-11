@@ -386,6 +386,31 @@ func (c *Client) ReportModel(model string) {
 	c.reportMetadataLocked()
 }
 
+// maxNotificationBodyLength is herdr's 240-character cap on the
+// notification.show body field. The title uses the same 80-character
+// text-field cap as block messages.
+const maxNotificationBodyLength = 240
+
+// Notify sends a notification.show request so herdr surfaces a toast
+// in its own UI. The request carries no pane id, source, or seq: it
+// is a global herdr UI notification, not a pane-scoped report, so it
+// bypasses the state machinery and goes straight to the sender.
+// Best-effort and fire-and-forget, like state reports. Safe to call
+// on a nil client.
+func (c *Client) Notify(title, body string) {
+	if c == nil {
+		return
+	}
+	_ = c.snd.send(reportRequest{
+		ID:     fmt.Sprintf("crush:notify:%d", time.Now().UnixNano()),
+		Method: "notification.show",
+		Params: notificationParams{
+			Title: truncateBlockMessage(title),
+			Body:  truncateRunes(body, maxNotificationBodyLength),
+		},
+	})
+}
+
 // acceptLifecycleLocked applies the session scoping shared by all
 // lifecycle events and reports whether the event should be processed.
 // Events from agent-tool sub-sessions are always ignored: a sub-agent
@@ -693,6 +718,14 @@ type metadataParams struct {
 	Title  string             `json:"title,omitempty"`
 	Tokens map[string]*string `json:"tokens"`
 	Seq    uint64             `json:"seq"`
+}
+
+// notificationParams carries the notification.show payload. Title is
+// required and capped at 80 characters; body is optional, capped at
+// 240, and omitted when empty so herdr shows a title-only toast.
+type notificationParams struct {
+	Title string `json:"title"`
+	Body  string `json:"body,omitempty"`
 }
 
 // unixSender sends JSON-RPC requests over a Unix domain socket using

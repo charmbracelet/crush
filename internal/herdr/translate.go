@@ -102,11 +102,16 @@ const maxBlockMessageLength = 80
 // truncateBlockMessage caps a blocked-reason message at herdr's
 // text-field limit, keeping the cut rune-safe.
 func truncateBlockMessage(s string) string {
+	return truncateRunes(s, maxBlockMessageLength)
+}
+
+// truncateRunes caps s at max runes, keeping the cut rune-safe.
+func truncateRunes(s string, max int) string {
 	r := []rune(s)
-	if len(r) <= maxBlockMessageLength {
+	if len(r) <= max {
 		return s
 	}
-	return string(r[:maxBlockMessageLength])
+	return string(r[:max])
 }
 
 // translateMessage maps a domain message event to a herdr event.

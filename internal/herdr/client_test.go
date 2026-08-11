@@ -840,3 +840,53 @@ func TestDisable(t *testing.T) {
 	Disable()
 	assert.Nil(t, newFromEnv())
 }
+
+// TestNotify verifies a toast goes out as a notification.show request
+// carrying the title and body.
+func TestNotify(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	c.Notify("Done", "turn complete")
+
+	req := lastRequest(c)
+	assert.Equal(t, "notification.show", req.Method)
+	p, ok := req.Params.(notificationParams)
+	assert.True(t, ok)
+	assert.Equal(t, "Done", p.Title)
+	assert.Equal(t, "turn complete", p.Body)
+}
+
+// TestNotifyTruncation verifies the title and body respect herdr's
+// 80/240-character caps, rune-safe.
+func TestNotifyTruncation(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	c.Notify(strings.Repeat("é", 100), strings.Repeat("b", 300))
+
+	p := lastRequest(c).Params.(notificationParams)
+	assert.Len(t, []rune(p.Title), maxBlockMessageLength)
+	assert.Len(t, []rune(p.Body), maxNotificationBodyLength)
+}
+
+// TestNotifyOmitsEmptyBody verifies a title-only toast leaves the
+// body key out of the wire payload entirely.
+func TestNotifyOmitsEmptyBody(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	c.Notify("Done", "")
+
+	data, err := json.Marshal(lastRequest(c).Params)
+	assert.NoError(t, err)
+	assert.NotContains(t, string(data), "body")
+}
+
+// TestNotifyNilClient verifies Notify is safe on a nil client, like
+// the other public methods.
+func TestNotifyNilClient(t *testing.T) {
+	t.Parallel()
+	var c *Client
+	assert.NotPanics(t, func() { c.Notify("Done", "") })
+}

@@ -309,26 +309,30 @@ func TestWithNonInteractiveEnv_SliceIndependence(t *testing.T) {
 	}
 }
 
-func TestWithoutHerdrEnv_StripsAllVars(t *testing.T) {
+// WithoutHerdrEnv strips the pane-ownership vars and nothing else:
+// HERDR_TAB_ID / HERDR_WORKSPACE_ID confer no authority over a pane, so
+// a child that shells out to herdr keeps its bearings.
+func TestWithoutHerdrEnv_StripsPaneOwnershipVars(t *testing.T) {
 	t.Parallel()
 	env := []string{
 		"HERDR_ENV=1",
 		"HERDR_SOCKET_PATH=/tmp/herdr.sock",
 		"HERDR_PANE_ID=wA:p1",
+		"HERDR_TAB_ID=t1",
+		"HERDR_WORKSPACE_ID=wA",
 		"PATH=/usr/bin",
 		"HOME=/home/user",
 	}
 	result := WithoutHerdrEnv(env)
-	for _, e := range result {
-		if strings.HasPrefix(e, "HERDR_") {
-			t.Errorf("herdr var not stripped: %s", e)
+	for _, e := range env[:3] {
+		if slices.Contains(result, e) {
+			t.Errorf("pane-ownership var not stripped: %s", e)
 		}
 	}
-	if !slices.Contains(result, "PATH=/usr/bin") {
-		t.Error("non-herdr var PATH was incorrectly removed")
-	}
-	if !slices.Contains(result, "HOME=/home/user") {
-		t.Error("non-herdr var HOME was incorrectly removed")
+	for _, e := range env[3:] {
+		if !slices.Contains(result, e) {
+			t.Errorf("var was incorrectly removed: %s", e)
+		}
 	}
 }
 

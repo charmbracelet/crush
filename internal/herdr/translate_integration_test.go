@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
@@ -215,4 +216,68 @@ func TestSessionTitleChangeIntegration(t *testing.T) {
 	if assert.NotNil(t, meta[1].Tokens["session"]) {
 		assert.Equal(t, sess.ID, *meta[1].Tokens["session"])
 	}
+}
+
+// TestPermissionRequestPublishOrderIntegration pins the contract
+// between permission.Service's publish behaviour and Translate that
+// the blocked report relies on. The service announces a request on
+// the notification broker before publishing the request itself, and
+// BridgeLocal consumes the two brokers on separate goroutines, so
+// the announcement may reach the client after the request does. It
+// must not unblock the pane; only the granted or denied notification
+// may. Drives a real permission service through a full
+// request/grant cycle and replays both events in the adverse order.
+func TestPermissionRequestPublishOrderIntegration(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	dir := t.TempDir()
+	svc := permission.NewPermissionService(dir, false, nil)
+	requests := svc.Subscribe(ctx)
+	notifications := svc.SubscribeNotifications(ctx)
+
+	c := newTestClient()
+	c.SetSession("s1", "Test")
+	c.HandleEvent(RunStarted{SessionID: "s1"})
+
+	granted := make(chan bool, 1)
+	go func() {
+		ok, err := svc.Request(ctx, permission.CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "tc-1",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       dir,
+		})
+		assert.NoError(t, err)
+		granted <- ok
+	}()
+
+	// deliver forwards one event exactly as BridgeLocal's forward
+	// goroutines do.
+	deliver := func(ev any) {
+		t.Helper()
+		if hev := Translate(ev); hev != nil {
+			c.HandleEvent(hev)
+		}
+	}
+
+	announce := <-notifications
+	require.Equal(t, "tc-1", announce.Payload.ToolCallID)
+	require.False(t, announce.Payload.Granted)
+	require.False(t, announce.Payload.Denied)
+	req := <-requests
+
+	// Adverse order: the request blocks the pane, then the
+	// announcement of that same request arrives late.
+	deliver(req)
+	deliver(announce)
+	require.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	require.True(t, svc.Grant(req.Payload))
+	deliver(<-notifications)
+	require.True(t, <-granted)
+	require.Equal(t,
+		[]string{stateWorking, stateBlocked, stateWorking},
+		reportedStates(c),
+	)
 }

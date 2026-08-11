@@ -352,6 +352,86 @@ func TestOverlappingPermissionAndQuestionBlocks(t *testing.T) {
 	assert.Equal(t, []string{stateWorking, stateBlocked, stateBlocked, stateWorking}, reportedStates(c))
 }
 
+func TestPermissionResolutionIsCorrelatedByToolCall(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	c.HandleEvent(RunStarted{SessionID: "sess-1"})
+	c.HandleEvent(PermissionRequested{ToolCallID: "tc-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	// A resolution for a different tool call must not unblock the
+	// open prompt. A PreToolUse hook that pre-approves a parallel
+	// tool call publishes exactly such a granted notification
+	// without ever raising a prompt of its own.
+	c.HandleEvent(PermissionResolved{ToolCallID: "tc-2"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	// The matching resolution does.
+	c.HandleEvent(PermissionResolved{ToolCallID: "tc-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateWorking}, reportedStates(c))
+}
+
+func TestQuestionResolutionIsCorrelatedByBatch(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	c.HandleEvent(RunStarted{SessionID: "sess-1"})
+	c.HandleEvent(QuestionAsked{BatchID: "b2", Text: "Second batch"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	// A late resolution for an earlier batch, reordered past the
+	// new request by the bridge's per-broker goroutines, must not
+	// unblock the batch now on screen.
+	c.HandleEvent(QuestionResolved{BatchID: "b1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	c.HandleEvent(QuestionResolved{BatchID: "b2"})
+	assert.Equal(t, []string{stateWorking, stateBlocked, stateWorking}, reportedStates(c))
+}
+
+func TestNewPromptSupersedesStaleBlock(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A turn cancelled while a prompt is open publishes no
+	// resolution, so the block outlives the request that raised it
+	// and keeps outranking the run's completion.
+	c.HandleEvent(RunStarted{SessionID: "sess-1"})
+	c.HandleEvent(PermissionRequested{ToolCallID: "tc-1"})
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+
+	// The permission service serializes its requests, so the next
+	// one proves the stale request is over: it takes the old
+	// block's place instead of piling up next to it.
+	c.HandleEvent(RunStarted{SessionID: "sess-1"})
+	c.HandleEvent(PermissionRequested{ToolCallID: "tc-2"})
+	c.HandleEvent(PermissionResolved{ToolCallID: "tc-2"})
+	assert.Equal(t,
+		[]string{stateWorking, stateBlocked, stateWorking},
+		reportedStates(c),
+	)
+	c.mu.Lock()
+	assert.Empty(t, c.blocks)
+	c.mu.Unlock()
+}
+
+func TestNewestBlockMessageWins(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// Each request is a distinct block key, so the message always
+	// tracks the most recent prompt rather than whichever reason
+	// happened to be recorded first.
+	c.HandleEvent(QuestionAsked{BatchID: "b1", Text: "First question"})
+	c.HandleEvent(PermissionRequested{ToolCallID: "tc-1"})
+	c.HandleEvent(QuestionAsked{BatchID: "b2", Text: "Second question"})
+	c.mu.Lock()
+	assert.Equal(t, "Second question", c.message)
+	c.mu.Unlock()
+}
+
 func TestQuestionBlockOutranksRunComplete(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()

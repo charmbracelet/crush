@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,6 +44,17 @@ const (
 	blockQuestion   blockReason = "question"
 	blockAuth       blockReason = "auth"
 )
+
+// blockKey identifies one outstanding block. The id correlates a
+// block with the event that resolves it: the tool call id for
+// permissions, the batch id for questions. Reasons that carry no
+// correlation id (auth) use the empty string. Keying on the id keeps
+// a resolution for one request from clearing a block raised by
+// another, and makes a re-delivered resolution idempotent.
+type blockKey struct {
+	reason blockReason
+	id     string
+}
 
 // subSessionSeparator separates the parent message id from the tool
 // call id in agent-tool sub-session ids
@@ -85,19 +97,30 @@ func (RunComplete) herdrEvent() {}
 
 // PermissionRequested indicates the agent is waiting for user approval.
 // Transitions to blocked.
-type PermissionRequested struct{}
+type PermissionRequested struct {
+	// ToolCallID identifies the tool call awaiting approval. It
+	// pairs the block with the PermissionResolved that ends it.
+	ToolCallID string
+}
 
 func (PermissionRequested) herdrEvent() {}
 
 // PermissionResolved indicates a permission decision was made.
 // Transitions back to working if a run is active, idle otherwise.
-type PermissionResolved struct{}
+type PermissionResolved struct {
+	// ToolCallID identifies the tool call whose approval was
+	// decided. Only that tool call's block is cleared.
+	ToolCallID string
+}
 
 func (PermissionResolved) herdrEvent() {}
 
 // QuestionAsked indicates the question tool is waiting for the user
 // to answer. Transitions to blocked.
 type QuestionAsked struct {
+	// BatchID identifies the question batch. It pairs the block
+	// with the QuestionResolved that ends it.
+	BatchID string
 	// Text is the blocked message, derived from the first
 	// question's text and truncated to herdr's text-field cap by
 	// Translate.
@@ -109,7 +132,11 @@ func (QuestionAsked) herdrEvent() {}
 // QuestionResolved indicates a pending question was answered or
 // cancelled. Transitions back to working if a run is active, idle
 // otherwise.
-type QuestionResolved struct{}
+type QuestionResolved struct {
+	// BatchID identifies the resolved question batch. Only that
+	// batch's block is cleared.
+	BatchID string
+}
 
 func (QuestionResolved) herdrEvent() {}
 
@@ -179,13 +206,14 @@ type Client struct {
 	state   string
 	message string
 	// runActive tracks an in-flight agent turn, summarizing tracks
-	// context compaction. Blocks record reasons the agent is waiting
-	// on the user; blockOrder keeps them oldest-first so the newest
-	// block's message can be picked for the report.
+	// context compaction. Blocks record the outstanding reasons the
+	// agent is waiting on the user, keyed by reason and request id;
+	// blockOrder keeps them oldest-first so the newest block's
+	// message can be picked for the report.
 	runActive   bool
 	summarizing bool
-	blocks      map[blockReason]string
-	blockOrder  []blockReason
+	blocks      map[blockKey]string
+	blockOrder  []blockKey
 	seq         uint64
 	// pres holds the complete desired pane presentation (session
 	// title, session id, model); reportedPres holds the last set
@@ -267,7 +295,7 @@ func newFromEnv() *Client {
 		socketPath: socketPath,
 		paneID:     paneID,
 		state:      stateIdle,
-		blocks:     make(map[blockReason]string),
+		blocks:     make(map[blockKey]string),
 		seq:        uint64(time.Now().UnixNano()),
 		snd:        newUnixSender(socketPath),
 	}
@@ -333,13 +361,13 @@ func (c *Client) HandleEvent(ev Event) {
 	case RunComplete:
 		c.onRunComplete(e.SessionID)
 	case PermissionRequested:
-		c.onPermissionRequest()
+		c.onPermissionRequest(e.ToolCallID)
 	case PermissionResolved:
-		c.onPermissionResolved()
+		c.onPermissionResolved(e.ToolCallID)
 	case QuestionAsked:
-		c.onQuestionAsked(e.Text)
+		c.onQuestionAsked(e.BatchID, e.Text)
 	case QuestionResolved:
-		c.onQuestionResolved()
+		c.onQuestionResolved(e.BatchID)
 	case AuthRequired:
 		c.onAuthRequired(e.ProviderID)
 	case SummarizeStarted:
@@ -486,43 +514,43 @@ func (c *Client) onRunComplete(sessionID string) {
 	// the 401 that raised the prompt. Successful re-auth publishes
 	// no event, so this is the only reliable point to drop the
 	// block without leaking a permanent blocked state.
-	c.clearBlockLocked(blockAuth)
+	c.clearBlockLocked(blockKey{reason: blockAuth})
 	c.recomputeLocked()
 }
 
-func (c *Client) onPermissionRequest() {
+func (c *Client) onPermissionRequest(toolCallID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// A permission request implies a run is active, even if no
 	// assistant message has arrived yet (e.g. tool calls that fire
 	// before any text output).
 	c.runActive = true
-	c.setBlockLocked(blockPermission, "")
+	c.setExclusiveBlockLocked(blockKey{reason: blockPermission, id: toolCallID}, "")
 	c.recomputeLocked()
 }
 
-func (c *Client) onPermissionResolved() {
+func (c *Client) onPermissionResolved(toolCallID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.clearBlockLocked(blockPermission)
+	c.clearBlockLocked(blockKey{reason: blockPermission, id: toolCallID})
 	c.recomputeLocked()
 }
 
-func (c *Client) onQuestionAsked(text string) {
+func (c *Client) onQuestionAsked(batchID, text string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// A question implies a run is active, even if no assistant
 	// message has arrived yet: the tool can only block on user
 	// input mid-turn.
 	c.runActive = true
-	c.setBlockLocked(blockQuestion, text)
+	c.setExclusiveBlockLocked(blockKey{reason: blockQuestion, id: batchID}, text)
 	c.recomputeLocked()
 }
 
-func (c *Client) onQuestionResolved() {
+func (c *Client) onQuestionResolved(batchID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.clearBlockLocked(blockQuestion)
+	c.clearBlockLocked(blockKey{reason: blockQuestion, id: batchID})
 	c.recomputeLocked()
 }
 
@@ -537,7 +565,7 @@ func (c *Client) onAuthRequired(providerID string) {
 	if providerID != "" {
 		msg = "Re-authentication required: " + providerID
 	}
-	c.setBlockLocked(blockAuth, truncateBlockMessage(msg))
+	c.setBlockLocked(blockKey{reason: blockAuth}, truncateBlockMessage(msg))
 	c.recomputeLocked()
 }
 
@@ -579,27 +607,53 @@ func (c *Client) onSessionUpdated(sessionID, title string) {
 	c.reportMetadataLocked()
 }
 
-// setBlockLocked records a reason the agent is waiting on the user.
-// Must be called with c.mu held.
-func (c *Client) setBlockLocked(reason blockReason, message string) {
+// setBlockLocked records one outstanding reason the agent is waiting
+// on the user. Re-setting a key it already holds keeps that key's
+// position in blockOrder: only genuinely new blocks become the
+// newest, so a re-delivered request cannot jump ahead of a block
+// raised after it. Must be called with c.mu held.
+func (c *Client) setBlockLocked(key blockKey, message string) {
 	if c.blocks == nil {
-		c.blocks = make(map[blockReason]string)
+		c.blocks = make(map[blockKey]string)
 	}
-	if _, ok := c.blocks[reason]; !ok {
-		c.blockOrder = append(c.blockOrder, reason)
+	if _, ok := c.blocks[key]; !ok {
+		c.blockOrder = append(c.blockOrder, key)
 	}
-	c.blocks[reason] = message
+	c.blocks[key] = message
 }
 
-// clearBlockLocked drops a block reason. Must be called with c.mu held.
-func (c *Client) clearBlockLocked(reason blockReason) {
-	if _, ok := c.blocks[reason]; !ok {
+// setExclusiveBlockLocked records a block whose reason can only ever
+// have one instance outstanding, dropping any older block that
+// shares the reason. Both prompting services serialize their
+// requests — the permission service behind a request mutex
+// (internal/permission/permission.go), the question service behind a
+// single pending slot (internal/question/question.go) — so an older
+// block with the same reason belongs to a request that has already
+// returned. That includes the requests cancelled by a turn interrupt,
+// which publish no resolution at all and would otherwise leave the
+// pane blocked forever. Must be called with c.mu held.
+func (c *Client) setExclusiveBlockLocked(key blockKey, message string) {
+	kept := c.blockOrder[:0]
+	for _, k := range c.blockOrder {
+		if k.reason == key.reason && k.id != key.id {
+			delete(c.blocks, k)
+			continue
+		}
+		kept = append(kept, k)
+	}
+	c.blockOrder = kept
+	c.setBlockLocked(key, message)
+}
+
+// clearBlockLocked drops one block. Must be called with c.mu held.
+func (c *Client) clearBlockLocked(key blockKey) {
+	if _, ok := c.blocks[key]; !ok {
 		return
 	}
-	delete(c.blocks, reason)
-	for i, r := range c.blockOrder {
-		if r == reason {
-			c.blockOrder = append(c.blockOrder[:i], c.blockOrder[i+1:]...)
+	delete(c.blocks, key)
+	for i, k := range c.blockOrder {
+		if k == key {
+			c.blockOrder = slices.Delete(c.blockOrder, i, i+1)
 			break
 		}
 	}

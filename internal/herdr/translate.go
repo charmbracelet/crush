@@ -24,17 +24,17 @@ func Translate(ev any) Event {
 	case pubsub.Event[notify.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}
 	case pubsub.Event[permission.PermissionRequest]:
-		return PermissionRequested{}
+		return PermissionRequested{ToolCallID: e.Payload.ToolCallID}
 	case pubsub.Event[permission.PermissionNotification]:
-		return PermissionResolved{}
+		return permissionNotification(e.Payload.ToolCallID, e.Payload.Granted, e.Payload.Denied)
 	case pubsub.Event[question.Request]:
 		var text string
 		if len(e.Payload.Questions) > 0 {
 			text = e.Payload.Questions[0].Text
 		}
-		return QuestionAsked{Text: truncateBlockMessage(text)}
+		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateBlockMessage(text)}
 	case pubsub.Event[question.Notification]:
-		return QuestionResolved{}
+		return QuestionResolved{BatchID: e.Payload.BatchID}
 	case pubsub.Event[notify.Notification]:
 		// Only re-authentication blocks the pane; every other
 		// notification type is informational. AWS SSO is handled
@@ -67,17 +67,17 @@ func Translate(ev any) Event {
 	case pubsub.Event[proto.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}
 	case pubsub.Event[proto.PermissionRequest]:
-		return PermissionRequested{}
+		return PermissionRequested{ToolCallID: e.Payload.ToolCallID}
 	case pubsub.Event[proto.PermissionNotification]:
-		return PermissionResolved{}
+		return permissionNotification(e.Payload.ToolCallID, e.Payload.Granted, e.Payload.Denied)
 	case pubsub.Event[proto.QuestionRequest]:
 		var text string
 		if len(e.Payload.Questions) > 0 {
 			text = e.Payload.Questions[0].Question
 		}
-		return QuestionAsked{Text: truncateBlockMessage(text)}
+		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateBlockMessage(text)}
 	case pubsub.Event[proto.QuestionNotification]:
-		return QuestionResolved{}
+		return QuestionResolved{BatchID: e.Payload.BatchID}
 	case pubsub.Event[proto.AgentEvent]:
 		// The server wraps notify.Notification into proto.AgentEvent
 		// with the domain type string, so re_authenticate arrives
@@ -93,6 +93,22 @@ func Translate(ev any) Event {
 	default:
 		return nil
 	}
+}
+
+// permissionNotification maps a permission notification to a herdr
+// event. Only a granted or denied notification ends the wait: the
+// permission service also publishes a flagless notification the
+// moment a request *starts*, before publishing the request itself
+// (permissionService.Request). Treating that marker as a resolution
+// is unsafe because local mode consumes the request broker and the
+// notification broker on separate goroutines, so the clear can land
+// after the set and leave the pane reporting working while the
+// prompt is still on screen.
+func permissionNotification(toolCallID string, granted, denied bool) Event {
+	if !granted && !denied {
+		return nil
+	}
+	return PermissionResolved{ToolCallID: toolCallID}
 }
 
 // maxBlockMessageLength is herdr's 80-character cap on report text

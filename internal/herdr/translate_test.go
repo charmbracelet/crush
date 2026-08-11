@@ -139,23 +139,37 @@ func TestTranslateDomainRunComplete(t *testing.T) {
 func TestTranslateDomainPermissionRequest(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[permission.PermissionRequest]{
-		Payload: permission.PermissionRequest{ToolName: "bash"},
+		Payload: permission.PermissionRequest{ToolName: "bash", ToolCallID: "tc-1"},
 	}
-	assert.Equal(t, PermissionRequested{}, Translate(ev))
+	assert.Equal(t, PermissionRequested{ToolCallID: "tc-1"}, Translate(ev))
 }
 
 func TestTranslateDomainPermissionNotification(t *testing.T) {
 	t.Parallel()
-	ev := pubsub.Event[permission.PermissionNotification]{
-		Payload: permission.PermissionNotification{Granted: true},
+	granted := pubsub.Event[permission.PermissionNotification]{
+		Payload: permission.PermissionNotification{ToolCallID: "tc-1", Granted: true},
 	}
-	assert.Equal(t, PermissionResolved{}, Translate(ev))
+	assert.Equal(t, PermissionResolved{ToolCallID: "tc-1"}, Translate(granted))
+
+	denied := pubsub.Event[permission.PermissionNotification]{
+		Payload: permission.PermissionNotification{ToolCallID: "tc-1", Denied: true},
+	}
+	assert.Equal(t, PermissionResolved{ToolCallID: "tc-1"}, Translate(denied))
+
+	// The permission service publishes a flagless notification when
+	// a request starts, before publishing the request itself. It is
+	// not a resolution and must not unblock the pane.
+	marker := pubsub.Event[permission.PermissionNotification]{
+		Payload: permission.PermissionNotification{ToolCallID: "tc-1"},
+	}
+	assert.Nil(t, Translate(marker))
 }
 
 func TestTranslateDomainQuestionRequest(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[question.Request]{
 		Payload: question.Request{
+			ID:        "b1",
 			SessionID: "s1",
 			Questions: []question.Question{
 				{Text: "Which file should I edit?"},
@@ -164,7 +178,8 @@ func TestTranslateDomainQuestionRequest(t *testing.T) {
 		},
 	}
 	// The blocked message is the first question's text.
-	assert.Equal(t, QuestionAsked{Text: "Which file should I edit?"}, Translate(ev))
+	want := QuestionAsked{BatchID: "b1", Text: "Which file should I edit?"}
+	assert.Equal(t, want, Translate(ev))
 }
 
 func TestTranslateDomainQuestionRequestEmptyQuestions(t *testing.T) {
@@ -198,7 +213,7 @@ func TestTranslateDomainQuestionNotification(t *testing.T) {
 	ev := pubsub.Event[question.Notification]{
 		Payload: question.Notification{BatchID: "b1"},
 	}
-	assert.Equal(t, QuestionResolved{}, Translate(ev))
+	assert.Equal(t, QuestionResolved{BatchID: "b1"}, Translate(ev))
 }
 
 func TestTranslateDomainReAuthenticateNotification(t *testing.T) {
@@ -298,30 +313,39 @@ func TestTranslateProtoRunComplete(t *testing.T) {
 func TestTranslateProtoPermissionRequest(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[proto.PermissionRequest]{
-		Payload: proto.PermissionRequest{ToolName: "bash"},
+		Payload: proto.PermissionRequest{ToolName: "bash", ToolCallID: "tc-1"},
 	}
-	assert.Equal(t, PermissionRequested{}, Translate(ev))
+	assert.Equal(t, PermissionRequested{ToolCallID: "tc-1"}, Translate(ev))
 }
 
 func TestTranslateProtoPermissionNotification(t *testing.T) {
 	t.Parallel()
-	ev := pubsub.Event[proto.PermissionNotification]{
-		Payload: proto.PermissionNotification{Granted: true},
+	granted := pubsub.Event[proto.PermissionNotification]{
+		Payload: proto.PermissionNotification{ToolCallID: "tc-1", Granted: true},
 	}
-	assert.Equal(t, PermissionResolved{}, Translate(ev))
+	assert.Equal(t, PermissionResolved{ToolCallID: "tc-1"}, Translate(granted))
+
+	// The server forwards the permission service's flagless
+	// request marker too; it is not a resolution on the wire
+	// either.
+	marker := pubsub.Event[proto.PermissionNotification]{
+		Payload: proto.PermissionNotification{ToolCallID: "tc-1"},
+	}
+	assert.Nil(t, Translate(marker))
 }
 
 func TestTranslateProtoQuestionRequest(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[proto.QuestionRequest]{
 		Payload: proto.QuestionRequest{
+			ID:        "b1",
 			SessionID: "s1",
 			Questions: []proto.QuestionItem{
 				{Question: "Pick an option"},
 			},
 		},
 	}
-	assert.Equal(t, QuestionAsked{Text: "Pick an option"}, Translate(ev))
+	assert.Equal(t, QuestionAsked{BatchID: "b1", Text: "Pick an option"}, Translate(ev))
 }
 
 func TestTranslateProtoQuestionNotification(t *testing.T) {
@@ -329,7 +353,7 @@ func TestTranslateProtoQuestionNotification(t *testing.T) {
 	ev := pubsub.Event[proto.QuestionNotification]{
 		Payload: proto.QuestionNotification{BatchID: "b1"},
 	}
-	assert.Equal(t, QuestionResolved{}, Translate(ev))
+	assert.Equal(t, QuestionResolved{BatchID: "b1"}, Translate(ev))
 }
 
 func TestTranslateProtoReAuthenticateAgentEvent(t *testing.T) {
@@ -477,6 +501,7 @@ func TestBridgeLocalForwardsQuestionEvents(t *testing.T) {
 	// A published question request blocks the pane, carrying the
 	// first question's text.
 	questions.b.Publish(pubsub.CreatedEvent, question.Request{
+		ID:        "b1",
 		Questions: []question.Question{{Text: "Pick an option"}},
 	})
 	assert.Eventually(t, func() bool {
@@ -486,7 +511,8 @@ func TestBridgeLocalForwardsQuestionEvents(t *testing.T) {
 	assert.Equal(t, "Pick an option", c.message)
 	c.mu.Unlock()
 
-	// Its resolution notification unblocks it.
+	// Its resolution notification, correlated by batch id, unblocks
+	// it.
 	questions.notifications.Publish(pubsub.CreatedEvent, question.Notification{BatchID: "b1"})
 	assert.Eventually(t, func() bool {
 		return slices.Equal(reportedStates(c), []string{stateBlocked, stateWorking})

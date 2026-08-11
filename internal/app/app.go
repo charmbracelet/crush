@@ -231,11 +231,15 @@ func (app *App) RunCompletions() *pubsub.Broker[notify.RunComplete] {
 
 // ReportCurrentSession tells herdr which session the user is now
 // viewing so the pane can show its title and persist a resumable
-// reference. Safe to call when not running inside a herdr pane; the
-// underlying client is nil-safe. Call this whenever the active
-// session changes (load, new, or select). An empty sessionID clears
-// the presentation (landing screen).
+// reference. A no-op when not running inside a herdr pane. Call this
+// whenever the active session changes (load, new, or select). An
+// empty sessionID clears the presentation (landing screen).
 func (app *App) ReportCurrentSession(ctx context.Context, sessionID string) {
+	// Outside a herdr pane there is nothing to report to, so the
+	// title lookup would be a database read for no one.
+	if app.herdrClient == nil {
+		return
+	}
 	var title string
 	if sessionID != "" {
 		sess, err := app.Sessions.Get(ctx, sessionID)

@@ -206,16 +206,20 @@ func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID strin
 	// Resolve the title so herdr's pane metadata reflects the
 	// session immediately: no session event fires on a plain
 	// switch. A lookup failure still reports the session id; the
-	// title catches up on the next session event.
-	var title string
-	if sessionID != "" {
-		if sess, err := w.GetSession(ctx, sessionID); err == nil {
-			title = sess.Title
-		} else {
-			slog.Debug("Failed to look up session title for herdr", "session_id", sessionID, "error", err)
+	// title catches up on the next session event. Outside a herdr
+	// pane the lookup has no consumer, so skip the round trip —
+	// this runs on every switch and on every reconnect re-assert.
+	if w.herdrClient != nil {
+		var title string
+		if sessionID != "" {
+			if sess, err := w.GetSession(ctx, sessionID); err == nil {
+				title = sess.Title
+			} else {
+				slog.Debug("Failed to look up session title for herdr", "session_id", sessionID, "error", err)
+			}
 		}
+		w.herdrClient.SetSession(sessionID, title)
 	}
-	w.herdrClient.SetSession(sessionID, title)
 	w.mu.Lock()
 	w.lastSession = sessionID
 	w.mu.Unlock()

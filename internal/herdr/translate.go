@@ -132,13 +132,15 @@ func truncateText(s string) string {
 	return truncateRunes(s, maxTextFieldLength)
 }
 
-// truncateRunes caps s at max runes, keeping the cut rune-safe.
-func truncateRunes(s string, max int) string {
+// truncateRunes caps s at limit runes, keeping the cut rune-safe. The
+// parameter is limit rather than max so the body does not shadow the
+// builtin.
+func truncateRunes(s string, limit int) string {
 	r := []rune(s)
-	if len(r) <= max {
+	if len(r) <= limit {
 		return s
 	}
-	return string(r[:max])
+	return string(r[:limit])
 }
 
 // firstLine reduces free-form text to a single trimmed line. herdr's

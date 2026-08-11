@@ -37,7 +37,7 @@ func Translate(ev any) Event {
 		if len(e.Payload.Questions) > 0 {
 			text = e.Payload.Questions[0].Text
 		}
-		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateText(text)}
+		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateText(firstLine(text))}
 	case pubsub.Event[question.Notification]:
 		return QuestionResolved{BatchID: e.Payload.BatchID}
 	case pubsub.Event[notify.Notification]:
@@ -84,7 +84,7 @@ func Translate(ev any) Event {
 		if len(e.Payload.Questions) > 0 {
 			text = e.Payload.Questions[0].Question
 		}
-		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateText(text)}
+		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateText(firstLine(text))}
 	case pubsub.Event[proto.QuestionNotification]:
 		return QuestionResolved{BatchID: e.Payload.BatchID}
 	case pubsub.Event[proto.AgentEvent]:

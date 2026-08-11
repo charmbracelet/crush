@@ -560,7 +560,7 @@
             "herdr",
             "disabled"
           ],
-          "description": "Notification style to use. Options: auto (default), native, osc, bell, herdr, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection). Herdr surfaces toasts in herdr's UI and requires running inside a herdr pane.",
+          "description": "Notification style to use. Options: auto (default), native, osc, bell, herdr, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection). Herdr surfaces toasts in herdr's own UI and only works when Crush runs inside a herdr pane; outside one it falls back to OSC.",
           "default": "auto"
         },
         "disabled_skills": {

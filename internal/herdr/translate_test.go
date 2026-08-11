@@ -253,6 +253,38 @@ func TestTranslateDomainQuestionRequestTruncatesMessage(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
+func TestTranslateDomainQuestionRequestFirstLinesMessage(t *testing.T) {
+	t.Parallel()
+	// Question text is model-generated free-form; herdr's text
+	// fields are single-line, so anything past the first newline
+	// is dropped and the remainder trimmed.
+	ev := pubsub.Event[question.Request]{
+		Payload: question.Request{
+			ID: "b1",
+			Questions: []question.Question{
+				{Text: "  Which file should I edit?\nAnd why?\r\nMore detail"},
+			},
+		},
+	}
+	want := QuestionAsked{BatchID: "b1", Text: "Which file should I edit?"}
+	assert.Equal(t, want, Translate(ev))
+}
+
+func TestTranslateDomainQuestionRequestFirstLineStillTruncated(t *testing.T) {
+	t.Parallel()
+	// First-lining runs before the cap, so a long first line is
+	// still cut at 80 runes.
+	ev := pubsub.Event[question.Request]{
+		Payload: question.Request{
+			Questions: []question.Question{
+				{Text: strings.Repeat("界", 100) + "\nignored"},
+			},
+		},
+	}
+	want := QuestionAsked{Text: strings.Repeat("界", maxTextFieldLength)}
+	assert.Equal(t, want, Translate(ev))
+}
+
 func TestTranslateDomainQuestionNotification(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[question.Notification]{
@@ -430,6 +462,34 @@ func TestTranslateProtoQuestionRequest(t *testing.T) {
 		},
 	}
 	assert.Equal(t, QuestionAsked{BatchID: "b1", Text: "Pick an option"}, Translate(ev))
+}
+
+func TestTranslateProtoQuestionRequestFirstLinesMessage(t *testing.T) {
+	t.Parallel()
+	// Same single-line contract as the domain path: text past the
+	// first newline is dropped and the remainder trimmed.
+	ev := pubsub.Event[proto.QuestionRequest]{
+		Payload: proto.QuestionRequest{
+			ID: "b1",
+			Questions: []proto.QuestionItem{
+				{Question: " Pick an option\nExplanations follow"},
+			},
+		},
+	}
+	assert.Equal(t, QuestionAsked{BatchID: "b1", Text: "Pick an option"}, Translate(ev))
+}
+
+func TestTranslateProtoQuestionRequestFirstLineStillTruncated(t *testing.T) {
+	t.Parallel()
+	ev := pubsub.Event[proto.QuestionRequest]{
+		Payload: proto.QuestionRequest{
+			Questions: []proto.QuestionItem{
+				{Question: strings.Repeat("a", 100) + "\r\nignored"},
+			},
+		},
+	}
+	want := QuestionAsked{Text: strings.Repeat("a", maxTextFieldLength)}
+	assert.Equal(t, want, Translate(ev))
 }
 
 func TestTranslateProtoQuestionNotification(t *testing.T) {

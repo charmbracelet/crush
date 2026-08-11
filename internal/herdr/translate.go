@@ -58,7 +58,7 @@ func Translate(ev any) Event {
 	case pubsub.Event[proto.Message]:
 		switch e.Payload.Role {
 		case proto.Assistant:
-			return AssistantMessage{SessionID: e.Payload.SessionID, Model: e.Payload.Model}
+			return AssistantMessage{SessionID: e.Payload.SessionID, Model: e.Payload.Model, Finished: e.Payload.IsFinished()}
 		case proto.User:
 			// Same exclusions as the domain mapping: only a
 			// creation starts a run. Bang-mode shell records,
@@ -174,7 +174,7 @@ func translateMessage(eventType pubsub.EventType, msg message.Message) Event {
 		}
 	}
 	if msg.Role == message.Assistant {
-		return AssistantMessage{SessionID: msg.SessionID, Model: msg.Model}
+		return AssistantMessage{SessionID: msg.SessionID, Model: msg.Model, Finished: msg.IsFinished()}
 	}
 	if msg.Role == message.User {
 		// Only the creation of a user message starts a turn.

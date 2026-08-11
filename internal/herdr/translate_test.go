@@ -27,6 +27,26 @@ func TestTranslateDomainAssistantMessage(t *testing.T) {
 	assert.Equal(t, AssistantMessage{SessionID: "s1", Model: "model-1"}, Translate(ev))
 }
 
+func TestTranslateDomainFinishedAssistantMessage(t *testing.T) {
+	t.Parallel()
+	// A finished assistant message is the turn's terminal snapshot
+	// (ESC-cancel coalesces one with FinishReasonCanceled); it must
+	// map with Finished set so the client does not treat it as
+	// ongoing activity.
+	ev := pubsub.Event[message.Message]{
+		Type: pubsub.UpdatedEvent,
+		Payload: message.Message{
+			Role:      message.Assistant,
+			SessionID: "s1",
+			Model:     "model-1",
+			Parts: []message.ContentPart{
+				message.Finish{Reason: message.FinishReasonCanceled},
+			},
+		},
+	}
+	assert.Equal(t, AssistantMessage{SessionID: "s1", Model: "model-1", Finished: true}, Translate(ev))
+}
+
 func TestTranslateDomainSummaryMessageStarted(t *testing.T) {
 	t.Parallel()
 	// An unfinished summary message (created or mid-stream update)
@@ -278,6 +298,21 @@ func TestTranslateProtoAssistantMessage(t *testing.T) {
 		Payload: proto.Message{Role: proto.Assistant, SessionID: "s1", Model: "model-1"},
 	}
 	assert.Equal(t, AssistantMessage{SessionID: "s1", Model: "model-1"}, Translate(ev))
+}
+
+func TestTranslateProtoFinishedAssistantMessage(t *testing.T) {
+	t.Parallel()
+	ev := pubsub.Event[proto.Message]{
+		Payload: proto.Message{
+			Role:      proto.Assistant,
+			SessionID: "s1",
+			Model:     "model-1",
+			Parts: []proto.ContentPart{
+				proto.Finish{Reason: proto.FinishReasonCanceled},
+			},
+		},
+	}
+	assert.Equal(t, AssistantMessage{SessionID: "s1", Model: "model-1", Finished: true}, Translate(ev))
 }
 
 func TestTranslateProtoNonAssistantIgnored(t *testing.T) {

@@ -141,6 +141,42 @@ func TestRunStartedSessionGating(t *testing.T) {
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 }
 
+func TestFinishedAssistantMessageAfterRunCompleteStaysIdle(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// The ESC-cancel race: the cancelled assistant's finished
+	// update travels on the messages broker while the cancelled
+	// RunComplete travels on the runCompletions broker, so the
+	// finished snapshot can be handled after the turn already
+	// ended. It must not re-arm the run; that would strand the
+	// pane in working with nothing left to clear it.
+	c.HandleEvent(RunStarted{SessionID: "sess-1"})
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1", Finished: true})
+	assert.False(t, c.runActive)
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
+func TestFinishedAssistantMessageMidRunKeepsWorking(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// A finished snapshot processed while the turn is still
+	// active (the common ordering) must not clear the run either:
+	// only RunComplete does. Skipping the arm is what makes the
+	// finished snapshot a no-op for the state machine.
+	c.HandleEvent(RunStarted{SessionID: "sess-1"})
+	c.HandleEvent(AssistantMessage{SessionID: "sess-1", Finished: true})
+	assert.True(t, c.runActive)
+	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+
+	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
+}
+
 func TestPermissionBlockAndUnblock(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()

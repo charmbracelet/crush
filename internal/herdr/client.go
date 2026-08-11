@@ -84,6 +84,14 @@ type AssistantMessage struct {
 	// known. Kept fresh on every assistant message so the pane's
 	// model token self-heals after a mid-session model switch.
 	Model string
+	// Finished marks the terminal snapshot of an assistant message
+	// (a finish part is set, e.g. stop or canceled). A finished
+	// message is output, not ongoing activity, so it must not arm
+	// runActive: the bridge consumes the messages broker and the
+	// runCompletions broker on separate goroutines, and a finished
+	// snapshot processed after its turn's RunComplete would
+	// otherwise re-arm runActive and strand the pane in working.
+	Finished bool
 }
 
 func (AssistantMessage) herdrEvent() {}
@@ -367,7 +375,7 @@ func (c *Client) HandleEvent(ev Event) {
 	case RunStarted:
 		c.onRunStarted(e.SessionID)
 	case AssistantMessage:
-		c.onAssistantMessage(e.SessionID, e.Model)
+		c.onAssistantMessage(e.SessionID, e.Model, e.Finished)
 	case RunComplete:
 		c.onRunComplete(e.SessionID)
 	case PermissionRequested:
@@ -510,13 +518,23 @@ func (c *Client) onRunStarted(sessionID string) {
 	c.recomputeLocked()
 }
 
-func (c *Client) onAssistantMessage(sessionID, model string) {
+func (c *Client) onAssistantMessage(sessionID, model string, finished bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.acceptLifecycleLocked(sessionID) {
 		return
 	}
-	c.runActive = true
+	// A finished message is the turn's terminal snapshot, not a
+	// sign of ongoing work. Arming runActive here could land after
+	// the turn's RunComplete (the two travel on separate brokers,
+	// so their delivery order is not serialized) and strand the
+	// pane in working — the ESC-cancel path is exactly that: the
+	// cancelled assistant's finished update races the cancelled
+	// RunComplete. Only RunComplete clears the flag, so skipping
+	// the arm can never cause a premature idle.
+	if !finished {
+		c.runActive = true
+	}
 	if model != "" {
 		c.pres.model = model
 		c.reportMetadataLocked()

@@ -4,10 +4,12 @@ import (
 	"context"
 	"maps"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -40,7 +42,7 @@ func TestMCPSession_CancelOnClose(t *testing.T) {
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	require.NoError(t, err)
 
-	sess := &ClientSession{clientSession, cancel}
+	sess := &ClientSession{ClientSession: clientSession, cancel: cancel}
 
 	// Verify the context is not cancelled before close.
 	require.NoError(t, ctx.Err())
@@ -70,7 +72,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$MCP_HOST/api",
 		}
-		tr, err := createTransport(t.Context(), m, shell)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, shell)
 		require.NoError(t, err)
 		require.NotNil(t, tr)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
@@ -84,7 +86,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPSSE,
 			URL:  "https://$(echo mcp.example.com)/events",
 		}
-		tr, err := createTransport(t.Context(), m, shell)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, shell)
 		require.NoError(t, err)
 		sse, ok := tr.(*mcp.SSEClientTransport)
 		require.True(t, ok, "expected SSEClientTransport, got %T", tr)
@@ -101,7 +103,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$(false)/api",
 		}
-		tr, err := createTransport(t.Context(), m, shellResolverWithPath(t, nil))
+		tr, _, err := createTransport(t.Context(), nil, "test", m, shellResolverWithPath(t, nil))
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "url:")
@@ -120,7 +122,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$MCP_MISSING_HOST/api",
 		}
-		tr, err := createTransport(t.Context(), m, shell)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, shell)
 		require.NoError(t, err)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
 		require.True(t, ok)
@@ -133,7 +135,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPSSE,
 			URL:  "https://$(false)/events",
 		}
-		tr, err := createTransport(t.Context(), m, shell)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, shell)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "url:")
@@ -149,7 +151,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "${MCP_EMPTY:-}",
 		}
-		tr, err := createTransport(t.Context(), m, shell)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, shell)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "non-empty 'url'")
@@ -161,7 +163,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 		// expansion, no error on unset vars.
 		tmpl := "https://$MCP_MISSING_HOST/api"
 		m := config.MCPConfig{Type: config.MCPHttp, URL: tmpl}
-		tr, err := createTransport(t.Context(), m, config.IdentityResolver())
+		tr, _, err := createTransport(t.Context(), nil, "test", m, config.IdentityResolver())
 		require.NoError(t, err)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
 		require.True(t, ok)
@@ -192,7 +194,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 				"REFERENCE": "$MY_TOKEN",
 			},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.NoError(t, err)
 		require.NotNil(t, tr)
 
@@ -218,7 +220,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"TOKEN": "$(false)"},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "env TOKEN")
@@ -237,7 +239,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"FORGEJO_ACCESS_TOKEN": "$(exit 5)"},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "env FORGEJO_ACCESS_TOKEN")
@@ -258,7 +260,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"FORGEJO_ACCESS_TOKEN": "$FORGEJO_TOKEN_UNSET"},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.NoError(t, err)
 		ct, ok := tr.(*mcp.CommandTransport)
 		require.True(t, ok)
@@ -273,7 +275,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Args:    []string{"--token", "$(false)"},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "arg 1")
@@ -286,7 +288,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Type:    config.MCPStdio,
 			Command: "$(false)",
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "invalid mcp command")
@@ -301,7 +303,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Args:    []string{"--token", "$MCP_MISSING"},
 			Env:     map[string]string{"TOKEN": "$(vault read -f token)"},
 		}
-		tr, err := createTransport(t.Context(), m, config.IdentityResolver())
+		tr, _, err := createTransport(t.Context(), nil, "test", m, config.IdentityResolver())
 		require.NoError(t, err)
 		ct, ok := tr.(*mcp.CommandTransport)
 		require.True(t, ok)
@@ -329,7 +331,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 				"X-Static":      "kept",
 			},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.NoError(t, err)
 
 		sct, ok := tr.(*mcp.StreamableClientTransport)
@@ -350,7 +352,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/api",
 			Headers: map[string]string{"Authorization": "$(false)"},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "header Authorization")
@@ -368,7 +370,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/events",
 			Headers: map[string]string{"Authorization": "$(false)"},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "header Authorization")
@@ -388,7 +390,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/events",
 			Headers: map[string]string{"Authorization": "$MISSING_TOKEN"},
 		}
-		tr, err := createTransport(t.Context(), m, r)
+		tr, _, err := createTransport(t.Context(), nil, "test", m, r)
 		require.NoError(t, err)
 		sse, ok := tr.(*mcp.SSEClientTransport)
 		require.True(t, ok)
@@ -510,7 +512,7 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 			states.Del(tc.mcpName)
 			t.Cleanup(func() { states.Del(tc.mcpName) })
 
-			sess, err := createSession(t.Context(), tc.mcpName, tc.cfg, r)
+			sess, err := createSession(t.Context(), nil, tc.mcpName, tc.cfg, r, false)
 			require.Error(t, err)
 			require.Nil(t, sess)
 			require.Contains(t, err.Error(), tc.wantErrContains)
@@ -523,4 +525,297 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 			require.Nil(t, info.Client, "no client session on failure")
 		})
 	}
+}
+
+func TestReconcile(t *testing.T) {
+	t.Parallel()
+
+	base := config.MCPConfig{
+		Type: config.MCPHttp,
+		URL:  "https://example.com/mcp",
+	}
+	changed := func() config.MCPConfig { m := base; m.URL = "https://other.com/mcp"; return m }()
+	disabled := func() config.MCPConfig { m := base; m.Disabled = true; return m }()
+	ptr := func(m config.MCPConfig) *config.MCPConfig { return &m }
+
+	// server seeds the running state reconcile diffs against: a state, the
+	// config the server last connected with (Config), and, for a server
+	// mid-connect, the config that attempt is connecting with (PendingConfig).
+	type server struct {
+		state   State
+		config  config.MCPConfig
+		pending *config.MCPConfig
+	}
+
+	tests := []struct {
+		name    string
+		servers map[string]server
+		current config.MCPs
+		want    map[string]reinitAction
+	}{
+		{
+			name:    "new server starts",
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name:    "removed server is cleaned up",
+			servers: map[string]server{"gone": {state: StateConnected, config: base}},
+			current: config.MCPs{},
+			want:    map[string]reinitAction{"gone": reinitRemove},
+		},
+		{
+			name:    "unchanged connected server is skipped",
+			servers: map[string]server{"a": {state: StateConnected, config: base}},
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{},
+		},
+		{
+			name:    "changed config restarts",
+			servers: map[string]server{"a": {state: StateConnected, config: base}},
+			current: config.MCPs{"a": changed},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name:    "disabled server is disabled",
+			servers: map[string]server{"a": {state: StateConnected, config: base}},
+			current: config.MCPs{"a": disabled},
+			want:    map[string]reinitAction{"a": reinitDisable},
+		},
+		{
+			name:    "already disabled server is skipped",
+			servers: map[string]server{"a": {state: StateDisabled}},
+			current: config.MCPs{"a": disabled},
+			want:    map[string]reinitAction{},
+		},
+		{
+			// Regression: disabling clears the recorded config, so a server
+			// left disabled with an unchanged config must restart on re-enable
+			// rather than being skipped as "already initialized".
+			name:    "re-enabled server restarts despite unchanged config",
+			servers: map[string]server{"a": {state: StateDisabled}},
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name:    "errored server restarts",
+			servers: map[string]server{"a": {state: StateError, config: base}},
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name:    "starting server connecting with current config is left alone",
+			servers: map[string]server{"a": {state: StateStarting, pending: ptr(base)}},
+			current: config.MCPs{"a": base},
+			want:    map[string]reinitAction{},
+		},
+		{
+			// Regression: a config change that lands while a server is still
+			// connecting must restart it, otherwise the in-flight attempt
+			// connects with the old config and the change is silently lost.
+			name:    "starting server with changed config restarts",
+			servers: map[string]server{"a": {state: StateStarting, pending: ptr(base)}},
+			current: config.MCPs{"a": changed},
+			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			name: "mixed scenario",
+			servers: map[string]server{
+				"keep":    {state: StateConnected, config: base},
+				"remove":  {state: StateConnected, config: base},
+				"restart": {state: StateConnected, config: base},
+			},
+			current: config.MCPs{
+				"keep":    base,
+				"restart": changed,
+				"new":     base,
+			},
+			want: map[string]reinitAction{
+				"remove":  reinitRemove,
+				"restart": reinitStart,
+				"new":     reinitStart,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			running := make(map[string]ClientInfo, len(tc.servers))
+			for name, s := range tc.servers {
+				running[name] = ClientInfo{
+					Name:          name,
+					State:         s.state,
+					Config:        s.config,
+					PendingConfig: s.pending,
+				}
+			}
+			got := reconcile(tc.current, running)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestMCPConfigEqual(t *testing.T) {
+	t.Parallel()
+
+	base := config.MCPConfig{
+		Type:    config.MCPHttp,
+		URL:     "https://example.com/mcp",
+		Headers: map[string]string{"Authorization": "Bearer tok"},
+		Timeout: 30,
+	}
+
+	tests := []struct {
+		name string
+		a, b config.MCPConfig
+		want bool
+	}{
+		{"identical", base, base, true},
+		{"different URL", base, func() config.MCPConfig { m := base; m.URL = "https://other.com/mcp"; return m }(), false},
+		{"different headers", base, func() config.MCPConfig {
+			m := base
+			m.Headers = map[string]string{"Authorization": "Bearer other"}
+			return m
+		}(), false},
+		{"different timeout", base, func() config.MCPConfig { m := base; m.Timeout = 60; return m }(), false},
+		{"different type", base, func() config.MCPConfig { m := base; m.Type = config.MCPStdio; return m }(), false},
+		{
+			"OAuthToken ignored",
+			base,
+			func() config.MCPConfig {
+				m := base
+				m.OAuthToken = &oauth.Token{AccessToken: "x"}
+				return m
+			}(),
+			true,
+		},
+		{
+			"both OAuthToken ignored",
+			func() config.MCPConfig {
+				m := base
+				m.OAuthToken = &oauth.Token{AccessToken: "x"}
+				return m
+			}(),
+			func() config.MCPConfig {
+				m := base
+				m.OAuthToken = &oauth.Token{AccessToken: "y"}
+				return m
+			}(),
+			true,
+		},
+		{"disabled vs enabled", base, func() config.MCPConfig { m := base; m.Disabled = true; return m }(), false},
+		{"oauth flag", base, func() config.MCPConfig { m := base; m.OAuth = true; return m }(), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, mcpConfigEqual(tc.a, tc.b))
+		})
+	}
+}
+
+// TestMCPConfigEqualExhaustive guards mcpConfigEqual against drift. It
+// enumerates every field of config.MCPConfig via reflection and fails if a
+// field is neither compared by mcpConfigEqual nor explicitly excluded here.
+// Adding a field to MCPConfig now forces a conscious decision about whether
+// it should trigger a server restart, rather than being silently ignored.
+func TestMCPConfigEqualExhaustive(t *testing.T) {
+	t.Parallel()
+
+	// Fields intentionally excluded from the comparison.
+	excluded := map[string]bool{
+		"OAuthToken": true, // internally managed, refreshed out-of-band.
+	}
+
+	typ := reflect.TypeOf(config.MCPConfig{})
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		if excluded[name] {
+			continue
+		}
+		// Build two configs that differ only in this field and assert the
+		// difference is detected.
+		a := config.MCPConfig{}
+		b := config.MCPConfig{}
+		setDistinct(typ.Field(i).Type, reflect.ValueOf(&a).Elem().Field(i))
+		require.False(t, mcpConfigEqual(a, b),
+			"mcpConfigEqual ignores field %q; add it to the comparison or to the excluded set", name)
+	}
+}
+
+// setDistinct assigns a non-zero value of the given type so two structs
+// differ in exactly one field.
+func setDistinct(typ reflect.Type, field reflect.Value) {
+	switch typ.Kind() {
+	case reflect.String:
+		field.SetString("x")
+	case reflect.Bool:
+		field.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		field.SetInt(1)
+	case reflect.Slice:
+		field.Set(reflect.MakeSlice(typ, 1, 1))
+	case reflect.Map:
+		m := reflect.MakeMap(typ)
+		m.SetMapIndex(reflect.Zero(typ.Key()), reflect.Zero(typ.Elem()))
+		field.Set(m)
+	case reflect.Pointer:
+		field.Set(reflect.New(typ.Elem()))
+	default:
+		panic("setDistinct: unhandled kind " + typ.Kind().String())
+	}
+}
+
+// TestBeginAuth_UnknownServer proves BeginAuth rejects a server that is not
+// present in the configuration.
+func TestBeginAuth_UnknownServer(t *testing.T) {
+	cfg := config.NewTestStore(&config.Config{})
+	_, _, err := BeginAuth(cfg, "missing")
+	require.ErrorContains(t, err, "not found")
+}
+
+// TestBeginAuth_NonOAuth proves BeginAuth rejects a server that does not use
+// OAuth over HTTP.
+func TestBeginAuth_NonOAuth(t *testing.T) {
+	cfg := config.NewTestStore(&config.Config{
+		MCP: config.MCPs{
+			"stdio": {Type: config.MCPStdio},
+			"plain": {Type: config.MCPHttp, URL: "https://example.com/mcp"},
+		},
+	})
+	for _, name := range []string{"stdio", "plain"} {
+		_, _, err := BeginAuth(cfg, name)
+		require.ErrorContains(t, err, "does not use OAuth", "name %q", name)
+	}
+}
+
+// TestBeginAuth_Concurrent proves only one browser-suppressed flow per
+// server may be in progress at a time; a second BeginAuth fails fast while
+// the first is outstanding, and succeeds once the first has finished.
+func TestBeginAuth_Concurrent(t *testing.T) {
+	const name = "oauth-http"
+	cfg := config.NewTestStore(&config.Config{
+		MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.com/mcp", OAuth: true}},
+	})
+
+	finish, cancel, err := BeginAuth(cfg, name)
+	require.NoError(t, err)
+	t.Cleanup(cancel)
+
+	// A second flow for the same server must fail fast while the first is
+	// still outstanding.
+	_, _, err = BeginAuth(cfg, name)
+	require.ErrorContains(t, err, "already has an authentication in progress")
+
+	// Finishing the first flow frees the slot for the next caller. Cancel
+	// the request context so finish returns promptly without dialing.
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	cancelCtx()
+	_ = finish(ctx)
+
+	_, cancel2, err := BeginAuth(cfg, name)
+	require.NoError(t, err)
+	cancel2()
 }

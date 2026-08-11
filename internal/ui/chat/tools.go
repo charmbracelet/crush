@@ -214,11 +214,12 @@ func NewToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	workingDir string,
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
 	case tools.BashToolName:
-		item = NewBashToolMessageItem(sty, toolCall, result, canceled)
+		item = NewBashToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobOutputToolName:
 		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
 	case tools.JobKillToolName:
@@ -255,8 +256,20 @@ func NewToolMessageItem(
 		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.TodosToolName:
 		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
+	case tools.QuestionToolName:
+		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ReferencesToolName:
 		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
+	case tools.DefinitionToolName:
+		item = NewDefinitionToolMessageItem(sty, toolCall, result, canceled)
+	case tools.RenameToolName:
+		item = NewRenameToolMessageItem(sty, toolCall, result, canceled)
+	case tools.ReplaceSymbolToolName:
+		item = NewReplaceSymbolToolMessageItem(sty, toolCall, result, canceled)
+	case tools.CallHierarchyToolName:
+		item = NewCallHierarchyToolMessageItem(sty, toolCall, result, canceled)
+	case tools.SymbolsToolName:
+		item = NewSymbolsToolMessageItem(sty, toolCall, result, canceled)
 	case tools.LSPRestartToolName:
 		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
 	default:
@@ -536,12 +549,19 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	return msg, true
 }
 
-// toolErrorContent formats an error message with ERROR tag.
+// toolErrorContent formats an error message with an ERROR or WARN tag.
 func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int) string {
 	if result == nil {
 		return ""
 	}
 	errContent := strings.ReplaceAll(result.Content, "\n", " ")
+	if strings.Contains(errContent, "User denied permission") ||
+		strings.Contains(errContent, "User cancelled") {
+		deniedTag := sty.Tool.WarnTag.Render("WARN")
+		deniedTagWidth := lipgloss.Width(deniedTag)
+		errContent = ansi.Truncate(errContent, width-deniedTagWidth-3, "…")
+		return fmt.Sprintf("%s %s", deniedTag, sty.Tool.WarnMessage.Render(errContent))
+	}
 	errTag := sty.Tool.ErrorTag.Render("ERROR")
 	tagWidth := lipgloss.Width(errTag)
 	errContent = ansi.Truncate(errContent, width-tagWidth-3, "…")
@@ -563,9 +583,9 @@ func toolIcon(sty *styles.Styles, status ToolStatus) string {
 	}
 }
 
-// toolParamList formats parameters as "main (key=value, ...)" with truncation.
 // toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
-func toolParamList(sty *styles.Styles, params []string, width int) string {
+// When opts.ExpandedContent is true, the output wraps instead of truncating.
+func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
 	// minSpaceForMainParam is the min space required for the main param
 	// if this is less that the value set we will only show the main param nothing else
 	const minSpaceForMainParam = 30
@@ -592,14 +612,18 @@ func toolParamList(sty *styles.Styles, params []string, width int) string {
 		}
 	}
 
-	if width >= 0 {
+	if width >= 0 && (opts == nil || !opts.ExpandedContent) {
 		output = ansi.Truncate(output, width, "…")
+	} else if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
+		output = ansi.Hardwrap(output, width, false)
 	}
 	return sty.Tool.ParamMain.Render(output)
 }
 
 // toolHeader builds the tool header line: "● ToolName params..."
-func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, nested bool, params ...string) string {
+// When opts.ExpandedContent is true, long parameters wrap instead of truncating.
+func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
+	nested := opts != nil && opts.Compact
 	icon := toolIcon(sty, status)
 	nameStyle := sty.Tool.NameNormal
 	if nested {
@@ -609,13 +633,26 @@ func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, n
 	prefix := fmt.Sprintf("%s %s ", icon, toolName)
 	prefixWidth := lipgloss.Width(prefix)
 	remainingWidth := width - prefixWidth
-	paramsStr := toolParamList(sty, params, remainingWidth)
+	paramsStr := toolParamList(sty, params, remainingWidth, opts)
+
+	// When expanded, toolParamList may return multiple lines. Indent
+	// continuation lines to align with the first line's param text.
+	if strings.Contains(paramsStr, "\n") {
+		lines := strings.Split(paramsStr, "\n")
+		indent := strings.Repeat(" ", prefixWidth)
+		for i := 1; i < len(lines); i++ {
+			lines[i] = indent + lines[i]
+		}
+		return prefix + strings.Join(lines, "\n")
+	}
 	return prefix + paramsStr
 }
 
 // toolOutputPlainContent renders plain text with optional expansion support.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
 	content = stringext.NormalizeSpace(content)
+	content = common.StripCursorControl(content)
+	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
 	maxLines := responseContextHeight

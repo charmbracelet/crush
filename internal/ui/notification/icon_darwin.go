@@ -2,6 +2,10 @@
 
 package notification
 
-// Icon is currently empty on darwin because platform icon support is broken. Do
-// use the icon for OSC notifications, just not native.
-var Icon any = ""
+import _ "embed"
+
+// Icon is the PNG data for the Crush icon, used for OSC 99 notifications.
+// Native macOS notifications don't support custom icons via beeep, but OSC 99 does.
+//
+//go:embed crush-icon.png
+var Icon []byte

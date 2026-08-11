@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -45,14 +46,17 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession                  struct{}
-	ActionToggleHelp                  struct{}
-	ActionToggleCompactMode           struct{}
-	ActionToggleThinking              struct{}
-	ActionTogglePills                 struct{}
-	ActionExternalEditor              struct{}
-	ActionToggleYoloMode              struct{}
-	ActionToggleNotifications         struct{}
+	ActionNewSession              struct{}
+	ActionToggleHelp              struct{}
+	ActionToggleCompactMode       struct{}
+	ActionToggleThinking          struct{}
+	ActionTogglePills             struct{}
+	ActionExternalEditor          struct{}
+	ActionToggleYoloMode          struct{}
+	ActionToggleNotifications     struct{}
+	ActionSelectNotificationStyle struct {
+		Style string
+	}
 	ActionToggleTransparentBackground struct{}
 	ActionInitializeProject           struct{}
 	ActionSummarize                   struct {
@@ -74,6 +78,12 @@ type (
 		Args      map[string]string // Actual argument values
 		Skill     *skills.Skill     // Set when this is a skill command
 	}
+	// ActionAttachSkill is sent when a skill is selected from the commands
+	// dialog to be attached to the conversation as a markdown attachment.
+	ActionAttachSkill struct {
+		ID   string
+		Name string
+	}
 	// ActionRunMCPPrompt is a message to run a custom command.
 	ActionRunMCPPrompt struct {
 		Title       string
@@ -87,6 +97,29 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+)
+
+// Messages for MCP OAuth authentication dialog.
+type (
+	// ActionMCPAuthStarted is sent when the user approves authentication
+	// for an MCP server. The UI should initiate the actual auth flow
+	// using the provided context, which the dialog will cancel if the
+	// user closes it.
+	ActionMCPAuthStarted struct {
+		Name string
+		Ctx  context.Context
+	}
+
+	// ActionMCPAuthComplete is sent when MCP authentication succeeds.
+	ActionMCPAuthComplete struct {
+		Name string
+	}
+
+	// ActionMCPAuthErrored is sent when MCP authentication fails.
+	ActionMCPAuthErrored struct {
+		Name  string
+		Error error
+	}
 )
 
 // Messages for API key input dialog.

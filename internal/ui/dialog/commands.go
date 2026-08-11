@@ -160,7 +160,21 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		c.dockerMCPAvailable = &msg.available
 		c.dockerMCPCheckInFlight = false
 		if c.selected == SystemCommands {
+			// Preserve the current selection across the rebuild to avoid reset
+			var prevID string
+			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
+				prevID = item.id
+			}
 			c.setCommandItems(c.selected)
+			if prevID != "" {
+				for i, it := range c.list.FilteredItems() {
+					if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
+						c.list.SetSelected(i)
+						c.list.ScrollToSelected()
+						break
+					}
+				}
+			}
 		}
 		return nil
 	case spinner.TickMsg:
@@ -289,10 +303,12 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	c.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
+	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
 
-	c.list.SetSize(innerWidth, height-heightOffset)
-	c.help.SetWidth(innerWidth)
+	c.list.SetSize(innerWidth, max(0, height-heightOffset))
+
+	// Hide the shortcut hints uniformly when the widest would crowd names.
+	applyInfoColumnVisibility(c.list.FilteredItems(), innerWidth, commandInfoMaxPercent)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
@@ -301,10 +317,10 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(inputView)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	rc.AddPart(listView)
-	rc.Help = c.help.View(c)
+	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
 
 	if c.loading {
-		rc.Help = c.spinner.View() + " Generating Prompt..."
+		rc.Help = t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt...")
 	}
 
 	view := rc.Render()
@@ -390,12 +406,21 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 		}
 	case UserCommands:
 		for _, cmd := range c.customCommands {
-			action := ActionRunCustomCommand{
-				Content:   cmd.Content,
-				Arguments: cmd.Arguments,
-				Skill:     cmd.Skill,
+			var action Action
+			if cmd.Skill != nil {
+				action = ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
+			} else {
+				action = ActionRunCustomCommand{
+					Content:   cmd.Content,
+					Arguments: cmd.Arguments,
+					Skill:     cmd.Skill,
+				}
 			}
-			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action))
+			item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
+			if cmd.Skill != nil {
+				item = item.WithDescription(cmd.Skill.Description)
+			}
+			commandItems = append(commandItems, item)
 		}
 	case MCPPrompts:
 		for _, cmd := range c.mcpPrompts {
@@ -420,7 +445,7 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 // defaultCommands returns the list of default system commands.
 func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
-		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
+		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 	}
@@ -502,18 +527,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
 	}
 
-	// Add a command for toggling notifications.
-	cfg = c.com.Config()
-	notificationsDisabled := cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications
-	notificationLabel := "Disable Notifications"
-	if notificationsDisabled {
-		notificationLabel = "Enable Notifications"
-	}
-	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_notifications", notificationLabel, "", ActionToggleNotifications{}))
+	// Add a command for selecting notification style via picker dialog.
+	notificationLabel := "Notification Style"
+	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),
+		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
@@ -550,15 +570,15 @@ func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
 }
 
 // StartLoading implements [LoadingDialog].
-func (a *Commands) StartLoading() tea.Cmd {
-	if a.loading {
+func (c *Commands) StartLoading() tea.Cmd {
+	if c.loading {
 		return nil
 	}
-	a.loading = true
-	return a.spinner.Tick
+	c.loading = true
+	return c.spinner.Tick
 }
 
 // StopLoading implements [LoadingDialog].
-func (a *Commands) StopLoading() {
-	a.loading = false
+func (c *Commands) StopLoading() {
+	c.loading = false
 }

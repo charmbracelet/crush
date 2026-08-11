@@ -2,17 +2,20 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -35,10 +38,18 @@ func wrapEvent(ev any) *pubsub.Payload {
 			},
 		})
 	case pubsub.Event[mcp.Event]:
+		pt := mcpEventTypeToProto(e.Payload.Type)
+		if pt == "" {
+			// Unsupported MCP event type (e.g. EventChannelMessage, which
+			// has no proto representation until session delivery is wired
+			// up). Drop it instead of fabricating a state_changed event.
+			slog.Debug("Dropping unsupported MCP event type for SSE", "type", e.Payload.Type)
+			return nil
+		}
 		return envelope(pubsub.PayloadTypeMCPEvent, pubsub.Event[proto.MCPEvent]{
 			Type: e.Type,
 			Payload: proto.MCPEvent{
-				Type:      mcpEventTypeToProto(e.Payload.Type),
+				Type:      pt,
 				Name:      e.Payload.Name,
 				State:     proto.MCPState(e.Payload.State),
 				Error:     e.Payload.Error,
@@ -68,6 +79,26 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Denied:     e.Payload.Denied,
 			},
 		})
+	case pubsub.Event[question.Request]:
+		slog.Info("Wrapping question batch event for SSE", "id", e.Payload.ID, "questions", len(e.Payload.Questions))
+		return envelope(pubsub.PayloadTypeQuestionRequest, pubsub.Event[proto.QuestionRequest]{
+			Type: e.Type,
+			Payload: proto.QuestionRequest{
+				ID:                 e.Payload.ID,
+				SessionID:          e.Payload.SessionID,
+				ToolCallID:         e.Payload.ToolCallID,
+				Questions:          questionsToProto(e.Payload.Questions),
+				ConfirmTitle:       e.Payload.ConfirmTitle,
+				ConfirmDescription: e.Payload.ConfirmDescription,
+			},
+		})
+	case pubsub.Event[question.Notification]:
+		return envelope(pubsub.PayloadTypeQuestionNotification, pubsub.Event[proto.QuestionNotification]{
+			Type: e.Type,
+			Payload: proto.QuestionNotification{
+				BatchID: e.Payload.BatchID,
+			},
+		})
 	case pubsub.Event[message.Message]:
 		return envelope(pubsub.PayloadTypeMessage, pubsub.Event[proto.Message]{
 			Type:    e.Type,
@@ -84,12 +115,47 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Payload: fileToProto(e.Payload),
 		})
 	case pubsub.Event[notify.Notification]:
+		payload := proto.AgentEvent{
+			SessionID:    e.Payload.SessionID,
+			SessionTitle: e.Payload.SessionTitle,
+			RunID:        e.Payload.RunID,
+			Type:         proto.AgentEventType(e.Payload.Type),
+			AWSSOCommand: e.Payload.AWSSOCommand,
+			AWSSOURL:     e.Payload.AWSSOURL,
+		}
+		// Carry any human-readable message across the wire; the client
+		// maps Error back into Notification.Message.
+		if e.Payload.Message != "" {
+			payload.Error = errors.New(e.Payload.Message)
+		}
+		if e.Payload.Type == notify.TypeAgentError {
+			payload.Type = proto.AgentEventTypeError
+		}
 		return envelope(pubsub.PayloadTypeAgentEvent, pubsub.Event[proto.AgentEvent]{
+			Type:    e.Type,
+			Payload: payload,
+		})
+	case pubsub.Event[notify.RunComplete]:
+		return envelope(pubsub.PayloadTypeRunComplete, pubsub.Event[proto.RunComplete]{
 			Type: e.Type,
-			Payload: proto.AgentEvent{
-				SessionID:    e.Payload.SessionID,
-				SessionTitle: e.Payload.SessionTitle,
-				Type:         proto.AgentEventType(e.Payload.Type),
+			Payload: proto.RunComplete{
+				SessionID: e.Payload.SessionID,
+				RunID:     e.Payload.RunID,
+				MessageID: e.Payload.MessageID,
+				Text:      e.Payload.Text,
+				Error:     e.Payload.Error,
+				Cancelled: e.Payload.Cancelled,
+			},
+		})
+	case pubsub.Event[proto.ConfigChanged]:
+		return envelope(pubsub.PayloadTypeConfigChanged, e)
+	case app.UpdateAvailableMsg:
+		return envelope(pubsub.PayloadTypeUpdateAvailable, pubsub.Event[proto.UpdateAvailable]{
+			Type: pubsub.UpdatedEvent,
+			Payload: proto.UpdateAvailable{
+				CurrentVersion: e.CurrentVersion,
+				LatestVersion:  e.LatestVersion,
+				IsDevelopment:  e.IsDevelopment,
 			},
 		})
 	case pubsub.Event[skills.Event]:
@@ -127,7 +193,9 @@ func mcpEventTypeToProto(t mcp.EventType) proto.MCPEventType {
 	case mcp.EventResourcesListChanged:
 		return proto.MCPEventResourcesListChanged
 	default:
-		return proto.MCPEventStateChanged
+		// Unsupported type (e.g. EventChannelMessage). Return empty so
+		// callers can drop it rather than coercing to state_changed.
+		return ""
 	}
 }
 
@@ -145,6 +213,29 @@ func sessionToProto(s session.Session) proto.Session {
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+// isSessionBusy reports whether the given workspace has an in-flight
+// agent run for sessionID. It tolerates a nil workspace (treating it as
+// "not busy") so REST handlers can pass GetWorkspace's result through
+// unconditionally — the workspace lookup error is already surfaced by
+// the prior ListSessions/GetSession call when relevant.
+func isSessionBusy(ws *backend.Workspace, sessionID string) bool {
+	if ws == nil || ws.App == nil || ws.AgentCoordinator == nil {
+		return false
+	}
+	return ws.AgentCoordinator.IsSessionBusy(sessionID)
+}
+
+// attachedClients returns the number of clients currently viewing
+// sessionID in ws. Hold-only clients (streams == 0) do not contribute.
+// A nil workspace is treated as zero so handlers can pass GetWorkspace's
+// result through without an extra guard.
+func attachedClients(ws *backend.Workspace, sessionID string) int {
+	if ws == nil {
+		return 0
+	}
+	return ws.AttachedClientsForSession(sessionID)
 }
 
 func todosToProto(todos []session.Todo) []proto.Todo {
@@ -224,6 +315,12 @@ func messageToProto(m message.Message) proto.Message {
 			msg.Parts = append(msg.Parts, proto.ImageURLContent{URL: v.URL, Detail: v.Detail})
 		case message.BinaryContent:
 			msg.Parts = append(msg.Parts, proto.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
+		case message.ShellCommand:
+			msg.Parts = append(msg.Parts, proto.ShellCommand{
+				Command:  v.Command,
+				Output:   v.Output,
+				ExitCode: v.ExitCode,
+			})
 		}
 	}
 
@@ -255,6 +352,32 @@ func messagesToProto(msgs []message.Message) []proto.Message {
 	out := make([]proto.Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = messageToProto(m)
+	}
+	return out
+}
+
+func questionsToProto(qs []question.Question) []proto.QuestionItem {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]proto.QuestionItem, len(qs))
+	for i, q := range qs {
+		choices := make([]proto.QuestionChoice, len(q.Choices))
+		for j, c := range q.Choices {
+			choices[j] = proto.QuestionChoice{
+				ID:          c.ID,
+				Label:       c.Label,
+				Description: c.Description,
+			}
+		}
+		out[i] = proto.QuestionItem{
+			ID:          q.ID,
+			Type:        string(q.Type),
+			Label:       q.Label,
+			Question:    q.Text,
+			Description: q.Description,
+			Choices:     choices,
+		}
 	}
 	return out
 }

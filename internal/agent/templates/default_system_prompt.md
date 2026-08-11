@@ -66,6 +66,7 @@ Follow the project's existing rules, conventions and guidelines, and otherwise u
 
 - **Comments**: Add concise high-level comments explaining the "why" and "what" for confusing, complicated, "hackish", weird, or non-idiomatic code. If such code is based on some reference URL the user gave, include those URL(s) along with the comments as a reference at the bottom of the comment. Otherwise, AVOID ADDING COMMENTS, and never use code comments to communicate with the user.
 - **Self-commenting code**: Prefer self-commenting code via descriptive identifiers and symbols.
+- **No em dashes**: Never use em dashes in source code; use commas, periods, parentheses, or semicolons instead. Hyphens are not a stand-in for em dashes.
 </coding_style>
 
 <engineering_and_testing>

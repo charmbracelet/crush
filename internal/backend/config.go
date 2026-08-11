@@ -10,7 +10,32 @@ import (
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/skills"
 )
+
+// publishConfigChanged publishes a ConfigChanged event on the workspace's
+// event broker so all subscribers (e.g. remote clients) refresh their
+// cached config snapshot. It also re-initializes any MCP servers whose
+// configuration changed as a result of the write.
+func publishConfigChanged(ws *Workspace) {
+	if ws == nil || ws.App == nil {
+		return
+	}
+
+	// Re-init MCP servers whose config changed. MCP state is process-global,
+	// so this only needs to happen once regardless of which workspace
+	// triggered the write. Run async so unrelated config writes (model
+	// switches, API keys) don't block on MCP reconciliation. Bound to the
+	// workspace ctx so teardown cancels any in-flight init.
+	go mcptools.Reinitialize(ws.ctx, ws.Cfg)
+
+	ws.SendEvent(pubsub.Event[proto.ConfigChanged]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: proto.ConfigChanged{WorkspaceID: ws.ID},
+	})
+}
 
 // MCPResourceContents holds the contents of an MCP resource returned
 // by the backend.
@@ -28,7 +53,11 @@ func (b *Backend) SetConfigField(workspaceID string, scope config.Scope, key str
 	if err != nil {
 		return err
 	}
-	return ws.Cfg.SetConfigField(scope, key, value)
+	if err := ws.Cfg.SetConfigField(scope, key, value); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
 }
 
 // RemoveConfigField removes a key from the config file for the given
@@ -38,7 +67,11 @@ func (b *Backend) RemoveConfigField(workspaceID string, scope config.Scope, key 
 	if err != nil {
 		return err
 	}
-	return ws.Cfg.RemoveConfigField(scope, key)
+	if err := ws.Cfg.RemoveConfigField(scope, key); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
 }
 
 // UpdatePreferredModel updates the preferred model for the given type
@@ -48,7 +81,11 @@ func (b *Backend) UpdatePreferredModel(workspaceID string, scope config.Scope, m
 	if err != nil {
 		return err
 	}
-	return ws.Cfg.UpdatePreferredModel(scope, modelType, model)
+	if err := ws.Cfg.UpdatePreferredModel(scope, modelType, model); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
 }
 
 // SetCompactMode sets the compact mode setting and persists it.
@@ -57,7 +94,11 @@ func (b *Backend) SetCompactMode(workspaceID string, scope config.Scope, enabled
 	if err != nil {
 		return err
 	}
-	return ws.Cfg.SetCompactMode(scope, enabled)
+	if err := ws.Cfg.SetCompactMode(scope, enabled); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
 }
 
 // SetProviderAPIKey sets the API key for a provider and persists it.
@@ -66,7 +107,11 @@ func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, prov
 	if err != nil {
 		return err
 	}
-	return ws.Cfg.SetProviderAPIKey(scope, providerID, apiKey)
+	if err := ws.Cfg.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
 }
 
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
@@ -76,6 +121,9 @@ func (b *Backend) ImportCopilot(workspaceID string) (*oauth.Token, bool, error) 
 		return nil, false, err
 	}
 	token, ok := ws.Cfg.ImportCopilot()
+	if ok {
+		publishConfigChanged(ws)
+	}
 	return token, ok, nil
 }
 
@@ -85,7 +133,11 @@ func (b *Backend) RefreshOAuthToken(ctx context.Context, workspaceID string, sco
 	if err != nil {
 		return err
 	}
-	return ws.Cfg.RefreshOAuthToken(ctx, scope, providerID)
+	if err := ws.Cfg.RefreshOAuthToken(ctx, scope, providerID); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
 }
 
 // ProjectNeedsInitialization checks whether the project in this
@@ -104,7 +156,11 @@ func (b *Backend) MarkProjectInitialized(workspaceID string) error {
 	if err != nil {
 		return err
 	}
-	return config.MarkProjectInitialized(ws.Cfg)
+	if err := config.MarkProjectInitialized(ws.Cfg); err != nil {
+		return err
+	}
+	publishConfigChanged(ws)
+	return nil
 }
 
 // InitializePrompt builds the initialization prompt for the workspace.
@@ -114,6 +170,50 @@ func (b *Backend) InitializePrompt(workspaceID string) (string, error) {
 		return "", err
 	}
 	return agent.InitializePrompt(ws.Cfg)
+}
+
+// ReadSkill reads a skill's content by ID.
+func (b *Backend) ReadSkill(ctx context.Context, workspaceID, skillID string) ([]byte, proto.SkillReadResult, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, proto.SkillReadResult{}, err
+	}
+
+	mgr := ws.Skills
+	content, result, err := skills.ReadContent(
+		mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID,
+	)
+	if err != nil {
+		return nil, proto.SkillReadResult{}, err
+	}
+	return content, proto.SkillReadResult{
+		Name:        result.Name,
+		Description: result.Description,
+		Source:      string(result.Source),
+		Builtin:     result.Builtin,
+	}, nil
+}
+
+// ListSkills returns the effective visible skills for a workspace.
+func (b *Backend) ListSkills(workspaceID string) ([]proto.SkillInfo, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	mgr := ws.Skills
+	entries := skills.Catalog(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir())
+	result := make([]proto.SkillInfo, len(entries))
+	for i, entry := range entries {
+		result[i] = proto.SkillInfo{
+			ID:            entry.ID,
+			Name:          entry.Name,
+			Description:   entry.Description,
+			Label:         entry.Label,
+			Source:        string(entry.Source),
+			UserInvocable: entry.UserInvocable,
+		}
+	}
+	return result, nil
 }
 
 // EnableDockerMCP validates Docker MCP availability, stages the
@@ -131,16 +231,17 @@ func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error
 
 	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, ws.Cfg); err != nil {
 		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
-		delete(ws.Cfg.Config().MCP, config.DockerMCPName)
+		ws.Cfg.RemoveDockerMCPInMemory()
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
 	if err := ws.Cfg.PersistDockerMCPConfig(mcpConfig); err != nil {
 		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
-		delete(ws.Cfg.Config().MCP, config.DockerMCPName)
+		ws.Cfg.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
 	}
 
+	publishConfigChanged(ws)
 	return nil
 }
 
@@ -160,6 +261,7 @@ func (b *Backend) DisableDockerMCP(workspaceID string) error {
 		return err
 	}
 
+	publishConfigChanged(ws)
 	return nil
 }
 
@@ -202,6 +304,37 @@ func (b *Backend) GetMCPPrompt(workspaceID, clientID, promptID string, args map[
 		return "", err
 	}
 	return commands.GetMCPPrompt(ws.Cfg, clientID, promptID, args)
+}
+
+func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return nil, err
+	}
+	prompts, err := commands.LoadMCPPrompts()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]proto.MCPPrompt, len(prompts))
+	for i, prompt := range prompts {
+		arguments := make([]proto.MCPPromptArgument, len(prompt.Arguments))
+		for j, argument := range prompt.Arguments {
+			arguments[j] = proto.MCPPromptArgument{
+				ID:          argument.ID,
+				Title:       argument.Title,
+				Description: argument.Description,
+				Required:    argument.Required,
+			}
+		}
+		result[i] = proto.MCPPrompt{
+			ID:          prompt.ID,
+			Title:       prompt.Title,
+			Description: prompt.Description,
+			PromptID:    prompt.PromptID,
+			ClientID:    prompt.ClientID,
+			Arguments:   arguments,
+		}
+	}
+	return result, nil
 }
 
 // GetWorkingDir returns the working directory for a workspace.

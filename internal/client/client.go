@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/server"
+	"github.com/google/uuid"
 )
 
 // DummyHost is used to satisfy the http.Client's requirement for a URL.
@@ -22,10 +24,11 @@ const DummyHost = "api.crush.localhost"
 
 // Client represents an RPC client connected to a Crush server.
 type Client struct {
-	h       *http.Client
-	path    string
-	network string
-	addr    string
+	h        *http.Client
+	path     string
+	network  string
+	addr     string
+	clientID string
 }
 
 // DefaultClient creates a new [Client] connected to the default server address.
@@ -44,6 +47,7 @@ func NewClient(path, network, address string) (*Client, error) {
 	c.path = filepath.Clean(path)
 	c.network = network
 	c.addr = address
+	c.clientID = uuid.New().String()
 	p := &http.Protocols{}
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)
@@ -63,6 +67,12 @@ func NewClient(path, network, address string) (*Client, error) {
 // Path returns the client's workspace filesystem path.
 func (c *Client) Path() string {
 	return c.path
+}
+
+// ClientID returns the per-process client ID minted in [NewClient].
+// The server uses it as a presence/coordination handle.
+func (c *Client) ClientID() string {
+	return c.clientID
 }
 
 // GetGlobalConfig retrieves the server's configuration.
@@ -106,17 +116,85 @@ func (c *Client) VersionInfo(ctx context.Context) (*proto.VersionInfo, error) {
 	return &vi, nil
 }
 
-// ShutdownServer sends a shutdown request to the server.
-func (c *Client) ShutdownServer(ctx context.Context) error {
+// ShutdownServerIfIdle asks the server to shut down, which it grants only
+// if it is hosting nothing. There is deliberately no unconditional
+// variant: a client only ever wants a server replaced, never other
+// sessions killed.
+//
+// A server that declines because it is in use returns an error wrapping
+// [ErrServerBusy]. A server too old to know the command returns
+// [ErrUnsupported]; it must be left running, since the shutdown request
+// it does understand is unconditional and would take its sessions down.
+func (c *Client) ShutdownServerIfIdle(ctx context.Context) error {
 	rsp, err := c.post(ctx, "/control", nil, jsonBody(proto.ServerControl{
-		Command: "shutdown",
+		Command: proto.ServerControlShutdownIfIdle,
 	}), nil)
 	if err != nil {
 		return err
 	}
 	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server shutdown failed: %s", rsp.Status)
+	if rsp.StatusCode == http.StatusOK {
+		return nil
+	}
+	failure := fmt.Errorf("server shutdown failed: %s", rsp.Status)
+	switch rsp.StatusCode {
+	case http.StatusConflict:
+		return fmt.Errorf("%w: %w", ErrServerBusy, failure)
+	case http.StatusBadRequest:
+		// The only way a well-formed control request is rejected as bad
+		// is an unknown command, i.e. a server predating this one.
+		return fmt.Errorf("%w: %w", ErrUnsupported, failure)
+	}
+	return failure
+}
+
+// ShutdownServer sends the original, unconditional "shutdown" command.
+// It exists for backward compatibility with servers that predate
+// [ServerControlShutdownIfIdle]: those servers reject the idle-checked
+// variant with [ErrUnsupported], so a client that has already verified
+// the server is idle (e.g. via [Client.ListWorkspaces]) can fall back to
+// this command to replace an old server.
+//
+// New servers apply the same idleness check to this command as they do
+// to [ServerControlShutdownIfIdle], so it is never more dangerous.
+func (c *Client) ShutdownServer(ctx context.Context) error {
+	rsp, err := c.post(ctx, "/control", nil, jsonBody(proto.ServerControl{
+		Command: proto.ServerControlShutdown,
+	}), nil)
+	if err != nil {
+		return err
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode == http.StatusOK {
+		return nil
+	}
+	failure := fmt.Errorf("server shutdown failed: %s", rsp.Status)
+	switch rsp.StatusCode {
+	case http.StatusConflict:
+		return fmt.Errorf("%w: %w", ErrServerBusy, failure)
+	}
+	return failure
+}
+
+// RetireClient tells the server this client has exited, releasing every
+// claim it holds on every workspace. It is the client's authoritative
+// goodbye: after it returns, the server refuses further workspace
+// creates from this client ID, so a create whose response was lost cannot
+// leave a workspace nobody can name.
+//
+// Servers predating the endpoint answer 404, reported as
+// [ErrUnsupported] so callers can fall back to releasing by workspace ID.
+func (c *Client) RetireClient(ctx context.Context) error {
+	rsp, err := c.delete(ctx, "/clients/"+c.clientID, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: %w", ErrUnsupported, err)
+		}
+		return fmt.Errorf("failed to retire client: %w", err)
 	}
 	return nil
 }

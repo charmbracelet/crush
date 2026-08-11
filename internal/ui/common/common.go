@@ -6,7 +6,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -112,7 +112,7 @@ func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) 
 	return tea.Sequence(
 		tea.SetClipboard(text),
 		func() tea.Msg {
-			_ = clipboard.WriteAll(text)
+			clipboard.WriteText(text)
 			return nil
 		},
 		callback,

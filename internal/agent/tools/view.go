@@ -335,7 +335,9 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 		lineText = strings.TrimSuffix(lineText, "\n")
 		lineText = strings.TrimSuffix(lineText, "\r")
 		if len(lineText) > MaxLineLength {
-			lineText = lineText[:MaxLineLength] + "..."
+			// Truncate at a rune boundary to avoid splitting
+			// multi-byte characters.
+			lineText = strings.ToValidUTF8(lineText[:MaxLineLength], "") + "..."
 		}
 		projectedSize := contentSize + len(lineText)
 		if len(lines) > 0 {

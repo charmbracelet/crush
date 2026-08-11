@@ -223,22 +223,30 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 // UpdateTitleAndUsage updates only the title and usage fields atomically.
 // This is safer than fetching, modifying, and saving the entire session.
 func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error {
-	return s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
+	if err := s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
 		ID:               sessionID,
 		Title:            title,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		Cost:             cost,
-	})
+	}); err != nil {
+		return err
+	}
+	s.publishSessionUpdate(ctx, sessionID)
+	return nil
 }
 
 // Rename updates only the title of a session without touching updated_at or
 // usage fields.
 func (s *service) Rename(ctx context.Context, id string, title string) error {
-	return s.q.RenameSession(ctx, db.RenameSessionParams{
+	if err := s.q.RenameSession(ctx, db.RenameSessionParams{
 		ID:    id,
 		Title: title,
-	})
+	}); err != nil {
+		return err
+	}
+	s.publishSessionUpdate(ctx, id)
+	return nil
 }
 
 func (s *service) List(ctx context.Context) ([]Session, error) {
@@ -252,6 +260,17 @@ func (s *service) List(ctx context.Context) ([]Session, error) {
 		s.applyEstimatedUsageState(&sessions[i])
 	}
 	return sessions, nil
+}
+
+// publishSessionUpdate re-fetches a session and publishes an UpdatedEvent so
+// that UI subscribers reflect title or usage changes.
+func (s *service) publishSessionUpdate(ctx context.Context, sessionID string) {
+	session, err := s.Get(ctx, sessionID)
+	if err != nil {
+		slog.Error("Failed to re-fetch session for event publish", "error", err, "sessionID", sessionID)
+		return
+	}
+	s.Publish(pubsub.UpdatedEvent, session)
 }
 
 func (s *service) applyEstimatedUsageState(session *Session) {

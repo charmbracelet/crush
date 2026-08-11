@@ -14,6 +14,7 @@ import (
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type MessageRole string
@@ -37,6 +38,11 @@ const (
 	FinishReasonToolUse   FinishReason = "tool_use"
 	FinishReasonCanceled  FinishReason = "canceled"
 	FinishReasonError     FinishReason = "error"
+	// FinishReasonContentFilter is a provider safety/refusal stop
+	// (Anthropic stop_reason=refusal, OpenAI content_filter, etc.).
+	// The TUI renders this as a REFUSED banner rather than a silent
+	// empty turn.
+	FinishReasonContentFilter FinishReason = "content_filter"
 
 	// Should never happen
 	FinishReasonUnknown FinishReason = "unknown"
@@ -128,6 +134,37 @@ type Finish struct {
 }
 
 func (Finish) isPart() {}
+
+// ShellCommand stores a bang-mode shell command and its output as a
+// distinct content part so it can be reconstructed on session restore.
+type ShellCommand struct {
+	Command  string `json:"command"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
+
+func (ShellCommand) isPart() {}
+
+// HasShellCommand reports whether the message contains any ShellCommand parts.
+func (m *Message) HasShellCommand() bool {
+	for _, part := range m.Parts {
+		if _, ok := part.(ShellCommand); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ShellCommands returns all ShellCommand parts from the message.
+func (m *Message) ShellCommands() []ShellCommand {
+	var cmds []ShellCommand
+	for _, part := range m.Parts {
+		if sc, ok := part.(ShellCommand); ok {
+			cmds = append(cmds, sc)
+		}
+	}
+	return cmds
+}
 
 type Message struct {
 	ID               string
@@ -224,6 +261,17 @@ func (m *Message) FinishReason() FinishReason {
 		}
 	}
 	return ""
+}
+
+// IsErrorLike reports whether the message finished with an error-style
+// banner (a real error or a provider safety refusal). The TUI renders
+// both through the same banner path.
+func (m *Message) IsErrorLike() bool {
+	switch m.FinishReason() {
+	case FinishReasonError, FinishReasonContentFilter:
+		return true
+	}
+	return false
 }
 
 func (m *Message) IsThinking() bool {
@@ -421,6 +469,23 @@ func (m *Message) Clone() Message {
 	return clone
 }
 
+// ResetStreamedContent removes all parts that were added during streaming
+// (text, reasoning, tool calls, finish) so the message is ready for a
+// retry. Non-streamed parts (images, binary attachments, tool results,
+// shell commands) are preserved.
+func (m *Message) ResetStreamedContent() {
+	kept := m.Parts[:0]
+	for _, part := range m.Parts {
+		switch part.(type) {
+		case TextContent, ReasoningContent, ToolCall, Finish:
+			// Drop streamed parts.
+		default:
+			kept = append(kept, part)
+		}
+	}
+	m.Parts = kept
+}
+
 func (m *Message) AddFinish(reason FinishReason, message, details string) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
@@ -482,6 +547,15 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			})
 		}
 		text = PromptWithTextAttachments(text, textAttachments)
+		// Include bang-mode shell commands as context for the agent.
+		for _, sc := range m.ShellCommands() {
+			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, ansi.Strip(sc.Output), sc.ExitCode)
+			if text != "" {
+				text += "\n\n" + shellText
+			} else {
+				text = shellText
+			}
+		}
 		if text != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}

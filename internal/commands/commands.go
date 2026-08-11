@@ -61,67 +61,28 @@ func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
 	return loadAll(buildCommandSources(cfg))
 }
 
-// LoadSkillCommands loads user-invocable skills as custom commands.
-func LoadSkillCommands() []CustomCommand {
-	var commands []CustomCommand
-
-	// Load from global skills directories with "user:" prefix
-	for _, dir := range config.GlobalSkillsDirs() {
-		commands = append(commands, loadInvocableSkillsFromDir(dir, userCommandPrefix)...)
-	}
-
-	return commands
-}
-
-// LoadProjectSkillCommands loads user-invocable skills from project directories as custom commands.
-func LoadProjectSkillCommands(workingDir string) []CustomCommand {
-	var commands []CustomCommand
-
-	// Load from project skills directories with "project:" prefix
-	for _, dir := range config.ProjectSkillsDir(workingDir) {
-		commands = append(commands, loadInvocableSkillsFromDir(dir, projectCommandPrefix)...)
-	}
-
-	return commands
-}
-
-func loadInvocableSkillsFromDir(dir, prefix string) []CustomCommand {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return nil
-	}
-
-	var commands []CustomCommand
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-
+// FromSkillCatalog converts user-invocable catalog entries into custom
+// command entries for the command palette.
+func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
+	commands := make([]CustomCommand, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.UserInvocable {
 			continue
 		}
-
-		skillPath := filepath.Join(dir, entry.Name(), skills.SkillFileName)
-		skill, err := skills.Parse(skillPath)
-		if err != nil {
-			continue
+		name := entry.Label
+		if name == "" {
+			name = userCommandPrefix + entry.Name
 		}
-
-		if !skill.UserInvocable {
-			continue
-		}
-
-		name := prefix + skill.Name
 		commands = append(commands, CustomCommand{
-			ID:        name,
-			Name:      name,
-			Content:   skill.Instructions,
-			Arguments: nil,
-			Skill:     skill,
+			ID:   name,
+			Name: name,
+			Skill: &skills.Skill{
+				Name:          entry.Name,
+				Description:   entry.Description,
+				SkillFilePath: entry.ID,
+			},
 		})
 	}
-
 	return commands
 }
 

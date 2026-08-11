@@ -30,7 +30,20 @@ function formatCompact(n) {
 }
 
 function formatCost(n) {
+  if (n >= 1000) {
+    return "$" + Math.round(n).toLocaleString();
+  }
   return "$" + n.toFixed(2);
+}
+
+function formatDate(dateStr) {
+  // SQL returns UTC dates (YYYY-MM-DD); convert to local date.
+  const utc = new Date(dateStr + "T00:00:00Z");
+  return utc.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function formatTime(ms) {
@@ -90,7 +103,7 @@ if (stats.recent_activity?.length > 0) {
   new Chart(document.getElementById("recentActivityChart"), {
     type: "bar",
     data: {
-      labels: stats.recent_activity.map((d) => d.day),
+      labels: stats.recent_activity.map((d) => formatDate(d.day)),
       datasets: [
         {
           label: "Sessions",
@@ -128,6 +141,9 @@ if (stats.recent_activity?.length > 0) {
 // Heatmap (Hour × Day of Week) - Bubble Chart
 const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// Convert UTC hour/day to local hour/day using a reference date.
+const utcOffsetHours = new Date().getTimezoneOffset() / -60;
+
 let maxCount =
   stats.hour_day_heatmap?.length > 0
     ? Math.max(...stats.hour_day_heatmap.map((h) => h.session_count))
@@ -144,12 +160,21 @@ if (stats.hour_day_heatmap?.length > 0) {
           label: "Sessions",
           data: stats.hour_day_heatmap
             .filter((h) => h.session_count > 0)
-            .map((h) => ({
-              x: h.hour,
-              y: h.day_of_week,
-              r: Math.sqrt(h.session_count) * scaleFactor,
-              count: h.session_count,
-            })),
+            .map((h) => {
+              const localHour = (h.hour + utcOffsetHours + 24) % 24;
+              const localDay =
+                h.hour + utcOffsetHours < 0
+                  ? (h.day_of_week + 6) % 7
+                  : h.hour + utcOffsetHours >= 24
+                    ? (h.day_of_week + 1) % 7
+                    : h.day_of_week;
+              return {
+                x: localHour,
+                y: localDay,
+                r: Math.sqrt(h.session_count) * scaleFactor,
+                count: h.session_count,
+              };
+            }),
           backgroundColor: (ctx) => {
             const count =
               ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
@@ -343,7 +368,7 @@ if (stats.usage_by_day?.length > 0) {
   const fragment = document.createDocumentFragment();
   stats.usage_by_day.slice(0, 30).forEach((d) => {
     const row = document.createElement("tr");
-    row.innerHTML = `<td>${d.day}</td><td>${d.session_count}</td><td>${formatNumber(
+    row.innerHTML = `<td>${formatDate(d.day)}</td><td>${d.session_count}</td><td>${formatNumber(
       d.prompt_tokens,
     )}</td><td>${formatNumber(
       d.completion_tokens,
@@ -353,4 +378,60 @@ if (stats.usage_by_day?.length > 0) {
     fragment.appendChild(row);
   });
   tableBody.appendChild(fragment);
+}
+
+// Per-Project Breakdown (only shown when aggregating multiple projects)
+if (projectStats && projectStats.length > 1) {
+  const projectSection = document.createElement("div");
+  projectSection.className = "chart-card full-width";
+  projectSection.innerHTML = `
+    <h2>Per-Project Breakdown</h2>
+    <div style="overflow-x: auto">
+      <table id="project-table">
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Sessions</th>
+            <th>Messages</th>
+            <th>Tokens</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  `;
+
+  const container = document.querySelector(".charts-grid");
+  if (container) {
+    container.appendChild(projectSection);
+
+    const projectTableBody = document.querySelector("#project-table tbody");
+    const fragment = document.createDocumentFragment();
+
+    // Sort by total cost descending
+    const sortedProjects = [...projectStats].sort(
+      (a, b) => b.stats.total.total_cost - a.stats.total.total_cost,
+    );
+
+    sortedProjects.forEach((p) => {
+      const row = document.createElement("tr");
+      const displayPath = p.project_path || "unknown";
+      const projectName = displayPath.split("/").pop() || displayPath;
+      const dirPath = displayPath.substring(0, displayPath.length - projectName.length) || "/";
+      row.innerHTML = `
+        <td>
+          <div class="project-name">${projectName}</div>
+          <div class="project-path" title="${displayPath}">${dirPath}</div>
+        </td>
+        <td>${formatNumber(p.stats.total.total_sessions)}</td>
+        <td>${formatNumber(p.stats.total.total_messages)}</td>
+        <td>${formatNumber(p.stats.total.total_tokens)}</td>
+        <td>${formatCost(p.stats.total.total_cost)}</td>
+      `;
+      fragment.appendChild(row);
+    });
+
+    projectTableBody.appendChild(fragment);
+  }
 }

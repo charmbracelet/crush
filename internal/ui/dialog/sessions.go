@@ -232,13 +232,11 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-	s.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
-	s.list.SetSize(innerWidth, height-heightOffset)
-	s.help.SetWidth(innerWidth)
+	s.input.SetWidth(dialogInputTextWidth(t, s.input, innerWidth))
+	listHeight, listTotalHeight, listWidth := sizeDialogList(t, s.list, innerWidth, height)
+
+	// Hide the timestamps uniformly when the widest would crowd the title.
+	applyInfoColumnVisibility(s.list.FilteredItems(), listWidth, sessionInfoMaxPercent)
 
 	// This makes it so we do not scroll the list if we don't have to
 	start, end := s.list.VisibleItemIndices()
@@ -309,8 +307,9 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.AddPart(inputView)
 	}
 	listView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
+	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, s.list.Offset())
 	rc.AddPart(listView)
-	rc.Help = s.help.View(s)
+	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
 
 	view := rc.Render()
 

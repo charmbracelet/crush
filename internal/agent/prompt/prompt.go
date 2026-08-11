@@ -30,17 +30,18 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider      string
-	Model         string
-	SystemPrompt  string
-	Config        config.Config
-	WorkingDir    string
-	IsGitRepo     bool
-	Platform      string
-	Date          string
-	GitStatus     string
-	ContextFiles  []ContextFile
-	AvailSkillXML string
+	Provider           string
+	Model              string
+	SystemPrompt       string
+	Config             config.Config
+	WorkingDir         string
+	IsGitRepo          bool
+	Platform           string
+	Date               string
+	GitStatus          string
+	ContextFiles       []ContextFile
+	GlobalContextFiles []ContextFile
+	AvailSkillXML      string
 }
 
 type ContextFile struct {
@@ -178,22 +179,27 @@ func (p *Prompt) systemPromptForConfig(store *config.ConfigStore) (string, error
 	return string(content), nil
 }
 
-func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
-	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
-	platform := cmp.Or(p.platform, runtime.GOOS)
-
+// loadContextFiles loads and deduplicates context files from a list of paths.
+func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
 	files := map[string][]ContextFile{}
-
-	cfg := store.Config()
-	for _, pth := range cfg.Options.ContextPaths {
+	for _, pth := range paths {
 		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
 		if _, ok := files[pathKey]; ok {
 			continue
 		}
-		content := processContextPath(expanded, store)
-		files[pathKey] = content
+		files[pathKey] = processContextPath(expanded, store)
 	}
+	return files
+}
+
+func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
+	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
+	platform := cmp.Or(p.platform, runtime.GOOS)
+
+	cfg := store.Config()
+	contextFiles := loadContextFiles(cfg.Options.ContextPaths, store)
+	globalContextFiles := loadContextFiles(cfg.Options.GlobalContextPaths, store)
 
 	// Discover and load skills metadata.
 	var availSkillXML string
@@ -254,8 +260,11 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
-	for _, contextFiles := range files {
-		data.ContextFiles = append(data.ContextFiles, contextFiles...)
+	for _, files := range contextFiles {
+		data.ContextFiles = append(data.ContextFiles, files...)
+	}
+	for _, files := range globalContextFiles {
+		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
 	}
 	return data, nil
 }

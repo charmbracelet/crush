@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -237,6 +238,117 @@ func TestRun_RequiresCwd(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Cwd is required") {
 		t.Fatalf("error should mention Cwd requirement: %v", err)
+	}
+}
+
+func TestWithNonInteractiveEnv_Empty(t *testing.T) {
+	t.Parallel()
+	result := withNonInteractiveEnv(nil)
+	// All defaults must be present.
+	for _, want := range nonInteractiveEnvVars {
+		if !slices.Contains(result, want) {
+			t.Errorf("missing default %q in result", want)
+		}
+	}
+}
+
+func TestWithNonInteractiveEnv_OverridesExisting(t *testing.T) {
+	t.Parallel()
+	env := []string{"EDITOR=nvim", "PAGER=less", "FOO=bar"}
+	result := withNonInteractiveEnv(env)
+
+	// EDITOR and PAGER must be overridden, not preserved.
+	for _, e := range result {
+		if e == "EDITOR=nvim" {
+			t.Error("EDITOR=nvim should have been overridden")
+		}
+		if e == "PAGER=less" {
+			t.Error("PAGER=less should have been overridden")
+		}
+	}
+	// FOO must survive.
+	if !slices.Contains(result, "FOO=bar") {
+		t.Error("FOO=bar should be preserved")
+	}
+}
+
+func TestWithNonInteractiveEnv_NoPrefixCollision(t *testing.T) {
+	t.Parallel()
+	// EDITORIAL should NOT match EDITOR.
+	env := []string{"EDITORIAL=yes", "GITHUB_TOKEN=secret"}
+	result := withNonInteractiveEnv(env)
+
+	foundEditorial := false
+	foundGithub := false
+	for _, e := range result {
+		if e == "EDITORIAL=yes" {
+			foundEditorial = true
+		}
+		if e == "GITHUB_TOKEN=secret" {
+			foundGithub = true
+		}
+	}
+	if !foundEditorial {
+		t.Error("EDITORIAL=yes should not be removed by EDITOR override")
+	}
+	if !foundGithub {
+		t.Error("GITHUB_TOKEN=secret should not be removed")
+	}
+}
+
+func TestWithNonInteractiveEnv_SliceIndependence(t *testing.T) {
+	t.Parallel()
+	env := []string{"FOO=bar"}
+	result := withNonInteractiveEnv(env)
+	// Mutating the input must not affect the result.
+	env[0] = "FOO=baz"
+	for _, e := range result {
+		if e == "FOO=baz" {
+			t.Error("result shares backing array with input")
+		}
+	}
+}
+
+func TestWithoutHerdrEnv_StripsAllVars(t *testing.T) {
+	t.Parallel()
+	env := []string{
+		"HERDR_ENV=1",
+		"HERDR_SOCKET_PATH=/tmp/herdr.sock",
+		"HERDR_PANE_ID=wA:p1",
+		"PATH=/usr/bin",
+		"HOME=/home/user",
+	}
+	result := withoutHerdrEnv(env)
+	for _, e := range result {
+		if strings.HasPrefix(e, "HERDR_") {
+			t.Errorf("herdr var not stripped: %s", e)
+		}
+	}
+	if !slices.Contains(result, "PATH=/usr/bin") {
+		t.Error("non-herdr var PATH was incorrectly removed")
+	}
+	if !slices.Contains(result, "HOME=/home/user") {
+		t.Error("non-herdr var HOME was incorrectly removed")
+	}
+}
+
+func TestWithoutHerdrEnv_EmptyInput(t *testing.T) {
+	t.Parallel()
+	result := withoutHerdrEnv(nil)
+	if len(result) != 0 {
+		t.Errorf("expected empty result for nil input, got %v", result)
+	}
+}
+
+func TestWithoutHerdrEnv_SliceIndependence(t *testing.T) {
+	t.Parallel()
+	env := []string{"HERDR_ENV=1", "FOO=bar"}
+	result := withoutHerdrEnv(env)
+	env[1] = "FOO=baz"
+	for _, e := range result {
+		if e == "FOO=baz" {
+			t.Error("result shares backing array with input")
+		}
 	}
 }
 

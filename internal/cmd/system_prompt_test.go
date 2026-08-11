@@ -43,7 +43,7 @@ func TestApplyWorkspaceOverrides_SystemPromptOverride(t *testing.T) {
 		Options: &config.Options{},
 	})
 
-	applyWorkspaceOverrides(store, false, systemPromptPath)
+	applyWorkspaceOverrides(store, false, systemPromptPath, nil)
 
 	require.Equal(t, systemPromptPath, store.Overrides().SystemPromptPath)
 	require.Empty(t, store.Config().Options.SystemPromptPath)

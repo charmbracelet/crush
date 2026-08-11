@@ -3,6 +3,7 @@ package dialog
 import (
 	"cmp"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"charm.land/bubbles/v2/help"
@@ -142,10 +143,15 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
+	// A stale catalog must not keep this dialog from opening: it is the
+	// only way for the user to choose a model.
 	var err error
 	m.providers, err = config.Providers(m.com.Config())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get providers: %w", err)
+		if len(m.providers) == 0 {
+			return nil, fmt.Errorf("failed to get providers: %w", err)
+		}
+		slog.Warn("Listing the previously known providers", "error", err)
 	}
 
 	if err := m.setProviderItems(); err != nil {
@@ -259,14 +265,9 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
-	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
-	m.list.SetSize(innerWidth, height-heightOffset)
-	m.help.SetWidth(innerWidth)
+	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
@@ -281,9 +282,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(inputView)
 
 	listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
+	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, m.list.Offset())
 	rc.AddPart(listView)
 
-	rc.Help = m.help.View(m)
+	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	cur := m.Cursor()
 
@@ -355,7 +357,7 @@ func (m *Models) setProviderItems() error {
 
 	// Get a list of known providers to compare against
 	knownProviders, err := config.Providers(cfg)
-	if err != nil {
+	if err != nil && len(knownProviders) == 0 {
 		return fmt.Errorf("failed to get providers: %w", err)
 	}
 
@@ -398,20 +400,8 @@ func (m *Models) setProviderItems() error {
 		}
 	}
 
-	// Move "Charm Hyper" to first position.
-	// (But still after recent models and custom providers).
-	slices.SortStableFunc(m.providers, func(a, b catwalk.Provider) int {
-		switch {
-		case a.ID == "hyper":
-			return -1
-		case b.ID == "hyper":
-			return 1
-		default:
-			return 0
-		}
-	})
-
-	// Now add known providers from the predefined list
+	// Now add known providers from the predefined list.
+	// Providers already has Hyper at the front of the list.
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
 		if addedProviders[providerID] {
@@ -498,7 +488,11 @@ func (m *Models) setProviderItems() error {
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
 	m.list.SetSelectedItem(selectedItemID)
-	m.list.ScrollToTop()
+	if selectedItemID != "" {
+		m.list.ScrollToSelected()
+	} else {
+		m.list.ScrollToTop()
+	}
 
 	// Update placeholder based on model type
 	if !m.isOnboarding {

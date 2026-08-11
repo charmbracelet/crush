@@ -801,10 +801,13 @@ func (dv *DiffView) getChromaLexer() chroma.Lexer {
 		return dv.cachedLexer
 	}
 
-	l := lexers.Match(dv.before.path)
-	if l == nil {
-		l = lexers.Analyse(dv.before.content)
+	// MatchLexer is memoized and already coalesced; the per-DiffView cache
+	// still avoids repeat lookups within a single render.
+	if l := xchroma.MatchLexer(dv.before.path); l != nil {
+		dv.cachedLexer = l
+		return dv.cachedLexer
 	}
+	l := lexers.Analyse(dv.before.content)
 	if l == nil {
 		l = lexers.Fallback
 	}

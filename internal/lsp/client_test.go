@@ -14,8 +14,6 @@ import (
 )
 
 func TestClient(t *testing.T) {
-	ctx := context.Background()
-
 	// Create a simple config for testing
 	cfg := config.LSPConfig{
 		Command:   "$THE_CMD", // Use echo as a dummy command that won't fail
@@ -26,7 +24,7 @@ func TestClient(t *testing.T) {
 
 	// Test creating a powernap client - this will likely fail with echo
 	// but we can still test the basic structure
-	client, err := New(ctx, "test", cfg, config.NewShellVariableResolver(env.NewFromMap(map[string]string{
+	client, err := New("test", cfg, config.NewShellVariableResolver(env.NewFromMap(map[string]string{
 		"THE_CMD": "echo",
 	})), ".", false)
 	if err != nil {
@@ -75,7 +73,7 @@ func TestNew_ExpansionFailure_Args(t *testing.T) {
 	}
 	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{}))
 
-	client, err := New(t.Context(), "test-args-fail", cfg, resolver, ".", false)
+	client, err := New("test-args-fail", cfg, resolver, ".", false)
 	require.Error(t, err)
 	require.Nil(t, client, "client must not start when args expansion fails")
 	require.Contains(t, err.Error(), "invalid lsp args")
@@ -91,7 +89,7 @@ func TestNew_ExpansionFailure_Env(t *testing.T) {
 	}
 	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{}))
 
-	client, err := New(t.Context(), "test-env-fail", cfg, resolver, ".", false)
+	client, err := New("test-env-fail", cfg, resolver, ".", false)
 	require.Error(t, err)
 	require.Nil(t, client, "client must not start when env expansion fails")
 	require.Contains(t, err.Error(), "invalid lsp env")

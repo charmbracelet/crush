@@ -128,16 +128,8 @@ func TestBackgroundShell_IsDone(t *testing.T) {
 		t.Fatalf("failed to start background shell: %v", err)
 	}
 
-	waitCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	t.Cleanup(cancel)
-
-	if !bgShell.WaitContext(waitCtx) {
-		t.Fatal("expected shell to be done")
-	}
-
-	if !bgShell.IsDone() {
-		t.Error("expected IsDone to report completed shell")
-	}
+	// Wait for the command to complete (Windows is slower to spin up).
+	require.Eventually(t, bgShell.IsDone, 5*time.Second, 50*time.Millisecond, "expected shell to be done")
 
 	// Clean up
 	manager.Kill(bgShell.ID)

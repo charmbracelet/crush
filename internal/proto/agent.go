@@ -31,11 +31,27 @@ type AgentEvent struct {
 	Message Message        `json:"message"`
 	Error   error          `json:"error,omitempty"`
 
+	// RunID echoes the caller-supplied AgentMessage.RunID for the run
+	// that produced this event. It lets observers (notably
+	// `crush run`) attribute an error event to a specific request
+	// instead of to any in-flight run on the session. Empty when no
+	// caller set one.
+	RunID string `json:"run_id,omitempty"`
+
 	// When summarizing.
 	SessionID    string `json:"session_id,omitempty"`
 	SessionTitle string `json:"session_title,omitempty"`
 	Progress     string `json:"progress,omitempty"`
 	Done         bool   `json:"done,omitempty"`
+
+	// AWS SSO progress fields, carried for TypeAWSSSOAuth and
+	// TypeAWSSSOAuthResult so the refresh dialog works in client/server
+	// mode. The command runs on the server; these ferry its progress to
+	// the client. AWSSOCommand is the refresh command being run; AWSSOURL
+	// is the verification URL once it appears in the command output. The
+	// result's failure text travels through Error, like TypeAgentError.
+	AWSSOCommand string `json:"aws_sso_command,omitempty"`
+	AWSSOURL     string `json:"aws_sso_url,omitempty"`
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

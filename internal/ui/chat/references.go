@@ -44,7 +44,7 @@ func (r *ReferencesToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		toolParams = append(toolParams, "path", fsext.PrettyPath(params.Path))
 	}
 
-	header := toolHeader(sty, opts.Status, "Find References", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Find References", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

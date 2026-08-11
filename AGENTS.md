@@ -20,8 +20,9 @@ internal/
   cmd/                             CLI commands (root, run, login, models, stats, sessions)
   config/
     config.go                      Config struct, context file paths, agent definitions
-    load.go                        crush.json loading and validation
+    load.go                        crushrc and crush.json loading and validation
     provider.go                    Provider configuration and model resolution
+  shellconfig/                      Bash-powered config format (crushrc builtins)
   agent/
     agent.go                       SessionAgent: runs LLM conversations per session
     coordinator.go                 Coordinator: manages named agents ("coder", "task")
@@ -71,16 +72,26 @@ internal/
 - **Context files**: Crush reads AGENTS.md, CRUSH.md, CLAUDE.md, GEMINI.md
   (and `.local` variants) from the working directory for project-specific
   instructions.
+- **Bash config format**: Crush's primary config format is `crushrc` — a
+  Bash script using builtins (`provider`, `model`, `mcp`, `lsp`,
+  `permissions`, `hook`, `options`) to define config. `crush.json` is still
+  supported but is deprecated in favor of `crushrc` and may be removed in a
+  future release. Shell config files are discovered alongside JSON configs
+  and deep-merged through the same pipeline. Builtins are registered via
+  `shell.RegisterBuiltin` and gated by a `ConfigBuilder` on the context —
+  they are no-ops during normal bash tool execution. See
+  `internal/shellconfig/`.
 - **Persistence**: SQLite + sqlc. All queries live in `internal/db/sql/`,
   generated code in `internal/db/`. Migrations in `internal/db/migrations/`.
 - **Pub/sub**: `internal/pubsub` for decoupled communication between agent,
   UI, and services.
-- **Hooks**: User-defined shell commands in `crush.json` that fire before
-  tool execution. The engine (`internal/hooks/`) is independent of fantasy
-  and agent — it takes inputs, runs commands, returns decisions. The
-  `hookedTool` decorator in `internal/agent/hooked_tool.go` wraps tools at
-  the coordinator level. Hooks run before permission checks. See
-  `HOOKS.md` for the user-facing protocol.
+- **Hooks**: User-defined shell commands in `crushrc` (or `crush.json`)
+  that fire before tool execution. The engine (`internal/hooks/`) is
+  independent of fantasy and agent — it takes inputs, runs commands,
+  returns decisions. The `hookedTool` decorator in
+  `internal/agent/hooked_tool.go` wraps tools at the coordinator level.
+  Hooks run before permission checks. See `HOOKS.md` for the user-facing
+  protocol.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
 
@@ -181,3 +192,43 @@ func TestYourFunction(t *testing.T) {
 
 Anytime you need to work on the TUI, read `internal/ui/AGENTS.md` before
 starting work.
+
+## Styling System
+
+The styling system lives in `internal/ui/styles/` and is organized into
+three layers:
+
+- **`quickstyle.go`**: The stable base theme builder. `quickStyle(opts)`
+  constructs a `Styles` struct from `quickStyleOpts` — a palette of
+  design tokens (primary, secondary, fgBase, bgBase, success, error, etc.).
+  `quickStyle` must be fully token-driven: never hardcode specific
+  `charmtone.*` colors here (except Chroma syntax highlighting, which is
+  pending tokenization). This lets any theme reuse the base without
+  inheriting Charmtone-specific colors.
+- **`themes.go`**: Defines concrete themes. Each theme function (e.g.
+  `CharmtonePantera`) calls `quickStyle` with its palette, then applies
+  theme-specific overrides as needed.
+- **`styles.go`**: Defines the `Styles` struct and its documentation —
+  the shape of what `quickStyle` produces.
+
+**Adding theme-specific overrides**: When a style genuinely needs a
+color that doesn't fit the token model (e.g. the bang prompt uses
+Salt/Hazy/Larple), keep `quickStyle` on the closest semantic token and
+override only the differing colors in the theme function:
+
+```go
+func CharmtonePantera() Styles {
+	s := quickStyle(quickStyleOpts{ /* palette */ })
+
+	// Override only the colors that differ from the token defaults.
+	s.Editor.PromptBangIconFocused = s.Editor.PromptBangIconFocused.
+		Foreground(charmtone.Salt).
+		Background(charmtone.Hazy)
+
+	return s
+}
+```
+
+**Adding a new theme**: Add a function in `themes.go` that returns the
+result of `quickStyle` with a `quickStyleOpts` palette (plus any needed
+overrides), then wire it into `ThemeForProvider`.

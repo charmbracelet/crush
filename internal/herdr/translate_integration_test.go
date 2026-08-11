@@ -242,11 +242,12 @@ func TestPermissionRequestPublishOrderIntegration(t *testing.T) {
 	granted := make(chan bool, 1)
 	go func() {
 		ok, err := svc.Request(ctx, permission.CreatePermissionRequest{
-			SessionID:  "s1",
-			ToolCallID: "tc-1",
-			ToolName:   "bash",
-			Action:     "execute",
-			Path:       dir,
+			SessionID:   "s1",
+			ToolCallID:  "tc-1",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "Execute command: ls",
+			Path:        dir,
 		})
 		assert.NoError(t, err)
 		granted <- ok
@@ -272,6 +273,12 @@ func TestPermissionRequestPublishOrderIntegration(t *testing.T) {
 	deliver(req)
 	deliver(announce)
 	require.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
+	// The real service's payload reaches herdr as the blocked
+	// reason, so the pane shows what crush is waiting on.
+	require.Equal(t,
+		"Permission: bash - Execute command: ls",
+		lastRequest(c).Params.(reportParams).Message,
+	)
 
 	require.True(t, svc.Grant(req.Payload))
 	deliver(<-notifications)

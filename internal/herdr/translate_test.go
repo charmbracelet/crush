@@ -139,9 +139,17 @@ func TestTranslateDomainRunComplete(t *testing.T) {
 func TestTranslateDomainPermissionRequest(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[permission.PermissionRequest]{
-		Payload: permission.PermissionRequest{ToolName: "bash", ToolCallID: "tc-1"},
+		Payload: permission.PermissionRequest{
+			ToolName:    "bash",
+			ToolCallID:  "tc-1",
+			Description: "Execute command: ls",
+		},
 	}
-	assert.Equal(t, PermissionRequested{ToolCallID: "tc-1"}, Translate(ev))
+	assert.Equal(t, PermissionRequested{
+		ToolCallID:  "tc-1",
+		ToolName:    "bash",
+		Description: "Execute command: ls",
+	}, Translate(ev))
 }
 
 func TestTranslateDomainPermissionNotification(t *testing.T) {
@@ -313,9 +321,17 @@ func TestTranslateProtoRunComplete(t *testing.T) {
 func TestTranslateProtoPermissionRequest(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[proto.PermissionRequest]{
-		Payload: proto.PermissionRequest{ToolName: "bash", ToolCallID: "tc-1"},
+		Payload: proto.PermissionRequest{
+			ToolName:    "bash",
+			ToolCallID:  "tc-1",
+			Description: "Execute command: ls",
+		},
 	}
-	assert.Equal(t, PermissionRequested{ToolCallID: "tc-1"}, Translate(ev))
+	assert.Equal(t, PermissionRequested{
+		ToolCallID:  "tc-1",
+		ToolName:    "bash",
+		Description: "Execute command: ls",
+	}, Translate(ev))
 }
 
 func TestTranslateProtoPermissionNotification(t *testing.T) {

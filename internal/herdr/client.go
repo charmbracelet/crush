@@ -101,6 +101,12 @@ type PermissionRequested struct {
 	// ToolCallID identifies the tool call awaiting approval. It
 	// pairs the block with the PermissionResolved that ends it.
 	ToolCallID string
+	// ToolName is the tool asking for approval ("bash", "edit").
+	ToolName string
+	// Description is the request's human-readable detail (the
+	// command, the file). Free-form and possibly multi-line; the
+	// client reduces it to a single capped line.
+	Description string
 }
 
 func (PermissionRequested) herdrEvent() {}
@@ -361,7 +367,7 @@ func (c *Client) HandleEvent(ev Event) {
 	case RunComplete:
 		c.onRunComplete(e.SessionID)
 	case PermissionRequested:
-		c.onPermissionRequest(e.ToolCallID)
+		c.onPermissionRequest(e.ToolCallID, e.ToolName, e.Description)
 	case PermissionResolved:
 		c.onPermissionResolved(e.ToolCallID)
 	case QuestionAsked:
@@ -518,15 +524,35 @@ func (c *Client) onRunComplete(sessionID string) {
 	c.recomputeLocked()
 }
 
-func (c *Client) onPermissionRequest(toolCallID string) {
+func (c *Client) onPermissionRequest(toolCallID, toolName, description string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// A permission request implies a run is active, even if no
 	// assistant message has arrived yet (e.g. tool calls that fire
 	// before any text output).
 	c.runActive = true
-	c.setExclusiveBlockLocked(blockKey{reason: blockPermission, id: toolCallID}, "")
+	c.setExclusiveBlockLocked(
+		blockKey{reason: blockPermission, id: toolCallID},
+		permissionBlockMessage(toolName, description),
+	)
 	c.recomputeLocked()
+}
+
+// permissionBlockMessage renders the reason a permission prompt is
+// waiting. The tool name leads because it is always short and always
+// present; the description carries the specifics (the command, the
+// path) and only its first line is usable, since herdr's text fields
+// are single-line and capped. Truncation cuts the tail, so the tool
+// name survives even for a long description.
+func permissionBlockMessage(toolName, description string) string {
+	msg := "Permission required"
+	if toolName = strings.TrimSpace(toolName); toolName != "" {
+		msg = "Permission: " + toolName
+	}
+	if detail := firstLine(description); detail != "" {
+		msg += " - " + detail
+	}
+	return truncateBlockMessage(msg)
 }
 
 func (c *Client) onPermissionResolved(toolCallID string) {

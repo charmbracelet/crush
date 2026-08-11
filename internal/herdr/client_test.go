@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -331,12 +332,11 @@ func TestOverlappingPermissionAndQuestionBlocks(t *testing.T) {
 	// A permission prompt opens, then a question arrives while the
 	// permission is still pending.
 	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
-	c.HandleEvent(PermissionRequested{})
+	c.HandleEvent(PermissionRequested{ToolName: "bash"})
 	c.HandleEvent(QuestionAsked{Text: "Pick an option"})
 	// The state stays blocked but the message changed from the
-	// permission's empty one to the question's text, and dedup is
-	// on the (state, message) pair: a second blocked report goes
-	// out.
+	// permission's text to the question's, and dedup is on the
+	// (state, message) pair: a second blocked report goes out.
 	assert.Equal(t, []string{stateWorking, stateBlocked, stateBlocked}, reportedStates(c))
 	// The newest block's message wins.
 	assert.Equal(t, "Pick an option", c.message)
@@ -581,22 +581,78 @@ func TestReportCarriesBlockMessage(t *testing.T) {
 	assert.Empty(t, req.Params.(reportParams).Message)
 }
 
-func TestPermissionBlockSendsEmptyMessage(t *testing.T) {
+func TestPermissionBlockSendsToolMessage(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
 
 	// A question leaves its text as the block message; a permission
-	// prompt then takes over with an empty one. The empty message
-	// must go out on the wire, not be dropped, so herdr clears the
-	// stale question text while the state stays blocked.
+	// prompt then takes over with its own. The replacement must go
+	// out on the wire, not be dropped by dedup, so herdr never shows
+	// the stale question text while the state stays blocked.
 	c.HandleEvent(QuestionAsked{Text: "Pick an option"})
-	c.HandleEvent(PermissionRequested{})
+	c.HandleEvent(PermissionRequested{
+		ToolName:    "bash",
+		Description: "Execute command: git push",
+	})
 	assert.Equal(t,
-		[]string{"Pick an option", ""},
+		[]string{"Pick an option", "Permission: bash - Execute command: git push"},
 		reportedMessages(c))
 	req := lastRequest(c)
 	assert.Equal(t, stateBlocked, req.Params.(reportParams).State)
-	assert.Empty(t, req.Params.(reportParams).Message)
+}
+
+func TestPermissionBlockMessage(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 200)
+	tests := []struct {
+		name        string
+		toolName    string
+		description string
+		want        string
+	}{
+		{
+			name:        "tool and description",
+			toolName:    "edit",
+			description: "Create file /tmp/a.go",
+			want:        "Permission: edit - Create file /tmp/a.go",
+		},
+		{
+			name:     "tool only",
+			toolName: "bash",
+			want:     "Permission: bash",
+		},
+		{
+			name:        "description only",
+			description: "Fetch content from URL: https://example.com",
+			want:        "Permission required - Fetch content from URL: https://example.com",
+		},
+		{
+			name: "neither",
+			want: "Permission required",
+		},
+		{
+			// Descriptions embed commands, which can span lines.
+			// herdr's text fields are single-line.
+			name:        "multi-line description keeps the first line",
+			toolName:    "bash",
+			description: "Execute command: cat <<EOF\nhello\nEOF",
+			want:        "Permission: bash - Execute command: cat <<EOF",
+		},
+		{
+			name:        "long description is truncated to herdr's cap",
+			toolName:    "bash",
+			description: long,
+			want:        "Permission: bash - " + strings.Repeat("x", 80-len("Permission: bash - ")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := permissionBlockMessage(tt.toolName, tt.description)
+			assert.Equal(t, tt.want, got)
+			assert.LessOrEqual(t, utf8.RuneCountInString(got), maxBlockMessageLength)
+		})
+	}
 }
 
 func TestReportRequestAlwaysIncludesMessageKey(t *testing.T) {

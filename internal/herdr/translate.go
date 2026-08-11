@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
@@ -24,7 +25,11 @@ func Translate(ev any) Event {
 	case pubsub.Event[notify.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}
 	case pubsub.Event[permission.PermissionRequest]:
-		return PermissionRequested{ToolCallID: e.Payload.ToolCallID}
+		return PermissionRequested{
+			ToolCallID:  e.Payload.ToolCallID,
+			ToolName:    e.Payload.ToolName,
+			Description: e.Payload.Description,
+		}
 	case pubsub.Event[permission.PermissionNotification]:
 		return permissionNotification(e.Payload.ToolCallID, e.Payload.Granted, e.Payload.Denied)
 	case pubsub.Event[question.Request]:
@@ -67,7 +72,11 @@ func Translate(ev any) Event {
 	case pubsub.Event[proto.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}
 	case pubsub.Event[proto.PermissionRequest]:
-		return PermissionRequested{ToolCallID: e.Payload.ToolCallID}
+		return PermissionRequested{
+			ToolCallID:  e.Payload.ToolCallID,
+			ToolName:    e.Payload.ToolName,
+			Description: e.Payload.Description,
+		}
 	case pubsub.Event[proto.PermissionNotification]:
 		return permissionNotification(e.Payload.ToolCallID, e.Payload.Granted, e.Payload.Denied)
 	case pubsub.Event[proto.QuestionRequest]:
@@ -128,6 +137,16 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string(r[:max])
+}
+
+// firstLine reduces free-form text to a single trimmed line. herdr's
+// text fields are single-line, so anything past the first newline is
+// dropped rather than sent as an embedded break.
+func firstLine(s string) string {
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 // translateMessage maps a domain message event to a herdr event.

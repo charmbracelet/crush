@@ -128,6 +128,23 @@ func TestTranslateDomainUserMessageDeletedIgnored(t *testing.T) {
 	assert.Nil(t, Translate(ev))
 }
 
+func TestTranslateDomainUserMessageUpdatedIgnored(t *testing.T) {
+	t.Parallel()
+	// Only a creation is a prompt submission. message.Service.Update
+	// publishes an UpdatedEvent for whatever message it is handed, so
+	// mapping updates would let a future edit-the-prompt feature
+	// re-arm runActive with no matching RunComplete.
+	ev := pubsub.Event[message.Message]{
+		Type: pubsub.UpdatedEvent,
+		Payload: message.Message{
+			Role:      message.User,
+			SessionID: "s1",
+			Parts:     []message.ContentPart{message.TextContent{Text: "hi"}},
+		},
+	}
+	assert.Nil(t, Translate(ev))
+}
+
 func TestTranslateDomainRunComplete(t *testing.T) {
 	t.Parallel()
 	ev := pubsub.Event[notify.RunComplete]{
@@ -306,6 +323,22 @@ func TestTranslateProtoUserMessageDeletedIgnored(t *testing.T) {
 	ev := pubsub.Event[proto.Message]{
 		Type:    pubsub.DeletedEvent,
 		Payload: proto.Message{Role: proto.User, SessionID: "s1"},
+	}
+	assert.Nil(t, Translate(ev))
+}
+
+func TestTranslateProtoUserMessageUpdatedIgnored(t *testing.T) {
+	t.Parallel()
+	// The server preserves the domain event type on the wire
+	// (messageToProto), so the creation-only rule has to hold here
+	// too.
+	ev := pubsub.Event[proto.Message]{
+		Type: pubsub.UpdatedEvent,
+		Payload: proto.Message{
+			Role:      proto.User,
+			SessionID: "s1",
+			Parts:     []proto.ContentPart{proto.TextContent{Text: "hi"}},
+		},
 	}
 	assert.Nil(t, Translate(ev))
 }

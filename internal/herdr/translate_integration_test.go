@@ -88,9 +88,10 @@ func TestSummaryMessageLifecycleIntegration(t *testing.T) {
 // TestUserMessageRunStartedIntegration pins the prompt-submission
 // contract between message.Service and Translate that the early
 // working report relies on: creating a user message means a turn
-// started, while a bang-mode shell record (also a user message)
-// means no run. Drives a real SQLite-backed message service and
-// asserts the resulting client state sequence.
+// started, while a bang-mode shell record (also a user message) and
+// an update to an existing prompt mean no run. Drives a real
+// SQLite-backed message service and asserts the resulting client
+// state sequence.
 func TestUserMessageRunStartedIntegration(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -123,7 +124,7 @@ func TestUserMessageRunStartedIntegration(t *testing.T) {
 
 	// Prompt submission flips the pane to working before any
 	// assistant output exists (agent.go:713).
-	_, err = svc.Create(ctx, sess.ID, message.CreateMessageParams{
+	prompt, err := svc.Create(ctx, sess.ID, message.CreateMessageParams{
 		Role:  message.User,
 		Parts: []message.ContentPart{message.TextContent{Text: "hi"}},
 	})
@@ -141,7 +142,14 @@ func TestUserMessageRunStartedIntegration(t *testing.T) {
 	require.NoError(t, err)
 	drain() // CreatedEvent -> nil.
 
-	require.Equal(t, []string{stateWorking}, reportedStates(c))
+	// Update publishes an UpdatedEvent for whatever message it is
+	// handed. Revising an existing prompt is not a submission, so it
+	// must not re-arm working once the turn has ended.
+	c.HandleEvent(RunComplete{SessionID: sess.ID})
+	require.NoError(t, svc.Update(ctx, prompt))
+	drain() // UpdatedEvent -> nil.
+
+	require.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
 }
 
 // TestTranslateDomainDeletedNonSummary guards the boundary of the

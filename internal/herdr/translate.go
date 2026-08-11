@@ -60,10 +60,10 @@ func Translate(ev any) Event {
 		case proto.Assistant:
 			return AssistantMessage{SessionID: e.Payload.SessionID, Model: e.Payload.Model}
 		case proto.User:
-			// Same exclusions as the domain mapping: bang-mode
-			// shell records and session-cleanup deletions start
-			// no run.
-			if e.Type == pubsub.DeletedEvent || hasShellCommandPart(e.Payload.Parts) {
+			// Same exclusions as the domain mapping: only a
+			// creation starts a run. Bang-mode shell records,
+			// session-cleanup deletions and updates do not.
+			if e.Type != pubsub.CreatedEvent || hasShellCommandPart(e.Payload.Parts) {
 				return nil
 			}
 			return RunStarted{SessionID: e.Payload.SessionID}
@@ -150,7 +150,8 @@ func firstLine(s string) string {
 }
 
 // translateMessage maps a domain message event to a herdr event.
-// A user message marks prompt submission, the real start of a turn.
+// Creating a user message marks prompt submission, the real start of
+// a turn.
 // Compaction never publishes a RunComplete, so the summary message's
 // lifecycle doubles as the compaction signal: an unfinished summary
 // message means compaction is running, a finished one means it
@@ -172,11 +173,14 @@ func translateMessage(eventType pubsub.EventType, msg message.Message) Event {
 		return AssistantMessage{SessionID: msg.SessionID, Model: msg.Model}
 	}
 	if msg.Role == message.User {
+		// Only the creation of a user message starts a turn.
 		// Bang-mode shell commands are persisted as user messages
 		// (shell.PersistOutput) but start no agent run, and session
-		// cleanup deletes user messages; neither may report
-		// working. Only a real prompt submission does.
-		if eventType == pubsub.DeletedEvent || len(msg.ShellCommands()) > 0 {
+		// cleanup deletes user messages. Updates are excluded for
+		// the same reason: re-arming runActive outside a real
+		// submission produces no matching RunComplete and strands
+		// the pane in working.
+		if eventType != pubsub.CreatedEvent || len(msg.ShellCommands()) > 0 {
 			return nil
 		}
 		return RunStarted{SessionID: msg.SessionID}

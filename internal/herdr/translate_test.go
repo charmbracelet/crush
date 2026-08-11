@@ -229,7 +229,7 @@ func TestTranslateDomainQuestionRequestTruncatesMessage(t *testing.T) {
 		},
 	}
 	got := Translate(ev)
-	want := QuestionAsked{Text: strings.Repeat("界", maxBlockMessageLength)}
+	want := QuestionAsked{Text: strings.Repeat("界", maxTextFieldLength)}
 	assert.Equal(t, want, got)
 }
 

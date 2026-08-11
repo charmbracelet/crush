@@ -191,7 +191,9 @@ type SessionUpdated struct {
 func (SessionUpdated) herdrEvent() {}
 
 // sender abstracts the transport layer for reporting state to herdr.
-// Production uses a Unix socket; tests use a recorder.
+// Production uses a Unix socket; tests use a recorder. Every call is
+// made with Client.mu held, so implementations never see concurrent
+// use and need not be thread-safe themselves.
 type sender interface {
 	send(req reportRequest) error
 	close()
@@ -337,6 +339,8 @@ func (c *Client) Close() {
 		return
 	}
 	c.releaseAgent()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.snd.close()
 }
 
@@ -436,25 +440,28 @@ func (c *Client) ReportModel(model string) {
 }
 
 // maxNotificationBodyLength is herdr's 240-character cap on the
-// notification.show body field. The title uses the same 80-character
-// text-field cap as block messages.
+// notification.show body field, the one text field that is not
+// bound by the generic maxTextFieldLength cap.
 const maxNotificationBodyLength = 240
 
 // Notify sends a notification.show request so herdr surfaces a toast
 // in its own UI. The request carries no pane id, source, or seq: it
 // is a global herdr UI notification, not a pane-scoped report, so it
-// bypasses the state machinery and goes straight to the sender.
-// Best-effort and fire-and-forget, like state reports. Safe to call
-// on a nil client.
+// skips the state machinery and neither reads nor writes client
+// state. It still takes c.mu, because that is what gives sender
+// implementations their single-threaded contract. Best-effort and
+// fire-and-forget, like state reports. Safe to call on a nil client.
 func (c *Client) Notify(title, body string) {
 	if c == nil {
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	_ = c.snd.send(reportRequest{
 		ID:     fmt.Sprintf("crush:notify:%d", time.Now().UnixNano()),
 		Method: "notification.show",
 		Params: notificationParams{
-			Title: truncateBlockMessage(title),
+			Title: truncateText(title),
 			Body:  truncateRunes(body, maxNotificationBodyLength),
 		},
 	})
@@ -561,7 +568,7 @@ func permissionBlockMessage(toolName, description string) string {
 	if detail := firstLine(description); detail != "" {
 		msg += " - " + detail
 	}
-	return truncateBlockMessage(msg)
+	return truncateText(msg)
 }
 
 func (c *Client) onPermissionResolved(toolCallID string) {
@@ -600,7 +607,7 @@ func (c *Client) onAuthRequired(providerID string) {
 	if providerID != "" {
 		msg = "Re-authentication required: " + providerID
 	}
-	c.setBlockLocked(blockKey{reason: blockAuth}, truncateBlockMessage(msg))
+	c.setBlockLocked(blockKey{reason: blockAuth}, truncateText(msg))
 	c.recomputeLocked()
 }
 
@@ -769,11 +776,11 @@ func (c *Client) newMetadataRequestLocked() reportRequest {
 	c.seq++
 	tokens := map[string]*string{"session": nil}
 	if c.pres.session != "" {
-		session := truncateBlockMessage(c.pres.session)
+		session := truncateText(c.pres.session)
 		tokens["session"] = &session
 	}
 	if c.pres.model != "" {
-		model := truncateBlockMessage(c.pres.model)
+		model := truncateText(c.pres.model)
 		tokens["model"] = &model
 	}
 	return reportRequest{
@@ -782,7 +789,7 @@ func (c *Client) newMetadataRequestLocked() reportRequest {
 		Params: metadataParams{
 			PaneID: c.paneID,
 			Source: "crush",
-			Title:  truncateBlockMessage(c.pres.title),
+			Title:  truncateText(c.pres.title),
 			Tokens: tokens,
 			Seq:    c.seq,
 		},

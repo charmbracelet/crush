@@ -37,7 +37,7 @@ func Translate(ev any) Event {
 		if len(e.Payload.Questions) > 0 {
 			text = e.Payload.Questions[0].Text
 		}
-		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateBlockMessage(text)}
+		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateText(text)}
 	case pubsub.Event[question.Notification]:
 		return QuestionResolved{BatchID: e.Payload.BatchID}
 	case pubsub.Event[notify.Notification]:
@@ -84,7 +84,7 @@ func Translate(ev any) Event {
 		if len(e.Payload.Questions) > 0 {
 			text = e.Payload.Questions[0].Question
 		}
-		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateBlockMessage(text)}
+		return QuestionAsked{BatchID: e.Payload.ID, Text: truncateText(text)}
 	case pubsub.Event[proto.QuestionNotification]:
 		return QuestionResolved{BatchID: e.Payload.BatchID}
 	case pubsub.Event[proto.AgentEvent]:
@@ -120,14 +120,16 @@ func permissionNotification(toolCallID string, granted, denied bool) Event {
 	return PermissionResolved{ToolCallID: toolCallID}
 }
 
-// maxBlockMessageLength is herdr's 80-character cap on report text
-// fields. Block messages must stay under it.
-const maxBlockMessageLength = 80
+// maxTextFieldLength is herdr's 80-rune cap on report text fields.
+// It applies to every string crush sends except the notification
+// body: the agent report's blocked-reason message, the notification
+// title, and the pane presentation's title and token values.
+const maxTextFieldLength = 80
 
-// truncateBlockMessage caps a blocked-reason message at herdr's
-// text-field limit, keeping the cut rune-safe.
-func truncateBlockMessage(s string) string {
-	return truncateRunes(s, maxBlockMessageLength)
+// truncateText caps a text field at herdr's limit, keeping the cut
+// rune-safe.
+func truncateText(s string) string {
+	return truncateRunes(s, maxTextFieldLength)
 }
 
 // truncateRunes caps s at max runes, keeping the cut rune-safe.

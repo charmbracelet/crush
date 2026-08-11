@@ -685,7 +685,7 @@ func TestPermissionBlockMessage(t *testing.T) {
 			t.Parallel()
 			got := permissionBlockMessage(tt.toolName, tt.description)
 			assert.Equal(t, tt.want, got)
-			assert.LessOrEqual(t, utf8.RuneCountInString(got), maxBlockMessageLength)
+			assert.LessOrEqual(t, utf8.RuneCountInString(got), maxTextFieldLength)
 		})
 	}
 }
@@ -1128,7 +1128,7 @@ func TestNotifyTruncation(t *testing.T) {
 	c.Notify(strings.Repeat("é", 100), strings.Repeat("b", 300))
 
 	p := lastRequest(c).Params.(notificationParams)
-	assert.Len(t, []rune(p.Title), maxBlockMessageLength)
+	assert.Len(t, []rune(p.Title), maxTextFieldLength)
 	assert.Len(t, []rune(p.Body), maxNotificationBodyLength)
 }
 
@@ -1151,4 +1151,59 @@ func TestNotifyNilClient(t *testing.T) {
 	t.Parallel()
 	var c *Client
 	assert.NotPanics(t, func() { c.Notify("Done", "") })
+}
+
+// unsyncSender is a sender with no internal locking, unlike
+// recordingSender. It encodes the contract that every sender call is
+// made with Client.mu held: a plain slice append from two goroutines
+// trips the race detector the moment that stops being true.
+type unsyncSender struct {
+	requests []reportRequest
+}
+
+func (u *unsyncSender) send(req reportRequest) error {
+	u.requests = append(u.requests, req)
+	return nil
+}
+
+func (u *unsyncSender) close() {}
+
+// TestSenderCallsAreSerialized drives notifications concurrently with
+// state events. Notify is the one send that reads and writes no
+// client state, which is what made it tempting to leave outside the
+// mutex; run under -race, an unsynchronized sender shows it cannot
+// be. Fails as a data race, not an assertion, if the lock goes away.
+func TestSenderCallsAreSerialized(t *testing.T) {
+	t.Parallel()
+	c := &Client{state: stateIdle, snd: &unsyncSender{}}
+
+	const (
+		notifiers = 4
+		rounds    = 100
+	)
+	var wg sync.WaitGroup
+	for range notifiers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range rounds {
+				c.Notify("Done", "turn complete")
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range rounds {
+			c.HandleEvent(AssistantMessage{SessionID: "s1"})
+			c.HandleEvent(QuestionAsked{BatchID: "b1", Text: "pick one"})
+			c.HandleEvent(QuestionResolved{BatchID: "b1"})
+			c.HandleEvent(RunComplete{SessionID: "s1"})
+		}
+	}()
+	wg.Wait()
+
+	// Every notification is sent unconditionally; state reports are
+	// deduplicated, so only the notifications have an exact count.
+	assert.GreaterOrEqual(t, len(c.snd.(*unsyncSender).requests), notifiers*rounds)
 }

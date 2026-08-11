@@ -404,6 +404,7 @@ func TestConfig_configureProviders(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{
 			ID:          "openai",
+			Type:        catwalk.TypeOpenAI,
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
 			Models: []catwalk.Model{{
@@ -425,12 +426,14 @@ func TestConfig_configureProviders(t *testing.T) {
 	// We want to make sure that we keep the configured API key as a placeholder
 	pc, _ := cfg.Providers.Get("openai")
 	require.Equal(t, "$OPENAI_API_KEY", pc.APIKey)
+	require.Equal(t, catwalk.TypeOpenAI, pc.Type)
 }
 
 func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{
 			ID:          "openai",
+			Type:        catwalk.TypeOpenAI,
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
 			Models: []catwalk.Model{{
@@ -445,6 +448,7 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	cfg.Providers.Set("openai", ProviderConfig{
 		APIKey:  "xyz",
 		BaseURL: "https://api.openai.com/v2",
+		Type:    catwalk.TypeAnthropic,
 		Models: []catwalk.Model{
 			{
 				ID:   "test-model",
@@ -469,6 +473,7 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	pc, _ := cfg.Providers.Get("openai")
 	require.Equal(t, "xyz", pc.APIKey)
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
+	require.Equal(t, catwalk.TypeAnthropic, pc.Type)
 	require.Len(t, pc.Models, 2)
 	require.Equal(t, "Updated", pc.Models[0].Name)
 }

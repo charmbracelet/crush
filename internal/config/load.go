@@ -292,7 +292,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		prepared.BaseURL = p.APIEndpoint
 		prepared.APIKey = p.APIKey
 		prepared.APIKeyTemplate = p.APIKey // Store original template for re-resolution
-		prepared.Type = p.Type
+		prepared.Type = cmp.Or(config.Type, p.Type)
 		prepared.Models = p.Models
 		prepared.ExtraHeaders = headers
 		if prepared.ExtraParams == nil {

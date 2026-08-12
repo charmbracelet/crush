@@ -144,7 +144,7 @@ func TestExportResolvedPalette_Builtin(t *testing.T) {
 	require.NotEmpty(t, tf.BgBase)
 	require.NotEmpty(t, tf.FgBase)
 	require.NotEmpty(t, tf.Success)
-	require.NoError(t, tf.Palette.Validate())
+	require.NoError(t, tf.Validate())
 }
 
 func TestExportResolvedPalette_GruvboxDark(t *testing.T) {

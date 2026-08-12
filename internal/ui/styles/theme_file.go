@@ -60,7 +60,7 @@ func LoadThemeFile(path string) (*ThemeFile, error) {
 		return nil, fmt.Errorf("decode theme file: %w", err)
 	}
 
-	if err := tf.Palette.Validate(); err != nil {
+	if err := tf.Validate(); err != nil {
 		return nil, fmt.Errorf("theme file %s: %w", filepath.Base(path), err)
 	}
 
@@ -151,6 +151,48 @@ func ValidateThemeName(name string) error {
 	}
 	if _, err := FindThemeFile(name); err == nil {
 		return fmt.Errorf("theme %q already exists", name)
+	}
+	return nil
+}
+
+// ValidateThemeRename is like ValidateThemeName but allows renaming a
+// theme to itself (case-insensitive). It still rejects builtins and
+// collisions with other themes.
+func ValidateThemeRename(oldName, newName string) error {
+	if newName == "" {
+		return errors.New("theme name cannot be empty")
+	}
+	lower := strings.ToLower(newName)
+	if !validThemeName.MatchString(lower) {
+		return errors.New("use lowercase letters, numbers, hyphens, and underscores only")
+	}
+	if IsBuiltinTheme(lower) {
+		return fmt.Errorf("%q is a built-in theme", lower)
+	}
+	if lower != strings.ToLower(oldName) {
+		if _, err := FindThemeFile(lower); err == nil {
+			return fmt.Errorf("theme %q already exists", lower)
+		}
+	}
+	return nil
+}
+
+// RenameThemeFile renames a user theme file on disk. It locates the
+// existing file via FindThemeFile, validates the new name, and moves
+// the file in the same directory. Returns an error if the source file
+// is not found, the new name is invalid, or a theme with the new name
+// already exists.
+func RenameThemeFile(oldName, newName string) error {
+	if err := ValidateThemeRename(oldName, newName); err != nil {
+		return err
+	}
+	oldPath, err := FindThemeFile(oldName)
+	if err != nil {
+		return fmt.Errorf("rename theme: %w", err)
+	}
+	newPath := filepath.Join(filepath.Dir(oldPath), strings.ToLower(newName)+".json")
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return fmt.Errorf("rename theme file: %w", err)
 	}
 	return nil
 }

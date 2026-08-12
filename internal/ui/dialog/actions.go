@@ -82,6 +82,10 @@ type (
 		Name string
 		Base string
 	}
+	ActionRenameTheme struct {
+		OldName string
+		NewName string
+	}
 	ActionInitializeProject struct{}
 	ActionSummarize         struct {
 		SessionID string

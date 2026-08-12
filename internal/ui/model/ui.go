@@ -2115,6 +2115,25 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.ThemeNewID)
 		m.dialog.CloseDialog(dialog.ThemeID)
 		m.openThemeEditorDialog()
+	case dialog.ActionRenameTheme:
+		oldName := msg.OldName
+		newName := strings.ToLower(msg.NewName)
+		if err := styles.RenameThemeFile(oldName, newName); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cfg := m.com.Config()
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.ActiveTheme == oldName {
+			if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
+				"options.tui.active_theme": newName,
+			}); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+		}
+		cmds = append(cmds, util.ReportInfo("Renamed theme "+oldName+" to "+newName))
+		m.dialog.CloseDialog(dialog.ThemeID)
+		m.openThemeDialog()
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:

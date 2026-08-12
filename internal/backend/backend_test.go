@@ -776,6 +776,84 @@ func TestFirstWinsMismatch_NoLogWhenIdentical(t *testing.T) {
 		"identical args must not log a mismatch: %s", buf.String())
 }
 
+// TestChannelOptInBoundary_DuplicateCreate verifies that channels are
+// an explicit opt-in that is never shared across a duplicate create at
+// the same path. A second client whose requested channels differ from
+// the existing workspace (including a client that did not opt in at
+// all) is rejected rather than silently inheriting the existing
+// workspace's channels.
+func TestChannelOptInBoundary_DuplicateCreate(t *testing.T) {
+	tests := []struct {
+		name            string
+		firstChannels   []string
+		secondChannels  []string
+		wantMismatchErr bool
+	}{
+		{
+			name:            "second omits opt-in",
+			firstChannels:   []string{"server:webhook"},
+			secondChannels:  nil,
+			wantMismatchErr: true,
+		},
+		{
+			name:            "second opts into extra channel",
+			firstChannels:   nil,
+			secondChannels:  []string{"server:webhook"},
+			wantMismatchErr: true,
+		},
+		{
+			name:            "different channels",
+			firstChannels:   []string{"server:webhook"},
+			secondChannels:  []string{"server:events"},
+			wantMismatchErr: true,
+		},
+		{
+			name:            "identical channels shared",
+			firstChannels:   []string{"server:webhook"},
+			secondChannels:  []string{"server:webhook"},
+			wantMismatchErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			xdgIsolated(t)
+			cwd := t.TempDir()
+			dataDir := t.TempDir()
+
+			b := New(context.Background(), nil, func() {})
+			b.SetCreateGrace(2 * time.Second)
+			t.Cleanup(func() { drainBackend(t, b) })
+
+			argsA := protoWS(cwd, dataDir, uuid.New().String())
+			argsA.Channels = tc.firstChannels
+			wsA, _, err := b.CreateWorkspace(argsA)
+			require.NoError(t, err)
+
+			argsB := protoWS(cwd, dataDir, uuid.New().String())
+			argsB.Channels = tc.secondChannels
+			wsB, protoB, err := b.CreateWorkspace(argsB)
+
+			if tc.wantMismatchErr {
+				require.ErrorIs(t, err, ErrChannelOptInMismatch)
+				require.Nil(t, wsB)
+				// The existing workspace must not be mutated
+				// and must not register the rejected client.
+				require.Equal(t, tc.firstChannels, wsA.Cfg.Overrides().EnabledChannels,
+					"existing channels must be immutable on rejection")
+				wsA.clientsMu.Lock()
+				require.Len(t, wsA.clients, 1, "rejected client must not be registered")
+				wsA.clientsMu.Unlock()
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, wsA.ID, protoB.ID)
+			require.Equal(t, tc.firstChannels, protoB.Channels)
+		})
+	}
+}
+
 // TestRaceTwoClientsAttachOneDetaches exercises the PLAN-required
 // race scenario: two clients attach concurrently, then one detaches.
 // The workspace must remain alive with refcount==1 and the clients
@@ -1238,4 +1316,469 @@ func TestAttachedClients_UnknownWorkspace(t *testing.T) {
 	b, _ := newTestBackend(t)
 	_, err := b.AttachedClients("00000000-0000-0000-0000-000000000000", "S1")
 	require.ErrorIs(t, err, ErrWorkspaceNotFound)
+}
+
+// TestTeardown_DefersShutdownWhileCreatePending verifies the core of the
+// "coder agent offline after more than one session" fix: tearing down the
+// last live workspace must NOT shut the server down while another
+// CreateWorkspace is mid-flight (it has committed to the slow init path
+// but not yet registered its workspace). Without the pending guard, the
+// teardown observed an empty workspace map and killed the whole server
+// out from under the workspace being born.
+func TestTeardown_DefersShutdownWhileCreatePending(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/pending-guard")
+
+	// Simulate a concurrent create that has passed the pending++ point
+	// but has not yet registered its workspace.
+	b.mu.Lock()
+	b.pending = 1
+	b.mu.Unlock()
+
+	b.teardown(ws)
+
+	require.Equal(t, int32(1), wsShutdowns.Load(),
+		"the torn-down workspace's own resources must still be released")
+	require.Equal(t, int32(0), serverShutdowns.Load(),
+		"server must not shut down while a create is in flight")
+}
+
+// TestTeardown_ShutsDownWhenIdleAndNoPending is the control for the guard
+// above: with no create in flight, tearing down the last workspace still
+// triggers the server shutdown, preserving the "shut down when empty"
+// behavior.
+func TestTeardown_ShutsDownWhenIdleAndNoPending(t *testing.T) {
+	t.Parallel()
+
+	b, serverShutdowns := newTestBackend(t)
+	ws, _ := insertTestWorkspace(t, b, "/tmp/idle-shutdown")
+
+	b.teardown(ws)
+
+	require.Equal(t, int32(1), serverShutdowns.Load(),
+		"server must shut down once the last workspace is gone and nothing is pending")
+}
+
+// TestCreateWorkspace_PendingBalancedOnSuccess drives the real
+// CreateWorkspace path and asserts the in-flight `pending` counter it
+// uses to hold off server shutdown is balanced back to zero once the
+// workspace is registered. This guards the bookkeeping the unit-level
+// teardown tests stub out: a refactor that drops the increment or
+// misplaces the deferred decrement would reintroduce the shutdown race.
+func TestCreateWorkspace_PendingBalancedOnSuccess(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	b, shutdownCount := newTestBackend(t)
+	// Keep the create hold alive so its grace timer can't fire and tear
+	// the workspace down mid-assertion.
+	b.SetCreateGrace(time.Hour)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	require.NoError(t, err)
+
+	b.mu.Lock()
+	pending := b.pending
+	b.mu.Unlock()
+	require.Equal(t, 0, pending, "pending must return to zero after a successful create")
+	require.Equal(t, int32(0), shutdownCount.Load(), "a live workspace must not trigger shutdown")
+}
+
+// TestCreateWorkspace_PendingBalancedAndReapsOnFailure asserts that a
+// create which fails during its slow init still decrements `pending`, and
+// that the deferred reap shuts an otherwise-idle server down (the safety
+// net that keeps a failed create racing the last teardown from leaking an
+// empty server the plain teardown declined to close).
+func TestCreateWorkspace_PendingBalancedAndReapsOnFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	b, shutdownCount := newTestBackend(t)
+
+	// A data dir whose parent is a regular file makes the workspace's
+	// data-directory creation fail deterministically, after the pending
+	// counter has been incremented.
+	tmp := t.TempDir()
+	fileAsParent := filepath.Join(tmp, "notadir")
+	require.NoError(t, os.WriteFile(fileAsParent, []byte("x"), 0o600))
+	badDataDir := filepath.Join(fileAsParent, "data")
+
+	_, _, err := b.CreateWorkspace(protoWS(tmp, badDataDir, uuid.New().String()))
+	require.Error(t, err, "create must fail when the data dir cannot be created")
+
+	b.mu.Lock()
+	pending := b.pending
+	remaining := b.workspaces.Len()
+	b.mu.Unlock()
+	require.Equal(t, 0, pending, "pending must return to zero after a failed create")
+	require.Zero(t, remaining, "no workspace should be registered after a failed create")
+	require.Equal(t, int32(1), shutdownCount.Load(),
+		"a failed create that leaves the server idle must reap it")
+}
+
+// TestServer_CreateCancelsPendingIdleShutdown is the regression test for
+// the coder-agent-offline handoff: when the last client of a session
+// leaves, the server must linger (not shut down immediately), and a
+// client returning within the linger window — the same directory or a
+// different one — must cancel that pending shutdown so it is never handed
+// a workspace on a server that is about to die.
+func TestServer_CreateCancelsPendingIdleShutdown(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	b, shutdownCount := newTestBackend(t)
+	b.SetIdleShutdownDelay(10 * time.Second) // long enough not to fire mid-test
+	b.SetCreateGrace(time.Hour)
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	// Session 1: a workspace that is attached then leaves, arming the
+	// idle-shutdown timer.
+	wsA, _ := insertTestWorkspace(t, b, "/tmp/linger-A")
+	cidA := newClientID(t)
+	require.NoError(t, b.AttachClient(wsA.ID, cidA))
+	b.DetachClient(wsA.ID, cidA)
+
+	b.mu.Lock()
+	armed := b.shutdownTimer != nil
+	b.mu.Unlock()
+	require.True(t, armed, "idle-shutdown timer must be armed after the last client leaves")
+	require.Equal(t, int32(0), shutdownCount.Load(), "server must linger, not shut down immediately")
+
+	// Session 2 arrives within the linger window: creating a workspace
+	// must cancel the pending shutdown.
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	require.NoError(t, err)
+
+	b.mu.Lock()
+	stillArmed := b.shutdownTimer != nil
+	b.mu.Unlock()
+	require.False(t, stillArmed, "a create within the linger window must cancel the pending shutdown")
+	require.Equal(t, int32(0), shutdownCount.Load(), "server must not shut down after a client returns")
+}
+
+// TestServer_ShutsDownAfterLingerWhenIdle confirms the linger still ends
+// in a shutdown when no client returns: the server is not leaked.
+func TestServer_ShutsDownAfterLingerWhenIdle(t *testing.T) {
+	t.Parallel()
+
+	b, shutdownCount := newTestBackend(t)
+	b.SetIdleShutdownDelay(100 * time.Millisecond)
+
+	wsA, _ := insertTestWorkspace(t, b, "/tmp/linger-idle")
+	cidA := newClientID(t)
+	require.NoError(t, b.AttachClient(wsA.ID, cidA))
+	b.DetachClient(wsA.ID, cidA)
+
+	// Nobody returns: after the linger elapses the server shuts down.
+	require.Eventually(t, func() bool { return shutdownCount.Load() == 1 },
+		2*time.Second, 10*time.Millisecond,
+		"idle server must shut down after the linger window")
+}
+
+// -- Detach grace --
+//
+// The SSE stream is a client's refcount claim, so a stream that drops
+// without an explicit release must not destroy the workspace before the
+// client's reconnect loop can come back. These cover both outcomes of
+// that window plus the fast path a clean exit still gets.
+
+// TestDetachStream_GraceSurvivesReattach is the core regression: a
+// momentary stream drop followed by a reconnect must leave the workspace
+// exactly where it was. Before the grace, the reconnect came back to a
+// workspace ID the server no longer knew, and every later request 404'd
+// forever because a sibling session kept the server itself alive.
+func TestDetachStream_GraceSurvivesReattach(t *testing.T) {
+	t.Parallel()
+
+	b, srvShutdowns := newTestBackend(t)
+	b.SetDetachGrace(time.Hour)
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/blip")
+
+	cid := newClientID(t)
+	b.registerClient(ws, cid)
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+
+	b.DetachClient(ws.ID, cid)
+	require.Equal(t, int32(0), wsShutdowns.Load(),
+		"a dropped stream must not tear the workspace down within the grace")
+	live, err := b.GetWorkspace(ws.ID)
+	require.NoError(t, err, "the workspace must still be addressable by its original ID")
+	require.Same(t, ws, live)
+
+	// The reconnect lands and converts the grace back into a stream claim.
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	ws.clientsMu.Lock()
+	cs := ws.clients[cid]
+	require.Equal(t, 1, cs.streams)
+	require.Nil(t, cs.holdTimer, "re-attaching must cancel the grace timer")
+	ws.clientsMu.Unlock()
+	require.Equal(t, int32(0), srvShutdowns.Load())
+}
+
+// TestDetachStream_GraceExpiryTearsDown checks the grace is bounded: a
+// client that never comes back must not pin the workspace (and with it
+// the server) indefinitely.
+func TestDetachStream_GraceExpiryTearsDown(t *testing.T) {
+	t.Parallel()
+
+	b, srvShutdowns := newTestBackend(t)
+	b.SetDetachGrace(50 * time.Millisecond)
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/gone-for-good")
+
+	cid := newClientID(t)
+	b.registerClient(ws, cid)
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	b.DetachClient(ws.ID, cid)
+
+	require.Eventually(t, func() bool { return srvShutdowns.Load() == 1 },
+		2*time.Second, 10*time.Millisecond,
+		"an unclaimed grace must expire and tear the workspace down")
+	require.Equal(t, int32(1), wsShutdowns.Load())
+	_, err := b.GetWorkspace(ws.ID)
+	require.ErrorIs(t, err, ErrWorkspaceNotFound)
+}
+
+// TestDetachStream_ExplicitReleaseSkipsGrace keeps clean exits fast: a
+// client that says goodbye before its stream closes is not coming back,
+// so the grace must not delay the teardown.
+func TestDetachStream_ExplicitReleaseSkipsGrace(t *testing.T) {
+	t.Parallel()
+
+	b, _ := newTestBackend(t)
+	b.SetDetachGrace(time.Hour)
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/clean-exit")
+
+	cid := newClientID(t)
+	b.registerClient(ws, cid)
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+
+	// The order a quitting client produces: release, then the stream ends.
+	require.NoError(t, b.releaseHold(ws.ID, cid))
+	require.Equal(t, int32(0), wsShutdowns.Load(), "the live stream still holds it")
+	b.DetachClient(ws.ID, cid)
+
+	require.Equal(t, int32(1), wsShutdowns.Load(),
+		"an explicitly released client must tear down without waiting out the grace")
+}
+
+// TestRegisterClient_RearmsGraceAndCancelsRelease covers a client that
+// recovers by re-creating the workspace rather than re-attaching: the
+// duplicate create must buy it a fresh attach window and undo an earlier
+// release, and the superseded timer must not be able to kill the new claim.
+func TestRegisterClient_RearmsGraceAndCancelsRelease(t *testing.T) {
+	t.Parallel()
+
+	b, _ := newTestBackend(t)
+	b.SetDetachGrace(50 * time.Millisecond)
+	b.createGrace = time.Hour
+	ws, wsShutdowns := insertTestWorkspace(t, b, "/tmp/rearm")
+
+	cid := newClientID(t)
+	b.registerClient(ws, cid)
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	require.NoError(t, b.releaseHold(ws.ID, cid))
+	b.DetachClient(ws.ID, cid)
+	require.Equal(t, int32(1), wsShutdowns.Load())
+
+	// A second workspace, this time reclaimed by a duplicate create while
+	// its short detach grace is running.
+	ws2, ws2Shutdowns := insertTestWorkspace(t, b, "/tmp/rearm-2")
+	b.registerClient(ws2, cid)
+	require.NoError(t, b.AttachClient(ws2.ID, cid))
+	b.DetachClient(ws2.ID, cid)
+	b.registerClient(ws2, cid)
+
+	ws2.clientsMu.Lock()
+	require.False(t, ws2.clients[cid].released)
+	ws2.clientsMu.Unlock()
+
+	//nolint:forbidigo // The superseded 50ms timer has to be given its chance to fire.
+	time.Sleep(200 * time.Millisecond)
+	require.Equal(t, int32(0), ws2Shutdowns.Load(),
+		"the re-armed claim must outlive the timer it replaced")
+}
+
+// -- Client retirement --
+
+// TestRetireClient_ReleasesEveryClaim checks the primitive a quitting
+// client relies on: one call drops its claims everywhere, whether they
+// are held by a stream, a create hold, or a detach grace.
+func TestRetireClient_ReleasesEveryClaim(t *testing.T) {
+	t.Parallel()
+
+	b, _ := newTestBackend(t)
+	b.SetDetachGrace(time.Hour)
+	b.createGrace = time.Hour
+
+	streamed, streamedShutdowns := insertTestWorkspace(t, b, "/tmp/retire-stream")
+	held, heldShutdowns := insertTestWorkspace(t, b, "/tmp/retire-hold")
+	shared, sharedShutdowns := insertTestWorkspace(t, b, "/tmp/retire-shared")
+
+	cid, other := newClientID(t), newClientID(t)
+	b.registerClient(streamed, cid)
+	require.NoError(t, b.AttachClient(streamed.ID, cid))
+	b.registerClient(held, cid)
+	b.registerClient(shared, cid)
+	b.registerClient(shared, other)
+
+	require.NoError(t, b.RetireClient(cid))
+
+	require.Equal(t, int32(1), streamedShutdowns.Load())
+	require.Equal(t, int32(1), heldShutdowns.Load())
+	require.Equal(t, int32(0), sharedShutdowns.Load(),
+		"a workspace another client is still using must be left alone")
+	shared.clientsMu.Lock()
+	require.NotContains(t, shared.clients, cid)
+	require.Contains(t, shared.clients, other)
+	shared.clientsMu.Unlock()
+
+	// Idempotent: retiring twice is not an error and changes nothing.
+	require.NoError(t, b.RetireClient(cid))
+	require.Equal(t, int32(1), streamedShutdowns.Load())
+}
+
+// TestRetireClient_RefusesLaterCreates is what makes teardown exact
+// without timing guesses. A recovery create whose response the client
+// never saw can still land on the server afterwards; refusing it is the
+// only way to guarantee it cannot leave a workspace nobody can name.
+func TestRetireClient_RefusesLaterCreates(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	b := New(context.Background(), nil, func() {})
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	cid := newClientID(t)
+	require.NoError(t, b.RetireClient(cid))
+
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
+	require.ErrorIs(t, err, ErrClientRetired)
+	require.Zero(t, b.workspaces.Len(), "a refused create must register nothing")
+}
+
+// TestRetireClient_DuringPendingCreate drives the actual ordering the
+// design has to survive: retirement lands while a create is already
+// inside its slow initialization, holding b.mu released. The create must
+// notice at its commit point and discard the workspace it built rather
+// than registering a claim for a client that has already gone.
+func TestRetireClient_DuringPendingCreate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	b := New(context.Background(), nil, func() {})
+	t.Cleanup(func() { drainBackend(t, b) })
+
+	cid := newClientID(t)
+	cwd, dataDir := t.TempDir(), t.TempDir()
+
+	createErr := make(chan error, 1)
+	go func() {
+		_, _, err := b.CreateWorkspace(protoWS(cwd, dataDir, cid))
+		createErr <- err
+	}()
+
+	// pending is bumped under b.mu before the create releases the lock for
+	// its slow init (config, db, app), and dropped only after the workspace
+	// is registered. Observing pending == 1 therefore means the create is
+	// genuinely mid-flight with b.mu free — the exact window retirement has
+	// to cover. Nothing here fakes the race; the create really is running.
+	require.Eventually(t, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.pending == 1
+	}, 30*time.Second, time.Millisecond, "create must reach its slow path")
+
+	require.NoError(t, b.RetireClient(cid))
+
+	require.ErrorIs(t, <-createErr, ErrClientRetired,
+		"a create that commits after retirement must be refused")
+	require.Zero(t, b.workspaces.Len(), "no workspace may be left behind")
+}
+
+// -- Shutdown as an atomic decision --
+
+// TestShutdownIfIdle_RefusesWhileWorkspaceLive is the guard that keeps a
+// second session alive: an upgrading client asks a mismatched server to
+// stand down, and only the server can answer without racing a session
+// that arrives between the question and the answer.
+func TestShutdownIfIdle_RefusesWhileWorkspaceLive(t *testing.T) {
+	t.Parallel()
+
+	b, shutdowns := newTestBackend(t)
+	ws, _ := insertTestWorkspace(t, b, "/tmp/in-use")
+	cid := newClientID(t)
+	b.registerClient(ws, cid)
+
+	require.False(t, b.ShutdownIfIdle(), "a server hosting a workspace must refuse")
+	require.Equal(t, int32(0), shutdowns.Load())
+
+	// Refusing must not latch anything: the server keeps serving.
+	b.mu.Lock()
+	require.False(t, b.closing)
+	b.mu.Unlock()
+}
+
+// TestShutdownIfIdle_RefusesWhileCreatePending closes the subtler half of
+// the same window: a workspace still working through its slow startup is
+// not yet in the workspace map, so a count-based check would call the
+// server idle and kill a session that is being born.
+func TestShutdownIfIdle_RefusesWhileCreatePending(t *testing.T) {
+	t.Parallel()
+
+	b, shutdowns := newTestBackend(t)
+	b.mu.Lock()
+	b.pending = 1
+	b.mu.Unlock()
+
+	require.False(t, b.ShutdownIfIdle())
+	require.Equal(t, int32(0), shutdowns.Load())
+}
+
+// TestShutdownIfIdle_GrantedAndFinal preserves upgrades: an idle server
+// does stand down, and the decision is final so a create arriving
+// afterwards is refused instead of being initialized on a dying process.
+func TestShutdownIfIdle_GrantedAndFinal(t *testing.T) {
+	t.Parallel()
+
+	b, shutdowns := newTestBackend(t)
+	require.True(t, b.ShutdownIfIdle())
+	require.Equal(t, int32(1), shutdowns.Load())
+
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), newClientID(t)))
+	require.ErrorIs(t, err, ErrServerShuttingDown)
+}
+
+// TestIdleShutdown_RefusesLaterCreates covers the same finality for the
+// unprompted path: a server that decided to exit because it went idle
+// must not accept the create of a client that arrives a moment later.
+func TestIdleShutdown_RefusesLaterCreates(t *testing.T) {
+	t.Parallel()
+
+	b, shutdowns := newTestBackend(t)
+	b.SetIdleShutdownDelay(10 * time.Millisecond)
+	ws, _ := insertTestWorkspace(t, b, "/tmp/going-idle")
+	cid := newClientID(t)
+	require.NoError(t, b.AttachClient(ws.ID, cid))
+	b.DetachClient(ws.ID, cid)
+
+	require.Eventually(t, func() bool { return shutdowns.Load() == 1 },
+		2*time.Second, 10*time.Millisecond)
+
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
+	require.ErrorIs(t, err, ErrServerShuttingDown,
+		"the client must be told to retry against a replacement server")
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image/color"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -23,7 +24,24 @@ func SyntaxHighlight(st *styles.Styles, source, fileName string, bg color.Color)
 	if l == nil {
 		l = lexers.Fallback
 	}
+	return syntaxHighlight(st, source, l, bg)
+}
 
+// SyntaxHighlightLexerName applies syntax highlighting using the lexer
+// registered under the given language name. It falls back to the fallback
+// lexer when the name is unknown, so callers can safely request languages
+// like "bash" without checking for availability.
+func SyntaxHighlightLexerName(st *styles.Styles, source, lexerName string, bg color.Color) (string, error) {
+	l := lexers.Get(lexerName)
+	if l == nil {
+		l = lexers.Fallback
+	}
+	return syntaxHighlight(st, source, l, bg)
+}
+
+// syntaxHighlight formats the given source using the provided lexer and the
+// memoized Chroma style for the theme and background.
+func syntaxHighlight(st *styles.Styles, source string, l chroma.Lexer, bg color.Color) (string, error) {
 	// Get the formatter
 	f := formatters.Get("terminal16m")
 	if f == nil {

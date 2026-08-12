@@ -6,11 +6,13 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -22,6 +24,57 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 )
+
+// Reasons the coder agent may be unavailable, returned by
+// Workspace.AgentReadyErr so callers can tell a genuinely
+// uninitialized agent apart from a lost server connection.
+var (
+	// ErrAgentNotInitialized means the workspace exists but its coder
+	// agent has not been configured/initialized (e.g. no model set).
+	ErrAgentNotInitialized = errors.New("coder agent is not initialized")
+	// ErrServerUnreachable means the client could not reach the server
+	// to determine the agent's status (server down, or the workspace was
+	// torn down out from under the client).
+	ErrServerUnreachable = errors.New("lost connection to the crush server")
+	// ErrWorkspaceGone means the server is reachable but no longer knows
+	// this client's workspace: it was torn down, or the server was
+	// replaced underneath the client. The subscription loop re-registers
+	// the workspace in the background when it sees this.
+	ErrWorkspaceGone = errors.New("the server reset this workspace; reconnecting")
+	// ErrStreamClosed means an established event stream ended.
+	// Resubscribing usually succeeds immediately, but events published in
+	// the meantime are lost for good, so the client treats it as a
+	// degraded link that requires a resync.
+	ErrStreamClosed = errors.New("the event stream closed; reconnecting")
+)
+
+// ConnectionState describes the health of the client-server link as
+// reported by the [ClientWorkspace] subscription loop.
+type ConnectionState int
+
+const (
+	// ConnectionDegraded means the event stream is down (or the workspace
+	// was lost server-side) and the client is retrying or re-registering
+	// in the background.
+	ConnectionDegraded ConnectionState = iota
+	// ConnectionRecovered means the event stream was re-established,
+	// possibly against a re-created workspace.
+	ConnectionRecovered
+)
+
+// ConnectionEvent is delivered to the TUI as a tea.Msg on degraded and
+// recovered transitions of the client-server link. Local (in-process)
+// workspaces never emit it.
+type ConnectionEvent struct {
+	State ConnectionState
+	// Err is the most recent failure, set when State is
+	// ConnectionDegraded.
+	Err error
+	// Stuck marks a degraded connection that has resisted repeated
+	// recovery attempts. The loop keeps retrying regardless; the UI
+	// should escalate from a transient notice to a persistent error.
+	Stuck bool
+}
 
 // LSPClientInfo holds information about an LSP client's state. This is
 // the frontend-facing type; implementations translate from the
@@ -90,6 +143,13 @@ type Workspace interface {
 	AgentIsSessionBusy(sessionID string) bool
 	AgentModel() AgentModel
 	AgentIsReady() bool
+	// AgentReadyErr reports nil when the coder agent is ready to accept
+	// work, or a descriptive error otherwise: ErrAgentNotInitialized
+	// when the agent simply isn't set up, or ErrServerUnreachable
+	// (wrapped) when the client could not reach the server to find out.
+	// It lets the UI show an actionable message instead of collapsing
+	// both cases into "agent offline".
+	AgentReadyErr() error
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
@@ -164,9 +224,13 @@ type Workspace interface {
 	MCPRefreshResources(ctx context.Context, name string)
 	RefreshMCPTools(ctx context.Context, name string)
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
+	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
+	MCPAuthenticate(ctx context.Context, name string) error
+	MCPPendingAuth() []mcptools.PendingAuthServer
+	MCPAuthURL(name string) string
 
 	// Events
 	Subscribe(program *tea.Program)

@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -35,12 +37,38 @@ var (
 	ErrInvalidClientID         = errors.New("invalid client_id")
 	ErrClientNotAttached       = errors.New("client not attached")
 	ErrWorkspaceClosing        = errors.New("workspace closing")
+	ErrServerShuttingDown      = errors.New("server is shutting down")
+	ErrServerNotIdle           = errors.New("server is hosting live workspaces")
+	ErrClientRetired           = errors.New("client has been retired")
+	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
 )
 
 // DefaultCreateGrace is the window in which a client must open an SSE
 // stream after creating a workspace before its creation hold is
 // released. Exposed as a package variable so tests can shorten it.
 var DefaultCreateGrace = 30 * time.Second
+
+// DefaultIdleShutdownDelay is how long the server stays alive after its
+// last workspace is released before it shuts itself down. The delay
+// exists so a client that closes one session and opens another moments
+// later (the same directory or a different one) reuses the still-running
+// server instead of racing its shutdown: with an immediate shutdown the
+// new client can attach to — or create a workspace on — a server that is
+// already tearing down, and then observe its coder agent as "offline".
+// Any workspace create within the window cancels the pending shutdown.
+// Overridable via CRUSH_SERVER_IDLE_TIMEOUT (seconds; 0 restores the
+// old shut-down-immediately behavior).
+var DefaultIdleShutdownDelay = 60 * time.Second
+
+// DefaultDetachGrace is how long a client's claim on a workspace survives
+// after its last SSE stream drops without an explicit release. The stream
+// is the client's refcount claim, so tearing the workspace down the instant
+// it closes turns any momentary drop (a hiccup, a suspended laptop, a proxy
+// timeout) into a permanently lost workspace: the client's reconnect comes
+// back milliseconds later to an ID the server no longer knows. A client
+// that released its claim first (a clean exit) skips the grace. Overridable
+// via CRUSH_SERVER_DETACH_GRACE (seconds; 0 restores immediate teardown).
+var DefaultDetachGrace = 10 * time.Second
 
 // ShutdownFunc is called when the backend needs to trigger a server
 // shutdown (e.g. when the last workspace is removed).
@@ -65,25 +93,67 @@ type Backend struct {
 	// concurrent CreateWorkspace calls at the same path deduplicate
 	// deterministically.
 	pathIndex map[string]string
-	mu        sync.Mutex
+	// pending counts CreateWorkspace calls that have committed to the
+	// slow initialization path (config/db/app setup) but have not yet
+	// registered their workspace in the map. It is guarded by mu.
+	// teardown must observe pending == 0 in addition to an empty
+	// workspace map before triggering server shutdown: otherwise a
+	// teardown of the last live workspace could race ahead of a
+	// concurrent create — which releases mu during its slow init — and
+	// shut the whole server down out from under the workspace being
+	// born.
+	pending int
+	// shutdownTimer, when non-nil, is an armed idle-shutdown timer
+	// waiting out lingerDelay before it shuts the server down. It is
+	// guarded by mu and cancelled the moment a new create arrives.
+	shutdownTimer *time.Timer
+	// closing latches the decision to exit. Every site that commits to
+	// a shutdown sets it while still holding mu, because shutdownFn has
+	// to run unlocked; CreateWorkspace refuses once it is set. That
+	// makes the shutdown-vs-create decision atomic: a create can never
+	// be handed a workspace on a process that is already leaving.
+	closing bool
+	// retired holds the IDs of clients that announced their exit via
+	// RetireClient. Creates from a retired client are refused, which is what
+	// lets a client release a workspace whose ID it never learned.
+	//
+	// Entries are never pruned, and deliberately so: an entry is exactly
+	// what refuses a create that was already on the wire when the client
+	// said goodbye, and HTTP gives no ordering between two requests, so
+	// there is no moment at which the server can prove none is still coming.
+	// Dropping an entry to save memory would reintroduce the orphaned
+	// workspace this mechanism exists to prevent. The cost is one UUID per
+	// client process, and the server only outlives its clients for as long
+	// as sessions keep arriving inside the idle-shutdown window.
+	retired map[string]struct{}
+	mu      sync.Mutex
 
 	cfg         *config.ConfigStore
 	ctx         context.Context
 	shutdownFn  ShutdownFunc
 	createGrace time.Duration
+	lingerDelay time.Duration
+	detachGrace time.Duration
 }
 
 // clientState tracks one client's claim on a workspace.
 //
 //   - streams counts the number of live SSE event streams the client
 //     currently has open against the workspace.
-//   - holdTimer is non-nil iff the client created the workspace but has
-//     not yet attached an SSE stream; it fires after createGrace and
-//     releases the hold.
+//   - holdTimer is non-nil in the two timer-held states: the client
+//     created the workspace but has not yet attached an SSE stream
+//     (fires after createGrace), or the client's last SSE stream dropped
+//     without an explicit release (fires after detachGrace, giving the
+//     client's reconnect loop a window to re-attach). Either way the
+//     timer releases the claim when it expires.
 //   - currentSessionID records which session this client is currently
 //     viewing. Empty string means the client has no session selected
 //     (e.g. the landing screen). Cleared automatically when the
 //     clientState entry is removed.
+//   - released marks that the client gave up its claim explicitly while
+//     streams were still open, which a clean exit does. The final stream
+//     detach then tears down immediately instead of waiting out the
+//     detach grace for a client that is not coming back.
 //
 // streams and holdTimer are mutually exclusive in practice (the hold
 // timer is stopped the moment an SSE stream attaches), but both being
@@ -92,6 +162,7 @@ type clientState struct {
 	streams          int
 	holdTimer        *time.Timer
 	currentSessionID string
+	released         bool
 }
 
 // Workspace represents a running [app.App] workspace with its
@@ -190,11 +261,33 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 	return &Backend{
 		workspaces:  csync.NewMap[string, *Workspace](),
 		pathIndex:   make(map[string]string),
+		retired:     make(map[string]struct{}),
 		cfg:         cfg,
 		ctx:         ctx,
 		shutdownFn:  shutdownFn,
 		createGrace: DefaultCreateGrace,
+		lingerDelay: idleShutdownDelayFromEnv(),
+		detachGrace: durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
 	}
+}
+
+// idleShutdownDelayFromEnv returns the idle-shutdown delay, honoring a
+// CRUSH_SERVER_IDLE_TIMEOUT override (in seconds; 0 disables lingering).
+func idleShutdownDelayFromEnv() time.Duration {
+	return durationFromEnv("CRUSH_SERVER_IDLE_TIMEOUT", DefaultIdleShutdownDelay)
+}
+
+// durationFromEnv reads a whole number of seconds from the named
+// environment variable, falling back to def when it is unset or
+// unparseable. Zero is a meaningful value for both lifecycle windows it
+// configures, so it is accepted.
+func durationFromEnv(name string, def time.Duration) time.Duration {
+	if v := os.Getenv(name); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return def
 }
 
 // SetCreateGrace overrides the create-grace window. Intended for tests
@@ -203,6 +296,24 @@ func (b *Backend) SetCreateGrace(d time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.createGrace = d
+}
+
+// SetDetachGrace overrides how long a client's claim survives after its
+// last SSE stream drops. A value <= 0 restores the tear-down-immediately
+// behavior. Intended for tests.
+func (b *Backend) SetDetachGrace(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.detachGrace = d
+}
+
+// SetIdleShutdownDelay overrides how long the server lingers after its
+// last workspace is released before shutting down. A value <= 0 restores
+// the shut-down-immediately behavior. Intended for tests.
+func (b *Backend) SetIdleShutdownDelay(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lingerDelay = d
 }
 
 // GetWorkspace retrieves a workspace by ID.
@@ -246,6 +357,13 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	b.mu.Lock()
+	if err := b.admitLocked(clientID); err != nil {
+		b.mu.Unlock()
+		return nil, proto.Workspace{}, err
+	}
+	// A client is arriving: cancel any pending idle shutdown so we never
+	// hand back a workspace on a server that is about to tear itself down.
+	b.cancelShutdownLocked()
 	if existingID, ok := b.pathIndex[key]; ok {
 		if ws, found := b.workspaces.Get(existingID); found {
 			// Hold b.mu while registering: teardown also
@@ -254,6 +372,10 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// return cannot be torn out from under us
 			// between lookup and registerClient. Lock order
 			// here is b.mu -> ws.clientsMu.
+			if !stringSlicesEqual(ws.Cfg.Overrides().EnabledChannels, args.Channels) {
+				b.mu.Unlock()
+				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+			}
 			logFirstWinsMismatch(ws, args)
 			b.registerClient(ws, clientID)
 			b.mu.Unlock()
@@ -263,7 +385,30 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		// removed; clean the stale entry and fall through.
 		delete(b.pathIndex, key)
 	}
+	// Commit to the slow creation path. Mark this create as pending
+	// while mu is still held so a teardown that runs during the
+	// unlocked init below cannot observe an empty backend and shut the
+	// server down. The deferred decrement runs after the workspace has
+	// been registered (or the create has failed), keeping the invariant
+	// that pending only drops once the workspace is visible in the map.
+	b.pending++
 	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.pending--
+		// If this create ended up registering nothing (it failed, or
+		// deduped onto an existing workspace that has since gone) and
+		// it was holding the last teardown back, the server may now be
+		// idle with no pending work. Arm the idle-shutdown timer here so
+		// a failed create racing the last teardown does not leak an
+		// empty server that a plain teardown already declined to reap.
+		shutdownNow := b.scheduleShutdownIfIdleLocked()
+		b.mu.Unlock()
+		if shutdownNow {
+			slog.Info("No workspaces remain after create settled, shutting down server...")
+			b.shutdownFn()
+		}
+	}()
 
 	id := uuid.New().String()
 	cfg, err := config.Init(args.Path, args.DataDir, args.Debug)
@@ -272,6 +417,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	cfg.Overrides().SkipPermissionRequests = args.YOLO
+	cfg.Overrides().EnabledChannels = args.Channels
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
@@ -315,6 +461,17 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	b.mu.Lock()
+	// Re-check admission: the client may have retired while the slow
+	// init above ran with b.mu released, and registering a claim for a
+	// client that has already announced its exit would strand the
+	// workspace. (b.closing cannot have flipped: every shutdown decision
+	// requires pending == 0, and this create has held pending since
+	// before it released b.mu.)
+	if err := b.admitLocked(clientID); err != nil {
+		b.mu.Unlock()
+		ws.invokeShutdown()
+		return nil, proto.Workspace{}, err
+	}
 	// Re-check the index under the lock: a concurrent caller may have
 	// won the race between the initial unlock and here.
 	if existingID, ok := b.pathIndex[key]; ok {
@@ -322,6 +479,11 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// Register under b.mu so teardown cannot run
 			// between lookup and registerClient. Lock order
 			// is b.mu -> ws.clientsMu.
+			if !stringSlicesEqual(existing.Cfg.Overrides().EnabledChannels, args.Channels) {
+				b.mu.Unlock()
+				ws.invokeShutdown()
+				return nil, proto.Workspace{}, ErrChannelOptInMismatch
+			}
 			logFirstWinsMismatch(existing, args)
 			b.registerClient(existing, clientID)
 			b.mu.Unlock()
@@ -436,15 +598,73 @@ func (b *Backend) AttachClient(workspaceID, clientID string) error {
 	return nil
 }
 
-// DetachClient releases one SSE stream's hold on the workspace. If the
-// client has no other streams and no pending creation hold, its claim
-// is removed and the workspace is torn down once refcount hits zero.
+// DetachClient releases one SSE stream's hold on the workspace. When the
+// client has no streams left and no pending creation hold, its claim
+// either enters the detach grace — giving a reconnecting client time to
+// re-attach — or, if the grace is disabled or the client already released
+// its claim, is removed, tearing the workspace down once the refcount
+// hits zero.
 func (b *Backend) DetachClient(workspaceID, clientID string) {
 	ws, ok := b.workspaces.Get(workspaceID)
 	if !ok {
 		return
 	}
 	b.detachStream(ws, clientID)
+}
+
+// admitLocked reports whether clientID may still take a claim on this
+// server. It must be called with b.mu held, which is what makes the
+// answer atomic with respect to the shutdown latch and to RetireClient.
+func (b *Backend) admitLocked(clientID string) error {
+	if b.closing {
+		return ErrServerShuttingDown
+	}
+	if _, ok := b.retired[clientID]; ok {
+		return ErrClientRetired
+	}
+	return nil
+}
+
+// RetireClient records that a client has exited and releases every claim it
+// holds, across every workspace. It is the authoritative "this client is
+// gone" signal, and the reason a client never has to guess whether a create
+// whose response it lost left a workspace behind: either the create landed
+// first and this call releases its claim, or it arrives later and is
+// refused, registering nothing.
+//
+// Idempotent. Lock order is the canonical b.mu -> ws.clientsMu; teardowns
+// for workspaces the client was last on run after b.mu is released and
+// re-check under both locks.
+func (b *Backend) RetireClient(clientID string) error {
+	if _, err := validateClientID(clientID); err != nil {
+		return err
+	}
+
+	b.mu.Lock()
+	if b.retired == nil {
+		b.retired = make(map[string]struct{})
+	}
+	b.retired[clientID] = struct{}{}
+	var orphaned []*Workspace
+	for _, ws := range b.workspaces.Seq2() {
+		ws.clientsMu.Lock()
+		if cs, ok := ws.clients[clientID]; ok {
+			if cs.holdTimer != nil {
+				cs.holdTimer.Stop()
+			}
+			delete(ws.clients, clientID)
+			if len(ws.clients) == 0 {
+				orphaned = append(orphaned, ws)
+			}
+		}
+		ws.clientsMu.Unlock()
+	}
+	b.mu.Unlock()
+
+	for _, ws := range orphaned {
+		b.teardown(ws)
+	}
+	return nil
 }
 
 // releaseHold releases the creation hold for a client, if any. Active
@@ -464,19 +684,37 @@ func (b *Backend) releaseHold(workspaceID, clientID string) error {
 
 // registerClient installs (idempotently) the given client's claim on
 // the workspace and starts a grace timer if the entry is fresh.
+//
+// A duplicate create from a client whose claim is timer-held (waiting to
+// attach, or waiting out the detach grace) re-arms it for a full create
+// grace and supersedes any earlier explicit release: the client is coming
+// back. The re-arm installs a fresh clientState rather than resetting the
+// old timer, so an already-fired timer racing this call fails expireHold's
+// identity check instead of killing the new claim.
 func (b *Backend) registerClient(ws *Workspace, clientID string) {
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
-	if _, ok := ws.clients[clientID]; ok {
-		// Idempotent: a duplicate CreateWorkspace from the same
-		// client does not add a second claim.
+	if old, ok := ws.clients[clientID]; ok {
+		old.released = false
+		if old.holdTimer == nil {
+			// Live streams hold the claim; nothing to re-arm.
+			return
+		}
+		old.holdTimer.Stop()
+		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, b.createGrace)
 		return
 	}
-	cs := &clientState{}
-	cs.holdTimer = time.AfterFunc(b.createGrace, func() {
+	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", b.createGrace)
+}
+
+// newHeldClient builds a clientState whose claim is held only by a timer
+// that releases it after grace. Callers must hold ws.clientsMu.
+func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, grace time.Duration) *clientState {
+	cs := &clientState{currentSessionID: sessionID}
+	cs.holdTimer = time.AfterFunc(grace, func() {
 		b.expireHold(ws, clientID, cs)
 	})
-	ws.clients[clientID] = cs
+	return cs
 }
 
 // expireHold is the body of the grace timer. It runs in its own
@@ -513,6 +751,11 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 	if cs.streams == 0 {
 		delete(ws.clients, clientID)
 		teardown = len(ws.clients) == 0
+	} else {
+		// The client gave up its claim while streams are still open, which
+		// is what a clean exit looks like. Remember it so the final detach
+		// skips the reconnect grace.
+		cs.released = true
 	}
 	ws.clientsMu.Unlock()
 	if teardown {
@@ -521,6 +764,10 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 }
 
 func (b *Backend) detachStream(ws *Workspace, clientID string) {
+	b.mu.Lock()
+	grace := b.detachGrace
+	b.mu.Unlock()
+
 	ws.clientsMu.Lock()
 	cs, ok := ws.clients[clientID]
 	if !ok {
@@ -532,8 +779,18 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	}
 	teardown := false
 	if cs.streams == 0 && cs.holdTimer == nil {
-		delete(ws.clients, clientID)
-		teardown = len(ws.clients) == 0
+		if grace > 0 && !cs.released {
+			// The stream dropped without the client releasing its claim, so
+			// treat it as an interruption rather than an exit: hold the
+			// workspace under a timer long enough for the client's
+			// reconnect to re-attach (AttachClient stops the timer).
+			cs.holdTimer = time.AfterFunc(grace, func() {
+				b.expireHold(ws, clientID, cs)
+			})
+		} else {
+			delete(ws.clients, clientID)
+			teardown = len(ws.clients) == 0
+		}
 	}
 	ws.clientsMu.Unlock()
 	if teardown {
@@ -568,14 +825,81 @@ func (b *Backend) teardown(ws *Workspace) {
 		delete(b.pathIndex, ws.resolvedPath)
 	}
 	b.workspaces.Del(ws.ID)
-	remaining := b.workspaces.Len()
+	// Arm (or, with lingering disabled, request) the idle shutdown. It
+	// only proceeds once there is genuinely nothing left: no live
+	// workspaces AND no create in flight. Deferring via the linger lets a
+	// client returning moments later reuse this server instead of racing
+	// its shutdown.
+	shutdownNow := b.scheduleShutdownIfIdleLocked()
 	b.mu.Unlock()
 
 	ws.invokeShutdown()
 
-	if remaining == 0 && b.shutdownFn != nil {
+	if shutdownNow {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
+	}
+}
+
+// scheduleShutdownIfIdleLocked decides what to do about server shutdown
+// after a workspace count or pending-create change. It must be called
+// with b.mu held.
+//
+// It returns true only when the caller should shut the server down
+// synchronously (after releasing b.mu) — that is, when the server is idle
+// and lingering is disabled (lingerDelay <= 0). When lingering is enabled
+// it instead arms a one-shot timer that re-checks idleness after
+// lingerDelay and shuts down then, and returns false. When the server is
+// not idle (a workspace is live or a create is in flight) it does
+// nothing and returns false.
+//
+// Returning true also latches [Backend.closing], since the caller has to
+// release b.mu before it can run shutdownFn.
+func (b *Backend) scheduleShutdownIfIdleLocked() (shutdownNow bool) {
+	if b.shutdownFn == nil {
+		return false
+	}
+	if b.workspaces.Len() != 0 || b.pending != 0 {
+		return false
+	}
+	if b.lingerDelay <= 0 {
+		b.closing = true
+		return true
+	}
+	if b.shutdownTimer == nil {
+		b.shutdownTimer = time.AfterFunc(b.lingerDelay, b.maybeShutdown)
+	}
+	return false
+}
+
+// cancelShutdownLocked stops any armed idle-shutdown timer. It must be
+// called with b.mu held.
+func (b *Backend) cancelShutdownLocked() {
+	if b.shutdownTimer != nil {
+		b.shutdownTimer.Stop()
+		b.shutdownTimer = nil
+	}
+}
+
+// maybeShutdown is the idle-shutdown timer callback. It shuts the server
+// down only if it is still idle when the linger window elapses; any
+// create that arrived in the meantime cancelled the timer (or bumped
+// pending / the workspace count), so this re-check makes the linger
+// race-free. Deciding to exit latches [Backend.closing] under the same
+// lock, so a create arriving in the gap before shutdownFn runs is
+// refused instead of being initialized on a departing process.
+func (b *Backend) maybeShutdown() {
+	b.mu.Lock()
+	b.shutdownTimer = nil
+	idle := b.workspaces.Len() == 0 && b.pending == 0
+	if idle {
+		b.closing = true
+	}
+	fn := b.shutdownFn
+	b.mu.Unlock()
+	if idle && fn != nil {
+		slog.Info("Server idle, shutting down...")
+		fn()
 	}
 }
 
@@ -677,9 +1001,43 @@ func (b *Backend) Config() *config.ConfigStore {
 
 // Shutdown initiates a graceful server shutdown.
 func (b *Backend) Shutdown() {
-	if b.shutdownFn != nil {
-		b.shutdownFn()
+	b.mu.Lock()
+	b.closing = true
+	fn := b.shutdownFn
+	b.mu.Unlock()
+	if fn != nil {
+		fn()
 	}
+}
+
+// ShutdownIfIdle shuts the server down only when it is hosting no
+// workspaces and has no creates in flight, reporting false when it declined
+// because work is live.
+//
+// This is the only shutdown a client may request. A client asks in order to
+// replace a version-mismatched server, and it cannot check idleness itself
+// without a second round trip a new session can slip into. Deciding here,
+// under the lock creates and teardowns take, closes that window: the answer
+// is atomic, and granting it latches the decision so creates arriving
+// afterwards are refused.
+func (b *Backend) ShutdownIfIdle() bool {
+	b.mu.Lock()
+	live, pending := b.workspaces.Len(), b.pending
+	idle := live == 0 && pending == 0
+	if idle {
+		b.closing = true
+	}
+	fn := b.shutdownFn
+	b.mu.Unlock()
+	if !idle {
+		slog.Warn("Refusing shutdown request: server is not idle",
+			"workspaces", live, "pending_creates", pending)
+		return false
+	}
+	if fn != nil {
+		fn()
+	}
+	return true
 }
 
 // resolveWorkspaceKey returns a stable canonical form of path suitable
@@ -712,14 +1070,15 @@ func validateClientID(id string) (string, error) {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	out := proto.Workspace{
-		ID:      ws.ID,
-		Path:    ws.Path,
-		YOLO:    ws.Cfg.Overrides().SkipPermissionRequests,
-		DataDir: cfg.Options.DataDirectory,
-		Debug:   cfg.Options.Debug,
-		Config:  cfg,
-		Env:     ws.Env,
-		Version: version.Version,
+		ID:       ws.ID,
+		Path:     ws.Path,
+		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
+		Channels: ws.Cfg.Overrides().EnabledChannels,
+		DataDir:  cfg.Options.DataDirectory,
+		Debug:    cfg.Options.Debug,
+		Config:   cfg,
+		Env:      ws.Env,
+		Version:  version.Version,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())
@@ -739,10 +1098,12 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	existingCfg := existing.Cfg.Config()
 	existingYOLO := existing.Cfg.Overrides().SkipPermissionRequests
+	existingChannels := existing.Cfg.Overrides().EnabledChannels
 	if existingYOLO == args.YOLO &&
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
-		stringSlicesEqual(existing.Env, args.Env) {
+		stringSlicesEqual(existing.Env, args.Env) &&
+		stringSlicesEqual(existingChannels, args.Channels) {
 		return
 	}
 	slog.Debug(
@@ -757,6 +1118,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"requested_data_dir", args.DataDir,
 		"existing_env", existing.Env,
 		"requested_env", args.Env,
+		"existing_channels", existingChannels,
+		"requested_channels", args.Channels,
 	)
 }
 

@@ -31,6 +31,7 @@ type Manager struct {
 	manager     *powernapconfig.Manager
 	callback    func(name string, client *Client)
 	now         func() time.Time
+	lookPath    func(string) (string, error)
 }
 
 // NewManager creates a new LSP manager service.
@@ -67,6 +68,7 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		manager:     manager,
 		callback:    func(string, *Client) {}, // default no-op callback
 		now:         time.Now,
+		lookPath:    exec.LookPath,
 	}
 }
 
@@ -172,25 +174,11 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		}
 	}
 
-	if !isUserConfigured {
-		if s.recentlyUnavailable(name) {
+	if isUserConfigured {
+		if !handles(server, filepath, s.cfg.WorkingDir()) {
 			return
 		}
-		if _, err := exec.LookPath(server.Command); err != nil {
-			slog.Debug("LSP server not installed, skipping", "name", name, "command", server.Command)
-			s.markUnavailable(name)
-			return
-		}
-		s.clearUnavailable(name)
-		if skipAutoStartCommands[server.Command] {
-			slog.Debug("LSP command too generic for auto-start, skipping", "name", name, "command", server.Command)
-			return
-		}
-	}
-
-	// this is the slowest bit, so we do it last.
-	if !handles(server, filepath, s.cfg.WorkingDir()) {
-		// nothing to do
+	} else if !s.canAutoStart(name, filepath, s.cfg.WorkingDir(), server) {
 		return
 	}
 
@@ -260,6 +248,34 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	}
 
 	slog.Debug("LSP client started", "name", name)
+}
+
+func (s *Manager) canAutoStart(
+	name, filePath, workDir string,
+	server *powernapconfig.ServerConfig,
+) bool {
+	if skipAutoStartCommands[server.Command] {
+		slog.Debug("LSP command too generic for auto-start, skipping", "name", name, "command", server.Command)
+		return false
+	}
+
+	// Filtering by file type is cheap and usually rejects a server before the
+	// root marker check. Do both before searching PATH, which can require a stat
+	// for every directory in PATH for every bundled server.
+	if !handles(server, filePath, workDir) {
+		return false
+	}
+
+	if s.recentlyUnavailable(name) {
+		return false
+	}
+	if _, err := s.lookPath(server.Command); err != nil {
+		slog.Debug("LSP server not installed, skipping", "name", name, "command", server.Command)
+		s.markUnavailable(name)
+		return false
+	}
+	s.clearUnavailable(name)
+	return true
 }
 
 func (s *Manager) isUserConfigured(name string) bool {

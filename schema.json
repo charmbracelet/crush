@@ -99,6 +99,13 @@
           },
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Environment variables to set on startup"
         }
       },
       "additionalProperties": false,
@@ -281,7 +288,7 @@
         "timeout": {
           "type": "integer",
           "description": "Timeout in seconds for MCP server connections",
-          "default": 15,
+          "default": 10,
           "examples": [
             30,
             60,
@@ -294,6 +301,23 @@
           },
           "type": "object",
           "description": "HTTP headers for HTTP/SSE MCP servers"
+        },
+        "oauth": {
+          "type": "boolean",
+          "description": "Enable OAuth 2.1 authorization flow for this MCP server (HTTP transport only)",
+          "default": false
+        },
+        "oauth_client_id": {
+          "type": "string",
+          "description": "Pre-registered OAuth client ID for servers without dynamic client registration"
+        },
+        "oauth_client_secret": {
+          "type": "string",
+          "description": "Pre-registered OAuth client secret paired with oauth_client_id"
+        },
+        "oauth_callback_port": {
+          "type": "integer",
+          "description": "Fixed localhost port for the OAuth callback"
         }
       },
       "additionalProperties": false,
@@ -387,6 +411,27 @@
         },
         "provider_options": {
           "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "OAuthClient": {
+      "properties": {
+        "client_id": {
+          "type": "string"
+        },
+        "client_secret": {
+          "type": "string"
+        },
+        "auth_url": {
+          "type": "string"
+        },
+        "token_url": {
+          "type": "string"
+        },
+        "auth_style": {
+          "type": "integer"
         }
       },
       "additionalProperties": false,
@@ -505,12 +550,7 @@
           "description": "Show indeterminate progress updates during long operations",
           "default": true
         },
-        "disable_notifications": {
-          "type": "boolean",
-          "description": "Deprecated: Use notification_style instead. Disable desktop notifications",
-          "default": false
-        },
-        "notification_style": {
+        "notifications": {
           "type": "string",
           "enum": [
             "auto",
@@ -519,7 +559,7 @@
             "bell",
             "disabled"
           ],
-          "description": "Notification style to use. Options: auto (default)",
+          "description": "Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).",
           "default": "auto"
         },
         "disabled_skills": {
@@ -633,6 +673,10 @@
         "provider_options": {
           "type": "object",
           "description": "Additional provider-specific options for this provider"
+        },
+        "aws_auth_refresh": {
+          "type": "string",
+          "description": "Shell command to run when AWS credentials expire (Bedrock only)."
         },
         "flat_rate": {
           "type": "boolean",
@@ -784,13 +828,15 @@
         },
         "expires_at": {
           "type": "integer"
+        },
+        "client": {
+          "$ref": "#/$defs/OAuthClient"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "access_token",
-        "refresh_token",
         "expires_in",
         "expires_at"
       ]

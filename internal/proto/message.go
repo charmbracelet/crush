@@ -21,14 +21,15 @@ type CreateMessageParams struct {
 
 // Message represents a message in the proto layer.
 type Message struct {
-	ID        string        `json:"id"`
-	Role      MessageRole   `json:"role"`
-	SessionID string        `json:"session_id"`
-	Parts     []ContentPart `json:"parts"`
-	Model     string        `json:"model"`
-	Provider  string        `json:"provider"`
-	CreatedAt int64         `json:"created_at"`
-	UpdatedAt int64         `json:"updated_at"`
+	ID               string        `json:"id"`
+	Role             MessageRole   `json:"role"`
+	SessionID        string        `json:"session_id"`
+	Parts            []ContentPart `json:"parts"`
+	Model            string        `json:"model"`
+	Provider         string        `json:"provider"`
+	CreatedAt        int64         `json:"created_at"`
+	UpdatedAt        int64         `json:"updated_at"`
+	IsSummaryMessage bool          `json:"is_summary_message,omitempty"`
 }
 
 // MessageRole represents the role of a message sender.
@@ -56,12 +57,13 @@ func (r *MessageRole) UnmarshalText(data []byte) error {
 type FinishReason string
 
 const (
-	FinishReasonEndTurn   FinishReason = "end_turn"
-	FinishReasonMaxTokens FinishReason = "max_tokens"
-	FinishReasonToolUse   FinishReason = "tool_use"
-	FinishReasonCanceled  FinishReason = "canceled"
-	FinishReasonError     FinishReason = "error"
-	FinishReasonUnknown   FinishReason = "unknown"
+	FinishReasonEndTurn       FinishReason = "end_turn"
+	FinishReasonMaxTokens     FinishReason = "max_tokens"
+	FinishReasonToolUse       FinishReason = "tool_use"
+	FinishReasonCanceled      FinishReason = "canceled"
+	FinishReasonError         FinishReason = "error"
+	FinishReasonContentFilter FinishReason = "content_filter"
+	FinishReasonUnknown       FinishReason = "unknown"
 )
 
 // MarshalText implements the [encoding.TextMarshaler] interface.

@@ -214,11 +214,12 @@ func NewToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	workingDir string,
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
 	case tools.BashToolName:
-		item = NewBashToolMessageItem(sty, toolCall, result, canceled)
+		item = NewBashToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobOutputToolName:
 		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
 	case tools.JobKillToolName:
@@ -649,7 +650,9 @@ func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, o
 
 // toolOutputPlainContent renders plain text with optional expansion support.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
-	content = common.RemapANSI16(stringext.NormalizeSpace(content), sty.ANSI)
+	content = stringext.NormalizeSpace(content)
+	content = common.StripCursorControl(content)
+	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
 	maxLines := responseContextHeight

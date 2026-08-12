@@ -55,7 +55,7 @@ func BenchmarkResizeSession(b *testing.B) {
 	sty := styles.CharmtonePantera()
 	var items []list.Item
 	for _, m := range ptrs {
-		for _, it := range ExtractMessageItems(&sty, m, toolResults) {
+		for _, it := range ExtractMessageItems(&sty, m, toolResults, "") {
 			items = append(items, it)
 		}
 	}

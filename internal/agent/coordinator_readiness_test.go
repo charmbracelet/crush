@@ -16,29 +16,30 @@ import (
 // TestBuildAgentReadinessSurvivesCallerCancellation is a regression test for
 // the CRUSH_CLIENT_SERVER=1 "new session hangs" bug.
 //
-// buildAgent starts readiness goroutines that run mcp.WaitForInit before
-// building the tool list. Several server entry points build an agent from a
+// buildAgent starts readiness goroutines that build the system prompt and the
+// initial tool list. Several server entry points build an agent from a
 // short-lived HTTP request context — the InitAgent/UpdateAgent handlers, and
 // the sub-agent build reached through UpdateModels -> buildTools -> agentTool.
-// When a slow MCP server kept initialization in flight, that request context
-// was canceled the moment the handler returned; WaitForInit then observed the
-// cancellation, the readyWg errgroup recorded context.Canceled, and every
-// later coordinator.run failed at readyWg.Wait() before emitting anything —
-// the session hung with no visible LLM response.
+// When that request context was canceled the moment the handler returned, the
+// readyWg errgroup recorded context.Canceled and every later coordinator.run
+// failed at readyWg.Wait() before emitting anything — the session hung with
+// no visible LLM response. (This was made worse while the tool-list goroutine
+// also blocked in mcp.WaitForInit, which kept it parked long enough to
+// observe the cancellation; the readiness work no longer waits on MCP init —
+// see coordinator.run — but the cancellation detachment still matters.)
 //
 // The fix detaches the readiness work from the caller context via
 // context.WithoutCancel, so canceling the context that triggered the build no
-// longer poisons readyWg. Here we arm MCP init so WaitForInit blocks, build an
-// agent with a cancelable context, cancel it, and require that readyWg keeps
-// waiting for init instead of failing with context.Canceled.
+// longer poisons readyWg. Here we build an agent with a cancelable context,
+// cancel it, and require that readyWg still completes cleanly.
 func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	env := testEnv(t)
 
 	// Minimal hermetic config: one openai-typed provider with selected large
 	// and small models so buildAgentModels and the system-prompt build both
 	// succeed. No MCP servers are configured, so initialization would complete
-	// instantly if we let it — we deliberately do not, so WaitForInit stays
-	// blocked for the duration of the assertion.
+	// instantly if we let it — we arm the gate anyway to prove the readiness
+	// goroutines no longer block on it.
 	crushJSON := `{
   "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
   "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
@@ -62,11 +63,11 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		filetracker: *env.filetracker,
 	}
 
-	// Arm the MCP init gate so buildAgent's readiness goroutine blocks in
-	// WaitForInit. We never complete init, so the goroutine stays parked; the
-	// agent package's TestMain does not enforce goleak and no other test in it
-	// builds a coordinator, so the parked goroutine is harmless.
+	// Arm the MCP init gate. We never complete init; the readiness goroutines
+	// must not care, since they build the tool list from the registry as it
+	// stands rather than waiting for initialization to finish.
 	mcp.ArmInit()
+	t.Cleanup(mcp.DisarmInit)
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
@@ -77,7 +78,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	require.NoError(t, err)
 
 	// The caller goes away, mirroring an HTTP handler returning and canceling
-	// its request context while MCP init is still in flight.
+	// its request context.
 	cancel()
 
 	done := make(chan error, 1)
@@ -85,15 +86,12 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 
 	select {
 	case err := <-done:
-		// readyWg finished early. context.Canceled is the regression: the
-		// caller's cancellation leaked into the readiness work and poisoned the
-		// errgroup. Any other early return means this minimal setup failed to
-		// build, which the NoError check surfaces distinctly.
+		// context.Canceled is the regression: the caller's cancellation
+		// leaked into the readiness work and poisoned the errgroup.
 		require.NotErrorIs(t, err, context.Canceled,
 			"readyWg was poisoned by caller cancellation (client/server new-session hang regression)")
 		require.NoError(t, err, "unexpected buildAgent readiness error")
-	case <-time.After(250 * time.Millisecond):
-		// readyWg is still waiting on MCP init despite the canceled caller
-		// context. This is the fixed behavior.
+	case <-time.After(2 * time.Second):
+		t.Fatal("readyWg did not complete; the readiness goroutines must not block on MCP init")
 	}
 }

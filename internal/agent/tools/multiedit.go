@@ -123,10 +123,14 @@ func validateEdits(edits []MultiEditOperation) error {
 	return nil
 }
 
-func applyEditsToContent(currentContent string, edits []MultiEditOperation, startIndex int) (string, []FailedEdit) {
+// applyEditsToContent applies edits sequentially, collecting the ones that
+// failed. It also reports whether any edit only matched after whitespace
+// normalization.
+func applyEditsToContent(currentContent string, edits []MultiEditOperation, startIndex int) (string, []FailedEdit, bool) {
 	var failedEdits []FailedEdit
+	var whitespaceCorrected bool
 	for i, edit := range edits {
-		newContent, err := applyEditToContent(currentContent, edit)
+		newContent, corrected, err := applyEditToContent(currentContent, edit)
 		if err != nil {
 			failedEdits = append(failedEdits, FailedEdit{
 				Index: startIndex + i + 1,
@@ -135,9 +139,10 @@ func applyEditsToContent(currentContent string, edits []MultiEditOperation, star
 			})
 			continue
 		}
+		whitespaceCorrected = whitespaceCorrected || corrected
 		currentContent = newContent
 	}
-	return currentContent, failedEdits
+	return currentContent, failedEdits, whitespaceCorrected
 }
 
 func processMultiEditWithCreation(edit editContext, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -160,7 +165,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
-	currentContent, failedEdits := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
+	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
 
 	// Get session and message IDs
 	sessionID := GetSessionFromContext(edit.ctx)
@@ -232,6 +237,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	} else {
 		message = fmt.Sprintf("File created with %d edits: %s", len(params.Edits), params.FilePath)
 	}
+	message = withWhitespaceNote(message, whitespaceCorrected)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(message),
@@ -255,7 +261,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return resp, nil
 	}
 
-	currentContent, failedEdits := applyEditsToContent(oldContent, params.Edits, 0)
+	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(oldContent, params.Edits, 0)
 
 	// Check if content actually changed
 	if oldContent == currentContent {
@@ -326,6 +332,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	} else {
 		message = fmt.Sprintf("Applied %d edits to file: %s", len(params.Edits), params.FilePath)
 	}
+	message = withWhitespaceNote(message, whitespaceCorrected)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(message),
@@ -340,13 +347,15 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	), nil
 }
 
-func applyEditToContent(content string, edit MultiEditOperation) (string, error) {
+// applyEditToContent applies a single edit, reporting whether it only matched
+// after whitespace normalization.
+func applyEditToContent(content string, edit MultiEditOperation) (string, bool, error) {
 	if edit.OldString == "" && edit.NewString == "" {
-		return content, nil
+		return content, false, nil
 	}
 
 	if edit.OldString == "" {
-		return "", fmt.Errorf("old_string cannot be empty for content replacement")
+		return "", false, fmt.Errorf("old_string cannot be empty for content replacement")
 	}
 
 	return findAndReplace(content, edit.OldString, edit.NewString, edit.ReplaceAll)

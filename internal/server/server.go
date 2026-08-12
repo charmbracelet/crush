@@ -105,6 +105,13 @@ func (s *Server) SetLogger(logger *slog.Logger) {
 	s.logger = logger
 }
 
+// Backend returns the server's backend. Intended for integration tests
+// that drive lifecycle transitions (detach, grace tuning) against a live
+// HTTP surface.
+func (s *Server) Backend() *backend.Backend {
+	return s.backend
+}
+
 // DefaultServer returns a new [Server] with the default address.
 func DefaultServer(cfg *config.ConfigStore) *Server {
 	hostURL, err := ParseHostURL(DefaultHost())
@@ -152,6 +159,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("GET /v1/version", c.handleGetVersion)
 	mux.HandleFunc("GET /v1/config", c.handleGetConfig)
 	mux.HandleFunc("POST /v1/control", c.handlePostControl)
+	mux.HandleFunc("DELETE /v1/clients/{client_id}", c.handleDeleteClient)
 	mux.HandleFunc("GET /v1/workspaces", c.handleGetWorkspaces)
 	mux.HandleFunc("POST /v1/workspaces", c.handlePostWorkspaces)
 	mux.HandleFunc("DELETE /v1/workspaces/{id}", c.handleDeleteWorkspaces)
@@ -208,8 +216,12 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("POST /v1/workspaces/{id}/skills/read", c.handlePostWorkspaceSkillRead)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-tools", c.handlePostWorkspaceMCPRefreshTools)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/read-resource", c.handlePostWorkspaceMCPReadResource)
+	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/prompts", c.handleGetWorkspaceMCPPrompts)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/get-prompt", c.handlePostWorkspaceMCPGetPrompt)
 	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/states", c.handleGetWorkspaceMCPStates)
+	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/pending-auth", c.handleGetWorkspaceMCPPendingAuth)
+	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/auth-url", c.handleGetWorkspaceMCPAuthURL)
+	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/auth", c.handlePostWorkspaceMCPAuth)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-prompts", c.handlePostWorkspaceMCPRefreshPrompts)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-resources", c.handlePostWorkspaceMCPRefreshResources)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/docker/enable", c.handlePostWorkspaceMCPEnableDocker)

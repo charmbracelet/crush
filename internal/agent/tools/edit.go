@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -192,27 +193,51 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 }
 
 // findAndReplace performs a find-and-replace on content. When replaceAll is
-// false it requires exactly one match. Returns the new content or an error
-// describing why the replacement could not be made.
-func findAndReplace(content, old, new string, replaceAll bool) (string, error) {
+// false it requires exactly one match. If an exact match fails, it falls back
+// to whitespace-normalized matching and, failing that, returns a diagnostic
+// hint describing why the replacement could not be made. The returned boolean
+// reports whether the replacement relied on the whitespace-normalized
+// fallback rather than an exact match.
+func findAndReplace(content, old, new string, replaceAll bool) (string, bool, error) {
 	if replaceAll {
-		if !strings.Contains(content, old) {
-			return "", fmt.Errorf("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks")
+		if strings.Contains(content, old) {
+			return strings.ReplaceAll(content, old, new), false, nil
 		}
-		return strings.ReplaceAll(content, old, new), nil
+	} else {
+		index := strings.Index(content, old)
+		switch {
+		case index == -1:
+			// Fall through to the fuzzy fallback below.
+		case index != strings.LastIndex(content, old):
+			return "", false, fmt.Errorf("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true")
+		default:
+			return content[:index] + new + content[index+len(old):], false, nil
+		}
 	}
 
-	index := strings.Index(content, old)
-	if index == -1 {
-		return "", fmt.Errorf("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks")
+	if result, ok := normalizedReplace(content, old, new, replaceAll); ok {
+		return result, true, nil
 	}
+	return "", false, notFoundError(content, old)
+}
 
-	lastIndex := strings.LastIndex(content, old)
-	if index != lastIndex {
-		return "", fmt.Errorf("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true")
+// withWhitespaceNote appends the whitespace auto-correction note to a tool
+// response message when the edit did not match the file byte-for-byte.
+func withWhitespaceNote(message string, whitespaceCorrected bool) string {
+	if !whitespaceCorrected {
+		return message
 	}
+	return message + "\n" + whitespaceCorrectedNote
+}
 
-	return content[:index] + new + content[index+len(old):], nil
+// notFoundError builds the "old_string not found" error, appending a
+// diagnostic hint when one is available to help the caller self-correct.
+func notFoundError(content, old string) error {
+	msg := "old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"
+	if hint := diagnoseMismatch(content, old); hint != "" {
+		msg += "\n\n" + hint
+	}
+	return errors.New(msg)
 }
 
 // commitFileChange writes newContent to filePath, updates the file history,
@@ -295,7 +320,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return resp, nil
 	}
 
-	newContent, err := findAndReplace(oldContent, oldString, "", replaceAll)
+	newContent, whitespaceCorrected, err := findAndReplace(oldContent, oldString, "", replaceAll)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -346,7 +371,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	}
 
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse("Content deleted from file: "+filePath),
+		fantasy.NewTextResponse(withWhitespaceNote("Content deleted from file: "+filePath, whitespaceCorrected)),
 		EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: writeContent,
@@ -365,7 +390,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return resp, nil
 	}
 
-	result, err := findAndReplace(oldContent, oldString, newString, replaceAll)
+	result, whitespaceCorrected, err := findAndReplace(oldContent, oldString, newString, replaceAll)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -419,7 +444,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	}
 
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse("Content replaced in file: "+filePath),
+		fantasy.NewTextResponse(withWhitespaceNote("Content replaced in file: "+filePath, whitespaceCorrected)),
 		EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: writeContent,

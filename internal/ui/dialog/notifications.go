@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
+	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/sahilm/fuzzy"
@@ -235,23 +236,28 @@ func (n *Notifications) FullHelp() [][]key.Binding {
 func (n *Notifications) setItems() {
 	cfg := n.com.Config()
 	currentStyle := "auto"
-	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
-		currentStyle = cfg.Options.NotificationStyle
+	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
+		currentStyle = cfg.Options.Notifications
 	}
 
 	items := make([]list.FilterableItem, 0, len(AllNotificationStyles))
 	selectedIndex := 0
-	for i, style := range AllNotificationStyles {
+	for _, style := range AllNotificationStyles {
+		// Native OS notifications don't build on every platform
+		// (illumos/solaris); hide the option where it can't work.
+		if style.ID == "native" && !notification.NativeSupported {
+			continue
+		}
 		item := &NotificationItem{
 			Versioned: list.NewVersioned(),
 			style:     style,
 			isCurrent: style.ID == currentStyle,
 			t:         n.com.Styles,
 		}
-		items = append(items, item)
 		if style.ID == currentStyle {
-			selectedIndex = i
+			selectedIndex = len(items)
 		}
+		items = append(items, item)
 	}
 
 	n.list.SetItems(items...)

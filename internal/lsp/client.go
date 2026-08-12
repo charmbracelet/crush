@@ -103,6 +103,13 @@ func New(
 
 // Initialize initializes the LSP client and returns the server capabilities.
 func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
+	// Register handlers for requests the server may send during the
+	// initialize handshake itself (e.g. typescript-language-server issuing
+	// window/workDoneProgress/create while loading the project, before
+	// initialize has returned). Registering after client.Initialize() is too
+	// late for those — the server treats an unhandled response as fatal.
+	c.registerHandlers()
+
 	if err := c.client.Initialize(ctx, false); err != nil {
 		return nil, fmt.Errorf("failed to initialize the lsp client: %w", err)
 	}
@@ -126,8 +133,6 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	result := &protocol.InitializeResult{
 		Capabilities: protocolCaps,
 	}
-
-	c.registerHandlers()
 
 	return result, nil
 }
@@ -227,6 +232,7 @@ func (c *Client) registerHandlers() {
 	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.client.GetOffsetEncoding()))
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
+	c.RegisterServerRequestHandler("window/workDoneProgress/create", HandleWorkDoneProgressCreate)
 	c.RegisterNotificationHandler("window/showMessage", func(ctx context.Context, method string, params json.RawMessage) {
 		if c.debug {
 			HandleServerMessage(ctx, method, params)
@@ -270,12 +276,15 @@ func (c *Client) Restart() error {
 
 	c.SetServerState(StateStarting)
 
+	// Register handlers before Initialize so servers that send
+	// requests during the handshake (e.g. window/workDoneProgress/create)
+	// don't crash on an unhandled response.
+	c.registerHandlers()
+
 	if err := c.client.Initialize(initCtx, false); err != nil {
 		c.SetServerState(StateError)
 		return fmt.Errorf("failed to initialize lsp client: %w", err)
 	}
-
-	c.registerHandlers()
 
 	if err := c.WaitForServerReady(initCtx); err != nil {
 		slog.Error("Server failed to become ready after restart", "name", c.name, "error", err)

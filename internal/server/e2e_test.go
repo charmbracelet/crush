@@ -342,10 +342,15 @@ func drainUntil[T any](ctx context.Context, evc <-chan any, match func(T) bool) 
 // config.Init does not read the host machine's real config.
 func TestE2E_TwoClientsReceiveSameMessage(t *testing.T) {
 	h := newRealCreateHarness(t)
-	// Shorten the create-grace window so the workspace's pending
-	// creation holds release quickly during test cleanup once both
-	// SSE streams have been detached.
+	// Shorten the lifecycle windows so the workspace's client holds
+	// release quickly during test cleanup once both SSE streams have
+	// been detached: the create grace covers the window before the
+	// streams attach, the detach grace the window after they drop.
+	// The pooled DB connection is only released once the last hold
+	// expires, and Windows cannot remove the temp data directory
+	// while that connection is still open.
 	h.backend.SetCreateGrace(200 * time.Millisecond)
+	h.backend.SetDetachGrace(200 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -463,7 +468,9 @@ func TestE2E_PermissionFlowCrossClient(t *testing.T) {
 
 	// Wait for the PermissionRequest to arrive on client A's SSE
 	// stream. We need its ID to drive the grant.
-	pickCtx, pickCancel := context.WithTimeout(ctx, 3*time.Second)
+	// 10s instead of the 3s used elsewhere because this context
+	// bounds three sequential waits, not one.
+	pickCtx, pickCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer pickCancel()
 	reqEv, ok := drainUntil(pickCtx, evcA, func(e pubsub.Event[proto.PermissionRequest]) bool {
 		return e.Payload.ToolCallID == toolCallID
@@ -567,10 +574,16 @@ func TestE2E_KillingClientASSEDoesNotBreakClientB(t *testing.T) {
 
 // TestE2E_ShutdownCallbackFiresWhenLastClientLeaves covers PLAN
 // item 6 scenario 4: once both clients disconnect, the backend
-// runs its "last workspace removed -> server shutdown" path.
+// runs its "last workspace removed -> server shutdown" path — now
+// after the idle-linger window rather than immediately.
 func TestE2E_ShutdownCallbackFiresWhenLastClientLeaves(t *testing.T) {
 	t.Parallel()
 	h := newE2EHarness(t)
+	// Shorten both lifecycle windows so the test doesn't wait out the
+	// production values. Both stay non-zero, so teardown still travels the
+	// real path: detach grace, then idle linger.
+	h.backend.SetDetachGrace(100 * time.Millisecond)
+	h.backend.SetIdleShutdownDelay(200 * time.Millisecond)
 
 	ctxA, cancelA := context.WithCancel(t.Context())
 	ctxB, cancelB := context.WithCancel(t.Context())
@@ -599,7 +612,8 @@ func TestE2E_ShutdownCallbackFiresWhenLastClientLeaves(t *testing.T) {
 	killB()
 	require.Eventually(t, h.shutdownHit.Load,
 		3*time.Second, 10*time.Millisecond,
-		"shutdown callback must fire once the last client disconnects")
+		"shutdown callback must fire once the last client disconnects "+
+			"(after the detach grace and the idle linger)")
 
 	// Workspace must be gone from the index.
 	_, err := h.backend.GetWorkspace(h.workspace.ID)

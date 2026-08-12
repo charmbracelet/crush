@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -37,7 +38,9 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/logo"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -57,6 +60,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific crush server host (for advanced users)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
+	_ = rootCmd.PersistentFlags().MarkHidden("channels")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
@@ -142,6 +147,7 @@ crush --continue
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
 		}
+		printSessionResume(model)
 		return nil
 	},
 }
@@ -160,9 +166,84 @@ var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
            ▀▀▀▀▀▀
 `)
 
+// printSessionResume prints the session title and resume hint to stdout after
+// the TUI exits, so the user can resume the session with `crush -s <id>`.
+// Nothing is printed when there is no active session.
+func printSessionResume(model *ui.UI) {
+	out := colorprofile.NewWriter(os.Stderr, os.Environ())
+
+	t := styles.ThemeForProvider("")
+	crushLogo := logo.Render(t.Logo.GradCanvas, version.Version, true, logo.Opts{
+		FieldColor:   t.Logo.FieldColor,
+		TitleColorA:  t.Logo.TitleColorA,
+		TitleColorB:  t.Logo.TitleColorB,
+		CharmColor:   t.Logo.CharmColor,
+		VersionColor: t.Logo.VersionColor,
+		Hyper:        false,
+	})
+
+	sess := model.CurrentSession()
+	hasSession := sess != nil && sess.ID != ""
+
+	tw, _, _ := term.GetSize(os.Stdout.Fd())
+	style := lipgloss.NewStyle().Padding(1, 3)
+	contentWidth := tw - style.GetHorizontalFrameSize()
+
+	info := crushLogo +
+		"\nThanks for using Crush! " +
+		lipgloss.NewStyle().Width(contentWidth).Render(randomExitMessage())
+
+	if hasSession {
+		title := strings.ReplaceAll(sess.Title, "\n", " ")
+
+		labelWidth := lipgloss.Width("Session  ")
+		titleWidth := contentWidth - labelWidth
+		if titleWidth > 0 {
+			title = ansi.Truncate(title, titleWidth, "…")
+		}
+
+		hash := session.HashID(sess.ID)[:7]
+		sessionLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Session  ") + title
+		continueLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Continue ") + "crush -s " + hash
+		info += "\n\n" + sessionLine + "\n" + continueLine
+	}
+
+	body := style.Width(tw).Render(info)
+
+	fmt.Fprintln(out, body)
+}
+
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
 `
+
+// randomExitMessage returns a random exit message.
+func randomExitMessage() string {
+	messages := []string{
+		"",
+		"See ya later.",
+		"You look great.",
+		"Have a gorgeous time.",
+		"Get some rest.",
+		"Come back soon.",
+		"You worked handsomely.",
+		"Time for a snack.",
+		"Who’s hungry?",
+		"That was fun.",
+		"See you at breakfast?",
+		"Time for a nap.",
+		"Who wants some spaghetti?",
+		"Take care of yourself.",
+		"Remember to hydrate.",
+		"Time for a swim?",
+		"You’re quite glamorous, you know.",
+		"Nice work.",
+		"You’re a sensation.",
+		"Where’s my eyeliner?",
+		"It’s tea time.",
+	}
+	return messages[rand.IntN(len(messages))]
+}
 
 func Execute() {
 	// FIXME: config.Load uses slog internally during provider resolution,
@@ -250,6 +331,7 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	channels, _ := cmd.Flags().GetStringSlice("channels")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -265,6 +347,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 
 	cfg := store.Config()
 	store.Overrides().SkipPermissionRequests = yolo
+	store.Overrides().EnabledChannels = channels
 
 	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("failed to create data directory: %q %w", cfg.Options.DataDirectory, err)
@@ -343,7 +426,7 @@ func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfi
 // setupClientServerWorkspace connects to a server process and wraps the
 // result in a ClientWorkspace.
 func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
-	c, protoWs, cleanupServer, err := connectToServer(cmd)
+	c, protoWs, _, err := connectToServer(cmd)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -356,7 +439,10 @@ func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func()
 		}
 	}
 
-	return clientWs, cleanupServer, nil
+	// Clean up via Shutdown rather than connectToServer's closure: it stops
+	// the subscription's reconnect/recovery loop first, so our own exit
+	// cannot be mistaken for a lost workspace and re-created mid-quit.
+	return clientWs, clientWs.Shutdown, nil
 }
 
 // connectToServer ensures the server is running, creates a client and
@@ -373,8 +459,8 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	channels, _ := cmd.Flags().GetStringSlice("channels")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
-	ctx := cmd.Context()
 
 	cwd, err := ResolveCwd(cmd)
 	if err != nil {
@@ -387,17 +473,20 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	}
 
 	wsReq := proto.Workspace{
-		Path:    cwd,
-		DataDir: dataDir,
-		Debug:   debug,
-		YOLO:    yolo,
-		Version: version.Version,
-		Env:     os.Environ(),
+		Path:     cwd,
+		DataDir:  dataDir,
+		Debug:    debug,
+		YOLO:     yolo,
+		Channels: channels,
+		Version:  version.Version,
+		Env:      os.Environ(),
 	}
 
-	ws, err := c.CreateWorkspace(ctx, wsReq)
+	ws, err := createWorkspaceOnLiveServer(cmd.Context(), c, wsReq, func() error {
+		return replaceExitingServer(cmd, hostURL)
+	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create workspace: %v", err)
+		return nil, nil, nil, err
 	}
 
 	if shouldEnableMetrics(ws.Config) {
@@ -409,8 +498,63 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 		crushlog.Setup(logFile, debug)
 	}
 
-	cleanup := func() { _ = c.DeleteWorkspace(context.Background(), ws.ID) }
+	// Retiring the client releases every claim it holds, so it covers
+	// workspaces this process created but never learned the ID of.
+	cleanup := func() {
+		if err := c.RetireClient(context.Background()); err != nil {
+			_ = c.DeleteWorkspace(context.Background(), ws.ID)
+		}
+	}
 	return c, ws, cleanup, nil
+}
+
+// maxStaleServerRetries bounds how many times workspace creation may be
+// retried against a replacement server. Only one client can lose the race
+// against a given server's shutdown, so a single retry is normally enough;
+// the bound just keeps a pathological loop finite.
+const maxStaleServerRetries = 3
+
+// createWorkspaceOnLiveServer creates the workspace, retrying against a
+// replacement when the server it reached has already committed to shutting
+// itself down for being idle.
+//
+// That race is unavoidable: the server decides to exit while no client is
+// talking to it, and a client can arrive between that decision and the
+// socket going away. The decision is final on the server's side, so the
+// only correct response is to bring up a fresh server and ask again
+// instead of failing the command.
+func createWorkspaceOnLiveServer(
+	ctx context.Context, c *client.Client, req proto.Workspace, replace func() error,
+) (*proto.Workspace, error) {
+	for attempt := range maxStaleServerRetries {
+		ws, err := c.CreateWorkspace(ctx, req)
+		if err == nil {
+			return ws, nil
+		}
+		if !errors.Is(err, client.ErrServerShuttingDown) || attempt == maxStaleServerRetries-1 {
+			return nil, fmt.Errorf("failed to create workspace: %v", err)
+		}
+		slog.Warn("Server is shutting down; retrying against a replacement",
+			"attempt", attempt+1, "error", err)
+		if err := replace(); err != nil {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("failed to create workspace: server kept shutting down")
+}
+
+// replaceExitingServer waits out the socket of a server that has committed
+// to exiting, then brings up a fresh one.
+func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL) error {
+	if hostURL.Scheme == "unix" {
+		if err := awaitSocketGone(cmd.Context(), hostURL); err != nil {
+			return err
+		}
+	}
+	if err := spawnAndWaitReady(cmd, hostURL); err != nil {
+		return fmt.Errorf("failed to initialize crush server: %v", err)
+	}
+	return nil
 }
 
 // ensureServer auto-starts a detached server if the socket file does not
@@ -668,12 +812,21 @@ func probeHealth(ctx context.Context, h *http.Client, reqURL string, hostURL *ur
 }
 
 // restartIfStale checks whether the running server matches the current
-// client version. When they differ, it sends a shutdown command and
-// removes the stale socket so the caller can start a fresh server.
+// client version. When they differ it asks the server to stand down and,
+// if it agrees, removes the stale socket so the caller can start a fresh
+// server.
 //
-// It returns restarted=true when it has shut down a stale server and the
-// caller must spawn a new one. When the server matches the client version
-// (or the check itself fails), restarted is false.
+// The request is conditional and the server has the last word: it refuses
+// while it is hosting anything, because BuildID derives from the
+// executable's mtime, so any rebuild (including every `go run`) makes a
+// second session look like an upgrade and would otherwise kill the first
+// session's workspaces. Servers too old to understand the conditional
+// command are left running for the same reason — the request they do
+// understand is unconditional. They shut themselves down when they go
+// idle, and the next client then finds no socket and spawns a current one.
+//
+// It returns restarted=true only when the server accepted the shutdown and
+// the caller must spawn a replacement.
 func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err error) {
 	c, err := client.NewClient("", hostURL.Scheme, hostURL.Host)
 	if err != nil {
@@ -686,28 +839,77 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 	if vi.Version == version.Version && vi.BuildID == version.BuildID {
 		return false, nil
 	}
-	slog.Info(
-		"Server version mismatch, restarting",
+	versionFields := []any{
 		"server_version", vi.Version,
 		"client_version", version.Version,
 		"server_build_id", vi.BuildID,
 		"client_build_id", version.BuildID,
-	)
-	_ = c.ShutdownServer(cmd.Context())
-	// Give the old process a moment to release the socket.
+	}
+	// Every refusal — in use, too old to be asked, or unreachable — leads to
+	// the same safe outcome: keep using the running server. The wrapped
+	// error says which it was.
+	if err := c.ShutdownServerIfIdle(cmd.Context()); err != nil {
+		if !errors.Is(err, client.ErrUnsupported) {
+			slog.Warn("Server version differs but it will not stand down; reusing it",
+				append(versionFields, "error", err)...)
+			return false, nil
+		}
+		// The server predates shutdown_if_idle. Fall back to the
+		// unconditional command, but only after verifying it is idle.
+		if !shutdownLegacyStaleServer(cmd.Context(), c, versionFields) {
+			return false, nil
+		}
+	}
+	slog.Info("Stale server accepted shutdown, restarting", versionFields...)
+	if err := awaitSocketGone(cmd.Context(), hostURL); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// shutdownLegacyStaleServer handles a stale server too old to understand the
+// idle-checked shutdown. That server's only "shutdown" command is
+// unconditional and would take live sessions down, so it is used only after
+// listing workspaces confirms the server is idle. It reports whether the
+// server accepted the shutdown; every other outcome (unreachable, busy, or a
+// refused shutdown) is logged and reported as false so the caller reuses the
+// running server.
+func shutdownLegacyStaleServer(ctx context.Context, c *client.Client, versionFields []any) bool {
+	workspaces, err := c.ListWorkspaces(ctx)
+	if err != nil {
+		slog.Warn("Server version differs but it will not stand down; reusing it",
+			append(versionFields, "list_error", err)...)
+		return false
+	}
+	if len(workspaces) > 0 {
+		slog.Warn("Server version differs and has active workspaces; reusing it",
+			append(versionFields, "workspaces", len(workspaces))...)
+		return false
+	}
+	if err := c.ShutdownServer(ctx); err != nil {
+		slog.Warn("Server version differs but it will not stand down; reusing it",
+			append(versionFields, "error", err)...)
+		return false
+	}
+	return true
+}
+
+// awaitSocketGone gives a server that has committed to exiting a moment to
+// release its socket, then force-removes whatever is left: the old process
+// has latched its decision and will not serve requests again.
+func awaitSocketGone(ctx context.Context, hostURL *url.URL) error {
 	for range 20 {
 		if _, err := os.Stat(hostURL.Host); errors.Is(err, fs.ErrNotExist) {
-			break
+			return nil
 		}
 		select {
-		case <-cmd.Context().Done():
-			return true, cmd.Context().Err()
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	// Force-remove if the socket is still lingering.
 	_ = os.Remove(hostURL.Host)
-	return true, nil
+	return nil
 }
 
 var safeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9._-]`)

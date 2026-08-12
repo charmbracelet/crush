@@ -11,7 +11,7 @@
 //     notifications are disabled or no suitable backend is available.
 //
 // Backend selection is based on terminal capabilities, environment, and user config:
-//   - Users can explicitly set notification_style in crush.json (auto/native/osc/bell/disabled)
+//   - Users can explicitly set notifications in crush.json (auto/native/osc/bell/disabled)
 //   - Auto mode: SSH sessions use OSC backend (auto-detects OSC 99 vs 777)
 //   - Auto mode: Local sessions use native OS notifications
 //   - If focus events are not supported in local sessions, notifications are disabled (NoopBackend)

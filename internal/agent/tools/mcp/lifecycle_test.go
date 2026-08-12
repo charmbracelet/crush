@@ -123,6 +123,48 @@ func TestUpdateState_ErrorClosesSessionAndClearsTools(t *testing.T) {
 	require.Equal(t, StateError, info.State)
 }
 
+// TestUpdateState_ConfigBookkeeping pins the config snapshot reconcile relies
+// on: StateConnected records the config now in effect and clears any pending
+// attempt, StateStarting records the config the in-flight attempt is using,
+// StateDisabled clears the recorded config so a re-enable restarts, and every
+// other transition preserves what was there.
+func TestUpdateState_ConfigBookkeeping(t *testing.T) {
+	const name = "test-config-bookkeeping"
+	t.Cleanup(func() {
+		states.Del(name)
+	})
+
+	base := config.MCPConfig{Type: config.MCPHttp, URL: "https://example.com/mcp"}
+	changed := base
+	changed.URL = "https://other.com/mcp"
+
+	// Connecting records the config and clears any pending attempt.
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(base))
+	updateState(name, StateConnected, nil, nil, Counts{}, withConfig(base))
+	info, _ := GetState(name)
+	require.Equal(t, base, info.Config, "connected state must record its config")
+	require.Nil(t, info.PendingConfig, "connected state must clear the pending config")
+
+	// Starting records the config the attempt is connecting with.
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(changed))
+	info, _ = GetState(name)
+	require.NotNil(t, info.PendingConfig, "starting state must record the pending config")
+	require.Equal(t, changed, *info.PendingConfig)
+	require.Equal(t, base, info.Config, "starting must not disturb the last connected config")
+
+	// An error preserves both so reconcile can still reason about the server.
+	updateState(name, StateError, errors.New("boom"), nil, Counts{})
+	info, _ = GetState(name)
+	require.Equal(t, base, info.Config, "error must preserve the connected config")
+	require.NotNil(t, info.PendingConfig, "error must preserve the pending config")
+
+	// Disabling clears both so a re-enable with an unchanged config restarts.
+	updateState(name, StateDisabled, nil, nil, Counts{})
+	info, _ = GetState(name)
+	require.Equal(t, config.MCPConfig{}, info.Config, "disabled must clear the connected config")
+	require.Nil(t, info.PendingConfig, "disabled must clear the pending config")
+}
+
 // TestUpdateState_ErrorClearsPromptsAndResources pins that a StateError
 // transition also drops the dead server's prompts and resources, not just its
 // tools. Leaving them registered lets a disconnected server keep advertising
@@ -195,7 +237,7 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 
 	var created atomic.Int32
 	origNewSession := newSession
-	newSession = func(context.Context, string, config.MCPConfig, config.VariableResolver) (*ClientSession, error) {
+	newSession = func(context.Context, *config.ConfigStore, string, config.MCPConfig, config.VariableResolver, bool) (*ClientSession, error) {
 		created.Add(1)
 		return <-replacements, nil
 	}
@@ -324,7 +366,7 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 
 	replacement := liveSessionWithCapabilities(t, "send_message", "a_prompt", "res://thing")
 	origNewSession := newSession
-	newSession = func(context.Context, string, config.MCPConfig, config.VariableResolver) (*ClientSession, error) {
+	newSession = func(context.Context, *config.ConfigStore, string, config.MCPConfig, config.VariableResolver, bool) (*ClientSession, error) {
 		return replacement, nil
 	}
 	t.Cleanup(func() { newSession = origNewSession })

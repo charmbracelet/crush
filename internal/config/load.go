@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 	"github.com/tidwall/gjson"
@@ -43,7 +44,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 	configPaths := lookupConfigs(workingDir)
 
-	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
+	cfg, loadedPaths, err := loadFromConfigPaths(context.Background(), configPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
@@ -99,10 +100,19 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		assignIfNil(&cfg.Options.TUI.Transparent, true)
 	}
 
-	// Load known providers, this loads the config from catwalk
-	providers, err := Providers(cfg)
+	// Load known providers, this loads the config from catwalk. A failed
+	// refresh still yields the cached or embedded catalog, so only an empty
+	// list is fatal: starting up without providers is worse than starting
+	// up with slightly stale ones. Pass a Hyper token refresher so the
+	// catalog fetch can retry on 401.
+	providers, err := Providers(cfg, func(ctx context.Context) error {
+		return store.RefreshOAuthToken(ctx, ScopeGlobal, "hyper")
+	})
 	if err != nil {
-		return nil, err
+		if len(providers) == 0 {
+			return nil, err
+		}
+		slog.Warn("Continuing with the previously known providers", "error", err)
 	}
 	store.knownProviders = providers
 
@@ -115,6 +125,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// from triggering auto-reload via RemoveConfigField.
 	store.writeMu.Lock()
 	defer store.writeMu.Unlock()
+
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
+	cfg.applyEnv(valueResolver)
 
 	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
@@ -150,7 +164,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.SetupAgents()
 
 	// Capture initial staleness snapshot
-	store.captureStalenessSnapshot(loadedPaths)
+	// Capture initial staleness snapshot. Track every discovered config path,
+	// not just the ones that loaded, so a config file created after startup
+	// (e.g. a crushrc added mid-session) is detected as a change.
+	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
 
 	return store, nil
 }
@@ -269,20 +286,20 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			headers[k] = resolved
 		}
-		prepared := ProviderConfig{
-			ID:                 string(p.ID),
-			Name:               p.Name,
-			BaseURL:            p.APIEndpoint,
-			APIKey:             p.APIKey,
-			APIKeyTemplate:     p.APIKey, // Store original template for re-resolution
-			OAuthToken:         config.OAuthToken,
-			Type:               p.Type,
-			Disable:            config.Disable,
-			SystemPromptPrefix: config.SystemPromptPrefix,
-			ExtraHeaders:       headers,
-			ExtraBody:          config.ExtraBody,
-			ExtraParams:        make(map[string]string),
-			Models:             p.Models,
+		// Start from user config so all user fields survive without
+		// explicit copying. Overlay catwalk identity/endpoint fields
+		// (already merged with user overrides above).
+		prepared := config
+		prepared.ID = string(p.ID)
+		prepared.Name = p.Name
+		prepared.BaseURL = p.APIEndpoint
+		prepared.APIKey = p.APIKey
+		prepared.APIKeyTemplate = p.APIKey // Store original template for re-resolution
+		prepared.Type = p.Type
+		prepared.Models = p.Models
+		prepared.ExtraHeaders = headers
+		if prepared.ExtraParams == nil {
+			prepared.ExtraParams = make(map[string]string)
 		}
 
 		switch {
@@ -500,6 +517,25 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	return nil
 }
 
+// applyEnv sets top-level env vars from the config. Keys are sorted for
+// deterministic ordering so that vars referencing other vars via the
+// value resolver produce consistent results.
+func (c *Config) applyEnv(resolver VariableResolver) {
+	keys := make([]string, 0, len(c.Env))
+	for k := range c.Env {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		resolved, err := resolver.ResolveValue(c.Env[k])
+		if err != nil {
+			slog.Warn("Skipping env var due to resolution failure.", "key", k, "value", c.Env[k], "error", err)
+			continue
+		}
+		os.Setenv(k, resolved)
+	}
+}
+
 func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options == nil {
 		c.Options = &Options{}
@@ -538,6 +574,13 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
+	}
+	// Drop orphaned OAuth token entries left behind when a user removes
+	// an MCP from crush.json. See MCPConfig.isOrphanedToken.
+	for name, m := range c.MCP {
+		if m.isOrphanedToken() {
+			delete(c.MCP, name)
+		}
 	}
 	if c.LSP == nil {
 		c.LSP = make(map[string]LSPConfig)
@@ -789,6 +832,9 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if largeModelSelected.PresencePenalty != nil {
 				large.PresencePenalty = largeModelSelected.PresencePenalty
 			}
+			if largeModelSelected.ProviderOptions != nil {
+				large.ProviderOptions = maps.Clone(largeModelSelected.ProviderOptions)
+			}
 		}
 	}
 	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
@@ -830,6 +876,9 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if smallModelSelected.PresencePenalty != nil {
 				small.PresencePenalty = smallModelSelected.PresencePenalty
 			}
+			if smallModelSelected.ProviderOptions != nil {
+				small.ProviderOptions = maps.Clone(smallModelSelected.ProviderOptions)
+			}
 			small.Think = smallModelSelected.Think
 		}
 	}
@@ -864,13 +913,27 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 // up. Global user-level config locations are always included
 // regardless of the boundary.
 func lookupConfigs(cwd string) []string {
-	// prepend default config paths
+	// Prepend global user config and machine-owned data JSON. Only the user
+	// config directory contributes a crushrc; the data directory is writable
+	// machine state and must never be executed as Bash. Missing files are
+	// skipped when loaded.
 	configPaths := []string{
+		systemConfigPath,
 		GlobalConfig(),
+		shellConfigSibling(GlobalConfig()),
 		GlobalConfigData(),
 	}
 
-	configNames := []string{appName + ".json", "." + appName + ".json"}
+	// Ordered high-to-low priority within a directory. LookupBounded returns
+	// matches in this order, and the later reverse + merge make the earliest
+	// listed name win on conflict. So: .crushrc beats crushrc, both beat the
+	// JSON configs, and .crush.json beats crush.json.
+	configNames := []string{
+		"." + appName + "rc",
+		appName + "rc",
+		"." + appName + ".json",
+		appName + ".json",
+	}
 
 	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
 	if err != nil {
@@ -884,11 +947,20 @@ func lookupConfigs(cwd string) []string {
 	return append(configPaths, foundConfigs...)
 }
 
-func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
+func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []string, error) {
 	var configs [][]byte
 	var loaded []string
 
+	// Track directories that have both crush.json and crushrc to warn
+	// about potential confusion, along with the top-level keys each
+	// defines so we can report conflicts.
+	jsonDirKeys := make(map[string]map[string]bool)
+	shDirKeys := make(map[string]map[string]bool)
+
 	for _, path := range configPaths {
+		if path == "" {
+			continue
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -899,11 +971,50 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		if len(data) == 0 {
 			continue
 		}
-		if !json.Valid(data) {
-			return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
+
+		dir := filepath.Dir(path)
+		if isShellConfig(path) {
+			jsonBytes, err := shellconfig.LoadShellConfig(ctx, path, data)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load shell config %s: %w", path, err)
+			}
+			if len(jsonBytes) > 0 {
+				if !json.Valid(jsonBytes) {
+					return nil, nil, fmt.Errorf("shell config %s produced invalid JSON", path)
+				}
+				addTopLevelKeys(shDirKeys, dir, jsonBytes)
+				configs = append(configs, jsonBytes)
+				loaded = append(loaded, path)
+			}
+		} else {
+			if !json.Valid(data) {
+				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
+			}
+			addTopLevelKeys(jsonDirKeys, dir, data)
+			configs = append(configs, data)
+			loaded = append(loaded, path)
 		}
-		configs = append(configs, data)
-		loaded = append(loaded, path)
+	}
+
+	// Warn if both a JSON config and a crushrc exist in the same directory
+	// and define overlapping top-level keys. Disjoint coexistence is
+	// intentional and not worth warning about.
+	for dir, jKeys := range jsonDirKeys {
+		sKeys, ok := shDirKeys[dir]
+		if !ok {
+			continue
+		}
+		var conflicts []string
+		for k := range jKeys {
+			if sKeys[k] {
+				conflicts = append(conflicts, k)
+			}
+		}
+		if len(conflicts) > 0 {
+			slices.Sort(conflicts)
+			slog.Warn("Found both a JSON config and a crushrc in the same directory; merging with crushrc taking precedence",
+				"dir", dir, "conflicting_keys", strings.Join(conflicts, ", "))
+		}
 	}
 
 	cfg, err := loadFromBytes(configs)
@@ -911,6 +1022,20 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		return nil, nil, err
 	}
 	return cfg, loaded, nil
+}
+
+// addTopLevelKeys records the top-level JSON keys present in data into the
+// set for dir.
+func addTopLevelKeys(m map[string]map[string]bool, dir string, data []byte) {
+	keys := m[dir]
+	if keys == nil {
+		keys = make(map[string]bool)
+		m[dir] = keys
+	}
+	gjson.ParseBytes(data).ForEach(func(key, _ gjson.Result) bool {
+		keys[key.String()] = true
+		return true
+	})
 }
 
 func loadFromBytes(configs [][]byte) (*Config, error) {
@@ -970,15 +1095,18 @@ func hasAWSCredentials(env env.Env) bool {
 }
 
 // migrateDisableNotifications migrates the deprecated disable_notifications
-// field to notification_style. It checks both the user config (~/.config) and
-// data config (~/.local) files. If disable_notifications is true, it sets
-// notification_style to "disabled" in the data file. Regardless of value, it
-// removes disable_notifications from any file that contains it.
+// and notification_style fields to the unified notifications field. It checks
+// both the user config (~/.config) and data config (~/.local) files. If
+// disable_notifications is true, it sets notifications to "disabled" in the
+// data file. If notification_style is set, it moves the value to notifications.
+// Regardless of value, it removes the deprecated fields from any file that
+// contains them.
 func migrateDisableNotifications() {
 	globalConfig := GlobalConfig()
 	dataConfig := GlobalConfigData()
 
 	var wasDisabled bool
+	var styleValue string
 	filesToClean := []string{}
 
 	for _, path := range []string{globalConfig, dataConfig} {
@@ -986,11 +1114,21 @@ func migrateDisableNotifications() {
 		if err != nil {
 			continue
 		}
+		needsClean := false
 		if gjson.Get(string(data), "options.disable_notifications").Exists() {
-			filesToClean = append(filesToClean, path)
+			needsClean = true
 			if gjson.Get(string(data), "options.disable_notifications").Bool() {
 				wasDisabled = true
 			}
+		}
+		if v := gjson.Get(string(data), "options.notification_style"); v.Exists() {
+			needsClean = true
+			if styleValue == "" {
+				styleValue = v.String()
+			}
+		}
+		if needsClean {
+			filesToClean = append(filesToClean, path)
 		}
 	}
 
@@ -998,32 +1136,39 @@ func migrateDisableNotifications() {
 		return
 	}
 
-	// If notifications were disabled, persist the equivalent notification_style.
-	if wasDisabled {
+	// Determine the value to persist: notification_style takes precedence,
+	// then disable_notifications: true maps to "disabled".
+	migratedValue := styleValue
+	if migratedValue == "" && wasDisabled {
+		migratedValue = "disabled"
+	}
+
+	if migratedValue != "" {
 		data, err := os.ReadFile(dataConfig)
 		if err == nil {
-			if !gjson.Get(string(data), "options.notification_style").Exists() {
-				updated, err := sjson.Set(string(data), "options.notification_style", "disabled")
+			if !gjson.Get(string(data), "options.notifications").Exists() {
+				updated, err := sjson.Set(string(data), "options.notifications", migratedValue)
 				if err == nil {
 					if err := atomicWriteFile(dataConfig, []byte(updated), 0o600); err != nil {
-						slog.Warn("Failed to migrate disable_notifications to notification_style", "error", err)
+						slog.Warn("Failed to migrate to notifications field", "error", err)
 					} else {
-						slog.Info("Migrated disable_notifications: true to notification_style: disabled")
+						slog.Info("Migrated notification settings to notifications field", "value", migratedValue)
 					}
 				}
 			}
 		}
 	}
 
-	// Remove disable_notifications from all files that contain it.
+	// Remove deprecated fields from all files that contain them.
 	for _, path := range filesToClean {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		updated, err := sjson.Delete(string(data), "options.disable_notifications")
-		if err != nil {
-			slog.Warn("Failed to remove deprecated disable_notifications field", "path", path, "error", err)
+		updated := string(data)
+		updated, _ = sjson.Delete(updated, "options.disable_notifications")
+		updated, _ = sjson.Delete(updated, "options.notification_style")
+		if updated == string(data) {
 			continue
 		}
 		if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
@@ -1038,6 +1183,20 @@ func GlobalConfig() string {
 		return filepath.Join(crushGlobal, fmt.Sprintf("%s.json", appName))
 	}
 	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
+}
+
+// shellConfigSibling returns the crushrc path that sits alongside a given
+// crush.json path (same directory). Used so global config locations pick up a
+// shell config, not just JSON.
+func shellConfigSibling(jsonPath string) string {
+	return filepath.Join(filepath.Dir(jsonPath), appName+"rc")
+}
+
+// isShellConfig reports whether a config path is a shell config (crushrc or
+// the hidden .crushrc), as opposed to a JSON config.
+func isShellConfig(path string) bool {
+	base := filepath.Base(path)
+	return base == appName+"rc" || base == "."+appName+"rc"
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the

@@ -421,10 +421,14 @@ func TestDispatch_ProbeWindowClassifiesByHead(t *testing.T) {
 // TestDispatch_BinaryPassthroughExecutes copies a real binary from PATH
 // into a tempdir, invokes it via a path-prefixed argv[0], and verifies it
 // ran — i.e. the binary branch correctly returns through `next` to the
-// default exec handler. We use whichever of `true`/`echo` is available on
-// PATH so the test works on any Unix-y system; it skips on Windows where
-// the stock binaries don't share names and the Go test binary approach
-// is heavier than this test deserves.
+// default exec handler. It skips on Windows, where the stock binaries
+// don't share names and the Go test binary approach is heavier than this
+// test deserves.
+//
+// The copy keeps the source's filename. Some coreutils builds (Nix's, for
+// one) ship every utility as a single multi-call binary that picks its
+// behaviour from argv[0], so a renamed copy of `true` exits non-zero with
+// "unknown program" instead of succeeding.
 func TestDispatch_BinaryPassthroughExecutes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("relies on a Unix-style PATH binary")
@@ -438,7 +442,7 @@ func TestDispatch_BinaryPassthroughExecutes(t *testing.T) {
 		t.Fatalf("read %s: %v", src, err)
 	}
 	dir := t.TempDir()
-	dst := filepath.Join(dir, "copied-true")
+	dst := filepath.Join(dir, filepath.Base(src))
 	if err := os.WriteFile(dst, data, 0o755); err != nil {
 		t.Fatalf("write %s: %v", dst, err)
 	}
@@ -452,7 +456,7 @@ func TestDispatch_BinaryPassthroughExecutes(t *testing.T) {
 		Env: os.Environ(),
 	})
 	if runErr != nil {
-		t.Fatalf("expected copy of /bin/true to exit 0, got: %v", runErr)
+		t.Fatalf("expected copy of %s to exit 0, got: %v", src, runErr)
 	}
 }
 

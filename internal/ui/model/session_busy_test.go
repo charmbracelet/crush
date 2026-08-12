@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -32,6 +33,9 @@ type countingWorkspace struct {
 	agentBusy bool
 	yolo      bool
 	queued    []string
+	model     workspace.AgentModel
+	lspStates map[string]workspace.LSPClientInfo
+	lspDiags  map[string]lsp.DiagnosticCounts
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -41,10 +45,21 @@ type countingWorkspace struct {
 	permSetCalls    int
 	clearQueueCalls int
 	cancelCalls     int
+	modelCalls      int
+	lspStateCalls   int
+	lspDiagCalls    int
 }
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
+
+func (w *countingWorkspace) AgentReadyErr() error {
+	w.readyCalls++
+	if w.ready {
+		return nil
+	}
+	return workspace.ErrAgentNotInitialized
+}
 
 func (w *countingWorkspace) AgentQueuedPrompts(string) int {
 	w.queuedCalls++
@@ -66,6 +81,21 @@ func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) {
 func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
 func (w *countingWorkspace) AgentCancel(string)     { w.cancelCalls++ }
 
+func (w *countingWorkspace) AgentModel() workspace.AgentModel {
+	w.modelCalls++
+	return w.model
+}
+
+func (w *countingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
+	w.lspStateCalls++
+	return w.lspStates
+}
+
+func (w *countingWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
+	w.lspDiagCalls++
+	return w.lspDiags[name]
+}
+
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
 }
@@ -74,22 +104,26 @@ func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message
 	return nil, nil
 }
 
+func (w *countingWorkspace) WorkingDir() string { return "" }
+
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
 
 func (w *countingWorkspace) Config() *config.Config { return nil }
 
 // syncProbes sums every synchronous counter; Update/View must keep this at
-// zero — the busy/queue invariant is that no workspace call ever happens on
-// the Update goroutine.
+// zero — the invariant is that no workspace call ever happens on the Update
+// goroutine (which is also the render loop).
 func (w *countingWorkspace) syncProbes() int {
 	return w.readyCalls + w.agentBusyCalls +
-		w.queuedCalls + w.queueListCalls + w.permCalls
+		w.queuedCalls + w.queueListCalls + w.permCalls +
+		w.modelCalls + w.lspStateCalls + w.lspDiagCalls
 }
 
 func (w *countingWorkspace) resetCounters() {
 	w.readyCalls, w.agentBusyCalls = 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
+	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
 }
 
 // newBusyUI builds a UI wired to the stub workspace with an active session
@@ -117,10 +151,11 @@ func newBusyUI(ws *countingWorkspace) *UI {
 // boundary (the tests using it must not call t.Parallel).
 func pinTTLs(t *testing.T) {
 	t.Helper()
-	oldBusy, oldQueue := busyCacheTTL, promptQueueTTL
+	oldBusy, oldQueue, oldLSP := busyCacheTTL, promptQueueTTL, lspStatesTTL
 	busyCacheTTL = time.Hour
 	promptQueueTTL = time.Hour
-	t.Cleanup(func() { busyCacheTTL, promptQueueTTL = oldBusy, oldQueue })
+	lspStatesTTL = time.Hour
+	t.Cleanup(func() { busyCacheTTL, promptQueueTTL, lspStatesTTL = oldBusy, oldQueue, oldLSP })
 }
 
 // warmCaches marks all memoized workspace state fresh so only explicit
@@ -128,7 +163,9 @@ func pinTTLs(t *testing.T) {
 func warmCaches(m *UI, busy bool) {
 	m.agentBusyCache.set(busy)
 	m.yoloCache.set(false)
+	m.agentReady = true
 	m.promptQueueCheckedAt = time.Now()
+	m.lspCheckedAt = time.Now()
 }
 
 // runCmds executes a command tree the way the Bubble Tea runtime would,
@@ -143,7 +180,7 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmds(m, c)
 		}
-	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg:
+	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	}
@@ -430,6 +467,41 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 	require.False(t, m.busyFetchInFlight, "fresh caches must not re-dispatch the backstop")
 }
 
+// TestSetSessionMessagesGatesAnimationsOnBusy verifies that reloading a
+// session does not start spinner animations when the agent is not busy.
+// A session that was killed mid-generation can persist an assistant message
+// with no Finish part, which still reports isSpinning() even though nothing
+// is running. Starting animations for it would leave a ghost "working"
+// spinner after the session is reloaded.
+func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: false}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	// A message that looks unfinished (no Finish part, no content).
+	msgs := []message.Message{
+		{
+			ID:        "m1",
+			SessionID: "s1",
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.ReasoningContent{Thinking: "thinking..."},
+			},
+		},
+	}
+
+	// When the agent is not busy, setSessionMessages must not start animations.
+	cmd := m.setSessionMessages(msgs)
+	require.Nil(t, cmd, "setSessionMessages must not start animations when agent is idle")
+
+	// When the agent is busy, animations should start.
+	warmCaches(m, true)
+	cmd = m.setSessionMessages(msgs)
+	require.NotNil(t, cmd, "setSessionMessages must start animations when agent is busy")
+}
+
 // TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for
 // busy/permission state: a probe started before a newer state transition
 // (here an optimistic busy write) must not overwrite the newer value when it
@@ -519,6 +591,160 @@ func TestStalePromptQueuePreservesSessionScoping(t *testing.T) {
 	require.Zero(t, m.promptQueue,
 		"a result from a different session must never populate the queue")
 	require.NotEmpty(t, cmds, "a session-mismatched result must re-fetch for the current session")
+}
+
+// TestRenderHelpersDoNotProbeWorkspace pins the render-path side of the
+// invariant for the model and LSP info: selectedLargeModel, lspInfo, and
+// lspErrorCount render from memoized state only. They run on every frame
+// (landing view, sidebar, compact header), and the probes behind them
+// (AgentIsReady, AgentModel, LSPGetStates, LSPGetDiagnosticCounts) are
+// synchronous HTTP round-trips in client/server mode.
+func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.agentReady = true
+	m.lspStates = map[string]workspace.LSPClientInfo{
+		"gopls": {Name: "gopls", State: lsp.StateReady, DiagnosticCount: 3},
+	}
+	m.lspDiagnostics = map[string]lsp.DiagnosticCounts{
+		"gopls": {Error: 2, Warning: 1},
+	}
+
+	for range 10 {
+		require.NotNil(t, m.selectedLargeModel())
+		m.lspInfo(40, 5, true)
+		require.Equal(t, 3, m.lspErrorCount())
+	}
+
+	// modelInfo reaches provider config only through the memoized model;
+	// with the agent not ready it renders the empty state.
+	m.agentReady = false
+	for range 10 {
+		m.modelInfo(40)
+	}
+
+	require.Zero(t, ws.syncProbes(), "render helpers must never probe the workspace")
+}
+
+// TestBusyRefreshCarriesReadyAndModel: the off-thread busy probe must also
+// deliver the coordinator's readiness and selected model so the sidebar and
+// landing view render them without per-frame probes.
+func TestBusyRefreshCarriesReadyAndModel(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready: true,
+		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "test-model", Provider: "prov"}},
+	}
+	m := newBusyUI(ws)
+	require.Nil(t, m.selectedLargeModel(), "before any probe the model is unknown")
+
+	_, cmd := m.Update(plainMsg{}) // stale caches: the backstop dispatches
+	runCmds(m, cmd)
+
+	require.True(t, m.agentReady, "the probe must land readiness in the cache")
+	sel := m.selectedLargeModel()
+	require.NotNil(t, sel)
+	require.Equal(t, "test-model", sel.ModelCfg.Model, "the probe must land the model in the cache")
+}
+
+// TestAgentModelChangedRefreshesModel: after a model change
+// (selection/thinking/reasoning cmds sequence agentModelChangedCmd), the
+// handler must re-fetch ready/model off-thread — no synchronous probe — and
+// the fresh model must replace the memoized one.
+func TestAgentModelChangedRefreshesModel(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready: true,
+		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "new-model"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.agentModel = workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "old-model"}}
+	ws.resetCounters()
+
+	_, cmd := m.Update(agentModelChangedMsg{})
+	require.Zero(t, ws.syncProbes(), "the model-change handler must not probe synchronously")
+	require.True(t, m.busyFetchInFlight, "a model change must schedule a ready/model refresh")
+
+	runCmds(m, cmd)
+	require.Equal(t, "new-model", m.agentModel.ModelCfg.Model,
+		"the refreshed model must land in the cache")
+}
+
+// TestMCPStateChangedRefreshesModel pins the fourth UpdateAgentModel call
+// site: an MCP state change rebuilds the agent, which can change the
+// effective model, so the memoized ready/model state must be re-fetched
+// off-thread afterwards — the edge the updateAgentModelCmd helper exists to
+// make unforgettable.
+func TestMCPStateChangedRefreshesModel(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready: true,
+		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "post-mcp-model"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.agentModel = workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "pre-mcp-model"}}
+	ws.resetCounters()
+
+	// handleStateChanged sequences the rebuild with agentModelChangedCmd;
+	// tea.Sequence's wrapper msg is unexported, so drive the two steps the
+	// way the runtime would: run the cmd (the stub records the call), then
+	// deliver the invalidation message.
+	_ = m.handleStateChanged()()
+	_, cmd := m.Update(agentModelChangedMsg{})
+	require.True(t, m.busyFetchInFlight, "an MCP state change must schedule a ready/model refresh")
+	runCmds(m, cmd)
+
+	require.True(t, m.agentReady)
+	require.Equal(t, "post-mcp-model", m.agentModel.ModelCfg.Model,
+		"an MCP state change must refresh the memoized model")
+}
+
+// TestLSPEventRefreshIsOffThreadAndDeduped pins the LSP side of the
+// invariant: an LSP event must not fetch states synchronously in Update
+// (LSPGetStates + per-server LSPGetDiagnosticCounts are HTTP round-trips in
+// client/server mode, and diagnostics events arrive per edited file). It
+// schedules one off-thread fetch, dedups while one is in flight, and
+// re-dispatches a queued refresh when the in-flight fetch lands.
+func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:     true,
+		lspStates: map[string]workspace.LSPClientInfo{"gopls": {Name: "gopls", DiagnosticCount: 3}},
+		lspDiags:  map[string]lsp.DiagnosticCounts{"gopls": {Error: 2, Warning: 1}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	ws.resetCounters()
+
+	_, cmd := m.Update(pubsub.Event[workspace.LSPEvent]{
+		Payload: workspace.LSPEvent{Type: workspace.LSPEventDiagnosticsChanged, Name: "gopls"},
+	})
+	require.Zero(t, ws.syncProbes(), "the LSP event handler must not probe synchronously")
+	require.True(t, m.lspFetchInFlight, "an LSP event must schedule an off-thread refresh")
+
+	// A second event while the fetch is in flight queues a re-fetch instead
+	// of stacking another dispatch.
+	m.Update(pubsub.Event[workspace.LSPEvent]{
+		Payload: workspace.LSPEvent{Type: workspace.LSPEventDiagnosticsChanged, Name: "gopls"},
+	})
+	require.Zero(t, ws.syncProbes())
+	require.True(t, m.lspRefreshQueued, "an event during an in-flight fetch must queue a re-fetch")
+
+	runCmds(m, cmd)
+	require.False(t, m.lspFetchInFlight)
+	require.False(t, m.lspRefreshQueued, "the queued flag must clear once the re-dispatched fetch lands")
+	require.Equal(t, 3, m.lspStates["gopls"].DiagnosticCount, "fetched states must land in the cache")
+	require.Equal(t, 2, m.lspDiagnostics["gopls"].Error, "fetched severity counts must land in the cache")
+	require.Equal(t, 3, m.lspErrorCount())
+	require.Equal(t, 2, ws.lspStateCalls, "one fetch plus the queued re-fetch")
 }
 
 // TestRemoteYoloToggleUpdatesEditorPrompt pins the second fix: when an

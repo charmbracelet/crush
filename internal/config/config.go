@@ -130,6 +130,10 @@ type ProviderConfig struct {
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
 
+	// AWSAuthRefresh is a shell command run when Bedrock returns a
+	// credential error. Output is discarded to avoid corrupting the TUI.
+	AWSAuthRefresh string `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command to run when AWS credentials expire (Bedrock only)."`
+
 	// Skip cost accumulation for this provider when using subscription or flat rate billing.
 	FlatRate bool `json:"flat_rate,omitempty" jsonschema:"description=Flat-rate mode for this provider"`
 
@@ -195,7 +199,7 @@ type MCPConfig struct {
 	Disabled      bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
 	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
-	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
+	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
 
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
@@ -204,6 +208,40 @@ type MCPConfig struct {
 	// omitted from the outgoing request rather than sent as
 	// "Header:".
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
+
+	// OAuth enables the MCP OAuth 2.1 authorization flow for HTTP
+	// transport servers. When true, the client uses dynamic client
+	// registration and opens a browser for the user to authorize.
+	// Tokens are persisted automatically. Only supported for type=http.
+	OAuth bool `json:"oauth,omitempty" jsonschema:"description=Enable OAuth 2.1 authorization flow for this MCP server (HTTP transport only),default=false"`
+
+	// OAuthClientID is an optional pre-registered OAuth client ID. Set
+	// it for servers that do not support dynamic client registration
+	// (e.g. GitHub, Slack) and instead issue client credentials when you
+	// register an OAuth app. Values run through shell expansion, so
+	// $VAR and $(cmd) work.
+	OAuthClientID string `json:"oauth_client_id,omitempty" jsonschema:"description=Pre-registered OAuth client ID for servers without dynamic client registration"`
+
+	// OAuthClientSecret is the optional secret paired with
+	// OAuthClientID for confidential clients. Values run through shell
+	// expansion, so $VAR and $(cmd) work.
+	OAuthClientSecret string `json:"oauth_client_secret,omitempty" jsonschema:"description=Pre-registered OAuth client secret paired with oauth_client_id"`
+
+	// OAuthCallbackPort pins the localhost port used for the OAuth
+	// redirect listener. Set this when the OAuth provider requires an
+	// exact-match callback URL (e.g. GitHub OAuth Apps). When omitted,
+	// Crush picks the first free port from its default range.
+	OAuthCallbackPort int `json:"oauth_callback_port,omitempty" jsonschema:"description=Fixed localhost port for the OAuth callback, required by providers that enforce exact-match redirect URIs"`
+
+	// OAuthToken is the persisted OAuth token for this server. It is
+	// managed internally and stored in the global data config.
+	OAuthToken *oauth.Token `json:"oauth_token,omitempty" jsonschema:"-"`
+}
+
+// isOrphanedToken reports whether this entry is a leftover OAuth token
+// with no real server config.
+func (m MCPConfig) isOrphanedToken() bool {
+	return m.Type == "" && m.Command == "" && m.URL == "" && m.OAuthToken != nil
 }
 
 type LSPConfig struct {
@@ -294,8 +332,7 @@ type Options struct {
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
-	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
-	NotificationStyle         string       `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
+	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 }
 
@@ -624,6 +661,9 @@ type Config struct {
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
+	// Env is a map of environment variables set on startup.
+	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
+
 	Agents map[string]Agent `json:"-"`
 }
 
@@ -690,6 +730,21 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 		}
 	}
 	return nil
+}
+
+// IsModelAvailable returns true if the provider is enabled and the model
+// exists in its catalog. Unlike GetModel, it rejects disabled providers.
+func (c *Config) IsModelAvailable(provider, model string) bool {
+	providerConfig, ok := c.Providers.Get(provider)
+	if !ok || providerConfig.Disable {
+		return false
+	}
+	for _, m := range providerConfig.Models {
+		if m.ID == model {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {

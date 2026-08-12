@@ -391,15 +391,24 @@ func (th *Theme) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return cur
 }
 
+// canRenameSelected reports whether the currently selected theme item
+// supports renaming (user-defined, not the sentinel).
+func (th *Theme) canRenameSelected() bool {
+	item := th.selectedThemeItem()
+	if item == nil || item.name == newThemeItemName {
+		return false
+	}
+	return !styles.IsBuiltinTheme(item.name)
+}
+
 func (th *Theme) ShortHelp() []key.Binding {
 	bindings := []key.Binding{
 		th.keyMap.UpDown,
-		th.keyMap.Select,
-		th.keyMap.Close,
 	}
-	if th.mode == themesModeNormal {
-		bindings = append(bindings, th.keyMap.Rename, th.keyMap.NewTheme)
+	if th.mode == themesModeNormal && th.canRenameSelected() {
+		bindings = append(bindings, th.keyMap.Rename)
 	}
+	bindings = append(bindings, th.keyMap.Select, th.keyMap.Close)
 	return bindings
 }
 
@@ -407,9 +416,13 @@ func (th *Theme) FullHelp() [][]key.Binding {
 	if th.mode == themesModeRenaming {
 		return [][]key.Binding{{th.keyMap.ConfirmRename, th.keyMap.CancelRename}}
 	}
+	row2 := []key.Binding{th.keyMap.Close}
+	if th.canRenameSelected() {
+		row2 = append([]key.Binding{th.keyMap.Rename}, row2...)
+	}
 	return [][]key.Binding{
 		{th.keyMap.Select, th.keyMap.Next, th.keyMap.Previous},
-		{th.keyMap.Rename, th.keyMap.NewTheme, th.keyMap.Close},
+		row2,
 	}
 }
 

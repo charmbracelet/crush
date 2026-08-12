@@ -197,13 +197,14 @@ func blockFuncs() []shell.BlockFunc {
 
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, env []string) fantasy.AgentTool {
 	// When the client's env is available (server mode), merge it with the
-	// server's os.Environ() so subprocesses inherit both. The client env
-	// takes precedence for duplicate keys, matching backend/agent.go.
+	// server's os.Environ() so subprocesses inherit both. The server env
+	// takes precedence for duplicate keys so that remote deployments use
+	// the machine's own PATH, HOME, and other system variables.
 	// In local mode env is nil, so shellEnv stays nil and NewShell falls
 	// back to os.Environ() on its own.
 	var shellEnv []string
 	if env != nil {
-		shellEnv = append(os.Environ(), env...)
+		shellEnv = append(env, os.Environ()...)
 	}
 	return fantasy.NewAgentTool(
 		BashToolName,

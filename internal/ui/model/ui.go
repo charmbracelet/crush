@@ -4149,6 +4149,11 @@ func (m *UI) refreshStyles() {
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	m.chat.InvalidateRenderCaches()
+	if d := m.dialog.Dialog(dialog.ThemeID); d != nil {
+		if td, ok := d.(*dialog.Theme); ok {
+			td.RefreshStyles()
+		}
+	}
 }
 
 // attachSkill reads a skill's content by ID and returns it as a markdown

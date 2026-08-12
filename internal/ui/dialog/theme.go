@@ -167,6 +167,17 @@ func (th *Theme) ID() string {
 	return ThemeID
 }
 
+// RefreshStyles invalidates cached renders on all theme items so they
+// pick up in-place style mutations after a theme switch or preview.
+func (th *Theme) RefreshStyles() {
+	for _, item := range th.list.FilteredItems() {
+		if ti, ok := item.(*ThemeItem); ok {
+			ti.cache = nil
+			ti.Bump()
+		}
+	}
+}
+
 // isSelectableThemeItem reports whether the item at the given index is a
 // selectable ThemeItem (not a section header or spacer).
 func (th *Theme) isSelectableThemeItem(idx int) bool {

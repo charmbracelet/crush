@@ -524,19 +524,8 @@ func (th *Theme) setThemeItems() {
 	if th.mode == themesModeRenaming && th.selectedIndex >= 0 && th.selectedIndex < len(items) {
 		th.list.SetSelected(th.selectedIndex)
 	} else {
-		// Find the current theme in the flat list.
-		found := false
-		for i, item := range items {
-			if ti, ok := item.(*ThemeItem); ok && ti.name == currentTheme {
-				th.list.SetSelected(i)
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Default to "New Theme..." (index 0).
-			th.list.SetSelected(0)
-		}
+		// Default to "New Theme..." (index 0).
+		th.list.SetSelected(0)
 	}
 	th.list.ScrollToSelected()
 }

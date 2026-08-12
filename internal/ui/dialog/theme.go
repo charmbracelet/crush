@@ -46,6 +46,7 @@ type Theme struct {
 		Next          key.Binding
 		Previous      key.Binding
 		UpDown        key.Binding
+		EditTheme     key.Binding
 		Rename        key.Binding
 		ConfirmRename key.Binding
 		CancelRename  key.Binding
@@ -140,6 +141,10 @@ func NewTheme(com *common.Common) *Theme {
 	th.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
 		key.WithHelp("↑/↓", "choose"),
+	)
+	th.keyMap.EditTheme = key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "edit"),
 	)
 	th.keyMap.Rename = key.NewBinding(
 		key.WithKeys("ctrl+r"),
@@ -245,6 +250,16 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 			switch {
 			case key.Matches(msg, th.keyMap.Close):
 				return ActionRevertThemePreview{}
+			case key.Matches(msg, th.keyMap.EditTheme):
+				selectedItem := th.list.SelectedItem()
+				if selectedItem == nil {
+					break
+				}
+				themeItem, ok := selectedItem.(*ThemeItem)
+				if !ok || themeItem.name == newThemeItemName {
+					break
+				}
+				return ActionOpenDialog{ThemeEditorID}
 			case key.Matches(msg, th.keyMap.Rename):
 				selectedItem := th.list.SelectedItem()
 				if selectedItem == nil {
@@ -412,12 +427,24 @@ func (th *Theme) canRenameSelected() bool {
 	return !styles.IsBuiltinTheme(item.name)
 }
 
+// canEditSelected reports whether the currently selected theme item
+// supports editing (not the sentinel).
+func (th *Theme) canEditSelected() bool {
+	item := th.selectedThemeItem()
+	return item != nil && item.name != newThemeItemName
+}
+
 func (th *Theme) ShortHelp() []key.Binding {
 	bindings := []key.Binding{
 		th.keyMap.UpDown,
 	}
-	if th.mode == themesModeNormal && th.canRenameSelected() {
-		bindings = append(bindings, th.keyMap.Rename)
+	if th.mode == themesModeNormal {
+		if th.canEditSelected() {
+			bindings = append(bindings, th.keyMap.EditTheme)
+		}
+		if th.canRenameSelected() {
+			bindings = append(bindings, th.keyMap.Rename)
+		}
 	}
 	bindings = append(bindings, th.keyMap.Select, th.keyMap.Close)
 	return bindings
@@ -430,6 +457,9 @@ func (th *Theme) FullHelp() [][]key.Binding {
 	row2 := []key.Binding{th.keyMap.Close}
 	if th.canRenameSelected() {
 		row2 = append([]key.Binding{th.keyMap.Rename}, row2...)
+	}
+	if th.canEditSelected() {
+		row2 = append([]key.Binding{th.keyMap.EditTheme}, row2...)
 	}
 	return [][]key.Binding{
 		{th.keyMap.Select, th.keyMap.Next, th.keyMap.Previous},

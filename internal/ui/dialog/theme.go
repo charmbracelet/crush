@@ -12,13 +12,15 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 )
 
 const (
-	ThemeID              = "theme"
-	themeDialogMaxWidth  = 50
-	themeDialogMaxHeight = 20
+	ThemeID = "theme"
+
+	// newThemeItemName is the sentinel name for the "New Theme..." entry.
+	newThemeItemName = "__new_theme__"
 )
 
 type themesMode uint8
@@ -37,7 +39,6 @@ type Theme struct {
 	input textinput.Model
 
 	mode          themesMode
-	renameInput   textinput.Model
 	selectedIndex int
 
 	keyMap struct {
@@ -63,8 +64,9 @@ type ThemeItem struct {
 	m         fuzzy.Match
 	cache     map[int]string
 	focused   bool
+	hideInfo  bool
 
-	renameMode  bool
+	mode        themesMode
 	renameInput textinput.Model
 }
 
@@ -95,11 +97,6 @@ func NewTheme(com *common.Common) *Theme {
 	th.input.Placeholder = "Type to filter"
 	th.input.SetStyles(com.Styles.TextInput)
 	th.input.Focus()
-
-	th.renameInput = textinput.New()
-	th.renameInput.SetVirtualCursor(false)
-	th.renameInput.Placeholder = "Enter theme name"
-	th.renameInput.SetStyles(com.Styles.TextInput)
 
 	th.keyMap.Select = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
@@ -150,7 +147,9 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 		case themesModeRenaming:
 			switch {
 			case key.Matches(msg, th.keyMap.ConfirmRename):
-				return th.confirmRename()
+				action := th.confirmRename()
+				th.setThemeItems()
+				return action
 			case key.Matches(msg, th.keyMap.CancelRename):
 				th.mode = themesModeNormal
 				th.setThemeItems()
@@ -173,7 +172,7 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 					break
 				}
 				themeItem, ok := selectedItem.(*ThemeItem)
-				if !ok {
+				if !ok || themeItem.name == newThemeItemName {
 					break
 				}
 				if styles.IsBuiltinTheme(themeItem.name) {
@@ -213,6 +212,9 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 				if !ok {
 					break
 				}
+				if themeItem.name == newThemeItemName {
+					return ActionOpenDialog{ThemeNewID}
+				}
 				return ActionSwitchTheme{Theme: themeItem.name}
 			default:
 				var cmd tea.Cmd
@@ -236,15 +238,12 @@ func (th *Theme) confirmRename() Action {
 	}
 	newName := strings.TrimSpace(item.InputValue())
 	if newName == "" {
-		th.setThemeItems()
 		return nil
 	}
 	oldName := item.name
 	if strings.EqualFold(newName, oldName) {
-		th.setThemeItems()
 		return nil
 	}
-	th.setThemeItems()
 	return ActionRenameTheme{OldName: oldName, NewName: newName}
 }
 
@@ -261,7 +260,7 @@ func (th *Theme) previewAction() Action {
 		return nil
 	}
 	themeItem, ok := selectedItem.(*ThemeItem)
-	if !ok {
+	if !ok || themeItem.name == newThemeItemName {
 		return nil
 	}
 	return ActionPreviewTheme{Theme: themeItem.name}
@@ -279,8 +278,8 @@ func (th *Theme) currentThemeName() string {
 
 func (th *Theme) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := th.com.Styles
-	width := max(0, min(themeDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(themeDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 
 	th.input.SetWidth(dialogInputTextWidth(t, th.input, innerWidth))
@@ -354,18 +353,30 @@ func (th *Theme) setThemeItems() {
 	currentTheme := th.currentThemeName()
 
 	allThemes := styles.ListAllThemes()
-	items := make([]list.FilterableItem, 0, len(allThemes))
-	currentIndex := 0
+	// +1 for the "New Theme..." sentinel at position 0.
+	items := make([]list.FilterableItem, 0, len(allThemes)+1)
 
+	// "New Theme..." sentinel as the first item.
+	items = append(items, &ThemeItem{
+		Versioned: &list.Versioned{},
+		name:      newThemeItemName,
+		label:     "New Theme...",
+		t:         th.com.Styles,
+		mode:      th.mode,
+	})
+
+	// Find the current theme index (offset by 1 for the sentinel).
+	currentIndex := 0
 	for i, info := range allThemes {
 		if info.Name == currentTheme {
-			currentIndex = i
+			currentIndex = i + 1
+			break
 		}
 	}
 
 	// In rename mode, preserve the previously selected index.
 	selectedIndex := currentIndex
-	if th.mode == themesModeRenaming && th.selectedIndex >= 0 && th.selectedIndex < len(allThemes) {
+	if th.mode == themesModeRenaming && th.selectedIndex >= 0 && th.selectedIndex <= len(allThemes) {
 		selectedIndex = th.selectedIndex
 	}
 
@@ -377,18 +388,21 @@ func (th *Theme) setThemeItems() {
 			label += " (" + info.Source.String() + ")"
 		}
 		item := &ThemeItem{
-			Versioned:  &list.Versioned{},
-			name:       info.Name,
-			label:      label,
-			isCurrent:  info.Name == currentTheme,
-			t:          th.com.Styles,
-			renameMode: th.mode == themesModeRenaming && i == selectedIndex,
+			Versioned: &list.Versioned{},
+			name:      info.Name,
+			label:     label,
+			isCurrent: info.Name == currentTheme,
+			t:         th.com.Styles,
+			mode:      th.mode,
 		}
-		if item.renameMode {
+		if th.mode == themesModeRenaming && (i+1) == selectedIndex {
 			item.renameInput = textinput.New()
 			item.renameInput.SetVirtualCursor(false)
+			item.renameInput.Prompt = ""
+			inputStyle := th.com.Styles.TextInput
+			inputStyle.Focused.Placeholder = th.com.Styles.Dialog.Sessions.RenamingPlaceholder
+			item.renameInput.SetStyles(inputStyle)
 			item.renameInput.SetValue(info.Name)
-			item.renameInput.SetStyles(th.com.Styles.TextInput)
 			item.renameInput.Focus()
 		}
 		items = append(items, item)
@@ -423,6 +437,26 @@ func (r *ThemeItem) SetMatch(m fuzzy.Match) {
 	r.m = m
 }
 
+// InfoText returns the secondary text shown on the right of the item.
+func (r *ThemeItem) InfoText() string {
+	if r.isCurrent {
+		return "current"
+	}
+	return ""
+}
+
+// SetHideInfo controls whether the info column is shown.
+func (r *ThemeItem) SetHideInfo(v bool) {
+	if r.hideInfo == v {
+		return
+	}
+	r.cache = nil
+	r.hideInfo = v
+	if r.Versioned != nil {
+		r.Bump()
+	}
+}
+
 func (r *ThemeItem) InputValue() string {
 	return r.renameInput.Value()
 }
@@ -441,23 +475,9 @@ func (r *ThemeItem) Cursor() *tea.Cursor {
 }
 
 func (r *ThemeItem) Render(width int) string {
-	if r.renameMode && r.focused {
-		s := ListItemStyles{
-			ItemBlurred:     r.t.Dialog.NormalItem,
-			ItemFocused:     r.t.Dialog.SelectedItem,
-			InfoTextBlurred: r.t.Dialog.Sessions.InfoBlurred,
-			InfoTextFocused: r.t.Dialog.Sessions.InfoFocused,
-		}
-		const cursorPadding = 1
-		inputWidth := max(0, width-s.ItemFocused.GetHorizontalFrameSize()-cursorPadding)
-		r.renameInput.SetWidth(inputWidth)
-		r.renameInput.Placeholder = r.name
-		return s.ItemFocused.Render(r.renameInput.View())
-	}
-
-	info := ""
-	if r.isCurrent {
-		info = "current"
+	info := r.InfoText()
+	if r.hideInfo {
+		info = ""
 	}
 	s := ListItemStyles{
 		ItemBlurred:     r.t.Dialog.NormalItem,
@@ -465,5 +485,19 @@ func (r *ThemeItem) Render(width int) string {
 		InfoTextBlurred: r.t.Dialog.Sessions.InfoBlurred,
 		InfoTextFocused: r.t.Dialog.Sessions.InfoFocused,
 	}
+
+	switch r.mode {
+	case themesModeRenaming:
+		s.ItemBlurred = r.t.Dialog.Sessions.RenamingItemBlurred
+		s.ItemFocused = r.t.Dialog.Sessions.RenamingingItemFocused
+		if r.focused {
+			const cursorPadding = 1
+			inputWidth := max(0, width-s.ItemFocused.GetHorizontalFrameSize()-cursorPadding)
+			r.renameInput.SetWidth(inputWidth)
+			r.renameInput.Placeholder = ansi.Truncate(r.label, width, "…")
+			return s.ItemFocused.Render(r.renameInput.View())
+		}
+	}
+
 	return renderItem(s, r.label, info, r.focused, width, r.cache, &r.m)
 }

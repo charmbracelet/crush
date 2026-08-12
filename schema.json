@@ -288,7 +288,7 @@
         "timeout": {
           "type": "integer",
           "description": "Timeout in seconds for MCP server connections",
-          "default": 15,
+          "default": 10,
           "examples": [
             30,
             60,

@@ -66,10 +66,15 @@ func SetBalance(balance int) {
 // for a balance extracted from the most recent API response's usage
 // metadata. If none is available, it falls back to calling the /v1/credits
 // endpoint directly.
-func FetchCredits(ctx context.Context, apiKey string) (int, error) {
+//
+// It returns nil when the team has hypercredit display disabled, in which
+// case Hyper reports the balance in dollars instead and there is no
+// hypercredit figure to show.
+func FetchCredits(ctx context.Context, apiKey string) (*int, error) {
 	if hasBalance.Load() {
 		hasBalance.Store(false)
-		return int(lastKnownBalance.Load()), nil
+		balance := int(lastKnownBalance.Load())
+		return &balance, nil
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -79,26 +84,28 @@ func FetchCredits(ctx context.Context, apiKey string) (int, error) {
 		nil,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("could not create request: %w", err)
+		return nil, fmt.Errorf("could not create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("failed to make request: %w", err)
+		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
+	// Teams with hypercredit display disabled get a balance_usd field
+	// instead of balance, and no balance is shown for them at all.
 	var result struct {
-		Balance int `json:"balance"`
+		Balance *int `json:"balance"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	return result.Balance, nil

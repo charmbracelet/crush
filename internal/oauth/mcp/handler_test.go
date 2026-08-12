@@ -3,6 +3,7 @@ package mcpoauth
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -476,11 +477,10 @@ func TestCallbackReceiver_IgnoresNonCallbackPaths(t *testing.T) {
 	r := &callbackReceiver{}
 	t.Cleanup(r.close)
 
-	listener := newTestListener(t)
-	go r.serve(listener)
+	base := serveReceiver(t, r)
 
-	base := "http://" + listener.Addr().String()
-	flight, owned := r.begin()
+	flight, owned, err := r.begin()
+	require.NoError(t, err)
 	require.True(t, owned)
 
 	// A stray request must not be mistaken for the redirect.
@@ -514,13 +514,13 @@ func TestCallbackReceiver_RendersFailurePage(t *testing.T) {
 	r := &callbackReceiver{serverName: "linear"}
 	t.Cleanup(r.close)
 
-	listener := newTestListener(t)
-	go r.serve(listener)
+	base := serveReceiver(t, r)
 
-	flight, owned := r.begin()
+	flight, owned, err := r.begin()
+	require.NoError(t, err)
 	require.True(t, owned)
 
-	url := "http://" + listener.Addr().String() + callbackPath +
+	url := base + callbackPath +
 		"?error=access_denied&error_description=user+said+no"
 	resp, err := http.Get(url) //nolint:noctx
 	require.NoError(t, err)
@@ -550,9 +550,7 @@ func TestCallbackReceiver_ConcurrentAuthorizeOpensOneTab(t *testing.T) {
 	r := &callbackReceiver{serverName: "linear"}
 	t.Cleanup(r.close)
 
-	listener := newTestListener(t)
-	go r.serve(listener)
-	base := "http://" + listener.Addr().String()
+	base := serveReceiver(t, r)
 
 	// Stand in for the browser: record the open, then redirect back as the
 	// authorization server would once the user consents.
@@ -606,9 +604,7 @@ func TestCallbackReceiver_AuthorizeTwiceInSequence(t *testing.T) {
 	r := &callbackReceiver{serverName: "linear"}
 	t.Cleanup(r.close)
 
-	listener := newTestListener(t)
-	go r.serve(listener)
-	base := "http://" + listener.Addr().String()
+	base := serveReceiver(t, r)
 
 	var opens atomic.Int64
 	code := "first"
@@ -637,14 +633,22 @@ func TestCallbackReceiver_AuthorizeTwiceInSequence(t *testing.T) {
 	require.Equal(t, int64(2), opens.Load(), "each login opens its own tab")
 }
 
-// newTestListener binds a loopback listener on an arbitrary free port for
-// a callback receiver to serve on.
-func newTestListener(t *testing.T) net.Listener {
+// serveReceiver binds the receiver's listener and returns the base URL
+// the authorization server would redirect to. The tests construct the
+// receiver directly (fixedPort 0) and run in parallel, so pin an
+// ephemeral port rather than a shared callbackPorts entry — otherwise
+// parallel runs collide on the same candidate.
+func serveReceiver(t *testing.T, r *callbackReceiver) string {
 	t.Helper()
-	lc := &net.ListenConfig{}
-	listener, err := lc.Listen(t.Context(), "tcp", "localhost:0")
-	require.NoError(t, err)
-	return listener
+	if r.fixedPort == 0 {
+		lc := &net.ListenConfig{}
+		probe, err := lc.Listen(t.Context(), "tcp", "localhost:0")
+		require.NoError(t, err)
+		r.fixedPort = probe.Addr().(*net.TCPAddr).Port
+		_ = probe.Close()
+	}
+	require.NoError(t, r.bind())
+	return fmt.Sprintf("http://localhost:%d", r.port)
 }
 
 // TestHandler_PassesIssuerThrough is a regression test for logins failing

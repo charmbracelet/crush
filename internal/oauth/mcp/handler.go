@@ -118,40 +118,40 @@ func NewHandler(
 ) (*Handler, error) {
 	receiver := &callbackReceiver{
 		serverName: serverName,
+		fixedPort:  callbackPort,
 	}
 
-	lc := &net.ListenConfig{}
-	var listener net.Listener
-	var port int
-	if callbackPort > 0 {
-		// A fixed port was requested (e.g. for providers that enforce
-		// exact-match redirect URIs). Bind it directly; if it's busy the
-		// user needs to free it or pick another.
-		var err error
-		listener, err = lc.Listen(context.Background(), "tcp", fmt.Sprintf("localhost:%d", callbackPort))
-		if err != nil {
-			receiver.close()
-			return nil, fmt.Errorf("failed to bind OAuth callback port %d: %w", callbackPort, err)
-		}
-		port = callbackPort
-	} else {
+	// Resolve the redirect port without binding it. The listener is only
+	// opened when an authorization actually runs (see fetchAuthorizationCode),
+	// so a handler that restores a valid token never occupies the port and
+	// several Crush processes can share it; only the one doing a live login
+	// binds, and only for the duration of that login.
+	//
+	// A fixed port comes straight from config. Otherwise we probe for the
+	// first free candidate, just long enough to learn which is open. Either
+	// way the chosen port is baked into the redirect URI below and pinned on
+	// the receiver, so bindLocked always rebinds the SAME port. The probe is
+	// not a reservation — another process can take the port before the first
+	// real login — but a busy port then fails loudly rather than silently
+	// binding a port the redirect URI does not point at.
+	port := callbackPort
+	if port == 0 {
+		lc := &net.ListenConfig{}
 		for _, p := range callbackPorts {
-			var err error
-			listener, err = lc.Listen(context.Background(), "tcp", fmt.Sprintf("localhost:%d", p))
+			probe, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf("localhost:%d", p))
 			if err == nil {
+				_ = probe.Close()
 				port = p
 				break
 			}
 		}
-		if listener == nil {
-			receiver.close()
-			return nil, fmt.Errorf("failed to start OAuth callback listener: all candidate ports in use")
+		if port == 0 {
+			return nil, errors.New("failed to start OAuth callback listener: all candidate ports in use")
 		}
 	}
+	receiver.fixedPort = port
 
 	redirectURL := fmt.Sprintf("http://localhost:%d%s", port, callbackPath)
-
-	go receiver.serve(listener)
 
 	h := &Handler{
 		receiver:       receiver,
@@ -383,12 +383,22 @@ func (h *Handler) Close() {
 // callbackReceiver owns the localhost listener that the authorization
 // server redirects back to, and hands each authorization result to the
 // flow waiting for it.
+//
+// The listener is bound lazily, on the first authorization attempt, and
+// released as soon as that attempt settles. A handler that holds a valid
+// token never binds at all, so any number of Crush processes may coexist;
+// the callback port is occupied only for the few seconds an actual login
+// is in flight.
 type callbackReceiver struct {
 	handler *Handler
-	server  *http.Server
 	// serverName labels the callback page so the user can see which MCP
 	// server they just authorized.
 	serverName string
+
+	// fixedPort, when > 0, is the OAuthCallbackPort config: the single
+	// port the registered redirect URI points at. When 0, a port is
+	// chosen from callbackPorts at bind time.
+	fixedPort int
 
 	mu sync.Mutex
 	// flight is the authorization currently awaiting a redirect, if any.
@@ -397,6 +407,11 @@ type callbackReceiver struct {
 	// single flight rather than each opening their own browser tab and
 	// racing for one redirect.
 	flight *authFlight
+	// server and port describe the live listener. They are set only while
+	// an authorization is in flight and cleared the moment it settles.
+	server *http.Server
+	port   int
+	closed bool
 }
 
 // authFlight is one authorization attempt: a browser tab was opened and a
@@ -419,17 +434,22 @@ func (f *authFlight) settle(result *auth.AuthorizationResult, err error) {
 	})
 }
 
-// begin returns the flight to wait on, and whether the caller created it.
+// begin returns the flight to wait on and whether the caller created it.
 // The creator is responsible for opening the browser and, once the attempt
-// is over, for clearing it so a later authorization can start fresh.
-func (r *callbackReceiver) begin() (*authFlight, bool) {
+// is over, for clearing it so a later authorization can start fresh. The
+// first (creating) caller also binds the callback listener; joiners wait
+// on the flight that is already serving.
+func (r *callbackReceiver) begin() (*authFlight, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.flight != nil {
-		return r.flight, false
+		return r.flight, false, nil
+	}
+	if err := r.bindLocked(); err != nil {
+		return nil, false, err
 	}
 	r.flight = &authFlight{done: make(chan struct{})}
-	return r.flight, true
+	return r.flight, true, nil
 }
 
 // end retires the flight if it is still the current one, so the next
@@ -451,19 +471,68 @@ func (r *callbackReceiver) current() *authFlight {
 	return r.flight
 }
 
-func (r *callbackReceiver) serve(listener net.Listener) {
+// bind starts the listener if one is not already running. The port was
+// resolved and pinned at construction, so this always targets the port the
+// redirect URI points at; if it is busy the error surfaces loudly rather
+// than silently binding a port nobody will redirect to.
+func (r *callbackReceiver) bind() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bindLocked()
+}
+
+// bindLocked is bind with r.mu already held. The listener starts accepting
+// before this returns, so a browser opened immediately after cannot beat
+// the server to the port.
+func (r *callbackReceiver) bindLocked() error {
+	if r.closed {
+		return errors.New("OAuth callback listener closed")
+	}
+	if r.server != nil {
+		return nil
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", r.handleCallback)
+	server := &http.Server{Handler: mux}
 
-	r.mu.Lock()
-	r.server = &http.Server{Handler: mux}
-	server := r.server
-	r.mu.Unlock()
+	lc := &net.ListenConfig{}
+	listener, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf("localhost:%d", r.fixedPort))
+	if err != nil {
+		return fmt.Errorf("failed to bind OAuth callback port %d: %w", r.fixedPort, err)
+	}
+	r.port = r.fixedPort
+	go r.serve(server, listener)
+	r.server = server
+	return nil
+}
 
+// serve runs the HTTP server until the listener is closed. An unexpected
+// Serve error settles the in-flight flight so a waiting flow fails
+// promptly instead of hanging until its context expires.
+func (r *callbackReceiver) serve(server *http.Server, listener net.Listener) {
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		if flight := r.current(); flight != nil {
 			flight.settle(nil, err)
 		}
+	}
+}
+
+// release shuts the listener down and clears it, so the callback port is
+// free for the next authorization (or another process). It is the mirror
+// of bind and is called once an authorization settles and on close.
+//
+// The callback page is rendered before the flight settles, so the response
+// is already on its way out by the time release runs. Shutdown (not Close)
+// lets any in-flight write finish draining before the socket closes.
+func (r *callbackReceiver) release() {
+	r.mu.Lock()
+	server := r.server
+	r.server = nil
+	r.mu.Unlock()
+	if server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
 	}
 }
 
@@ -486,10 +555,17 @@ func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Reque
 		ErrorDescription: query.Get("error_description"),
 	}
 
+	// Render the page BEFORE settling the flight. settle unblocks await,
+	// which releases the listener; settling first would close the connection
+	// out from under this write and show the user a browser error instead
+	// of the success page. Writing first keeps the response on the wire.
+	if err := callback.Serve(w, result); err != nil {
+		slog.Warn("Failed to render OAuth callback page", "error", err)
+	}
+
 	// A redirect with no flight waiting means the tab was reloaded or
-	// revisited after the flow finished. Still render the page, since the
-	// outcome it describes is accurate, but do not disturb any later
-	// authorization.
+	// revisited after the flow finished. The page above already described
+	// the outcome accurately, so do not disturb any later authorization.
 	if flight := r.current(); flight != nil {
 		if result.Failed() {
 			flight.settle(nil, fmt.Errorf("OAuth error: %s: %s", result.ErrorCode, result.ErrorDescription))
@@ -502,14 +578,13 @@ func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Reque
 			}, nil)
 		}
 	}
-
-	if err := callback.Serve(w, result); err != nil {
-		slog.Warn("Failed to render OAuth callback page", "error", err)
-	}
 }
 
 func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-	flight, owned := r.begin()
+	flight, owned, err := r.begin()
+	if err != nil {
+		return nil, err
+	}
 	if !owned {
 		// Another request already opened the browser for this server. Wait
 		// for that redirect instead of opening a second tab.
@@ -543,10 +618,15 @@ func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *aut
 	return r.await(ctx, flight, true)
 }
 
-// await blocks until the flight settles or ctx is cancelled.
+// await blocks until the flight settles or ctx is cancelled. The owner
+// releases the callback listener once the flow is done, so the port is
+// free again as soon as the authorization completes (or is abandoned).
 func (r *callbackReceiver) await(ctx context.Context, flight *authFlight, owned bool) (*auth.AuthorizationResult, error) {
 	select {
 	case <-flight.done:
+		if owned {
+			r.release()
+		}
 		if flight.err != nil {
 			slog.Error("MCP OAuth authorization failed", "error", flight.err)
 			return nil, flight.err
@@ -559,17 +639,21 @@ func (r *callbackReceiver) await(ctx context.Context, flight *authFlight, owned 
 			// Abandoning the tab we opened; make sure nobody keeps
 			// waiting on a redirect that is no longer coming.
 			flight.settle(nil, ctx.Err())
+			r.release()
 		}
 		return nil, ctx.Err()
 	}
 }
 
-// close shuts the listener down and fails any authorization still waiting
-// on a redirect, so a pending flow ends promptly instead of hanging until
-// its context expires.
+// close shuts the receiver down permanently and fails any authorization
+// still waiting on a redirect, so a pending flow ends promptly instead of
+// hanging until its context expires. After close, bind refuses to start a
+// new listener.
 func (r *callbackReceiver) close() {
 	r.mu.Lock()
+	r.closed = true
 	server, flight := r.server, r.flight
+	r.server = nil
 	r.flight = nil
 	r.mu.Unlock()
 

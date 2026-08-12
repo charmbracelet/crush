@@ -54,6 +54,32 @@ type Theme struct {
 	}
 }
 
+// ThemeSectionHeader is a non-selectable section divider in the theme
+// list. It renders as a titled horizontal rule via common.Section.
+type ThemeSectionHeader struct {
+	*list.Versioned
+	title string
+	t     *styles.Styles
+}
+
+func (h *ThemeSectionHeader) Filter() string { return "" }
+func (h *ThemeSectionHeader) Finished() bool { return true }
+func (h *ThemeSectionHeader) Render(width int) string {
+	return common.Section(h.t, " "+h.title+" ", width)
+}
+
+// themeSpacer is a filterable spacer that adds vertical space between
+// sections in the theme list. Unlike list.SpacerItem it satisfies
+// FilterableItem so it can live in a FilterableList.
+type themeSpacer struct {
+	*list.Versioned
+	height int
+}
+
+func (s *themeSpacer) Filter() string          { return "" }
+func (s *themeSpacer) Finished() bool          { return true }
+func (s *themeSpacer) Render(width int) string { return strings.Repeat("\n", s.height) }
+
 // ThemeItem represents a single theme entry in the picker.
 type ThemeItem struct {
 	*list.Versioned
@@ -77,8 +103,9 @@ func (r *ThemeItem) Finished() bool {
 }
 
 var (
-	_ Dialog   = (*Theme)(nil)
-	_ ListItem = (*ThemeItem)(nil)
+	_ Dialog              = (*Theme)(nil)
+	_ ListItem            = (*ThemeItem)(nil)
+	_ list.FilterableItem = (*ThemeSectionHeader)(nil)
 )
 
 // NewTheme creates a new theme management dialog.
@@ -140,6 +167,47 @@ func (th *Theme) ID() string {
 	return ThemeID
 }
 
+// isSelectableThemeItem reports whether the item at the given index is a
+// selectable ThemeItem (not a section header or spacer).
+func (th *Theme) isSelectableThemeItem(idx int) bool {
+	items := th.list.FilteredItems()
+	if idx < 0 || idx >= len(items) {
+		return false
+	}
+	_, ok := items[idx].(*ThemeItem)
+	return ok
+}
+
+// selectNextTheme skips section headers and spacers when moving down.
+func (th *Theme) selectNextTheme() {
+	for {
+		if th.list.IsSelectedLast() {
+			th.list.SelectFirst()
+			th.list.ScrollToTop()
+		} else {
+			th.list.SelectNext()
+		}
+		if th.isSelectableThemeItem(th.list.Selected()) {
+			return
+		}
+	}
+}
+
+// selectPrevTheme skips section headers and spacers when moving up.
+func (th *Theme) selectPrevTheme() {
+	for {
+		if th.list.IsSelectedFirst() {
+			th.list.SelectLast()
+			th.list.ScrollToBottom()
+		} else {
+			th.list.SelectPrev()
+		}
+		if th.isSelectableThemeItem(th.list.Selected()) {
+			return
+		}
+	}
+}
+
 func (th *Theme) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -185,23 +253,13 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 				return ActionOpenDialog{ThemeNewID}
 			case key.Matches(msg, th.keyMap.Previous):
 				th.list.Focus()
-				if th.list.IsSelectedFirst() {
-					th.list.SelectLast()
-					th.list.ScrollToBottom()
-				} else {
-					th.list.SelectPrev()
-					th.list.ScrollToSelected()
-				}
+				th.selectPrevTheme()
+				th.list.ScrollToSelected()
 				return th.previewAction()
 			case key.Matches(msg, th.keyMap.Next):
 				th.list.Focus()
-				if th.list.IsSelectedLast() {
-					th.list.SelectFirst()
-					th.list.ScrollToTop()
-				} else {
-					th.list.SelectNext()
-					th.list.ScrollToSelected()
-				}
+				th.selectNextTheme()
+				th.list.ScrollToSelected()
 				return th.previewAction()
 			case key.Matches(msg, th.keyMap.Select):
 				selectedItem := th.list.SelectedItem()
@@ -222,7 +280,11 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 				value := th.input.Value()
 				th.list.SetFilter(value)
 				th.list.ScrollToTop()
+				// Select first selectable item after filtering.
 				th.list.SetSelected(0)
+				if !th.isSelectableThemeItem(0) {
+					th.selectNextTheme()
+				}
 				return ActionCmd{cmd}
 			}
 		}
@@ -249,7 +311,9 @@ func (th *Theme) confirmRename() Action {
 
 func (th *Theme) selectedThemeItem() *ThemeItem {
 	if item := th.list.SelectedItem(); item != nil {
-		return item.(*ThemeItem)
+		if ti, ok := item.(*ThemeItem); ok {
+			return ti
+		}
 	}
 	return nil
 }
@@ -351,12 +415,21 @@ func (th *Theme) FullHelp() [][]key.Binding {
 
 func (th *Theme) setThemeItems() {
 	currentTheme := th.currentThemeName()
-
 	allThemes := styles.ListAllThemes()
-	// +1 for the "New Theme..." sentinel at position 0.
-	items := make([]list.FilterableItem, 0, len(allThemes)+1)
 
-	// "New Theme..." sentinel as the first item.
+	// Separate builtin (including overridden) from user-only themes.
+	var systemThemes, userThemes []styles.ThemeInfo
+	for _, info := range allThemes {
+		if info.Source == styles.ThemeSourceBuiltin || info.Overridden {
+			systemThemes = append(systemThemes, info)
+		} else {
+			userThemes = append(userThemes, info)
+		}
+	}
+
+	items := make([]list.FilterableItem, 0, len(allThemes)+5)
+
+	// "New Theme..." sentinel — no divider above it.
 	items = append(items, &ThemeItem{
 		Versioned: &list.Versioned{},
 		name:      newThemeItemName,
@@ -365,52 +438,86 @@ func (th *Theme) setThemeItems() {
 		mode:      th.mode,
 	})
 
-	// Find the current theme index (offset by 1 for the sentinel).
-	currentIndex := 0
-	for i, info := range allThemes {
-		if info.Name == currentTheme {
-			currentIndex = i + 1
-			break
-		}
+	// Spacer after "New Theme...".
+	items = append(items, &themeSpacer{Versioned: &list.Versioned{}, height: 1})
+
+	// System section.
+	items = append(items, &ThemeSectionHeader{
+		Versioned: &list.Versioned{},
+		title:     "System",
+		t:         th.com.Styles,
+	})
+	for _, info := range systemThemes {
+		items = append(items, th.newThemeItem(info, currentTheme))
 	}
 
-	// In rename mode, preserve the previously selected index.
-	selectedIndex := currentIndex
-	if th.mode == themesModeRenaming && th.selectedIndex >= 0 && th.selectedIndex <= len(allThemes) {
-		selectedIndex = th.selectedIndex
-	}
+	// Spacer between sections.
+	items = append(items, &themeSpacer{Versioned: &list.Versioned{}, height: 1})
 
-	for i, info := range allThemes {
-		label := info.Name
-		if info.Overridden {
-			label += " (overridden)"
-		} else if info.Source != styles.ThemeSourceBuiltin {
-			label += " (" + info.Source.String() + ")"
-		}
-		item := &ThemeItem{
-			Versioned: &list.Versioned{},
-			name:      info.Name,
-			label:     label,
-			isCurrent: info.Name == currentTheme,
-			t:         th.com.Styles,
-			mode:      th.mode,
-		}
-		if th.mode == themesModeRenaming && (i+1) == selectedIndex {
-			item.renameInput = textinput.New()
-			item.renameInput.SetVirtualCursor(false)
-			item.renameInput.Prompt = ""
-			inputStyle := th.com.Styles.TextInput
-			inputStyle.Focused.Placeholder = th.com.Styles.Dialog.Sessions.RenamingPlaceholder
-			item.renameInput.SetStyles(inputStyle)
-			item.renameInput.SetValue(info.Name)
-			item.renameInput.Focus()
-		}
-		items = append(items, item)
+	// User section.
+	items = append(items, &ThemeSectionHeader{
+		Versioned: &list.Versioned{},
+		title:     "User",
+		t:         th.com.Styles,
+	})
+	for _, info := range userThemes {
+		items = append(items, th.newThemeItem(info, currentTheme))
 	}
 
 	th.list.SetItems(items...)
-	th.list.SetSelected(selectedIndex)
+
+	// Restore selection or default to current theme.
+	if th.mode == themesModeRenaming && th.selectedIndex >= 0 && th.selectedIndex < len(items) {
+		th.list.SetSelected(th.selectedIndex)
+	} else {
+		// Find the current theme in the flat list.
+		found := false
+		for i, item := range items {
+			if ti, ok := item.(*ThemeItem); ok && ti.name == currentTheme {
+				th.list.SetSelected(i)
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Default to "New Theme..." (index 0).
+			th.list.SetSelected(0)
+		}
+	}
 	th.list.ScrollToSelected()
+}
+
+func (th *Theme) newThemeItem(info styles.ThemeInfo, currentTheme string) *ThemeItem {
+	label := info.Name
+	if info.Overridden {
+		label += " (overridden)"
+	} else if info.Source != styles.ThemeSourceBuiltin {
+		label += " (" + info.Source.String() + ")"
+	}
+	item := &ThemeItem{
+		Versioned: &list.Versioned{},
+		name:      info.Name,
+		label:     label,
+		isCurrent: info.Name == currentTheme,
+		t:         th.com.Styles,
+		mode:      th.mode,
+	}
+	if th.mode == themesModeRenaming && th.selectedIndex >= 0 {
+		filteredItems := th.list.FilteredItems()
+		if th.selectedIndex < len(filteredItems) {
+			if si, ok := filteredItems[th.selectedIndex].(*ThemeItem); ok && si.name == info.Name {
+				item.renameInput = textinput.New()
+				item.renameInput.SetVirtualCursor(false)
+				item.renameInput.Prompt = ""
+				inputStyle := th.com.Styles.TextInput
+				inputStyle.Focused.Placeholder = th.com.Styles.Dialog.Sessions.RenamingPlaceholder
+				item.renameInput.SetStyles(inputStyle)
+				item.renameInput.SetValue(info.Name)
+				item.renameInput.Focus()
+			}
+		}
+	}
+	return item
 }
 
 func (r *ThemeItem) Filter() string {

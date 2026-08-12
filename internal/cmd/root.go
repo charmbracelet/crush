@@ -227,6 +227,20 @@ func randomExitMessage() string {
 		"Get some rest.",
 		"Come back soon.",
 		"You worked handsomely.",
+		"Time for a snack.",
+		"Who’s hungry?",
+		"That was fun.",
+		"See you at breakfast?",
+		"Time for a nap.",
+		"Who wants some spaghetti?",
+		"Take care of yourself.",
+		"Remember to hydrate.",
+		"Time for a swim?",
+		"You’re quite glamorous, you know.",
+		"Nice work.",
+		"You’re a sensation.",
+		"Where’s my eyeliner?",
+		"It’s tea time.",
 	}
 	return messages[rand.IntN(len(messages))]
 }

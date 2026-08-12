@@ -263,7 +263,7 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 	// be picked up by the next Update or by Flush.
 	if p.timer == nil && !p.flushing {
 		id := msg.ID
-		p.timer = time.AfterFunc(s.debounce, func() {
+		p.timer = time.AfterFunc(s.debounce, func() { //nolint:contextcheck // detached context prevents stranded writes when stream is cancelled
 			// Detached from caller ctx so a cancelled stream context
 			// does not strand the buffered write.
 			_ = s.flushOne(context.Background(), id, false)

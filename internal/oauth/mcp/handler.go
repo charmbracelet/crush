@@ -581,7 +581,7 @@ func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Reque
 }
 
 func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-	flight, owned, err := r.begin()
+	flight, owned, err := r.begin() //nolint:contextcheck // localhost port binding is near-instant
 	if err != nil {
 		return nil, err
 	}
@@ -625,7 +625,7 @@ func (r *callbackReceiver) await(ctx context.Context, flight *authFlight, owned 
 	select {
 	case <-flight.done:
 		if owned {
-			r.release()
+			r.release() //nolint:contextcheck // HTTP server shutdown uses its own 2s timeout
 		}
 		if flight.err != nil {
 			slog.Error("MCP OAuth authorization failed", "error", flight.err)
@@ -639,7 +639,7 @@ func (r *callbackReceiver) await(ctx context.Context, flight *authFlight, owned 
 			// Abandoning the tab we opened; make sure nobody keeps
 			// waiting on a redirect that is no longer coming.
 			flight.settle(nil, ctx.Err())
-			r.release()
+			r.release() //nolint:contextcheck // HTTP server shutdown uses its own 2s timeout
 		}
 		return nil, ctx.Err()
 	}

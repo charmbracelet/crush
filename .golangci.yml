@@ -2,6 +2,7 @@ version: "2"
 linters:
   enable:
     - bodyclose
+    - contextcheck
     # - exhaustive
     # - goconst
     # - godot
@@ -41,6 +42,29 @@ linters:
         text: "SA1019.*interp.ExecHandler"
         linters:
           - staticcheck
+      # The config system intentionally uses background context for
+      # file I/O operations that must complete regardless of request
+      # cancellation (atomic writes, lock acquisition, auto-reload).
+      # Threading request-scoped context through would require changing
+      # every exported ConfigStore method — a breaking API change.
+      - path: internal/config/
+        linters:
+          - contextcheck
+      # Backend interface methods (CreateWorkspace, SetConfigField,
+      # SendMessage, etc.) don't accept context — adding it would be a
+      # breaking change to the client-server protocol.
+      - path: internal/server/
+        linters:
+          - contextcheck
+      # Workspace methods cascade into the config system and do
+      # best-effort refresh after mutations.
+      - path: internal/workspace/
+        linters:
+          - contextcheck
+      # Backend config/event handlers cascade into the config system.
+      - path: internal/backend/
+        linters:
+          - contextcheck
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

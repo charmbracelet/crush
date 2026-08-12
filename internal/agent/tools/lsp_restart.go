@@ -49,7 +49,7 @@ func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			var mu sync.Mutex
 			var wg sync.WaitGroup
 			for name, client := range clientsToRestart {
-				wg.Go(func() {
+				wg.Go(func() { //nolint:contextcheck // LSP server restart outlives the request
 					if err := client.Restart(); err != nil {
 						slog.Error("Failed to restart LSP client", "name", name, "error", err)
 						mu.Lock()

@@ -1260,7 +1260,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// A dropped prompt carrying a RunID must still publish its
 		// terminal cancelled RunComplete so a caller waiting on that
 		// RunID does not hang.
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
+		a.publishCanceledQueueDrops(canceledRunIDDrops) //nolint:contextcheck // must deliver cancelled-run notifications after run ctx is gone
 	}
 	if len(queuedMessages) == 0 {
 		// No queued work. Clear the cancel mark only when no accepted

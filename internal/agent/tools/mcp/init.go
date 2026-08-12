@@ -493,7 +493,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	// all or the token is structurally invalid (empty access token).
 	if m.OAuth && m.Type == config.MCPHttp && !hasUsableToken(m.OAuthToken) {
 		if m.OAuthToken != nil {
-			clearOAuthToken(cfg, name)
+			clearOAuthToken(cfg, name) //nolint:contextcheck // best-effort token cleanup; config write cascades to lockConfig
 		}
 		updateState(name, StateNeedsAuth, nil, nil, Counts{})
 		clearMCPData(name)
@@ -511,7 +511,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		// StateError.
 		if m.OAuth && m.Type == config.MCPHttp && isOAuthInitErr(err) {
 			if m.OAuthToken != nil {
-				clearOAuthToken(cfg, name)
+				clearOAuthToken(cfg, name) //nolint:contextcheck // best-effort token cleanup; config write cascades to lockConfig
 			}
 			updateState(name, StateNeedsAuth, nil, nil, Counts{})
 			slog.Info("MCP OAuth token is no longer valid, re-authentication required", "name", name, "error", err)
@@ -709,7 +709,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 		// re-authenticate instead of leaving it in an error state.
 		if m.OAuth && m.Type == config.MCPHttp {
 			if m.OAuthToken != nil && isOAuthInitErr(err) {
-				clearOAuthToken(cfg, name)
+				clearOAuthToken(cfg, name) //nolint:contextcheck // best-effort token cleanup; config write cascades to lockConfig
 			}
 			updateState(name, StateNeedsAuth, nil, nil, Counts{})
 			slog.Info("MCP OAuth session expired, re-authentication required", "name", name, "error", err)
@@ -934,7 +934,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 
 	session, err := client.Connect(mcpCtx, transport, nil)
 	if err != nil {
-		err = maybeStdioErr(err, transport)
+		err = maybeStdioErr(err, transport) //nolint:contextcheck // pure error formatting, no I/O
 		updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, Counts{})
 		slog.Error("MCP client failed to initialize", "error", err, "name", name)
 		cancel()
@@ -1037,7 +1037,7 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 		// (and the client registration/endpoints needed to refresh it)
 		// on every exchange and refresh via this saver.
 		if m.OAuth {
-			tokenSaver := func(tok *oauth.Token) {
+			tokenSaver := func(tok *oauth.Token) { //nolint:contextcheck // OAuth SDK callback; no context parameter available
 				if err := cfg.SetConfigField(config.ScopeGlobal, fmt.Sprintf("mcp.%s.oauth_token", name), tok); err != nil {
 					slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
 				} else {
@@ -1067,7 +1067,7 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 
 			// Normalize trailing slash for PRM discovery compatibility.
 			normalizedURL := strings.TrimSuffix(url, "/")
-			oauthHandler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
+			oauthHandler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort) //nolint:contextcheck // port binding is near-instant
 			if oauthErr != nil {
 				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
 			}
@@ -1112,7 +1112,7 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 		// injects bearer tokens and handles 401-triggered authorization.
 		// Based on Bruno Krugel's oauthRoundTripper from PR #3396.
 		if m.OAuth {
-			tokenSaver := func(tok *oauth.Token) {
+			tokenSaver := func(tok *oauth.Token) { //nolint:contextcheck // OAuth SDK callback; no context parameter available
 				if err := cfg.SetConfigField(config.ScopeGlobal, fmt.Sprintf("mcp.%s.oauth_token", name), tok); err != nil {
 					slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
 				} else {
@@ -1138,7 +1138,7 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 
 			// Normalize trailing slash for PRM discovery compatibility.
 			normalizedURL := strings.TrimSuffix(url, "/")
-			handler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort)
+			handler, oauthErr := mcpoauth.NewHandler(name, normalizedURL, m.OAuthToken, preregistered, tokenSaver, mcpoauth.IsInteractive(ctx), m.OAuthCallbackPort) //nolint:contextcheck // port binding is near-instant
 			if oauthErr != nil {
 				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
 			}

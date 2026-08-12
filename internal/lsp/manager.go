@@ -111,7 +111,7 @@ func (s *Manager) Start(ctx context.Context, path string) {
 
 	var wg sync.WaitGroup
 	for name, server := range s.manager.GetServers() {
-		wg.Go(func() {
+		wg.Go(func() { //nolint:contextcheck // LSP server outlives any single request
 			s.startServer(name, path, server)
 		})
 	}

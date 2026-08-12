@@ -361,7 +361,7 @@ func (s *unixSender) writeLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if err := dialSend(s.socketPath, req); err != nil {
+			if err := dialSend(s.socketPath, req); err != nil { //nolint:contextcheck // dialSend uses its own 500ms timeout
 				slog.Debug("Herdr report failed", "error", err)
 			}
 		case <-ctx.Done():

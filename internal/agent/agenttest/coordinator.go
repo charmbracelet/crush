@@ -37,7 +37,7 @@ func NewCoordinator(
 	sessions session.Service,
 	messages message.Service,
 ) (agent.Coordinator, error) {
-	cfg, err := config.Init(workingDir, "", false)
+	cfg, err := config.Init(workingDir, "", false) //nolint:contextcheck // test helper; Init is a startup call with no request context
 	if err != nil {
 		return nil, err
 	}

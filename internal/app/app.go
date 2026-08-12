@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
@@ -127,7 +128,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 	}
 
-	app.setupEvents()
+	app.setupEvents() //nolint:contextcheck // derives its own lifecycle context from app.globalCtx
 
 	// Initialize clipboard support. This is best-effort; if it fails
 	// (e.g., headless environment), clipboard operations will return nil.
@@ -480,7 +481,7 @@ func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) e
 		Model:    lastMsg.Model,
 	})
 	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-		smallModel := app.GetDefaultSmallModel(lastMsg.Provider)
+		smallModel := app.GetDefaultSmallModel(lastMsg.Provider) //nolint:contextcheck // Providers uses sync.Once; ctx is moot after first call
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallModel)
 	}
 	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
@@ -537,7 +538,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 
 	case largeModel != "":
 		// No small model specified, but large model was - use provider's default.
-		smallCfg := app.GetDefaultSmallModel(largeProviderID)
+		smallCfg := app.GetDefaultSmallModel(largeProviderID) //nolint:contextcheck // Providers uses sync.Once; ctx is moot after first call
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallCfg)
 	}
 
@@ -718,6 +719,33 @@ func (app *App) Subscribe(program *tea.Program) {
 		return nil
 	})
 	defer app.tuiWG.Done()
+
+	// Monitor for dropped pubsub events and warn the user so they know
+	// the display may be stale (e.g. during heavy LLM streaming).
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		lastDrop := app.events.DropCount()
+		lastMustDeliver := app.events.MustDeliverDropCount()
+		for {
+			select {
+			case <-tuiCtx.Done():
+				return
+			case <-ticker.C:
+				curDrop := app.events.DropCount()
+				curMustDeliver := app.events.MustDeliverDropCount()
+				dropped := (curDrop - lastDrop) + (curMustDeliver - lastMustDeliver)
+				lastDrop = curDrop
+				lastMustDeliver = curMustDeliver
+				if dropped > 0 {
+					program.Send(util.NewWarnMsg(fmt.Sprintf(
+						"UI could not keep up — %d event(s) dropped. The display may be out of date.",
+						dropped,
+					)))
+				}
+			}
+		}
+	}()
 
 	events := app.events.Subscribe(tuiCtx)
 	for {

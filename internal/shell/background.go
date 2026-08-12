@@ -56,7 +56,7 @@ type BackgroundShell struct {
 	stderr      *syncBuffer
 	done        chan struct{}
 	exitErr     error
-	completedAt int64 // Unix timestamp when job completed (0 if still running)
+	completedAt atomic.Int64 // Unix timestamp when job completed (0 if still running)
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -122,7 +122,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 		err := shell.ExecStream(shellCtx, command, bgShell.stdout, bgShell.stderr)
 
 		bgShell.exitErr = err
-		atomic.StoreInt64(&bgShell.completedAt, time.Now().Unix())
+		bgShell.completedAt.Store(time.Now().Unix())
 	}()
 
 	return bgShell, nil
@@ -178,7 +178,7 @@ func (m *BackgroundShellManager) Cleanup() int {
 
 	var toRemove []string
 	for shell := range m.shells.Seq() {
-		completedAt := atomic.LoadInt64(&shell.completedAt)
+		completedAt := shell.completedAt.Load()
 		if completedAt > 0 && now-completedAt > retentionSeconds {
 			toRemove = append(toRemove, shell.ID)
 		}
@@ -191,29 +191,23 @@ func (m *BackgroundShellManager) Cleanup() int {
 	return len(toRemove)
 }
 
-// KillAll terminates all background shells.
-func (m *BackgroundShellManager) KillAll() {
+// KillAll terminates all background shells. The provided context bounds how
+// long the function waits for each shell to exit.
+func (m *BackgroundShellManager) KillAll(ctx context.Context) {
 	shells := slices.Collect(m.shells.Seq())
 	m.shells.Reset(map[string]*BackgroundShell{})
-	done := make(chan struct{}, 1)
-	go func() {
-		var wg sync.WaitGroup
-		for _, shell := range shells {
-			wg.Go(func() {
-				shell.cancel()
-				<-shell.done
-			})
-		}
-		wg.Wait()
-		done <- struct{}{}
-	}()
 
-	select {
-	case <-done:
-		return
-	case <-time.After(time.Second * 5):
-		return
+	var wg sync.WaitGroup
+	for _, shell := range shells {
+		wg.Go(func() {
+			shell.cancel()
+			select {
+			case <-shell.done:
+			case <-ctx.Done():
+			}
+		})
 	}
+	wg.Wait()
 }
 
 // GetOutput returns the current output of a background shell.
@@ -239,4 +233,13 @@ func (bs *BackgroundShell) IsDone() bool {
 // Wait blocks until the background shell completes.
 func (bs *BackgroundShell) Wait() {
 	<-bs.done
+}
+
+func (bs *BackgroundShell) WaitContext(ctx context.Context) bool {
+	select {
+	case <-bs.done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

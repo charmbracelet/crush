@@ -1,9 +1,13 @@
 package message
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
+
+	"charm.land/fantasy"
+	"github.com/stretchr/testify/require"
 )
 
 func makeTestAttachments(n int, contentSize int) []Attachment {
@@ -17,6 +21,99 @@ func makeTestAttachments(n int, contentSize int) []Attachment {
 		}
 	}
 	return attachments
+}
+
+func TestToAIMessage_CorruptedMediaData(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: Tool,
+		Parts: []ContentPart{
+			ToolResult{
+				ToolCallID: "call_123",
+				Name:       "screenshot",
+				Content:    "Loaded image/png content",
+				Data:       "abc\x80def",
+				MIMEType:   "image/png",
+			},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 1)
+
+	part, ok := messages[0].Content[0].(fantasy.ToolResultPart)
+	require.True(t, ok)
+
+	require.Equal(t, "call_123", part.ToolCallID)
+
+	textContent, ok := part.Output.(fantasy.ToolResultOutputContentText)
+	require.True(t, ok, "corrupted media should be downgraded to text")
+	require.Equal(t, mediaLoadFailedPlaceholder, textContent.Text)
+}
+
+func TestToAIMessage_ValidMediaData(t *testing.T) {
+	t.Parallel()
+
+	validBase64 := base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4E, 0x47})
+
+	msg := &Message{
+		Role: Tool,
+		Parts: []ContentPart{
+			ToolResult{
+				ToolCallID: "call_456",
+				Name:       "screenshot",
+				Content:    "Loaded image/png content",
+				Data:       validBase64,
+				MIMEType:   "image/png",
+			},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 1)
+
+	part, ok := messages[0].Content[0].(fantasy.ToolResultPart)
+	require.True(t, ok)
+
+	require.Equal(t, "call_456", part.ToolCallID)
+
+	mediaContent, ok := part.Output.(fantasy.ToolResultOutputContentMedia)
+	require.True(t, ok, "valid media should remain as media")
+	require.Equal(t, validBase64, mediaContent.Data)
+	require.Equal(t, "image/png", mediaContent.MediaType)
+}
+
+func TestToAIMessage_ASCIIButInvalidBase64(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: Tool,
+		Parts: []ContentPart{
+			ToolResult{
+				ToolCallID: "call_789",
+				Name:       "screenshot",
+				Content:    "Loaded image/png content",
+				Data:       "not-valid-base64!!!",
+				MIMEType:   "image/png",
+			},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 1)
+
+	part, ok := messages[0].Content[0].(fantasy.ToolResultPart)
+	require.True(t, ok)
+
+	require.Equal(t, "call_789", part.ToolCallID)
+
+	textContent, ok := part.Output.(fantasy.ToolResultOutputContentText)
+	require.True(t, ok, "ASCII but invalid base64 should be downgraded to text")
+	require.Equal(t, mediaLoadFailedPlaceholder, textContent.Text)
 }
 
 func BenchmarkPromptWithTextAttachments(b *testing.B) {
@@ -42,4 +139,37 @@ func BenchmarkPromptWithTextAttachments(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestResetStreamedContent(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.AddImageURL("https://example.com/img.png", "high")
+	msg.AppendContent("partial answer")
+	msg.AppendReasoningContent("thinking...")
+	msg.AddToolCall(ToolCall{ID: "1", Name: "bash"})
+	msg.AddToolResult(ToolResult{ToolCallID: "1", Content: "output"})
+	msg.AddFinish(FinishReasonError, "boom", "stream died")
+
+	msg.ResetStreamedContent()
+
+	// Streamed parts are gone.
+	require.Empty(t, msg.Content().Text, "text should be cleared")
+	require.Empty(t, msg.ReasoningContent().Thinking, "reasoning should be cleared")
+	require.Empty(t, msg.ToolCalls(), "tool calls should be cleared")
+	require.Nil(t, msg.FinishPart(), "finish should be cleared")
+
+	// Non-streamed parts survive.
+	require.Len(t, msg.ImageURLContent(), 1, "image should survive")
+	require.Len(t, msg.ToolResults(), 1, "tool results should survive")
+}
+
+func TestResetStreamedContentEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Reset on an empty message is a no-op and must not panic.
+	msg := &Message{}
+	msg.ResetStreamedContent()
+	require.Empty(t, msg.Parts)
 }

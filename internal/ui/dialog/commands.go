@@ -27,9 +27,7 @@ type CommandType uint
 func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
 
 const (
-	sidebarCompactModeBreakpoint   = 120
-	defaultCommandsDialogMaxHeight = 20
-	defaultCommandsDialogMaxWidth  = 70
+	sidebarCompactModeBreakpoint = 120
 )
 
 const (
@@ -39,6 +37,10 @@ const (
 )
 
 // Commands represents a dialog that shows available commands.
+type dockerMCPAvailabilityCheckedMsg struct {
+	available bool
+}
+
 type Commands struct {
 	com    *common.Common
 	keyMap struct {
@@ -51,8 +53,11 @@ type Commands struct {
 		Close key.Binding
 	}
 
-	sessionID string // can be empty for non-session-specific commands
-	selected  CommandType
+	sessionID  string
+	hasSession bool
+	hasTodos   bool
+	hasQueue   bool
+	selected   CommandType
 
 	spinner spinner.Model
 	loading bool
@@ -65,16 +70,22 @@ type Commands struct {
 
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
+
+	dockerMCPAvailable     *bool
+	dockerMCPCheckInFlight bool
 }
 
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
 		sessionID:      sessionID,
+		hasSession:     hasSession,
+		hasTodos:       hasTodos,
+		hasQueue:       hasQueue,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
@@ -122,6 +133,10 @@ func NewCommands(com *common.Common, sessionID string, customCommands []commands
 	closeKey.SetHelp("esc", "cancel")
 	c.keyMap.Close = closeKey
 
+	if available, known := config.DockerMCPAvailabilityCached(); known {
+		c.dockerMCPAvailable = &available
+	}
+
 	// Set initial commands
 	c.setCommandItems(c.selected)
 
@@ -141,6 +156,27 @@ func (c *Commands) ID() string {
 // HandleMsg implements [Dialog].
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case dockerMCPAvailabilityCheckedMsg:
+		c.dockerMCPAvailable = &msg.available
+		c.dockerMCPCheckInFlight = false
+		if c.selected == SystemCommands {
+			// Preserve the current selection across the rebuild to avoid reset
+			var prevID string
+			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
+				prevID = item.id
+			}
+			c.setCommandItems(c.selected)
+			if prevID != "" {
+				for i, it := range c.list.FilteredItems() {
+					if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
+						c.list.SetSelected(i)
+						c.list.ScrollToSelected()
+						break
+					}
+				}
+			}
+		}
+		return nil
 	case spinner.TickMsg:
 		if c.loading {
 			var cmd tea.Cmd
@@ -155,19 +191,17 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			c.list.Focus()
 			if c.list.IsSelectedFirst() {
 				c.list.SelectLast()
-				c.list.ScrollToBottom()
-				break
+			} else {
+				c.list.SelectPrev()
 			}
-			c.list.SelectPrev()
 			c.list.ScrollToSelected()
 		case key.Matches(msg, c.keyMap.Next):
 			c.list.Focus()
 			if c.list.IsSelectedLast() {
 				c.list.SelectFirst()
-				c.list.ScrollToTop()
-				break
+			} else {
+				c.list.SelectNext()
 			}
-			c.list.SelectNext()
 			c.list.ScrollToSelected()
 		case key.Matches(msg, c.keyMap.Select):
 			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
@@ -205,6 +239,20 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
+func checkDockerMCPAvailabilityCmd() tea.Cmd {
+	return func() tea.Msg {
+		return dockerMCPAvailabilityCheckedMsg{available: config.RefreshDockerMCPAvailability()}
+	}
+}
+
+func (c *Commands) InitialCmd() tea.Cmd {
+	if c.dockerMCPAvailable != nil || c.dockerMCPCheckInFlight {
+		return nil
+	}
+	c.dockerMCPCheckInFlight = true
+	return checkDockerMCPAvailabilityCmd()
+}
+
 // Cursor returns the cursor position relative to the dialog.
 func (c *Commands) Cursor() *tea.Cursor {
 	return InputCursor(c.com.Styles, c.input.Cursor())
@@ -218,9 +266,9 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 
 	selectedFn := func(t CommandType) string {
 		if t == selected {
-			return sty.RadioOn.Padding(0, 1).Render() + sty.HalfMuted.Render(t.String())
+			return sty.Radio.On.Padding(0, 1).Render() + sty.Radio.Label.Render(t.String())
 		}
-		return sty.RadioOff.Padding(0, 1).Render() + sty.HalfMuted.Render(t.String())
+		return sty.Radio.Off.Padding(0, 1).Render() + sty.Radio.Label.Render(t.String())
 	}
 
 	parts := []string{
@@ -240,8 +288,8 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 // Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
-	width := max(0, min(defaultCommandsDialogMaxWidth, area.Dx()))
-	height := max(0, min(defaultCommandsDialogMaxHeight, area.Dy()))
+	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),
@@ -255,10 +303,12 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	c.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
+	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
 
-	c.list.SetSize(innerWidth, height-heightOffset)
-	c.help.SetWidth(innerWidth)
+	c.list.SetSize(innerWidth, max(0, height-heightOffset))
+
+	// Hide the shortcut hints uniformly when the widest would crowd names.
+	applyInfoColumnVisibility(c.list.FilteredItems(), innerWidth, commandInfoMaxPercent)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
@@ -267,10 +317,10 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(inputView)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	rc.AddPart(listView)
-	rc.Help = c.help.View(c)
+	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
 
 	if c.loading {
-		rc.Help = c.spinner.View() + " Generating Prompt..."
+		rc.Help = t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt...")
 	}
 
 	view := rc.Render()
@@ -356,11 +406,21 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 		}
 	case UserCommands:
 		for _, cmd := range c.customCommands {
-			action := ActionRunCustomCommand{
-				Content:   cmd.Content,
-				Arguments: cmd.Arguments,
+			var action Action
+			if cmd.Skill != nil {
+				action = ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
+			} else {
+				action = ActionRunCustomCommand{
+					Content:   cmd.Content,
+					Arguments: cmd.Arguments,
+					Skill:     cmd.Skill,
+				}
 			}
-			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action))
+			item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
+			if cmd.Skill != nil {
+				item = item.WithDescription(cmd.Skill.Description)
+			}
+			commandItems = append(commandItems, item)
 		}
 	case MCPPrompts:
 		for _, cmd := range c.mcpPrompts {
@@ -385,13 +445,13 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 // defaultCommands returns the list of default system commands.
 func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
-		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
+		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 	}
 
 	// Only show compact command if there's an active session
-	if c.sessionID != "" {
+	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
 	}
 
@@ -421,32 +481,76 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
-	if c.windowWidth >= sidebarCompactModeBreakpoint && c.sessionID != "" {
+	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
-	if c.sessionID != "" {
-		cfg := c.com.Config()
-		agentCfg := cfg.Agents[config.AgentCoder]
-		model := cfg.GetModelByType(agentCfg.Model)
+	if c.hasSession {
+		cfgPrime := c.com.Config()
+		agentCfg := cfgPrime.Agents[config.AgentCoder]
+		model := cfgPrime.GetModelByType(agentCfg.Model)
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
-				// TODO: Pass in the file picker dialog id
+				DialogID: FilePickerID,
 			}))
 		}
 	}
 
-	// Add external editor command if $EDITOR is available
-	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv
+	// Add external editor command if $EDITOR is available.
+	//
+	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv;
+	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
+	// antipattern.
 	if os.Getenv("EDITOR") != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
 
-	return append(commands,
-		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),
+	// Add Docker MCP command if available and not already enabled.
+	if !cfg.IsDockerMCPEnabled() && c.dockerMCPAvailable != nil && *c.dockerMCPAvailable {
+		commands = append(commands, NewCommandItem(c.com.Styles, "enable_docker_mcp", "Enable Docker MCP Catalog", "", ActionEnableDockerMCP{}))
+	}
+
+	// Add disable Docker MCP command if it's currently enabled
+	if cfg.IsDockerMCPEnabled() {
+		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "Disable Docker MCP Catalog", "", ActionDisableDockerMCP{}))
+	}
+
+	if c.hasTodos || c.hasQueue {
+		var label string
+		switch {
+		case c.hasTodos && c.hasQueue:
+			label = "Toggle To-Dos/Queue"
+		case c.hasQueue:
+			label = "Toggle Queue"
+		default:
+			label = "Toggle To-Dos"
+		}
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
+	}
+
+	// Add a command for selecting notification style via picker dialog.
+	notificationLabel := "Notification Style"
+	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
+
+	commands = append(
+		commands,
+		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
-		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}),
 	)
+
+	// Add transparent background toggle.
+	transparentLabel := "Disable Background Color"
+	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {
+		transparentLabel = "Enable Background Color"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+
+	commands = append(
+		commands,
+		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}).WithAliases("exit"),
+	)
+
+	return commands
 }
 
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.
@@ -466,15 +570,15 @@ func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
 }
 
 // StartLoading implements [LoadingDialog].
-func (a *Commands) StartLoading() tea.Cmd {
-	if a.loading {
+func (c *Commands) StartLoading() tea.Cmd {
+	if c.loading {
 		return nil
 	}
-	a.loading = true
-	return a.spinner.Tick
+	c.loading = true
+	return c.spinner.Tick
 }
 
 // StopLoading implements [LoadingDialog].
-func (a *Commands) StopLoading() {
-	a.loading = false
+func (c *Commands) StopLoading() {
+	c.loading = false
 }

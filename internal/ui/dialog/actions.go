@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,8 +15,9 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -36,25 +38,32 @@ type ActionSelectSession struct {
 
 // ActionSelectModel is a message indicating a model has been selected.
 type ActionSelectModel struct {
-	Provider  catwalk.Provider
-	Model     config.SelectedModel
-	ModelType config.SelectedModelType
+	Provider       catwalk.Provider
+	Model          config.SelectedModel
+	ModelType      config.SelectedModelType
+	ReAuthenticate bool
 }
 
 // Messages for commands
 type (
-	ActionNewSession        struct{}
-	ActionToggleHelp        struct{}
-	ActionToggleCompactMode struct{}
-	ActionToggleThinking    struct{}
-	ActionExternalEditor    struct{}
-	ActionToggleYoloMode    struct{}
-	// ActionInitializeProject is a message to initialize a project.
-	ActionInitializeProject struct{}
-	ActionSummarize         struct {
+	ActionNewSession              struct{}
+	ActionToggleHelp              struct{}
+	ActionToggleCompactMode       struct{}
+	ActionToggleThinking          struct{}
+	ActionTogglePills             struct{}
+	ActionExternalEditor          struct{}
+	ActionToggleYoloMode          struct{}
+	ActionToggleNotifications     struct{}
+	ActionSelectNotificationStyle struct {
+		Style string
+	}
+	ActionToggleTransparentBackground struct{}
+	ActionInitializeProject           struct{}
+	ActionSummarize                   struct {
 		SessionID string
 	}
-	// ActionSelectReasoningEffort is a message indicating a reasoning effort has been selected.
+	// ActionSelectReasoningEffort is a message indicating a reasoning effort
+	// has been selected.
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
@@ -67,6 +76,13 @@ type (
 		Content   string
 		Arguments []commands.Argument
 		Args      map[string]string // Actual argument values
+		Skill     *skills.Skill     // Set when this is a skill command
+	}
+	// ActionAttachSkill is sent when a skill is selected from the commands
+	// dialog to be attached to the conversation as a markdown attachment.
+	ActionAttachSkill struct {
+		ID   string
+		Name string
 	}
 	// ActionRunMCPPrompt is a message to run a custom command.
 	ActionRunMCPPrompt struct {
@@ -76,6 +92,33 @@ type (
 		ClientID    string
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
+	}
+	// ActionEnableDockerMCP is a message to enable Docker MCP.
+	ActionEnableDockerMCP struct{}
+	// ActionDisableDockerMCP is a message to disable Docker MCP.
+	ActionDisableDockerMCP struct{}
+)
+
+// Messages for MCP OAuth authentication dialog.
+type (
+	// ActionMCPAuthStarted is sent when the user approves authentication
+	// for an MCP server. The UI should initiate the actual auth flow
+	// using the provided context, which the dialog will cancel if the
+	// user closes it.
+	ActionMCPAuthStarted struct {
+		Name string
+		Ctx  context.Context
+	}
+
+	// ActionMCPAuthComplete is sent when MCP authentication succeeds.
+	ActionMCPAuthComplete struct {
+		Name string
+	}
+
+	// ActionMCPAuthErrored is sent when MCP authentication fails.
+	ActionMCPAuthErrored struct {
+		Name  string
+		Error error
 	}
 )
 
@@ -131,22 +174,22 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 	return func() tea.Msg {
 		isFileLarge, err := common.IsFileTooBig(path, common.MaxAttachmentSize)
 		if err != nil {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("unable to read the image: %v", err),
 			}
 		}
 		if isFileLarge {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  "file too large, max 5MB",
 			}
 		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("unable to read the image: %v", err),
 			}
 		}

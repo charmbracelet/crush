@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -32,13 +33,13 @@ func Tools() iter.Seq2[string, []*Tool] {
 }
 
 // RunTool runs an MCP tool with the given input parameters.
-func RunTool(ctx context.Context, name, toolName string, input string) (ToolResult, error) {
+func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
 	}
 
-	c, err := getOrRenewClient(ctx, name)
+	c, err := getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -81,12 +82,13 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 
 	textContent := strings.Join(textParts, "\n")
 
-	// MCP SDK returns Data as already base64-encoded, so we use it directly.
+	// We need to make sure the data is base64
+	// when using something like docker + playwright the data was not returned correctly.
 	if imageData != nil {
 		return ToolResult{
 			Type:      "image",
 			Content:   textContent,
-			Data:      imageData,
+			Data:      ensureRawBytes(imageData),
 			MediaType: imageMimeType,
 		}, nil
 	}
@@ -95,7 +97,7 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 		return ToolResult{
 			Type:      "media",
 			Content:   textContent,
-			Data:      audioData,
+			Data:      ensureRawBytes(audioData),
 			MediaType: audioMimeType,
 		}, nil
 	}
@@ -108,7 +110,7 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
-func RefreshTools(ctx context.Context, name string) {
+func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 	session, ok := sessions.Get(name)
 	if !ok {
 		slog.Warn("Refresh tools: no session", "name", name)
@@ -121,14 +123,28 @@ func RefreshTools(ctx context.Context, name string) {
 		return
 	}
 
-	toolCount := updateTools(name, tools)
+	toolCount := updateTools(cfg, name, tools)
 
 	prev, _ := states.Get(name)
 	prev.Counts.Tools = toolCount
 	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
-func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) {
+// registerSessionTools lists the tools a live session exposes and writes them
+// into the shared registry, returning the number registered after any
+// configured allow/deny filtering. It is the single seam through which a
+// (re)connected session's tools enter the registry, so both the initial
+// connect and a lazy renew repopulate the tool list the agent sends to the LLM
+// instead of leaving it empty.
+func registerSessionTools(ctx context.Context, cfg *config.ConfigStore, name string, sess *ClientSession) (int, error) {
+	tools, err := getTools(ctx, sess)
+	if err != nil {
+		return 0, err
+	}
+	return updateTools(cfg, name, tools), nil
+}
+
+func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	// Always call ListTools to get the actual available tools.
 	// The InitializeResult Capabilities.Tools field may be an empty object {},
 	// which is valid per MCP spec, but we still need to call ListTools to discover tools.
@@ -139,8 +155,11 @@ func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) 
 	return result.Tools, nil
 }
 
-func updateTools(name string, tools []*Tool) int {
-	tools = filterDisabledTools(name, tools)
+func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
+	mcpCfg, ok := cfg.Config().MCP[name]
+	if ok {
+		tools = filterTools(mcpCfg, tools)
+	}
 	if len(tools) == 0 {
 		allTools.Del(name)
 		return 0
@@ -149,19 +168,81 @@ func updateTools(name string, tools []*Tool) int {
 	return len(tools)
 }
 
-// filterDisabledTools removes tools that are disabled via config.
-func filterDisabledTools(mcpName string, tools []*Tool) []*Tool {
-	cfg := config.Get()
-	mcpCfg, ok := cfg.MCP[mcpName]
-	if !ok || len(mcpCfg.DisabledTools) == 0 {
-		return tools
+// filterTools filters tools based on enabled_tools (allow list) and
+// disabled_tools (deny list) from the MCP config.
+func filterTools(mcpCfg config.MCPConfig, tools []*Tool) []*Tool {
+	if len(mcpCfg.EnabledTools) > 0 {
+		filtered := make([]*Tool, 0, len(mcpCfg.EnabledTools))
+		for _, tool := range tools {
+			if slices.Contains(mcpCfg.EnabledTools, tool.Name) {
+				filtered = append(filtered, tool)
+			}
+		}
+		tools = filtered
 	}
 
-	filtered := make([]*Tool, 0, len(tools))
-	for _, tool := range tools {
-		if !slices.Contains(mcpCfg.DisabledTools, tool.Name) {
-			filtered = append(filtered, tool)
+	if len(mcpCfg.DisabledTools) > 0 {
+		filtered := make([]*Tool, 0, len(tools))
+		for _, tool := range tools {
+			if !slices.Contains(mcpCfg.DisabledTools, tool.Name) {
+				filtered = append(filtered, tool)
+			}
+		}
+		tools = filtered
+	}
+
+	return tools
+}
+
+// ensureRawBytes normalizes MCP media data into raw binary bytes.
+//
+// The MCP Go SDK's json.Unmarshal normally base64-decodes
+// ImageContent.Data into raw bytes automatically. However, some MCP
+// transports (notably Docker over stdio) can deliver data in
+// unexpected formats. This function handles both cases:
+//
+//   - If data looks like a valid base64 string (ASCII-only, decodable)
+//     it is decoded and the raw bytes are returned.
+//   - If data is already raw binary (contains bytes > 127) it is
+//     returned as-is.
+func ensureRawBytes(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+
+	normalized := normalizeBase64Input(data)
+	if decoded, ok := decodeBase64(normalized); ok {
+		return decoded
+	}
+
+	// Already raw binary — return unchanged.
+	return data
+}
+
+func normalizeBase64Input(data []byte) []byte {
+	normalized := strings.Join(strings.Fields(string(data)), "")
+	return []byte(normalized)
+}
+
+func decodeBase64(data []byte) ([]byte, bool) {
+	if len(data) == 0 {
+		return data, true
+	}
+
+	for _, b := range data {
+		if b > 127 {
+			return nil, false
 		}
 	}
-	return filtered
+
+	s := string(data)
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err == nil {
+		return decoded, true
+	}
+	decoded, err = base64.RawStdEncoding.DecodeString(s)
+	if err == nil {
+		return decoded, true
+	}
+	return nil, false
 }

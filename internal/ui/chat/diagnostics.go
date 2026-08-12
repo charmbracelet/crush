@@ -37,7 +37,7 @@ type DiagnosticsToolRenderContext struct{}
 func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Diagnostics", opts.Anim)
+		return pendingTool(sty, "Diagnostics", opts.Anim, opts.Compact)
 	}
 
 	var params tools.DiagnosticsParams
@@ -49,7 +49,7 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		mainParam = fsext.PrettyPath(params.FilePath)
 	}
 
-	header := toolHeader(sty, opts.Status, "Diagnostics", cappedWidth, opts.Compact, mainParam)
+	header := toolHeader(sty, opts.Status, "Diagnostics", cappedWidth, opts, mainParam)
 	if opts.Compact {
 		return header
 	}

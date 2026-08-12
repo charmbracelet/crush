@@ -3,8 +3,8 @@ package dialog
 import (
 	"cmp"
 	"fmt"
+	"log/slog"
 	"slices"
-	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -13,7 +13,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -70,7 +70,7 @@ const (
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
 
-const defaultModelsDialogMaxWidth = 70
+const defaultModelsDialogMaxWidth = 73
 
 // Models represents a model selection dialog.
 type Models struct {
@@ -84,6 +84,7 @@ type Models struct {
 		Tab      key.Binding
 		UpDown   key.Binding
 		Select   key.Binding
+		Edit     key.Binding
 		Next     key.Binding
 		Previous key.Binding
 		Close    key.Binding
@@ -124,6 +125,10 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "confirm"),
 	)
+	m.keyMap.Edit = key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "edit"),
+	)
 	m.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
 		key.WithHelp("↑/↓", "choose"),
@@ -138,12 +143,17 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	providers, err := getFilteredProviders(com.Config())
+	// A stale catalog must not keep this dialog from opening: it is the
+	// only way for the user to choose a model.
+	var err error
+	m.providers, err = config.Providers(m.com.Config())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get providers: %w", err)
+		if len(m.providers) == 0 {
+			return nil, fmt.Errorf("failed to get providers: %w", err)
+		}
+		slog.Warn("Listing the previously known providers", "error", err)
 	}
 
-	m.providers = providers
 	if err := m.setProviderItems(); err != nil {
 		return nil, fmt.Errorf("failed to set provider items: %w", err)
 	}
@@ -167,21 +177,19 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			m.list.Focus()
 			if m.list.IsSelectedFirst() {
 				m.list.SelectLast()
-				m.list.ScrollToBottom()
-				break
+			} else {
+				m.list.SelectPrev()
 			}
-			m.list.SelectPrev()
 			m.list.ScrollToSelected()
 		case key.Matches(msg, m.keyMap.Next):
 			m.list.Focus()
 			if m.list.IsSelectedLast() {
 				m.list.SelectFirst()
-				m.list.ScrollToTop()
-				break
+			} else {
+				m.list.SelectNext()
 			}
-			m.list.SelectNext()
 			m.list.ScrollToSelected()
-		case key.Matches(msg, m.keyMap.Select):
+		case key.Matches(msg, m.keyMap.Select, m.keyMap.Edit):
 			selectedItem := m.list.SelectedItem()
 			if selectedItem == nil {
 				break
@@ -192,10 +200,13 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				break
 			}
 
+			isEdit := key.Matches(msg, m.keyMap.Edit)
+
 			return ActionSelectModel{
-				Provider:  modelItem.prov,
-				Model:     modelItem.SelectedModel(),
-				ModelType: modelItem.SelectedModelType(),
+				Provider:       modelItem.prov,
+				Model:          modelItem.SelectedModel(),
+				ModelType:      modelItem.SelectedModelType(),
+				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.isOnboarding {
@@ -207,7 +218,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				m.modelType = ModelTypeLarge
 			}
 			if err := m.setProviderItems(); err != nil {
-				return uiutil.ReportError(err)
+				return util.ReportError(err)
 			}
 		default:
 			var cmd tea.Cmd
@@ -231,13 +242,13 @@ func (m *Models) Cursor() *tea.Cursor {
 // modelTypeRadioView returns the radio view for model type selection.
 func (m *Models) modelTypeRadioView() string {
 	t := m.com.Styles
-	textStyle := t.HalfMuted
-	largeRadioStyle := t.RadioOff
-	smallRadioStyle := t.RadioOff
+	textStyle := t.Radio.Label
+	largeRadioStyle := t.Radio.Off
+	smallRadioStyle := t.Radio.Off
 	if m.modelType == ModelTypeLarge {
-		largeRadioStyle = t.RadioOn
+		largeRadioStyle = t.Radio.On
 	} else {
-		smallRadioStyle = t.RadioOn
+		smallRadioStyle = t.Radio.On
 	}
 
 	largeRadio := largeRadioStyle.Padding(0, 1).Render()
@@ -251,17 +262,12 @@ func (m *Models) modelTypeRadioView() string {
 // Draw implements [Dialog].
 func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()))
-	height := max(0, min(defaultDialogHeight, area.Dy()))
+	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
-	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
-	m.list.SetSize(innerWidth, height-heightOffset)
-	m.help.SetWidth(innerWidth)
+	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
@@ -276,9 +282,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(inputView)
 
 	listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
+	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, m.list.Offset())
 	rc.AddPart(listView)
 
-	rc.Help = m.help.View(m)
+	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	cur := m.Cursor()
 
@@ -287,13 +294,8 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.TitleInfo = ""
 		rc.IsOnboarding = true
 		view := rc.Render()
+		cur = adjustOnboardingInputCursor(t, cur)
 		DrawOnboardingCursor(scr, area, view, cur)
-
-		// FIXME(@andreynering): Figure it out how to properly fix this
-		if cur != nil {
-			cur.Y -= 1
-			cur.X -= 1
-		}
 	} else {
 		view := rc.Render()
 		DrawCenterCursor(scr, area, view, cur)
@@ -309,27 +311,35 @@ func (m *Models) ShortHelp() []key.Binding {
 			m.keyMap.Select,
 		}
 	}
-	return []key.Binding{
+	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
 		m.keyMap.Select,
-		m.keyMap.Close,
 	}
+	if m.isSelectedConfigured() {
+		h = append(h, m.keyMap.Edit)
+	}
+	h = append(h, m.keyMap.Close)
+	return h
 }
 
 // FullHelp returns the full help view.
 func (m *Models) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{
-			m.keyMap.Select,
-			m.keyMap.Next,
-			m.keyMap.Previous,
-			m.keyMap.Tab,
-		},
-		{
-			m.keyMap.Close,
-		},
+	return [][]key.Binding{m.ShortHelp()}
+}
+
+func (m *Models) isSelectedConfigured() bool {
+	selectedItem := m.list.SelectedItem()
+	if selectedItem == nil {
+		return false
 	}
+	modelItem, ok := selectedItem.(*ModelItem)
+	if !ok {
+		return false
+	}
+	providerID := string(modelItem.prov.ID)
+	_, isConfigured := m.com.Config().Providers.Get(providerID)
+	return isConfigured
 }
 
 // setProviderItems sets the provider items in the list.
@@ -347,7 +357,7 @@ func (m *Models) setProviderItems() error {
 
 	// Get a list of known providers to compare against
 	knownProviders, err := config.Providers(cfg)
-	if err != nil {
+	if err != nil && len(knownProviders) == 0 {
 		return fmt.Errorf("failed to get providers: %w", err)
 	}
 
@@ -390,20 +400,8 @@ func (m *Models) setProviderItems() error {
 		}
 	}
 
-	// Move "Charm Hyper" to first position.
-	// (But still after recent models and custom providers).
-	slices.SortStableFunc(m.providers, func(a, b catwalk.Provider) int {
-		switch {
-		case a.ID == "hyper":
-			return -1
-		case b.ID == "hyper":
-			return 1
-		default:
-			return 0
-		}
-	})
-
-	// Now add known providers from the predefined list
+	// Now add known providers from the predefined list.
+	// Providers already has Hyper at the front of the list.
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
 		if addedProviders[providerID] {
@@ -432,18 +430,13 @@ func (m *Models) setProviderItems() error {
 					}
 					continue
 				}
-				if model.Name == "" {
-					model.Name = model.ID
-				}
+				model.Name = cmp.Or(model.Name, model.ID)
 				displayProvider.Models = append(displayProvider.Models, model)
 				modelIndex[model.ID] = len(displayProvider.Models) - 1
 			}
 		}
 
-		name := displayProvider.Name
-		if name == "" {
-			name = providerID
-		}
+		name := cmp.Or(displayProvider.Name, providerID)
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {
@@ -482,7 +475,7 @@ func (m *Models) setProviderItems() error {
 
 		if len(validRecentItems) != len(recentItems) {
 			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := cfg.SetConfigField(fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
 				return fmt.Errorf("failed to update recent models: %w", err)
 			}
 		}
@@ -495,7 +488,11 @@ func (m *Models) setProviderItems() error {
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
 	m.list.SetSelectedItem(selectedItemID)
-	m.list.ScrollToTop()
+	if selectedItemID != "" {
+		m.list.ScrollToSelected()
+	} else {
+		m.list.ScrollToTop()
+	}
 
 	// Update placeholder based on model type
 	if !m.isOnboarding {
@@ -503,27 +500,6 @@ func (m *Models) setProviderItems() error {
 	}
 
 	return nil
-}
-
-func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
-	providers, err := config.Providers(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get providers: %w", err)
-	}
-	var filteredProviders []catwalk.Provider
-	for _, p := range providers {
-		var (
-			isAzure         = p.ID == catwalk.InferenceProviderAzure
-			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
-			isHyper         = string(p.ID) == "hyper"
-			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
-			_, isConfigured = cfg.Providers.Get(string(p.ID))
-		)
-		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
-			filteredProviders = append(filteredProviders, p)
-		}
-	}
-	return filteredProviders, nil
 }
 
 func modelKey(providerID, modelID string) string {

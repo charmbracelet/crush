@@ -4,8 +4,65 @@ package event
 // scenarios. These tests will not log anything.
 
 import (
+	"reflect"
 	"testing"
+
+	"github.com/posthog/posthog-go"
 )
+
+func TestSetNonInteractive(t *testing.T) {
+	originalNonInteractive := baseProps[nonInteractiveAttrName]
+	originalNonInteractiveNested := baseProps[nonInteractiveNestedAttrName]
+	t.Cleanup(func() {
+		baseProps = baseProps.
+			Set(nonInteractiveAttrName, originalNonInteractive).
+			Set(nonInteractiveNestedAttrName, originalNonInteractiveNested)
+	})
+
+	tests := []struct {
+		name                     string
+		nonInteractive           bool
+		crush                    string
+		wantNonInteractiveNested bool
+	}{
+		{
+			name: "interactive direct invocation",
+		},
+		{
+			name:           "non-interactive direct invocation",
+			nonInteractive: true,
+		},
+		{
+			name:  "interactive nested invocation",
+			crush: "1",
+		},
+		{
+			name:                     "non-interactive nested invocation",
+			nonInteractive:           true,
+			crush:                    "1",
+			wantNonInteractiveNested: true,
+		},
+		{
+			name:           "non-interactive invocation with unrecognized marker",
+			nonInteractive: true,
+			crush:          "0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CRUSH", tt.crush)
+			SetNonInteractive(tt.nonInteractive)
+
+			if got := baseProps[nonInteractiveAttrName]; got != tt.nonInteractive {
+				t.Errorf("%s = %v, want %v", nonInteractiveAttrName, got, tt.nonInteractive)
+			}
+			if got := baseProps[nonInteractiveNestedAttrName]; got != tt.wantNonInteractiveNested {
+				t.Errorf("%s = %v, want %v", nonInteractiveNestedAttrName, got, tt.wantNonInteractiveNested)
+			}
+		})
+	}
+}
 
 func TestError(t *testing.T) {
 	t.Run("returns early when client is nil", func(t *testing.T) {
@@ -51,11 +108,39 @@ func TestError(t *testing.T) {
 		}()
 
 		client = nil
-		Error("test error",
+		Error(
+			"test error",
 			"type", "test",
 			"severity", "high",
 			"source", "unit-test",
 		)
+	})
+}
+
+func TestPairsToProps(t *testing.T) {
+	t.Run("sets valid key value pairs", func(t *testing.T) {
+		got := pairsToProps("foo", "bar", "count", 3)
+		want := posthog.NewProperties().
+			Set("foo", "bar").
+			Set("count", 3)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("pairsToProps() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("returns empty properties for odd pairs", func(t *testing.T) {
+		got := pairsToProps("foo", "bar", "count")
+		if len(got) != 0 {
+			t.Fatalf("pairsToProps() should return empty properties, got %#v", got)
+		}
+	})
+
+	t.Run("ignores non-string key and continues", func(t *testing.T) {
+		got := pairsToProps(123, "bad", "ok", true)
+		want := posthog.NewProperties().Set("ok", true)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("pairsToProps() = %#v, want %#v", got, want)
+		}
 	})
 }
 

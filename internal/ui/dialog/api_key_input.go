@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
@@ -70,20 +70,17 @@ func NewAPIKeyInput(
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
-	m.width = 60
-
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize() - 2
+	m.width = 0 // Set dynamically in Draw().
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = "Enter you API key..."
+	m.input.Placeholder = "Enter your API key..."
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
-	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Base.Foreground(t.Green)),
+		spinner.WithStyle(t.Dialog.APIKey.Spinner),
 	)
 
 	m.help = help.New()
@@ -161,11 +158,14 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 
+	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize() - 2
+	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
+
 	textStyle := t.Dialog.SecondaryText
-	helpStyle := t.Dialog.HelpView
 	dialogStyle := t.Dialog.View.Width(m.width)
 	inputStyle := t.Dialog.InputPrompt
-	helpStyle = helpStyle.Width(m.width - dialogStyle.GetHorizontalFrameSize())
+	helpView := renderDialogHelp(t, &m.help, m, m.width-dialogStyle.GetHorizontalFrameSize())
 
 	m.input.Prompt = m.spinner.View()
 
@@ -175,20 +175,15 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		textStyle.Render("This will be written in your global configuration:"),
 		textStyle.Render(config.GlobalConfigData()),
 		"",
-		helpStyle.Render(m.help.View(m)),
+		helpView,
 	}, "\n")
 
 	cur := m.Cursor()
 
 	if m.isOnboarding {
 		view := content
+		cur = adjustOnboardingInputCursor(t, cur)
 		DrawOnboardingCursor(scr, area, view, cur)
-
-		// FIXME(@andreynering): Figure it out how to properly fix this
-		if cur != nil {
-			cur.Y -= 1
-			cur.X -= 1
-		}
 	} else {
 		view := dialogStyle.Render(content)
 		DrawCenterCursor(scr, area, view, cur)
@@ -207,7 +202,7 @@ func (m *APIKeyInput) headerView() string {
 		return textStyle.Render(m.dialogTitle())
 	}
 	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset, m.com.Styles.Primary, m.com.Styles.Secondary)
+	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset, m.com.Styles.Dialog.TitleGradFromColor, m.com.Styles.Dialog.TitleGradToColor)
 }
 
 func (m *APIKeyInput) dialogTitle() string {
@@ -256,7 +251,7 @@ func (m *APIKeyInput) inputView() string {
 		ts := t.TextInput
 		ts.Focused.Prompt = ts.Focused.Prompt.Foreground(charmtone.Cherry)
 
-		m.input.Prompt = styles.ErrorIcon + " "
+		m.input.Prompt = styles.LSPErrorIcon + " "
 		m.input.SetStyles(ts)
 		m.input.Focus()
 	}
@@ -296,7 +291,7 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 		Type:    m.provider.Type,
 		BaseURL: m.provider.APIEndpoint,
 	}
-	err := providerConfig.TestConnection(config.Get().Resolver())
+	err := providerConfig.TestConnection(m.com.Workspace.Resolver())
 
 	// intentionally wait for at least 750ms to make sure the user sees the spinner
 	elapsed := time.Since(start)
@@ -312,11 +307,9 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 }
 
 func (m *APIKeyInput) saveKeyAndContinue() Action {
-	cfg := m.com.Config()
-
-	err := cfg.SetProviderAPIKey(string(m.provider.ID), m.input.Value())
+	err := m.com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(m.provider.ID), m.input.Value())
 	if err != nil {
-		return ActionCmd{uiutil.ReportError(fmt.Errorf("failed to save API key: %w", err))}
+		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}
 
 	return ActionSelectModel{

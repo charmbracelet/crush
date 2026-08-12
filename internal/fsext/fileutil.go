@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type FileInfo struct {
@@ -70,13 +72,37 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 	}
 }
 
-// ShouldSkip checks if a path should be skipped based on hierarchical gitignore,
-// crushignore, and hidden file rules
+// ShouldSkip checks if a file path should be skipped based on hierarchical gitignore,
+// crushignore, and hidden file rules.
 func (w *FastGlobWalker) ShouldSkip(path string) bool {
-	return w.directoryLister.shouldIgnore(path, nil)
+	return w.directoryLister.shouldIgnore(path, nil, false)
 }
 
-func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
+// ShouldSkipDir checks if a directory path should be skipped based on hierarchical
+// gitignore, crushignore, and hidden file rules.
+func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
+	return w.directoryLister.shouldIgnore(path, nil, true)
+}
+
+// Glob globs files.
+//
+// Does not respect gitignore.
+func Glob(pattern string, cwd string, limit int) ([]string, bool, error) {
+	return globWithDoubleStar(context.Background(), pattern, cwd, limit, false)
+}
+
+// GlobGitignoreAware globs files respecting gitignore.
+func GlobGitignoreAware(pattern string, cwd string, limit int) ([]string, bool, error) {
+	return globWithDoubleStar(context.Background(), pattern, cwd, limit, true)
+}
+
+// GlobGitignoreAwareCtx is like [GlobGitignoreAware] but stops early when ctx
+// is cancelled (e.g. on timeout), returning whatever was found so far.
+func GlobGitignoreAwareCtx(ctx context.Context, pattern, cwd string, limit int) ([]string, bool, error) {
+	return globWithDoubleStar(ctx, pattern, cwd, limit, true)
+}
+
+func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit int, gitignore bool) ([]string, bool, error) {
 	// Normalize pattern to forward slashes on Windows so their config can use
 	// backslashes
 	pattern = filepath.ToSlash(pattern)
@@ -84,23 +110,31 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 	walker := NewFastGlobWalker(searchPath)
 	found := csync.NewSlice[FileInfo]()
 	conf := fastwalk.Config{
-		Follow:  true,
+		// Do not follow symlinks: following them lets the walk escape the
+		// search root (into module caches, the nix store, $HOME, etc.) and
+		// chase cycles, which is slow and can hang. Mirrors the rg path,
+		// which no longer passes -L.
+		Follow:  false,
 		ToSlash: fastwalk.DefaultToSlash(),
 		Sort:    fastwalk.SortFilesFirst,
 	}
 	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return filepath.SkipAll // Timed out or cancelled; stop walking.
+		}
 		if err != nil {
 			return nil // Skip files we can't access
 		}
 
-		if d.IsDir() {
-			if walker.ShouldSkip(path) {
+		isDir := d.IsDir()
+		if isDir {
+			if gitignore && walker.ShouldSkipDir(path) {
 				return filepath.SkipDir
 			}
-		}
-
-		if walker.ShouldSkip(path) {
-			return nil
+		} else {
+			if gitignore && walker.ShouldSkip(path) {
+				return nil
+			}
 		}
 
 		relPath, err := filepath.Rel(searchPath, path)
@@ -145,10 +179,12 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 }
 
 // ShouldExcludeFile checks if a file should be excluded from processing
-// based on common patterns and ignore rules
+// based on common patterns and ignore rules.
 func ShouldExcludeFile(rootPath, filePath string) bool {
+	info, err := os.Stat(filePath)
+	isDir := err == nil && info.IsDir()
 	return NewDirectoryLister(rootPath).
-		shouldIgnore(filePath, nil)
+		shouldIgnore(filePath, nil, isDir)
 }
 
 func PrettyPath(path string) string {
@@ -169,7 +205,11 @@ func DirTrim(pwd string, lim int) string {
 		if i == len(dirs)-1 {
 			out = dirs[i]
 		} else if i >= len(dirs)-lim {
-			out = string(dirs[i][0]) + out
+			// Keep the first grapheme cluster, not the first byte: CJK,
+			// combining marks, and emoji can span multiple bytes and runes,
+			// so a byte or single rune would render the wrong character.
+			first, _ := ansi.FirstGraphemeCluster(dirs[i], ansi.GraphemeWidth)
+			out = first + out
 		} else {
 			out = "..." + out
 			break

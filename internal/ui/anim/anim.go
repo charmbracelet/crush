@@ -30,9 +30,14 @@ const (
 	// change every 8 frames (400 milliseconds).
 	ellipsisAnimSpeed = 8
 
-	// The maximum amount of time that can pass before a character appears.
-	// This is used to create a staggered entrance effect.
-	maxBirthOffset = time.Second
+	// The maximum number of animation steps that can pass before a
+	// character appears. With fps == 20 this is ~1s of staggered
+	// entrance, identical to the previous wall-clock-driven value.
+	// Switching from wall-clock + rand to a step-driven birth schedule
+	// keeps Render() deterministic: two Anim instances built from the
+	// same Settings produce byte-identical output when no Animate ticks
+	// have advanced their step counter.
+	maxBirthSteps = 20
 
 	// Number of frames to prerender for the animation. After this number
 	// of frames, the animation will loop. This only applies when color
@@ -47,7 +52,6 @@ const (
 var (
 	defaultGradColorA = color.RGBA{R: 0xff, G: 0, B: 0, A: 0xff}
 	defaultGradColorB = color.RGBA{R: 0, G: 0, B: 0xff, A: 0xff}
-	defaultLabelColor = color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
 )
 
 var (
@@ -57,10 +61,10 @@ var (
 
 // Internal ID management. Used during animating to ensure that frame messages
 // are received only by spinner components that sent them.
-var lastID int64
+var lastID atomic.Int64
 
 func nextID() int {
-	return int(atomic.AddInt64(&lastID, 1))
+	return int(lastID.Add(1))
 }
 
 // Cache for expensive animation calculations
@@ -78,13 +82,21 @@ var animCacheMap = csync.NewMap[string, *animCache]()
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()
-	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t",
-		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors)
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v",
+		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // StepMsg is a message type used to trigger the next step in the animation.
-type StepMsg struct{ ID string }
+// Gen carries the generation of the tick chain that produced it. A chain
+// started by a later Start() bumps the Anim's generation, so ticks from an
+// older chain (mismatched Gen) are dropped instead of advancing the frame.
+// This is what keeps a single spinner from being driven by two concurrent
+// tick chains (which would render as a doubled, double-speed animation).
+type StepMsg struct {
+	ID  string
+	Gen int64
+}
 
 // Settings defines settings for the animation.
 type Settings struct {
@@ -95,6 +107,20 @@ type Settings struct {
 	GradColorA  color.Color
 	GradColorB  color.Color
 	CycleColors bool
+
+	// NoScramble disables the scrambled rune animation. The cycling
+	// character region is removed entirely so only the label and its
+	// animated ellipsis are visible. Useful for non-LLM contexts where
+	// scrambled glyphs imply "thinking" rather than "running".
+	NoScramble bool
+
+	// Suffix is an optional function that returns a dynamic suffix string
+	// to render after the label and ellipsis. Called on every Render().
+	Suffix func() string
+
+	// SuffixColor is the color used to render the suffix text.
+	// Falls back to LabelColor if unset.
+	SuffixColor color.Color
 }
 
 // Default settings.
@@ -107,15 +133,24 @@ type Anim struct {
 	label            *csync.Slice[string]
 	labelWidth       int
 	labelColor       color.Color
-	startTime        time.Time
-	birthOffsets     []time.Duration
+	birthSteps       []int
 	initialFrames    [][]string // frames for the initial characters
 	initialized      atomic.Bool
 	cyclingFrames    [][]string           // frames for the cycling characters
-	step             atomic.Int64         // current main frame step
+	step             atomic.Int64         // current main frame step (wraps)
+	framesSinceStart atomic.Int64         // total Animate ticks (does not wrap)
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
+	suffix           func() string
+	suffixColor      color.Color
+
+	// gen identifies the currently armed tick chain. Start() bumps it and
+	// stamps every emitted StepMsg with the new value; Animate() drops ticks
+	// whose Gen does not match (unless Gen is the zero wildcard). Re-arming
+	// therefore supersedes any in-flight chain instead of running a second
+	// one concurrently, and Stop() bumps it to kill a chain outright.
+	gen atomic.Int64
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -131,18 +166,37 @@ func New(opts Settings) *Anim {
 	if colorIsUnset(opts.GradColorB) {
 		opts.GradColorB = defaultGradColorB
 	}
-	if colorIsUnset(opts.LabelColor) {
-		opts.LabelColor = defaultLabelColor
-	}
+	// A nil LabelColor means "use the terminal default foreground".
+	// No fallback is applied so non-interactive callers can opt out
+	// of explicit coloring.
 
 	if opts.ID != "" {
 		a.id = opts.ID
 	} else {
 		a.id = fmt.Sprintf("%d", nextID())
 	}
-	a.startTime = time.Now()
-	a.cyclingCharWidth = opts.Size
+	if opts.NoScramble {
+		a.cyclingCharWidth = 0
+	} else {
+		a.cyclingCharWidth = opts.Size
+	}
 	a.labelColor = opts.LabelColor
+
+	// Store the suffix function if provided.
+	if opts.Suffix != nil {
+		a.suffix = opts.Suffix
+	}
+	if opts.SuffixColor != nil {
+		a.suffixColor = opts.SuffixColor
+	} else {
+		a.suffixColor = opts.LabelColor
+	}
+
+	// NoScramble means no cycling chars and no birth animation. Mark as
+	// initialized immediately so the label renders without a fade-in.
+	if opts.NoScramble {
+		a.initialized.Store(true)
+	}
 
 	// Check cache first
 	cacheKey := settingsHash(opts)
@@ -160,10 +214,14 @@ func New(opts Settings) *Anim {
 		// Generate new values and cache them
 		a.labelWidth = lipgloss.Width(opts.Label)
 
-		// Total width of anim, in cells.
-		a.width = opts.Size
+		// Total width of anim, in cells. When NoScramble is set there
+		// are no cycling chars so the label gap is unnecessary.
+		a.width = a.cyclingCharWidth
 		if opts.Label != "" {
-			a.width += labelGapWidth + lipgloss.Width(opts.Label)
+			if a.cyclingCharWidth > 0 {
+				a.width += labelGapWidth
+			}
+			a.width += lipgloss.Width(opts.Label)
 		}
 
 		// Render the label
@@ -207,7 +265,13 @@ func New(opts Settings) *Anim {
 			}
 		}
 
-		// Prerender scrambled rune frames for the animation.
+		// Prerender scrambled rune frames for the animation. Seed
+		// the rune picker off the settings hash so cyclingFrames is
+		// a pure function of Settings: two processes with identical
+		// Settings populate the cache with the same glyphs, which
+		// keeps any cross-process golden-file comparison stable.
+		seed := xxh3.HashString(cacheKey)
+		rng := rand.New(rand.NewPCG(seed, ^seed))
 		a.cyclingFrames = make([][]string, numFrames)
 		offset = 0
 		for i := range a.cyclingFrames {
@@ -219,7 +283,7 @@ func New(opts Settings) *Anim {
 
 				// Also prerender the color with Lip Gloss here to avoid processing
 				// in the render loop.
-				r := availableRunes[rand.IntN(len(availableRunes))]
+				r := availableRunes[rng.IntN(len(availableRunes))]
 				a.cyclingFrames[i][j] = lipgloss.NewStyle().
 					Foreground(ramp[j+offset]).
 					Render(string(r))
@@ -249,10 +313,20 @@ func New(opts Settings) *Anim {
 		animCacheMap.Set(cacheKey, cached)
 	}
 
-	// Random assign a birth to each character for a stagged entrance effect.
-	a.birthOffsets = make([]time.Duration, a.width)
-	for i := range a.birthOffsets {
-		a.birthOffsets[i] = time.Duration(rand.N(int64(maxBirthOffset))) * time.Nanosecond
+	// Assign a deterministic birth step to each column for a
+	// staggered entrance effect. The schedule is seeded off the
+	// spinner id and the settings hash, so two spinners with the
+	// same role and identity stagger identically (this is what
+	// keeps Render() byte-equal across cache hits and across
+	// processes for the same Settings+ID) while spinners with
+	// different ids — distinct assistant messages, different tool
+	// calls, "Thinking" vs "Generating" labels — fade in with
+	// different patterns instead of marching in lock-step.
+	birthSeed := xxh3.HashString(a.id + "|" + cacheKey)
+	birthRng := rand.New(rand.NewPCG(birthSeed, ^birthSeed))
+	a.birthSteps = make([]int, a.width)
+	for i := range a.birthSteps {
+		a.birthSteps[i] = birthRng.IntN(maxBirthSteps)
 	}
 
 	return a
@@ -262,10 +336,13 @@ func New(opts Settings) *Anim {
 func (a *Anim) SetLabel(newLabel string) {
 	a.labelWidth = lipgloss.Width(newLabel)
 
-	// Update total width
+	// Update total width. Skip the label gap when there are no cycling chars.
 	a.width = a.cyclingCharWidth
 	if newLabel != "" {
-		a.width += labelGapWidth + a.labelWidth
+		if a.cyclingCharWidth > 0 {
+			a.width += labelGapWidth
+		}
+		a.width += a.labelWidth
 	}
 
 	// Re-render the label
@@ -317,14 +394,31 @@ func (a *Anim) Width() (w int) {
 	return w
 }
 
-// Start starts the animation.
+// Start starts the animation. It bumps the generation so any tick chain
+// started by a previous Start() is superseded: its in-flight StepMsgs carry
+// the old generation and are dropped by Animate() instead of advancing the
+// frame a second time. Without this, re-arming a spinner that still has a
+// live chain (e.g. reloading a session whose message never got a Finish
+// part) would run two chains concurrently and render a doubled animation.
 func (a *Anim) Start() tea.Cmd {
+	a.gen.Add(1)
 	return a.Step()
+}
+
+// Stop kills any in-flight tick chain without starting a new one. It bumps
+// the generation so outstanding StepMsgs no longer match; the next one to
+// arrive is dropped and the chain terminates.
+func (a *Anim) Stop() {
+	a.gen.Add(1)
 }
 
 // Animate advances the animation to the next step.
 func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	if msg.ID != a.id {
+		return nil
+	}
+	// Drop ticks from a superseded chain.
+	if msg.Gen != a.gen.Load() {
 		return nil
 	}
 
@@ -333,13 +427,14 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 		a.step.Store(0)
 	}
 
+	frames := a.framesSinceStart.Add(1)
 	if a.initialized.Load() && a.labelWidth > 0 {
 		// Manage the ellipsis animation.
 		ellipsisStep := a.ellipsisStep.Add(1)
 		if int(ellipsisStep) >= ellipsisAnimSpeed*len(ellipsisFrames) {
 			a.ellipsisStep.Store(0)
 		}
-	} else if !a.initialized.Load() && time.Since(a.startTime) >= maxBirthOffset {
+	} else if !a.initialized.Load() && int(frames) >= maxBirthSteps {
 		a.initialized.Store(true)
 	}
 	return a.Step()
@@ -349,40 +444,66 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 func (a *Anim) Render() string {
 	var b strings.Builder
 	step := int(a.step.Load())
+	frames := int(a.framesSinceStart.Load())
 	for i := range a.width {
 		switch {
-		case !a.initialized.Load() && i < len(a.birthOffsets) && time.Since(a.startTime) < a.birthOffsets[i]:
-			// Birth offset not reached: render initial character.
+		case !a.initialized.Load() && i < len(a.birthSteps) && frames < a.birthSteps[i]:
+			// Birth step not reached: render initial character.
 			b.WriteString(a.initialFrames[step][i])
 		case i < a.cyclingCharWidth:
 			// Render a cycling character.
 			b.WriteString(a.cyclingFrames[step][i])
-		case i == a.cyclingCharWidth:
-			// Render label gap.
+		case i == a.cyclingCharWidth && a.cyclingCharWidth > 0:
+			// Render label gap (only when there are cycling chars).
 			b.WriteString(labelGap)
-		case i > a.cyclingCharWidth:
-			// Label.
-			if labelChar, ok := a.label.Get(i - a.cyclingCharWidth - labelGapWidth); ok {
+		default:
+			// Label. Offset past cycling chars and gap (if any).
+			offset := a.cyclingCharWidth
+			if a.cyclingCharWidth > 0 {
+				offset += labelGapWidth
+			}
+			if labelChar, ok := a.label.Get(i - offset); ok {
 				b.WriteString(labelChar)
 			}
 		}
 	}
 	// Render animated ellipsis at the end of the label if all characters
-	// have been initialized.
+	// have been initialized. Skip when a suffix is active to avoid visual
+	// competition between the animated dots and the timer.
 	if a.initialized.Load() && a.labelWidth > 0 {
-		ellipsisStep := int(a.ellipsisStep.Load())
-		if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
-			b.WriteString(ellipsisFrame)
+		showEllipsis := true
+		if a.suffix != nil {
+			if s := a.suffix(); s != "" {
+				showEllipsis = false
+			}
+		}
+		if showEllipsis {
+			ellipsisStep := int(a.ellipsisStep.Load())
+			if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
+				b.WriteString(ellipsisFrame)
+			}
+		}
+	}
+
+	// Render optional suffix (e.g., elapsed time).
+	if a.suffix != nil {
+		suffixStr := a.suffix()
+		if suffixStr != "" {
+			b.WriteString(" ")
+			b.WriteString(lipgloss.NewStyle().Foreground(a.suffixColor).Render(suffixStr))
 		}
 	}
 
 	return b.String()
 }
 
-// Step is a command that triggers the next step in the animation.
+// Step is a command that triggers the next step in the animation. The
+// emitted StepMsg carries the current generation so Animate() can tell
+// whether this tick still belongs to the armed chain.
 func (a *Anim) Step() tea.Cmd {
+	gen := a.gen.Load()
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
-		return StepMsg{ID: a.id}
+		return StepMsg{ID: a.id, Gen: gen}
 	})
 }
 

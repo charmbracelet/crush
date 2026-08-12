@@ -126,7 +126,7 @@ func HighlightBuffer(content string, area image.Rectangle, startLine, startCol, 
 			}
 			cell := line.At(x)
 			if cell != nil {
-				line.Set(x, highlighter(x, y, cell))
+				highlighter(x, y, cell)
 			}
 		}
 	}

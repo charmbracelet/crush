@@ -4,11 +4,11 @@ import "charm.land/bubbles/v2/key"
 
 type KeyMap struct {
 	Editor struct {
-		AddFile     key.Binding
 		SendMessage key.Binding
 		OpenEditor  key.Binding
 		Newline     key.Binding
 		AddImage    key.Binding
+		PasteImage  key.Binding
 		MentionFile key.Binding
 		Commands    key.Binding
 
@@ -43,9 +43,14 @@ type KeyMap struct {
 		HalfPageUp     key.Binding
 		Home           key.Binding
 		End            key.Binding
+		EndFollow      key.Binding
 		Copy           key.Binding
 		ClearHighlight key.Binding
 		Expand         key.Binding
+		ScrollLeft     key.Binding
+		ScrollRight    key.Binding
+		FocusSidebar   key.Binding
+		FocusChat      key.Binding
 	}
 
 	Initialize struct {
@@ -56,13 +61,14 @@ type KeyMap struct {
 	}
 
 	// Global key maps
-	Quit     key.Binding
-	Help     key.Binding
-	Commands key.Binding
-	Models   key.Binding
-	Suspend  key.Binding
-	Sessions key.Binding
-	Tab      key.Binding
+	Quit       key.Binding
+	Help       key.Binding
+	Commands   key.Binding
+	Models     key.Binding
+	Suspend    key.Binding
+	Sessions   key.Binding
+	Tab        key.Binding
+	ToggleYolo key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -95,12 +101,12 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
 		),
+		ToggleYolo: key.NewBinding(
+			key.WithKeys("ctrl+y"),
+			key.WithHelp("ctrl+y", "toggle yolo"),
+		),
 	}
 
-	km.Editor.AddFile = key.NewBinding(
-		key.WithKeys("/"),
-		key.WithHelp("/", "add file"),
-	)
 	km.Editor.SendMessage = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "send"),
@@ -119,6 +125,10 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.AddImage = key.NewBinding(
 		key.WithKeys("ctrl+f"),
 		key.WithHelp("ctrl+f", "add image"),
+	)
+	km.Editor.PasteImage = key.NewBinding(
+		key.WithKeys("ctrl+v", "super+v"),
+		key.WithHelp("ctrl+v", "paste image from clipboard"),
 	)
 	km.Editor.MentionFile = key.NewBinding(
 		key.WithKeys("@"),
@@ -168,8 +178,8 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+d", "toggle details"),
 	)
 	km.Chat.TogglePills = key.NewBinding(
-		key.WithKeys("ctrl+space"),
-		key.WithHelp("ctrl+space", "toggle tasks"),
+		key.WithKeys("ctrl+t", "ctrl+space"),
+		key.WithHelp("ctrl+t", "toggle tasks"),
 	)
 	km.Chat.PillLeft = key.NewBinding(
 		key.WithKeys("left"),
@@ -228,6 +238,9 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("G", "end"),
 		key.WithHelp("G", "end"),
 	)
+	km.Chat.EndFollow = key.NewBinding(
+		key.WithKeys("ctrl+end"),
+	)
 	km.Chat.Copy = key.NewBinding(
 		key.WithKeys("c", "y", "C", "Y"),
 		key.WithHelp("c/y", "copy"),
@@ -239,6 +252,22 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.Expand = key.NewBinding(
 		key.WithKeys("space"),
 		key.WithHelp("space", "expand/collapse"),
+	)
+	km.Chat.ScrollLeft = key.NewBinding(
+		key.WithKeys("shift+left", "H"),
+		key.WithHelp("shift+←/H", "scroll left"),
+	)
+	km.Chat.ScrollRight = key.NewBinding(
+		key.WithKeys("shift+right", "L"),
+		key.WithHelp("shift+→/L", "scroll right"),
+	)
+	km.Chat.FocusSidebar = key.NewBinding(
+		key.WithKeys("l", "right"),
+		key.WithHelp("l/→", "focus sidebar"),
+	)
+	km.Chat.FocusChat = key.NewBinding(
+		key.WithKeys("h", "left"),
+		key.WithHelp("h/←", "focus chat"),
 	)
 	km.Initialize.Yes = key.NewBinding(
 		key.WithKeys("y", "Y"),

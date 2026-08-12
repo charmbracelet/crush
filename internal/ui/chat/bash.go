@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -30,18 +31,21 @@ func NewBashToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	workingDir string,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &BashToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &BashToolRenderContext{workingDir: workingDir}, canceled)
 }
 
 // BashToolRenderContext renders bash tool messages.
-type BashToolRenderContext struct{}
+type BashToolRenderContext struct {
+	workingDir string
+}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Bash", opts.Anim)
+		return pendingTool(sty, "Bash", opts.Anim, opts.Compact)
 	}
 
 	var params tools.BashParams
@@ -62,14 +66,21 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	// Regular bash command.
-	cmd := strings.ReplaceAll(params.Command, "\n", " ")
+	cmd := params.Command
+	if !opts.ExpandedContent {
+		cmd = strings.ReplaceAll(cmd, "\n", " ")
+	}
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
+	cmd = common.StripBashDisplayPrefix(cmd, b.workingDir)
+	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
+		cmd = highlighted
+	}
 	toolParams := []string{cmd}
 	if params.RunInBackground {
 		toolParams = append(toolParams, "background", "true")
 	}
 
-	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -123,7 +134,7 @@ type JobOutputToolRenderContext struct{}
 func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Job", opts.Anim)
+		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
 	}
 
 	var params tools.JobOutputParams
@@ -174,7 +185,7 @@ type JobKillToolRenderContext struct{}
 func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Job", opts.Anim)
+		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
 	}
 
 	var params tools.JobKillParams

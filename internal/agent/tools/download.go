@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"os"
@@ -31,23 +32,39 @@ type DownloadPermissionsParams struct {
 
 const DownloadToolName = "download"
 
-//go:embed download.md
-var downloadDescription []byte
+//go:embed download.md.tpl
+var downloadDescriptionTmpl []byte
+
+var downloadDescriptionTpl = template.Must(
+	template.New("downloadDescription").
+		Parse(string(downloadDescriptionTmpl)),
+)
+
+type downloadDescriptionData struct {
+	MaxDownloadTimeout int
+}
+
+func downloadDescription() string {
+	return renderTemplate(downloadDescriptionTpl, downloadDescriptionData{
+		MaxDownloadTimeout: 600,
+	})
+}
 
 func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 100
+		transport.MaxIdleConnsPerHost = 10
+		transport.IdleConnTimeout = 90 * time.Second
+
 		client = &http.Client{
-			Timeout: 5 * time.Minute, // Default 5 minute timeout for downloads
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   5 * time.Minute, // Default 5 minute timeout for downloads
+			Transport: transport,
 		}
 	}
 	return fantasy.NewParallelAgentTool(
 		DownloadToolName,
-		string(downloadDescription),
+		downloadDescription(),
 		func(ctx context.Context, params DownloadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
@@ -70,7 +87,8 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for downloading files")
 			}
 
-			p, err := permissions.Request(ctx,
+			p, err := permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        filePath,
@@ -84,7 +102,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			// Handle timeout with context
@@ -143,5 +161,6 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			}
 
 			return fantasy.NewTextResponse(responseMsg), nil
-		})
+		},
+	)
 }

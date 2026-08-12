@@ -15,10 +15,11 @@ const (
 )
 
 //go:embed job_output.md
-var jobOutputDescription []byte
+var jobOutputDescription string
 
 type JobOutputParams struct {
 	ShellID string `json:"shell_id" description:"The ID of the background shell to retrieve output from"`
+	Wait    bool   `json:"wait" description:"If true, block until the background shell completes before returning output"`
 }
 
 type JobOutputResponseMetadata struct {
@@ -32,7 +33,7 @@ type JobOutputResponseMetadata struct {
 func NewJobOutputTool() fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobOutputToolName,
-		string(jobOutputDescription),
+		jobOutputDescription,
 		func(ctx context.Context, params JobOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ShellID == "" {
 				return fantasy.NewTextErrorResponse("missing shell_id"), nil
@@ -42,6 +43,10 @@ func NewJobOutputTool() fantasy.AgentTool {
 			bgShell, ok := bgManager.Get(params.ShellID)
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("background shell not found: %s", params.ShellID)), nil
+			}
+
+			if params.Wait {
+				bgShell.WaitContext(ctx)
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()
@@ -66,6 +71,7 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			output := strings.Join(outputParts, "\n")
+			output = TruncateOutput(output)
 
 			metadata := JobOutputResponseMetadata{
 				ShellID:          params.ShellID,
@@ -81,5 +87,6 @@ func NewJobOutputTool() fantasy.AgentTool {
 
 			result := fmt.Sprintf("Status: %s\n\n%s", status, output)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
-		})
+		},
+	)
 }

@@ -17,7 +17,7 @@ import (
 )
 
 //go:embed templates/agentic_fetch.md
-var agenticFetchToolDescription []byte
+var agenticFetchToolDescription string
 
 // agenticFetchValidationResult holds the validated parameters from the tool call context.
 type agenticFetchValidationResult struct {
@@ -52,19 +52,20 @@ var agenticFetchPromptTmpl []byte
 
 func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
 	if client == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 100
+		transport.MaxIdleConnsPerHost = 10
+		transport.IdleConnTimeout = 90 * time.Second
+
 		client = &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		}
 	}
 
 	return fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
-		string(agenticFetchToolDescription),
+		agenticFetchToolDescription,
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			validationResult, err := validateAgenticFetchParams(ctx, params)
 			if err != nil {
@@ -79,7 +80,8 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				description = "Search the web and analyze results"
 			}
 
-			p, err := c.permissions.Request(ctx,
+			p, err := c.permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   validationResult.SessionID,
 					Path:        c.cfg.WorkingDir(),
@@ -94,10 +96,10 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return tools.NewPermissionDeniedResponse(), nil
 			}
 
-			tmpDir, err := os.MkdirTemp(c.cfg.Options.DataDirectory, "crush-fetch-*")
+			tmpDir, err := os.MkdirTemp(c.cfg.Config().Options.DataDirectory, "crush-fetch-*")
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary directory: %s", err)), nil
 			}
@@ -150,12 +152,12 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
 			}
 
-			systemPrompt, err := promptTemplate.Build(ctx, small.Model.Provider(), small.Model.Model(), *c.cfg)
+			systemPrompt, err := promptTemplate.Build(ctx, small.Model.Provider(), small.Model.Model(), c.cfg)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %s", err)
 			}
 
-			smallProviderCfg, ok := c.cfg.Providers.Get(small.ModelCfg.Provider)
+			smallProviderCfg, ok := c.cfg.Config().Providers.Get(small.ModelCfg.Provider)
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
@@ -165,69 +167,40 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
 				webSearchTool,
-				tools.NewGlobTool(tmpDir),
-				tools.NewGrepTool(tmpDir),
+				tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob),
+				tools.NewGrepTool(tmpDir, c.cfg.Config().Tools.Grep),
 				tools.NewSourcegraphTool(client),
-				tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, tmpDir),
+				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
 			}
+
+			// Sub-agent tools run without hook interception. The top-level
+			// `agentic_fetch` call itself is already wrapped from the coder's
+			// side; firing hooks again for every inner tool call would run
+			// the user's hooks N times per delegated turn.
 
 			agent := NewSessionAgent(SessionAgentOptions{
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)
 				SmallModel:           small,
 				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 				SystemPrompt:         systemPrompt,
-				DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 				IsYolo:               c.permissions.SkipRequests(),
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,
 			})
 
-			agentToolSessionID := c.sessions.CreateAgentToolSessionID(validationResult.AgentMessageID, call.ID)
-			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, validationResult.SessionID, "Fetch Analysis")
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
-			}
-
-			c.permissions.AutoApproveSession(session.ID)
-
-			// Use small model for web content analysis (faster and cheaper)
-			maxTokens := small.CatwalkCfg.DefaultMaxTokens
-			if small.ModelCfg.MaxTokens != 0 {
-				maxTokens = small.ModelCfg.MaxTokens
-			}
-
-			result, err := agent.Run(ctx, SessionAgentCall{
-				SessionID:        session.ID,
-				Prompt:           fullPrompt,
-				MaxOutputTokens:  maxTokens,
-				ProviderOptions:  getProviderOptions(small, smallProviderCfg),
-				Temperature:      small.ModelCfg.Temperature,
-				TopP:             small.ModelCfg.TopP,
-				TopK:             small.ModelCfg.TopK,
-				FrequencyPenalty: small.ModelCfg.FrequencyPenalty,
-				PresencePenalty:  small.ModelCfg.PresencePenalty,
+			return c.runSubAgent(ctx, subAgentParams{
+				Agent:          agent,
+				SessionID:      validationResult.SessionID,
+				AgentMessageID: validationResult.AgentMessageID,
+				ToolCallID:     call.ID,
+				Prompt:         fullPrompt,
+				SessionTitle:   "Fetch Analysis",
+				SessionSetup: func(sessionID string) {
+					c.permissions.AutoApproveSession(sessionID)
+				},
 			})
-			if err != nil {
-				return fantasy.NewTextErrorResponse("error generating response"), nil
-			}
-
-			updatedSession, err := c.sessions.Get(ctx, session.ID)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error getting session: %s", err)
-			}
-			parentSession, err := c.sessions.Get(ctx, validationResult.SessionID)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error getting parent session: %s", err)
-			}
-
-			parentSession.Cost += updatedSession.Cost
-
-			_, err = c.sessions.Save(ctx, parentSession)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
-			}
-
-			return fantasy.NewTextResponse(result.Response.Content.Text()), nil
-		}), nil
+		},
+	), nil
 }

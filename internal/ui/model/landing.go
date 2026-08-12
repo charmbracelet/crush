@@ -1,17 +1,22 @@
 package model
 
 import (
+	"image"
+
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/charmbracelet/ultraviolet/layout"
 )
 
-// selectedLargeModel returns the currently selected large language model from
-// the agent coordinator, if one exists.
-func (m *UI) selectedLargeModel() *agent.Model {
-	if m.com.App.AgentCoordinator != nil {
-		model := m.com.App.AgentCoordinator.Model()
+// selectedLargeModel returns the currently selected large language model as
+// memoized by the off-thread busy/agent probe (see workspace_cache.go), or
+// nil when the agent isn't ready. It must never probe the workspace: it is
+// called on every frame and AgentIsReady/AgentModel are synchronous HTTP
+// round-trips in client/server mode.
+func (m *UI) selectedLargeModel() *workspace.AgentModel {
+	if m.agentReady {
+		model := m.agentModel
 		return &model
 	}
 	return nil
@@ -22,7 +27,7 @@ func (m *UI) selectedLargeModel() *agent.Model {
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.layout.main.Dx()
-	cwd := common.PrettyPath(t, m.com.Config().WorkingDir(), width)
+	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 
 	parts := []string{
 		cwd,
@@ -31,14 +36,19 @@ func (m *UI) landingView() string {
 	parts = append(parts, "", m.modelInfo(width))
 	infoSection := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	_, remainingHeightArea := uv.SplitVertical(m.layout.main, uv.Fixed(lipgloss.Height(infoSection)+1))
+	var remainingHeightArea image.Rectangle
+	layout.Vertical(
+		layout.Len(lipgloss.Height(infoSection)+1),
+		layout.Fill(1),
+	).Split(m.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
 
-	mcpLspSectionWidth := min(30, (width-1)/2)
+	mcpLspSectionWidth := min(30, (width-2)/3)
 
 	lspSection := m.lspInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
 	mcpSection := m.mcpInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
+	skillsSection := m.skillsInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
 
-	content := lipgloss.JoinHorizontal(lipgloss.Left, lspSection, " ", mcpSection)
+	content := lipgloss.JoinHorizontal(lipgloss.Left, lspSection, " ", mcpSection, " ", skillsSection)
 
 	return lipgloss.NewStyle().
 		Width(width).

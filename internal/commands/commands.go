@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
@@ -44,6 +46,8 @@ type CustomCommand struct {
 	Name      string
 	Content   string
 	Arguments []Argument
+	// Skill is set when this command represents a user-invocable skill
+	Skill *skills.Skill
 }
 
 type commandSource struct {
@@ -55,6 +59,31 @@ type commandSource struct {
 // XDG config directory, home directory, and project directory.
 func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
 	return loadAll(buildCommandSources(cfg))
+}
+
+// FromSkillCatalog converts user-invocable catalog entries into custom
+// command entries for the command palette.
+func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
+	commands := make([]CustomCommand, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.UserInvocable {
+			continue
+		}
+		name := entry.Label
+		if name == "" {
+			name = userCommandPrefix + entry.Name
+		}
+		commands = append(commands, CustomCommand{
+			ID:   name,
+			Name: name,
+			Skill: &skills.Skill{
+				Name:          entry.Name,
+				Description:   entry.Description,
+				SkillFilePath: entry.ID,
+			},
+		})
+	}
+	return commands
 }
 
 // LoadMCPPrompts loads custom commands from available MCP servers.
@@ -90,31 +119,20 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 }
 
 func buildCommandSources(cfg *config.Config) []commandSource {
-	var sources []commandSource
-
-	// XDG config directory
-	if dir := getXDGCommandsDir(); dir != "" {
-		sources = append(sources, commandSource{
-			path:   dir,
+	return []commandSource{
+		{
+			path:   filepath.Join(home.Config(), "crush", "commands"),
 			prefix: userCommandPrefix,
-		})
-	}
-
-	// Home directory
-	if home := home.Dir(); home != "" {
-		sources = append(sources, commandSource{
-			path:   filepath.Join(home, ".crush", "commands"),
+		},
+		{
+			path:   filepath.Join(home.Dir(), ".crush", "commands"),
 			prefix: userCommandPrefix,
-		})
+		},
+		{
+			path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
+			prefix: projectCommandPrefix,
+		},
 	}
-
-	// Project directory
-	sources = append(sources, commandSource{
-		path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
-		prefix: projectCommandPrefix,
-	})
-
-	return sources
 }
 
 func loadAll(sources []commandSource) ([]CustomCommand, error) {
@@ -130,8 +148,8 @@ func loadAll(sources []commandSource) ([]CustomCommand, error) {
 }
 
 func loadFromSource(source commandSource) ([]CustomCommand, error) {
-	if err := ensureDir(source.path); err != nil {
-		return nil, err
+	if _, err := os.Stat(source.path); os.IsNotExist(err) {
+		return nil, nil
 	}
 
 	var commands []CustomCommand
@@ -203,33 +221,17 @@ func buildCommandID(path, baseDir, prefix string) string {
 	return prefix + strings.Join(parts, ":")
 }
 
-func getXDGCommandsDir() string {
-	xdgHome := os.Getenv("XDG_CONFIG_HOME")
-	if xdgHome == "" {
-		if home := home.Dir(); home != "" {
-			xdgHome = filepath.Join(home, ".config")
-		}
-	}
-	if xdgHome != "" {
-		return filepath.Join(xdgHome, "crush", "commands")
-	}
-	return ""
-}
-
-func ensureDir(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return os.MkdirAll(path, 0o755)
-	}
-	return nil
-}
-
 func isMarkdownFile(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".md")
 }
 
-func GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
-	// TODO: we should pass the context down
-	result, err := mcp.GetPromptMessages(context.Background(), clientID, promptID, args)
+func GetMCPPrompt(cfg *config.ConfigStore, clientID, promptID string, args map[string]string) (string, error) {
+	// Create a context with timeout since tea.Cmd doesn't support context passing.
+	// The MCP client has its own timeout, but this provides an additional safeguard.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := mcp.GetPromptMessages(ctx, cfg, clientID, promptID, args)
 	if err != nil {
 		return "", err
 	}

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -27,16 +29,17 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider      string
-	Model         string
-	Config        config.Config
-	WorkingDir    string
-	IsGitRepo     bool
-	Platform      string
-	Date          string
-	GitStatus     string
-	ContextFiles  []ContextFile
-	AvailSkillXML string
+	Provider           string
+	Model              string
+	Config             config.Config
+	WorkingDir         string
+	IsGitRepo          bool
+	Platform           string
+	Date               string
+	GitStatus          string
+	ContextFiles       []ContextFile
+	GlobalContextFiles []ContextFile
+	AvailSkillXML      string
 }
 
 type ContextFile struct {
@@ -76,13 +79,13 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 	return p, nil
 }
 
-func (p *Prompt) Build(ctx context.Context, provider, model string, cfg config.Config) (string, error) {
+func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
 	t, err := template.New(p.name).Parse(p.template)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
 	var sb strings.Builder
-	d, err := p.promptData(ctx, provider, model, cfg)
+	d, err := p.promptData(ctx, provider, model, store)
 	if err != nil {
 		return "", err
 	}
@@ -104,12 +107,9 @@ func processFile(filePath string) *ContextFile {
 	}
 }
 
-func processContextPath(p string, cfg config.Config) []ContextFile {
+func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 	var contexts []ContextFile
-	fullPath := p
-	if !filepath.IsAbs(p) {
-		fullPath = filepath.Join(cfg.WorkingDir(), p)
-	}
+	fullPath := filepathext.SmartJoin(store.WorkingDir(), p)
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		return contexts
@@ -136,11 +136,11 @@ func processContextPath(p string, cfg config.Config) []ContextFile {
 }
 
 // expandPath expands ~ and environment variables in file paths
-func expandPath(path string, cfg config.Config) string {
+func expandPath(path string, store *config.ConfigStore) string {
 	path = home.Long(path)
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {
-		if expanded, err := cfg.Resolver().ResolveValue(path); err == nil {
+		if expanded, err := store.Resolver().ResolveValue(path); err == nil {
 			path = expanded
 		}
 	}
@@ -148,39 +148,67 @@ func expandPath(path string, cfg config.Config) string {
 	return path
 }
 
-func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg config.Config) (PromptDat, error) {
-	workingDir := cmp.Or(p.workingDir, cfg.WorkingDir())
-	platform := cmp.Or(p.platform, runtime.GOOS)
-
+// loadContextFiles loads and deduplicates context files from a list of paths.
+func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
 	files := map[string][]ContextFile{}
-
-	for _, pth := range cfg.Options.ContextPaths {
-		expanded := expandPath(pth, cfg)
+	for _, pth := range paths {
+		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
 		if _, ok := files[pathKey]; ok {
 			continue
 		}
-		content := processContextPath(expanded, cfg)
-		files[pathKey] = content
+		files[pathKey] = processContextPath(expanded, store)
 	}
+	return files
+}
+
+func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
+	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
+	platform := cmp.Or(p.platform, runtime.GOOS)
+
+	cfg := store.Config()
+	contextFiles := loadContextFiles(cfg.Options.ContextPaths, store)
+	globalContextFiles := loadContextFiles(cfg.Options.GlobalContextPaths, store)
 
 	// Discover and load skills metadata.
 	var availSkillXML string
+
+	// Start with builtin skills.
+	allSkills := skills.DiscoverBuiltin()
+	builtinNames := make(map[string]bool, len(allSkills))
+	for _, s := range allSkills {
+		builtinNames[s.Name] = true
+	}
+
+	// Discover user skills from configured paths.
 	if len(cfg.Options.SkillsPaths) > 0 {
 		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
 		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, cfg))
+			expandedPaths = append(expandedPaths, expandPath(pth, store))
 		}
-		if discoveredSkills := skills.Discover(expandedPaths); len(discoveredSkills) > 0 {
-			availSkillXML = skills.ToPromptXML(discoveredSkills)
+		for _, userSkill := range skills.Discover(expandedPaths) {
+			if builtinNames[userSkill.Name] {
+				slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+			}
+			allSkills = append(allSkills, userSkill)
 		}
 	}
 
-	isGit := isGitRepo(cfg.WorkingDir())
+	// Deduplicate: user skills override builtins with the same name.
+	allSkills = skills.Deduplicate(allSkills)
+
+	// Filter out disabled skills.
+	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
+
+	if len(allSkills) > 0 {
+		availSkillXML = skills.ToPromptXML(allSkills)
+	}
+
+	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
 		Provider:      provider,
 		Model:         model,
-		Config:        cfg,
+		Config:        *cfg,
 		WorkingDir:    filepath.ToSlash(workingDir),
 		IsGitRepo:     isGit,
 		Platform:      platform,
@@ -189,14 +217,17 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg con
 	}
 	if isGit {
 		var err error
-		data.GitStatus, err = getGitStatus(ctx, cfg.WorkingDir())
+		data.GitStatus, err = getGitStatus(ctx, store.WorkingDir())
 		if err != nil {
 			return PromptDat{}, err
 		}
 	}
 
-	for _, contextFiles := range files {
-		data.ContextFiles = append(data.ContextFiles, contextFiles...)
+	for _, files := range contextFiles {
+		data.ContextFiles = append(data.ContextFiles, files...)
+	}
+	for _, files := range globalContextFiles {
+		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
 	}
 	return data, nil
 }

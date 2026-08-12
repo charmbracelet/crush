@@ -45,15 +45,39 @@ tasks:
     vars:
       LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
-      - "go build {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
+      - "go build -v {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
+    sources:
+      - ./**/*.go
+      - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
+      - internal/agent/hyper/provider.json
     generates:
-      - crush
+      - crush{{exeExt}}
 
   run:
     desc: Run build
     cmds:
       - task: build
-      - "./crush {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
+      - "./crush{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
+
+  run:catwalk:
+    desc: Run build with local Catwalk
+    env:
+      CATWALK_URL: http://localhost:8080
+    cmds:
+      - task: build
+      - ./crush{{exeExt}} {{.CLI_ARGS}}
+
+  run:onboarding:
+    desc: Run build with custom config to test onboarding
+    env:
+      CRUSH_GLOBAL_DATA: tmp/onboarding/data
+      CRUSH_GLOBAL_CONFIG: tmp/onboarding/config
+    cmds:
+      - task: build
+      - rm -rf tmp/onboarding
+      - ./crush{{exeExt}} {{.CLI_ARGS}}
 
   test:
     desc: Run tests
@@ -77,6 +101,11 @@ tasks:
     cmds:
       - prettier --write internal/cmd/stats/index.html internal/cmd/stats/index.css internal/cmd/stats/index.js
 
+  modernize:
+    desc: Run modernize
+    cmds:
+      - go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -fix -test ./...
+
   dev:
     desc: Run with profiling enabled
     env:
@@ -91,6 +120,12 @@ tasks:
     cmds:
       - task: fetch-tags
       - go install {{.LDFLAGS}} -v .
+    sources:
+      - ./**/*.go
+      - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
+      - internal/agent/hyper/provider.json
 
   profile:cpu:
     desc: 10s CPU profile
@@ -151,7 +186,30 @@ tasks:
 
   deps:
     desc: Update Fantasy and Catwalk
+    env:
+      # The Go proxy takes a bit of time to see the latest release. Setting
+      # these bypass it to ensure we can update to a release from a minute ago.
+      GOPROXY: direct
+      GONOSUMDB: charm.land/*
     cmds:
-      - go get charm.land/fantasy
-      - go get charm.land/catwalk
+      - go get charm.land/fantasy@latest
+      - go get charm.land/catwalk@latest
       - go mod tidy
+
+  swag:
+    desc: Generate OpenAPI spec from swag annotations
+    cmds:
+      - go run github.com/swaggo/swag/cmd/swag@v1.16.6 init --generalInfo main.go --dir . --output internal/swagger --packageName swagger --parseDependency --parseInternal --parseDepth 5
+    sources:
+      - internal/server/*.go
+      - internal/proto/*.go
+      - main.go
+    generates:
+      - internal/swagger/docs.go
+      - internal/swagger/swagger.json
+      - internal/swagger/swagger.yaml
+
+  sqlc:
+    desc: Generate code using SQLC
+    cmds:
+      - sqlc generate

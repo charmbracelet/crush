@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -45,12 +46,33 @@ var acceptLanguages = []string{
 	"en-CA,en;q=0.9,en-US;q=0.8",
 }
 
+// errSearchRateLimited reports that DuckDuckGo served a bot-check page
+// instead of results.
+var errSearchRateLimited = errors.New(
+	"DuckDuckGo is rate-limiting this machine. " +
+		"Do not retry or rephrase; wait a few minutes or fetch known URLs directly",
+)
+
+// ddgAnomalyMarkers are substrings of the bot-detection page DuckDuckGo
+// Lite serves (with HTTP 200) instead of results once a client trips its
+// rate limiter.  Parsing that page yields zero results, which would
+// otherwise masquerade as "your query found nothing".
+var ddgAnomalyMarkers = []string{
+	"anomaly-modal",
+	"/anomaly.js",
+	"Unfortunately, bots use DuckDuckGo too",
+}
+
+// ddgLiteEndpoint is a package var so tests can point the search at a
+// local httptest server.
+var ddgLiteEndpoint = "https://lite.duckduckgo.com/lite/?q="
+
 func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, maxResults int) ([]SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 10
 	}
 
-	searchURL := "https://lite.duckduckgo.com/lite/?q=" + url.QueryEscape(query)
+	searchURL := ddgLiteEndpoint + url.QueryEscape(query)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
@@ -65,7 +87,13 @@ func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, ma
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+	// A 202 from DuckDuckGo is the anomaly-challenge interstitial, not a
+	// result page; report throttling rather than parsing it into an
+	// empty result set.
+	if resp.StatusCode == http.StatusAccepted {
+		return nil, errSearchRateLimited
+	}
+	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("search failed with status code: %d", resp.StatusCode)
 	}
 
@@ -74,7 +102,14 @@ func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, ma
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return parseLiteSearchResults(string(body), maxResults)
+	content := string(body)
+	for _, marker := range ddgAnomalyMarkers {
+		if strings.Contains(content, marker) {
+			return nil, errSearchRateLimited
+		}
+	}
+
+	return parseLiteSearchResults(content, maxResults)
 }
 
 func setRandomizedHeaders(req *http.Request) {
@@ -172,8 +207,8 @@ func getTextContent(n *html.Node) string {
 
 func cleanDuckDuckGoURL(rawURL string) string {
 	if strings.HasPrefix(rawURL, "//duckduckgo.com/l/?uddg=") {
-		if idx := strings.Index(rawURL, "uddg="); idx != -1 {
-			encoded := rawURL[idx+5:]
+		if _, after, ok := strings.Cut(rawURL, "uddg="); ok {
+			encoded := after
 			if ampIdx := strings.Index(encoded, "&"); ampIdx != -1 {
 				encoded = encoded[:ampIdx]
 			}
@@ -191,11 +226,11 @@ func formatSearchResults(results []SearchResult) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d search results:\n\n", len(results)))
+	fmt.Fprintf(&sb, "Found %d search results:\n\n", len(results))
 	for _, result := range results {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", result.Position, result.Title))
-		sb.WriteString(fmt.Sprintf("   URL: %s\n", result.Link))
-		sb.WriteString(fmt.Sprintf("   Summary: %s\n\n", result.Snippet))
+		fmt.Fprintf(&sb, "%d. %s\n", result.Position, result.Title)
+		fmt.Fprintf(&sb, "   URL: %s\n", result.Link)
+		fmt.Fprintf(&sb, "   Summary: %s\n\n", result.Snippet)
 	}
 	return sb.String()
 }

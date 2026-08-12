@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"cmp"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -15,7 +16,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -202,7 +203,7 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 				for i, arg := range a.arguments {
 					args[arg.ID] = a.inputs[i].Value()
 					if arg.Required && strings.TrimSpace(a.inputs[i].Value()) == "" {
-						warning = uiutil.ReportWarn("Required argument '" + arg.Title + "' is missing.")
+						warning = util.ReportWarn("Required argument '" + arg.Title + "' is missing.")
 						break
 					}
 				}
@@ -229,11 +230,11 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 			a.inputs[a.focused], cmd = a.inputs[a.focused].Update(msg)
 			return ActionCmd{Cmd: cmd}
 		}
-	case tea.MouseWheelMsg:
-		a.viewport, _ = a.viewport.Update(msg)
+	case common.CoalescedWheelMsg:
+		a.viewport, _ = a.viewport.Update(tea.MouseWheelMsg(msg.Mouse))
 		// If focused field scrolled out of view, focus the visible field
 		if !a.isFieldVisible(a.focused) {
-			a.focusInput(a.findVisibleFieldByOffset(msg.Button == tea.MouseWheelDown))
+			a.focusInput(a.findVisibleFieldByOffset(msg.DeltaY > 0))
 		}
 	case tea.PasteMsg:
 		var cmd tea.Cmd
@@ -311,12 +312,9 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Use standard header
 	titleStyle := s.Dialog.Title
 
-	titleText := a.title
-	if titleText == "" {
-		titleText = "Arguments"
-	}
+	titleText := cmp.Or(a.title, "Arguments")
 
-	header := common.DialogTitle(s, titleText, width, s.Primary, s.Secondary)
+	header := common.DialogTitle(s, titleText, width, s.Dialog.TitleGradFromColor, s.Dialog.TitleGradToColor)
 
 	// Add description if available.
 	var description string
@@ -325,7 +323,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		description = descStyle.Render(a.description)
 	}
 
-	helpView := s.Dialog.HelpView.Width(width).Render(a.help.View(a))
+	helpView := renderDialogHelp(s, &a.help, a, width)
 	if a.loading {
 		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
 	}
@@ -337,12 +335,8 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	a.viewport.SetHeight(viewportHeight)
 	a.viewport.SetContent(renderedFields)
 
-	scrollbar := common.Scrollbar(s, viewportHeight, a.viewport.TotalLineCount(), viewportHeight, a.viewport.YOffset())
-	content := a.viewport.View()
-	if scrollbar != "" {
-		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbar)
-	}
-	contentParts := []string{}
+	content := joinScrollbar(s, a.viewport.View(), viewportHeight, a.viewport.TotalLineCount(), viewportHeight, a.viewport.YOffset())
+	var contentParts []string
 	if description != "" {
 		contentParts = append(contentParts, description)
 	}

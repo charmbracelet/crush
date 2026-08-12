@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -22,11 +23,11 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 		}
 	}
 
-	title := t.Subtle.Render("MCPs")
+	title := t.Resource.Heading.Render("MCPs")
 	if isSection {
 		title = common.Section(t, title, width)
 	}
-	list := t.Subtle.Render("None")
+	list := t.Resource.AdditionalText.Render("None")
 	if len(mcps) > 0 {
 		list = mcpList(t, mcps, width, maxItems)
 	}
@@ -34,14 +35,17 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
-// mcpCounts formats tool and prompt counts for display.
+// mcpCounts formats tool, prompt, and resource counts for display.
 func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
-	parts := []string{}
+	var parts []string
 	if counts.Tools > 0 {
-		parts = append(parts, t.Subtle.Render(fmt.Sprintf("%d tools", counts.Tools)))
+		parts = append(parts, t.Resource.CapabilityCount.Render(fmt.Sprintf("%d tools", counts.Tools)))
 	}
 	if counts.Prompts > 0 {
-		parts = append(parts, t.Subtle.Render(fmt.Sprintf("%d prompts", counts.Prompts)))
+		parts = append(parts, t.Resource.CapabilityCount.Render(fmt.Sprintf("%d prompts", counts.Prompts)))
+	}
+	if counts.Resources > 0 {
+		parts = append(parts, t.Resource.CapabilityCount.Render(fmt.Sprintf("%d resources", counts.Resources)))
 	}
 	return strings.Join(parts, " ")
 }
@@ -57,27 +61,35 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 	for _, m := range mcps {
 		var icon string
 		title := m.Name
+		// Show "Docker MCP" instead of the config name for Docker MCP.
+		if m.Name == config.DockerMCPName {
+			title = "Docker MCP"
+		}
+		title = t.Resource.Name.Render(title)
 		var description string
 		var extraContent string
 
 		switch m.State {
 		case mcp.StateStarting:
-			icon = t.ItemBusyIcon.String()
-			description = t.Subtle.Render("starting...")
+			icon = t.Resource.BusyIcon.String()
+			description = t.Resource.StatusText.Render("starting...")
 		case mcp.StateConnected:
-			icon = t.ItemOnlineIcon.String()
+			icon = t.Resource.OnlineIcon.String()
 			extraContent = mcpCounts(t, m.Counts)
 		case mcp.StateError:
-			icon = t.ItemErrorIcon.String()
-			description = t.Subtle.Render("error")
+			icon = t.Resource.ErrorIcon.String()
+			description = t.Resource.StatusText.Render("error")
 			if m.Error != nil {
-				description = t.Subtle.Render(fmt.Sprintf("error: %s", m.Error.Error()))
+				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", m.Error.Error()))
 			}
+		case mcp.StateNeedsAuth:
+			icon = t.Resource.NeedsAuthIcon.String()
+			description = t.Resource.StatusText.Render("needs authentication")
 		case mcp.StateDisabled:
-			icon = t.ItemOfflineIcon.Foreground(t.Muted.GetBackground()).String()
-			description = t.Subtle.Render("disabled")
+			icon = t.Resource.DisabledIcon.String()
+			description = t.Resource.StatusText.Render("disabled")
 		default:
-			icon = t.ItemOfflineIcon.String()
+			icon = t.Resource.OfflineIcon.String()
 		}
 
 		renderedMcps = append(renderedMcps, common.Status(t, common.StatusOpts{
@@ -91,7 +103,7 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 	if len(renderedMcps) > maxItems {
 		visibleItems := renderedMcps[:maxItems-1]
 		remaining := len(renderedMcps) - maxItems
-		visibleItems = append(visibleItems, t.Subtle.Render(fmt.Sprintf("…and %d more", remaining)))
+		visibleItems = append(visibleItems, t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
 		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, renderedMcps...)

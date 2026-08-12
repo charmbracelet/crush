@@ -10,22 +10,37 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func openDB(dbPath string) (*sql.DB, error) {
-	// Set pragmas for better performance via _pragma query params.
-	// Format: _pragma=name(value)
+func openDBReadOnly(dbPath string) (*sql.DB, error) {
 	params := url.Values{}
-	params.Add("_pragma", "foreign_keys(on)")
-	params.Add("_pragma", "journal_mode(WAL)")
-	params.Add("_pragma", "page_size(4096)")
-	params.Add("_pragma", "cache_size(-8000)")
-	params.Add("_pragma", "synchronous(NORMAL)")
-	params.Add("_pragma", "secure_delete(on)")
-	params.Add("_pragma", "busy_timeout(5000)")
+	// Only set safe pragmas for read-only mode - most pragmas require write access
+	params.Set("_txlock", "immediate")
+	params.Set("mode", "ro")
 
 	dsn := fmt.Sprintf("file:%s?%s", dbPath, params.Encode())
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+
+	return db, nil
+}
+
+func openDB(dbPath string) (*sql.DB, error) {
+	// Set pragmas for better performance via _pragma query params.
+	// Format: _pragma=name(value)
+	params := url.Values{}
+	for name, value := range pragmas {
+		params.Add("_pragma", fmt.Sprintf("%s(%s)", name, value))
+	}
+	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
+	// preventing deferred-to-writer upgrade deadlocks.
+	params.Set("_txlock", "immediate")
+
+	dsn := fmt.Sprintf("file:%s?%s", dbPath, params.Encode())
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
 	return db, nil
 }

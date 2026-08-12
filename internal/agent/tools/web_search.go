@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"time"
@@ -10,25 +11,31 @@ import (
 	"charm.land/fantasy"
 )
 
-//go:embed web_search.md
-var webSearchToolDescription []byte
+//go:embed web_search.md.tpl
+var webSearchDescriptionTmpl []byte
+
+var webSearchDescriptionTpl = template.Must(
+	template.New("webSearchDescription").
+		Parse(string(webSearchDescriptionTmpl)),
+)
 
 // NewWebSearchTool creates a web search tool for sub-agents (no permissions needed).
 func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 100
+		transport.MaxIdleConnsPerHost = 10
+		transport.IdleConnTimeout = 90 * time.Second
+
 		client = &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		}
 	}
 
 	return fantasy.NewParallelAgentTool(
 		WebSearchToolName,
-		string(webSearchToolDescription),
+		renderToolDescription(webSearchDescriptionTpl),
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("query is required"), nil
@@ -50,5 +57,6 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 			}
 
 			return fantasy.NewTextResponse(formatSearchResults(results)), nil
-		})
+		},
+	)
 }

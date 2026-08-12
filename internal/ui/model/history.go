@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -22,9 +23,9 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 		var err error
 
 		if m.session != nil {
-			messages, err = m.com.App.Messages.ListUserMessages(ctx, m.session.ID)
+			messages, err = m.com.Workspace.ListUserMessages(ctx, m.session.ID)
 		} else {
-			messages, err = m.com.App.Messages.ListAllUserMessages(ctx)
+			messages, err = m.com.Workspace.ListAllUserMessages(ctx)
 		}
 		if err != nil {
 			slog.Error("Failed to load prompt history", "error", err)
@@ -36,6 +37,9 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 			if text := msg.Content().Text; text != "" {
 				texts = append(texts, text)
 			}
+			for _, sc := range msg.ShellCommands() {
+				texts = append(texts, "!"+sc.Command)
+			}
 		}
 		return promptHistoryLoadedMsg{messages: texts}
 	}
@@ -43,14 +47,13 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 
 // handleHistoryUp handles up arrow for history navigation.
 func (m *UI) handleHistoryUp(msg tea.Msg) tea.Cmd {
+	prevHeight := m.textarea.Height()
 	// Navigate to older history entry from cursor position (0,0).
 	if m.textarea.Length() == 0 || m.isAtEditorStart() {
 		if m.historyPrev() {
 			// we send this so that the textarea moves the view to the correct position
 			// without this the cursor will show up in the wrong place.
-			ta, cmd := m.textarea.Update(nil)
-			m.textarea = ta
-			return cmd
+			return m.updateTextareaWithPrevHeight(nil, prevHeight)
 		}
 	}
 
@@ -61,54 +64,45 @@ func (m *UI) handleHistoryUp(msg tea.Msg) tea.Cmd {
 	}
 
 	// Let textarea handle normal cursor movement.
-	ta, cmd := m.textarea.Update(msg)
-	m.textarea = ta
-	return cmd
+	return m.updateTextarea(msg)
 }
 
 // handleHistoryDown handles down arrow for history navigation.
 func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
+	prevHeight := m.textarea.Height()
 	// Navigate to newer history entry from end of text.
 	if m.isAtEditorEnd() {
 		if m.historyNext() {
 			// we send this so that the textarea moves the view to the correct position
 			// without this the cursor will show up in the wrong place.
-			ta, cmd := m.textarea.Update(nil)
-			m.textarea = ta
-			return cmd
+			return m.updateTextareaWithPrevHeight(nil, prevHeight)
 		}
 	}
 
 	// First move cursor to end before navigating history.
 	if m.textarea.Line() == max(m.textarea.LineCount()-1, 0) {
 		m.textarea.MoveToEnd()
-		ta, cmd := m.textarea.Update(nil)
-		m.textarea = ta
-		return cmd
+		return m.updateTextarea(nil)
 	}
 
 	// Let textarea handle normal cursor movement.
-	ta, cmd := m.textarea.Update(msg)
-	m.textarea = ta
-	return cmd
+	return m.updateTextarea(msg)
 }
 
 // handleHistoryEscape handles escape for exiting history navigation.
 func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
+	prevHeight := m.textarea.Height()
 	// Return to current draft when browsing history.
 	if m.promptHistory.index >= 0 {
 		m.promptHistory.index = -1
 		m.textarea.Reset()
 		m.textarea.InsertString(m.promptHistory.draft)
-		ta, cmd := m.textarea.Update(nil)
-		m.textarea = ta
-		return cmd
+		m.syncBangModeFromTextarea()
+		return m.updateTextareaWithPrevHeight(nil, prevHeight)
 	}
 
 	// Let textarea handle escape normally.
-	ta, cmd := m.textarea.Update(msg)
-	m.textarea = ta
-	return cmd
+	return m.updateTextarea(msg)
 }
 
 // updateHistoryDraft updates history state when text is modified.
@@ -117,6 +111,27 @@ func (m *UI) updateHistoryDraft(oldValue string) {
 		m.promptHistory.draft = m.textarea.Value()
 		m.promptHistory.index = -1
 	}
+}
+
+// syncBangModeFromTextarea engages or disengages bang mode based on
+// whether the current textarea value starts with "!". The "!" prefix
+// is stripped when entering bang mode and re-added when leaving it so
+// the visible text always reflects the correct state.
+func (m *UI) syncBangModeFromTextarea() {
+	val := m.textarea.Value()
+	hasBang := strings.HasPrefix(val, "!")
+	if hasBang {
+		if !m.bangMode {
+			m.bangMode = true
+			m.bangWasEmpty = false
+		}
+		m.textarea.SetValue(strings.TrimPrefix(val, "!"))
+		m.textarea.MoveToBegin()
+	} else if m.bangMode {
+		m.bangMode = false
+		m.bangWasEmpty = false
+	}
+	m.setEditorPrompt(m.yoloModeCached())
 }
 
 // historyPrev changes the text area content to the previous message in the history
@@ -136,6 +151,7 @@ func (m *UI) historyPrev() bool {
 	m.textarea.Reset()
 	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
 	m.textarea.MoveToBegin()
+	m.syncBangModeFromTextarea()
 	return true
 }
 
@@ -150,11 +166,13 @@ func (m *UI) historyNext() bool {
 		m.promptHistory.index = -1
 		m.textarea.Reset()
 		m.textarea.InsertString(m.promptHistory.draft)
+		m.syncBangModeFromTextarea()
 		return true
 	}
 	m.promptHistory.index = nextIndex
 	m.textarea.Reset()
 	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
+	m.syncBangModeFromTextarea()
 	return true
 }
 

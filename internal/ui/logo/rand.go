@@ -14,8 +14,8 @@ func cachedRandN(n int) int {
 	randCachesMu.Lock()
 	defer randCachesMu.Unlock()
 
-	if n, ok := randCaches[n]; ok {
-		return n
+	if nPrime, ok := randCaches[n]; ok {
+		return nPrime
 	}
 
 	r := rand.IntN(n)

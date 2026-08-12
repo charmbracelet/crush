@@ -10,10 +10,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/anthropic"
-	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
-	"charm.land/fantasy/providers/openrouter"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -50,50 +47,11 @@ type modelPair struct {
 	smallModel builderFunc
 }
 
-func anthropicBuilder(model string) builderFunc {
-	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
-		provider, err := anthropic.New(
-			anthropic.WithAPIKey(os.Getenv("CRUSH_ANTHROPIC_API_KEY")),
-			anthropic.WithHTTPClient(&http.Client{Transport: r}),
-		)
-		if err != nil {
-			return nil, err
-		}
-		return provider.LanguageModel(t.Context(), model)
-	}
-}
-
-func openaiBuilder(model string) builderFunc {
-	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
-		provider, err := openai.New(
-			openai.WithAPIKey(os.Getenv("CRUSH_OPENAI_API_KEY")),
-			openai.WithHTTPClient(&http.Client{Transport: r}),
-		)
-		if err != nil {
-			return nil, err
-		}
-		return provider.LanguageModel(t.Context(), model)
-	}
-}
-
-func openRouterBuilder(model string) builderFunc {
-	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
-		provider, err := openrouter.New(
-			openrouter.WithAPIKey(os.Getenv("CRUSH_OPENROUTER_API_KEY")),
-			openrouter.WithHTTPClient(&http.Client{Transport: r}),
-		)
-		if err != nil {
-			return nil, err
-		}
-		return provider.LanguageModel(t.Context(), model)
-	}
-}
-
-func zAIBuilder(model string) builderFunc {
+func hyperBuilder(model string) builderFunc {
 	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
 		provider, err := openaicompat.New(
-			openaicompat.WithBaseURL("https://api.z.ai/api/coding/paas/v4"),
-			openaicompat.WithAPIKey(os.Getenv("CRUSH_ZAI_API_KEY")),
+			openaicompat.WithBaseURL("https://hyper.charm.land/v1"),
+			openaicompat.WithAPIKey(os.Getenv("CRUSH_HYPER_API_KEY")),
 			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
 		)
 		if err != nil {
@@ -153,7 +111,15 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 			DefaultMaxTokens: 10000,
 		},
 	}
-	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, "", systemPrompt, false, false, true, env.sessions, env.messages, tools})
+	agent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:   largeModel,
+		SmallModel:   smallModel,
+		SystemPrompt: systemPrompt,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+		Tools:        tools,
+	})
 	return agent
 }
 
@@ -177,42 +143,41 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 
 	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
 	// independently of user config on `$HOME/.config/crush/crush.json`.
-	cfg.Options.Attribution = &config.Attribution{
+	cfg.Config().Options.Attribution = &config.Attribution{
 		TrailerStyle:  "co-authored-by",
 		GeneratedWith: true,
 	}
 
-	// Clear skills paths to ensure test reproducibility - user's skills
-	// would be included in prompt and break VCR cassette matching.
-	cfg.Options.SkillsPaths = []string{}
+	// Clear some fields to avoid issues with VCR cassette matching.
+	cfg.Config().Options.SkillsPaths = nil
+	cfg.Config().Options.DisabledSkills = []string{"crush-config"}
+	cfg.Config().Options.ContextPaths = nil
+	cfg.Config().Options.GlobalContextPaths = nil
+	cfg.Config().LSP = nil
 
-	// Clear LSP config to ensure test reproducibility - user's LSP config
-	// would be included in prompt and break VCR cassette matching.
-	cfg.LSP = nil
-
-	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), *cfg)
+	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	// Get the model name for the bash tool
 	modelName := large.Model() // fallback to ID if Name not available
-	if model := cfg.GetModel(large.Provider(), large.Model()); model != nil {
+	if model := cfg.Config().GetModel(large.Provider(), large.Model()); model != nil {
 		modelName = model.Name
 	}
 
 	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(env.permissions, env.workingDir, cfg.Options.Attribution, modelName),
+		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.Attribution, modelName),
 		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
-		tools.NewEditTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),
-		tools.NewMultiEditTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),
+		tools.NewEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
+		tools.NewMultiEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 		tools.NewFetchTool(env.permissions, env.workingDir, r.GetDefaultClient()),
-		tools.NewGlobTool(env.workingDir),
-		tools.NewGrepTool(env.workingDir),
-		tools.NewLsTool(env.permissions, env.workingDir, cfg.Tools.Ls),
+		tools.NewGlobTool(env.workingDir, cfg.Config().Tools.Glob),
+		tools.NewGrepTool(env.workingDir, cfg.Config().Tools.Grep),
+		tools.NewLsTool(env.permissions, env.workingDir, cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(r.GetDefaultClient()),
-		tools.NewViewTool(env.lspClients, env.permissions, *env.filetracker, env.workingDir),
-		tools.NewWriteTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),
+		tools.NewViewTool(nil, env.permissions, *env.filetracker, nil, env.workingDir),
+		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 	}
 
 	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil

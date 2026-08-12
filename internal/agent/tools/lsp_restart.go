@@ -10,14 +10,13 @@ import (
 	"sync"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
 )
 
 const LSPRestartToolName = "lsp_restart"
 
 //go:embed lsp_restart.md
-var lspRestartDescription []byte
+var lspRestartDescription string
 
 type LSPRestartParams struct {
 	// Name is the optional name of a specific LSP client to restart.
@@ -25,24 +24,24 @@ type LSPRestartParams struct {
 	Name string `json:"name,omitempty"`
 }
 
-func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
+func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSPRestartToolName,
-		string(lspRestartDescription),
+		lspRestartDescription,
 		func(ctx context.Context, params LSPRestartParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if lspClients.Len() == 0 {
-				return fantasy.NewTextErrorResponse("no LSP clients available to restart"), nil
-			}
-
 			clientsToRestart := make(map[string]*lsp.Client)
 			if params.Name == "" {
-				maps.Insert(clientsToRestart, lspClients.Seq2())
+				maps.Insert(clientsToRestart, lspManager.Clients().Seq2())
 			} else {
-				client, exists := lspClients.Get(params.Name)
+				client, exists := lspManager.Clients().Get(params.Name)
 				if !exists {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("LSP client '%s' not found", params.Name)), nil
 				}
 				clientsToRestart[params.Name] = client
+			}
+
+			if len(clientsToRestart) == 0 {
+				return fantasy.NewTextResponse("No LSP clients to restart"), nil
 			}
 
 			var restarted []string
@@ -76,5 +75,6 @@ func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 			}
 
 			return fantasy.NewTextResponse(output), nil
-		})
+		},
+	)
 }

@@ -13,3 +13,8 @@ INSERT INTO read_files (
 -- name: GetFileRead :one
 SELECT * FROM read_files
 WHERE session_id = ? AND path = ? LIMIT 1;
+
+-- name: ListSessionReadFiles :many
+SELECT * FROM read_files
+WHERE session_id = ?
+ORDER BY read_at DESC;

@@ -86,7 +86,15 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 }
 
 // Start creates and starts a new background shell with the given command.
+// Start creates and starts a new background shell with the given command.
+// If env is nil, the shell inherits os.Environ().
 func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
+	return m.StartWithEnv(ctx, workingDir, nil, blockFuncs, command, description)
+}
+
+// StartWithEnv is like Start but allows the caller to supply an explicit
+// environment. If env is nil, the shell inherits os.Environ().
+func (m *BackgroundShellManager) StartWithEnv(ctx context.Context, workingDir string, env []string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
 	// Check job limit
 	if m.shells.Len() >= MaxBackgroundJobs {
 		return nil, fmt.Errorf("maximum number of background jobs (%d) reached. Please terminate or wait for some jobs to complete", MaxBackgroundJobs)
@@ -96,6 +104,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 
 	shell := NewShell(&Options{
 		WorkingDir: workingDir,
+		Env:        env,
 		BlockFuncs: blockFuncs,
 	})
 

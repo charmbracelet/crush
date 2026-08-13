@@ -1052,7 +1052,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)
 	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(o.bgMostVisible)
-	s.Pills.QueueItemPrefix = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("  •")
+	// No leading pad: these lists stack under the same pills row as the todo
+	// list, which starts at column 0.
+	s.Pills.QueueItemPrefix = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("•")
+	s.Pills.CronItemPrefix = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("⏰")
 	s.Pills.QueueItemText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Pills.QueueLabel = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Pills.QueueIconBase = lipgloss.NewStyle().Foreground(o.fgBase)

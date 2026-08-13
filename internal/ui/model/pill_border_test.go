@@ -3,7 +3,9 @@ package model
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 )
 
@@ -33,23 +35,20 @@ func queuePillHasBorder(view string) bool {
 }
 
 // TestQueuePillAlwaysHasBorder guards CHARM-1678: the queued-prompts pill must
-// render with its rounded border regardless of panel expansion or which pill
-// section is nominally focused.
+// render with its rounded border regardless of panel expansion.
 func TestQueuePillAlwaysHasBorder(t *testing.T) {
 	incompleteTodos := []session.Todo{{Content: "a", Status: session.TodoStatusPending}}
 
 	cases := []struct {
-		name           string
-		expanded       bool
-		focusedSection pillSection
-		todos          []session.Todo
-		queue          int
+		name     string
+		expanded bool
+		todos    []session.Todo
+		queue    int
 	}{
-		{"collapsed only queue", false, pillSectionTodos, nil, 2},
-		{"collapsed queue+todos", false, pillSectionTodos, incompleteTodos, 2},
-		{"expanded queue focused", true, pillSectionQueue, nil, 2},
-		{"expanded stale todos focus only queue", true, pillSectionTodos, nil, 2},
-		{"expanded todos focused queue+todos", true, pillSectionTodos, incompleteTodos, 2},
+		{"collapsed only queue", false, nil, 2},
+		{"collapsed queue+todos", false, incompleteTodos, 2},
+		{"expanded only queue", true, nil, 2},
+		{"expanded queue+todos", true, incompleteTodos, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,7 +56,6 @@ func TestQueuePillAlwaysHasBorder(t *testing.T) {
 			u.session = &session.Session{ID: "s1", Todos: tc.todos}
 			u.promptQueue = tc.queue
 			u.pillsExpanded = tc.expanded
-			u.focusedPillSection = tc.focusedSection
 			u.updateLayoutAndSize()
 			u.renderPills()
 
@@ -71,31 +69,52 @@ func TestQueuePillAlwaysHasBorder(t *testing.T) {
 	}
 }
 
-// TestEffectiveFocusedSectionFallsThrough verifies that a stale focused section
-// (pointing at a section with no content) resolves to the section that still
-// has content, so the expanded list stays populated.
-func TestEffectiveFocusedSectionFallsThrough(t *testing.T) {
-	cases := []struct {
-		name     string
-		stored   pillSection
-		todos    []session.Todo
-		queue    int
-		expected pillSection
-	}{
-		{"todos focus but only queue", pillSectionTodos, nil, 2, pillSectionQueue},
-		{"queue focus but only todos", pillSectionQueue, []session.Todo{{Content: "a", Status: session.TodoStatusPending}}, 0, pillSectionTodos},
-		{"todos focus with todos", pillSectionTodos, []session.Todo{{Content: "a", Status: session.TodoStatusPending}}, 2, pillSectionTodos},
-		{"queue focus with queue", pillSectionQueue, nil, 2, pillSectionQueue},
+// TestExpandedPillsShowEverySection verifies that expanding the panel lists
+// every section that has content, not just one of them: with todos, queued
+// prompts and scheduled tasks all present, ctrl+t must reveal all three lists.
+func TestExpandedPillsShowEverySection(t *testing.T) {
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		{Content: "write the todo", Status: session.TodoStatusPending},
+	}}
+	u.promptQueue = 1
+	u.promptQueueItems = []string{"queued prompt"}
+	u.cronTasks = []scheduler.Task{{
+		ID:        "abc12345",
+		Prompt:    "scheduled prompt",
+		NextRunAt: time.Now().Add(time.Hour),
+	}}
+	u.pillsExpanded = true
+	u.updateLayoutAndSize()
+	u.renderPills()
+
+	for _, want := range []string{"write the todo", "queued prompt", "scheduled prompt"} {
+		if !strings.Contains(u.pillsView, want) {
+			t.Fatalf("expected expanded pills to contain %q:\n%s", want, u.pillsView)
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			u := newTestUI()
-			u.session = &session.Session{ID: "s1", Todos: tc.todos}
-			u.promptQueue = tc.queue
-			u.focusedPillSection = tc.stored
-			if got := u.effectiveFocusedSection(); got != tc.expected {
-				t.Fatalf("effectiveFocusedSection() = %d, want %d", got, tc.expected)
-			}
-		})
+}
+
+// TestPillsAreaHeightSumsExpandedSections verifies the reserved height accounts
+// for every expanded list, so the stacked sections are not clipped.
+func TestPillsAreaHeightSumsExpandedSections(t *testing.T) {
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		{Content: "a", Status: session.TodoStatusPending},
+		{Content: "b", Status: session.TodoStatusPending},
+	}}
+	u.promptQueue = 3
+	u.cronTasks = []scheduler.Task{
+		{ID: "t1", NextRunAt: time.Now()},
+		{ID: "t2", NextRunAt: time.Now()},
+	}
+
+	if got, want := u.pillsAreaHeight(), pillHeightWithBorder; got != want {
+		t.Fatalf("collapsed pillsAreaHeight() = %d, want %d", got, want)
+	}
+
+	u.pillsExpanded = true
+	if got, want := u.pillsAreaHeight(), pillHeightWithBorder+2+3+2; got != want {
+		t.Fatalf("expanded pillsAreaHeight() = %d, want %d", got, want)
 	}
 }

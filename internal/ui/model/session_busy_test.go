@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
@@ -208,7 +209,8 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmds(m, c)
 		}
-	case busyStateMsg, promptQueueMsg, queuedMessagePoppedMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg:
+	case busyStateMsg, promptQueueMsg, queuedMessagePoppedMsg, promptQueueClearedMsg,
+		agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	case util.InfoMsg:
@@ -1199,4 +1201,72 @@ func TestPopQueuedMessageSupersedesInFlightQueueRefresh(t *testing.T) {
 	})
 	require.Equal(t, []string{"older"}, m.promptQueueItems)
 	require.NotEmpty(t, cmds)
+}
+
+// actionDialog is a dialog stub that answers every message with a fixed
+// action, standing in for the commands dialog so a command action can be
+// driven through the real overlay routing (Overlay.Update -> handleDialogMsg)
+// without building the command list.
+type actionDialog struct {
+	id     string
+	action dialog.Action
+}
+
+func (d *actionDialog) ID() string                      { return d.id }
+func (d *actionDialog) HandleMsg(tea.Msg) dialog.Action { return d.action }
+
+func (d *actionDialog) Draw(uv.Screen, uv.Rectangle) *tea.Cursor { return nil }
+
+// TestClearQueueCommandDiscardsQueue pins the bulk escape hatch: escape is
+// turn-scoped now and preserves the queue, and shift+up pops one message at a
+// time, so the commands-dialog entry is the only way to discard a queue built
+// up by accident. The clear is a synchronous HTTP round-trip in client/server
+// mode, so Update must dispatch it rather than call it.
+func TestClearQueueCommandDiscardsQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, queued: []string{"a", "b"}}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"a", "b"}
+	staleGen := m.promptQueueGen
+	m.dialog.OpenDialog(&actionDialog{id: dialog.CommandsID, action: dialog.ActionClearQueue{}})
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Zero(t, ws.clearQueueCalls, "the clear must run off the Update goroutine")
+	require.False(t, m.dialog.ContainsDialog(dialog.CommandsID),
+		"selecting the command must close the dialog")
+
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Empty(t, ws.queued, "the agent queue must be discarded")
+	require.Empty(t, m.promptQueueItems)
+	require.Zero(t, m.promptQueue)
+	require.Greater(t, m.promptQueueGen, staleGen,
+		"the clear must supersede queue reads started before it")
+	require.Equal(t, 1, ws.queueListCalls,
+		"the emptied queue must be confirmed by one authoritative re-fetch")
+	require.Equal(t, util.InfoTypeInfo, m.status.msg.Type)
+	require.Equal(t, "Queued messages cleared.", m.status.msg.Msg)
+}
+
+// TestClearQueueResultAfterSessionSwitchKeepsCurrentQueue: the clear is
+// dispatched for one session and its result lands one round-trip later, by
+// which time the user may have switched — it says nothing about the queue now
+// on screen, so it must not empty it.
+func TestClearQueueResultAfterSessionSwitchKeepsCurrentQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, queued: []string{"a"}}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"a"}
+
+	require.Nil(t, m.applyPromptQueueCleared(promptQueueClearedMsg{forSession: "s0"}))
+	require.Equal(t, []string{"a"}, m.promptQueueItems,
+		"another session's clear must not empty this session's queue")
+	require.Equal(t, 1, m.promptQueue)
 }

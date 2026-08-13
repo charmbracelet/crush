@@ -111,6 +111,12 @@ type queuedMessagePoppedMsg struct {
 	err        error
 }
 
+// promptQueueClearedMsg reports that an off-thread queue clear finished for
+// the session, so the memoized queue can be emptied and re-fetched.
+type promptQueueClearedMsg struct {
+	forSession string
+}
+
 // agentModelChangedMsg reports that the coordinator's model was updated
 // (model selection, thinking toggle, reasoning effort), so the memoized
 // ready/model state should be re-fetched without waiting for the TTL.
@@ -358,6 +364,51 @@ func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 	m.promptQueueCheckedAt = time.Now()
 	m.updateLayoutAndSize()
 
+	if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return cmds
+}
+
+// clearQueuedMessages discards every prompt queued for the session off the
+// Update goroutine (the workspace call is a synchronous HTTP round-trip in
+// client/server mode), delivering a promptQueueClearedMsg. The memoized
+// queue is deliberately not zeroed here: no caller needs an optimistic
+// value, and emptying the cache before the clear lands would let a queue
+// fetch dispatched during the round-trip repopulate the pill.
+func (m *UI) clearQueuedMessages() tea.Cmd {
+	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
+		return nil
+	}
+	ws := m.com.Workspace
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		ws.AgentClearQueue(sessionID)
+		return promptQueueClearedMsg{forSession: sessionID}
+	}
+}
+
+// applyPromptQueueCleared empties the memoized queue once a clear has landed
+// and supersedes queue reads started before it. Runs on the Update
+// goroutine.
+func (m *UI) applyPromptQueueCleared(msg promptQueueClearedMsg) []tea.Cmd {
+	if msg.forSession != m.currentSessionID() {
+		// The clear raced a session switch, so it says nothing about the
+		// queue now on screen; that session's own reads stay authoritative.
+		return nil
+	}
+	// Bump the generation so a fetch started before the clear cannot land
+	// and repopulate the pill it just emptied.
+	m.invalidatePromptQueue()
+	hadQueue := m.promptQueue > 0 || len(m.promptQueueItems) > 0
+	m.promptQueueItems = nil
+	m.promptQueue = 0
+	m.promptQueueCheckedAt = time.Now()
+	if hadQueue {
+		m.updateLayoutAndSize()
+	}
+
+	cmds := []tea.Cmd{util.ReportInfo("Queued messages cleared.")}
 	if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}

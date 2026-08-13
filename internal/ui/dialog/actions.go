@@ -46,14 +46,18 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession              struct{}
-	ActionToggleHelp              struct{}
-	ActionToggleCompactMode       struct{}
-	ActionToggleThinking          struct{}
-	ActionTogglePills             struct{}
-	ActionExternalEditor          struct{}
-	ActionToggleYoloMode          struct{}
-	ActionToggleNotifications     struct{}
+	ActionNewSession          struct{}
+	ActionToggleHelp          struct{}
+	ActionToggleCompactMode   struct{}
+	ActionToggleThinking      struct{}
+	ActionTogglePills         struct{}
+	ActionExternalEditor      struct{}
+	ActionToggleYoloMode      struct{}
+	ActionToggleNotifications struct{}
+	// ActionClearQueue discards every prompt queued for the current
+	// session. Popping (shift+up) restores one queued message at a time, so
+	// this is the only way to discard a queue built up by accident.
+	ActionClearQueue              struct{}
 	ActionSelectNotificationStyle struct {
 		Style string
 	}

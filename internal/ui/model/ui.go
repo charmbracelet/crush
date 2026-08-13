@@ -731,6 +731,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.applyPromptQueue(msg)...)
 	case queuedMessagePoppedMsg:
 		cmds = append(cmds, m.applyQueuedMessagePop(msg)...)
+	case promptQueueClearedMsg:
+		cmds = append(cmds, m.applyPromptQueueCleared(msg)...)
 	case lspStatesMsg:
 		if cmd := m.applyLSPStates(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1956,6 +1958,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionTogglePills:
 		if cmd := m.togglePillsExpanded(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionClearQueue:
+		// The clear is off-thread; the memoized queue is emptied when its
+		// promptQueueClearedMsg lands.
+		if cmd := m.clearQueuedMessages(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)

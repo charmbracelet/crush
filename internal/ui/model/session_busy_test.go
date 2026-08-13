@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
@@ -474,6 +475,48 @@ func TestCancelAgentPreservesQueue(t *testing.T) {
 	require.Equal(t, 1, ws.cancelCalls, "second esc press must cancel the agent")
 	require.Equal(t, []string{"a"}, ws.queued)
 	require.Zero(t, ws.clearQueueCalls, "canceling the agent must preserve queued prompts")
+}
+
+// cancelHelp returns the description the help panes show for the esc/cancel
+// binding, or "" when no cancel binding is offered.
+func cancelHelp(t *testing.T, binds []key.Binding) string {
+	t.Helper()
+	for _, b := range binds {
+		if b.Help().Key == "esc" {
+			return b.Help().Desc
+		}
+	}
+	return ""
+}
+
+// TestCancelHelpNeverAdvertisesClearQueue pins the help text against the
+// turn-scoped cancel semantics: esc cancels the active turn and leaves the
+// queue alone, so neither help pane may claim it clears the queue just
+// because prompts are queued. The armed state still shows the
+// double-press hint.
+func TestCancelHelpNeverAdvertisesClearQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"a", "b"}}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"a", "b"}
+
+	require.Equal(t, "cancel", cancelHelp(t, m.ShortHelp()),
+		"short help must not advertise clearing the queue")
+	full := m.FullHelp()
+	require.NotEmpty(t, full)
+	require.Equal(t, "cancel", cancelHelp(t, full[0]),
+		"full help must not advertise clearing the queue")
+
+	// First esc press arms cancellation: both panes switch to the
+	// double-press hint, still never mentioning the queue.
+	m.isCanceling = true
+	require.Equal(t, "press again to cancel", cancelHelp(t, m.ShortHelp()))
+	full = m.FullHelp()
+	require.NotEmpty(t, full)
+	require.Equal(t, "press again to cancel", cancelHelp(t, full[0]))
 }
 
 // TestBackstopRefreshesStaleCaches: when the memoized state outlives its TTL

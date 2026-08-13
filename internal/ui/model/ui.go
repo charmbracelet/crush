@@ -3126,13 +3126,13 @@ func (m *UI) ShortHelp() []key.Binding {
 	case uiInitialize:
 		binds = append(binds, k.Quit)
 	case uiChat:
-		// Show cancel binding if agent is busy.
+		// Show cancel binding if agent is busy. Cancel is turn-scoped and
+		// leaves queued prompts intact, so the help text must never
+		// advertise clearing the queue.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, cancelBinding)
 		}
@@ -3222,13 +3222,13 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Quit,
 			})
 	case uiChat:
-		// Show cancel binding if agent is busy.
+		// Show cancel binding if agent is busy. Cancel is turn-scoped and
+		// leaves queued prompts intact, so the help text must never
+		// advertise clearing the queue.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
 		}

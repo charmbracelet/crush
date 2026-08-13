@@ -340,7 +340,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
-	store, err := config.Init(cwd, dataDir, debug)
+	store, err := config.Init(context.Background(), cwd, dataDir, debug)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -397,7 +397,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	}
 
 	ws := workspace.NewAppWorkspace(appInstance, store)
-	cleanup := func() { appInstance.Shutdown() }
+	cleanup := func() { appInstance.Shutdown(context.Background()) }
 	return ws, cleanup, nil
 }
 
@@ -441,7 +441,7 @@ func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func()
 	// Clean up via Shutdown rather than connectToServer's closure: it stops
 	// the subscription's reconnect/recovery loop first, so our own exit
 	// cannot be mistaken for a lost workspace and re-created mid-quit.
-	return clientWs, clientWs.Shutdown, nil
+	return clientWs, func() { clientWs.Shutdown(context.Background()) }, nil
 }
 
 // connectToServer ensures the server is running, creates a client and

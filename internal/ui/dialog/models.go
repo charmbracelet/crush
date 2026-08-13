@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -146,7 +147,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	// A stale catalog must not keep this dialog from opening: it is the
 	// only way for the user to choose a model.
 	var err error
-	m.providers, err = config.Providers(m.com.Config())
+	m.providers, err = config.Providers(context.Background(), m.com.Config())
 	if err != nil {
 		if len(m.providers) == 0 {
 			return nil, fmt.Errorf("failed to get providers: %w", err)
@@ -356,7 +357,7 @@ func (m *Models) setProviderItems() error {
 	addedProviders := make(map[string]bool)
 
 	// Get a list of known providers to compare against
-	knownProviders, err := config.Providers(cfg)
+	knownProviders, err := config.Providers(context.Background(), cfg)
 	if err != nil && len(knownProviders) == 0 {
 		return fmt.Errorf("failed to get providers: %w", err)
 	}
@@ -475,7 +476,7 @@ func (m *Models) setProviderItems() error {
 
 		if len(validRecentItems) != len(recentItems) {
 			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
+			if err := m.com.Workspace.SetConfigField(context.Background(), config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
 				return fmt.Errorf("failed to update recent models: %w", err)
 			}
 		}

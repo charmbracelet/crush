@@ -53,7 +53,9 @@ func (m *UI) openMCPAuthDialog() tea.Cmd {
 		m.dialog.BringToFront(dialog.MCPAuthID)
 		return nil
 	}
-	dlg, cmd := dialog.NewMCPAuth(m.com, pending, m.com.Workspace.MCPAuthURL)
+	dlg, cmd := dialog.NewMCPAuth(m.com, pending, func(name string) string {
+		return m.com.Workspace.MCPAuthURL(context.Background(), name)
+	})
 	m.dialog.OpenDialog(dlg)
 	return cmd
 }

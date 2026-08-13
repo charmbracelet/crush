@@ -42,28 +42,28 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 	writeSkill(t, wdA, "wsa-only-skill", "Workspace A only skill.")
 	writeSkill(t, wdB, "wsb-only-skill", "Workspace B only skill.")
 
-	srvCfg, err := config.Init(wdA, "", false)
+	srvCfg, err := config.Init(context.Background(), wdA, "", false)
 	require.NoError(t, err)
 	b := backend.New(t.Context(), srvCfg, nil)
 
 	cidA := uuid.New().String()
 	cidB := uuid.New().String()
 
-	wsA, _, err := b.CreateWorkspace(proto.Workspace{
+	wsA, _, err := b.CreateWorkspace(context.Background(), proto.Workspace{
 		ClientID: cidA,
 		Path:     wdA,
 		DataDir:  filepath.Join(wdA, ".crush"),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = b.DeleteWorkspace(wsA.ID, cidA) })
+	t.Cleanup(func() { _ = b.DeleteWorkspace(context.Background(), wsA.ID, cidA) })
 
-	wsB, _, err := b.CreateWorkspace(proto.Workspace{
+	wsB, _, err := b.CreateWorkspace(context.Background(), proto.Workspace{
 		ClientID: cidB,
 		Path:     wdB,
 		DataDir:  filepath.Join(wdB, ".crush"),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = b.DeleteWorkspace(wsB.ID, cidB) })
+	t.Cleanup(func() { _ = b.DeleteWorkspace(context.Background(), wsB.ID, cidB) })
 
 	require.NotNil(t, wsA.Skills, "workspace A must have its own skills.Manager")
 	require.NotNil(t, wsB.Skills, "workspace B must have its own skills.Manager")

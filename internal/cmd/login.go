@@ -123,7 +123,7 @@ func loginHyper(ws workspace.Workspace, force bool) error {
 		return fmt.Errorf("access token is not active")
 	}
 
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, "hyper", token); err != nil {
+	if err := ws.SetProviderAPIKey(context.Background(), config.ScopeGlobal, "hyper", token); err != nil {
 		return err
 	}
 
@@ -199,7 +199,7 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 		token = t
 	}
 
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, "copilot", token); err != nil {
+	if err := ws.SetProviderAPIKey(context.Background(), config.ScopeGlobal, "copilot", token); err != nil {
 		return err
 	}
 

@@ -275,7 +275,7 @@ func runNonInteractive(
 	// Start herdr integration when running inside a herdr pane.
 	hc := herdr.Init()
 	hc.SetSessionID(sess.ID)
-	defer hc.Close()
+	defer hc.Close(ctx)
 
 	defer func() {
 		if progress && stderrTTY {

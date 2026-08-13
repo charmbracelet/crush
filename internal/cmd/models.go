@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"slices"
@@ -32,7 +33,7 @@ crush models gpt5`,
 		dataDir, _ := cmd.Flags().GetString("data-dir")
 		debug, _ := cmd.Flags().GetBool("debug")
 
-		cfg, err := config.Init(cwd, dataDir, debug)
+		cfg, err := config.Init(context.Background(), cwd, dataDir, debug)
 		if err != nil {
 			return err
 		}

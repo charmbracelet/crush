@@ -208,8 +208,8 @@ func TestPostCurrentSession_HoldOnly(t *testing.T) {
 	ws := installSyntheticWorkspace(t, c)
 
 	cid := uuid.New().String()
-	require.NoError(t, backend.RegisterClientForTesting(c.backend, ws, cid))
-	t.Cleanup(func() { _ = c.backend.DeleteWorkspace(ws.ID, cid) })
+	require.NoError(t, backend.RegisterClientForTesting(t.Context(), c.backend, ws, cid))
+	t.Cleanup(func() { _ = c.backend.DeleteWorkspace(context.Background(), ws.ID, cid) })
 
 	rec := postCurrentSession(t, c, ws.ID, cid, "S1")
 	require.Equal(t, http.StatusConflict, rec.Code, "hold-only client must be rejected")
@@ -222,7 +222,7 @@ func TestPostCurrentSession_AttachedClientSucceeds(t *testing.T) {
 
 	cid := uuid.New().String()
 	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
-	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
+	t.Cleanup(func() { c.backend.DetachClient(context.Background(), ws.ID, cid) })
 
 	rec := postCurrentSession(t, c, ws.ID, cid, "S1")
 	require.Equal(t, http.StatusOK, rec.Code)

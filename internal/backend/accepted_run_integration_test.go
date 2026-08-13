@@ -87,7 +87,7 @@ func TestSendMessage_AcceptedCancelRace_RealMachinery(t *testing.T) {
 
 	ws := insertAgentWorkspace(t, b, coord)
 
-	require.NoError(t, b.SendMessage(ws.ID, proto.AgentMessage{SessionID: sess.ID, Prompt: "hi"}))
+	require.NoError(t, b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: sess.ID, Prompt: "hi"}))
 
 	// Coordinator.BeginAccepted ran synchronously inside SendMessage
 	// before dispatch; the dispatched run has now entered the gate but

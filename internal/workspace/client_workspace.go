@@ -103,8 +103,8 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 
 // refreshWorkspace re-fetches the workspace from the server, updating
 // the cached snapshot. Called after config-mutating operations.
-func (w *ClientWorkspace) refreshWorkspace() {
-	updated, err := w.client.GetWorkspace(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) refreshWorkspace(ctx context.Context) {
+	updated, err := w.client.GetWorkspace(ctx, w.workspaceID())
 	if err != nil {
 		slog.Error("Failed to refresh workspace", "error", err)
 		return
@@ -326,8 +326,8 @@ func (w *ClientWorkspace) InitCoderAgentNonInteractive(ctx context.Context) erro
 	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), false)
 }
 
-func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	model, err := w.client.GetDefaultSmallModel(context.Background(), w.workspaceID(), providerID)
+func (w *ClientWorkspace) GetDefaultSmallModel(ctx context.Context, providerID string) config.SelectedModel {
+	model, err := w.client.GetDefaultSmallModel(ctx, w.workspaceID(), providerID)
 	if err != nil {
 		return config.SelectedModel{}
 	}
@@ -528,53 +528,53 @@ func (w *ClientWorkspace) Resolver() config.VariableResolver {
 
 // -- Config mutations --
 
-func (w *ClientWorkspace) UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
-	err := w.client.UpdatePreferredModel(context.Background(), w.workspaceID(), scope, modelType, model)
+func (w *ClientWorkspace) UpdatePreferredModel(ctx context.Context, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
+	err := w.client.UpdatePreferredModel(ctx, w.workspaceID(), scope, modelType, model)
 	if err == nil {
-		w.refreshWorkspace()
+		w.refreshWorkspace(ctx)
 	}
 	return err
 }
 
-func (w *ClientWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
-	err := w.client.SetCompactMode(context.Background(), w.workspaceID(), scope, enabled)
+func (w *ClientWorkspace) SetCompactMode(ctx context.Context, scope config.Scope, enabled bool) error {
+	err := w.client.SetCompactMode(ctx, w.workspaceID(), scope, enabled)
 	if err == nil {
-		w.refreshWorkspace()
+		w.refreshWorkspace(ctx)
 	}
 	return err
 }
 
-func (w *ClientWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
-	err := w.client.SetProviderAPIKey(context.Background(), w.workspaceID(), scope, providerID, apiKey)
+func (w *ClientWorkspace) SetProviderAPIKey(ctx context.Context, scope config.Scope, providerID string, apiKey any) error {
+	err := w.client.SetProviderAPIKey(ctx, w.workspaceID(), scope, providerID, apiKey)
 	if err == nil {
-		w.refreshWorkspace()
+		w.refreshWorkspace(ctx)
 	}
 	return err
 }
 
-func (w *ClientWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
-	err := w.client.SetConfigField(context.Background(), w.workspaceID(), scope, key, value)
+func (w *ClientWorkspace) SetConfigField(ctx context.Context, scope config.Scope, key string, value any) error {
+	err := w.client.SetConfigField(ctx, w.workspaceID(), scope, key, value)
 	if err == nil {
-		w.refreshWorkspace()
+		w.refreshWorkspace(ctx)
 	}
 	return err
 }
 
-func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) error {
-	err := w.client.RemoveConfigField(context.Background(), w.workspaceID(), scope, key)
+func (w *ClientWorkspace) RemoveConfigField(ctx context.Context, scope config.Scope, key string) error {
+	err := w.client.RemoveConfigField(ctx, w.workspaceID(), scope, key)
 	if err == nil {
-		w.refreshWorkspace()
+		w.refreshWorkspace(ctx)
 	}
 	return err
 }
 
-func (w *ClientWorkspace) ImportCopilot() (*oauth.Token, bool) {
-	token, ok, err := w.client.ImportCopilot(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) ImportCopilot(ctx context.Context) (*oauth.Token, bool) {
+	token, ok, err := w.client.ImportCopilot(ctx, w.workspaceID())
 	if err != nil {
 		return nil, false
 	}
 	if ok {
-		w.refreshWorkspace()
+		w.refreshWorkspace(ctx)
 	}
 	return token, ok
 }
@@ -582,7 +582,7 @@ func (w *ClientWorkspace) ImportCopilot() (*oauth.Token, bool) {
 func (w *ClientWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
 	err := w.client.RefreshOAuthToken(ctx, w.workspaceID(), scope, providerID)
 	if err == nil {
-		w.refreshWorkspace()
+		w.refreshWorkspace(ctx)
 	}
 	return err
 }
@@ -597,8 +597,8 @@ func (w *ClientWorkspace) MarkProjectInitialized() error {
 	return w.client.MarkProjectInitialized(context.Background(), w.workspaceID())
 }
 
-func (w *ClientWorkspace) InitializePrompt() (string, error) {
-	return w.client.GetInitializePrompt(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) InitializePrompt(ctx context.Context) (string, error) {
+	return w.client.GetInitializePrompt(ctx, w.workspaceID())
 }
 
 func (w *ClientWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
@@ -714,16 +714,16 @@ func (w *ClientWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPro
 	return result, nil
 }
 
-func (w *ClientWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
-	return w.client.GetMCPPrompt(context.Background(), w.workspaceID(), clientID, promptID, args)
+func (w *ClientWorkspace) GetMCPPrompt(ctx context.Context, clientID, promptID string, args map[string]string) (string, error) {
+	return w.client.GetMCPPrompt(ctx, w.workspaceID(), clientID, promptID, args)
 }
 
 func (w *ClientWorkspace) EnableDockerMCP(ctx context.Context) error {
 	return w.client.EnableDockerMCP(ctx, w.workspaceID())
 }
 
-func (w *ClientWorkspace) DisableDockerMCP() error {
-	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) DisableDockerMCP(ctx context.Context) error {
+	return w.client.DisableDockerMCP(ctx, w.workspaceID())
 }
 
 func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
@@ -752,7 +752,7 @@ func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) erro
 			if opened {
 				continue
 			}
-			if u := w.MCPAuthURL(name); u != "" {
+			if u := w.MCPAuthURL(ctx, name); u != "" {
 				if err := browser.OpenURL(u); err != nil {
 					slog.Warn("Failed to open MCP OAuth URL in browser", "error", err)
 				}
@@ -775,12 +775,12 @@ func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
 	return result
 }
 
-func (w *ClientWorkspace) MCPAuthURL(name string) string {
+func (w *ClientWorkspace) MCPAuthURL(ctx context.Context, name string) string {
 	// The server's in-progress authorization URL is exposed through the
 	// pending-auth list while the flow runs; a server in StateNeedsAuth
 	// paired with an active flow reports its URL here. Poll the server
 	// for the in-flight URL.
-	u, err := w.client.MCPAuthURL(context.Background(), w.workspaceID(), name)
+	u, err := w.client.MCPAuthURL(ctx, w.workspaceID(), name)
 	if err != nil {
 		return ""
 	}
@@ -1002,7 +1002,7 @@ func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 		}
 
 		if _, ok := ev.(pubsub.Event[proto.ConfigChanged]); ok {
-			w.refreshWorkspace()
+			w.refreshWorkspace(w.subCtx)
 			continue
 		}
 		translated := w.translateEvent(ev)
@@ -1018,7 +1018,7 @@ func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 // goodbye less tidy.
 const shutdownDrainTimeout = 5 * time.Second
 
-func (w *ClientWorkspace) Shutdown() {
+func (w *ClientWorkspace) Shutdown(ctx context.Context) {
 	// Stop the reconnect/recovery loop first, then wait for it: cancelling
 	// alone does not unwind a workspace recovery that is already in
 	// flight, and we want to release the workspace that recovery ended up
@@ -1027,14 +1027,14 @@ func (w *ClientWorkspace) Shutdown() {
 		w.subCancel()
 	}
 	w.awaitSubscription()
-	w.herdrClient.Close()
+	w.herdrClient.Close(ctx)
 
 	// Retiring the client releases every claim it holds, on every workspace,
 	// and blocks any further create from this client ID. That is what makes
 	// teardown exact even when a recovery create's response was lost: the
 	// create either landed before this call, and its claim is released here,
 	// or it arrives afterwards and registers nothing.
-	err := w.client.RetireClient(context.Background())
+	err := w.client.RetireClient(ctx)
 	if err == nil {
 		return
 	}
@@ -1045,7 +1045,7 @@ func (w *ClientWorkspace) Shutdown() {
 	// The server predates client retirement, so fall back to releasing
 	// the workspace we know about. Nothing better is possible against an
 	// older server.
-	_ = w.client.DeleteWorkspace(context.Background(), w.workspaceID())
+	_ = w.client.DeleteWorkspace(ctx, w.workspaceID())
 }
 
 // awaitSubscription waits for the subscription loop to return. It returns

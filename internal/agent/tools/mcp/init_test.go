@@ -772,7 +772,7 @@ func setDistinct(typ reflect.Type, field reflect.Value) {
 // present in the configuration.
 func TestBeginAuth_UnknownServer(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{})
-	_, _, err := BeginAuth(cfg, "missing")
+	_, _, err := BeginAuth(context.Background(), cfg, "missing")
 	require.ErrorContains(t, err, "not found")
 }
 
@@ -786,7 +786,7 @@ func TestBeginAuth_NonOAuth(t *testing.T) {
 		},
 	})
 	for _, name := range []string{"stdio", "plain"} {
-		_, _, err := BeginAuth(cfg, name)
+		_, _, err := BeginAuth(context.Background(), cfg, name)
 		require.ErrorContains(t, err, "does not use OAuth", "name %q", name)
 	}
 }
@@ -800,13 +800,13 @@ func TestBeginAuth_Concurrent(t *testing.T) {
 		MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.com/mcp", OAuth: true}},
 	})
 
-	finish, cancel, err := BeginAuth(cfg, name)
+	finish, cancel, err := BeginAuth(context.Background(), cfg, name)
 	require.NoError(t, err)
 	t.Cleanup(cancel)
 
 	// A second flow for the same server must fail fast while the first is
 	// still outstanding.
-	_, _, err = BeginAuth(cfg, name)
+	_, _, err = BeginAuth(context.Background(), cfg, name)
 	require.ErrorContains(t, err, "already has an authentication in progress")
 
 	// Finishing the first flow frees the slot for the next caller. Cancel
@@ -815,7 +815,7 @@ func TestBeginAuth_Concurrent(t *testing.T) {
 	cancelCtx()
 	_ = finish(ctx)
 
-	_, cancel2, err := BeginAuth(cfg, name)
+	_, cancel2, err := BeginAuth(context.Background(), cfg, name)
 	require.NoError(t, err)
 	cancel2()
 }

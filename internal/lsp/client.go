@@ -244,7 +244,7 @@ func (c *Client) registerHandlers() {
 }
 
 // Restart closes the current LSP client and creates a new one with the same configuration.
-func (c *Client) Restart() error {
+func (c *Client) Restart(ctx context.Context) error {
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
 		openFiles = append(openFiles, string(uri))
@@ -253,9 +253,10 @@ func (c *Client) Restart() error {
 	// Cancel the old long-lived context and create a fresh one so that
 	// reinitialization is not affected by any prior cancellation.
 	c.cancelCtx()
-	c.ctx, c.cancelCtx = context.WithCancel(context.Background())
+	freshCtx, freshCancel := context.WithCancel(context.WithoutCancel(ctx))
+	c.ctx, c.cancelCtx = freshCtx, freshCancel
 
-	closeCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	closeCtx, cancel := context.WithTimeout(freshCtx, 10*time.Second)
 	defer cancel()
 
 	if err := c.Close(closeCtx); err != nil {
@@ -271,7 +272,7 @@ func (c *Client) Restart() error {
 		return err
 	}
 
-	initCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	initCtx, cancel := context.WithTimeout(freshCtx, 30*time.Second)
 	defer cancel()
 
 	c.SetServerState(StateStarting)

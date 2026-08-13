@@ -196,7 +196,7 @@ func TestCompleteWithCode_InvalidInputs(t *testing.T) {
 }
 
 func TestStartBrowserFlow(t *testing.T) {
-	flow, err := StartBrowserFlow()
+	flow, err := StartBrowserFlow(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(flow.Close)
 

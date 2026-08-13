@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -437,7 +438,7 @@ func TestClientWorkspace_ReconnectsOnStreamDrop(t *testing.T) {
 		"subscription loop should reconnect after the stream drops")
 
 	// Shutdown cancels the subscription context; the loop must return.
-	ws.Shutdown()
+	ws.Shutdown(context.Background())
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -470,7 +471,7 @@ func TestClientWorkspace_SubscriptionStopsWhenServerDown(t *testing.T) {
 
 	// Let it retry a few times, then shut down.
 	time.Sleep(30 * time.Millisecond)
-	ws.Shutdown()
+	ws.Shutdown(context.Background())
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -717,7 +718,7 @@ func TestClientWorkspace_RecoversFromWorkspaceGone(t *testing.T) {
 	}, 3*time.Second, 5*time.Millisecond,
 		"the UI must be told to resync after the workspace was re-created")
 
-	ws.Shutdown()
+	ws.Shutdown(context.Background())
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
@@ -766,7 +767,7 @@ func TestClientWorkspace_ResyncsAfterPlainStreamDrop(t *testing.T) {
 	require.Zero(t, creates, "a live workspace must not be re-created")
 	require.Equal(t, "ws-1", ws.workspaceID())
 
-	ws.Shutdown()
+	ws.Shutdown(context.Background())
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
@@ -799,7 +800,7 @@ func TestClientWorkspace_EscalatesUnrecoverableConnection(t *testing.T) {
 	require.GreaterOrEqual(t, creates, maxRecoveryEscalate,
 		"the loop must keep retrying rather than giving up")
 
-	ws.Shutdown()
+	ws.Shutdown(context.Background())
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
@@ -836,7 +837,7 @@ func TestClientWorkspace_ShutdownRetiresAfterLostCreateResponse(t *testing.T) {
 	require.NotEqual(t, "ws-orphan", ws.workspaceID(),
 		"the client must genuinely not know the workspace's ID")
 
-	ws.Shutdown()
+	ws.Shutdown(context.Background())
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
@@ -878,7 +879,7 @@ func TestClientWorkspace_ShutdownFallsBackForLegacyServer(t *testing.T) {
 	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
 	require.NoError(t, err)
 
-	NewClientWorkspace(c, proto.Workspace{ID: "ws-1"}).Shutdown()
+	NewClientWorkspace(c, proto.Workspace{ID: "ws-1"}).Shutdown(context.Background())
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -970,7 +971,7 @@ func TestClientWorkspace_ShutdownWaitsForInFlightRecovery(t *testing.T) {
 	}()
 
 	<-creating
-	ws.Shutdown()
+	ws.Shutdown(context.Background())
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
@@ -1050,7 +1051,7 @@ func TestClientWorkspace_GitBranch(t *testing.T) {
 	require.NoError(t, err)
 
 	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
-	t.Cleanup(ws.Shutdown)
+	t.Cleanup(func() { ws.Shutdown(context.Background()) })
 
 	branch, err := ws.GitBranch(t.Context())
 	require.NoError(t, err)
@@ -1075,7 +1076,7 @@ func TestClientWorkspace_GitBranchServerError(t *testing.T) {
 	require.NoError(t, err)
 
 	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
-	t.Cleanup(ws.Shutdown)
+	t.Cleanup(func() { ws.Shutdown(context.Background()) })
 
 	_, err = ws.GitBranch(t.Context())
 	require.Error(t, err)

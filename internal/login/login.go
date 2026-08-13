@@ -202,8 +202,8 @@ type openaiFlow struct {
 	f *openai.BrowserFlow
 }
 
-func (f *openaiFlow) Start(_ context.Context) (string, string, error) {
-	bf, err := openai.StartBrowserFlow()
+func (f *openaiFlow) Start(ctx context.Context) (string, string, error) {
+	bf, err := openai.StartBrowserFlow(ctx)
 	if err != nil {
 		return "", "", err
 	}
@@ -235,7 +235,7 @@ type grokFlow struct {
 }
 
 func (f *grokFlow) Start(ctx context.Context) (string, string, error) {
-	bf, err := grok.StartBrowserFlow()
+	bf, err := grok.StartBrowserFlow(ctx)
 	if err != nil {
 		dc, deviceErr := grok.RequestDeviceCode(ctx)
 		if deviceErr != nil {

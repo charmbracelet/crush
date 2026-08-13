@@ -45,13 +45,13 @@ func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// The user picks Claude in this instance.
-	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, SelectedModel{
+	require.NoError(t, store.UpdatePreferredModel(context.Background(), ScopeGlobal, SelectedModelTypeLarge, SelectedModel{
 		Provider: "anthropic",
 		Model:    "claude-3",
 	}))
@@ -82,7 +82,7 @@ func TestModelSelectionYieldsToDiskWhenUnchosen(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})

@@ -78,7 +78,7 @@ func insertAgentWorkspace(t *testing.T, b *Backend, coord agent.Coordinator) *Wo
 		Path:         t.TempDir(),
 		resolvedPath: t.TempDir(),
 		clients:      make(map[string]*clientState),
-		shutdownFn:   func() {},
+		shutdownFn:   func(context.Context) {},
 	}
 	ws.App = &app.App{AgentCoordinator: coord}
 	ws.ctx, ws.cancel = context.WithCancel(b.ctx)
@@ -92,7 +92,7 @@ func insertAgentWorkspace(t *testing.T, b *Backend, coord agent.Coordinator) *Wo
 func TestSendMessage_WorkspaceNotFound(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
-	err := b.SendMessage("nope", proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	err := b.SendMessage(context.Background(), "nope", proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
 	require.ErrorIs(t, err, ErrWorkspaceNotFound)
 }
 
@@ -100,7 +100,7 @@ func TestSendMessage_AgentNotInitialized(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
 	ws := insertAgentWorkspace(t, b, nil)
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	err := b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
 	require.ErrorIs(t, err, ErrAgentNotInitialized)
 }
 
@@ -108,7 +108,7 @@ func TestSendMessage_EmptyPrompt(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
 	ws := insertAgentWorkspace(t, b, newBlockingCoordinator())
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: ""})
+	err := b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: ""})
 	require.ErrorIs(t, err, agent.ErrEmptyPrompt)
 }
 
@@ -116,7 +116,7 @@ func TestSendMessage_SessionMissing(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
 	ws := insertAgentWorkspace(t, b, newBlockingCoordinator())
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "", Prompt: "hi"})
+	err := b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: "", Prompt: "hi"})
 	require.ErrorIs(t, err, agent.ErrSessionMissing)
 }
 
@@ -127,7 +127,7 @@ func TestSendMessage_WorkspaceClosing(t *testing.T) {
 	ws.runMu.Lock()
 	ws.closing = true
 	ws.runMu.Unlock()
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	err := b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
 	require.ErrorIs(t, err, ErrWorkspaceClosing)
 }
 
@@ -141,7 +141,7 @@ func TestSendMessage_SuccessIncrementsRunWG(t *testing.T) {
 	coord := newBlockingCoordinator()
 	ws := insertAgentWorkspace(t, b, coord)
 
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	err := b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
 	require.NoError(t, err)
 
 	select {

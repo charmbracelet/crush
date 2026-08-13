@@ -74,7 +74,7 @@ func TestSetProviderAPIKeyXAIIsEitherOr(t *testing.T) {
 			}
 		}`)
 
-		require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "xai", token))
+		require.NoError(t, store.SetProviderAPIKey(t.Context(), ScopeGlobal, "xai", token))
 
 		pc, ok := store.Config().Providers.Get("xai")
 		require.True(t, ok)
@@ -104,7 +104,7 @@ func TestSetProviderAPIKeyXAIIsEitherOr(t *testing.T) {
 			}
 		}`)
 
-		require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "xai", "sk-new"))
+		require.NoError(t, store.SetProviderAPIKey(t.Context(), ScopeGlobal, "xai", "sk-new"))
 
 		pc, ok := store.Config().Providers.Get("xai")
 		require.True(t, ok)
@@ -244,7 +244,7 @@ func TestLoadRefreshesGrokModelsWhenCatwalkUpdates(t *testing.T) {
 
 	fetched := stubGrokModels(t, []catwalk.Model{{ID: "grok-fresh", Name: "Grok Fresh"}})
 
-	store, err := Load(workDir, dataDir, false)
+	store, err := Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	require.True(t, CatwalkUpdated(), "the stub served a fresh catalog")
@@ -278,7 +278,7 @@ func TestLoadKeepsGrokModelsWhenCatwalkNotModified(t *testing.T) {
 
 	fetched := stubGrokModels(t, []catwalk.Model{{ID: "grok-fresh", Name: "Grok Fresh"}})
 
-	store, err := Load(workDir, dataDir, false)
+	store, err := Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	require.False(t, CatwalkUpdated(), "the stub reported the catalog unchanged")

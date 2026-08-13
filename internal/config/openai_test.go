@@ -171,7 +171,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 			}
 		}`)
 
-		require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "openai", token))
+		require.NoError(t, store.SetProviderAPIKey(context.Background(), ScopeGlobal, "openai", token))
 
 		pc, ok := store.Config().Providers.Get("openai")
 		require.True(t, ok)
@@ -198,7 +198,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 			}
 		}`)
 
-		require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "openai", "sk-new"))
+		require.NoError(t, store.SetProviderAPIKey(context.Background(), ScopeGlobal, "openai", "sk-new"))
 
 		pc, ok := store.Config().Providers.Get("openai")
 		require.True(t, ok)
@@ -215,7 +215,7 @@ func TestSetProviderAPIKeyOpenAIIsEitherOr(t *testing.T) {
 	t.Run("copilot", func(t *testing.T) {
 		store := newStore(t, "copilot", `{"providers":{"copilot":{"id":"copilot"}}}`)
 
-		require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "copilot", token))
+		require.NoError(t, store.SetProviderAPIKey(context.Background(), ScopeGlobal, "copilot", token))
 
 		pc, ok := store.Config().Providers.Get("copilot")
 		require.True(t, ok)
@@ -397,7 +397,7 @@ func TestLoadRefreshesChatGPTModelsWhenCatwalkUpdates(t *testing.T) {
 
 	fetched := stubChatGPTModels(t, []catwalk.Model{{ID: "gpt-fresh", Name: "GPT Fresh"}})
 
-	store, err := Load(workDir, dataDir, false)
+	store, err := Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	require.True(t, CatwalkUpdated(), "the stub served a fresh catalog")
@@ -431,7 +431,7 @@ func TestLoadKeepsChatGPTModelsWhenCatwalkNotModified(t *testing.T) {
 
 	fetched := stubChatGPTModels(t, []catwalk.Model{{ID: "gpt-fresh", Name: "GPT Fresh"}})
 
-	store, err := Load(workDir, dataDir, false)
+	store, err := Load(t.Context(), workDir, dataDir, false)
 	require.NoError(t, err)
 
 	require.False(t, CatwalkUpdated(), "the stub reported the catalog unchanged")

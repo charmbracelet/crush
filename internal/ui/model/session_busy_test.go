@@ -214,7 +214,11 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	case util.InfoMsg:
-		m.status.SetInfoMsg(msg)
+		// Status banners go through Update exactly as they do in production
+		// (ui.go's util.InfoMsg case). The one command it returns is the
+		// status-clear tick, which blocks for the whole status TTL before
+		// emitting util.ClearStatusMsg, so it is deliberately not run here.
+		m.Update(msg)
 	}
 }
 

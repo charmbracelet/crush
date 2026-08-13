@@ -25,6 +25,8 @@ package model
 // Update, no model mutation inside commands).
 
 import (
+	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -310,39 +312,42 @@ func (m *UI) popQueuedMessage() tea.Cmd {
 func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 	m.queuedPopInFlight = false
 	if msg.err != nil {
-		return []tea.Cmd{util.ReportError(msg.err)}
+		// The failure may have been raised after the server already
+		// removed the message (response read/decode failure, dropped
+		// connection), so from here the queue state is unknown: re-fetch
+		// it instead of serving a count that may be one too high, and do
+		// not promise the user their message is still queued.
+		slog.Error("Failed to pop queued message",
+			"session_id", msg.forSession, "error", msg.err)
+		m.invalidatePromptQueue()
+		cmds := []tea.Cmd{util.ReportError(fmt.Errorf("%w (it may have left the queue anyway)", msg.err))}
+		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return cmds
 	}
-	if !msg.found || msg.forSession != m.currentSessionID() {
+	if !msg.found {
 		return nil
 	}
-
-	prevHeight := m.textarea.Height()
-	var cmds []tea.Cmd
-	// The key handler refuses to pop while the editor holds text, but that
-	// check ran before the round-trip (an HTTP POST in client/server mode).
-	// Anything typed since then must survive: the pop already removed the
-	// message at the agent layer, so it can neither be refused nor put back
-	// here. Append below the draft instead of overwriting it, and say so.
-	if draft := m.textarea.Value(); draft != "" {
-		m.textarea.MoveToEnd()
-		if !strings.HasSuffix(draft, "\n") {
-			m.textarea.InsertRune('\n')
+	if msg.forSession != m.currentSessionID() {
+		// The pop raced a session switch. It is destructive at the agent
+		// layer — the message is already out of that session's queue and
+		// cannot be put back — so park it instead of dropping it, and
+		// restore it the next time that session is loaded. Restoring it
+		// into the editor here would offer a prompt written for another
+		// session to the current one.
+		slog.Warn("Parking popped queued message after session switch",
+			"for_session", msg.forSession, "current_session", m.currentSessionID())
+		if m.queuedPopOrphans == nil {
+			m.queuedPopOrphans = make(map[string]agent.QueuedMessage, 1)
 		}
-		m.textarea.InsertString(msg.message.Prompt)
-		m.textarea.MoveToEnd()
-		// Bang mode is not re-synced: the "!" prefix that drives it belongs
-		// to the draft, which is unchanged, and the restored prompt is no
-		// longer at the start of the value.
-		cmds = append(cmds, util.ReportWarn("Input field was not empty: appended the popped queued message below your text."))
-	} else {
-		m.textarea.SetValue(msg.message.Prompt)
-		m.syncBangModeFromTextarea()
-		m.textarea.MoveToEnd()
+		m.queuedPopOrphans[msg.forSession] = msg.message
+		return []tea.Cmd{util.ReportWarn("Session changed: the popped message will be restored when you return to that session.")}
 	}
-	m.promptHistory.index = -1
-	m.promptHistory.draft = m.textarea.Value()
-	for _, attachment := range msg.message.Attachments {
-		m.attachments.Update(attachment)
+
+	cmds, appended := m.restorePoppedMessage(msg.message)
+	if appended {
+		cmds = append(cmds, util.ReportWarn("Input field was not empty: appended the popped queued message below your text."))
 	}
 
 	m.invalidatePromptQueue()
@@ -353,11 +358,68 @@ func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 	m.promptQueueCheckedAt = time.Now()
 	m.updateLayoutAndSize()
 
-	cmds = append(cmds, m.updateTextareaWithPrevHeight(nil, prevHeight))
 	if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	return cmds
+}
+
+// restorePoppedMessage puts a popped queued message back into the editor and
+// reports whether it had to be appended below existing text. Shared by the
+// pop apply path and the parked-restore path, both of which run after the
+// message has already left the agent queue: it can be neither refused nor
+// re-queued, so nothing here may drop it.
+//
+// The key handler refuses to pop while the editor holds text, but that check
+// ran before the round-trip (an HTTP POST in client/server mode), and a
+// parked message is restored into whatever the editor holds on session load.
+// Either way an existing draft must survive, so the prompt is appended below
+// it rather than overwriting it.
+func (m *UI) restorePoppedMessage(queued agent.QueuedMessage) (cmds []tea.Cmd, appended bool) {
+	prevHeight := m.textarea.Height()
+	if draft := m.textarea.Value(); draft != "" {
+		appended = true
+		m.textarea.MoveToEnd()
+		if !strings.HasSuffix(draft, "\n") {
+			m.textarea.InsertRune('\n')
+		}
+		m.textarea.InsertString(queued.Prompt)
+		m.textarea.MoveToEnd()
+		// Bang mode is not re-synced: the "!" prefix that drives it belongs
+		// to the draft, which is unchanged, and the restored prompt is no
+		// longer at the start of the value.
+	} else {
+		m.textarea.SetValue(queued.Prompt)
+		m.syncBangModeFromTextarea()
+		m.textarea.MoveToEnd()
+	}
+	m.promptHistory.index = -1
+	m.promptHistory.draft = m.textarea.Value()
+	for _, attachment := range queued.Attachments {
+		m.attachments.Update(attachment)
+	}
+	return []tea.Cmd{m.updateTextareaWithPrevHeight(nil, prevHeight)}, appended
+}
+
+// restoreParkedPop restores the queued message parked when a pop result
+// landed after a session switch (see applyQueuedMessagePop). Called on
+// session load, so the message comes back the first time the user returns to
+// the session it was popped from. At most one message can be parked per
+// session: the pop is single-flight, and this clears the entry on the load
+// that must precede any further pop for that session.
+func (m *UI) restoreParkedPop() tea.Cmd {
+	sessionID := m.currentSessionID()
+	queued, ok := m.queuedPopOrphans[sessionID]
+	if !ok {
+		return nil
+	}
+	delete(m.queuedPopOrphans, sessionID)
+	cmds, appended := m.restorePoppedMessage(queued)
+	warn := "Restored the queued message you popped before switching sessions."
+	if appended {
+		warn = "Appended the queued message you popped before switching sessions below your text."
+	}
+	return tea.Batch(append(cmds, util.ReportWarn(warn))...)
 }
 
 // staleWorkspaceRefreshCmds is the TTL backstop, called at the tail of

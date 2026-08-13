@@ -1062,21 +1062,114 @@ func TestPopQueuedMessageIsSingleFlight(t *testing.T) {
 	require.Empty(t, ws.queued)
 }
 
+// TestPopQueuedMessageReportsWorkspaceError pins the transport-failure path:
+// the error may be raised after the server already removed the message
+// (response read/decode failure, dropped connection), so the queue state is
+// unknown from here — it must be re-fetched, and the banner must not imply
+// the message is still queued.
 func TestPopQueuedMessageReportsWorkspaceError(t *testing.T) {
 	pinTTLs(t)
 
-	ws := &countingWorkspace{ready: true, popErr: errors.New("pop failed")}
+	// The server popped "newest" and then the response was lost.
+	ws := &countingWorkspace{ready: true, popErr: errors.New("pop failed"), queued: []string{"older"}}
 	m := newBusyUI(ws)
 	warmCaches(m, true)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"older", "newest"}
+	staleGen := m.promptQueueGen
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModAlt})
 	runCmds(m, cmd)
 
 	require.Equal(t, 1, ws.popQueueCalls)
 	require.Equal(t, util.InfoTypeError, m.status.msg.Type)
-	require.Equal(t, "pop failed", m.status.msg.Msg)
+	require.Equal(t, "pop failed (it may have left the queue anyway)", m.status.msg.Msg)
 	require.False(t, m.queuedPopInFlight,
 		"a failed pop must clear the in-flight mark so the key is not wedged")
+	require.Greater(t, m.promptQueueGen, staleGen,
+		"an unknown queue state must supersede the memoized one")
+	require.Equal(t, []string{"older"}, m.promptQueueItems,
+		"the re-fetch must replace the queue the pop may have shortened")
+	require.Equal(t, 1, m.promptQueue)
+}
+
+// TestPopQueuedMessageParksResultAfterSessionSwitch pins the session-switch
+// race: the pop is destructive at the agent layer and queued prompts live
+// nowhere else (they are not persisted until they run), so a result that
+// lands after a session switch may not be dropped. It also may not be
+// restored into the current session's editor — the prompt was written for
+// another session. It is parked and handed back on return.
+func TestPopQueuedMessageParksResultAfterSessionSwitch(t *testing.T) {
+	pinTTLs(t)
+
+	restored := message.Attachment{FileName: "restored.png", MimeType: "image/png"}
+	ws := &countingWorkspace{
+		ready:  true,
+		queued: []string{"older", "newest"},
+		queuedMessages: []agent.QueuedMessage{
+			{Prompt: "older"},
+			{Prompt: "newest", Attachments: []message.Attachment{restored}},
+		},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"older", "newest"}
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	// The user switches sessions while the pop is in flight.
+	m.session = &session.Session{ID: "s2"}
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.popQueueCalls)
+	require.Empty(t, m.textarea.Value(),
+		"another session's prompt must not land in the current editor")
+	require.Empty(t, m.attachments.List())
+	require.Equal(t, util.InfoTypeWarn, m.status.msg.Type)
+	require.Equal(t,
+		"Session changed: the popped message will be restored when you return to that session.",
+		m.status.msg.Msg)
+	require.Equal(t,
+		agent.QueuedMessage{Prompt: "newest", Attachments: []message.Attachment{restored}},
+		m.queuedPopOrphans["s1"],
+		"the popped message must be parked for the session it came from")
+
+	_, cmd = m.Update(loadSessionMsg{session: &session.Session{ID: "s1"}})
+	runCmds(m, cmd)
+
+	require.Equal(t, "newest", m.textarea.Value(), "returning must hand the message back")
+	require.True(t, m.isAtEditorEnd())
+	require.Equal(t, []message.Attachment{restored}, m.attachments.List())
+	require.Equal(t, util.InfoTypeWarn, m.status.msg.Type)
+	require.Equal(t,
+		"Restored the queued message you popped before switching sessions.",
+		m.status.msg.Msg)
+	require.Empty(t, m.queuedPopOrphans, "a restored message must not be parked twice")
+}
+
+// TestParkedPopRestoreKeepsEditorDraft pins that the parked restore is
+// non-destructive: the editor is shared across sessions, so text typed while
+// the message was parked must survive it coming back.
+func TestParkedPopRestoreKeepsEditorDraft(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.session = &session.Session{ID: "s2"}
+	m.queuedPopOrphans = map[string]agent.QueuedMessage{"s1": {Prompt: "newest"}}
+	m.textarea.SetValue("draft")
+
+	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s1"}})
+	runCmds(m, cmd)
+
+	require.Equal(t, "draft\nnewest", m.textarea.Value())
+	require.True(t, m.isAtEditorEnd())
+	require.Equal(t, util.InfoTypeWarn, m.status.msg.Type)
+	require.Equal(t,
+		"Appended the queued message you popped before switching sessions below your text.",
+		m.status.msg.Msg)
+	require.Empty(t, m.queuedPopOrphans)
 }
 
 func TestPopQueuedMessageSupersedesInFlightQueueRefresh(t *testing.T) {

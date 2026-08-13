@@ -27,6 +27,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
@@ -348,6 +349,13 @@ type UI struct {
 	// (or impatience over an HTTP round-trip) would pop several messages
 	// and only the last result would survive in the editor.
 	queuedPopInFlight bool
+	// queuedPopOrphans holds popped queued messages whose result landed
+	// after the user had switched away from the session they came from,
+	// keyed by that session. The pop already removed the message at the
+	// agent layer and queued prompts are not persisted anywhere, so
+	// dropping the result would destroy the text: it is parked here and
+	// restored by restoreParkedPop the next time that session is loaded.
+	queuedPopOrphans map[string]agent.QueuedMessage
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
@@ -801,6 +809,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+		// A queued message popped just before the user switched away from
+		// this session was parked rather than dropped; hand it back now.
+		if cmd := m.restoreParkedPop(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.updateLayoutAndSize()
 
 	case sessionFilesUpdatesMsg:
@@ -854,6 +867,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.DeletedEvent {
+			// The session can never be loaded again, so a message parked
+			// for it can never be restored.
+			delete(m.queuedPopOrphans, msg.Payload.ID)
 			if m.session != nil && m.session.ID == msg.Payload.ID {
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)

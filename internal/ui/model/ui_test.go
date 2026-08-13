@@ -177,7 +177,7 @@ func (w *testWorkspace) AgentRun(ctx context.Context, _ string, prompt string, _
 	return nil
 }
 
-func (w *testWorkspace) SetCompactMode(scope config.Scope, compact bool) error {
+func (w *testWorkspace) SetCompactMode(_ context.Context, scope config.Scope, compact bool) error {
 	w.compactCalls = append(w.compactCalls, compact)
 	return nil
 }

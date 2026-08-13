@@ -114,7 +114,7 @@ func TestClientWorkspace_ConfigChangedRefreshesSiblingCache(t *testing.T) {
 	// latter's autoReload reverts unknown-provider models back to
 	// defaults during configureSelectedModels, which would make the
 	// assertion test infrastructure rather than the cache wiring.
-	require.NoError(t, wsA.SetCompactMode(config.ScopeGlobal, true))
+	require.NoError(t, wsA.SetCompactMode(context.Background(), config.ScopeGlobal, true))
 
 	// Client A writes and refreshes synchronously inside
 	// SetCompactMode, so its cache must already reflect the change.
@@ -353,7 +353,7 @@ func TestClientWorkspace_RecoversAfterServerSideTeardown(t *testing.T) {
 	_, err = ws.ListSessions(t.Context())
 	require.NoError(t, err, "the recovered workspace must serve requests again")
 
-	ws.Shutdown()
+	ws.Shutdown(context.Background())
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):

@@ -47,7 +47,7 @@ func BenchmarkUpdatePreferredModel(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func BenchmarkUpdatePreferredModel(b *testing.B) {
 	i := 0
 	for b.Loop() {
 		m := models[i%len(models)]
-		if err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, m); err != nil {
+		if err := store.UpdatePreferredModel(context.Background(), ScopeGlobal, SelectedModelTypeLarge, m); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -92,7 +92,7 @@ func BenchmarkReloadFromDisk(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	if err != nil {
 		b.Fatal(err)
 	}

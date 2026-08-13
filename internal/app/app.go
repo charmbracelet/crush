@@ -127,7 +127,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 	}
 
-	app.setupEvents()
+	app.setupEvents(ctx)
 
 	// Initialize clipboard support. This is best-effort; if it fails
 	// (e.g., headless environment), clipboard operations will return nil.
@@ -517,7 +517,7 @@ func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) e
 		Model:    lastMsg.Model,
 	})
 	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-		smallModel := app.GetDefaultSmallModel(lastMsg.Provider)
+		smallModel := app.GetDefaultSmallModel(ctx, lastMsg.Provider)
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallModel)
 	}
 	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
@@ -574,7 +574,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 
 	case largeModel != "":
 		// No small model specified, but large model was - use provider's default.
-		smallCfg := app.GetDefaultSmallModel(largeProviderID)
+		smallCfg := app.GetDefaultSmallModel(ctx, largeProviderID)
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallCfg)
 	}
 
@@ -605,12 +605,12 @@ func (app *App) overrideReasoningEffort(ctx context.Context, reasoningEffort str
 
 // GetDefaultSmallModel returns the default small model for the given
 // provider. Falls back to the large model if no default is found.
-func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
+func (app *App) GetDefaultSmallModel(ctx context.Context, providerID string) config.SelectedModel {
 	cfg := app.config.Config()
 	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
 
 	// Find the provider in the known providers list to get its default small model.
-	knownProviders, _ := config.Providers(cfg)
+	knownProviders, _ := config.Providers(ctx, cfg)
 	var knownProvider *catwalk.Provider
 	for _, p := range knownProviders {
 		if string(p.ID) == providerID {
@@ -674,8 +674,8 @@ func chatGPTSmallModel(pc config.ProviderConfig) *catwalk.Model {
 	return nil
 }
 
-func (app *App) setupEvents() {
-	ctx, cancel := context.WithCancel(app.globalCtx)
+func (app *App) setupEvents(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
 	app.eventsCtx = ctx
 	app.subscribe(ctx, "sessions", app.Sessions.Subscribe)
 	app.subscribe(ctx, "messages", app.Messages.Subscribe)
@@ -861,7 +861,7 @@ func (app *App) Subscribe(program *tea.Program) {
 }
 
 // Shutdown performs a graceful shutdown of the application.
-func (app *App) Shutdown() {
+func (app *App) Shutdown(ctx context.Context) {
 	start := time.Now()
 	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
 
@@ -872,7 +872,7 @@ func (app *App) Shutdown() {
 	}
 
 	// Shared shutdown context for all timeout-bounded cleanup.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
 	// Drain any debounced message updates before the DB-close cleanup
@@ -899,7 +899,7 @@ func (app *App) Shutdown() {
 	})
 
 	// Close herdr client to stop its background writer.
-	app.herdrClient.Close()
+	app.herdrClient.Close(ctx)
 
 	// Shutdown all LSP clients.
 	wg.Go(func() {

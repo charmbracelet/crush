@@ -47,12 +47,12 @@ func newPublishingWorkspace(t *testing.T) (*Backend, *Workspace, <-chan pubsub.E
 	cwd := t.TempDir()
 	dataDir := t.TempDir()
 
-	b := New(context.Background(), nil, func() {})
+	b := New(context.Background(), nil, func(context.Context) {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
 	cid := uuid.New().String()
-	ws, _, err := b.CreateWorkspace(protoWS(cwd, dataDir, cid))
+	ws, _, err := b.CreateWorkspace(context.Background(), protoWS(cwd, dataDir, cid))
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -63,7 +63,7 @@ func newPublishingWorkspace(t *testing.T) (*Backend, *Workspace, <-chan pubsub.E
 func TestSetConfigField_PublishesConfigChanged(t *testing.T) {
 	b, ws, evc := newPublishingWorkspace(t)
 
-	require.NoError(t, b.SetConfigField(ws.ID, config.ScopeGlobal, "options.debug", true))
+	require.NoError(t, b.SetConfigField(context.Background(), ws.ID, config.ScopeGlobal, "options.debug", true))
 	awaitConfigChanged(t, evc, ws.ID)
 }
 
@@ -72,10 +72,10 @@ func TestRemoveConfigField_PublishesConfigChanged(t *testing.T) {
 
 	// Seed a field we can then remove. Setting also publishes, so
 	// drain the resulting event before testing remove.
-	require.NoError(t, b.SetConfigField(ws.ID, config.ScopeGlobal, "options.debug", true))
+	require.NoError(t, b.SetConfigField(context.Background(), ws.ID, config.ScopeGlobal, "options.debug", true))
 	awaitConfigChanged(t, evc, ws.ID)
 
-	require.NoError(t, b.RemoveConfigField(ws.ID, config.ScopeGlobal, "options.debug"))
+	require.NoError(t, b.RemoveConfigField(context.Background(), ws.ID, config.ScopeGlobal, "options.debug"))
 	awaitConfigChanged(t, evc, ws.ID)
 }
 
@@ -94,21 +94,21 @@ func TestUpdatePreferredModel_PublishesConfigChanged(t *testing.T) {
 	b, ws, evc := newPublishingWorkspace(t)
 
 	model := config.SelectedModel{Provider: "openai", Model: "gpt-4"}
-	require.NoError(t, b.UpdatePreferredModel(ws.ID, config.ScopeGlobal, config.SelectedModelTypeLarge, model))
+	require.NoError(t, b.UpdatePreferredModel(context.Background(), ws.ID, config.ScopeGlobal, config.SelectedModelTypeLarge, model))
 	awaitConfigChanged(t, evc, ws.ID)
 }
 
 func TestSetCompactMode_PublishesConfigChanged(t *testing.T) {
 	b, ws, evc := newPublishingWorkspace(t)
 
-	require.NoError(t, b.SetCompactMode(ws.ID, config.ScopeGlobal, true))
+	require.NoError(t, b.SetCompactMode(context.Background(), ws.ID, config.ScopeGlobal, true))
 	awaitConfigChanged(t, evc, ws.ID)
 }
 
 func TestSetProviderAPIKey_PublishesConfigChanged(t *testing.T) {
 	b, ws, evc := newPublishingWorkspace(t)
 
-	require.NoError(t, b.SetProviderAPIKey(ws.ID, config.ScopeGlobal, "openai", "test-key"))
+	require.NoError(t, b.SetProviderAPIKey(context.Background(), ws.ID, config.ScopeGlobal, "openai", "test-key"))
 	awaitConfigChanged(t, evc, ws.ID)
 }
 
@@ -130,7 +130,7 @@ func TestImportCopilot_PublishesConfigChanged(t *testing.T) {
 	b, ws, evc := newPublishingWorkspace(t)
 
 	// Not-found path: no token exists, so no event must fire.
-	_, ok, err := b.ImportCopilot(ws.ID)
+	_, ok, err := b.ImportCopilot(context.Background(), ws.ID)
 	require.NoError(t, err)
 	require.False(t, ok, "ImportCopilot should return ok=false when no token is present")
 
@@ -177,10 +177,10 @@ func TestDisableDockerMCP_PublishesConfigChanged(t *testing.T) {
 
 	// Persist a Docker MCP entry directly via the store so the
 	// downstream DisableDockerMCP path has something to remove.
-	require.NoError(t, ws.Cfg.PersistDockerMCPConfig(config.DockerMCPConfig()))
+	require.NoError(t, ws.Cfg.PersistDockerMCPConfig(context.Background(), config.DockerMCPConfig()))
 	drainEvents(evc, 100*time.Millisecond)
 
-	require.NoError(t, b.DisableDockerMCP(ws.ID))
+	require.NoError(t, b.DisableDockerMCP(context.Background(), ws.ID))
 	awaitConfigChanged(t, evc, ws.ID)
 }
 

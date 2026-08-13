@@ -27,8 +27,8 @@ const DockerMCPName = "docker"
 
 // IsDockerMCPAvailable checks if Docker MCP is available by running
 // 'docker mcp version'.
-func IsDockerMCPAvailable() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func IsDockerMCPAvailable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	err := dockerMCPVersionRunner(ctx)
@@ -52,7 +52,7 @@ func DockerMCPAvailabilityCached() (available bool, known bool) {
 
 // RefreshDockerMCPAvailability refreshes and caches Docker MCP availability.
 func RefreshDockerMCPAvailability() bool {
-	available := IsDockerMCPAvailable()
+	available := IsDockerMCPAvailable(context.Background())
 	dockerMCPAvailabilityCache.mu.Lock()
 	dockerMCPAvailabilityCache.available = available
 	dockerMCPAvailabilityCache.checkedAt = time.Now()
@@ -82,8 +82,8 @@ func DockerMCPConfig() MCPConfig {
 
 // PrepareDockerMCPConfig validates Docker MCP availability and stages the
 // Docker MCP configuration in memory.
-func (s *ConfigStore) PrepareDockerMCPConfig() (MCPConfig, error) {
-	if !IsDockerMCPAvailable() {
+func (s *ConfigStore) PrepareDockerMCPConfig(ctx context.Context) (MCPConfig, error) {
+	if !IsDockerMCPAvailable(ctx) {
 		return MCPConfig{}, fmt.Errorf("docker mcp is not available, please ensure docker is installed and 'docker mcp version' succeeds")
 	}
 
@@ -100,28 +100,28 @@ func (s *ConfigStore) PrepareDockerMCPConfig() (MCPConfig, error) {
 
 // PersistDockerMCPConfig persists a previously prepared Docker MCP
 // configuration to the global config file.
-func (s *ConfigStore) PersistDockerMCPConfig(mcpConfig MCPConfig) error {
-	if err := s.SetConfigField(ScopeGlobal, "mcp."+DockerMCPName, mcpConfig); err != nil {
+func (s *ConfigStore) PersistDockerMCPConfig(ctx context.Context, mcpConfig MCPConfig) error {
+	if err := s.SetConfigField(ctx, ScopeGlobal, "mcp."+DockerMCPName, mcpConfig); err != nil {
 		return fmt.Errorf("failed to persist docker mcp configuration: %w", err)
 	}
 	return nil
 }
 
 // EnableDockerMCP adds Docker MCP configuration and persists it.
-func (s *ConfigStore) EnableDockerMCP() error {
-	mcpConfig, err := s.PrepareDockerMCPConfig()
+func (s *ConfigStore) EnableDockerMCP(ctx context.Context) error {
+	mcpConfig, err := s.PrepareDockerMCPConfig(ctx)
 	if err != nil {
 		return err
 	}
-	if err := s.PersistDockerMCPConfig(mcpConfig); err != nil {
+	if err := s.PersistDockerMCPConfig(ctx, mcpConfig); err != nil {
 		return err
 	}
 	return nil
 }
 
 // DisableDockerMCP removes Docker MCP configuration and persists the change.
-func (s *ConfigStore) DisableDockerMCP() error {
-	return s.update(ScopeGlobal, func(c *Config) map[string]any {
+func (s *ConfigStore) DisableDockerMCP(ctx context.Context) error {
+	return s.update(ctx, ScopeGlobal, func(c *Config) map[string]any {
 		if c.MCP == nil {
 			return nil
 		}

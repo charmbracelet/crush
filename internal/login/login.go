@@ -187,8 +187,8 @@ type openaiFlow struct {
 	f *openai.BrowserFlow
 }
 
-func (f *openaiFlow) Start(_ context.Context) (string, string, error) {
-	bf, err := openai.StartBrowserFlow()
+func (f *openaiFlow) Start(ctx context.Context) (string, string, error) {
+	bf, err := openai.StartBrowserFlow(ctx)
 	if err != nil {
 		return "", "", err
 	}

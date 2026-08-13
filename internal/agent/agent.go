@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -492,7 +493,13 @@ func (a *sessionAgent) PopQueuedMessage(sessionID string) (QueuedMessage, bool) 
 	if last == 0 {
 		a.messageQueue.Del(sessionID)
 	} else {
-		a.messageQueue.Set(sessionID, queued[:last])
+		// Clone instead of reslicing: queue readers (QueuedPrompts,
+		// QueuedPromptsList) run without the dispatch mutex and can be
+		// ranging over a slice header captured before this pop. A bare
+		// queued[:last] keeps the original array and its spare capacity,
+		// so the next enqueueCall would append in place over index last —
+		// the very element such a reader is still reading.
+		a.messageQueue.Set(sessionID, slices.Clone(queued[:last]))
 	}
 	mu.Unlock()
 

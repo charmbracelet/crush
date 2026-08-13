@@ -244,6 +244,53 @@ func TestPopQueuedMessage_NewestFirstWithAttachments(t *testing.T) {
 	require.Equal(t, QueuedMessage{}, empty)
 }
 
+// TestPopQueuedMessage_DoesNotAliasQueueBackingArray verifies that the
+// queue left behind by a pop does not share its backing array with the
+// pre-pop queue. QueuedPrompts/QueuedPromptsList read the queue without
+// the per-session dispatch mutex, so a reader can be ranging over a slice
+// header captured before the pop; if the pop merely resliced, the next
+// enqueueCall would append in place over the popped index and mutate that
+// reader's window (a torn read of a multi-word struct under -race).
+func TestPopQueuedMessage_DoesNotAliasQueueBackingArray(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+
+	const sessionID = "pop-alias"
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{SessionID: sessionID, Prompt: "oldest"},
+		{SessionID: sessionID, Prompt: "newest"},
+	})
+	// Stand in for a concurrent QueuedPromptsList: it holds the slice
+	// header as it was before the pop, spare capacity included.
+	beforePop, ok := a.messageQueue.Get(sessionID)
+	require.True(t, ok)
+
+	popped, ok := a.PopQueuedMessage(sessionID)
+	require.True(t, ok)
+	require.Equal(t, "newest", popped.Prompt)
+
+	a.enqueueCall(SessionAgentCall{SessionID: sessionID, Prompt: "requeued"})
+
+	require.Equal(t, []string{"oldest", "newest"}, promptsOf(beforePop),
+		"an enqueue after a pop must not write into a pre-pop reader's window")
+	require.Equal(t, []string{"oldest", "requeued"},
+		a.QueuedPromptsList(sessionID),
+		"the live queue must keep the surviving prompt and the new one")
+}
+
+func promptsOf(calls []SessionAgentCall) []string {
+	prompts := make([]string, len(calls))
+	for i, call := range calls {
+		prompts[i] = call.Prompt
+	}
+	return prompts
+}
+
 func TestPopQueuedMessage_RunIDPublishesCancelledRunComplete(t *testing.T) {
 	t.Parallel()
 

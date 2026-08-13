@@ -282,11 +282,15 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	return nil
 }
 
-// popQueuedMessage removes the newest queued message off the Update goroutine.
+// popQueuedMessage removes the newest queued message off the Update
+// goroutine. It is single-flight: the pop mutates the agent queue, so a
+// second dispatch before the first result lands would remove a second
+// message that no apply path can restore.
 func (m *UI) popQueuedMessage() tea.Cmd {
-	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
+	if m.queuedPopInFlight || !m.hasSession() || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
+	m.queuedPopInFlight = true
 	ws := m.com.Workspace
 	sessionID := m.session.ID
 	return func() tea.Msg {
@@ -303,6 +307,7 @@ func (m *UI) popQueuedMessage() tea.Cmd {
 // applyQueuedMessagePop restores a popped message and supersedes stale queue
 // reads. It runs on the Update goroutine.
 func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
+	m.queuedPopInFlight = false
 	if msg.err != nil {
 		return []tea.Cmd{util.ReportError(msg.err)}
 	}

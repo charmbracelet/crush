@@ -923,6 +923,47 @@ func TestPopQueuedMessageEmptyQueueIsNoOp(t *testing.T) {
 	require.Empty(t, m.textarea.Value())
 	require.Empty(t, m.attachments.List())
 	require.Equal(t, gen, m.promptQueueGen)
+	require.False(t, m.queuedPopInFlight, "an empty-queue result must clear the in-flight mark")
+}
+
+// TestPopQueuedMessageIsSingleFlight pins the guard against key autorepeat:
+// the pop is destructive at the agent layer and nothing in the model changes
+// until its result lands, so a second dispatch would remove a second message
+// that the apply path then overwrites in the editor — losing it for good.
+func TestPopQueuedMessageIsSingleFlight(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:          true,
+		queued:         []string{"older", "newest"},
+		queuedMessages: []agent.QueuedMessage{{Prompt: "older"}, {Prompt: "newest"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"older", "newest"}
+
+	_, first := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	require.True(t, m.queuedPopInFlight, "the dispatched pop must be marked in flight")
+	_, second := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	runCmds(m, first)
+	runCmds(m, second)
+
+	require.Equal(t, 1, ws.popQueueCalls, "autorepeat must not pop twice")
+	require.False(t, m.queuedPopInFlight, "the result must clear the in-flight mark")
+	require.Equal(t, "newest", m.textarea.Value())
+	require.Equal(t, []string{"older"}, m.promptQueueItems)
+	require.Equal(t, 1, m.promptQueue)
+	require.Equal(t, []string{"older"}, ws.queued)
+
+	// A later press is allowed once the first pop settled.
+	m.textarea.SetValue("")
+	_, third := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	runCmds(m, third)
+
+	require.Equal(t, 2, ws.popQueueCalls)
+	require.Equal(t, "older", m.textarea.Value())
+	require.Empty(t, ws.queued)
 }
 
 func TestPopQueuedMessageReportsWorkspaceError(t *testing.T) {
@@ -938,6 +979,8 @@ func TestPopQueuedMessageReportsWorkspaceError(t *testing.T) {
 	require.Equal(t, 1, ws.popQueueCalls)
 	require.Equal(t, util.InfoTypeError, m.status.msg.Type)
 	require.Equal(t, "pop failed", m.status.msg.Msg)
+	require.False(t, m.queuedPopInFlight,
+		"a failed pop must clear the in-flight mark so the key is not wedged")
 }
 
 func TestPopQueuedMessageSupersedesInFlightQueueRefresh(t *testing.T) {

@@ -342,6 +342,12 @@ type UI struct {
 	// in-flight fetch captures it at dispatch and its result is discarded
 	// if the generation has moved on (see workspace_cache.go).
 	promptQueueGen uint64
+	// queuedPopInFlight is set while a queued-message pop is in flight. The
+	// pop is destructive at the agent layer and nothing in the model
+	// changes until its result lands, so without this guard key autorepeat
+	// (or impatience over an HTTP round-trip) would pop several messages
+	// and only the last result would survive in the editor.
+	queuedPopInFlight bool
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).

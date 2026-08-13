@@ -18,7 +18,7 @@ func (c *controllerV1) handlePostWorkspaceConfigSet(w http.ResponseWriter, r *ht
 		return
 	}
 
-	if err := c.backend.SetConfigField(id, req.Scope, req.Key, req.Value); err != nil {
+	if err := c.backend.SetConfigField(r.Context(), id, req.Scope, req.Key, req.Value); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -36,7 +36,7 @@ func (c *controllerV1) handlePostWorkspaceConfigRemove(w http.ResponseWriter, r 
 		return
 	}
 
-	if err := c.backend.RemoveConfigField(id, req.Scope, req.Key); err != nil {
+	if err := c.backend.RemoveConfigField(r.Context(), id, req.Scope, req.Key); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -54,7 +54,7 @@ func (c *controllerV1) handlePostWorkspaceConfigModel(w http.ResponseWriter, r *
 		return
 	}
 
-	if err := c.backend.UpdatePreferredModel(id, req.Scope, req.ModelType, req.Model); err != nil {
+	if err := c.backend.UpdatePreferredModel(r.Context(), id, req.Scope, req.ModelType, req.Model); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -72,7 +72,7 @@ func (c *controllerV1) handlePostWorkspaceConfigCompact(w http.ResponseWriter, r
 		return
 	}
 
-	if err := c.backend.SetCompactMode(id, req.Scope, req.Enabled); err != nil {
+	if err := c.backend.SetCompactMode(r.Context(), id, req.Scope, req.Enabled); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -97,7 +97,7 @@ func (c *controllerV1) handlePostWorkspaceConfigProviderKey(w http.ResponseWrite
 		return
 	}
 
-	if err := c.backend.SetProviderAPIKey(id, req.Scope, req.ProviderID, apiKey); err != nil {
+	if err := c.backend.SetProviderAPIKey(r.Context(), id, req.Scope, req.ProviderID, apiKey); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -107,7 +107,7 @@ func (c *controllerV1) handlePostWorkspaceConfigProviderKey(w http.ResponseWrite
 // handlePostWorkspaceConfigImportCopilot imports Copilot credentials.
 func (c *controllerV1) handlePostWorkspaceConfigImportCopilot(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	token, ok, err := c.backend.ImportCopilot(id)
+	token, ok, err := c.backend.ImportCopilot(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -157,7 +157,7 @@ func (c *controllerV1) handlePostWorkspaceProjectInit(w http.ResponseWriter, r *
 // handleGetWorkspaceProjectInitPrompt returns the project initialization prompt.
 func (c *controllerV1) handleGetWorkspaceProjectInitPrompt(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	prompt, err := c.backend.InitializePrompt(id)
+	prompt, err := c.backend.InitializePrompt(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -208,7 +208,7 @@ func (c *controllerV1) handlePostWorkspaceMCPEnableDocker(w http.ResponseWriter,
 // handlePostWorkspaceMCPDisableDocker disables the Docker MCP server.
 func (c *controllerV1) handlePostWorkspaceMCPDisableDocker(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := c.backend.DisableDockerMCP(id); err != nil {
+	if err := c.backend.DisableDockerMCP(r.Context(), id); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -273,7 +273,7 @@ func (c *controllerV1) handlePostWorkspaceMCPGetPrompt(w http.ResponseWriter, r 
 		return
 	}
 
-	prompt, err := c.backend.GetMCPPrompt(id, req.ClientID, req.PromptID, req.Args)
+	prompt, err := c.backend.GetMCPPrompt(r.Context(), id, req.ClientID, req.PromptID, req.Args)
 	if err != nil {
 		c.handleError(w, r, err)
 		return

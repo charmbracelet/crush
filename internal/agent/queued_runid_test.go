@@ -18,7 +18,9 @@ import (
 // gatedStreamModel streams a single text part followed by a clean finish,
 // but blocks the very first Stream call until its gate is released. That
 // lets a test hold a run "active" (past PrepareStep, inside Stream) just
-// long enough to enqueue a follow-up prompt behind the busy session.
+// long enough to enqueue a follow-up prompt behind the busy session. If
+// the run context is canceled while the gate is held, Stream fails with
+// the context error, the way a real provider call does.
 // Subsequent Stream calls (e.g. the recursive run draining the queue)
 // proceed immediately.
 type gatedStreamModel struct {
@@ -44,6 +46,7 @@ func (m *gatedStreamModel) Stream(ctx context.Context, call fantasy.Call) (fanta
 		select {
 		case <-m.gate:
 		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 	}
 	text := m.text
@@ -178,4 +181,119 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	}
 	require.Equal(t, 2, assistants, "the active turn and the recursive turn each produce one assistant message")
 	require.Equal(t, 1, follows, "the follow-up prompt is its own user turn")
+}
+
+// TestRun_CancelKeepsQueuedPromptsForEditing is the end-to-end proof for
+// issue #3558: with a turn active and prompts queued behind it, "esc esc"
+// must cancel the active turn and nothing else. Before this, Cancel called
+// clearQueueAndNotify, so cancelling destroyed every queued prompt — the
+// data loss the pop feature exists to prevent. The canceled turn returns
+// through the error path (before the completion handoff), so the queue is
+// left intact, in order, for the user to pop and edit; still-queued
+// prompts are not reported as cancelled to a waiting caller, because they
+// have not been discarded.
+func TestRun_CancelKeepsQueuedPromptsForEditing(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	large := &gatedStreamModel{
+		text:    "done",
+		gate:    make(chan struct{}),
+		entered: make(chan struct{}),
+	}
+	small := &finishStreamModel{text: "title"}
+
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel:  Model{Model: large, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		SmallModel:  Model{Model: small, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		IsYolo:      true,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	// Start the main turn; it blocks inside Stream once active.
+	mainDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{
+			SessionID: sess.ID,
+			RunID:     "run-main",
+			Prompt:    "main",
+		})
+		mainDone <- runErr
+	}()
+	select {
+	case <-large.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("main run never entered Stream")
+	}
+	require.True(t, sa.IsSessionBusy(sess.ID))
+
+	// The user queues two prompts behind the busy turn: one typed in the
+	// TUI (no RunID) and one submitted by a non-interactive caller.
+	for _, queued := range []SessionAgentCall{
+		{SessionID: sess.ID, Prompt: "queued-one"},
+		{SessionID: sess.ID, RunID: "run-two", Prompt: "queued-two"},
+	} {
+		res, runErr := sa.Run(t.Context(), queued)
+		require.NoError(t, runErr)
+		require.Nil(t, res, "a busy-session prompt must enqueue and return (nil, nil)")
+	}
+	require.Equal(t, 2, sa.QueuedPrompts(sess.ID))
+
+	// esc esc.
+	sa.Cancel(sess.ID)
+	require.ErrorIs(t, <-mainDone, context.Canceled,
+		"the active turn must end canceled")
+
+	// The queue survived the cancel, in its original order, and the
+	// newest entry is still poppable for editing.
+	require.Equal(t, []string{"queued-one", "queued-two"}, sa.QueuedPromptsList(sess.ID),
+		"cancelling must not discard queued prompts")
+	popped, ok := sa.PopQueuedMessage(sess.ID)
+	require.True(t, ok)
+	require.Equal(t, "queued-two", popped.Prompt)
+	require.Equal(t, []string{"queued-one"}, sa.QueuedPromptsList(sess.ID))
+
+	// Neither queued prompt ran: only the canceled main turn produced
+	// messages.
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 2)
+	require.Equal(t, message.User, msgs[0].Role)
+	require.Equal(t, "main", msgs[0].Content().String())
+	require.Equal(t, message.Assistant, msgs[1].Role)
+	require.Equal(t, message.FinishReasonCanceled, msgs[1].FinishReason())
+
+	// Exactly two terminal events: the canceled main turn, and the popped
+	// prompt (a pop does discard it, so its waiting caller is released).
+	// A prompt that merely sat in the queue across the cancel publishes
+	// nothing.
+	got := map[string]notify.RunComplete{}
+	deadline := time.After(5 * time.Second)
+	for len(got) < 2 {
+		select {
+		case ev := <-ch:
+			got[ev.Payload.RunID] = ev.Payload
+		case <-deadline:
+			t.Fatalf("timed out waiting for terminal events; got %v", got)
+		}
+	}
+	require.True(t, got["run-main"].Cancelled, "the active turn must report cancelled")
+	require.True(t, got["run-two"].Cancelled, "the popped prompt must release its caller")
+	select {
+	case extra := <-ch:
+		t.Fatalf("unexpected extra terminal event: %+v", extra.Payload)
+	case <-time.After(200 * time.Millisecond):
+	}
 }

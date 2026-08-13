@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,12 +62,12 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 
 // TestDrainQueueForStep_FiltersUnderDispatchLock verifies that the queue
 // drain evaluates the per-session cancel mark while holding the dispatch
-// mutex (canceledBySeq's documented precondition). Queued calls at or
-// below the cancel high-water mark are dropped, calls queued after the
-// cancel (higher seq) are folded, untracked enqueues (seq == 0) are
-// dropped whenever any mark is present, and the queue is cleared. These
-// calls carry no RunID, so all foldable survivors are returned for
-// folding (the existing follow-up behavior).
+// mutex (canceledBySeq's documented precondition). Calls queued after the
+// cancel (higher seq) are folded into the active turn; calls at or below
+// the cancel high-water mark — and untracked enqueues (seq == 0) whenever
+// any mark is present — stay in the queue in their original order. A
+// cancel ends the turn in progress, so folding a covered prompt into that
+// turn would destroy it; discarding it would lose it outright.
 func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	t.Parallel()
 
@@ -86,16 +87,18 @@ func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	// Cancel high-water mark at seq 2: seq <= 2 and seq == 0 are covered.
 	a.cancelMark.Set(sessionID, 2)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold := a.drainQueueForStep(sessionID)
 
 	require.Len(t, fold, 1,
 		"only the follow-up queued after the cancel (seq > mark) must be folded")
 	require.Equal(t, "after", fold[0].Prompt)
-	require.Empty(t, canceledWithRunID,
-		"no dropped call carried a RunID, so none need a terminal RunComplete")
 
-	_, ok := a.messageQueue.Get(sessionID)
-	require.False(t, ok, "drain must clear the session message queue when nothing is kept")
+	kept, ok := a.messageQueue.Get(sessionID)
+	require.True(t, ok, "cancel-covered prompts must survive the drain")
+	require.Len(t, kept, 3)
+	require.Equal(t, []string{"below", "at-mark", "untracked"},
+		[]string{kept[0].Prompt, kept[1].Prompt, kept[2].Prompt},
+		"the surviving prompts must keep their original order")
 }
 
 // TestDrainQueueForStep_NoMarkFoldsAllNonRunID verifies that with no
@@ -115,9 +118,8 @@ func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 		{SessionID: sessionID, Prompt: "b", acceptSeq: 5},
 	})
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold := a.drainQueueForStep(sessionID)
 	require.Len(t, fold, 2, "no cancel mark means all non-RunID queued calls are folded")
-	require.Empty(t, canceledWithRunID)
 }
 
 // TestDrainQueueForStep_KeepsRunIDPromptsQueued is the core of fix 2: a
@@ -143,11 +145,10 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 		{SessionID: sessionID, RunID: "run-b", Prompt: "keep-me-too", acceptSeq: 3},
 	})
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold := a.drainQueueForStep(sessionID)
 
 	require.Len(t, fold, 1, "only the non-RunID prompt is folded into the active turn")
 	require.Equal(t, "fold-me", fold[0].Prompt)
-	require.Empty(t, canceledWithRunID)
 
 	kept, ok := a.messageQueue.Get(sessionID)
 	require.True(t, ok, "RunID-bearing prompts must remain queued for the recursive run path")
@@ -156,12 +157,12 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 	require.Equal(t, "run-b", kept[1].RunID)
 }
 
-// TestDrainQueueForStep_ReportsCanceledRunIDDrops verifies that a queued
-// prompt carrying a RunID that is dropped because a cancel covers it is
-// reported in canceledWithRunID so the caller can publish its terminal
-// cancelled RunComplete. A canceled prompt without a RunID is dropped
-// silently as before.
-func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
+// TestDrainQueueForStep_KeepsCanceledPromptsQueued verifies that a cancel
+// covering a queued prompt never removes it: the drain leaves it queued
+// (RunID or not) so it survives the canceled turn, stays visible in the
+// queue pill, and remains poppable. Only prompts queued after the cancel
+// are folded into the active turn.
+func TestDrainQueueForStep_KeepsCanceledPromptsQueued(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
@@ -178,17 +179,15 @@ func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
 	})
 	a.cancelMark.Set(sessionID, 2)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold := a.drainQueueForStep(sessionID)
 
-	require.Empty(t, fold, "no uncanceled non-RunID prompts to fold")
-	require.Len(t, canceledWithRunID, 1,
-		"only the dropped RunID-bearing prompt needs a terminal RunComplete")
-	require.Equal(t, "run-canceled", canceledWithRunID[0].RunID)
+	require.Empty(t, fold, "a cancel-covered prompt must not be folded into the canceled turn")
 
 	kept, ok := a.messageQueue.Get(sessionID)
 	require.True(t, ok)
-	require.Len(t, kept, 1, "the uncanceled RunID prompt stays queued")
-	require.Equal(t, "run-survives", kept[0].RunID)
+	require.Len(t, kept, 3, "cancellation must not remove queued prompts")
+	require.Equal(t, []string{"canceled", "canceled-no-runid", "survives"},
+		[]string{kept[0].Prompt, kept[1].Prompt, kept[2].Prompt})
 }
 
 func TestPopQueuedMessage_NewestFirstWithAttachments(t *testing.T) {
@@ -327,15 +326,28 @@ func requireSingleCancelledRunComplete(t *testing.T, ch <-chan pubsub.Event[noti
 	}
 }
 
-// TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete proves the
-// terminal-event behavior end-to-end: a RunID-bearing prompt sitting in
-// the queue that is canceled while queued (via the public Cancel path,
-// which routes through clearQueueAndNotify -> publishCanceledQueueDrops)
-// must emit exactly one cancelled RunComplete on the broker for its
-// RunID. A queued prompt without a RunID is dropped silently. This is the
-// coverage the earlier drain test lacked: it asserted the returned
-// bookkeeping slice, not the published event a `crush run` caller awaits.
-func TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
+// requireNoRunComplete asserts nothing is published on ch. A queued prompt
+// that is still queued has not been discarded, so it must not report a
+// terminal cancelled RunComplete: a `crush run` caller blocking on that
+// RunID would exit as canceled while its prompt was still pending.
+func requireNoRunComplete(t *testing.T, ch <-chan pubsub.Event[notify.RunComplete]) {
+	t.Helper()
+	select {
+	case ev := <-ch:
+		t.Fatalf("expected no RunComplete for a still-queued prompt, got %+v", ev.Payload)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestClearQueue_QueuedRunIDPromptPublishesCancelledRunComplete proves the
+// terminal-event behavior end-to-end: a RunID-bearing prompt discarded
+// from the queue by the explicit ClearQueue path (which routes through
+// clearQueueAndNotify -> publishCanceledQueueDrops) must emit exactly one
+// cancelled RunComplete on the broker for its RunID. A queued prompt
+// without a RunID is dropped silently. This is the coverage the earlier
+// drain test lacked: it asserted the returned bookkeeping slice, not the
+// published event a `crush run` caller awaits.
+func TestClearQueue_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
@@ -352,28 +364,27 @@ func TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
 	defer subCancel()
 	ch := broker.Subscribe(subCtx)
 
-	const sessionID = "cancel-queued-runid"
+	const sessionID = "clear-queued-runid"
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
 		{SessionID: sessionID, Prompt: "no-runid", acceptSeq: 1},
 		{SessionID: sessionID, RunID: "run-queued", Prompt: "queued", acceptSeq: 2},
 	})
 
-	a.Cancel(sessionID)
+	a.ClearQueue(sessionID)
 
 	requireSingleCancelledRunComplete(t, ch, sessionID, "run-queued")
 
 	_, ok := a.messageQueue.Get(sessionID)
-	require.False(t, ok, "Cancel must clear the queue")
+	require.False(t, ok, "ClearQueue must clear the queue")
 }
 
-// TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete drives
-// the production drain sequence (drainQueueForStep then
-// publishCanceledQueueDrops, mirroring the PrepareStep handoff) and
-// asserts the dropped RunID-bearing prompt actually publishes exactly one
-// cancelled RunComplete on the broker. The companion bookkeeping test
-// covers the returned slice; this one covers the observable terminal
-// event.
-func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.T) {
+// TestCancel_PreservesQueuedPrompts is the regression test for issue
+// #3558: Escape must cancel the turn in progress without discarding
+// queued prompts. It drives the public Cancel path with an active request
+// and an accepted follow-up so both cancel branches fire, then asserts the
+// queue is untouched — order, count, and RunID-bearing entries — and that
+// no queued prompt was reported as cancelled to a waiting `crush run`.
+func TestCancel_PreservesQueuedPrompts(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
@@ -390,16 +401,69 @@ func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.
 	defer subCancel()
 	ch := broker.Subscribe(subCtx)
 
-	const sessionID = "drain-drop-runid"
+	const sessionID = "cancel-preserves-queue"
+	var activeCanceled atomic.Bool
+	a.activeRequests.Set(sessionID, &activeCancel{cancel: func() { activeCanceled.Store(true) }})
+	accept := a.BeginAccepted(sessionID)
+	defer accept.Close()
 	a.messageQueue.Set(sessionID, []SessionAgentCall{
-		{SessionID: sessionID, RunID: "run-dropped", Prompt: "dropped", acceptSeq: 1},
-		{SessionID: sessionID, Prompt: "dropped-no-runid", acceptSeq: 1},
+		{SessionID: sessionID, Prompt: "first", acceptSeq: 1},
+		{SessionID: sessionID, RunID: "run-queued", Prompt: "second", acceptSeq: 2},
 	})
-	a.cancelMark.Set(sessionID, 2)
 
-	_, canceledWithRunID := a.drainQueueForStep(sessionID)
-	require.Len(t, canceledWithRunID, 1)
-	a.publishCanceledQueueDrops(canceledWithRunID)
+	a.Cancel(sessionID)
 
-	requireSingleCancelledRunComplete(t, ch, sessionID, "run-dropped")
+	require.True(t, activeCanceled.Load(), "the active turn must still be canceled")
+	require.True(t, a.hasPendingCancel(sessionID),
+		"the accepted-but-not-active follow-up must still be covered")
+
+	queued, ok := a.messageQueue.Get(sessionID)
+	require.True(t, ok, "Cancel must not delete the queue")
+	require.Len(t, queued, 2, "Cancel must not discard queued prompts")
+	require.Equal(t, "first", queued[0].Prompt)
+	require.Equal(t, "second", queued[1].Prompt)
+	require.Equal(t, "run-queued", queued[1].RunID)
+	require.Equal(t, 2, a.QueuedPrompts(sessionID))
+
+	requireNoRunComplete(t, ch)
+}
+
+// TestCancelAll_ShutdownDiscardsQueueAndNotifies covers the one place that
+// still discards queued prompts implicitly: shutdown. Cancel keeps the
+// queue because a queued prompt can still run later, but CancelAll runs
+// when the workspace is going away, so every queued RunID must receive its
+// terminal cancelled RunComplete or a `crush run` caller blocking on it
+// would never exit.
+func TestCancelAll_ShutdownDiscardsQueueAndNotifies(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	const sessionID = "cancel-all-shutdown"
+	// Releasing the active entry mirrors processRequest's deferred
+	// cleanup, so CancelAll's busy-wait finishes immediately.
+	a.activeRequests.Set(sessionID, &activeCancel{
+		cancel: func() { a.activeRequests.Del(sessionID) },
+	})
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{SessionID: sessionID, RunID: "run-queued", Prompt: "queued", acceptSeq: 1},
+	})
+
+	a.CancelAll()
+
+	requireSingleCancelledRunComplete(t, ch, sessionID, "run-queued")
+	require.Equal(t, 0, a.QueuedPrompts(sessionID),
+		"shutdown must discard queued prompts it can no longer run")
 }

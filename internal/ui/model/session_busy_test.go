@@ -102,6 +102,10 @@ func (w *countingWorkspace) AgentPopQueuedMessage(string) (agent.QueuedMessage, 
 	}
 	return queued, true, nil
 }
+
+// AgentCancel mirrors production: agent.sessionAgent.Cancel ends the turn
+// in progress and deliberately leaves the message queue alone, so w.queued
+// must stay untouched here. Only AgentClearQueue discards queued prompts.
 func (w *countingWorkspace) AgentCancel(string) { w.cancelCalls++ }
 
 func (w *countingWorkspace) AgentModel() workspace.AgentModel {
@@ -440,7 +444,11 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 }
 
 // TestCancelAgentPreservesQueue verifies that queued prompts do not change
-// Escape's double-press active-task cancellation behavior.
+// Escape's double-press active-task cancellation behavior, and that the UI
+// neither discards its cached queue nor asks the workspace to clear the
+// agent queue. The agent side of the contract — Cancel leaving the queue
+// intact — is pinned by agent.TestCancel_PreservesQueuedPrompts; the stub
+// here only models it.
 func TestCancelAgentPreservesQueue(t *testing.T) {
 	pinTTLs(t)
 

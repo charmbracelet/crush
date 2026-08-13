@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -34,7 +35,7 @@ func TestScopeB_InPlaceMutationRace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestScopeB_InPlaceMutationRace(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
-			_ = store.SetCompactMode(ScopeGlobal, i%2 == 0)
+			_ = store.SetCompactMode(context.Background(), ScopeGlobal, i%2 == 0)
 		}
 		close(stop)
 	}()

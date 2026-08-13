@@ -160,7 +160,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("failed to gather stats from projects: %w", err)
 		}
 	default:
-		cfg, err := config.Init(cwd, dataDir, false)
+		cfg, err := config.Init(ctx, cwd, dataDir, false)
 		if err != nil {
 			return fmt.Errorf("failed to initialize config: %w", err)
 		}
@@ -220,7 +220,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 
 	outputDataDir := dataDir
 	if outputDataDir == "" {
-		cfg, err := config.Init(cwd, "", false)
+		cfg, err := config.Init(ctx, cwd, "", false)
 		if err == nil {
 			outputDataDir = cfg.Config().Options.DataDirectory
 		}

@@ -86,7 +86,7 @@ func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string
 			"workspace", ws.ID, "server", serverName, "error", err)
 		return
 	}
-	if err := b.SendMessage(ws.ID, proto.AgentMessage{
+	if err := b.SendMessage(ws.ctx, ws.ID, proto.AgentMessage{
 		SessionID: sessionID,
 		Channel:   serverName,
 		Prompt:    content,

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,8 +19,8 @@ type ProjectInitFlag struct {
 	Initialized bool `json:"initialized"`
 }
 
-func Init(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
-	store, err := Load(workingDir, dataDir, debug)
+func Init(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	store, err := Load(ctx, workingDir, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}

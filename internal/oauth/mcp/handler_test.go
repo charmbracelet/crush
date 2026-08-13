@@ -2,6 +2,7 @@ package mcpoauth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -180,7 +181,7 @@ func TestHandler_FreshAuthorize(t *testing.T) {
 		mu    sync.Mutex
 		saved *oauth.Token
 	)
-	h, err := NewHandler("test", mcpURL, nil, nil, func(tok *oauth.Token) {
+	h, err := NewHandler(context.Background(), "test", mcpURL, nil, nil, func(tok *oauth.Token) {
 		mu.Lock()
 		saved = tok
 		mu.Unlock()
@@ -221,7 +222,7 @@ func TestHandler_PreregisteredClientSkipsDCR(t *testing.T) {
 
 	preregistered := &oauth.OAuthClient{ClientID: "configured-client"}
 	var saved *oauth.Token
-	h, err := NewHandler("test", mcpURL, nil, preregistered, func(tok *oauth.Token) {
+	h, err := NewHandler(context.Background(), "test", mcpURL, nil, preregistered, func(tok *oauth.Token) {
 		saved = tok
 	}, true, 0)
 	require.NoError(t, err)
@@ -255,7 +256,7 @@ func TestHandler_RestoreSkipsBrowser(t *testing.T) {
 		},
 	}
 
-	h, err := NewHandler("test", mcpURL, saved, nil, func(*oauth.Token) {}, false, 0)
+	h, err := NewHandler(context.Background(), "test", mcpURL, saved, nil, func(*oauth.Token) {}, false, 0)
 	require.NoError(t, err)
 	t.Cleanup(h.Close)
 	h.openURL = func(string) error {
@@ -296,7 +297,7 @@ func TestHandler_RefreshPersists(t *testing.T) {
 		mu    sync.Mutex
 		saver *oauth.Token
 	)
-	h, err := NewHandler("test", mcpURL, saved, nil, func(tok *oauth.Token) {
+	h, err := NewHandler(context.Background(), "test", mcpURL, saved, nil, func(tok *oauth.Token) {
 		mu.Lock()
 		saver = tok
 		mu.Unlock()
@@ -383,7 +384,7 @@ func TestSavingTokenSource_NilInputs(t *testing.T) {
 // as an authorization failure rather than a captured token.
 func TestHandler_AuthorizeError(t *testing.T) {
 	base, mcpURL := newFakeAS(t, fakeASOpts{clientID: "c", accessToken: "a"})
-	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	h, err := NewHandler(context.Background(), "test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
 	require.NoError(t, err)
 	t.Cleanup(h.Close)
 
@@ -414,7 +415,7 @@ func TestHandler_AuthorizeError(t *testing.T) {
 // ErrInteractiveAuthRequired so the caller can surface a needs-auth state.
 func TestHandler_BackgroundAuthorizeRefused(t *testing.T) {
 	base, mcpURL := newFakeAS(t, fakeASOpts{clientID: "c", accessToken: "a"})
-	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, false, 0)
+	h, err := NewHandler(context.Background(), "test", mcpURL, nil, nil, func(*oauth.Token) {}, false, 0)
 	require.NoError(t, err)
 	t.Cleanup(h.Close)
 	h.openURL = func(string) error {
@@ -432,7 +433,7 @@ func TestHandler_BackgroundAuthorizeRefused(t *testing.T) {
 // returned restore function re-enables the browser.
 func TestHandler_BrowserSuppressed(t *testing.T) {
 	base, mcpURL := newFakeAS(t, fakeASOpts{clientID: "c", accessToken: "a"})
-	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	h, err := NewHandler(context.Background(), "test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
 	require.NoError(t, err)
 	t.Cleanup(h.Close)
 
@@ -480,7 +481,7 @@ func TestCallbackReceiver_IgnoresNonCallbackPaths(t *testing.T) {
 
 	base := serveReceiver(t, r)
 
-	flight, owned, err := r.begin()
+	flight, owned, err := r.begin(context.Background())
 	require.NoError(t, err)
 	require.True(t, owned)
 
@@ -517,7 +518,7 @@ func TestCallbackReceiver_RendersFailurePage(t *testing.T) {
 
 	base := serveReceiver(t, r)
 
-	flight, owned, err := r.begin()
+	flight, owned, err := r.begin(context.Background())
 	require.NoError(t, err)
 	require.True(t, owned)
 
@@ -653,7 +654,7 @@ func serveReceiver(t *testing.T, r *callbackReceiver) string {
 		r.fixedPort = probe.Addr().(*net.TCPAddr).Port
 		_ = probe.Close()
 	}
-	require.NoError(t, r.bind())
+	require.NoError(t, r.bind(context.Background()))
 	return fmt.Sprintf("http://localhost:%d", r.port)
 }
 
@@ -668,7 +669,7 @@ func TestHandler_PassesIssuerThrough(t *testing.T) {
 		accessToken:  "a",
 		issSupported: true,
 	})
-	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	h, err := NewHandler(context.Background(), "test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
 	require.NoError(t, err)
 	t.Cleanup(h.Close)
 
@@ -694,7 +695,7 @@ func TestHandler_RejectsWrongIssuer(t *testing.T) {
 		accessToken:  "a",
 		issSupported: true,
 	})
-	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	h, err := NewHandler(context.Background(), "test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
 	require.NoError(t, err)
 	t.Cleanup(h.Close)
 
@@ -749,7 +750,7 @@ func TestConnect_OneLoginOpensOneTab(t *testing.T) {
 	})
 	endpoint := newFakeMCP(t, authServer)
 
-	h, err := NewHandler("test", endpoint, nil, nil, func(*oauth.Token) {}, true, 0)
+	h, err := NewHandler(context.Background(), "test", endpoint, nil, nil, func(*oauth.Token) {}, true, 0)
 	require.NoError(t, err)
 	t.Cleanup(h.Close)
 

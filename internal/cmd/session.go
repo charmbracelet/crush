@@ -113,7 +113,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 		return nil, nil, nil, err
 	}
 
-	cfg, err := config.Init(cwd, dataDir, false)
+	cfg, err := config.Init(ctx, cwd, dataDir, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
@@ -561,12 +561,12 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 	}
 
 	return &colorprofile.Writer{
-			Forward: pipe,
-			Profile: profile,
-		}, func() {
-			pipe.Close()
-			_ = cmd.Wait()
-		}, true
+		Forward: pipe,
+		Profile: profile,
+	}, func() {
+		pipe.Close()
+		_ = cmd.Wait()
+	}, true
 }
 
 type sessionShowMeta struct {

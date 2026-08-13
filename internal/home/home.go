@@ -35,12 +35,24 @@ func Short(p string) string {
 	if homedir == "" || !strings.HasPrefix(p, homedir) {
 		return p
 	}
+	if len(p) == len(homedir) {
+		return "~"
+	}
+	if p[len(homedir)] != filepath.Separator {
+		return p
+	}
 	return filepath.Join("~", strings.TrimPrefix(p, homedir))
 }
 
 // Long replaces the `~` with actual home path from [Dir].
 func Long(p string) string {
 	if homedir == "" || !strings.HasPrefix(p, "~") {
+		return p
+	}
+	if len(p) == 1 {
+		return homedir
+	}
+	if p[1] != filepath.Separator {
 		return p
 	}
 	return strings.Replace(p, "~", homedir, 1)

@@ -219,9 +219,15 @@ func (w *AppWorkspace) AgentClearQueue(sessionID string) {
 	}
 }
 
+// AgentPopQueuedMessage removes and returns the newest queued message for
+// the session. A nil coordinator is reported as an empty queue, not an
+// error: no coordinator means no queue exists, so nothing can be popped
+// and nothing can be lost. This matches the other queue operations and,
+// crucially, Backend.PopQueuedMessage, so the same user action behaves
+// identically in client/server mode.
 func (w *AppWorkspace) AgentPopQueuedMessage(sessionID string) (agent.QueuedMessage, bool, error) {
 	if w.app.AgentCoordinator == nil {
-		return agent.QueuedMessage{}, false, ErrAgentNotInitialized
+		return agent.QueuedMessage{}, false, nil
 	}
 	queued, ok := w.app.AgentCoordinator.PopQueuedMessage(sessionID)
 	return queued, ok, nil

@@ -291,12 +291,26 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	return nil
 }
 
+// noQueuedMessages is the banner shown when a pop finds nothing to restore,
+// either from the memoized count or from the workspace itself.
+const noQueuedMessages = "No queued messages."
+
 // popQueuedMessage removes the newest queued message off the Update
 // goroutine. It is single-flight: the pop mutates the agent queue, so a
 // second dispatch before the first result lands would remove a second
-// message that no apply path can restore.
+// message that no apply path can restore. An empty memoized queue is
+// answered from the cache — the pop is an HTTP round-trip in client/server
+// mode, and this file exists to keep those off key presses the cache can
+// answer — with a banner, because a key that silently does nothing reads as
+// a broken binding.
 func (m *UI) popQueuedMessage() tea.Cmd {
-	if m.queuedPopInFlight || !m.hasSession() || m.com == nil || m.com.Workspace == nil {
+	if m.queuedPopInFlight {
+		return nil
+	}
+	if m.promptQueue == 0 {
+		return util.ReportInfo(noQueuedMessages)
+	}
+	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
 	m.queuedPopInFlight = true
@@ -333,7 +347,23 @@ func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 		return cmds
 	}
 	if !msg.found {
-		return nil
+		if msg.forSession != m.currentSessionID() {
+			// Nothing was popped and the result belongs to a session
+			// the user has left: it says nothing about the queue now on
+			// screen, so leave that queue and the editor alone.
+			return nil
+		}
+		// The pop only runs with a non-empty memoized queue, so the
+		// queue drained while the request was in flight (the agent
+		// dequeued it, or another client cleared it). The memoized
+		// count is known wrong: supersede it and re-fetch, and say why
+		// the editor stayed empty.
+		m.invalidatePromptQueue()
+		cmds := []tea.Cmd{util.ReportInfo(noQueuedMessages)}
+		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return cmds
 	}
 	if msg.forSession != m.currentSessionID() {
 		// The pop raced a session switch. It is destructive at the agent

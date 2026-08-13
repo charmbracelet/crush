@@ -915,6 +915,8 @@ func TestPopQueuedMessageRejectsNonEmptyInput(t *testing.T) {
 	}
 	m := newBusyUI(ws)
 	warmCaches(m, true)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"queued"}
 	m.textarea.SetValue("draft")
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
@@ -1004,7 +1006,12 @@ func TestPopQueuedMessageAppendsAttachmentsAndSynchronizesBangMode(t *testing.T)
 	require.Equal(t, []message.Attachment{existing, restored}, m.attachments.List())
 }
 
-func TestPopQueuedMessageEmptyQueueIsNoOp(t *testing.T) {
+// TestPopQueuedMessageEmptyQueueIsAnsweredFromCache pins that a pop with
+// nothing queued costs no workspace round-trip (it is an HTTP POST in
+// client/server mode, and the memoized count already answers it) and still
+// tells the user why the editor stayed empty, so the chord does not read as
+// a broken binding.
+func TestPopQueuedMessageEmptyQueueIsAnsweredFromCache(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true}
@@ -1017,11 +1024,62 @@ func TestPopQueuedMessageEmptyQueueIsNoOp(t *testing.T) {
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
 	runCmds(m, cmd)
 
-	require.Equal(t, 1, ws.popQueueCalls)
+	require.Zero(t, ws.popQueueCalls, "the memoized count must answer this without a round-trip")
+	require.Equal(t, util.InfoTypeInfo, m.status.msg.Type)
+	require.Equal(t, "No queued messages.", m.status.msg.Msg)
 	require.Empty(t, m.textarea.Value())
 	require.Empty(t, m.attachments.List())
 	require.Equal(t, gen, m.promptQueueGen)
+	require.False(t, m.queuedPopInFlight, "a short-circuited pop must not mark itself in flight")
+}
+
+// TestPopQueuedMessageStaleCountReportsEmptyQueue pins the other half: the
+// memoized count is the gate, so it can be one round-trip stale (the agent
+// dequeued the last prompt meanwhile). The server's "not found" stays the
+// authority — it must report the empty queue and supersede the wrong count
+// rather than leave the pill promising a message that is gone.
+func TestPopQueuedMessageStaleCountReportsEmptyQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"already dequeued"}
+	staleGen := m.promptQueueGen
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.popQueueCalls)
+	require.Equal(t, util.InfoTypeInfo, m.status.msg.Type)
+	require.Equal(t, "No queued messages.", m.status.msg.Msg)
+	require.Empty(t, m.textarea.Value())
+	require.Greater(t, m.promptQueueGen, staleGen,
+		"a queue the server says is empty must supersede the memoized one")
+	require.Zero(t, m.promptQueue, "the re-fetch must drop the phantom queue pill")
+	require.Empty(t, m.promptQueueItems)
 	require.False(t, m.queuedPopInFlight, "an empty-queue result must clear the in-flight mark")
+}
+
+// TestPopQueuedMessageEmptyResultAfterSessionSwitchKeepsCurrentQueue: a pop
+// that found nothing says nothing about the session the user switched to, so
+// it must not invalidate or empty that session's queue.
+func TestPopQueuedMessageEmptyResultAfterSessionSwitchKeepsCurrentQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, queued: []string{"a"}}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"a"}
+	gen := m.promptQueueGen
+
+	require.Nil(t, m.applyQueuedMessagePop(queuedMessagePoppedMsg{forSession: "s0"}))
+	require.Equal(t, []string{"a"}, m.promptQueueItems)
+	require.Equal(t, 1, m.promptQueue)
+	require.Equal(t, gen, m.promptQueueGen)
+	require.Zero(t, ws.queueListCalls, "another session's empty pop must not re-fetch this queue")
 }
 
 // helpDesc returns the description the help panes show for the binding

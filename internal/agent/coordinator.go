@@ -105,6 +105,7 @@ type Coordinator interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
+	PopQueuedMessage(sessionID string) (QueuedMessage, bool)
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
@@ -1191,6 +1192,10 @@ func (c *coordinator) CancelAll() {
 
 func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent.ClearQueue(sessionID)
+}
+
+func (c *coordinator) PopQueuedMessage(sessionID string) (QueuedMessage, bool) {
+	return c.currentAgent.PopQueuedMessage(sessionID)
 }
 
 func (c *coordinator) IsBusy() bool {

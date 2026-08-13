@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -188,6 +189,88 @@ func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, kept, 1, "the uncanceled RunID prompt stays queued")
 	require.Equal(t, "run-survives", kept[0].RunID)
+}
+
+func TestPopQueuedMessage_NewestFirstWithAttachments(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+
+	const sessionID = "pop-newest"
+	content := []byte("newest content")
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{SessionID: sessionID, Prompt: "oldest"},
+		{
+			SessionID: sessionID,
+			Prompt:    "newest",
+			Attachments: []message.Attachment{{
+				FilePath: "/tmp/newest.txt",
+				FileName: "newest.txt",
+				MimeType: "text/plain",
+				Content:  content,
+			}},
+		},
+	})
+
+	popped, ok := a.PopQueuedMessage(sessionID)
+	require.True(t, ok)
+	require.Equal(t, "newest", popped.Prompt)
+	require.Equal(t, []message.Attachment{{
+		FilePath: "/tmp/newest.txt",
+		FileName: "newest.txt",
+		MimeType: "text/plain",
+		Content:  []byte("newest content"),
+	}}, popped.Attachments)
+
+	content[0] = 'X'
+	require.Equal(t, []byte("newest content"), popped.Attachments[0].Content,
+		"the returned attachment content must not alias the queued call")
+	remaining, ok := a.messageQueue.Get(sessionID)
+	require.True(t, ok)
+	require.Len(t, remaining, 1)
+	require.Equal(t, "oldest", remaining[0].Prompt)
+
+	last, ok := a.PopQueuedMessage(sessionID)
+	require.True(t, ok)
+	require.Equal(t, "oldest", last.Prompt)
+	_, ok = a.messageQueue.Get(sessionID)
+	require.False(t, ok, "popping the last call must remove the queue map entry")
+
+	empty, ok := a.PopQueuedMessage(sessionID)
+	require.False(t, ok)
+	require.Equal(t, QueuedMessage{}, empty)
+}
+
+func TestPopQueuedMessage_RunIDPublishesCancelledRunComplete(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ch := broker.Subscribe(ctx)
+	const sessionID = "pop-runid"
+	a.messageQueue.Set(sessionID, []SessionAgentCall{{
+		SessionID: sessionID,
+		RunID:     "queued-run",
+		Prompt:    "queued",
+	}})
+
+	popped, ok := a.PopQueuedMessage(sessionID)
+	require.True(t, ok)
+	require.Equal(t, "queued", popped.Prompt)
+	requireSingleCancelledRunComplete(t, ch, sessionID, "queued-run")
 }
 
 // TestRunCompletePublisher_MustDeliverOverTakesPublish exercises the

@@ -132,6 +132,12 @@ type SessionAgentCall struct {
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
 }
 
+// QueuedMessage is the frontend-safe content of a queued agent call.
+type QueuedMessage struct {
+	Prompt      string
+	Attachments []message.Attachment
+}
+
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
@@ -145,6 +151,7 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
+	PopQueuedMessage(sessionID string) (QueuedMessage, bool)
 	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
@@ -468,6 +475,40 @@ func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
 		return
 	}
 	a.publishCanceledQueueDrops(queued)
+}
+
+// PopQueuedMessage atomically removes the newest queued call for sessionID.
+// Queue order is oldest-to-newest, so removing the final element preserves
+// the order of all remaining calls. The returned content does not expose
+// agent-only dispatch state and owns its attachment byte slices.
+func (a *sessionAgent) PopQueuedMessage(sessionID string) (QueuedMessage, bool) {
+	mu := a.sessionMu(sessionID)
+	mu.Lock()
+	queued, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queued) == 0 {
+		mu.Unlock()
+		return QueuedMessage{}, false
+	}
+
+	last := len(queued) - 1
+	popped := queued[last]
+	if last == 0 {
+		a.messageQueue.Del(sessionID)
+	} else {
+		a.messageQueue.Set(sessionID, queued[:last])
+	}
+	mu.Unlock()
+
+	attachments := make([]message.Attachment, len(popped.Attachments))
+	for i, attachment := range popped.Attachments {
+		attachments[i] = attachment
+		attachments[i].Content = append([]byte(nil), attachment.Content...)
+	}
+	a.publishCanceledQueueDrops([]SessionAgentCall{popped})
+	return QueuedMessage{
+		Prompt:      popped.Prompt,
+		Attachments: attachments,
+	}, true
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It

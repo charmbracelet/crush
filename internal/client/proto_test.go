@@ -9,10 +9,66 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPopAgentSessionQueuedMessage(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/v1/workspaces/ws1/agent/sessions/sess1/prompts/pop", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(proto.PopQueuedMessageResponse{
+			Found: true,
+			Message: proto.QueuedMessage{
+				Prompt: "queued",
+				Attachments: []proto.Attachment{{
+					FileName: "notes.txt",
+					MimeType: "text/plain",
+					Content:  []byte("content"),
+				}},
+			},
+		}))
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	got, found, err := c.PopAgentSessionQueuedMessage(context.Background(), "ws1", "sess1")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "queued", got.Prompt)
+	require.Equal(t, "notes.txt", got.Attachments[0].FileName)
+	require.Equal(t, []byte("content"), got.Attachments[0].Content)
+}
+
+func TestPopAgentSessionQueuedMessageEmptyAndError(t *testing.T) {
+	t.Parallel()
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			require.NoError(t, json.NewEncoder(w).Encode(proto.PopQueuedMessageResponse{}))
+		}))
+		defer srv.Close()
+
+		got, found, err := captureClient(t, srv).PopAgentSessionQueuedMessage(context.Background(), "ws1", "sess1")
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Equal(t, agent.QueuedMessage{}, got)
+	})
+
+	t.Run("server error", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		_, _, err := captureClient(t, srv).PopAgentSessionQueuedMessage(context.Background(), "ws1", "sess1")
+		require.Error(t, err)
+	})
+}
 
 func TestSendEventAfterContextCancelIsIdempotent(t *testing.T) {
 	t.Parallel()

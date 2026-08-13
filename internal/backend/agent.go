@@ -234,6 +234,21 @@ func (b *Backend) QueuedPromptsList(workspaceID, sessionID string) ([]string, er
 	return ws.AgentCoordinator.QueuedPromptsList(sessionID), nil
 }
 
+// PopQueuedMessage removes and returns the newest queued message for a session.
+func (b *Backend) PopQueuedMessage(workspaceID, sessionID string) (agent.QueuedMessage, bool, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return agent.QueuedMessage{}, false, err
+	}
+
+	if ws.AgentCoordinator == nil {
+		return agent.QueuedMessage{}, false, nil
+	}
+
+	queued, ok := ws.AgentCoordinator.PopQueuedMessage(sessionID)
+	return queued, ok, nil
+}
+
 // GetDefaultSmallModel returns the default small model for a provider.
 func (b *Backend) GetDefaultSmallModel(workspaceID, providerID string) (config.SelectedModel, error) {
 	ws, err := b.GetWorkspace(workspaceID)

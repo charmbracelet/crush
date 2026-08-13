@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
@@ -308,6 +309,10 @@ func (w *ClientWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 
 func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
 	_ = w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
+}
+
+func (w *ClientWorkspace) AgentPopQueuedMessage(sessionID string) (agent.QueuedMessage, bool, error) {
+	return w.client.PopAgentSessionQueuedMessage(context.Background(), w.workspaceID(), sessionID)
 }
 
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {

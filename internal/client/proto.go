@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -451,6 +452,30 @@ func (c *Client) ClearAgentSessionQueuedPrompts(ctx context.Context, id string, 
 		return fmt.Errorf("failed to clear session agent queued prompts: status code %d", rsp.StatusCode)
 	}
 	return nil
+}
+
+// PopAgentSessionQueuedMessage removes and returns the newest queued message.
+func (c *Client) PopAgentSessionQueuedMessage(ctx context.Context, id, sessionID string) (agent.QueuedMessage, bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/prompts/pop", id, sessionID), nil, nil, nil)
+	if err != nil {
+		return agent.QueuedMessage{}, false, fmt.Errorf("failed to pop session agent queued message: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return agent.QueuedMessage{}, false, fmt.Errorf("failed to pop session agent queued message: status code %d", rsp.StatusCode)
+	}
+
+	var result proto.PopQueuedMessageResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
+		return agent.QueuedMessage{}, false, fmt.Errorf("failed to decode popped session agent queued message: %w", err)
+	}
+	if !result.Found {
+		return agent.QueuedMessage{}, false, nil
+	}
+	return agent.QueuedMessage{
+		Prompt:      result.Message.Prompt,
+		Attachments: proto.AttachmentsToMessage(result.Message.Attachments),
+	}, result.Found, nil
 }
 
 // GetAgentInfo retrieves the agent status for a workspace.

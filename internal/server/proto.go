@@ -929,6 +929,33 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentSessionPromptPop removes the newest queued message.
+//
+//	@Summary		Pop newest queued message
+//	@Tags			agent
+//	@Produce		json
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Success		200	{object}	proto.PopQueuedMessageResponse
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/pop [post]
+func (c *controllerV1) handlePostWorkspaceAgentSessionPromptPop(w http.ResponseWriter, r *http.Request) {
+	queued, ok, err := c.backend.PopQueuedMessage(r.PathValue("id"), r.PathValue("sid"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+
+	jsonEncode(w, proto.PopQueuedMessageResponse{
+		Found: ok,
+		Message: proto.QueuedMessage{
+			Prompt:      queued.Prompt,
+			Attachments: proto.AttachmentsFromMessage(queued.Attachments),
+		},
+	})
+}
+
 // handlePostWorkspaceAgentSessionSummarize summarizes a session.
 //
 //	@Summary		Summarize session

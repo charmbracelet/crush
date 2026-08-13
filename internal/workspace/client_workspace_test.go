@@ -24,6 +24,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestClientWorkspaceAgentPopQueuedMessage(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/agent/sessions/sess-1/prompts/pop", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(proto.PopQueuedMessageResponse{
+			Found: true,
+			Message: proto.QueuedMessage{
+				Prompt: "queued",
+				Attachments: []proto.Attachment{{
+					FileName: "notes.txt",
+					MimeType: "text/plain",
+				}},
+			},
+		}))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	got, found, err := ws.AgentPopQueuedMessage("sess-1")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "queued", got.Prompt)
+	require.Equal(t, "notes.txt", got.Attachments[0].FileName)
+}
+
 // TestProtoToMessageToolResult ensures that ToolResult metadata,
 // data, and MIME type survive the conversion from proto on the
 // client. Without these fields the TUI cannot render rich tool

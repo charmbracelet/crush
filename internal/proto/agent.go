@@ -5,6 +5,18 @@ import (
 	"errors"
 )
 
+// QueuedMessage is the transport-safe content of a queued agent call.
+type QueuedMessage struct {
+	Prompt      string       `json:"prompt"`
+	Attachments []Attachment `json:"attachments"`
+}
+
+// PopQueuedMessageResponse distinguishes an empty queue from an empty message.
+type PopQueuedMessageResponse struct {
+	Found   bool          `json:"found"`
+	Message QueuedMessage `json:"message"`
+}
+
 // AgentEventType represents the type of agent event.
 type AgentEventType string
 

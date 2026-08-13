@@ -439,10 +439,9 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 	require.Equal(t, 1, ws.cancelCalls, "second esc press must cancel the agent")
 }
 
-// TestCancelAgentClearsQueueFromCachedCount: the queue-clear decision must
-// come from the memoized count — no synchronous AgentQueuedPrompts probe —
-// and clearing must zero the cached count immediately.
-func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
+// TestCancelAgentPreservesQueue verifies that queued prompts do not change
+// Escape's double-press active-task cancellation behavior.
+func TestCancelAgentPreservesQueue(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{ready: true, queued: []string{"a"}}
@@ -453,13 +452,20 @@ func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
 	ws.resetCounters()
 
 	cmd := m.cancelAgent()
-	require.Nil(t, cmd)
-	require.Equal(t, 1, ws.clearQueueCalls, "esc with a queue must clear it")
-	require.Zero(t, ws.queuedCalls, "the decision must use the cached count, not a probe")
-	require.Zero(t, ws.queueListCalls, "the decision must use the cached count, not a probe")
-	require.Zero(t, m.promptQueue, "the cached count must be zeroed immediately")
-	require.Empty(t, m.promptQueueItems)
-	require.False(t, m.isCanceling, "clearing the queue must not arm cancellation")
+	require.NotNil(t, cmd, "first esc press must arm the cancellation timer")
+	require.True(t, m.isCanceling)
+	require.Equal(t, []string{"a"}, ws.queued)
+	require.Equal(t, 1, m.promptQueue)
+	require.Equal(t, []string{"a"}, m.promptQueueItems)
+	require.Zero(t, ws.clearQueueCalls, "esc must not clear queued prompts")
+	require.Zero(t, ws.queuedCalls, "esc must not probe the queue")
+	require.Zero(t, ws.queueListCalls, "esc must not probe the queue")
+
+	m.cancelAgent()
+	require.False(t, m.isCanceling)
+	require.Equal(t, 1, ws.cancelCalls, "second esc press must cancel the agent")
+	require.Equal(t, []string{"a"}, ws.queued)
+	require.Zero(t, ws.clearQueueCalls, "canceling the agent must preserve queued prompts")
 }
 
 // TestBackstopRefreshesStaleCaches: when the memoized state outlives its TTL

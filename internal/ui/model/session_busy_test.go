@@ -2,11 +2,13 @@ package model
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -30,13 +33,15 @@ import (
 type countingWorkspace struct {
 	workspace.Workspace
 
-	ready     bool
-	agentBusy bool
-	yolo      bool
-	queued    []string
-	model     workspace.AgentModel
-	lspStates map[string]workspace.LSPClientInfo
-	lspDiags  map[string]lsp.DiagnosticCounts
+	ready          bool
+	agentBusy      bool
+	yolo           bool
+	queued         []string
+	queuedMessages []agent.QueuedMessage
+	popErr         error
+	model          workspace.AgentModel
+	lspStates      map[string]workspace.LSPClientInfo
+	lspDiags       map[string]lsp.DiagnosticCounts
 
 	readyCalls      int
 	agentBusyCalls  int
@@ -45,6 +50,7 @@ type countingWorkspace struct {
 	permCalls       int
 	permSetCalls    int
 	clearQueueCalls int
+	popQueueCalls   int
 	cancelCalls     int
 	modelCalls      int
 	lspStateCalls   int
@@ -81,7 +87,20 @@ func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) {
 
 func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
 func (w *countingWorkspace) AgentPopQueuedMessage(string) (agent.QueuedMessage, bool, error) {
-	return agent.QueuedMessage{}, false, nil
+	w.popQueueCalls++
+	if w.popErr != nil {
+		return agent.QueuedMessage{}, false, w.popErr
+	}
+	if len(w.queuedMessages) == 0 {
+		return agent.QueuedMessage{}, false, nil
+	}
+	last := len(w.queuedMessages) - 1
+	queued := w.queuedMessages[last]
+	w.queuedMessages = w.queuedMessages[:last]
+	if len(w.queued) > 0 {
+		w.queued = w.queued[:len(w.queued)-1]
+	}
+	return queued, true, nil
 }
 func (w *countingWorkspace) AgentCancel(string) { w.cancelCalls++ }
 
@@ -126,7 +145,7 @@ func (w *countingWorkspace) syncProbes() int {
 func (w *countingWorkspace) resetCounters() {
 	w.readyCalls, w.agentBusyCalls = 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
-	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
+	w.permSetCalls, w.clearQueueCalls, w.popQueueCalls, w.cancelCalls = 0, 0, 0, 0
 	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
 }
 
@@ -184,9 +203,11 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmds(m, c)
 		}
-	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg:
+	case busyStateMsg, promptQueueMsg, queuedMessagePoppedMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
+	case util.InfoMsg:
+		m.status.SetInfoMsg(msg)
 	}
 }
 
@@ -781,4 +802,155 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
+}
+
+func TestPopQueuedMessageKeysRestoreNewestMessage(t *testing.T) {
+	pinTTLs(t)
+
+	for _, tc := range []struct {
+		name string
+		mod  tea.KeyMod
+	}{
+		{name: "shift up", mod: tea.ModShift},
+		{name: "alt up", mod: tea.ModAlt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attachment := message.Attachment{FileName: "notes.txt", MimeType: "text/plain"}
+			ws := &countingWorkspace{
+				ready:  true,
+				queued: []string{"older", "newest"},
+				queuedMessages: []agent.QueuedMessage{
+					{Prompt: "older"},
+					{Prompt: "newest", Attachments: []message.Attachment{attachment}},
+				},
+			}
+			m := newBusyUI(ws)
+			warmCaches(m, true)
+			m.promptQueue = 2
+			m.promptQueueItems = []string{"older", "newest"}
+
+			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tc.mod})
+			require.Zero(t, ws.popQueueCalls, "pop must run asynchronously")
+			runCmds(m, cmd)
+
+			require.Equal(t, 1, ws.popQueueCalls)
+			require.Equal(t, "newest", m.textarea.Value())
+			require.True(t, m.isAtEditorEnd())
+			require.Equal(t, []message.Attachment{attachment}, m.attachments.List())
+			require.Equal(t, -1, m.promptHistory.index)
+			require.Equal(t, "newest", m.promptHistory.draft)
+			require.Equal(t, []string{"older"}, m.promptQueueItems)
+			require.Equal(t, 1, m.promptQueue)
+			require.Equal(t, []string{"older"}, ws.queued)
+		})
+	}
+}
+
+func TestPopQueuedMessageRejectsNonEmptyInput(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:          true,
+		queued:         []string{"queued"},
+		queuedMessages: []agent.QueuedMessage{{Prompt: "queued"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.textarea.SetValue("draft")
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	runCmds(m, cmd)
+
+	require.Zero(t, ws.popQueueCalls)
+	require.Equal(t, "draft", m.textarea.Value())
+	require.Equal(t, util.InfoTypeWarn, m.status.msg.Type)
+	require.Equal(t, "Can't pop queued message: input field is not empty.", m.status.msg.Msg)
+}
+
+func TestPopQueuedMessageAppendsAttachmentsAndSynchronizesBangMode(t *testing.T) {
+	pinTTLs(t)
+
+	existing := message.Attachment{FileName: "existing.txt", MimeType: "text/plain"}
+	restored := message.Attachment{FileName: "restored.png", MimeType: "image/png"}
+	ws := &countingWorkspace{
+		ready:          true,
+		queued:         []string{"!echo queued"},
+		queuedMessages: []agent.QueuedMessage{{Prompt: "!echo queued", Attachments: []message.Attachment{restored}}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"!echo queued"}
+	m.attachments.Update(existing)
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModAlt})
+	runCmds(m, cmd)
+
+	require.True(t, m.bangMode)
+	require.Equal(t, "echo queued", m.textarea.Value())
+	require.True(t, m.isAtEditorEnd())
+	require.Equal(t, []message.Attachment{existing, restored}, m.attachments.List())
+}
+
+func TestPopQueuedMessageEmptyQueueIsNoOp(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 0
+	m.promptQueueItems = nil
+	gen := m.promptQueueGen
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.popQueueCalls)
+	require.Empty(t, m.textarea.Value())
+	require.Empty(t, m.attachments.List())
+	require.Equal(t, gen, m.promptQueueGen)
+}
+
+func TestPopQueuedMessageReportsWorkspaceError(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, popErr: errors.New("pop failed")}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModAlt})
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.popQueueCalls)
+	require.Equal(t, util.InfoTypeError, m.status.msg.Type)
+	require.Equal(t, "pop failed", m.status.msg.Msg)
+}
+
+func TestPopQueuedMessageSupersedesInFlightQueueRefresh(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:          true,
+		queued:         []string{"older", "newest"},
+		queuedMessages: []agent.QueuedMessage{{Prompt: "older"}, {Prompt: "newest"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"older", "newest"}
+	m.promptQueueInFlight = true
+	staleGen := m.promptQueueGen
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	runCmds(m, cmd)
+
+	require.Equal(t, []string{"older"}, m.promptQueueItems)
+	require.Greater(t, m.promptQueueGen, staleGen)
+	cmds := m.applyPromptQueue(promptQueueMsg{
+		forSession: "s1",
+		gen:        staleGen,
+		prompts:    []string{"older", "newest"},
+	})
+	require.Equal(t, []string{"older"}, m.promptQueueItems)
+	require.NotEmpty(t, cmds)
 }

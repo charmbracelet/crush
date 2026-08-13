@@ -30,6 +30,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -97,6 +99,14 @@ type promptQueueMsg struct {
 // started a run or was enqueued behind one), so busy and queue state should
 // be re-fetched.
 type agentRunSubmittedMsg struct{}
+
+// queuedMessagePoppedMsg delivers an off-thread queued-message pop result.
+type queuedMessagePoppedMsg struct {
+	forSession string
+	message    agent.QueuedMessage
+	found      bool
+	err        error
+}
 
 // agentModelChangedMsg reports that the coordinator's model was updated
 // (model selection, thinking toggle, reasoning effort), so the memoized
@@ -270,6 +280,59 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 		m.renderPills()
 	}
 	return nil
+}
+
+// popQueuedMessage removes the newest queued message off the Update goroutine.
+func (m *UI) popQueuedMessage() tea.Cmd {
+	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
+		return nil
+	}
+	ws := m.com.Workspace
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		queued, found, err := ws.AgentPopQueuedMessage(sessionID)
+		return queuedMessagePoppedMsg{
+			forSession: sessionID,
+			message:    queued,
+			found:      found,
+			err:        err,
+		}
+	}
+}
+
+// applyQueuedMessagePop restores a popped message and supersedes stale queue
+// reads. It runs on the Update goroutine.
+func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
+	if msg.err != nil {
+		return []tea.Cmd{util.ReportError(msg.err)}
+	}
+	if !msg.found || msg.forSession != m.currentSessionID() {
+		return nil
+	}
+
+	prevHeight := m.textarea.Height()
+	m.textarea.SetValue(msg.message.Prompt)
+	m.syncBangModeFromTextarea()
+	m.textarea.MoveToEnd()
+	m.promptHistory.index = -1
+	m.promptHistory.draft = m.textarea.Value()
+	for _, attachment := range msg.message.Attachments {
+		m.attachments.Update(attachment)
+	}
+
+	m.invalidatePromptQueue()
+	if len(m.promptQueueItems) > 0 {
+		m.promptQueueItems = m.promptQueueItems[:len(m.promptQueueItems)-1]
+	}
+	m.promptQueue = len(m.promptQueueItems)
+	m.promptQueueCheckedAt = time.Now()
+	m.updateLayoutAndSize()
+
+	cmds := []tea.Cmd{m.updateTextareaWithPrevHeight(nil, prevHeight)}
+	if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return cmds
 }
 
 // staleWorkspaceRefreshCmds is the TTL backstop, called at the tail of

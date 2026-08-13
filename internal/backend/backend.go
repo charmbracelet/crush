@@ -72,7 +72,7 @@ var DefaultDetachGrace = 10 * time.Second
 
 // ShutdownFunc is called when the backend needs to trigger a server
 // shutdown (e.g. when the last workspace is removed).
-type ShutdownFunc func()
+type ShutdownFunc func(ctx context.Context)
 
 // Backend provides transport-agnostic business logic for the Crush
 // server. It manages workspaces and delegates to [app.App] services.
@@ -181,11 +181,12 @@ type Workspace struct {
 	resolvedPath string
 
 	// ctx is the workspace-scoped run context. It is derived from
-	// the backend context in CreateWorkspace and lives for the
-	// lifetime of the workspace; cancel tears it down. Agent runs
-	// dispatched on behalf of this workspace are bound to ctx so
-	// their lifetime is owned by the workspace, not by any single
-	// client's HTTP request.
+	// the request context but detached from its cancellation in
+	// CreateWorkspace (WithoutCancel) so it lives for the lifetime
+	// of the workspace; cancel tears it down. Agent runs dispatched
+	// on behalf of this workspace are bound to ctx so their lifetime
+	// is owned by the workspace, not by any single client's HTTP
+	// request.
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -207,18 +208,18 @@ type Workspace struct {
 	// release the workspace's underlying resources. It defaults to the
 	// embedded [app.App.Shutdown]; tests may override it to avoid
 	// driving a full [app.App] through shutdown.
-	shutdownFn func()
+	shutdownFn func(context.Context)
 }
 
 // invokeShutdown calls the workspace shutdown hook if set, falling
 // back to the workspace [Workspace.Shutdown] wrapper when not.
-func (w *Workspace) invokeShutdown() {
+func (w *Workspace) invokeShutdown(ctx context.Context) {
 	if w.shutdownFn != nil {
-		w.shutdownFn()
+		w.shutdownFn(ctx)
 		return
 	}
 	if w.App != nil {
-		w.Shutdown()
+		w.Shutdown(ctx)
 	}
 }
 
@@ -239,7 +240,7 @@ func (w *Workspace) invokeShutdown() {
 // CancelAll is idempotent, so the second call inside app.App.Shutdown
 // is harmless; the important guarantee is that cancel -> CancelAll ->
 // runWG.Wait completes before the embedded cleanup touches the DB.
-func (w *Workspace) Shutdown() {
+func (w *Workspace) Shutdown(ctx context.Context) {
 	w.runMu.Lock()
 	w.closing = true
 	w.runMu.Unlock()
@@ -252,7 +253,7 @@ func (w *Workspace) Shutdown() {
 	}
 	w.runWG.Wait()
 	if w.App != nil {
-		w.App.Shutdown()
+		w.App.Shutdown(ctx)
 	}
 }
 
@@ -342,7 +343,7 @@ func (b *Backend) ListWorkspaces() []proto.Workspace {
 // the resulting workspace registers a creation hold on behalf of that
 // client which is released either by the first SSE attach (which
 // converts it into a stream claim) or by the grace window expiring.
-func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Workspace, error) {
+func (b *Backend) CreateWorkspace(ctx context.Context, args proto.Workspace) (*Workspace, proto.Workspace, error) {
 	if args.Path == "" {
 		return nil, proto.Workspace{}, ErrPathRequired
 	}
@@ -377,7 +378,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 				return nil, proto.Workspace{}, ErrChannelOptInMismatch
 			}
 			logFirstWinsMismatch(ws, args)
-			b.registerClient(ws, clientID)
+			b.registerClient(ctx, ws, clientID)
 			b.mu.Unlock()
 			return ws, workspaceToProto(ws), nil
 		}
@@ -406,12 +407,12 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		b.mu.Unlock()
 		if shutdownNow {
 			slog.Info("No workspaces remain after create settled, shutting down server...")
-			b.shutdownFn()
+			b.shutdownFn(ctx)
 		}
 	}()
 
 	id := uuid.New().String()
-	cfg, err := config.Init(args.Path, args.DataDir, args.Debug)
+	cfg, err := config.Init(ctx, args.Path, args.DataDir, args.Debug)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
@@ -423,7 +424,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	conn, err := db.Connect(b.ctx, cfg.Config().Options.DataDirectory, db.WithDataDirLock(true))
+	conn, err := db.Connect(ctx, cfg.Config().Options.DataDirectory, db.WithDataDirLock(true))
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -440,12 +441,12 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	appWorkspace, err := app.New(b.ctx, conn, cfg, skillsMgr)
+	appWorkspace, err := app.New(context.WithoutCancel(ctx), conn, cfg, skillsMgr)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create app workspace: %w", err)
 	}
 
-	wsCtx, wsCancel := context.WithCancel(b.ctx)
+	wsCtx, wsCancel := context.WithCancel(context.WithoutCancel(ctx))
 	ws := &Workspace{
 		App:          appWorkspace,
 		ID:           id,
@@ -468,7 +469,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// before it released b.mu.)
 	if err := b.admitLocked(clientID); err != nil {
 		b.mu.Unlock()
-		ws.invokeShutdown()
+		ws.invokeShutdown(ctx)
 		return nil, proto.Workspace{}, err
 	}
 	// Re-check the index under the lock: a concurrent caller may have
@@ -480,13 +481,13 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			// is b.mu -> ws.clientsMu.
 			if !stringSlicesEqual(existing.Cfg.Overrides().EnabledChannels, args.Channels) {
 				b.mu.Unlock()
-				ws.invokeShutdown()
+				ws.invokeShutdown(ctx)
 				return nil, proto.Workspace{}, ErrChannelOptInMismatch
 			}
 			logFirstWinsMismatch(existing, args)
-			b.registerClient(existing, clientID)
+			b.registerClient(ctx, existing, clientID)
 			b.mu.Unlock()
-			ws.invokeShutdown()
+			ws.invokeShutdown(ctx)
 			return existing, workspaceToProto(existing), nil
 		}
 		delete(b.pathIndex, key)
@@ -496,7 +497,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// Register the originating client's hold while still holding
 	// b.mu so the workspace is observable with its claim from the
 	// moment it appears in the index.
-	b.registerClient(ws, clientID)
+	b.registerClient(ctx, ws, clientID)
 	b.mu.Unlock()
 
 	if args.Version != "" && args.Version != version.Version {
@@ -603,12 +604,12 @@ func (b *Backend) AttachClient(workspaceID, clientID string) error {
 // re-attach — or, if the grace is disabled or the client already released
 // its claim, is removed, tearing the workspace down once the refcount
 // hits zero.
-func (b *Backend) DetachClient(workspaceID, clientID string) {
+func (b *Backend) DetachClient(ctx context.Context, workspaceID, clientID string) {
 	ws, ok := b.workspaces.Get(workspaceID)
 	if !ok {
 		return
 	}
-	b.detachStream(ws, clientID)
+	b.detachStream(ctx, ws, clientID)
 }
 
 // admitLocked reports whether clientID may still take a claim on this
@@ -634,7 +635,7 @@ func (b *Backend) admitLocked(clientID string) error {
 // Idempotent. Lock order is the canonical b.mu -> ws.clientsMu; teardowns
 // for workspaces the client was last on run after b.mu is released and
 // re-check under both locks.
-func (b *Backend) RetireClient(clientID string) error {
+func (b *Backend) RetireClient(ctx context.Context, clientID string) error {
 	if _, err := validateClientID(clientID); err != nil {
 		return err
 	}
@@ -661,7 +662,7 @@ func (b *Backend) RetireClient(clientID string) error {
 	b.mu.Unlock()
 
 	for _, ws := range orphaned {
-		b.teardown(ws)
+		b.teardown(ctx, ws)
 	}
 	return nil
 }
@@ -669,7 +670,7 @@ func (b *Backend) RetireClient(clientID string) error {
 // releaseHold releases the creation hold for a client, if any. Active
 // stream claims are unaffected. Idempotent: returns nil if the
 // workspace or the client's hold no longer exist.
-func (b *Backend) releaseHold(workspaceID, clientID string) error {
+func (b *Backend) releaseHold(ctx context.Context, workspaceID, clientID string) error {
 	if _, err := validateClientID(clientID); err != nil {
 		return err
 	}
@@ -677,7 +678,7 @@ func (b *Backend) releaseHold(workspaceID, clientID string) error {
 	if !ok {
 		return nil
 	}
-	b.releaseHoldLocked(ws, clientID)
+	b.releaseHoldLocked(ctx, ws, clientID)
 	return nil
 }
 
@@ -690,7 +691,7 @@ func (b *Backend) releaseHold(workspaceID, clientID string) error {
 // back. The re-arm installs a fresh clientState rather than resetting the
 // old timer, so an already-fired timer racing this call fails expireHold's
 // identity check instead of killing the new claim.
-func (b *Backend) registerClient(ws *Workspace, clientID string) {
+func (b *Backend) registerClient(ctx context.Context, ws *Workspace, clientID string) {
 	ws.clientsMu.Lock()
 	defer ws.clientsMu.Unlock()
 	if old, ok := ws.clients[clientID]; ok {
@@ -700,18 +701,23 @@ func (b *Backend) registerClient(ws *Workspace, clientID string) {
 			return
 		}
 		old.holdTimer.Stop()
-		ws.clients[clientID] = b.newHeldClient(ws, clientID, old.currentSessionID, b.createGrace)
+		ws.clients[clientID] = b.newHeldClient(ctx, ws, clientID, old.currentSessionID, b.createGrace)
 		return
 	}
-	ws.clients[clientID] = b.newHeldClient(ws, clientID, "", b.createGrace)
+	ws.clients[clientID] = b.newHeldClient(ctx, ws, clientID, "", b.createGrace)
 }
 
 // newHeldClient builds a clientState whose claim is held only by a timer
 // that releases it after grace. Callers must hold ws.clientsMu.
-func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, grace time.Duration) *clientState {
+func (b *Backend) newHeldClient(ctx context.Context, ws *Workspace, clientID, sessionID string, grace time.Duration) *clientState {
 	cs := &clientState{currentSessionID: sessionID}
+	// Detach from the request context: the timer fires asynchronously
+	// long after the request that created it has returned, so the ctx
+	// must not be tied to the request's lifetime. WithoutCancel carries
+	// values forward without the cancellation.
+	detachedCtx := context.WithoutCancel(ctx)
 	cs.holdTimer = time.AfterFunc(grace, func() {
-		b.expireHold(ws, clientID, cs)
+		b.expireHold(detachedCtx, ws, clientID, cs)
 	})
 	return cs
 }
@@ -719,7 +725,7 @@ func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, grace
 // expireHold is the body of the grace timer. It runs in its own
 // goroutine and races against AttachClient/releaseHold; the timer
 // stays valid only while the entry's holdTimer still points at it.
-func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState) {
+func (b *Backend) expireHold(ctx context.Context, ws *Workspace, clientID string, timer *clientState) {
 	ws.clientsMu.Lock()
 	cs, ok := ws.clients[clientID]
 	if !ok || cs != timer || cs.holdTimer == nil || cs.streams > 0 {
@@ -731,11 +737,11 @@ func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState)
 	teardown := len(ws.clients) == 0
 	ws.clientsMu.Unlock()
 	if teardown {
-		b.teardown(ws)
+		b.teardown(ctx, ws)
 	}
 }
 
-func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
+func (b *Backend) releaseHoldLocked(ctx context.Context, ws *Workspace, clientID string) {
 	ws.clientsMu.Lock()
 	cs, ok := ws.clients[clientID]
 	if !ok {
@@ -758,11 +764,11 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 	}
 	ws.clientsMu.Unlock()
 	if teardown {
-		b.teardown(ws)
+		b.teardown(ctx, ws)
 	}
 }
 
-func (b *Backend) detachStream(ws *Workspace, clientID string) {
+func (b *Backend) detachStream(ctx context.Context, ws *Workspace, clientID string) {
 	b.mu.Lock()
 	grace := b.detachGrace
 	b.mu.Unlock()
@@ -784,7 +790,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 			// workspace under a timer long enough for the client's
 			// reconnect to re-attach (AttachClient stops the timer).
 			cs.holdTimer = time.AfterFunc(grace, func() {
-				b.expireHold(ws, clientID, cs)
+				b.expireHold(ctx, ws, clientID, cs)
 			})
 		} else {
 			delete(ws.clients, clientID)
@@ -793,7 +799,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	}
 	ws.clientsMu.Unlock()
 	if teardown {
-		b.teardown(ws)
+		b.teardown(ctx, ws)
 	}
 }
 
@@ -808,7 +814,7 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 // so it is mutually exclusive with this critical section). teardown
 // re-checks under both locks (in the canonical b.mu -> ws.clientsMu
 // order) and aborts if the workspace has been re-claimed.
-func (b *Backend) teardown(ws *Workspace) {
+func (b *Backend) teardown(ctx context.Context, ws *Workspace) {
 	b.mu.Lock()
 	ws.clientsMu.Lock()
 	if len(ws.clients) > 0 {
@@ -832,11 +838,11 @@ func (b *Backend) teardown(ws *Workspace) {
 	shutdownNow := b.scheduleShutdownIfIdleLocked()
 	b.mu.Unlock()
 
-	ws.invokeShutdown()
+	ws.invokeShutdown(ctx)
 
 	if shutdownNow {
 		slog.Info("Last workspace removed, shutting down server...")
-		b.shutdownFn()
+		b.shutdownFn(ctx)
 	}
 }
 
@@ -898,7 +904,7 @@ func (b *Backend) maybeShutdown() {
 	b.mu.Unlock()
 	if idle && fn != nil {
 		slog.Info("Server idle, shutting down...")
-		fn()
+		fn(context.Background())
 	}
 }
 
@@ -906,8 +912,8 @@ func (b *Backend) maybeShutdown() {
 // handler. It releases the named client's creation hold; live streams
 // from the same client remain attached and continue holding the
 // workspace open until their own deferred DetachClient runs.
-func (b *Backend) DeleteWorkspace(id, clientID string) error {
-	return b.releaseHold(id, clientID)
+func (b *Backend) DeleteWorkspace(ctx context.Context, id, clientID string) error {
+	return b.releaseHold(ctx, id, clientID)
 }
 
 // SetCurrentSession records which session the given client is
@@ -999,13 +1005,13 @@ func (b *Backend) Config() *config.ConfigStore {
 }
 
 // Shutdown initiates a graceful server shutdown.
-func (b *Backend) Shutdown() {
+func (b *Backend) Shutdown(ctx context.Context) {
 	b.mu.Lock()
 	b.closing = true
 	fn := b.shutdownFn
 	b.mu.Unlock()
 	if fn != nil {
-		fn()
+		fn(ctx)
 	}
 }
 
@@ -1019,7 +1025,7 @@ func (b *Backend) Shutdown() {
 // under the lock creates and teardowns take, closes that window: the answer
 // is atomic, and granting it latches the decision so creates arriving
 // afterwards are refused.
-func (b *Backend) ShutdownIfIdle() bool {
+func (b *Backend) ShutdownIfIdle(ctx context.Context) bool {
 	b.mu.Lock()
 	live, pending := b.workspaces.Len(), b.pending
 	idle := live == 0 && pending == 0
@@ -1034,7 +1040,7 @@ func (b *Backend) ShutdownIfIdle() bool {
 		return false
 	}
 	if fn != nil {
-		fn()
+		fn(ctx)
 	}
 	return true
 }

@@ -48,12 +48,12 @@ type MCPResourceContents struct {
 
 // SetConfigField sets a key/value pair in the config file for the
 // given scope.
-func (b *Backend) SetConfigField(workspaceID string, scope config.Scope, key string, value any) error {
+func (b *Backend) SetConfigField(ctx context.Context, workspaceID string, scope config.Scope, key string, value any) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
-	if err := ws.Cfg.SetConfigField(scope, key, value); err != nil {
+	if err := ws.Cfg.SetConfigField(ctx, scope, key, value); err != nil {
 		return err
 	}
 	publishConfigChanged(ws)
@@ -62,12 +62,12 @@ func (b *Backend) SetConfigField(workspaceID string, scope config.Scope, key str
 
 // RemoveConfigField removes a key from the config file for the given
 // scope.
-func (b *Backend) RemoveConfigField(workspaceID string, scope config.Scope, key string) error {
+func (b *Backend) RemoveConfigField(ctx context.Context, workspaceID string, scope config.Scope, key string) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
-	if err := ws.Cfg.RemoveConfigField(scope, key); err != nil {
+	if err := ws.Cfg.RemoveConfigField(ctx, scope, key); err != nil {
 		return err
 	}
 	publishConfigChanged(ws)
@@ -76,12 +76,12 @@ func (b *Backend) RemoveConfigField(workspaceID string, scope config.Scope, key 
 
 // UpdatePreferredModel updates the preferred model for the given type
 // and persists it to the config file at the given scope.
-func (b *Backend) UpdatePreferredModel(workspaceID string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
+func (b *Backend) UpdatePreferredModel(ctx context.Context, workspaceID string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
-	if err := ws.Cfg.UpdatePreferredModel(scope, modelType, model); err != nil {
+	if err := ws.Cfg.UpdatePreferredModel(ctx, scope, modelType, model); err != nil {
 		return err
 	}
 	publishConfigChanged(ws)
@@ -89,12 +89,12 @@ func (b *Backend) UpdatePreferredModel(workspaceID string, scope config.Scope, m
 }
 
 // SetCompactMode sets the compact mode setting and persists it.
-func (b *Backend) SetCompactMode(workspaceID string, scope config.Scope, enabled bool) error {
+func (b *Backend) SetCompactMode(ctx context.Context, workspaceID string, scope config.Scope, enabled bool) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
-	if err := ws.Cfg.SetCompactMode(scope, enabled); err != nil {
+	if err := ws.Cfg.SetCompactMode(ctx, scope, enabled); err != nil {
 		return err
 	}
 	publishConfigChanged(ws)
@@ -102,12 +102,12 @@ func (b *Backend) SetCompactMode(workspaceID string, scope config.Scope, enabled
 }
 
 // SetProviderAPIKey sets the API key for a provider and persists it.
-func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, providerID string, apiKey any) error {
+func (b *Backend) SetProviderAPIKey(ctx context.Context, workspaceID string, scope config.Scope, providerID string, apiKey any) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
-	if err := ws.Cfg.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
+	if err := ws.Cfg.SetProviderAPIKey(ctx, scope, providerID, apiKey); err != nil {
 		return err
 	}
 	publishConfigChanged(ws)
@@ -115,12 +115,12 @@ func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, prov
 }
 
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
-func (b *Backend) ImportCopilot(workspaceID string) (*oauth.Token, bool, error) {
+func (b *Backend) ImportCopilot(ctx context.Context, workspaceID string) (*oauth.Token, bool, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, false, err
 	}
-	token, ok := ws.Cfg.ImportCopilot()
+	token, ok := ws.Cfg.ImportCopilot(ctx)
 	if ok {
 		publishConfigChanged(ws)
 	}
@@ -164,12 +164,12 @@ func (b *Backend) MarkProjectInitialized(workspaceID string) error {
 }
 
 // InitializePrompt builds the initialization prompt for the workspace.
-func (b *Backend) InitializePrompt(workspaceID string) (string, error) {
+func (b *Backend) InitializePrompt(ctx context.Context, workspaceID string) (string, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return "", err
 	}
-	return agent.InitializePrompt(ws.Cfg)
+	return agent.InitializePrompt(ctx, ws.Cfg)
 }
 
 // ReadSkill reads a skill's content by ID.
@@ -224,7 +224,7 @@ func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error
 		return err
 	}
 
-	mcpConfig, err := ws.Cfg.PrepareDockerMCPConfig()
+	mcpConfig, err := ws.Cfg.PrepareDockerMCPConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
-	if err := ws.Cfg.PersistDockerMCPConfig(mcpConfig); err != nil {
+	if err := ws.Cfg.PersistDockerMCPConfig(ctx, mcpConfig); err != nil {
 		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
 		ws.Cfg.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
@@ -247,7 +247,7 @@ func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error
 
 // DisableDockerMCP closes the Docker MCP client, removes the
 // configuration, and persists the change.
-func (b *Backend) DisableDockerMCP(workspaceID string) error {
+func (b *Backend) DisableDockerMCP(ctx context.Context, workspaceID string) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
@@ -257,7 +257,7 @@ func (b *Backend) DisableDockerMCP(workspaceID string) error {
 		return fmt.Errorf("failed to disable docker MCP: %w", err)
 	}
 
-	if err := ws.Cfg.DisableDockerMCP(); err != nil {
+	if err := ws.Cfg.DisableDockerMCP(ctx); err != nil {
 		return err
 	}
 
@@ -298,12 +298,12 @@ func (b *Backend) ReadMCPResource(ctx context.Context, workspaceID, name, uri st
 }
 
 // GetMCPPrompt retrieves a prompt from a named MCP server.
-func (b *Backend) GetMCPPrompt(workspaceID, clientID, promptID string, args map[string]string) (string, error) {
+func (b *Backend) GetMCPPrompt(ctx context.Context, workspaceID, clientID, promptID string, args map[string]string) (string, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return "", err
 	}
-	return commands.GetMCPPrompt(ws.Cfg, clientID, promptID, args)
+	return commands.GetMCPPrompt(ctx, ws.Cfg, clientID, promptID, args)
 }
 
 func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) {

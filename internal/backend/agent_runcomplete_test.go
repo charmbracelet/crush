@@ -62,7 +62,7 @@ func insertRunCompleteWorkspace(t *testing.T, b *Backend, base context.Context, 
 		Path:         t.TempDir(),
 		resolvedPath: t.TempDir(),
 		clients:      make(map[string]*clientState),
-		shutdownFn:   func() {},
+		shutdownFn:   func(context.Context) {},
 	}
 	ws.App = a
 	ws.ctx, ws.cancel = context.WithCancel(base)
@@ -90,7 +90,7 @@ func TestRunAgent_PreRunErrorPublishesTerminalRunComplete(t *testing.T) {
 	defer cancel()
 	ch := ws.RunCompletions().Subscribe(subCtx)
 
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
+	err := b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
 	require.NoError(t, err)
 
 	select {
@@ -121,7 +121,7 @@ func TestRunAgent_NoFallbackWhenCoordinatorPublished(t *testing.T) {
 	defer cancel()
 	ch := ws.RunCompletions().Subscribe(subCtx)
 
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
+	err := b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
 	require.NoError(t, err)
 
 	// Wait for the dispatched run goroutine to return so any publish
@@ -150,7 +150,7 @@ func TestRunAgent_CancellationPublishesNoErrorTerminal(t *testing.T) {
 	defer cancel()
 	ch := ws.RunCompletions().Subscribe(subCtx)
 
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
+	err := b.SendMessage(context.Background(), ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
 	require.NoError(t, err)
 
 	ws.runWG.Wait()

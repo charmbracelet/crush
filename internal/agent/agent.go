@@ -429,10 +429,11 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 // cleared by Cancel/ClearQueue — would otherwise leave a caller blocked on
 // that RunID: `crush run` ignores live message events and exits only on a
 // RunComplete whose RunID matches. Calls without a RunID had no such waiter
-// and are dropped silently as before. A detached, bounded context keeps the
-// must-deliver publish alive even when the run context that triggered the
-// drop is already canceled.
-func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
+// and are dropped silently as before. The publish runs on a detached,
+// bounded context derived from ctx (WithoutCancel plus a 5s timeout, the
+// same idiom as the cleanup path) so it stays alive even when the run
+// context that triggered the drop is already canceled.
+func (a *sessionAgent) publishCanceledQueueDrops(ctx context.Context, drops []SessionAgentCall) {
 	var hasRunID bool
 	for _, d := range drops {
 		if d.RunID != "" {
@@ -443,7 +444,7 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 	if !hasRunID {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	for _, d := range drops {
 		if d.RunID == "" {
@@ -467,7 +468,7 @@ func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
 	if !ok {
 		return
 	}
-	a.publishCanceledQueueDrops(queued)
+	a.publishCanceledQueueDrops(context.Background(), queued)
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
@@ -826,7 +827,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// queued so each runs as its own turn (with its own
 			// RunComplete) via the recursive run path below.
 			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
-			a.publishCanceledQueueDrops(canceledRunIDs)
+			a.publishCanceledQueueDrops(callContext, canceledRunIDs)
 			for _, queued := range fold {
 				userMessage, createErr := a.createUserMessage(callContext, queued)
 				if createErr != nil {
@@ -1267,7 +1268,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// A dropped prompt carrying a RunID must still publish its
 		// terminal cancelled RunComplete so a caller waiting on that
 		// RunID does not hang.
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
+		a.publishCanceledQueueDrops(ctx, canceledRunIDDrops)
 	}
 	if len(queuedMessages) == 0 {
 		// No queued work. Clear the cancel mark only when no accepted

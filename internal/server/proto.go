@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ func (c *controllerV1) handlePostControl(w http.ResponseWriter, r *http.Request)
 		// client's own check and its request, and guarding the plain
 		// command too means clients predating the check cannot take live
 		// sessions down either.
-		if !c.backend.ShutdownIfIdle() {
+		if !c.backend.ShutdownIfIdle(r.Context()) {
 			c.handleError(w, r, backend.ErrServerNotIdle)
 			return
 		}
@@ -84,7 +85,7 @@ func (c *controllerV1) handlePostWorkspaces(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	_, result, err := c.backend.CreateWorkspace(args)
+	_, result, err := c.backend.CreateWorkspace(r.Context(), args)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -132,7 +133,7 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 
 // handleDeleteClient retires a client, releasing every claim it holds.
 func (c *controllerV1) handleDeleteClient(w http.ResponseWriter, r *http.Request) {
-	if err := c.backend.RetireClient(r.PathValue("client_id")); err != nil {
+	if err := c.backend.RetireClient(r.Context(), r.PathValue("client_id")); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -145,7 +146,7 @@ func (c *controllerV1) handleDeleteWorkspaces(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	if err := c.backend.DeleteWorkspace(id, clientID); err != nil {
+	if err := c.backend.DeleteWorkspace(r.Context(), id, clientID); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -165,7 +166,7 @@ func (c *controllerV1) handleGetWorkspaceConfig(w http.ResponseWriter, r *http.R
 // handleGetWorkspaceProviders lists available providers for a workspace.
 func (c *controllerV1) handleGetWorkspaceProviders(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	providers, err := c.backend.GetWorkspaceProviders(id)
+	providers, err := c.backend.GetWorkspaceProviders(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -195,7 +196,11 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		c.handleError(w, r, err)
 		return
 	}
-	defer c.backend.DetachClient(id, clientID)
+	// DetachClient runs when the SSE stream ends — by then r.Context()
+	// is already cancelled. Detach so the teardown/server-shutdown chain
+	// gets a usable context that carries request values without the
+	// cancellation.
+	defer c.backend.DetachClient(context.WithoutCancel(r.Context()), id, clientID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -505,7 +510,7 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 	// endpoint can no longer tear down a turn that other subscribed
 	// clients are still watching. Only the explicit cancel endpoint
 	// should be able to end a run.
-	if err := c.backend.SendMessage(id, msg); err != nil {
+	if err := c.backend.SendMessage(r.Context(), id, msg); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -636,7 +641,7 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseW
 func (c *controllerV1) handleGetWorkspaceAgentDefaultSmallModel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	providerID := r.URL.Query().Get("provider_id")
-	model, err := c.backend.GetDefaultSmallModel(id, providerID)
+	model, err := c.backend.GetDefaultSmallModel(r.Context(), id, providerID)
 	if err != nil {
 		c.handleError(w, r, err)
 		return

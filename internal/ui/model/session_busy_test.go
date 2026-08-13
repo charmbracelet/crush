@@ -924,6 +924,59 @@ func TestPopQueuedMessageRejectsNonEmptyInput(t *testing.T) {
 	require.Equal(t, "Can't pop queued message: input field is not empty.", m.status.msg.Msg)
 }
 
+// TestPopQueuedMessageKeepsTextTypedWhileInFlight pins the non-destructive
+// apply path. The "input field is not empty" guard runs at key-press time,
+// but the pop is an HTTP round-trip in client/server mode and the message is
+// already gone from the agent queue by the time the result lands — so
+// neither the draft nor the popped prompt may be dropped.
+func TestPopQueuedMessageKeepsTextTypedWhileInFlight(t *testing.T) {
+	pinTTLs(t)
+
+	for _, tc := range []struct {
+		name     string
+		bangMode bool
+		draft    string
+		want     string
+	}{
+		{name: "plain draft", draft: "typed while waiting", want: "typed while waiting\nqueued prompt"},
+		// In bang mode the leading "!" is stripped from the value, so
+		// re-syncing bang mode from the merged text would silently turn a
+		// shell command back into a prompt.
+		{name: "bang draft", bangMode: true, draft: "ls -la", want: "ls -la\nqueued prompt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := &countingWorkspace{
+				ready:          true,
+				queued:         []string{"queued prompt"},
+				queuedMessages: []agent.QueuedMessage{{Prompt: "queued prompt"}},
+			}
+			m := newBusyUI(ws)
+			warmCaches(m, true)
+			m.promptQueue = 1
+			m.promptQueueItems = []string{"queued prompt"}
+			m.bangMode = tc.bangMode
+
+			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+			// The user starts typing before the pop result arrives.
+			m.textarea.SetValue(tc.draft)
+			runCmds(m, cmd)
+
+			require.Equal(t, 1, ws.popQueueCalls)
+			require.Equal(t, tc.want, m.textarea.Value())
+			require.True(t, m.isAtEditorEnd())
+			require.Equal(t, tc.bangMode, m.bangMode)
+			require.Equal(t, -1, m.promptHistory.index)
+			require.Equal(t, tc.want, m.promptHistory.draft)
+			require.Equal(t, util.InfoTypeWarn, m.status.msg.Type)
+			require.Equal(t,
+				"Input field was not empty: appended the popped queued message below your text.",
+				m.status.msg.Msg)
+			require.Empty(t, m.promptQueueItems)
+			require.Empty(t, ws.queued)
+		})
+	}
+}
+
 func TestPopQueuedMessageAppendsAttachmentsAndSynchronizesBangMode(t *testing.T) {
 	pinTTLs(t)
 

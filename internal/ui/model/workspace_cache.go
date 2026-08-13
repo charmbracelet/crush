@@ -26,6 +26,7 @@ package model
 
 import (
 	"slices"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -316,9 +317,28 @@ func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 	}
 
 	prevHeight := m.textarea.Height()
-	m.textarea.SetValue(msg.message.Prompt)
-	m.syncBangModeFromTextarea()
-	m.textarea.MoveToEnd()
+	var cmds []tea.Cmd
+	// The key handler refuses to pop while the editor holds text, but that
+	// check ran before the round-trip (an HTTP POST in client/server mode).
+	// Anything typed since then must survive: the pop already removed the
+	// message at the agent layer, so it can neither be refused nor put back
+	// here. Append below the draft instead of overwriting it, and say so.
+	if draft := m.textarea.Value(); draft != "" {
+		m.textarea.MoveToEnd()
+		if !strings.HasSuffix(draft, "\n") {
+			m.textarea.InsertRune('\n')
+		}
+		m.textarea.InsertString(msg.message.Prompt)
+		m.textarea.MoveToEnd()
+		// Bang mode is not re-synced: the "!" prefix that drives it belongs
+		// to the draft, which is unchanged, and the restored prompt is no
+		// longer at the start of the value.
+		cmds = append(cmds, util.ReportWarn("Input field was not empty: appended the popped queued message below your text."))
+	} else {
+		m.textarea.SetValue(msg.message.Prompt)
+		m.syncBangModeFromTextarea()
+		m.textarea.MoveToEnd()
+	}
 	m.promptHistory.index = -1
 	m.promptHistory.draft = m.textarea.Value()
 	for _, attachment := range msg.message.Attachments {
@@ -333,7 +353,7 @@ func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 	m.promptQueueCheckedAt = time.Now()
 	m.updateLayoutAndSize()
 
-	cmds := []tea.Cmd{m.updateTextareaWithPrevHeight(nil, prevHeight)}
+	cmds = append(cmds, m.updateTextareaWithPrevHeight(nil, prevHeight))
 	if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}

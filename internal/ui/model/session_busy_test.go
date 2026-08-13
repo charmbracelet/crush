@@ -1024,6 +1024,62 @@ func TestPopQueuedMessageEmptyQueueIsNoOp(t *testing.T) {
 	require.False(t, m.queuedPopInFlight, "an empty-queue result must clear the in-flight mark")
 }
 
+// helpDesc returns the description the help panes show for the binding
+// rendered under helpKey, or "" when no such binding is offered.
+func helpDesc(groups [][]key.Binding, helpKey string) string {
+	for _, group := range groups {
+		for _, b := range group {
+			if b.Help().Key == helpKey {
+				return b.Help().Desc
+			}
+		}
+	}
+	return ""
+}
+
+// TestPopQueuedMessageHelpListsBindingWhenQueued pins the discoverability of
+// the pop binding: an unlisted chord is the feature's only entry point, so
+// the full help pane must name it whenever prompts are queued in editor
+// focus — including while a draft is in the editor, which is exactly when a
+// user wonders how to get back to a queued prompt. It must stay out of chat
+// focus, where the same chord scrolls the conversation, and out of the
+// status line, which is already 113 columns wide: another entry there would
+// push "ctrl+g more" (the way to reach the full pane) off a 120- or
+// 140-column terminal.
+func TestPopQueuedMessageHelpListsBindingWhenQueued(t *testing.T) {
+	pinTTLs(t)
+
+	const desc = "edit last queued message"
+
+	ws := &countingWorkspace{ready: true, queued: []string{"older", "newest"}}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"older", "newest"}
+
+	require.Equal(t, desc, helpDesc(m.FullHelp(), "shift+↑"),
+		"full help must list the pop binding while prompts are queued")
+	require.Empty(t, helpDesc([][]key.Binding{m.ShortHelp()}, "shift+↑"),
+		"the status line must stay short enough to keep its own tail")
+
+	m.textarea.SetValue("draft")
+	require.Equal(t, desc, helpDesc(m.FullHelp(), "shift+↑"),
+		"a draft must not hide the binding: it is how the user recovers one")
+	m.textarea.SetValue("")
+
+	// Chat focus: the editor never sees the key press there.
+	m.focus = uiFocusMain
+	require.NotEqual(t, desc, helpDesc(m.FullHelp(), "shift+↑"),
+		"full help must not list the editor pop in chat focus")
+	m.focus = uiFocusEditor
+
+	// Nothing queued: nothing to pop.
+	m.promptQueue = 0
+	m.promptQueueItems = nil
+	require.Empty(t, helpDesc(m.FullHelp(), "shift+↑"),
+		"full help must not list the pop with an empty queue")
+}
+
 // TestPopQueuedMessageIsSingleFlight pins the guard against key autorepeat:
 // the pop is destructive at the agent layer and nothing in the model changes
 // until its result lands, so a second dispatch would remove a second message

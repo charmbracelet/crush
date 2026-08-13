@@ -141,6 +141,7 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.PopQueuedMessage = key.NewBinding(
 		key.WithKeys("shift+up", "alt+up"),
+		key.WithHelp("shift+↑", "edit last queued message"),
 	)
 	km.Editor.AttachmentDeleteMode = key.NewBinding(
 		key.WithKeys("ctrl+r"),

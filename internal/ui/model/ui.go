@@ -3291,6 +3291,17 @@ func (m *UI) FullHelp() [][]key.Binding {
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
 			}
+			// Shift+Up/Alt+Up pops the newest queued prompt back into
+			// the editor. It is only handled in editor focus (in chat
+			// focus the same chord is Chat.UpOneItem) and only does
+			// something when prompts are queued, so it is listed here
+			// exactly then. It is deliberately kept out of ShortHelp:
+			// that line is already 113 columns wide, and another entry
+			// would push "ctrl+g more" — the way to reach this pane —
+			// off the end of a 120- or 140-column terminal.
+			if m.promptQueue > 0 {
+				editorBinds = append(editorBinds, k.Editor.PopQueuedMessage)
+			}
 			binds = append(binds, editorBinds)
 			if hasAttachments {
 				binds = append(

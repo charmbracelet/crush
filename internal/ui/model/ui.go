@@ -349,6 +349,14 @@ type UI struct {
 	// (or impatience over an HTTP round-trip) would pop several messages
 	// and only the last result would survive in the editor.
 	queuedPopInFlight bool
+	// queueClearInFlight is the same guard for the queue drain, which has
+	// the same shape: it empties the agent queue while the memoized count
+	// deliberately stays put until the result lands, and both Escape paths
+	// gate on that count. Without it an "esc esc esc" mash — or a busy
+	// double-press whose busy->idle edge arrives before the round-trip
+	// returns — fires a second drain whose empty result reports "No queued
+	// messages." over the restore banner the first one just published.
+	queueClearInFlight bool
 	// queuedRestoreOrphans holds queued messages a pop or an Escape drain
 	// removed, whose result landed after the user had switched away from
 	// the session they came from, keyed by that session. They are already

@@ -1775,3 +1775,103 @@ func TestIdleEscapeDuringAttachmentDeleteModeKeepsQueue(t *testing.T) {
 	require.Empty(t, m.promptQueueItems)
 	require.Equal(t, "a\n\ndraft", m.textarea.Value())
 }
+
+// TestIdleEscapeDrainIsSingleFlight pins the guard against a repeated press:
+// the drain empties the agent queue while the memoized count deliberately
+// stays put until the result lands, and the idle branch gates on nothing
+// else, so a second press would dispatch a second drain. That drain finds
+// the queue already empty and its apply path reports "No queued messages."
+// over the restore banner the first drain just published — telling the user
+// nothing was restored right after restoring it.
+func TestIdleEscapeDrainIsSingleFlight(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:          true,
+		queued:         []string{"a", "b"},
+		queuedMessages: []agent.QueuedMessage{{Prompt: "a"}, {Prompt: "b"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"a", "b"}
+	m.textarea.SetValue("draft")
+	ws.resetCounters()
+
+	_, first := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.True(t, m.queueClearInFlight, "the dispatched drain must be marked in flight")
+	_, second := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Nil(t, second, "a press during the round-trip must dispatch nothing")
+
+	runCmds(m, first)
+	runCmds(m, second)
+
+	require.Equal(t, 1, ws.clearQueueCalls, "an esc mash must not drain twice")
+	require.False(t, m.queueClearInFlight, "the result must clear the in-flight mark")
+	require.Equal(t, "a\n\nb\n\ndraft", m.textarea.Value())
+	require.Equal(t, util.InfoTypeInfo, m.status.msg.Type)
+	require.Equal(t, "Queued messages moved to the input field.", m.status.msg.Msg,
+		"the restore banner must survive the suppressed press")
+
+	// The mark is released, not latched: a later press with something queued
+	// again drains as usual.
+	ws.queued = []string{"c"}
+	ws.queuedMessages = []agent.QueuedMessage{{Prompt: "c"}}
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"c"}
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.Equal(t, 2, ws.clearQueueCalls)
+	require.Equal(t, "c\n\na\n\nb\n\ndraft", m.textarea.Value())
+}
+
+// TestBusyEscapeDrainIsSingleFlightAcrossTheBusyEdge covers the other way
+// the same drain re-fires: the busy double-press drains on its confirming
+// press, the cancel makes the session read idle before the round-trip
+// returns, and the next press of the "esc esc esc" mash the double-press
+// machine trains takes the *idle* branch on the still-non-zero memoized
+// count.
+func TestBusyEscapeDrainIsSingleFlightAcrossTheBusyEdge(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:          true,
+		agentBusy:      true,
+		queued:         []string{"a"},
+		queuedMessages: []agent.QueuedMessage{{Prompt: "a"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"a"}
+	m.textarea.SetValue("draft")
+	ws.resetCounters()
+
+	// Arming press: its command is the double-press timer, deliberately not
+	// run here (it blocks for the whole window before emitting its expiry).
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.True(t, m.isCanceling)
+
+	// Confirming press: cancels and dispatches the drain.
+	_, confirm := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, 1, ws.cancelCalls)
+	require.True(t, m.queueClearInFlight)
+
+	// The cancel lands: the session now reads idle while the drain is still
+	// out, which is what routes the next press to the idle branch.
+	ws.agentBusy = false
+	m.agentBusyCache.set(false)
+
+	_, third := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Nil(t, third, "the idle branch must not re-fire the in-flight drain")
+
+	runCmds(m, confirm)
+	runCmds(m, third)
+
+	require.Equal(t, 1, ws.clearQueueCalls, "the gesture must drain exactly once")
+	require.False(t, m.queueClearInFlight)
+	require.Equal(t, "a\n\ndraft", m.textarea.Value())
+	require.Equal(t, "Queued messages moved to the input field.", m.status.msg.Msg)
+}

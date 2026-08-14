@@ -414,10 +414,21 @@ func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 // here: no caller needs an optimistic value, and emptying the cache before
 // the drain lands would let a queue fetch dispatched during the round-trip
 // repopulate the pill.
+//
+// It is single-flight for the same reason the pop is: because the memoized
+// count stays non-zero for the whole round-trip, and both Escape paths gate
+// on nothing else, a further press would dispatch a second drain that finds
+// the queue already empty and reports noQueuedMessages over the first
+// drain's restore banner. The in-flight drain's own result is the feedback
+// for the suppressed press, so there is nothing to report here.
 func (m *UI) clearQueuedMessages(restore bool) tea.Cmd {
+	if m.queueClearInFlight {
+		return nil
+	}
 	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
+	m.queueClearInFlight = true
 	ws := m.com.Workspace
 	sessionID := m.session.ID
 	return func() tea.Msg {
@@ -433,9 +444,12 @@ func (m *UI) clearQueuedMessages(restore bool) tea.Cmd {
 
 // applyPromptQueueCleared empties the memoized queue once a drain has
 // landed, hands the drained prompts to the editor when the drain was a
-// restore, and supersedes queue reads started before it. Runs on the Update
-// goroutine.
+// restore, and supersedes queue reads started before it. It releases the
+// single-flight mark on every path, including the ones that leave the
+// memoized queue alone, so a failed or session-crossing drain cannot wedge
+// the key. Runs on the Update goroutine.
 func (m *UI) applyPromptQueueCleared(msg promptQueueClearedMsg) []tea.Cmd {
+	m.queueClearInFlight = false
 	if msg.err != nil {
 		// The failure may have been raised after the agent already removed
 		// the messages (response read/decode failure, dropped connection),

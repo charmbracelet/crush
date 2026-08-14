@@ -123,6 +123,20 @@ type MCPNameRequest struct {
 	Name string `json:"name"`
 }
 
+// MCPPendingAuthServer describes an MCP server awaiting OAuth
+// authentication, returned to clients so they can prompt the user.
+type MCPPendingAuthServer struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// MCPAuthResponse describes the result of an MCP authentication request.
+type MCPAuthResponse struct {
+	// AuthURL is the OAuth authorization URL the user must visit, when
+	// the flow is still in progress.
+	AuthURL string `json:"auth_url,omitempty"`
+}
+
 // MCPReadResourceRequest represents a request to read an MCP resource.
 type MCPReadResourceRequest struct {
 	Name string `json:"name"`

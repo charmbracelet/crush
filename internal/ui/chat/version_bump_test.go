@@ -132,7 +132,7 @@ func TestBaseToolMessageItem_MutatorsBumpVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	tc := message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: false}
-	item := NewToolMessageItem(&sty, "msg", tc, nil, false)
+	item := NewToolMessageItem(&sty, "msg", tc, nil, false, "")
 
 	v := item.(versionedItem)
 
@@ -285,7 +285,7 @@ func TestAgentToolMessageItem_NestedToolMutatorsBumpVersion(t *testing.T) {
 
 	mkChild := func(id string) ToolMessageItem {
 		tc := message.ToolCall{ID: id, Name: "bash", Input: `{}`, Finished: false}
-		return NewToolMessageItem(&sty, "msg", tc, nil, false)
+		return NewToolMessageItem(&sty, "msg", tc, nil, false, "")
 	}
 
 	// AddNestedTool always bumps.
@@ -322,7 +322,7 @@ func TestAgenticFetchToolMessageItem_NestedToolMutatorsBumpVersion(t *testing.T)
 
 	mkChild := func(id string) ToolMessageItem {
 		tc := message.ToolCall{ID: id, Name: "fetch", Input: `{}`, Finished: false}
-		return NewToolMessageItem(&sty, "msg", tc, nil, false)
+		return NewToolMessageItem(&sty, "msg", tc, nil, false, "")
 	}
 
 	requireBump(t, "AddNestedTool", item, func() {
@@ -359,7 +359,7 @@ func TestAgentToolMessageItem_NestedChildInPlaceMutationBumpsParent(t *testing.T
 	item := NewAgentToolMessageItem(&sty, parent, nil, false)
 
 	childTC := message.ToolCall{ID: "c1", Name: "bash", Input: `{}`, Finished: false}
-	child := NewToolMessageItem(&sty, "msg", childTC, nil, false)
+	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, "")
 	item.AddNestedTool(child)
 
 	v0 := item.Version()
@@ -388,7 +388,7 @@ func TestAgenticFetchToolMessageItem_NestedChildInPlaceMutationBumpsParent(t *te
 	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
 
 	childTC := message.ToolCall{ID: "c1", Name: "fetch", Input: `{}`, Finished: false}
-	child := NewToolMessageItem(&sty, "msg", childTC, nil, false)
+	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, "")
 	item.AddNestedTool(child)
 
 	v0 := item.Version()
@@ -429,7 +429,7 @@ func TestBaseToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	tc := message.ToolCall{ID: "tc-spin", Name: "bash", Input: "{}", Finished: false}
-	item := NewToolMessageItem(&sty, "msg", tc, nil, false)
+	item := NewToolMessageItem(&sty, "msg", tc, nil, false, "")
 	v := item.(versionedItem)
 	a, ok := item.(Animatable)
 	require.True(t, ok, "base tool message item must implement Animatable")
@@ -477,7 +477,7 @@ func TestAgentToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 	parent := NewAgentToolMessageItem(&sty, parentTC, nil, false)
 
 	childTC := message.ToolCall{ID: "agent-child", Name: "bash", Input: `{}`, Finished: false}
-	child := NewToolMessageItem(&sty, "msg", childTC, nil, false)
+	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, "")
 	parent.AddNestedTool(child)
 
 	// Spinning + parent's own ID → parent bumps.
@@ -522,7 +522,7 @@ func TestAgenticFetchToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 	parent := NewAgenticFetchToolMessageItem(&sty, parentTC, nil, false)
 
 	childTC := message.ToolCall{ID: "fetch-child", Name: "fetch", Input: `{}`, Finished: false}
-	child := NewToolMessageItem(&sty, "msg", childTC, nil, false)
+	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, "")
 	parent.AddNestedTool(child)
 
 	requireBump(t, "Animate[spinning,parent ID]", parent, func() {
@@ -553,7 +553,7 @@ func TestBaseToolMessageItem_FinishedTransition(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	tc := message.ToolCall{ID: "tc-fin", Name: "bash", Input: "{}", Finished: false}
-	item := NewToolMessageItem(&sty, "msg", tc, nil, false)
+	item := NewToolMessageItem(&sty, "msg", tc, nil, false, "")
 	require.False(t, item.Finished(), "running tool must not be Finished()")
 
 	tcFinished := tc
@@ -564,6 +564,6 @@ func TestBaseToolMessageItem_FinishedTransition(t *testing.T) {
 
 	// Canceled tool with no result is also Finished.
 	tcCanceled := message.ToolCall{ID: "tc-cancel", Name: "bash", Input: "{}", Finished: false}
-	canceled := NewToolMessageItem(&sty, "msg", tcCanceled, nil, true)
+	canceled := NewToolMessageItem(&sty, "msg", tcCanceled, nil, true, "")
 	require.True(t, canceled.Finished(), "canceled tool must be Finished()")
 }

@@ -43,9 +43,10 @@ func (c *controllerV1) handleGetVersion(w http.ResponseWriter, _ *http.Request) 
 //	@Summary		Send server control command
 //	@Tags			system
 //	@Accept			json
-//	@Param			request	body	proto.ServerControl	true	"Control command (e.g. shutdown)"
+//	@Param			request	body	proto.ServerControl	true	"Control command (e.g. shutdown, shutdown_if_idle)"
 //	@Success		200
 //	@Failure		400	{object}	proto.Error
+//	@Failure		409	{object}	proto.Error
 //	@Router			/control [post]
 func (c *controllerV1) handlePostControl(w http.ResponseWriter, r *http.Request) {
 	var req proto.ServerControl
@@ -56,8 +57,16 @@ func (c *controllerV1) handlePostControl(w http.ResponseWriter, r *http.Request)
 	}
 
 	switch req.Command {
-	case "shutdown":
-		c.backend.Shutdown()
+	case proto.ServerControlShutdown, proto.ServerControlShutdownIfIdle:
+		// Both spellings are conditional. Only the backend can rule on
+		// idleness without racing a session that arrives between a
+		// client's own check and its request, and guarding the plain
+		// command too means clients predating the check cannot take live
+		// sessions down either.
+		if !c.backend.ShutdownIfIdle() {
+			c.handleError(w, r, backend.ErrServerNotIdle)
+			return
+		}
 	default:
 		c.server.logError(r, "Unknown command", "command", req.Command)
 		jsonError(w, http.StatusBadRequest, "unknown command")
@@ -179,6 +188,21 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 		return
 	}
 	if err := c.backend.SetCurrentSession(id, clientID, req.SessionID); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+}
+
+// handleDeleteClient retires a client, releasing every claim it holds.
+//
+//	@Summary		Retire a client
+//	@Tags			system
+//	@Param			client_id	path	string	true	"Client ID (UUID)"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Router			/clients/{client_id} [delete]
+func (c *controllerV1) handleDeleteClient(w http.ResponseWriter, r *http.Request) {
+	if err := c.backend.RetireClient(r.PathValue("client_id")); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -1161,9 +1185,19 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 	case errors.Is(err, backend.ErrInvalidClientID):
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrClientNotAttached):
-		status = http.StatusNotFound
-	case errors.Is(err, backend.ErrWorkspaceClosing):
+		// 409, not 404: the workspace exists, the caller just has no live
+		// stream yet. A 404 here is indistinguishable from "workspace
+		// gone" and would trip clients that treat 404 as the trigger for
+		// workspace recovery.
 		status = http.StatusConflict
+	case errors.Is(err, backend.ErrWorkspaceClosing),
+		errors.Is(err, backend.ErrServerNotIdle),
+		errors.Is(err, backend.ErrClientRetired):
+		status = http.StatusConflict
+	case errors.Is(err, backend.ErrServerShuttingDown):
+		// 503, not 409: the request is not wrong, this process is just
+		// leaving. Clients retry against its replacement.
+		status = http.StatusServiceUnavailable
 	}
 	c.server.logError(r, err.Error())
 	jsonError(w, status, err.Error())

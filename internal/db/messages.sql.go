@@ -83,6 +83,32 @@ func (q *Queries) DeleteSessionMessages(ctx context.Context, sessionID string) e
 	return err
 }
 
+const getLastAssistantMessageBySession = `-- name: GetLastAssistantMessageBySession :one
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
+FROM messages
+WHERE session_id = ? AND role = 'assistant' AND is_summary_message = 0
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error) {
+	row := q.queryRow(ctx, q.getLastAssistantMessageBySessionStmt, getLastAssistantMessageBySession, sessionID)
+	var i Message
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Role,
+		&i.Parts,
+		&i.Model,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.Provider,
+		&i.IsSummaryMessage,
+	)
+	return i, err
+}
+
 const getMessage = `-- name: GetMessage :one
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
 FROM messages

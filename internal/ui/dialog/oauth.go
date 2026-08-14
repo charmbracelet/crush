@@ -414,29 +414,29 @@ func (m *OAuth) ShortHelp() []key.Binding {
 	}
 }
 
-func (d *OAuth) copyCode() tea.Cmd {
-	if d.State != OAuthStateDisplay {
+func (m *OAuth) copyCode() tea.Cmd {
+	if m.State != OAuthStateDisplay {
 		return nil
 	}
-	return common.CopyToClipboard(d.userCode, "Code copied to clipboard")
+	return common.CopyToClipboard(m.userCode, "Code copied to clipboard")
 }
 
-func (d *OAuth) copyURL() tea.Cmd {
-	if d.State != OAuthStateDisplay {
+func (m *OAuth) copyURL() tea.Cmd {
+	if m.State != OAuthStateDisplay {
 		return nil
 	}
-	return common.CopyToClipboard(d.verificationURL, "URL copied to clipboard")
+	return common.CopyToClipboard(m.verificationURL, "URL copied to clipboard")
 }
 
-func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
-	if d.State != OAuthStateDisplay {
+func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
+	if m.State != OAuthStateDisplay {
 		return nil
 	}
 	return common.CopyToClipboardWithCallback(
-		d.userCode,
+		m.userCode,
 		"Code copied and URL opened",
 		func() tea.Msg {
-			if err := browser.OpenURL(d.verificationURL); err != nil {
+			if err := browser.OpenURL(m.verificationURL); err != nil {
 				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
 			}
 			return nil

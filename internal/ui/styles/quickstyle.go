@@ -48,7 +48,7 @@ type quickStyleOpts struct {
 	error             color.Color
 	warning           color.Color
 	warningSubtle     color.Color
-	denied            color.Color
+	attention         color.Color
 	busy              color.Color
 	info              color.Color
 	infoMoreSubtle    color.Color
@@ -647,7 +647,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ErrorTag = base.Padding(0, 1).Background(o.destructive).Foreground(o.onPrimary)
 	s.Tool.ErrorMessage = base.Foreground(o.fgSubtle)
 
-	s.Tool.WarnTag = base.Padding(0, 1).Background(o.denied).Foreground(o.bgBase).Bold(true)
+	s.Tool.WarnTag = base.Padding(0, 1).Background(o.attention).Foreground(o.bgBase).Bold(true)
 	s.Tool.WarnMessage = base.Foreground(o.fgSubtle)
 
 	// Diff and multi-edit styles
@@ -805,7 +805,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Resource.BusyIcon = s.Resource.OfflineIcon.Foreground(o.busy)
 	s.Resource.ErrorIcon = s.Resource.OfflineIcon.Foreground(o.destructive)
 	s.Resource.OnlineIcon = s.Resource.OfflineIcon.Foreground(o.successMostSubtle)
-	s.Resource.NeedsAuthIcon = s.Resource.OfflineIcon.Foreground(o.info)
+	s.Resource.NeedsAuthIcon = s.Resource.OfflineIcon.Foreground(o.attention)
 	s.Resource.DisabledIcon = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("●")
 	s.Resource.AdditionalText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Resource.CapabilityCount = lipgloss.NewStyle().Foreground(o.fgMostSubtle)

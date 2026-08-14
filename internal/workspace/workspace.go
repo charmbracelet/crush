@@ -36,7 +36,45 @@ var (
 	// to determine the agent's status (server down, or the workspace was
 	// torn down out from under the client).
 	ErrServerUnreachable = errors.New("lost connection to the crush server")
+	// ErrWorkspaceGone means the server is reachable but no longer knows
+	// this client's workspace: it was torn down, or the server was
+	// replaced underneath the client. The subscription loop re-registers
+	// the workspace in the background when it sees this.
+	ErrWorkspaceGone = errors.New("the server reset this workspace; reconnecting")
+	// ErrStreamClosed means an established event stream ended.
+	// Resubscribing usually succeeds immediately, but events published in
+	// the meantime are lost for good, so the client treats it as a
+	// degraded link that requires a resync.
+	ErrStreamClosed = errors.New("the event stream closed; reconnecting")
 )
+
+// ConnectionState describes the health of the client-server link as
+// reported by the [ClientWorkspace] subscription loop.
+type ConnectionState int
+
+const (
+	// ConnectionDegraded means the event stream is down (or the workspace
+	// was lost server-side) and the client is retrying or re-registering
+	// in the background.
+	ConnectionDegraded ConnectionState = iota
+	// ConnectionRecovered means the event stream was re-established,
+	// possibly against a re-created workspace.
+	ConnectionRecovered
+)
+
+// ConnectionEvent is delivered to the TUI as a tea.Msg on degraded and
+// recovered transitions of the client-server link. Local (in-process)
+// workspaces never emit it.
+type ConnectionEvent struct {
+	State ConnectionState
+	// Err is the most recent failure, set when State is
+	// ConnectionDegraded.
+	Err error
+	// Stuck marks a degraded connection that has resisted repeated
+	// recovery attempts. The loop keeps retrying regardless; the UI
+	// should escalate from a transient notice to a persistent error.
+	Stuck bool
+}
 
 // LSPClientInfo holds information about an LSP client's state. This is
 // the frontend-facing type; implementations translate from the

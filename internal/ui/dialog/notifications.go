@@ -236,8 +236,8 @@ func (n *Notifications) FullHelp() [][]key.Binding {
 func (n *Notifications) setItems() {
 	cfg := n.com.Config()
 	currentStyle := "auto"
-	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
-		currentStyle = cfg.Options.NotificationStyle
+	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
+		currentStyle = cfg.Options.Notifications
 	}
 
 	items := make([]list.FilterableItem, 0, len(AllNotificationStyles))

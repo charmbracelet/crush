@@ -9,11 +9,14 @@ import (
 	"github.com/charmbracelet/ultraviolet/layout"
 )
 
-// selectedLargeModel returns the currently selected large language model from
-// the agent coordinator, if one exists.
+// selectedLargeModel returns the currently selected large language model as
+// memoized by the off-thread busy/agent probe (see workspace_cache.go), or
+// nil when the agent isn't ready. It must never probe the workspace: it is
+// called on every frame and AgentIsReady/AgentModel are synchronous HTTP
+// round-trips in client/server mode.
 func (m *UI) selectedLargeModel() *workspace.AgentModel {
-	if m.com.Workspace.AgentIsReady() {
-		model := m.com.Workspace.AgentModel()
+	if m.agentReady {
+		model := m.agentModel
 		return &model
 	}
 	return nil

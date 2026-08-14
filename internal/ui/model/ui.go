@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -170,9 +171,10 @@ type (
 		sessionFiles []SessionFile
 	}
 	// creditsUpdatedMsg is sent when the remaining Hyper credits have been
-	// fetched from the API.
+	// fetched from the API. credits is nil when the team has hypercredit
+	// display disabled.
 	creditsUpdatedMsg struct {
-		credits int
+		credits *int
 	}
 )
 
@@ -272,8 +274,19 @@ type UI struct {
 		yesInitializeSelected bool
 	}
 
-	// lsp
-	lspStates map[string]workspace.LSPClientInfo
+	// lspStates / lspDiagnostics memoize the workspace LSP state and
+	// per-server severity counts (each probe behind them is a synchronous
+	// HTTP round-trip in client/server mode, and the sidebar, landing view,
+	// and compact header render them every frame). LSP events refresh them
+	// off-thread with a TTL backstop; see lsp.go.
+	lspStates        map[string]workspace.LSPClientInfo
+	lspDiagnostics   map[string]lsp.DiagnosticCounts
+	lspFetchInFlight bool
+	// lspRefreshQueued records that an LSP event arrived while a fetch was
+	// already in flight; applyLSPStates re-dispatches so the freshest state
+	// still lands.
+	lspRefreshQueued bool
+	lspCheckedAt     time.Time
 
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
@@ -335,6 +348,13 @@ type UI struct {
 	agentBusyCache    ttlCache
 	yoloCache         ttlCache
 	busyFetchInFlight bool
+	// agentReady / agentModel memoize the coordinator readiness and
+	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
+	// client/server mode, and modelInfo renders them every frame). Seeded
+	// once at construction and refreshed by the same off-thread probe as
+	// agentBusyCache.
+	agentReady bool
+	agentModel workspace.AgentModel
 	// busyFetchGen is bumped by every busy/permission state transition;
 	// like promptQueueGen it lets a stale in-flight probe result be
 	// discarded and re-fetched instead of clobbering newer state.
@@ -351,6 +371,8 @@ type UI struct {
 	hoverY        int
 
 	// hyperCredits is the remaining Hyper credits, updated after each prompt.
+	// It is nil when unknown, or when the team has hypercredit display
+	// disabled, and no balance is rendered in either case.
 	hyperCredits *int
 
 	// Prompt history for up/down navigation through previous messages.
@@ -445,6 +467,14 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// and View never probe the workspace synchronously.
 	yolo := com.Workspace.PermissionSkipRequests()
 	ui.yoloCache.set(yolo)
+
+	// Seed the memoized agent ready/model state the same way so the first
+	// frame renders the model info; the busy probe keeps it fresh
+	// afterwards.
+	if com.Workspace.AgentIsReady() {
+		ui.agentReady = true
+		ui.agentModel = com.Workspace.AgentModel()
+	}
 	ui.setEditorPrompt(yolo)
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
@@ -489,8 +519,10 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
-	// load initial LSP state
-	m.lspStates = m.com.Workspace.LSPGetStates()
+	// Prime the memoized LSP state off-thread.
+	if cmd := m.requestLSPRefresh(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	// load initial session if specified
 	if cmd := m.loadInitialSession(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -542,8 +574,8 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 // change.
 func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
 	// Check for explicit user preference first.
-	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
-		switch cfg.Options.NotificationStyle {
+	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
+		switch cfg.Options.Notifications {
 		case "native":
 			if !notification.NativeSupported {
 				slog.Debug("Native notifications unavailable on this platform; using OSC backend", "osc99_supported", caps.OSC99Notifications)
@@ -563,7 +595,7 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 		case "auto":
 			// Fall through to auto-detection below.
 		default:
-			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.NotificationStyle)
+			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.Notifications)
 		}
 	}
 
@@ -607,7 +639,7 @@ func (m *UI) updateNotificationBackend() {
 // focused, and notifications must not be disabled in config.
 func (m *UI) shouldSendNotification() bool {
 	cfg := m.com.Config()
-	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle == "disabled" {
+	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications == "disabled" {
 		return false
 	}
 	return m.caps.ReportFocusEvents && !m.notifyWindowFocused
@@ -683,6 +715,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.applyBusyState(msg)...)
 	case promptQueueMsg:
 		cmds = append(cmds, m.applyPromptQueue(msg)...)
+	case lspStatesMsg:
+		if cmd := m.applyLSPStates(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case agentModelChangedMsg:
+		// The coordinator model changed (selection, thinking, reasoning):
+		// re-fetch the memoized ready/model state off-thread.
+		m.invalidateBusyCaches()
+		if cmd := m.dispatchBusyRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case agentRunSubmittedMsg:
 		// A prompt was just accepted (run started or enqueued): fetch the
 		// authoritative busy/queue state to confirm the optimistic values
@@ -725,6 +768,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if cmd := m.setSessionMessages(msgs); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if cmd := m.restoreModelFromSession(msgs); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.autoExpandPillsIfReasonable(); cmd != nil {
@@ -883,9 +929,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
-		m.lspStates = m.com.Workspace.LSPGetStates()
+		// Refresh the memoized LSP state off-thread: LSPGetStates is a
+		// synchronous HTTP round-trip in client/server mode and diagnostics
+		// events can arrive per edited file.
+		if cmd := m.requestLSPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case pubsub.Event[workspace.LSPEvent]:
-		m.lspStates = m.com.Workspace.LSPGetStates()
+		if cmd := m.requestLSPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
 	case pubsub.Event[mcp.Event]:
@@ -1269,7 +1322,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case creditsUpdatedMsg:
-		m.hyperCredits = &msg.credits
+		m.hyperCredits = msg.credits
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -1292,6 +1345,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			TTL:  ttl,
 		})
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
+	case workspace.ConnectionEvent:
+		cmds = append(cmds, m.handleConnectionEvent(msg)...)
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
 	case completions.CompletionItemsLoadedMsg:
@@ -1367,27 +1422,34 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		switch msg.Role {
 		case message.User:
 			m.lastUserMessageTime = msg.CreatedAt
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
 		case message.Assistant:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
 		}
 	}
 
 	// Load nested tool calls for agent/agentic_fetch tools.
 	m.loadNestedToolCalls(items)
 
-	// If the user switches between sessions while the agent is working we want
-	// to make sure the animations are shown.
-	for _, item := range items {
-		if animatable, ok := item.(chat.Animatable); ok {
-			if cmd := animatable.StartAnimation(); cmd != nil {
-				cmds = append(cmds, cmd)
+	// If the user switches between sessions while the agent is working we
+	// want to make sure the animations are shown. Gate on the agent actually
+	// being busy: a session that was killed mid-generation can persist an
+	// assistant message with no Finish part, which still reports isSpinning()
+	// even though nothing is running. Starting animations for it here would
+	// leave a ghost "working" spinner (and a second one alongside any tool
+	// spinner) after the session is reloaded.
+	if m.isAgentBusy() {
+		for _, item := range items {
+			if animatable, ok := item.(chat.Animatable); ok {
+				if cmd := animatable.StartAnimation(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	}
@@ -1400,6 +1462,39 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
+}
+
+// handleConnectionEvent reports the health of the client-server link and,
+// once it recovers, reloads the open session. A reload is always needed
+// after a degraded episode: events published while the stream was down are
+// gone, and if the workspace itself was re-created any run died with it.
+func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
+	info := util.InfoMsg{
+		Type: util.InfoTypeWarn,
+		Msg:  "Lost connection to the Crush server — reconnecting…",
+		TTL:  30 * time.Second,
+	}
+	switch msg.State {
+	case workspace.ConnectionDegraded:
+		slog.Warn("Server connection degraded", "error", msg.Err, "stuck", msg.Stuck)
+		if msg.Stuck {
+			info.Type = util.InfoTypeError
+			info.Msg = "Can't restore the connection to the Crush server. Restart Crush to recover."
+			info.TTL = time.Minute
+		}
+	case workspace.ConnectionRecovered:
+		info = util.InfoMsg{
+			Type: util.InfoTypeSuccess,
+			Msg:  "Reconnected to the Crush server.",
+			TTL:  DefaultStatusTTL,
+		}
+	}
+	m.status.SetInfoMsg(info)
+	cmds := []tea.Cmd{clearInfoMsgCmd(info.TTL)}
+	if msg.State == workspace.ConnectionRecovered && m.session != nil {
+		cmds = append(cmds, m.loadSession(m.session.ID))
+	}
+	return cmds
 }
 
 // loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
@@ -1436,7 +1531,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		// Extract nested tool items.
 		var nestedTools []chat.ToolMessageItem
 		for _, nestedMsg := range nestedMsgPtrs {
-			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap)
+			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.com.Workspace.WorkingDir())
 			for _, nestedItem := range nestedItems {
 				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
 					// Mark nested tools as simple (compact) rendering.
@@ -1486,7 +1581,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			return nil
 		}
 		m.lastUserMessageTime = msg.CreatedAt
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1499,7 +1594,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case message.Assistant:
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1623,7 +1718,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if existingToolItem == nil {
-			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false))
+			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false, m.com.Workspace.WorkingDir()))
 		}
 	}
 
@@ -1637,10 +1732,9 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	m.chat.AppendMessages(items...)
 	if m.chat.Follow() {
-		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+		if cmd := m.chat.ScrollToBottomAndSelectLast(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.chat.SelectLast()
 	}
 
 	return tea.Sequence(cmds...)
@@ -1700,7 +1794,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 		}
 		if !found {
 			// Create a new nested tool item.
-			nestedItem := chat.NewToolMessageItem(m.com.Styles, event.Payload.ID, tc, nil, false)
+			nestedItem := chat.NewToolMessageItem(m.com.Styles, event.Payload.ID, tc, nil, false, m.com.Workspace.WorkingDir())
 			if simplifiable, ok := nestedItem.(chat.Compactable); ok {
 				simplifiable.SetCompact(true)
 			}
@@ -1730,10 +1824,9 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	m.chat.UpdateNestedToolIDs(toolCallID)
 
 	if m.chat.Follow() {
-		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+		if cmd := m.chat.ScrollToBottomAndSelectLast(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.chat.SelectLast()
 	}
 
 	return tea.Sequence(cmds...)
@@ -1794,8 +1887,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
-			cfg.Options.NotificationStyle = msg.Style
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notification_style", msg.Style); err != nil {
+			cfg.Options.Notifications = msg.Style
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notifications", msg.Style); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			} else {
 				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
@@ -1849,7 +1942,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		cmds = append(cmds, func() tea.Msg {
+		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			cfg := m.com.Config()
 			if cfg == nil {
 				return util.ReportError(errors.New("configuration not found"))()
@@ -1871,7 +1964,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				status = "enabled"
 			}
 			return util.NewInfoMsg("Thinking mode " + status)
-		})
+		}))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
 		cmds = append(cmds, func() tea.Msg {
@@ -1955,10 +2048,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cmds = append(cmds, func() tea.Msg {
+		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			m.com.Workspace.UpdateAgentModel(context.TODO())
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
-		})
+		}))
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
@@ -2102,6 +2195,69 @@ func (m *UI) fetchHyperCredits() tea.Cmd {
 	}
 }
 
+// restoreModelFromSession checks the last assistant message in the
+// loaded session and, if it used a different provider/model than the
+// current config, restores that model/provider provided it is still
+// available. Returns a tea.Cmd that rebuilds the agent models if a
+// switch was made, or nil if no switch was needed.
+func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
+	var lastAssistant *message.Message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == message.Assistant && !msgs[i].IsSummaryMessage {
+			lastAssistant = &msgs[i]
+			break
+		}
+	}
+	if lastAssistant == nil || lastAssistant.Provider == "" || lastAssistant.Model == "" {
+		return nil
+	}
+
+	cfg := m.com.Config()
+	if cfg == nil {
+		return nil
+	}
+
+	currentLarge := cfg.Models[config.SelectedModelTypeLarge]
+	if currentLarge.Provider == lastAssistant.Provider && currentLarge.Model == lastAssistant.Model {
+		return nil
+	}
+
+	if !cfg.IsModelAvailable(lastAssistant.Provider, lastAssistant.Model) {
+		slog.Debug("Skipping model restoration: provider/model not available",
+			"provider", lastAssistant.Provider,
+			"model", lastAssistant.Model)
+		return nil
+	}
+
+	selectedModel := config.SelectedModel{
+		Provider: lastAssistant.Provider,
+		Model:    lastAssistant.Model,
+	}
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, selectedModel); err != nil {
+		slog.Error("Failed to restore model from session", "error", err)
+		return nil
+	}
+
+	m.applyThemeForProvider(lastAssistant.Provider)
+
+	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+		smallModel := m.com.Workspace.GetDefaultSmallModel(lastAssistant.Provider)
+		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+			slog.Error("Failed to set small model during session restore", "error", err)
+		}
+	}
+
+	return m.updateAgentModelCmd(func() tea.Msg {
+		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+			return util.ReportError(err)
+		}
+		slog.Info("Restored model from session",
+			"provider", lastAssistant.Provider,
+			"model", lastAssistant.Model)
+		return nil
+	})
+}
+
 // handleSelectModel performs the model selection after any provider
 // pre-checks (such as a silent Hyper OAuth refresh) have completed.
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
@@ -2166,7 +2322,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
-	cmds = append(cmds, func() tea.Msg {
+	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
 			return util.ReportError(err)
 		}
@@ -2181,7 +2337,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
 
 		return util.NewInfoMsg(modelMsg)
-	})
+	}))
 
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
 	m.dialog.CloseDialog(dialog.OAuthID)
@@ -2192,6 +2348,13 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		m.com.Config().SetupAgents()
 		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
 			cmds = append(cmds, util.ReportError(err))
+		}
+		// The agent just came up: re-fetch the memoized ready/model state
+		// so the landing view shows the selected model without waiting for
+		// the TTL backstop.
+		m.invalidateBusyCaches()
+		if cmd := m.dispatchBusyRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	} else if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
@@ -2254,6 +2417,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			m.detailsOpen = !m.detailsOpen
 			m.updateLayoutAndSize()
 			return true
+		case key.Matches(msg, m.keyMap.Chat.EndFollow):
+			if m.state == uiChat && m.hasSession() {
+				if cmd := m.chat.ScrollToBottomAndSelectLast(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
 		case key.Matches(msg, m.keyMap.Chat.TogglePills):
 			if m.state == uiChat && m.hasSession() {
 				if cmd := m.togglePillsExpanded(); cmd != nil {
@@ -2671,10 +2841,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				m.chat.SelectFirst()
 			case key.Matches(msg, m.keyMap.Chat.End):
-				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				if cmd := m.chat.ScrollToBottomAndSelectLast(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-				m.chat.SelectLast()
 			default:
 				if ok, cmd := m.chat.HandleKeyMsg(msg); ok {
 					cmds = append(cmds, cmd)
@@ -2733,6 +2902,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.isCompact,
 		m.detailsOpen,
 		area.Dx(),
+		m.lspErrorCount(),
 		m.hyperCredits,
 	)
 }
@@ -3087,7 +3257,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.ToggleYolo,
 		)
 		if hasSession {
-			mainBinds = append(mainBinds, k.Chat.NewSession)
+			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow)
 		}
 
 		binds = append(binds, mainBinds)
@@ -3141,6 +3311,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.HalfPageDown,
 					k.Chat.Home,
 					k.Chat.End,
+					k.Chat.EndFollow,
 					k.Chat.FocusSidebar,
 				},
 				[]key.Binding{
@@ -3805,6 +3976,12 @@ func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
 }
 
+// CurrentSession returns the active session, or nil when there is none.
+// It is safe to call after the TUI has exited.
+func (m *UI) CurrentSession() *session.Session {
+	return m.session
+}
+
 // mimeOf detects the MIME type of the given content.
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
@@ -4093,7 +4270,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		return nil
 	}
 
-	if !m.com.Workspace.AgentIsReady() {
+	// Gate on the memoized ready state: esc is a hot key and AgentIsReady
+	// is a synchronous HTTP round-trip in client/server mode.
+	if !m.agentReady {
 		return nil
 	}
 
@@ -4437,6 +4616,10 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		// busy/queue refresh below.
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
+	case notify.TypeAWSSSOAuth:
+		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
+	case notify.TypeAWSSSOAuthResult:
+		return m.handleAWSSSOAuthResult(n.Message)
 	default:
 		return nil
 	}
@@ -4469,6 +4652,49 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 		return nil
 	}
 	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[agentCfg.Model], agentCfg.Model)
+}
+
+// handleAWSSSOAuth opens the AWS SSO progress dialog (or updates the SSO URL
+// on an already-open one). The refresh command runs in the coordinator; this
+// dialog is a display surface driven by agent notifications.
+func (m *UI) handleAWSSSOAuth(command, url string) tea.Cmd {
+	// Update the URL on an already-open dialog.
+	if existing := m.dialog.Dialog(dialog.AWSSSOID); existing != nil {
+		if awsDlg, ok := existing.(*dialog.AWSSSO); ok && url != "" {
+			awsDlg.SetURL(url)
+		}
+		m.dialog.BringToFront(dialog.AWSSSOID)
+		return nil
+	}
+	if command == "" {
+		return nil
+	}
+	dlg, cmd := dialog.NewAWSSSO(m.com, command)
+	if url != "" {
+		dlg.SetURL(url)
+	}
+	m.dialog.OpenDialogWithGrace(dlg)
+	return cmd
+}
+
+// handleAWSSSOAuthResult finishes the AWS SSO dialog once the refresh command
+// exits: it closes on success or shows the error so the user can dismiss it.
+func (m *UI) handleAWSSSOAuthResult(errMsg string) tea.Cmd {
+	existing := m.dialog.Dialog(dialog.AWSSSOID)
+	if existing == nil {
+		return nil
+	}
+	awsDlg, ok := existing.(*dialog.AWSSSO)
+	if !ok {
+		return nil
+	}
+	if errMsg == "" {
+		// Success: the turn retries transparently, so no need to linger.
+		m.dialog.CloseDialog(dialog.AWSSSOID)
+		return nil
+	}
+	awsDlg.Finish(errMsg)
+	return nil
 }
 
 // newSession clears the current session state and prepares for a new session.
@@ -4817,12 +5043,12 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 }
 
 func (m *UI) handleStateChanged() tea.Cmd {
-	return func() tea.Msg {
+	return m.updateAgentModelCmd(func() tea.Msg {
 		m.com.Workspace.UpdateAgentModel(context.Background())
 		return mcpStateChangedMsg{
 			states: m.com.Workspace.MCPGetStates(),
 		}
-	}
+	})
 }
 
 func handleMCPPromptsEvent(ws workspace.Workspace, name string) tea.Cmd {

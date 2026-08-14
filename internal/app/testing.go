@@ -41,13 +41,13 @@ func NewForTest(ctx context.Context) *App {
 
 	eventsCtx, cancel := context.WithCancel(ctx)
 	app.eventsCtx = eventsCtx
-	setupSubscriber(eventsCtx, app.serviceEventsWG, "permissions",
+	setupSubscriberMustDeliver(eventsCtx, app.serviceEventsWG, "permissions",
 		app.Permissions.Subscribe, app.events)
-	setupSubscriber(eventsCtx, app.serviceEventsWG, "permissions-notifications",
+	setupSubscriberMustDeliver(eventsCtx, app.serviceEventsWG, "permissions-notifications",
 		app.Permissions.SubscribeNotifications, app.events)
-	setupSubscriber(eventsCtx, app.serviceEventsWG, "question-batches",
+	setupSubscriberMustDeliver(eventsCtx, app.serviceEventsWG, "question-batches",
 		app.Questions.Subscribe, app.events)
-	setupSubscriber(eventsCtx, app.serviceEventsWG, "question-notifications",
+	setupSubscriberMustDeliver(eventsCtx, app.serviceEventsWG, "question-notifications",
 		app.Questions.SubscribeNotifications, app.events)
 	setupSubscriber(eventsCtx, app.serviceEventsWG, "agent-notifications",
 		app.agentNotifications.Subscribe, app.events)

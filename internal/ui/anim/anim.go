@@ -52,7 +52,6 @@ const (
 var (
 	defaultGradColorA = color.RGBA{R: 0xff, G: 0, B: 0, A: 0xff}
 	defaultGradColorB = color.RGBA{R: 0, G: 0, B: 0xff, A: 0xff}
-	defaultLabelColor = color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
 )
 
 var (
@@ -89,7 +88,15 @@ func settingsHash(opts Settings) string {
 }
 
 // StepMsg is a message type used to trigger the next step in the animation.
-type StepMsg struct{ ID string }
+// Gen carries the generation of the tick chain that produced it. A chain
+// started by a later Start() bumps the Anim's generation, so ticks from an
+// older chain (mismatched Gen) are dropped instead of advancing the frame.
+// This is what keeps a single spinner from being driven by two concurrent
+// tick chains (which would render as a doubled, double-speed animation).
+type StepMsg struct {
+	ID  string
+	Gen int64
+}
 
 // Settings defines settings for the animation.
 type Settings struct {
@@ -137,6 +144,13 @@ type Anim struct {
 	id               string
 	suffix           func() string
 	suffixColor      color.Color
+
+	// gen identifies the currently armed tick chain. Start() bumps it and
+	// stamps every emitted StepMsg with the new value; Animate() drops ticks
+	// whose Gen does not match (unless Gen is the zero wildcard). Re-arming
+	// therefore supersedes any in-flight chain instead of running a second
+	// one concurrently, and Stop() bumps it to kill a chain outright.
+	gen atomic.Int64
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -152,9 +166,9 @@ func New(opts Settings) *Anim {
 	if colorIsUnset(opts.GradColorB) {
 		opts.GradColorB = defaultGradColorB
 	}
-	if colorIsUnset(opts.LabelColor) {
-		opts.LabelColor = defaultLabelColor
-	}
+	// A nil LabelColor means "use the terminal default foreground".
+	// No fallback is applied so non-interactive callers can opt out
+	// of explicit coloring.
 
 	if opts.ID != "" {
 		a.id = opts.ID
@@ -380,14 +394,31 @@ func (a *Anim) Width() (w int) {
 	return w
 }
 
-// Start starts the animation.
+// Start starts the animation. It bumps the generation so any tick chain
+// started by a previous Start() is superseded: its in-flight StepMsgs carry
+// the old generation and are dropped by Animate() instead of advancing the
+// frame a second time. Without this, re-arming a spinner that still has a
+// live chain (e.g. reloading a session whose message never got a Finish
+// part) would run two chains concurrently and render a doubled animation.
 func (a *Anim) Start() tea.Cmd {
+	a.gen.Add(1)
 	return a.Step()
+}
+
+// Stop kills any in-flight tick chain without starting a new one. It bumps
+// the generation so outstanding StepMsgs no longer match; the next one to
+// arrive is dropped and the chain terminates.
+func (a *Anim) Stop() {
+	a.gen.Add(1)
 }
 
 // Animate advances the animation to the next step.
 func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	if msg.ID != a.id {
+		return nil
+	}
+	// Drop ticks from a superseded chain.
+	if msg.Gen != a.gen.Load() {
 		return nil
 	}
 
@@ -466,10 +497,13 @@ func (a *Anim) Render() string {
 	return b.String()
 }
 
-// Step is a command that triggers the next step in the animation.
+// Step is a command that triggers the next step in the animation. The
+// emitted StepMsg carries the current generation so Animate() can tell
+// whether this tick still belongs to the armed chain.
 func (a *Anim) Step() tea.Cmd {
+	gen := a.gen.Load()
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
-		return StepMsg{ID: a.id}
+		return StepMsg{ID: a.id, Gen: gen}
 	})
 }
 

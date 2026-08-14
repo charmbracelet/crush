@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>{{.Title}}</title>
+    <link rel="icon" type="image/svg+xml" href="{{.Favicon}}" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      {{.CSS}}
+    </style>
+  </head>
+  <body>
+    <main class="card {{.Kind}}">
+      <div class="mark">{{.Heartbit}}</div>
+
+      <h1>{{.Heading}}</h1>
+
+      <p class="detail">
+        {{.Detail}}{{with .Subject}} <span class="subject">{{.}}</span>{{end}}
+      </p>
+
+      {{if .ErrorCode}}
+      <div class="reason">
+        <span class="code">{{.ErrorCode}}</span>
+        {{with .ErrorDescription}}{{.}}{{else}}The authorization server did not
+        say why.{{end}}
+      </div>
+      {{end}} {{if .CloseDelay}}
+      <div class="rail" id="rail" data-delay="{{.CloseDelay}}">
+        <span></span>
+      </div>
+      {{end}}
+
+      <p class="status" id="status">{{.Status}}</p>
+
+      <p class="brand">
+        <a
+          href="https://charm.land"
+          aria-label="Charm"
+          title="Visit Charm's Website"
+          >{{.Charm}}</a
+        >
+      </p>
+    </main>
+
+    <script>
+      {{.JS}}
+    </script>
+  </body>
+</html>

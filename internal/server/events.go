@@ -120,10 +120,16 @@ func wrapEvent(ev any) *pubsub.Payload {
 			SessionTitle: e.Payload.SessionTitle,
 			RunID:        e.Payload.RunID,
 			Type:         proto.AgentEventType(e.Payload.Type),
+			AWSSOCommand: e.Payload.AWSSOCommand,
+			AWSSOURL:     e.Payload.AWSSOURL,
+		}
+		// Carry any human-readable message across the wire; the client
+		// maps Error back into Notification.Message.
+		if e.Payload.Message != "" {
+			payload.Error = errors.New(e.Payload.Message)
 		}
 		if e.Payload.Type == notify.TypeAgentError {
 			payload.Type = proto.AgentEventTypeError
-			payload.Error = errors.New(e.Payload.Message)
 		}
 		return envelope(pubsub.PayloadTypeAgentEvent, pubsub.Event[proto.AgentEvent]{
 			Type:    e.Type,
@@ -261,13 +267,14 @@ func fileToProto(f history.File) proto.File {
 
 func messageToProto(m message.Message) proto.Message {
 	msg := proto.Message{
-		ID:        m.ID,
-		SessionID: m.SessionID,
-		Role:      proto.MessageRole(m.Role),
-		Model:     m.Model,
-		Provider:  m.Provider,
-		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+		ID:               m.ID,
+		SessionID:        m.SessionID,
+		Role:             proto.MessageRole(m.Role),
+		Model:            m.Model,
+		Provider:         m.Provider,
+		CreatedAt:        m.CreatedAt,
+		UpdatedAt:        m.UpdatedAt,
+		IsSummaryMessage: m.IsSummaryMessage,
 	}
 
 	for _, p := range m.Parts {

@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -305,4 +307,136 @@ func TestCachePathFor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestProviders_KeepsCatalogWhenCachingFails covers the case that used to
+// sign Hyper users out: the provider list was fetched successfully but could
+// not be written to the on-disk cache, and Providers discarded it. Hyper's
+// endpoint and models live in the catalog rather than in the user's config,
+// so losing it there removed the provider entirely and invalidated the
+// user's saved model.
+func TestProviders_KeepsCatalogWhenCachingFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	// A file where a directory needs to be, so every cache write fails.
+	blocked := filepath.Join(tmpDir, "blocked")
+	require.NoError(t, os.WriteFile(blocked, []byte("block"), 0o644))
+	unwritable := filepath.Join(blocked, "subdir", "cache.json")
+
+	resetProviderState()
+	defer resetProviderState()
+
+	// Prime both syncers with mock clients so Providers reuses the memoized
+	// outcome instead of reaching the network.
+	catwalkSyncer.Init(&mockCatwalkClient{
+		providers: []catwalk.Provider{{Name: "Provider1", ID: "p1"}},
+	}, unwritable, true)
+	hyperSyncer.Init(&mockHyperClient{
+		provider: catwalk.Provider{
+			Name:   "Hyper",
+			ID:     "hyper",
+			Models: []catwalk.Model{{ID: "hyper-1", Name: "Hyper Model"}},
+		},
+	}, unwritable, true)
+
+	catwalkProviders, catwalkErr := catwalkSyncer.Get(t.Context())
+	require.Error(t, catwalkErr, "cache write should fail")
+	require.NotEmpty(t, catwalkProviders, "syncer still returns a usable catalog")
+
+	hyperProvider, hyperErr := hyperSyncer.Get(t.Context())
+	require.Error(t, hyperErr, "cache write should fail")
+	require.Equal(t, "Hyper", hyperProvider.Name)
+
+	providers, err := Providers(&Config{Options: &Options{}})
+
+	// The failure is reported, but as a warning alongside a usable catalog.
+	require.Error(t, err)
+	require.Len(t, providers, 2)
+	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[0].ID, "Hyper stays at the front")
+	require.Equal(t, catwalk.InferenceProvider("p1"), providers[1].ID)
+}
+
+// TestProviders_FallsBackToEmbeddedHyper checks that Hyper is still in the
+// catalog when it could not be fetched at all, using the copy bundled with
+// this release.
+func TestProviders_FallsBackToEmbeddedHyper(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+
+	resetProviderState()
+	defer resetProviderState()
+
+	catwalkSyncer.Init(&mockCatwalkClient{
+		providers: []catwalk.Provider{{Name: "Provider1", ID: "p1"}},
+	}, filepath.Join(tmpDir, "providers.json"), true)
+	hyperSyncer.Init(&mockHyperClient{
+		err: errors.New("network error"),
+	}, filepath.Join(tmpDir, "hyper.json"), true)
+
+	_, _ = catwalkSyncer.Get(t.Context())
+	_, _ = hyperSyncer.Get(t.Context())
+
+	providers, err := Providers(&Config{Options: &Options{}})
+	require.NoError(t, err)
+	require.Len(t, providers, 2)
+	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[0].ID)
+	require.NotEmpty(t, providers[0].Models, "the embedded Hyper provider carries models")
+}
+
+// TestProviders_HonorsDisableDefaultProviders makes sure the embedded Hyper
+// fallback does not smuggle a default provider back in.
+func TestProviders_HonorsDisableDefaultProviders(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	resetProviderState()
+	defer resetProviderState()
+
+	providers, err := Providers(&Config{
+		Options: &Options{DisableDefaultProviders: true},
+	})
+	require.NoError(t, err)
+	require.Empty(t, providers)
+}
+
+// TestCacheStore_ReplacesFileInsteadOfRewritingIt guards the property that
+// several Crush instances depend on: the provider cache is swapped into place
+// as a finished file, never truncated and refilled underneath a reader that is
+// already reading it. A reader that loses that race cannot parse the catalog
+// and silently falls back to the bundled copy.
+func TestCacheStore_ReplacesFileInsteadOfRewritingIt(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "providers.json")
+	c := newCache[[]catwalk.Provider](path)
+
+	require.NoError(t, c.Store([]catwalk.Provider{{ID: "first", Name: "First"}}))
+	before, err := os.Stat(path)
+	require.NoError(t, err)
+
+	require.NoError(t, c.Store([]catwalk.Provider{{ID: "second", Name: "Second"}}))
+	after, err := os.Stat(path)
+	require.NoError(t, err)
+
+	// os.Stat on Windows resolves file identity lazily by reopening the path,
+	// so both stats describe whichever file the path points at by the time
+	// they are compared and SameFile cannot observe the replacement. The
+	// write path is shared, so asserting this on the other platforms covers
+	// it. The checks below still run everywhere.
+	if runtime.GOOS != "windows" {
+		require.False(t, os.SameFile(before, after),
+			"the cache should be replaced by a rename, not rewritten in place")
+	}
+
+	// The new contents are complete and no temporary files are left behind.
+	got, _, err := c.Get()
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, catwalk.InferenceProvider("second"), got[0].ID)
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "only the cache file should remain")
+	require.Equal(t, "providers.json", entries[0].Name())
 }

@@ -17,11 +17,20 @@ import (
 
 // publishConfigChanged publishes a ConfigChanged event on the workspace's
 // event broker so all subscribers (e.g. remote clients) refresh their
-// cached config snapshot.
+// cached config snapshot. It also re-initializes any MCP servers whose
+// configuration changed as a result of the write.
 func publishConfigChanged(ws *Workspace) {
 	if ws == nil || ws.App == nil {
 		return
 	}
+
+	// Re-init MCP servers whose config changed. MCP state is process-global,
+	// so this only needs to happen once regardless of which workspace
+	// triggered the write. Run async so unrelated config writes (model
+	// switches, API keys) don't block on MCP reconciliation. Bound to the
+	// workspace ctx so teardown cancels any in-flight init.
+	go mcptools.Reinitialize(ws.ctx, ws.Cfg)
+
 	ws.SendEvent(pubsub.Event[proto.ConfigChanged]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: proto.ConfigChanged{WorkspaceID: ws.ID},

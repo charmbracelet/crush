@@ -5,7 +5,9 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -14,33 +16,108 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
+// lspStatesTTL bounds how long the memoized LSP state may go without a
+// re-probe being scheduled; LSP events normally refresh it much sooner. The
+// backstop covers events missed across SSE reconnects in client/server
+// mode, so it can be an order of magnitude looser than the busy/permission
+// TTL (which drives interactive affordances like the spinner and queue
+// pill): a few seconds of stale LSP counts is invisible, a few seconds of
+// stale busy state is not. Package var so tests can pin it.
+var lspStatesTTL = 5 * time.Second
+
+// lspStatesMsg delivers LSP states and per-server diagnostic counts fetched
+// off-thread.
+type lspStatesMsg struct {
+	states      map[string]workspace.LSPClientInfo
+	diagnostics map[string]lsp.DiagnosticCounts
+}
+
 // LSPInfo wraps LSP client information with diagnostic counts by severity.
 type LSPInfo struct {
 	workspace.LSPClientInfo
 	Diagnostics map[protocol.DiagnosticSeverity]int
 }
 
+// requestLSPRefresh schedules an off-thread refresh of the memoized LSP
+// state. While a fetch is already in flight it only marks the state dirty;
+// applyLSPStates re-dispatches so the freshest data still lands.
+func (m *UI) requestLSPRefresh() tea.Cmd {
+	if m.lspFetchInFlight {
+		m.lspRefreshQueued = true
+		return nil
+	}
+	return m.dispatchLSPRefresh()
+}
+
+// dispatchLSPRefresh returns a command that fetches the LSP states and
+// per-server diagnostic counts off the Update goroutine (each a synchronous
+// HTTP round-trip in client/server mode), delivering an lspStatesMsg. It
+// returns nil while a fetch is already in flight. The closure captures only
+// locals (never m) so it is safe off-thread.
+func (m *UI) dispatchLSPRefresh() tea.Cmd {
+	if m.lspFetchInFlight || m.com == nil || m.com.Workspace == nil {
+		return nil
+	}
+	m.lspFetchInFlight = true
+	// Stamp the check time at dispatch too so the TTL backstop doesn't
+	// keep re-requesting while this fetch is in flight.
+	m.lspCheckedAt = time.Now()
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		states := ws.LSPGetStates()
+		diagnostics := make(map[string]lsp.DiagnosticCounts, len(states))
+		for name := range states {
+			diagnostics[name] = ws.LSPGetDiagnosticCounts(name)
+		}
+		return lspStatesMsg{states: states, diagnostics: diagnostics}
+	}
+}
+
+// applyLSPStates stores an off-thread LSP fetch result and re-dispatches
+// when events arrived while it was in flight. Runs on the Update goroutine.
+func (m *UI) applyLSPStates(msg lspStatesMsg) tea.Cmd {
+	m.lspFetchInFlight = false
+	m.lspCheckedAt = time.Now()
+	m.lspStates = msg.states
+	m.lspDiagnostics = msg.diagnostics
+	if m.lspRefreshQueued {
+		m.lspRefreshQueued = false
+		return m.dispatchLSPRefresh()
+	}
+	return nil
+}
+
+// lspErrorCount returns the total diagnostic count across the memoized LSP
+// states, shown in the compact header.
+func (m *UI) lspErrorCount() int {
+	count := 0
+	for _, info := range m.lspStates {
+		count += info.DiagnosticCount
+	}
+	return count
+}
+
 // lspInfo renders the LSP status section showing active LSP clients and their
-// diagnostic counts.
+// diagnostic counts. It renders from the memoized state only: this runs on
+// every frame, and the workspace probes behind it are synchronous HTTP
+// round-trips in client/server mode. LSP events (plus the TTL backstop)
+// keep the memoized state fresh off-thread; see requestLSPRefresh.
 func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
-	// Always pull fresh state to avoid race with async TrackConfigured.
-	m.lspStates = m.com.Workspace.LSPGetStates()
 	states := slices.SortedFunc(maps.Values(m.lspStates), func(a, b workspace.LSPClientInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
 	var lsps []LSPInfo
 	for _, state := range states {
-		lspErrs := map[protocol.DiagnosticSeverity]int{}
-		counts := m.com.Workspace.LSPGetDiagnosticCounts(state.Name)
-		lspErrs[protocol.SeverityError] = counts.Error
-		lspErrs[protocol.SeverityWarning] = counts.Warning
-		lspErrs[protocol.SeverityHint] = counts.Hint
-		lspErrs[protocol.SeverityInformation] = counts.Information
-
-		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: lspErrs})
+		counts := m.lspDiagnostics[state.Name]
+		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: map[protocol.DiagnosticSeverity]int{
+			protocol.SeverityError:       counts.Error,
+			protocol.SeverityWarning:     counts.Warning,
+			protocol.SeverityHint:        counts.Hint,
+			protocol.SeverityInformation: counts.Information,
+		}})
 	}
 
 	title := t.Resource.Heading.Render("LSPs")

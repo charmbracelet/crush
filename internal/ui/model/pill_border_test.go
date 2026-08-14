@@ -201,13 +201,46 @@ func TestPillsRowEscapeQueueHint(t *testing.T) {
 	}
 }
 
-func TestPillsRowWrapsBusyEscapeHintBelowPills(t *testing.T) {
+func TestPillsRowWrapsBusyEscapeHintBesidePills(t *testing.T) {
+	u := newTestUI()
+	u.width = 80
+	u.session = &session.Session{ID: "s1"}
+	u.promptQueue = 1
+	u.agentBusyCache.set(true)
+	u.updateLayoutAndSize()
+	u.renderPills()
+
+	view := ansi.Strip(u.pillsView)
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), pillHeightWithBorder; got != want {
+		t.Fatalf("rendered line count = %d, want %d:\n%s", got, want, view)
+	}
+	ctrlLine := lineContaining(lines, "ctrl+t")
+	escapeLine := lineContaining(lines, "esc esc")
+	if ctrlLine < 0 || escapeLine < 0 {
+		t.Fatalf("expected wrapped queue hints in pills view:\n%s", view)
+	}
+	if !strings.Contains(lines[escapeLine], "╰") {
+		t.Fatalf("escape hint is not beside the pill bottom border: %q", lines[escapeLine])
+	}
+	ctrlColumn := ansi.StringWidth(lines[ctrlLine][:strings.Index(lines[ctrlLine], "ctrl+t")])
+	escapeColumn := ansi.StringWidth(lines[escapeLine][:strings.Index(lines[escapeLine], "esc esc")])
+	if escapeColumn != ctrlColumn {
+		t.Fatalf("escape hint column = %d, want ctrl+t column %d:\n%s",
+			escapeColumn, ctrlColumn, view)
+	}
+	if strings.HasPrefix(strings.TrimLeft(lines[escapeLine], " "), "esc esc") {
+		t.Fatalf("escape hint started at the panel's left edge: %q", lines[escapeLine])
+	}
+}
+
+func TestPillsRowWideHintFallsBackBelowPills(t *testing.T) {
 	u := newTestUI()
 	u.width = 120
 	u.session = &session.Session{
 		ID: "s1",
 		Todos: []session.Todo{{
-			Content: "Short task",
+			Content: "A task long enough to consume the available pill row",
 			Status:  session.TodoStatusInProgress,
 		}},
 	}
@@ -216,16 +249,19 @@ func TestPillsRowWrapsBusyEscapeHintBelowPills(t *testing.T) {
 	u.updateLayoutAndSize()
 	u.renderPills()
 
-	lines := strings.Split(ansi.Strip(u.pillsView), "\n")
-	ctrlLine := lineContaining(lines, "ctrl+t")
-	popLine := lineContaining(lines, "shift/alt+up")
-	escapeLine := lineContaining(lines, "esc esc")
-	if ctrlLine < 0 || popLine < 0 || escapeLine < 0 {
-		t.Fatalf("expected all queue hints in pills view:\n%s", ansi.Strip(u.pillsView))
+	view := ansi.Strip(u.pillsView)
+	lines := strings.Split(view, "\n")
+	escapeLine := lineContaining(lines, "esc esc cancel + pop all messages")
+	if escapeLine < pillHeightWithBorder {
+		t.Fatalf("escape hint line = %d, want below the pill block:\n%s", escapeLine, view)
 	}
-	if escapeLine <= ctrlLine || escapeLine <= popLine {
-		t.Fatalf("escape hint line = %d, want below ctrl+t line %d and pop line %d:\n%s",
-			escapeLine, ctrlLine, popLine, ansi.Strip(u.pillsView))
+	firstHint := strings.Index(lines[escapeLine], "ctrl+t")
+	if firstHint < 0 {
+		t.Fatalf("fallback line does not contain the first hint:\n%s", view)
+	}
+	if got, want := ansi.StringWidth(lines[escapeLine][:firstHint]), 3; got != want {
+		t.Fatalf("fallback hint column = %d, want panel content column %d:\n%s",
+			got, want, view)
 	}
 }
 

@@ -141,7 +141,7 @@ func pillHelpHint(t *styles.Styles, key, desc string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Center, keyView, " ", descView)
 }
 
-func packPillHints(hints []string, firstBudget, contentWidth int) []string {
+func packPillHints(hints []string, firstBudget, continuationBudget int) []string {
 	lines := []string{""}
 	budget := max(firstBudget, 0)
 	for _, hint := range hints {
@@ -160,9 +160,30 @@ func packPillHints(hints []string, firstBudget, contentWidth int) []string {
 		}
 
 		lines = append(lines, hint)
-		budget = max(contentWidth, 0)
+		budget = max(continuationBudget, 0)
 	}
 	return lines
+}
+
+func layoutPillHints(hints []string, sideBudget, contentWidth int) ([]string, bool) {
+	column := true
+	for _, hint := range hints {
+		if ansi.StringWidth(hint) > sideBudget {
+			column = false
+			break
+		}
+	}
+	if column {
+		return packPillHints(hints, sideBudget, sideBudget), true
+	}
+	return packPillHints(hints, sideBudget, contentWidth), false
+}
+
+func pillHintRows(lines []string, column bool) int {
+	if column {
+		return max(pillHeightWithBorder, len(lines)+1)
+	}
+	return pillHeightWithBorder + len(lines) - 1
 }
 
 func (m *UI) pillsRowParts(t *styles.Styles) (string, []string) {
@@ -336,9 +357,9 @@ func (m *UI) pillsAreaHeight(width int) int {
 	const paddingLeft = 3
 	contentWidth := max(width-paddingLeft, 0)
 	pillsRow, hints := m.pillsRowParts(m.com.Styles)
-	firstBudget := max(contentWidth-lipgloss.Width(pillsRow)-1, 0)
-	hintLines := packPillHints(hints, firstBudget, contentWidth)
-	pillsAreaHeight := pillHeightWithBorder + len(hintLines) - 1
+	sideBudget := max(contentWidth-lipgloss.Width(pillsRow)-1, 0)
+	hintLines, column := layoutPillHints(hints, sideBudget, contentWidth)
+	pillsAreaHeight := pillHintRows(hintLines, column)
 	if m.pillsExpanded {
 		switch m.effectiveFocusedSection() {
 		case pillSectionTodos:
@@ -409,16 +430,24 @@ func (m *UI) renderPills() {
 		return
 	}
 
-	firstBudget := max(contentWidth-lipgloss.Width(pillsRow)-1, 0)
-	hintLines := packPillHints(hints, firstBudget, contentWidth)
-	firstLine := pillsRow
-	if hintLines[0] != "" {
-		firstLine = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", hintLines[0])
-	}
-	pillsRow = firstLine
-	if len(hintLines) > 1 {
-		pillsRow = lipgloss.JoinVertical(lipgloss.Left,
-			append([]string{pillsRow}, hintLines[1:]...)...)
+	sideBudget := max(contentWidth-lipgloss.Width(pillsRow)-1, 0)
+	hintLines, column := layoutPillHints(hints, sideBudget, contentWidth)
+	if column {
+		hintColumn := lipgloss.JoinVertical(lipgloss.Left,
+			append([]string{""}, hintLines...)...)
+		pillsRow = lipgloss.JoinHorizontal(lipgloss.Top,
+			pillsRow, " ", hintColumn)
+	} else {
+		firstLine := pillsRow
+		if hintLines[0] != "" {
+			firstLine = lipgloss.JoinHorizontal(lipgloss.Center,
+				pillsRow, " ", hintLines[0])
+		}
+		pillsRow = firstLine
+		if len(hintLines) > 1 {
+			pillsRow = lipgloss.JoinVertical(lipgloss.Left,
+				append([]string{pillsRow}, hintLines[1:]...)...)
+		}
 	}
 
 	pillsArea := pillsRow

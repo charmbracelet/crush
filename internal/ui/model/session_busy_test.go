@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
@@ -1741,6 +1742,118 @@ func TestIdleEscapeDrainsQueueIntoEditor(t *testing.T) {
 	require.Equal(t, "a\n\nb\n\ndraft", m.textarea.Value())
 }
 
+// TestIdleEscapeDrainRestoresAttachmentOnlyMessage pins the empty-parts
+// guard in restoreQueuedMessages: a submission can carry attachments and no
+// text at all (a large paste becomes paste_1.txt with nothing typed), and
+// rewriting the buffer for such a restore would disengage bang mode with no
+// "!" to materialize in its place — the shell intent the prompt is still
+// advertising would silently become an ordinary prompt.
+func TestIdleEscapeDrainRestoresAttachmentOnlyMessage(t *testing.T) {
+	pinTTLs(t)
+
+	paste := message.Attachment{
+		FilePath: "paste_1.txt",
+		FileName: "paste_1.txt",
+		MimeType: "text/plain",
+		Content:  []byte("pasted blob"),
+	}
+	ws := &countingWorkspace{
+		ready:          true,
+		queued:         []string{""},
+		queuedMessages: []agent.QueuedMessage{{Attachments: []message.Attachment{paste}}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{""}
+	// The user has just typed "!": bang mode is armed and the textarea is
+	// empty, because the leading "!" is not part of its value.
+	m.bangMode = true
+	ws.resetCounters()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Empty(t, m.textarea.Value(), "an attachment-only restore has no text to prepend")
+	require.True(t, m.bangMode,
+		"an attachment-only restore must not disengage bang mode: there is no \"!\" to materialize")
+	require.Equal(t, []message.Attachment{paste}, m.attachments.List())
+	require.Equal(t, util.InfoTypeInfo, m.status.msg.Type)
+	require.Equal(t, "Queued messages moved to the input field.", m.status.msg.Msg)
+}
+
+// TestIdleEscapeDrainRestoresTheSameAttachmentTwiceInOneBatch pins the held
+// snapshot taken before the restore loop: two queued submissions can carry
+// the same file, and a drain restores the whole queue at once, so the batch
+// must reach the editor as it was queued. Snapshotting inside the loop would
+// let the first copy hide the second — a case only the drain can produce,
+// since a pop restores one message at a time. The dedupe is against chips
+// the editor already held, not against the batch itself.
+func TestIdleEscapeDrainRestoresTheSameAttachmentTwiceInOneBatch(t *testing.T) {
+	pinTTLs(t)
+
+	shared := message.Attachment{
+		FilePath: "/tmp/notes.txt",
+		FileName: "notes.txt",
+		MimeType: "text/plain",
+		Content:  []byte("hello"),
+	}
+	ws := &countingWorkspace{
+		ready:  true,
+		queued: []string{"first", "second"},
+		queuedMessages: []agent.QueuedMessage{
+			{Prompt: "first", Attachments: []message.Attachment{shared}},
+			{Prompt: "second", Attachments: []message.Attachment{shared}},
+		},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"first", "second"}
+	ws.resetCounters()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Equal(t, "first\n\nsecond", m.textarea.Value())
+	require.Equal(t, []message.Attachment{shared, shared}, m.attachments.List(),
+		"a batch carrying the same file twice must be restored as it was queued")
+}
+
+// TestIdleEscapeDrainWithStaleCountReportsEmptyQueue pins the restore arm
+// for a drain that comes back empty. The memoized count is the gate, so it
+// can be one round-trip stale (the agent dequeued the last prompt, or
+// another client drained it, while the press was in flight). Nothing reaches
+// the editor, so the banner must say the queue was empty instead of claiming
+// prompts were moved into the input field.
+func TestIdleEscapeDrainWithStaleCountReportsEmptyQueue(t *testing.T) {
+	pinTTLs(t)
+
+	// The stub has nothing queued while the UI is still showing a queue.
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"a"}
+	m.textarea.SetValue("draft")
+	ws.resetCounters()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.clearQueueCalls, "the memoized count must let the press through")
+	require.Equal(t, util.InfoTypeInfo, m.status.msg.Type)
+	require.Equal(t, noQueuedMessages, m.status.msg.Msg,
+		"an empty drain must not claim prompts were moved into the input field")
+	require.Equal(t, "draft", m.textarea.Value(), "an empty drain restores nothing")
+	require.Empty(t, m.promptQueueItems)
+	require.Zero(t, m.promptQueue)
+	require.False(t, m.queueClearInFlight)
+	require.Empty(t, m.queuedRestoreOrphans, "an empty drain must not park anything")
+}
+
 // TestIdleEscapeWithoutQueueClearsNothing keeps esc inert on an idle
 // session with nothing queued: the binding acts only when the UI is
 // showing a queue to move.
@@ -1893,6 +2006,59 @@ func TestIdleEscapeDuringAttachmentDeleteModeKeepsQueue(t *testing.T) {
 	require.Equal(t, 1, ws.clearQueueCalls)
 	require.Empty(t, m.promptQueueItems)
 	require.Equal(t, "a\n\ndraft", m.textarea.Value())
+}
+
+// TestIdleEscapeWithCompletionsOpenKeepsQueue: esc keeps its more local
+// meaning while the @-completions popup is open — it closes the popup — so
+// the queue must not be drained on the same press. Draining it would cancel
+// queued client submissions and prepend their text above the draft the user
+// is completing a path into.
+func TestIdleEscapeWithCompletionsOpenKeepsQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:          true,
+		queued:         []string{"a"},
+		queuedMessages: []agent.QueuedMessage{{Prompt: "a"}},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"a"}
+	m.textarea.SetValue("look at @")
+	// The shared harness leaves the completions component nil, and the "@"
+	// keystroke that opens it in production needs both a config (for the
+	// walk limits) and a filesystem walk. Open it the way that keystroke
+	// does — raise the flag, then let the production
+	// CompletionItemsLoadedMsg handler hand the loaded items to the
+	// component — so the escape press itself routes exactly as it does in
+	// production.
+	m.completions = completions.New(
+		m.com.Styles.Completions.Normal,
+		m.com.Styles.Completions.Focused,
+		m.com.Styles.Completions.Match,
+	)
+	m.completionsOpen = true
+	m.Update(completions.CompletionItemsLoadedMsg{
+		Files: []completions.FileCompletionValue{{Path: "internal/ui/model/ui.go"}},
+	})
+	require.True(t, m.completions.IsOpen(), "the popup must be open before the press")
+	ws.resetCounters()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.False(t, m.completionsOpen, "esc must close the completions popup")
+	require.Zero(t, ws.clearQueueCalls, "esc must close the popup first")
+	require.Equal(t, []string{"a"}, m.promptQueueItems)
+	require.Equal(t, "look at @", m.textarea.Value(), "the queue must stay off the editor")
+
+	// A second press, now that the popup is closed, drains.
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Empty(t, m.promptQueueItems)
+	require.Equal(t, "a\n\nlook at @", m.textarea.Value())
 }
 
 // TestIdleEscapeDrainIsSingleFlight pins the guard against a repeated press:

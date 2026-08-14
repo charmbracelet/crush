@@ -553,8 +553,17 @@ func TestClearQueue_HoldsSessionDispatchMutex(t *testing.T) {
 
 	mu := a.sessionMu(sessionID)
 	mu.Lock()
+	started := make(chan struct{})
 	done := make(chan []QueuedMessage, 1)
-	go func() { done <- a.ClearQueue(sessionID) }()
+	go func() {
+		close(started)
+		done <- a.ClearQueue(sessionID)
+	}()
+	// Without waiting for the goroutine to reach the call, the negative
+	// window below is satisfied by a goroutine that was never scheduled —
+	// which is exactly what happens under -race load, and it would pass with
+	// the mutex removed.
+	<-started
 
 	select {
 	case <-done:

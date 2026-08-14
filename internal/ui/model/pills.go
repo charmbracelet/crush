@@ -129,6 +129,14 @@ func queueList(queueItems []string, t *styles.Styles) string {
 	return strings.Join(lines, "\n")
 }
 
+// pillHelpHint renders one compact keystroke/action hint with the shared pill
+// help styling.
+func pillHelpHint(t *styles.Styles, key, desc string) string {
+	keyView := t.Pills.HelpKey.Render(key)
+	descView := t.Pills.HelpText.Render(desc)
+	return lipgloss.JoinHorizontal(lipgloss.Center, keyView, " ", descView)
+}
+
 // pillsHeightReasonableTerminalHeight is the minimum terminal height at which
 // we auto-expand pills when there are incomplete todos.
 const pillsHeightReasonableTerminalHeight = 40
@@ -347,9 +355,13 @@ func (m *UI) renderPills() {
 	if m.pillsExpanded {
 		helpDesc = "close"
 	}
-	helpKey := t.Pills.HelpKey.Render("ctrl+t")
-	helpText := t.Pills.HelpText.Render(helpDesc)
-	helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
+	helpHint := pillHelpHint(t, "ctrl+t", helpDesc)
+	if hasQueue {
+		// Advertise the queued-message pop while the queue exists: the pills
+		// row is visible exactly when the binding is usable.
+		popHint := pillHelpHint(t, "shift/alt+up", "pop message")
+		helpHint = lipgloss.JoinHorizontal(lipgloss.Center, helpHint, " ", popHint)
+	}
 	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
 
 	pillsArea := pillsRow

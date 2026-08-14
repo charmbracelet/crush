@@ -99,3 +99,46 @@ func TestEffectiveFocusedSectionFallsThrough(t *testing.T) {
 		})
 	}
 }
+
+// TestPillsRowPopHint verifies that the pills-row footer advertises the
+// queued-message pop binding exactly while a queue exists — in both collapsed
+// and expanded states — and omits it when only todos drive the pills row.
+func TestPillsRowPopHint(t *testing.T) {
+	todos := []session.Todo{{Content: "a", Status: session.TodoStatusPending}}
+
+	cases := []struct {
+		name           string
+		expanded       bool
+		focusedSection pillSection
+		todos          []session.Todo
+		queue          int
+		wantHint       bool
+	}{
+		{"collapsed queue only", false, pillSectionQueue, nil, 2, true},
+		{"expanded queue only", true, pillSectionQueue, nil, 2, true},
+		{"collapsed queue+todos", false, pillSectionTodos, todos, 2, true},
+		{"expanded todos focused queue+todos", true, pillSectionTodos, todos, 2, true},
+		{"no queue collapsed", false, pillSectionTodos, todos, 0, false},
+		{"no queue expanded", true, pillSectionTodos, todos, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u := newTestUI()
+			u.session = &session.Session{ID: "s1", Todos: tc.todos}
+			u.promptQueue = tc.queue
+			u.pillsExpanded = tc.expanded
+			u.focusedPillSection = tc.focusedSection
+			u.updateLayoutAndSize()
+			u.renderPills()
+
+			if !strings.Contains(u.pillsView, "ctrl+t") {
+				t.Fatalf("expected the ctrl+t toggle hint in pills view:\n%s", u.pillsView)
+			}
+			hasHint := strings.Contains(u.pillsView, "shift/alt+up") &&
+				strings.Contains(u.pillsView, "pop message")
+			if hasHint != tc.wantHint {
+				t.Fatalf("pop hint presence = %v, want %v:\n%s", hasHint, tc.wantHint, u.pillsView)
+			}
+		})
+	}
+}

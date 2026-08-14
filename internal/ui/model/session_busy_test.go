@@ -1724,3 +1724,54 @@ func TestIdleEscapeDuringHistoryNavigationKeepsQueue(t *testing.T) {
 	require.Empty(t, m.promptQueueItems)
 	require.Equal(t, "a\n\ndraft", m.textarea.Value())
 }
+
+// TestIdleEscapeDuringAttachmentDeleteModeKeepsQueue: esc keeps its more
+// local meaning while the ctrl+r attachment delete prompt is armed — it
+// only backs out of that prompt — so the queue must not be drained on the
+// same press. Draining it would cancel queued client submissions and
+// prepend their text to a draft the user was not editing.
+func TestIdleEscapeDuringAttachmentDeleteModeKeepsQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:          true,
+		queued:         []string{"a"},
+		queuedMessages: []agent.QueuedMessage{{Prompt: "a"}},
+	}
+	m := newBusyUI(ws)
+	// The shared harness wires an empty keymap; delete mode needs the real
+	// bindings so ctrl+r and esc route exactly as they do in production.
+	m.attachments = attachments.New(nil, attachments.Keymap{
+		DeleteMode: m.keyMap.Editor.AttachmentDeleteMode,
+		DeleteAll:  m.keyMap.Editor.DeleteAllAttachments,
+		Escape:     m.keyMap.Editor.Escape,
+	})
+	warmCaches(m, false)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"a"}
+	m.textarea.SetValue("draft")
+	m.attachments.Update(message.Attachment{FileName: "notes.txt"})
+	ws.resetCounters()
+
+	// ctrl+r arms delete mode: from here a digit key removes that
+	// attachment, so esc has to be the way back out.
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	runCmds(m, cmd)
+	require.True(t, m.attachments.Deleting(), "ctrl+r must arm delete mode")
+
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.False(t, m.attachments.Deleting(), "esc must back out of delete mode")
+	require.Zero(t, ws.clearQueueCalls, "esc must leave delete mode first")
+	require.Equal(t, []string{"a"}, m.promptQueueItems)
+	require.Equal(t, "draft", m.textarea.Value(), "the queue must stay off the editor")
+	require.Len(t, m.attachments.List(), 1, "backing out must keep the attachment")
+
+	// A second press, now that delete mode is disarmed, drains.
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Empty(t, m.promptQueueItems)
+	require.Equal(t, "a\n\ndraft", m.textarea.Value())
+}

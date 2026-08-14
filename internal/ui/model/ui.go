@@ -2552,9 +2552,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		// nothing needs confirming, because no text is destroyed.
 		//
 		// Escape keeps its more local meanings: it still closes the
-		// completions popup and still leaves prompt-history navigation
-		// (which restores the draft), both handled further down.
-		if m.promptQueue > 0 && !m.completionsOpen && !m.isBrowsingHistory() {
+		// completions popup, still leaves prompt-history navigation (which
+		// restores the draft), and it still *only* backs out of the ctrl+r
+		// attachment delete prompt. The first two are handled further down;
+		// the delete prompt disarms from Update's tail whichever branch runs
+		// here, so without the guard the drain would ride along with the
+		// press that was meant to cancel a deletion — cancelling any queued
+		// client submissions on the way out.
+		if m.promptQueue > 0 && !m.completionsOpen && !m.isBrowsingHistory() &&
+			!m.attachments.Deleting() {
 			if cmd := m.clearQueuedMessages(true); cmd != nil {
 				cmds = append(cmds, cmd)
 			}

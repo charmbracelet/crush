@@ -39,6 +39,11 @@ type Attachments struct {
 func (m *Attachments) List() []message.Attachment { return m.list }
 func (m *Attachments) Reset()                     { m.list = nil }
 
+// Deleting reports whether delete mode is armed, i.e. the component is
+// waiting for the index of the attachment to remove. Callers need this to
+// avoid shadowing the Escape that backs out of that prompt.
+func (m *Attachments) Deleting() bool { return m.deleting }
+
 func (m *Attachments) Update(msg tea.Msg) bool {
 	switch msg := msg.(type) {
 	case message.Attachment:

@@ -41,6 +41,7 @@ type countingWorkspace struct {
 	queued         []string
 	queuedMessages []agent.QueuedMessage
 	popErr         error
+	clearErr       error
 	model          workspace.AgentModel
 	lspStates      map[string]workspace.LSPClientInfo
 	lspDiags       map[string]lsp.DiagnosticCounts
@@ -89,8 +90,14 @@ func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) {
 
 // AgentClearQueue mirrors the production drain: it returns the messages it
 // removed, oldest to newest, so tests can assert what reaches the editor.
+// With clearErr set it fails the way the client does — nil messages plus the
+// error — and leaves the stub's queue alone, so a test can decide whether
+// the drain reached the agent before the failure.
 func (w *countingWorkspace) AgentClearQueue(string) ([]agent.QueuedMessage, error) {
 	w.clearQueueCalls++
+	if w.clearErr != nil {
+		return nil, w.clearErr
+	}
 	drained := w.queuedMessages
 	w.queuedMessages = nil
 	w.queued = nil
@@ -1567,6 +1574,54 @@ func TestEscapeDrainResultAfterSessionSwitchParksBatch(t *testing.T) {
 		"returning must hand the whole batch back in queue order")
 	require.Equal(t, []message.Attachment{attachment}, m.attachments.List())
 	require.Empty(t, m.queuedRestoreOrphans)
+}
+
+// TestEscapeDrainReportsWorkspaceError pins the transport-failure path of
+// the drain, mirroring TestPopQueuedMessageReportsWorkspaceError: the clear
+// is destructive server-side, so an error may be raised after the messages
+// were already removed. From here the queue state is unknown, so the
+// memoized count must be superseded by an authoritative re-fetch rather
+// than either kept (a pill that may now be too high) or zeroed (a queue the
+// drain may never have reached), and the banner must not promise the
+// prompts are still queued.
+func TestEscapeDrainReportsWorkspaceError(t *testing.T) {
+	pinTTLs(t)
+
+	// The drain never reached the agent, and while it was in flight the
+	// agent dequeued "older" to run it: neither the memoized ["older",
+	// "newest"] nor an empty queue is the truth.
+	ws := &countingWorkspace{
+		ready:    true,
+		clearErr: errors.New("clear failed"),
+		queued:   []string{"newest"},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"older", "newest"}
+	m.textarea.SetValue("draft")
+	staleGen := m.promptQueueGen
+	ws.resetCounters()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Equal(t, util.InfoTypeError, m.status.msg.Type)
+	require.Equal(t, "clear failed (the queue may have been emptied anyway)", m.status.msg.Msg)
+	require.False(t, m.queueClearInFlight,
+		"a failed drain must clear the in-flight mark so the key is not wedged")
+	require.Greater(t, m.promptQueueGen, staleGen,
+		"an unknown queue state must supersede the memoized one")
+	require.Equal(t, 1, ws.queueListCalls,
+		"the unknown queue state must be replaced by one authoritative re-fetch")
+	require.Equal(t, []string{"newest"}, m.promptQueueItems,
+		"the re-fetch must replace the queue the drain may have emptied")
+	require.Equal(t, 1, m.promptQueue)
+	require.Equal(t, "draft", m.textarea.Value(),
+		"a failed drain restores nothing: the editor must be left alone")
+	require.Empty(t, m.attachments.List())
+	require.Empty(t, m.queuedRestoreOrphans, "a failed drain must not park anything")
 }
 
 // TestIdleEscapeDrainsQueueIntoEditor covers the state a cancel leaves

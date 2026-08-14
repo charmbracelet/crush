@@ -441,17 +441,35 @@ func (c *Client) GetAgentSessionQueuedPrompts(ctx context.Context, id string, se
 	return count, nil
 }
 
-// ClearAgentSessionQueuedPrompts clears the queued prompts for a session.
-func (c *Client) ClearAgentSessionQueuedPrompts(ctx context.Context, id string, sessionID string) error {
+// ClearAgentSessionQueuedPrompts clears the queued prompts for a session and
+// returns the messages the server removed, oldest to newest. Because the
+// clear is destructive server-side, an error here may be raised after the
+// messages were already removed.
+func (c *Client) ClearAgentSessionQueuedPrompts(ctx context.Context, id string, sessionID string) ([]agent.QueuedMessage, error) {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/prompts/clear", id, sessionID), nil, nil, nil)
 	if err != nil {
-		return fmt.Errorf("failed to clear session agent queued prompts: %w", err)
+		return nil, fmt.Errorf("failed to clear session agent queued prompts: %w", err)
 	}
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to clear session agent queued prompts: status code %d", rsp.StatusCode)
+		return nil, fmt.Errorf("failed to clear session agent queued prompts: status code %d", rsp.StatusCode)
 	}
-	return nil
+
+	var result proto.ClearQueueResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode cleared session agent queued prompts: %w", err)
+	}
+	if len(result.Messages) == 0 {
+		return nil, nil
+	}
+	drained := make([]agent.QueuedMessage, len(result.Messages))
+	for i, queued := range result.Messages {
+		drained[i] = agent.QueuedMessage{
+			Prompt:      queued.Prompt,
+			Attachments: proto.AttachmentsToMessage(queued.Attachments),
+		}
+	}
+	return drained, nil
 }
 
 // PopAgentSessionQueuedMessage removes and returns the newest queued message.

@@ -537,6 +537,9 @@ const docTemplate = `{
         },
         "/workspaces/{id}/agent/sessions/{sid}/prompts/clear": {
             "post": {
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "agent"
                 ],
@@ -559,7 +562,10 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.ClearQueueResponse"
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -3946,6 +3952,17 @@ const docTemplate = `{
                 },
                 "mime_type": {
                     "type": "string"
+                }
+            }
+        },
+        "proto.ClearQueueResponse": {
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/proto.QueuedMessage"
+                    }
                 }
             }
         },

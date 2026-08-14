@@ -54,6 +54,39 @@ func TestClientWorkspaceAgentPopQueuedMessage(t *testing.T) {
 	require.Equal(t, "notes.txt", got.Attachments[0].FileName)
 }
 
+func TestClientWorkspaceAgentClearQueue(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/workspaces/ws-1/agent/sessions/sess-1/prompts/clear", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(proto.ClearQueueResponse{
+			Messages: []proto.QueuedMessage{
+				{Prompt: "oldest"},
+				{
+					Prompt: "newest",
+					Attachments: []proto.Attachment{{
+						FileName: "notes.txt",
+						MimeType: "text/plain",
+					}},
+				},
+			},
+		}))
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+
+	drained, err := ws.AgentClearQueue("sess-1")
+	require.NoError(t, err)
+	require.Len(t, drained, 2)
+	require.Equal(t, []string{"oldest", "newest"},
+		[]string{drained[0].Prompt, drained[1].Prompt})
+	require.Equal(t, "notes.txt", drained[1].Attachments[0].FileName)
+}
+
 // TestProtoToMessageToolResult ensures that ToolResult metadata,
 // data, and MIME type survive the conversion from proto on the
 // client. Without these fields the TUI cannot render rich tool

@@ -17,6 +17,13 @@ type PopQueuedMessageResponse struct {
 	Message QueuedMessage `json:"message"`
 }
 
+// ClearQueueResponse carries the messages a queue clear removed, oldest to
+// newest, so the caller can hand them back to the user instead of losing
+// them.
+type ClearQueueResponse struct {
+	Messages []QueuedMessage `json:"messages"`
+}
+
 // AgentEventType represents the type of agent event.
 type AgentEventType string
 

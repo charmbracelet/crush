@@ -213,10 +213,11 @@ func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 	return w.app.AgentCoordinator.QueuedPromptsList(sessionID)
 }
 
-func (w *AppWorkspace) AgentClearQueue(sessionID string) {
-	if w.app.AgentCoordinator != nil {
-		w.app.AgentCoordinator.ClearQueue(sessionID)
+func (w *AppWorkspace) AgentClearQueue(sessionID string) ([]agent.QueuedMessage, error) {
+	if w.app.AgentCoordinator == nil {
+		return nil, nil
 	}
+	return w.app.AgentCoordinator.ClearQueue(sessionID), nil
 }
 
 // AgentPopQueuedMessage removes and returns the newest queued message for

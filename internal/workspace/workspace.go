@@ -153,7 +153,14 @@ type Workspace interface {
 	AgentReadyErr() error
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
-	AgentClearQueue(sessionID string)
+	// AgentClearQueue removes every prompt queued for the session and
+	// returns them, oldest to newest, so a caller can hand them back to
+	// the user instead of destroying them. An uninitialized agent is
+	// reported as an empty queue, not an error, matching
+	// AgentPopQueuedMessage. The error is reserved for a transport or
+	// backend failure, and because the clear is destructive it may be
+	// raised after the messages were already removed.
+	AgentClearQueue(sessionID string) ([]agent.QueuedMessage, error)
 	// AgentPopQueuedMessage removes the newest queued message for the
 	// session and returns it. The bool reports whether anything was
 	// queued; an uninitialized agent is reported as an empty queue, not

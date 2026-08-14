@@ -530,6 +530,9 @@
         },
         "/workspaces/{id}/agent/sessions/{sid}/prompts/clear": {
             "post": {
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "agent"
                 ],
@@ -552,7 +555,10 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.ClearQueueResponse"
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -3939,6 +3945,17 @@
                 },
                 "mime_type": {
                     "type": "string"
+                }
+            }
+        },
+        "proto.ClearQueueResponse": {
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/proto.QueuedMessage"
+                    }
                 }
             }
         },

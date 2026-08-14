@@ -161,7 +161,7 @@ type SessionAgent interface {
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
-	ClearQueue(sessionID string)
+	ClearQueue(sessionID string) []QueuedMessage
 	PopQueuedMessage(sessionID string) (QueuedMessage, bool)
 	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
@@ -496,17 +496,20 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 	}
 }
 
-// clearQueueAndNotify removes all queued prompts for the session and
-// publishes a terminal cancelled RunComplete for any that carried a RunID,
-// so callers waiting on those RunIDs (e.g. `crush run`) are not left
-// hanging when their queued prompt is discarded without running.
-func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
-	queued, ok := a.messageQueue.Get(sessionID)
-	a.messageQueue.Del(sessionID)
-	if !ok {
-		return
+// queuedMessageOf copies the frontend-safe content out of a queued call:
+// prompt text and attachments, with the attachment bytes cloned so the
+// caller owns them and can hand them to the editor without aliasing a
+// queued call the agent may still be holding.
+func queuedMessageOf(call SessionAgentCall) QueuedMessage {
+	attachments := make([]message.Attachment, len(call.Attachments))
+	for i, attachment := range call.Attachments {
+		attachments[i] = attachment
+		attachments[i].Content = append([]byte(nil), attachment.Content...)
 	}
-	a.publishCanceledQueueDrops(queued)
+	return QueuedMessage{
+		Prompt:      call.Prompt,
+		Attachments: attachments,
+	}
 }
 
 // PopQueuedMessage atomically removes the newest queued call for sessionID.
@@ -537,16 +540,8 @@ func (a *sessionAgent) PopQueuedMessage(sessionID string) (QueuedMessage, bool) 
 	}
 	mu.Unlock()
 
-	attachments := make([]message.Attachment, len(popped.Attachments))
-	for i, attachment := range popped.Attachments {
-		attachments[i] = attachment
-		attachments[i].Content = append([]byte(nil), attachment.Content...)
-	}
 	a.publishCanceledQueueDrops([]SessionAgentCall{popped})
-	return QueuedMessage{
-		Prompt:      popped.Prompt,
-		Attachments: attachments,
-	}, true
+	return queuedMessageOf(popped), true
 }
 
 // canceledBySeq reports whether an accepted handle or queued call with
@@ -2098,11 +2093,37 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	}
 }
 
-func (a *sessionAgent) ClearQueue(sessionID string) {
-	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Debug("Clearing queued prompts", "session_id", sessionID)
-		a.clearQueueAndNotify(sessionID)
+// ClearQueue atomically removes every prompt queued for sessionID and
+// returns what it removed, oldest to newest, so a caller that is taking
+// the queue off the agent (Escape in the TUI) can hand the prompts back
+// to the user instead of destroying them. The returned messages carry
+// their attachments and own the attachment bytes.
+//
+// The removal holds the per-session dispatch mutex, like PopQueuedMessage:
+// the returned content is acted upon, so the drain must be atomic against
+// the run handoff and the PrepareStep drain — a message reported as
+// drained must never also be started. Terminal events are published after
+// the lock is dropped, so a RunID-bearing prompt discarded without ever
+// running still emits exactly one cancelled RunComplete and leaves no
+// `crush run` caller hanging.
+func (a *sessionAgent) ClearQueue(sessionID string) []QueuedMessage {
+	mu := a.sessionMu(sessionID)
+	mu.Lock()
+	queued, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queued) == 0 {
+		mu.Unlock()
+		return nil
 	}
+	a.messageQueue.Del(sessionID)
+	mu.Unlock()
+
+	slog.Debug("Clearing queued prompts", "session_id", sessionID, "count", len(queued))
+	drained := make([]QueuedMessage, len(queued))
+	for i, call := range queued {
+		drained[i] = queuedMessageOf(call)
+	}
+	a.publishCanceledQueueDrops(queued)
+	return drained
 }
 
 // CancelAll is the shutdown path: the process or workspace is going away,
@@ -2134,6 +2155,8 @@ func (a *sessionAgent) CancelAll() {
 	}
 	for sessionID := range teardown {
 		a.Cancel(sessionID)
+		// The drained prompts are deliberately discarded: nothing is
+		// left to hand them back to at shutdown.
 		a.ClearQueue(sessionID)
 	}
 

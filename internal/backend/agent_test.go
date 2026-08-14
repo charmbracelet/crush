@@ -53,7 +53,7 @@ func (c *blockingCoordinator) IsBusy() bool                                     
 func (c *blockingCoordinator) IsSessionBusy(string) bool                         { return false }
 func (c *blockingCoordinator) QueuedPrompts(string) int                          { return 0 }
 func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
-func (c *blockingCoordinator) ClearQueue(string)                                 {}
+func (c *blockingCoordinator) ClearQueue(string) []agent.QueuedMessage           { return nil }
 func (c *blockingCoordinator) PopQueuedMessage(string) (agent.QueuedMessage, bool) {
 	return agent.QueuedMessage{}, false
 }
@@ -125,6 +125,52 @@ func TestPopQueuedMessageEmptyAndErrors(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 	require.Equal(t, agent.QueuedMessage{}, got)
+}
+
+type clearCoordinator struct {
+	agent.Coordinator
+	drained []agent.QueuedMessage
+}
+
+func (c *clearCoordinator) ClearQueue(string) []agent.QueuedMessage {
+	return c.drained
+}
+
+func TestClearQueue(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	want := []agent.QueuedMessage{
+		{Prompt: "oldest"},
+		{
+			Prompt: "newest",
+			Attachments: []message.Attachment{{
+				FileName: "notes.txt",
+				MimeType: "text/plain",
+				Content:  []byte("content"),
+			}},
+		},
+	}
+	ws := insertAgentWorkspace(t, b, &clearCoordinator{drained: want})
+
+	got, err := b.ClearQueue(ws.ID, "S1")
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestClearQueueEmptyAndErrors(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+
+	drained, err := b.ClearQueue("missing", "S1")
+	require.ErrorIs(t, err, ErrWorkspaceNotFound)
+	require.Nil(t, drained)
+
+	// No coordinator means no queue: an empty drain, not an error, so the
+	// same user action behaves identically in client/server mode.
+	ws := insertAgentWorkspace(t, b, nil)
+	drained, err = b.ClearQueue(ws.ID, "S1")
+	require.NoError(t, err)
+	require.Nil(t, drained)
 }
 
 func TestSendMessage_WorkspaceNotFound(t *testing.T) {

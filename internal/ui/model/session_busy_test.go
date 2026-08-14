@@ -87,7 +87,16 @@ func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) {
 	w.yolo = skip
 }
 
-func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
+// AgentClearQueue mirrors the production drain: it returns the messages it
+// removed, oldest to newest, so tests can assert what reaches the editor.
+func (w *countingWorkspace) AgentClearQueue(string) ([]agent.QueuedMessage, error) {
+	w.clearQueueCalls++
+	drained := w.queuedMessages
+	w.queuedMessages = nil
+	w.queued = nil
+	return drained, nil
+}
+
 func (w *countingWorkspace) AgentPopQueuedMessage(string) (agent.QueuedMessage, bool, error) {
 	w.popQueueCalls++
 	if w.popErr != nil {

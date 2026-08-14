@@ -26,9 +26,12 @@ func TestAppWorkspace_QueueOpsWithUninitializedAgent(t *testing.T) {
 	require.False(t, found)
 	require.Equal(t, agent.QueuedMessage{}, popped)
 
+	drained, err := ws.AgentClearQueue("session")
+	require.NoError(t, err)
+	require.Nil(t, drained)
+
 	require.Zero(t, ws.AgentQueuedPrompts("session"))
 	require.Empty(t, ws.AgentQueuedPromptsList("session"))
-	require.NotPanics(t, func() { ws.AgentClearQueue("session") })
 
 	// The uninitialized agent is still reported where the UI acts on it.
 	require.ErrorIs(t, ws.AgentReadyErr(), ErrAgentNotInitialized)

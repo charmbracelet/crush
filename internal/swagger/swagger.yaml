@@ -551,6 +551,13 @@ definitions:
       mime_type:
         type: string
     type: object
+  proto.ClearQueueResponse:
+    properties:
+      messages:
+        items:
+          $ref: '#/definitions/proto.QueuedMessage'
+        type: array
+    type: object
   proto.ConfigCompactRequest:
     properties:
       enabled:
@@ -1425,9 +1432,13 @@ paths:
         name: sid
         required: true
         type: string
+      produces:
+      - application/json
       responses:
         "200":
           description: OK
+          schema:
+            $ref: '#/definitions/proto.ClearQueueResponse'
         "404":
           description: Not Found
           schema:

@@ -415,7 +415,14 @@ func (m *UI) clearQueuedMessages() tea.Cmd {
 	ws := m.com.Workspace
 	sessionID := m.session.ID
 	return func() tea.Msg {
-		ws.AgentClearQueue(sessionID)
+		// The drained prompts have no consumer on this path: the
+		// commands-dialog clear is the deliberate discard. A failure is
+		// logged rather than dropped, since the clear may have removed
+		// them before the error was raised.
+		if _, err := ws.AgentClearQueue(sessionID); err != nil {
+			slog.Error("Failed to clear queued messages",
+				"session_id", sessionID, "error", err)
+		}
 		return promptQueueClearedMsg{forSession: sessionID}
 	}
 }

@@ -44,9 +44,9 @@ func (s *stubCoordinator) IsBusy() bool  { return false }
 func (s *stubCoordinator) IsSessionBusy(id string) bool {
 	return s.busy[id]
 }
-func (s *stubCoordinator) QueuedPrompts(string) int          { return 0 }
-func (s *stubCoordinator) QueuedPromptsList(string) []string { return nil }
-func (s *stubCoordinator) ClearQueue(string)                 {}
+func (s *stubCoordinator) QueuedPrompts(string) int                { return 0 }
+func (s *stubCoordinator) QueuedPromptsList(string) []string       { return nil }
+func (s *stubCoordinator) ClearQueue(string) []agent.QueuedMessage { return nil }
 func (s *stubCoordinator) PopQueuedMessage(string) (agent.QueuedMessage, bool) {
 	return agent.QueuedMessage{}, false
 }

@@ -70,6 +70,63 @@ func TestPopAgentSessionQueuedMessageEmptyAndError(t *testing.T) {
 	})
 }
 
+func TestClearAgentSessionQueuedPrompts(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/v1/workspaces/ws1/agent/sessions/sess1/prompts/clear", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(proto.ClearQueueResponse{
+			Messages: []proto.QueuedMessage{
+				{Prompt: "oldest"},
+				{
+					Prompt: "newest",
+					Attachments: []proto.Attachment{{
+						FileName: "notes.txt",
+						MimeType: "text/plain",
+						Content:  []byte("content"),
+					}},
+				},
+			},
+		}))
+	}))
+	defer srv.Close()
+
+	drained, err := captureClient(t, srv).ClearAgentSessionQueuedPrompts(context.Background(), "ws1", "sess1")
+	require.NoError(t, err)
+	require.Len(t, drained, 2)
+	require.Equal(t, []string{"oldest", "newest"},
+		[]string{drained[0].Prompt, drained[1].Prompt})
+	require.Equal(t, "notes.txt", drained[1].Attachments[0].FileName)
+	require.Equal(t, []byte("content"), drained[1].Attachments[0].Content)
+}
+
+func TestClearAgentSessionQueuedPromptsEmptyAndError(t *testing.T) {
+	t.Parallel()
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			require.NoError(t, json.NewEncoder(w).Encode(proto.ClearQueueResponse{}))
+		}))
+		defer srv.Close()
+
+		drained, err := captureClient(t, srv).ClearAgentSessionQueuedPrompts(context.Background(), "ws1", "sess1")
+		require.NoError(t, err)
+		require.Nil(t, drained, "an empty drain must match the local path's nil")
+	})
+
+	t.Run("server error", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		drained, err := captureClient(t, srv).ClearAgentSessionQueuedPrompts(context.Background(), "ws1", "sess1")
+		require.Error(t, err)
+		require.Nil(t, drained)
+	})
+}
+
 func TestSendEventAfterContextCancelIsIdempotent(t *testing.T) {
 	t.Parallel()
 

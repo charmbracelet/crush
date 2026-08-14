@@ -206,17 +206,22 @@ func (b *Backend) QueuedPrompts(workspaceID, sessionID string) (int, error) {
 	return ws.AgentCoordinator.QueuedPrompts(sessionID), nil
 }
 
-// ClearQueue clears the prompt queue for the session.
-func (b *Backend) ClearQueue(workspaceID, sessionID string) error {
+// ClearQueue clears the prompt queue for the session and returns the
+// messages it removed, oldest to newest, so a caller can restore them
+// instead of losing them. A workspace with no coordinator has no queue,
+// so it reports an empty drain rather than an error — the same shape
+// PopQueuedMessage uses.
+func (b *Backend) ClearQueue(workspaceID, sessionID string) ([]agent.QueuedMessage, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if ws.AgentCoordinator != nil {
-		ws.AgentCoordinator.ClearQueue(sessionID)
+	if ws.AgentCoordinator == nil {
+		return nil, nil
 	}
-	return nil
+
+	return ws.AgentCoordinator.ClearQueue(sessionID), nil
 }
 
 // QueuedPromptsList returns the list of queued prompt strings for a

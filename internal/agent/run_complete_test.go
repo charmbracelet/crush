@@ -387,13 +387,13 @@ func requireNoRunComplete(t *testing.T, ch <-chan pubsub.Event[notify.RunComplet
 }
 
 // TestClearQueue_QueuedRunIDPromptPublishesCancelledRunComplete proves the
-// terminal-event behavior end-to-end: a RunID-bearing prompt discarded
-// from the queue by the explicit ClearQueue path (which routes through
-// clearQueueAndNotify -> publishCanceledQueueDrops) must emit exactly one
-// cancelled RunComplete on the broker for its RunID. A queued prompt
-// without a RunID is dropped silently. This is the coverage the earlier
-// drain test lacked: it asserted the returned bookkeeping slice, not the
-// published event a `crush run` caller awaits.
+// terminal-event behavior end-to-end: a RunID-bearing prompt removed from
+// the queue by the explicit ClearQueue path (which routes through
+// publishCanceledQueueDrops) must emit exactly one cancelled RunComplete
+// on the broker for its RunID. A queued prompt without a RunID is dropped
+// silently. This is the coverage the earlier drain test lacked: it
+// asserted the returned bookkeeping slice, not the published event a
+// `crush run` caller awaits.
 func TestClearQueue_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
 	t.Parallel()
 
@@ -417,12 +417,111 @@ func TestClearQueue_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T)
 		{SessionID: sessionID, RunID: "run-queued", Prompt: "queued", acceptSeq: 2},
 	})
 
-	a.ClearQueue(sessionID)
+	drained := a.ClearQueue(sessionID)
+	require.Len(t, drained, 2)
+	require.Equal(t, []string{"no-runid", "queued"},
+		[]string{drained[0].Prompt, drained[1].Prompt},
+		"the drain must report every removed prompt, RunID-bearing or not")
 
 	requireSingleCancelledRunComplete(t, ch, sessionID, "run-queued")
 
 	_, ok := a.messageQueue.Get(sessionID)
 	require.False(t, ok, "ClearQueue must clear the queue")
+}
+
+// TestClearQueue_DrainsInOrderWithOwnedAttachments pins the
+// drain-and-return contract the Escape gesture depends on: the clear
+// reports every message it removed, oldest to newest, with attachments
+// whose bytes the caller owns, and it deletes the queue map entry. An
+// empty queue drains to nothing.
+func TestClearQueue_DrainsInOrderWithOwnedAttachments(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+
+	const sessionID = "clear-drain"
+	content := []byte("oldest content")
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{
+			SessionID: sessionID,
+			Prompt:    "oldest",
+			Attachments: []message.Attachment{{
+				FilePath: "/tmp/oldest.txt",
+				FileName: "oldest.txt",
+				MimeType: "text/plain",
+				Content:  content,
+			}},
+		},
+		{SessionID: sessionID, Prompt: "middle"},
+		{SessionID: sessionID, Prompt: "newest"},
+	})
+
+	drained := a.ClearQueue(sessionID)
+	require.Len(t, drained, 3)
+	require.Equal(t, []string{"oldest", "middle", "newest"},
+		[]string{drained[0].Prompt, drained[1].Prompt, drained[2].Prompt},
+		"the drain must preserve queue order, oldest to newest")
+	require.Equal(t, []message.Attachment{{
+		FilePath: "/tmp/oldest.txt",
+		FileName: "oldest.txt",
+		MimeType: "text/plain",
+		Content:  []byte("oldest content"),
+	}}, drained[0].Attachments)
+
+	content[0] = 'X'
+	require.Equal(t, []byte("oldest content"), drained[0].Attachments[0].Content,
+		"the drained attachment content must not alias the queued call")
+
+	_, ok := a.messageQueue.Get(sessionID)
+	require.False(t, ok, "the drain must delete the queue map entry")
+	require.Nil(t, a.ClearQueue(sessionID), "draining an empty queue returns nothing")
+}
+
+// TestClearQueue_HoldsSessionDispatchMutex pins the synchronization the
+// returned payload requires: the drain removes messages the caller then
+// acts on, so it must be atomic against the run handoff and the
+// PrepareStep drain — a message reported as drained can never also have
+// been started. The pre-drain implementation returned nothing and skipped
+// the mutex, which was unobservable only because the content was thrown
+// away.
+func TestClearQueue_HoldsSessionDispatchMutex(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+
+	const sessionID = "clear-dispatch-mutex"
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{SessionID: sessionID, Prompt: "queued"},
+	})
+
+	mu := a.sessionMu(sessionID)
+	mu.Lock()
+	done := make(chan []QueuedMessage, 1)
+	go func() { done <- a.ClearQueue(sessionID) }()
+
+	select {
+	case <-done:
+		mu.Unlock()
+		t.Fatal("ClearQueue drained the queue without the session dispatch mutex")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	mu.Unlock()
+	select {
+	case drained := <-done:
+		require.Len(t, drained, 1)
+		require.Equal(t, "queued", drained[0].Prompt)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ClearQueue never completed after the dispatch mutex was released")
+	}
 }
 
 // TestCancel_PreservesQueuedPrompts is the regression test for issue

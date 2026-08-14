@@ -307,8 +307,8 @@ func (w *ClientWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 	return prompts
 }
 
-func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
-	_ = w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
+func (w *ClientWorkspace) AgentClearQueue(sessionID string) ([]agent.QueuedMessage, error) {
+	return w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
 }
 
 func (w *ClientWorkspace) AgentPopQueuedMessage(sessionID string) (agent.QueuedMessage, bool, error) {

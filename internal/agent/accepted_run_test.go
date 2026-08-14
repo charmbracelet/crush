@@ -216,16 +216,3 @@ func TestPersistCanceledTurn_SucceedsWithCanceledContext(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, msgs, 2)
 }
-
-func TestClearPendingCancel(t *testing.T) {
-	t.Parallel()
-	sa, _ := newCancelTestAgent(t)
-
-	accept := sa.BeginAccepted("sid")
-	defer accept.Close()
-	sa.Cancel("sid")
-	require.True(t, sa.hasPendingCancel("sid"))
-
-	sa.clearPendingCancel("sid")
-	require.False(t, sa.hasPendingCancel("sid"))
-}

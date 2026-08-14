@@ -549,16 +549,6 @@ func (a *sessionAgent) PopQueuedMessage(sessionID string) (QueuedMessage, bool) 
 	}, true
 }
 
-// clearPendingCancel removes any pending-cancel mark for sessionID. It
-// takes the per-session dispatch lock so it is ordered against Cancel
-// and the dispatch handoff.
-func (a *sessionAgent) clearPendingCancel(sessionID string) {
-	mu := a.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
-	a.cancelMark.Del(sessionID)
-}
-
 // canceledBySeq reports whether an accepted handle or queued call with
 // the given accept sequence is covered by a pending cancel for the
 // session. Callers must hold the session's dispatch mutex. A tracked

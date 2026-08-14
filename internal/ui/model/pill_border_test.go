@@ -201,6 +201,99 @@ func TestPillsRowEscapeQueueHint(t *testing.T) {
 	}
 }
 
+func TestPillsRowWrapsBusyEscapeHintBelowPills(t *testing.T) {
+	u := newTestUI()
+	u.width = 120
+	u.session = &session.Session{
+		ID: "s1",
+		Todos: []session.Todo{{
+			Content: "Short task",
+			Status:  session.TodoStatusInProgress,
+		}},
+	}
+	u.promptQueue = 3
+	u.agentBusyCache.set(true)
+	u.updateLayoutAndSize()
+	u.renderPills()
+
+	lines := strings.Split(ansi.Strip(u.pillsView), "\n")
+	ctrlLine := lineContaining(lines, "ctrl+t")
+	popLine := lineContaining(lines, "shift/alt+up")
+	escapeLine := lineContaining(lines, "esc esc")
+	if ctrlLine < 0 || popLine < 0 || escapeLine < 0 {
+		t.Fatalf("expected all queue hints in pills view:\n%s", ansi.Strip(u.pillsView))
+	}
+	if escapeLine <= ctrlLine || escapeLine <= popLine {
+		t.Fatalf("escape hint line = %d, want below ctrl+t line %d and pop line %d:\n%s",
+			escapeLine, ctrlLine, popLine, ansi.Strip(u.pillsView))
+	}
+}
+
+func TestPillsRowWrappedHeightMatchesRenderedView(t *testing.T) {
+	for _, width := range []int{60, 80, 100, 120, 140} {
+		for _, withTodo := range []bool{false, true} {
+			for _, busy := range []bool{false, true} {
+				for _, expanded := range []bool{false, true} {
+					name := fmt.Sprintf("width=%d/todo=%t/busy=%t/expanded=%t",
+						width, withTodo, busy, expanded)
+					t.Run(name, func(t *testing.T) {
+						u := newTestUI()
+						u.width = width
+						u.session = &session.Session{ID: "s1"}
+						if withTodo {
+							u.session.Todos = []session.Todo{{
+								Content: "A task long enough to consume the available pill row",
+								Status:  session.TodoStatusInProgress,
+							}}
+						}
+						u.promptQueueItems = []string{"first", "second", "third"}
+						u.promptQueue = len(u.promptQueueItems)
+						u.agentBusyCache.set(busy)
+						u.pillsExpanded = expanded
+						u.focusedPillSection = pillSectionQueue
+						u.updateLayoutAndSize()
+						u.renderPills()
+
+						view := ansi.Strip(u.pillsView)
+						lines := strings.Split(view, "\n")
+						if got, want := len(lines), u.layout.pills.Dy(); got != want {
+							t.Fatalf("rendered line count = %d, pills height = %d:\n%s", got, want, view)
+						}
+						for i, line := range lines {
+							if got := ansi.StringWidth(line); got > u.layout.pills.Dx() {
+								t.Fatalf("line %d width = %d, pills width = %d: %q",
+									i, got, u.layout.pills.Dx(), line)
+							}
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestPillsRowWideIdleQueueDoesNotWrap(t *testing.T) {
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1"}
+	u.promptQueue = 3
+	u.updateLayoutAndSize()
+	u.renderPills()
+
+	if got, want := len(strings.Split(ansi.Strip(u.pillsView), "\n")), pillHeightWithBorder; got != want {
+		t.Fatalf("rendered line count = %d, want %d without wrapping:\n%s",
+			got, want, ansi.Strip(u.pillsView))
+	}
+}
+
+func lineContaining(lines []string, text string) int {
+	for i, line := range lines {
+		if strings.Contains(line, text) {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestExpandedQueueListEscapesControlsWithoutHidingItems(t *testing.T) {
 	u := newTestUI()
 	u.session = &session.Session{ID: "s1"}

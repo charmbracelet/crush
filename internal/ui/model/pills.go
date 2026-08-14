@@ -141,6 +141,64 @@ func pillHelpHint(t *styles.Styles, key, desc string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Center, keyView, " ", descView)
 }
 
+func packPillHints(hints []string, firstBudget, contentWidth int) []string {
+	lines := []string{""}
+	budget := max(firstBudget, 0)
+	for _, hint := range hints {
+		line := lines[len(lines)-1]
+		separatorWidth := 0
+		if line != "" {
+			separatorWidth = 1
+		}
+		if ansi.StringWidth(line)+separatorWidth+ansi.StringWidth(hint) <= budget {
+			if line == "" {
+				lines[len(lines)-1] = hint
+			} else {
+				lines[len(lines)-1] = line + " " + hint
+			}
+			continue
+		}
+
+		lines = append(lines, hint)
+		budget = max(contentWidth, 0)
+	}
+	return lines
+}
+
+func (m *UI) pillsRowParts(t *styles.Styles) (string, []string) {
+	hasIncomplete := hasIncompleteTodos(m.session.Todos)
+	hasQueue := m.promptQueue > 0
+
+	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
+	if m.todoIsSpinning {
+		inProgressIcon = m.todoSpinner.View()
+	}
+
+	var pills []string
+	if hasIncomplete {
+		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
+	}
+	if hasQueue {
+		pills = append(pills, queuePill(m.promptQueue, t))
+	}
+
+	helpDesc := "open"
+	if m.pillsExpanded {
+		helpDesc = "close"
+	}
+	hints := []string{pillHelpHint(t, "ctrl+t", helpDesc)}
+	if hasQueue {
+		hints = append(hints, pillHelpHint(t, "shift/alt+up", "pop message"))
+		escKey, escDesc := "esc", "pop all messages"
+		if m.isAgentBusy() {
+			escKey, escDesc = "esc esc", "cancel + pop all messages"
+		}
+		hints = append(hints, pillHelpHint(t, escKey, escDesc))
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, pills...), hints
+}
+
 // pillsHeightReasonableTerminalHeight is the minimum terminal height at which
 // we auto-expand pills when there are incomplete todos.
 const pillsHeightReasonableTerminalHeight = 40
@@ -259,7 +317,7 @@ func (m *UI) effectiveFocusedSection() pillSection {
 }
 
 // pillsAreaHeight calculates the total height needed for the pills area.
-func (m *UI) pillsAreaHeight() int {
+func (m *UI) pillsAreaHeight(width int) int {
 	if !m.hasSession() {
 		return 0
 	}
@@ -275,7 +333,12 @@ func (m *UI) pillsAreaHeight() int {
 		return 0
 	}
 
-	pillsAreaHeight := pillHeightWithBorder
+	const paddingLeft = 3
+	contentWidth := max(width-paddingLeft, 0)
+	pillsRow, hints := m.pillsRowParts(m.com.Styles)
+	firstBudget := max(contentWidth-lipgloss.Width(pillsRow)-1, 0)
+	hintLines := packPillHints(hints, firstBudget, contentWidth)
+	pillsAreaHeight := pillHeightWithBorder + len(hintLines) - 1
 	if m.pillsExpanded {
 		switch m.effectiveFocusedSection() {
 		case pillSectionTodos:
@@ -326,14 +389,7 @@ func (m *UI) renderPills() {
 	if m.todoIsSpinning {
 		inProgressIcon = m.todoSpinner.View()
 	}
-
-	var pills []string
-	if hasIncomplete {
-		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
-	}
-	if hasQueue {
-		pills = append(pills, queuePill(m.promptQueue, t))
-	}
+	pillsRow, hints := m.pillsRowParts(t)
 
 	var expandedList string
 	if m.pillsExpanded {
@@ -349,34 +405,21 @@ func (m *UI) renderPills() {
 		}
 	}
 
-	if len(pills) == 0 {
+	if pillsRow == "" {
 		return
 	}
 
-	pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
-
-	helpDesc := "open"
-	if m.pillsExpanded {
-		helpDesc = "close"
+	firstBudget := max(contentWidth-lipgloss.Width(pillsRow)-1, 0)
+	hintLines := packPillHints(hints, firstBudget, contentWidth)
+	firstLine := pillsRow
+	if hintLines[0] != "" {
+		firstLine = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", hintLines[0])
 	}
-	helpHint := pillHelpHint(t, "ctrl+t", helpDesc)
-	if hasQueue {
-		// Advertise the queued-message pop while the queue exists: the pills
-		// row is visible exactly when the binding is usable.
-		popHint := pillHelpHint(t, "shift/alt+up", "pop message")
-		helpHint = lipgloss.JoinHorizontal(lipgloss.Center, helpHint, " ", popHint)
-		// esc moves the whole queue into the input field. While the agent
-		// is busy that is the confirming press of the double-press cancel
-		// gesture, which stops the turn as well, so the hint spells out
-		// both halves rather than promising a single press will do it.
-		escKey, escDesc := "esc", "pop all messages"
-		if m.isAgentBusy() {
-			escKey, escDesc = "esc esc", "cancel + pop all messages"
-		}
-		helpHint = lipgloss.JoinHorizontal(lipgloss.Center, helpHint, " ",
-			pillHelpHint(t, escKey, escDesc))
+	pillsRow = firstLine
+	if len(hintLines) > 1 {
+		pillsRow = lipgloss.JoinVertical(lipgloss.Left,
+			append([]string{pillsRow}, hintLines[1:]...)...)
 	}
-	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
 
 	pillsArea := pillsRow
 	if expandedList != "" {

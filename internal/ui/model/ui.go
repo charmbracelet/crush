@@ -892,7 +892,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
-			prevPillsHeight := m.pillsAreaHeight()
+			prevPillsHeight := m.pillsAreaHeight(m.layout.main.Dx())
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
@@ -905,7 +905,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// When the footprint is unchanged we still re-render the pill
 			// content so status changes (e.g. the in-progress spinner)
 			// show up.
-			if m.pillsAreaHeight() != prevPillsHeight {
+			if m.pillsAreaHeight(m.layout.main.Dx()) != prevPillsHeight {
 				m.updateLayoutAndSize()
 			} else {
 				m.renderPills()
@@ -3688,7 +3688,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.header = headerRect
-			pillsHeight := m.pillsAreaHeight()
+			pillsHeight := m.pillsAreaHeight(mainRect.Dx())
 			if pillsHeight > 0 {
 				pillsHeight = min(pillsHeight, mainRect.Dy())
 				var chatRect, pillsRect image.Rectangle
@@ -3728,7 +3728,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.sidebar = sideRect
-			pillsHeight := m.pillsAreaHeight()
+			pillsHeight := m.pillsAreaHeight(mainRect.Dx())
 			if pillsHeight > 0 {
 				pillsHeight = min(pillsHeight, mainRect.Dy())
 				var chatRect, pillsRect image.Rectangle

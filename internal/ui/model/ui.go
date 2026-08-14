@@ -349,13 +349,15 @@ type UI struct {
 	// (or impatience over an HTTP round-trip) would pop several messages
 	// and only the last result would survive in the editor.
 	queuedPopInFlight bool
-	// queuedPopOrphans holds popped queued messages whose result landed
-	// after the user had switched away from the session they came from,
-	// keyed by that session. The pop already removed the message at the
-	// agent layer and queued prompts are not persisted anywhere, so
-	// dropping the result would destroy the text: it is parked here and
-	// restored by restoreParkedPop the next time that session is loaded.
-	queuedPopOrphans map[string]agent.QueuedMessage
+	// queuedRestoreOrphans holds queued messages a pop or an Escape drain
+	// removed, whose result landed after the user had switched away from
+	// the session they came from, keyed by that session. They are already
+	// out of the agent queue and queued prompts are not persisted
+	// anywhere, so dropping the result would destroy the text: it is
+	// parked here and restored by restoreParkedQueuedMessages the next
+	// time that session is loaded. A drain parks a whole batch, and a
+	// session can accumulate several before the user returns.
+	queuedRestoreOrphans map[string][]agent.QueuedMessage
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
@@ -811,9 +813,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
-		// A queued message popped just before the user switched away from
-		// this session was parked rather than dropped; hand it back now.
-		if cmd := m.restoreParkedPop(); cmd != nil {
+		// Queued messages a pop or an Escape drain removed just before the
+		// user switched away from this session were parked rather than
+		// dropped; hand them back now.
+		if cmd := m.restoreParkedQueuedMessages(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		m.updateLayoutAndSize()
@@ -869,9 +872,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.DeletedEvent {
-			// The session can never be loaded again, so a message parked
+			// The session can never be loaded again, so messages parked
 			// for it can never be restored.
-			delete(m.queuedPopOrphans, msg.Payload.ID)
+			delete(m.queuedRestoreOrphans, msg.Payload.ID)
 			if m.session != nil && m.session.ID == msg.Payload.ID {
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -1962,9 +1965,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionClearQueue:
-		// The clear is off-thread; the memoized queue is emptied when its
-		// promptQueueClearedMsg lands.
-		if cmd := m.clearQueuedMessages(); cmd != nil {
+		// This entry is the destructive discard: the drained prompts are
+		// thrown away rather than handed back to the editor, which is what
+		// both Escape paths do. It runs off-thread; the memoized queue is
+		// emptied when its promptQueueClearedMsg lands.
+		if cmd := m.clearQueuedMessages(false); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -2524,30 +2529,33 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// Handle the cancel key: it stops the agent while it is busy, and once
-	// the agent has stopped it discards what is still queued.
+	// Handle the cancel key: it stops the agent while it is busy, and it
+	// takes the queue off the agent, moving the queued prompts into the
+	// input field rather than destroying them.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
 		if m.isAgentBusy() {
+			// The double-press machine lives in cancelAgent, which drains
+			// on the confirming press: the arming press must stay
+			// queue-neutral.
 			if cmd := m.cancelAgent(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return tea.Batch(cmds...)
 		}
-		// Idle with queued prompts: cancellation is turn-scoped, so
-		// stopping the agent leaves the queue intact and esc becomes the
-		// bulk discard for it. The memoized count gates this — the same
-		// value that gates the queue pill and the pop — so the key only
-		// acts when the UI is showing something to discard. The clear is
-		// an HTTP round-trip in client/server mode, so it runs as a cmd
-		// and the pill empties when promptQueueClearedMsg lands. Nothing
-		// here arms isCanceling or starts the cancel timer: there is no
-		// turn to stop.
+		// Idle with queued prompts: there is no turn to stop, so a single
+		// press drains. The memoized count gates it — the same value that
+		// gates the queue pill and the pop — so the key only acts when the
+		// UI is showing a queue. The drain is an HTTP round-trip in
+		// client/server mode, so it runs as a cmd: the pill empties and
+		// the prompts reach the editor when promptQueueClearedMsg lands.
+		// Nothing here arms isCanceling or starts the cancel timer, and
+		// nothing needs confirming, because no text is destroyed.
 		//
 		// Escape keeps its more local meanings: it still closes the
 		// completions popup and still leaves prompt-history navigation
 		// (which restores the draft), both handled further down.
 		if m.promptQueue > 0 && !m.completionsOpen && !m.isBrowsingHistory() {
-			if cmd := m.clearQueuedMessages(); cmd != nil {
+			if cmd := m.clearQueuedMessages(true); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return tea.Batch(cmds...)
@@ -2678,10 +2686,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.closeCompletions()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 			case key.Matches(msg, m.keyMap.Editor.PopQueuedMessage):
-				if m.textarea.Value() != "" {
-					cmds = append(cmds, util.ReportWarn("Can't pop queued message: input field is not empty."))
-					break
-				}
+				// Unconditional: the popped prompt is prepended above
+				// whatever the editor holds, so a draft is never at risk
+				// and the binding can be pressed repeatedly to walk the
+				// queue back into the input field. popQueuedMessage keeps
+				// the single-flight and empty-queue gates.
 				if cmd := m.popQueuedMessage(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -4312,9 +4321,12 @@ func cancelTimerCmd() tea.Cmd {
 	})
 }
 
-// cancelAgent handles the cancel key press. The first press sets isCanceling to true
-// and starts a timer. The second press (before the timer expires) actually
-// cancels the agent.
+// cancelAgent handles the cancel key press. The first press sets isCanceling
+// to true and starts a timer; it is queue-neutral. The second press (before
+// the timer expires) cancels the agent and also takes the queue off it,
+// moving the queued prompts into the input field: one esc gesture both stops
+// the work and hands the queue back, and cancellation itself is turn-scoped,
+// so the queue would otherwise be left ownerless.
 func (m *UI) cancelAgent() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -4344,6 +4356,13 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.todoIsSpinning = false
 		m.invalidateBusyCaches()
 		m.renderPills()
+		// The drain is an HTTP round-trip in client/server mode, so it
+		// runs as a cmd: the prompts reach the editor and the pill empties
+		// when promptQueueClearedMsg lands. The memoized count gates it,
+		// the same value that gates the pill and the pop.
+		if m.promptQueue > 0 {
+			return tea.Batch(m.dispatchBusyRefresh(), m.clearQueuedMessages(true))
+		}
 		return m.dispatchBusyRefresh()
 	}
 

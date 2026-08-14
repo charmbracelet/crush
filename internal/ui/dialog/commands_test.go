@@ -31,11 +31,11 @@ func hasCommandAction(items []*CommandItem, action Action) bool {
 	return false
 }
 
-// TestDefaultCommandsClearQueueRequiresQueue pins the only bulk queue-discard
-// path the TUI has: escape is turn-scoped and preserves the queue, and
-// shift+up pops one message at a time into the editor, so the commands dialog
-// must offer a clear whenever prompts are queued — and must not offer it when
-// there is nothing to clear.
+// TestDefaultCommandsClearQueueRequiresQueue pins the only queue-discard path
+// the TUI has: esc moves the whole queue into the input field and shift+up
+// moves one message at a time, so this entry is how a queue is thrown away
+// instead of pasted back. It must be offered whenever prompts are queued —
+// and never when there is nothing to discard.
 func TestDefaultCommandsClearQueueRequiresQueue(t *testing.T) {
 	t.Parallel()
 

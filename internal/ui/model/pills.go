@@ -361,13 +361,16 @@ func (m *UI) renderPills() {
 		// row is visible exactly when the binding is usable.
 		popHint := pillHelpHint(t, "shift/alt+up", "pop message")
 		helpHint = lipgloss.JoinHorizontal(lipgloss.Center, helpHint, " ", popHint)
-		// esc clears the queue only once the agent has stopped; while it
-		// is busy esc arms and carries out cancellation instead, so the
-		// hint would be advertising a binding that does something else.
-		if !m.isAgentBusy() {
-			clearHint := pillHelpHint(t, "esc", "clear the queue")
-			helpHint = lipgloss.JoinHorizontal(lipgloss.Center, helpHint, " ", clearHint)
+		// esc moves the whole queue into the input field. While the agent
+		// is busy that is the confirming press of the double-press cancel
+		// gesture, which stops the turn as well, so the hint spells out
+		// both halves rather than promising a single press will do it.
+		escKey, escDesc := "esc", "pop all messages"
+		if m.isAgentBusy() {
+			escKey, escDesc = "esc esc", "cancel + pop all messages"
 		}
+		helpHint = lipgloss.JoinHorizontal(lipgloss.Center, helpHint, " ",
+			pillHelpHint(t, escKey, escDesc))
 	}
 	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
 

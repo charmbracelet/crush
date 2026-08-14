@@ -113,10 +113,19 @@ type queuedMessagePoppedMsg struct {
 	err        error
 }
 
-// promptQueueClearedMsg reports that an off-thread queue clear finished for
+// promptQueueClearedMsg reports that an off-thread queue drain finished for
 // the session, so the memoized queue can be emptied and re-fetched.
 type promptQueueClearedMsg struct {
 	forSession string
+	// messages is what the drain removed, oldest to newest. The drain is
+	// destructive at the agent layer and queued prompts live nowhere else,
+	// so nothing on the apply path may drop this unless restore is false.
+	messages []agent.QueuedMessage
+	// restore reports whether the drained prompts belong back in the input
+	// field (both Escape paths) or are a deliberate discard (the
+	// commands-dialog entry).
+	restore bool
+	err     error
 }
 
 // agentModelChangedMsg reports that the coordinator's model was updated
@@ -376,17 +385,11 @@ func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 		// session to the current one.
 		slog.Warn("Parking popped queued message after session switch",
 			"for_session", msg.forSession, "current_session", m.currentSessionID())
-		if m.queuedPopOrphans == nil {
-			m.queuedPopOrphans = make(map[string]agent.QueuedMessage, 1)
-		}
-		m.queuedPopOrphans[msg.forSession] = msg.message
-		return []tea.Cmd{util.ReportWarn("Session changed: the popped message will be restored when you return to that session.")}
+		m.parkQueuedMessages(msg.forSession, []agent.QueuedMessage{msg.message})
+		return []tea.Cmd{util.ReportWarn(parkedQueuedMessagesBanner(1))}
 	}
 
-	cmds, appended := m.restorePoppedMessage(msg.message)
-	if appended {
-		cmds = append(cmds, util.ReportWarn("Input field was not empty: appended the popped queued message below your text."))
-	}
+	cmds := m.restoreQueuedMessages([]agent.QueuedMessage{msg.message})
 
 	m.invalidatePromptQueue()
 	if len(m.promptQueueItems) > 0 {
@@ -402,41 +405,70 @@ func (m *UI) applyQueuedMessagePop(msg queuedMessagePoppedMsg) []tea.Cmd {
 	return cmds
 }
 
-// clearQueuedMessages discards every prompt queued for the session off the
+// clearQueuedMessages drains every prompt queued for the session off the
 // Update goroutine (the workspace call is a synchronous HTTP round-trip in
-// client/server mode), delivering a promptQueueClearedMsg. The memoized
-// queue is deliberately not zeroed here: no caller needs an optimistic
-// value, and emptying the cache before the clear lands would let a queue
-// fetch dispatched during the round-trip repopulate the pill.
-func (m *UI) clearQueuedMessages() tea.Cmd {
+// client/server mode), delivering a promptQueueClearedMsg that carries what
+// the drain removed. restore says whether those prompts belong back in the
+// input field (both Escape paths) or are a deliberate discard (the
+// commands-dialog entry). The memoized queue is deliberately not zeroed
+// here: no caller needs an optimistic value, and emptying the cache before
+// the drain lands would let a queue fetch dispatched during the round-trip
+// repopulate the pill.
+func (m *UI) clearQueuedMessages(restore bool) tea.Cmd {
 	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
 	ws := m.com.Workspace
 	sessionID := m.session.ID
 	return func() tea.Msg {
-		// The drained prompts have no consumer on this path: the
-		// commands-dialog clear is the deliberate discard. A failure is
-		// logged rather than dropped, since the clear may have removed
-		// them before the error was raised.
-		if _, err := ws.AgentClearQueue(sessionID); err != nil {
-			slog.Error("Failed to clear queued messages",
-				"session_id", sessionID, "error", err)
+		messages, err := ws.AgentClearQueue(sessionID)
+		return promptQueueClearedMsg{
+			forSession: sessionID,
+			messages:   messages,
+			restore:    restore,
+			err:        err,
 		}
-		return promptQueueClearedMsg{forSession: sessionID}
 	}
 }
 
-// applyPromptQueueCleared empties the memoized queue once a clear has landed
-// and supersedes queue reads started before it. Runs on the Update
+// applyPromptQueueCleared empties the memoized queue once a drain has
+// landed, hands the drained prompts to the editor when the drain was a
+// restore, and supersedes queue reads started before it. Runs on the Update
 // goroutine.
 func (m *UI) applyPromptQueueCleared(msg promptQueueClearedMsg) []tea.Cmd {
+	if msg.err != nil {
+		// The failure may have been raised after the agent already removed
+		// the messages (response read/decode failure, dropped connection),
+		// so from here the queue state is unknown: re-fetch it instead of
+		// serving a count that may be too high, and do not promise the
+		// user their prompts are still queued.
+		slog.Error("Failed to clear queued messages",
+			"session_id", msg.forSession, "error", msg.err)
+		m.invalidatePromptQueue()
+		cmds := []tea.Cmd{util.ReportError(fmt.Errorf("%w (the queue may have been emptied anyway)", msg.err))}
+		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return cmds
+	}
 	if msg.forSession != m.currentSessionID() {
-		// The clear raced a session switch, so it says nothing about the
+		// The drain raced a session switch, so it says nothing about the
 		// queue now on screen; that session's own reads stay authoritative.
+		if msg.restore && len(msg.messages) > 0 {
+			// The prompts are already out of that session's queue and
+			// cannot be put back, and they were written for it rather
+			// than for the session now loaded: park the batch and hand it
+			// back on the next load of that session. A discard has
+			// nothing to park — dropping the prompts was the point.
+			slog.Warn("Parking drained queued messages after session switch",
+				"for_session", msg.forSession, "current_session", m.currentSessionID(),
+				"messages", len(msg.messages))
+			m.parkQueuedMessages(msg.forSession, msg.messages)
+			return []tea.Cmd{util.ReportWarn(parkedQueuedMessagesBanner(len(msg.messages)))}
+		}
 		return nil
 	}
-	// Bump the generation so a fetch started before the clear cannot land
+	// Bump the generation so a fetch started before the drain cannot land
 	// and repopulate the pill it just emptied.
 	m.invalidatePromptQueue()
 	hadQueue := m.promptQueue > 0 || len(m.promptQueueItems) > 0
@@ -447,63 +479,87 @@ func (m *UI) applyPromptQueueCleared(msg promptQueueClearedMsg) []tea.Cmd {
 		m.updateLayoutAndSize()
 	}
 
-	cmds := []tea.Cmd{util.ReportInfo("Queued messages cleared.")}
+	var cmds []tea.Cmd
+	switch {
+	case !msg.restore:
+		cmds = append(cmds, util.ReportInfo("Queued messages cleared."))
+	case len(msg.messages) == 0:
+		// The memoized count that let the press through was wrong: the
+		// agent dequeued the last prompt, or another client emptied the
+		// queue, while the drain was in flight.
+		cmds = append(cmds, util.ReportInfo(noQueuedMessages))
+	default:
+		cmds = append(m.restoreQueuedMessages(msg.messages),
+			util.ReportInfo("Queued messages moved to the input field."))
+	}
 	if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	return cmds
 }
 
-// restorePoppedMessage puts a popped queued message back into the editor and
-// reports whether it had to be appended below existing text. Shared by the
-// pop apply path and the parked-restore path, both of which run after the
-// message has already left the agent queue: it can be neither refused nor
-// re-queued, so nothing here may drop it.
+// restoreQueuedMessages puts queued prompts that have left the agent queue
+// back into the editor, in front of whatever it already holds. Shared by the
+// pop apply path, the Escape drain and the parked restore, all of which run
+// after the messages were removed: they can be neither refused nor
+// re-queued, so nothing here may drop text.
 //
-// The key handler refuses to pop while the editor holds text, but that check
-// ran before the round-trip (an HTTP POST in client/server mode), and a
-// parked message is restored into whatever the editor holds on session load.
-// Either way an existing draft must survive, so the prompt is appended below
-// it rather than overwriting it.
-func (m *UI) restorePoppedMessage(queued agent.QueuedMessage) (cmds []tea.Cmd, appended bool) {
+// The prompts go ahead of the draft, oldest first, separated by blank lines.
+// Repeated pops then read in the order the prompts would have run in, a
+// blank line keeps separately queued prompts readable as distinct paragraphs
+// instead of welding two lines into one, and the user's own draft stays last,
+// where the cursor is left.
+func (m *UI) restoreQueuedMessages(queued []agent.QueuedMessage) []tea.Cmd {
 	prevHeight := m.textarea.Height()
-	if draft := m.textarea.Value(); draft != "" {
-		appended = true
-		m.textarea.MoveToEnd()
-		if !strings.HasSuffix(draft, "\n") {
-			m.textarea.InsertRune('\n')
+	parts := make([]string, 0, len(queued)+1)
+	for _, restored := range queued {
+		if restored.Prompt != "" {
+			parts = append(parts, restored.Prompt)
 		}
-		m.textarea.InsertString(queued.Prompt)
-		m.textarea.MoveToEnd()
-		// Bang mode is not re-synced: the "!" prefix that drives it belongs
-		// to the draft, which is unchanged, and the restored prompt is no
-		// longer at the start of the value.
-	} else {
-		m.textarea.SetValue(queued.Prompt)
+	}
+	// With no prompt text to prepend (a submission that carried only
+	// attachments) the buffer is left exactly as it is: rewriting it would
+	// disengage bang mode with no "!" to materialize in its place.
+	if len(parts) > 0 {
+		draft := m.textarea.Value()
+		// Bang mode hides the leading "!" from the textarea value, so a
+		// prompt prepended in front of a bang draft would silently be
+		// folded into the shell command. Materialize the "!" so the shell
+		// intent stays visible; syncBangModeFromTextarea then leaves bang
+		// mode, since the value no longer starts with it. A bare "!"
+		// carries no content and is dropped along with the mode.
+		if m.bangMode && draft != "" {
+			draft = "!" + draft
+		}
+		if draft != "" {
+			parts = append(parts, draft)
+		}
+		m.textarea.SetValue(strings.Join(parts, "\n\n"))
 		m.syncBangModeFromTextarea()
 		m.textarea.MoveToEnd()
+		m.promptHistory.index = -1
+		m.promptHistory.draft = m.textarea.Value()
 	}
-	m.promptHistory.index = -1
-	m.promptHistory.draft = m.textarea.Value()
-	// Attachments are additive, so the restore can collide with chips the
-	// editor already holds (the text guard says nothing about
-	// attachments). Skip an attachment that is already there byte for
-	// byte: re-adding it would show two identical chips and send the same
-	// file twice. Same-named attachments whose bytes differ are both kept
-	// — paste_<n>.txt names are only unique within one editor's list, so
-	// a name-keyed dedupe would drop content this path may not drop. The
-	// held set is snapshotted before the loop, so a queued message that
-	// itself carries the same file twice is restored as it was queued.
+	// Attachments are additive, so a restore can collide with chips the
+	// editor already holds. Skip an attachment that is already there byte
+	// for byte: re-adding it would show two identical chips and send the
+	// same file twice. Same-named attachments whose bytes differ are both
+	// kept — paste_<n>.txt names are only unique within one editor's list,
+	// so a name-keyed dedupe would drop content this path may not drop.
+	// The held set is snapshotted before the loop, so a batch that carries
+	// the same file twice is restored as it was queued.
 	held := m.attachments.List()
-	for _, attachment := range queued.Attachments {
-		if slices.ContainsFunc(held, func(have message.Attachment) bool {
-			return sameAttachment(have, attachment)
-		}) {
-			continue
+	for _, restored := range queued {
+		for _, attachment := range restored.Attachments {
+			if slices.ContainsFunc(held, func(have message.Attachment) bool {
+				return sameAttachment(have, attachment)
+			}) {
+				continue
+			}
+			m.attachments.Update(attachment)
 		}
-		m.attachments.Update(attachment)
 	}
-	return []tea.Cmd{m.updateTextareaWithPrevHeight(nil, prevHeight)}, appended
+	return []tea.Cmd{m.updateTextareaWithPrevHeight(nil, prevHeight)}
 }
 
 // sameAttachment reports whether two attachments are the same file carrying
@@ -516,24 +572,48 @@ func sameAttachment(a, b message.Attachment) bool {
 		bytes.Equal(a.Content, b.Content)
 }
 
-// restoreParkedPop restores the queued message parked when a pop result
-// landed after a session switch (see applyQueuedMessagePop). Called on
-// session load, so the message comes back the first time the user returns to
-// the session it was popped from. At most one message can be parked per
-// session: the pop is single-flight, and this clears the entry on the load
-// that must precede any further pop for that session.
-func (m *UI) restoreParkedPop() tea.Cmd {
+// parkQueuedMessages parks messages removed from a session the user is no
+// longer looking at, keyed by that session, so the next load of it hands
+// them back (see restoreParkedQueuedMessages). Parks append: a session can
+// accumulate a pop and a drain, or several drains, before the user returns.
+func (m *UI) parkQueuedMessages(sessionID string, queued []agent.QueuedMessage) {
+	if m.queuedRestoreOrphans == nil {
+		m.queuedRestoreOrphans = make(map[string][]agent.QueuedMessage, 1)
+	}
+	m.queuedRestoreOrphans[sessionID] = append(m.queuedRestoreOrphans[sessionID], queued...)
+}
+
+// queuedMessagesLabel renders a queued-message count for banner text: "the
+// queued message" for one, "3 queued messages" beyond that.
+func queuedMessagesLabel(n int) string {
+	if n == 1 {
+		return "the queued message"
+	}
+	return fmt.Sprintf("%d queued messages", n)
+}
+
+// parkedQueuedMessagesBanner is the warning shown when messages are parked
+// for a session the user has left.
+func parkedQueuedMessagesBanner(n int) string {
+	return fmt.Sprintf("Session changed: %s will be restored when you return to that session.",
+		queuedMessagesLabel(n))
+}
+
+// restoreParkedQueuedMessages restores the messages parked when a pop or
+// drain result landed after a session switch (see applyQueuedMessagePop and
+// applyPromptQueueCleared). Called on session load, so they come back the
+// first time the user returns to the session they were removed from, in the
+// order they were queued.
+func (m *UI) restoreParkedQueuedMessages() tea.Cmd {
 	sessionID := m.currentSessionID()
-	queued, ok := m.queuedPopOrphans[sessionID]
+	queued, ok := m.queuedRestoreOrphans[sessionID]
 	if !ok {
 		return nil
 	}
-	delete(m.queuedPopOrphans, sessionID)
-	cmds, appended := m.restorePoppedMessage(queued)
-	warn := "Restored the queued message you popped before switching sessions."
-	if appended {
-		warn = "Appended the queued message you popped before switching sessions below your text."
-	}
+	delete(m.queuedRestoreOrphans, sessionID)
+	cmds := m.restoreQueuedMessages(queued)
+	warn := fmt.Sprintf("Restored %s you removed before switching sessions.",
+		queuedMessagesLabel(len(queued)))
 	return tea.Batch(append(cmds, util.ReportWarn(warn))...)
 }
 

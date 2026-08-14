@@ -143,21 +143,22 @@ func TestPillsRowPopHint(t *testing.T) {
 	}
 }
 
-// TestPillsRowClearQueueHint verifies the footer advertises the queue
-// clear only when esc actually clears: a queue must exist and the agent
-// must be idle. While the agent is busy, esc cancels the active turn and
-// deliberately preserves the queue, so advertising it there would point at
-// a binding that does something else.
-func TestPillsRowClearQueueHint(t *testing.T) {
+// TestPillsRowEscapeQueueHint verifies the footer advertises the Escape
+// queue move whenever a queue exists, with wording that matches the gesture:
+// a single press while the agent is idle, the confirming press of the
+// double-press cancel while it is busy. With no queue there is nothing to
+// advertise.
+func TestPillsRowEscapeQueueHint(t *testing.T) {
 	cases := []struct {
 		name     string
 		queue    int
 		busy     bool
-		wantHint bool
+		wantKey  string
+		wantDesc string
 	}{
-		{"idle with queue", 2, false, true},
-		{"busy with queue", 2, true, false},
-		{"idle without queue", 0, false, false},
+		{"idle with queue", 2, false, "esc", "pop all messages"},
+		{"busy with queue", 2, true, "esc esc", "cancel + pop all messages"},
+		{"idle without queue", 0, false, "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -171,9 +172,17 @@ func TestPillsRowClearQueueHint(t *testing.T) {
 			u.updateLayoutAndSize()
 			u.renderPills()
 
-			hasHint := strings.Contains(u.pillsView, "clear the queue")
-			if hasHint != tc.wantHint {
-				t.Fatalf("clear hint presence = %v, want %v:\n%s", hasHint, tc.wantHint, u.pillsView)
+			if tc.wantDesc == "" {
+				if strings.Contains(u.pillsView, "pop all messages") {
+					t.Fatalf("expected no escape hint without a queue:\n%s", u.pillsView)
+				}
+				return
+			}
+			if !strings.Contains(u.pillsView, tc.wantKey) {
+				t.Fatalf("expected %q in pills view:\n%s", tc.wantKey, u.pillsView)
+			}
+			if !strings.Contains(u.pillsView, tc.wantDesc) {
+				t.Fatalf("expected %q in pills view:\n%s", tc.wantDesc, u.pillsView)
 			}
 		})
 	}

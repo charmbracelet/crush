@@ -1390,6 +1390,70 @@ func TestPopQueuedMessageParksResultAfterSessionSwitch(t *testing.T) {
 	require.Empty(t, m.queuedRestoreOrphans, "a restored message must not be parked twice")
 }
 
+// TestParksAccumulateAcrossPopAndDrain pins that parking appends. Both
+// destructive queue ops can land after the same session switch — the user
+// pops, then Escapes, then leaves before either round-trip returns — and
+// parked prompts live nowhere else, so a second park that overwrote the
+// first would destroy text outright. Both batches come back on the single
+// return, in the order they were removed.
+func TestParksAccumulateAcrossPopAndDrain(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{
+		ready:  true,
+		queued: []string{"drained-older", "drained-newer", "popped"},
+		queuedMessages: []agent.QueuedMessage{
+			{Prompt: "drained-older"},
+			{Prompt: "drained-newer"},
+			{Prompt: "popped"},
+		},
+	}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 3
+	m.promptQueueItems = []string{"drained-older", "drained-newer", "popped"}
+
+	// Both ops are dispatched against s1 and are still in flight when the
+	// user switches away: the pop takes the newest prompt, the Escape drain
+	// takes what is left. Neither memoized-count gate has been zeroed yet,
+	// so the second press goes out too (they hold separate single-flight
+	// marks).
+	_, popCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	_, drainCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m.session = &session.Session{ID: "s2"}
+	runCmds(m, popCmd)
+	runCmds(m, drainCmd)
+
+	require.Equal(t, 1, ws.popQueueCalls)
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Empty(t, m.textarea.Value(),
+		"another session's prompts must not land in the current editor")
+	require.Equal(t, util.InfoTypeWarn, m.status.msg.Type)
+	require.Equal(t,
+		"Session changed: 2 queued messages will be restored when you return to that session.",
+		m.status.msg.Msg)
+	require.Equal(t,
+		[]agent.QueuedMessage{
+			{Prompt: "popped"},
+			{Prompt: "drained-older"},
+			{Prompt: "drained-newer"},
+		},
+		m.queuedRestoreOrphans["s1"],
+		"the drain must park behind the pop, not replace it")
+
+	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s1"}})
+	runCmds(m, cmd)
+
+	require.Equal(t, "popped\n\ndrained-older\n\ndrained-newer", m.textarea.Value(),
+		"returning must hand back every parked batch, in the order they were parked")
+	require.True(t, m.isAtEditorEnd())
+	require.Equal(t, util.InfoTypeWarn, m.status.msg.Type)
+	require.Equal(t,
+		"Restored 3 queued messages you removed before switching sessions.",
+		m.status.msg.Msg)
+	require.Empty(t, m.queuedRestoreOrphans, "a restored batch must not be parked twice")
+}
+
 // TestParkedRestoreKeepsEditorDraft pins that the parked restore is
 // non-destructive: the editor is shared across sessions, so text typed while
 // the messages were parked must survive them coming back, and the whole

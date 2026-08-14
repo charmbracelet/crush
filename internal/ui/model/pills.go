@@ -17,8 +17,6 @@ const (
 	pillHeightWithBorder = 3
 	// maxTaskDisplayLength is the maximum length of a task name in the pill.
 	maxTaskDisplayLength = 40
-	// maxQueueDisplayLength is the maximum length of a queue item in the list.
-	maxQueueDisplayLength = 60
 )
 
 // pillSection represents which section of the pills panel is focused.
@@ -111,22 +109,28 @@ func todoList(sessionTodos []session.Todo, spinnerView string, t *styles.Styles,
 }
 
 // queueList renders the expanded queue items list.
-func queueList(queueItems []string, t *styles.Styles) string {
+func queueList(queueItems []string, t *styles.Styles, width int) string {
 	if len(queueItems) == 0 {
 		return ""
 	}
 
-	var lines []string
+	prefix := t.Pills.QueueItemPrefix.Render() + " "
+	textWidth := max(width-ansi.StringWidth(prefix), 0)
+	lines := make([]string, 0, len(queueItems))
 	for _, item := range queueItems {
-		text := item
-		if ansi.StringWidth(text) > maxQueueDisplayLength {
-			text = ansi.Truncate(text, maxQueueDisplayLength-1, "…")
-		}
-		prefix := t.Pills.QueueItemPrefix.Render() + " "
+		text := escapeQueueItem(item)
+		text = ansi.Truncate(text, textWidth, "…")
 		lines = append(lines, prefix+t.Pills.QueueItemText.Render(text))
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func escapeQueueItem(item string) string {
+	item = strings.ReplaceAll(item, "\r\n", "\n")
+	item = strings.ReplaceAll(item, "\r", "\n")
+	item = strings.ReplaceAll(item, "\n", `\n`)
+	return strings.ReplaceAll(item, "\t", `\t`)
 }
 
 // pillHelpHint renders one compact keystroke/action hint with the shared pill
@@ -340,7 +344,7 @@ func (m *UI) renderPills() {
 			// workspace_cache.go): renderPills runs on the Update/View
 			// path and must never block on a workspace round-trip.
 			if len(m.promptQueueItems) > 0 {
-				expandedList = queueList(m.promptQueueItems, t)
+				expandedList = queueList(m.promptQueueItems, t, contentWidth)
 			}
 		}
 	}

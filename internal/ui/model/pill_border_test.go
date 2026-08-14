@@ -1,10 +1,12 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // roundedBorderRunes are chars that only appear when a pill has a visible
@@ -194,6 +196,63 @@ func TestPillsRowEscapeQueueHint(t *testing.T) {
 				if strings.Contains(u.pillsView, absent) {
 					t.Fatalf("expected %q to be absent from pills view:\n%s", absent, u.pillsView)
 				}
+			}
+		})
+	}
+}
+
+func TestExpandedQueueListEscapesControlsWithoutHidingItems(t *testing.T) {
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1"}
+	u.promptQueueItems = []string{
+		"first line\r\nsecond line",
+		"tab\tvalue",
+		"message after controls",
+	}
+	u.promptQueue = len(u.promptQueueItems)
+	u.pillsExpanded = true
+	u.focusedPillSection = pillSectionQueue
+	u.updateLayoutAndSize()
+	u.renderPills()
+
+	view := ansi.Strip(u.pillsView)
+	var queueLines []string
+	for line := range strings.SplitSeq(view, "\n") {
+		if strings.Contains(line, "•") {
+			queueLines = append(queueLines, line)
+		}
+	}
+
+	if len(queueLines) != len(u.promptQueueItems) {
+		t.Fatalf("rendered %d queue rows, want %d:\n%s",
+			len(queueLines), len(u.promptQueueItems), view)
+	}
+	if !strings.Contains(queueLines[0], `first line\nsecond line`) {
+		t.Fatalf("expected escaped newline in first queue row: %q", queueLines[0])
+	}
+	if !strings.Contains(queueLines[1], `tab\tvalue`) {
+		t.Fatalf("expected escaped tab in second queue row: %q", queueLines[1])
+	}
+	if !strings.Contains(queueLines[2], "message after controls") {
+		t.Fatalf("expected final queued message to remain visible: %q", queueLines[2])
+	}
+}
+
+func TestQueueListFitsLiveContentWidth(t *testing.T) {
+	styles := newTestUI().com.Styles
+	item := "a queue message that must be truncated to fit the viewport"
+
+	for _, width := range []int{0, 1, 8, 40, 80, 100, 140} {
+		t.Run(fmt.Sprintf("width %d", width), func(t *testing.T) {
+			view := queueList([]string{item}, styles, width)
+			if got := ansi.StringWidth(view); got > width && width >= 4 {
+				t.Fatalf("queue row width = %d, want <= %d: %q", got, width, ansi.Strip(view))
+			}
+			if width < 4 && ansi.Strip(view) != "  • " {
+				t.Fatalf("narrow queue row = %q, want bullet only", ansi.Strip(view))
+			}
+			if width == 40 && !strings.HasSuffix(ansi.Strip(view), "…") {
+				t.Fatalf("truncated queue row lacks ellipsis: %q", ansi.Strip(view))
 			}
 		})
 	}

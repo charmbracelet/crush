@@ -153,7 +153,7 @@ func TestPostWorkspaceAgentSessionPromptPop(t *testing.T) {
 		found:          true,
 	}
 	c, wsID := buildAgentWorkspace(t, coord)
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 	req.SetPathValue("id", wsID)
 	req.SetPathValue("sid", "S1")
 	rec := httptest.NewRecorder()
@@ -174,7 +174,7 @@ func TestPostWorkspaceAgentSessionPromptPopEmpty(t *testing.T) {
 		runCoordinator: newRunCoordinator(func(context.Context) error { return nil }),
 	}
 	c, wsID := buildAgentWorkspace(t, coord)
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 	req.SetPathValue("id", wsID)
 	req.SetPathValue("sid", "S1")
 	rec := httptest.NewRecorder()

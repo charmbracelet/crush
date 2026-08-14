@@ -1015,6 +1015,76 @@ func TestPopQueuedMessageAppendsAttachmentsAndSynchronizesBangMode(t *testing.T)
 	require.Equal(t, []message.Attachment{existing, restored}, m.attachments.List())
 }
 
+// TestPopQueuedMessageSkipsAttachmentsAlreadyOnEditor pins the identity used
+// when a restore collides with chips the editor already holds: an attachment
+// that is already there byte for byte is not added again (two identical
+// chips would send the same file twice), while a same-named attachment
+// carrying different bytes is kept, since paste_<n>.txt names are only
+// unique within one editor's list and the restore may never drop content.
+func TestPopQueuedMessageSkipsAttachmentsAlreadyOnEditor(t *testing.T) {
+	pinTTLs(t)
+
+	notes := message.Attachment{
+		FilePath: "/tmp/notes.txt",
+		FileName: "notes.txt",
+		MimeType: "text/plain",
+		Content:  []byte("hello"),
+	}
+	diagram := message.Attachment{
+		FilePath: "/tmp/diagram.png",
+		FileName: "diagram.png",
+		MimeType: "image/png",
+		Content:  []byte("png bytes"),
+	}
+	typedPaste := message.Attachment{
+		FilePath: "paste_1.txt",
+		FileName: "paste_1.txt",
+		MimeType: "text/plain",
+		Content:  []byte("typed later"),
+	}
+	queuedPaste := typedPaste
+	queuedPaste.Content = []byte("queued earlier")
+
+	for _, tc := range []struct {
+		name     string
+		held     message.Attachment
+		restored []message.Attachment
+		want     []message.Attachment
+	}{
+		{
+			name:     "identical attachment is not duplicated",
+			held:     notes,
+			restored: []message.Attachment{notes, diagram},
+			want:     []message.Attachment{notes, diagram},
+		},
+		{
+			name:     "same name with different bytes is kept",
+			held:     typedPaste,
+			restored: []message.Attachment{queuedPaste},
+			want:     []message.Attachment{typedPaste, queuedPaste},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := &countingWorkspace{
+				ready:          true,
+				queued:         []string{"queued prompt"},
+				queuedMessages: []agent.QueuedMessage{{Prompt: "queued prompt", Attachments: tc.restored}},
+			}
+			m := newBusyUI(ws)
+			warmCaches(m, true)
+			m.promptQueue = 1
+			m.promptQueueItems = []string{"queued prompt"}
+			m.attachments.Update(tc.held)
+
+			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+			runCmds(m, cmd)
+
+			require.Equal(t, "queued prompt", m.textarea.Value())
+			require.Equal(t, tc.want, m.attachments.List())
+		})
+	}
+}
+
 // TestPopQueuedMessageEmptyQueueIsAnsweredFromCache pins that a pop with
 // nothing queued costs no workspace round-trip (it is an HTTP POST in
 // client/server mode, and the memoized count already answers it) and still

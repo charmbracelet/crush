@@ -25,6 +25,7 @@ package model
 // Update, no model mutation inside commands).
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -34,6 +35,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
@@ -476,10 +478,35 @@ func (m *UI) restorePoppedMessage(queued agent.QueuedMessage) (cmds []tea.Cmd, a
 	}
 	m.promptHistory.index = -1
 	m.promptHistory.draft = m.textarea.Value()
+	// Attachments are additive, so the restore can collide with chips the
+	// editor already holds (the text guard says nothing about
+	// attachments). Skip an attachment that is already there byte for
+	// byte: re-adding it would show two identical chips and send the same
+	// file twice. Same-named attachments whose bytes differ are both kept
+	// — paste_<n>.txt names are only unique within one editor's list, so
+	// a name-keyed dedupe would drop content this path may not drop. The
+	// held set is snapshotted before the loop, so a queued message that
+	// itself carries the same file twice is restored as it was queued.
+	held := m.attachments.List()
 	for _, attachment := range queued.Attachments {
+		if slices.ContainsFunc(held, func(have message.Attachment) bool {
+			return sameAttachment(have, attachment)
+		}) {
+			continue
+		}
 		m.attachments.Update(attachment)
 	}
 	return []tea.Cmd{m.updateTextareaWithPrevHeight(nil, prevHeight)}, appended
+}
+
+// sameAttachment reports whether two attachments are the same file carrying
+// the same bytes, i.e. adding b to a list that already holds a would send
+// the identical payload twice.
+func sameAttachment(a, b message.Attachment) bool {
+	return a.FilePath == b.FilePath &&
+		a.FileName == b.FileName &&
+		a.MimeType == b.MimeType &&
+		bytes.Equal(a.Content, b.Content)
 }
 
 // restoreParkedPop restores the queued message parked when a pop result

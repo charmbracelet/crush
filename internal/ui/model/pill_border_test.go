@@ -155,10 +155,16 @@ func TestPillsRowEscapeQueueHint(t *testing.T) {
 		busy     bool
 		wantKey  string
 		wantDesc string
+		// absent pins wording the case must *not* render. The idle wording
+		// is a substring of the busy wording ("esc esc" contains "esc",
+		// "cancel + pop all messages" contains "pop all messages"), so
+		// containment alone is satisfied by the busy rendering and the
+		// idle/busy distinction could be deleted undetected.
+		absent []string
 	}{
-		{"idle with queue", 2, false, "esc", "pop all messages"},
-		{"busy with queue", 2, true, "esc esc", "cancel + pop all messages"},
-		{"idle without queue", 0, false, "", ""},
+		{"idle with queue", 2, false, "esc", "pop all messages", []string{"esc esc", "cancel +"}},
+		{"busy with queue", 2, true, "esc esc", "cancel + pop all messages", nil},
+		{"idle without queue", 0, false, "", "", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,6 +189,11 @@ func TestPillsRowEscapeQueueHint(t *testing.T) {
 			}
 			if !strings.Contains(u.pillsView, tc.wantDesc) {
 				t.Fatalf("expected %q in pills view:\n%s", tc.wantDesc, u.pillsView)
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(u.pillsView, absent) {
+					t.Fatalf("expected %q to be absent from pills view:\n%s", absent, u.pillsView)
+				}
 			}
 		})
 	}

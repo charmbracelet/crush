@@ -130,12 +130,16 @@ func TestRun_BusyWithPendingCancelTakesCancelOnEntry(t *testing.T) {
 }
 
 // TestRun_PrepareStepDrainKeepsQueuedOnPendingCancel verifies that the
-// queue drain inside PrepareStep does not fold queued follow-up prompts
-// into the active turn when a cancel has been recorded for the session:
-// that turn is the one being canceled, so folding would destroy the
-// prompt with it. The prompt stays queued and runs as its own turn
-// through the completion handoff instead — cancellation never discards
-// queued work.
+// queue drain inside PrepareStep does not fold a cancel-covered queued
+// prompt into the turn being canceled — folding would destroy the prompt
+// along with that turn. It stays queued and runs as its own turn instead,
+// so cancellation never discards queued work.
+//
+// The new submission ("main") lands on a session that is idle with a
+// non-empty queue, so the dispatch decision swaps it behind the queue:
+// the queued follow-up runs first as its own turn and "main" runs last.
+// Both prompts therefore get their own user/assistant pair; a fold would
+// instead produce two user messages under one assistant.
 func TestRun_PrepareStepDrainKeepsQueuedOnPendingCancel(t *testing.T) {
 	t.Parallel()
 	sa, env := newStreamTestAgent(t)
@@ -162,9 +166,9 @@ func TestRun_PrepareStepDrainKeepsQueuedOnPendingCancel(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	// The queued follow-up was not folded into the main turn: it ran as
-	// its own turn after it, so its user message follows the main turn's
-	// assistant message instead of preceding it.
+	// Each prompt produced its own user/assistant pair, oldest first: the
+	// queued follow-up was neither folded into a turn nor overtaken by the
+	// prompt submitted after it.
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
 	roles := make([]message.MessageRole, len(msgs))
@@ -179,7 +183,7 @@ func TestRun_PrepareStepDrainKeepsQueuedOnPendingCancel(t *testing.T) {
 		[]message.MessageRole{message.User, message.Assistant, message.User, message.Assistant},
 		roles,
 		"the queued follow-up must run as its own turn, not be folded into the canceled one")
-	require.Equal(t, []string{"main", "queued-followup"}, prompts)
+	require.Equal(t, []string{"queued-followup", "main"}, prompts)
 
 	// The queue drained through the handoff and the pending cancel is
 	// consumed.

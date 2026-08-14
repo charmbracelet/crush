@@ -142,3 +142,39 @@ func TestPillsRowPopHint(t *testing.T) {
 		})
 	}
 }
+
+// TestPillsRowClearQueueHint verifies the footer advertises the queue
+// clear only when esc actually clears: a queue must exist and the agent
+// must be idle. While the agent is busy, esc cancels the active turn and
+// deliberately preserves the queue, so advertising it there would point at
+// a binding that does something else.
+func TestPillsRowClearQueueHint(t *testing.T) {
+	cases := []struct {
+		name     string
+		queue    int
+		busy     bool
+		wantHint bool
+	}{
+		{"idle with queue", 2, false, true},
+		{"busy with queue", 2, true, false},
+		{"idle without queue", 0, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u := newTestUI()
+			u.session = &session.Session{
+				ID:    "s1",
+				Todos: []session.Todo{{Content: "a", Status: session.TodoStatusPending}},
+			}
+			u.promptQueue = tc.queue
+			u.agentBusyCache.set(tc.busy)
+			u.updateLayoutAndSize()
+			u.renderPills()
+
+			hasHint := strings.Contains(u.pillsView, "clear the queue")
+			if hasHint != tc.wantHint {
+				t.Fatalf("clear hint presence = %v, want %v:\n%s", hasHint, tc.wantHint, u.pillsView)
+			}
+		})
+	}
+}

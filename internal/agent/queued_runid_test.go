@@ -297,3 +297,94 @@ func TestRun_CancelKeepsQueuedPromptsForEditing(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+// TestRun_IdleWithQueueRunsSubmissionsOldestFirst covers restarting the
+// agent after "esc esc": cancellation is turn-scoped, so the session is
+// left idle with its queue intact, and the prompt the user sends to get
+// going again must run *behind* what is already queued. Keying the
+// dispatch decision on IsSessionBusy alone made the new prompt the active
+// run, so it overtook every queued prompt and they drained after it.
+//
+// Each prompt carries a RunID, so none of them can be folded into another
+// turn: every one runs as its own turn and owes exactly one terminal
+// RunComplete. The order of those events is the contract — a caller
+// waiting on the new submission's RunID must not be released before the
+// prompts queued ahead of it have completed.
+func TestRun_IdleWithQueueRunsSubmissionsOldestFirst(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	model := &finishStreamModel{text: "done"}
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel:  Model{Model: model, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		SmallModel:  Model{Model: model, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		IsYolo:      true,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	// Two prompts survived a cancel and sit queued on an idle session.
+	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-one", Prompt: "queued-one"})
+	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-two", Prompt: "queued-two"})
+	require.False(t, sa.IsSessionBusy(sess.ID))
+
+	// The user restarts the agent with a new prompt.
+	_, err = sa.Run(t.Context(), SessionAgentCall{
+		SessionID: sess.ID,
+		RunID:     "run-new",
+		Prompt:    "new",
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, 0, sa.QueuedPrompts(sess.ID), "the whole queue must have drained")
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	roles := make([]message.MessageRole, len(msgs))
+	prompts := make([]string, 0, 3)
+	for i, m := range msgs {
+		roles[i] = m.Role
+		if m.Role == message.User {
+			prompts = append(prompts, m.Content().String())
+		}
+	}
+	require.Equal(t, []string{"queued-one", "queued-two", "new"}, prompts,
+		"queued prompts must run in order, with the new submission last")
+	require.Equal(t, []message.MessageRole{
+		message.User, message.Assistant,
+		message.User, message.Assistant,
+		message.User, message.Assistant,
+	}, roles, "each prompt runs as its own turn")
+
+	// One terminal event per RunID, in execution order.
+	var order []string
+	deadline := time.After(5 * time.Second)
+	for len(order) < 3 {
+		select {
+		case ev := <-ch:
+			require.Empty(t, ev.Payload.Error)
+			require.False(t, ev.Payload.Cancelled)
+			order = append(order, ev.Payload.RunID)
+		case <-deadline:
+			t.Fatalf("timed out waiting for terminal events; got %v", order)
+		}
+	}
+	require.Equal(t, []string{"run-one", "run-two", "run-new"}, order,
+		"the new submission's RunID must not complete before the prompts queued ahead of it")
+	select {
+	case extra := <-ch:
+		t.Fatalf("unexpected extra terminal event: %+v", extra.Payload)
+	case <-time.After(200 * time.Millisecond):
+	}
+}

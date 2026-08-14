@@ -514,3 +514,80 @@ func TestCancelAll_ShutdownDiscardsQueueAndNotifies(t *testing.T) {
 	require.Equal(t, 0, a.QueuedPrompts(sessionID),
 		"shutdown must discard queued prompts it can no longer run")
 }
+
+// TestCancelAll_ShutdownDiscardsQueueOnIdleSession is the same shutdown
+// contract for the state Cancel actually leaves behind. Cancel is
+// turn-scoped: it ends the active turn and keeps the queue, so after
+// "esc esc" the session has *no* active request and a non-empty queue.
+// Keying the teardown on activeRequests alone made CancelAll return
+// early (nothing is busy) and the queued RunIDs never got a terminal
+// event, hanging any caller blocking on one.
+func TestCancelAll_ShutdownDiscardsQueueOnIdleSession(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	const sessionID = "cancel-all-idle"
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{SessionID: sessionID, RunID: "run-queued", Prompt: "queued", acceptSeq: 1},
+	})
+	require.False(t, a.IsBusy())
+
+	a.CancelAll()
+
+	requireSingleCancelledRunComplete(t, ch, sessionID, "run-queued")
+	require.Equal(t, 0, a.QueuedPrompts(sessionID),
+		"shutdown must discard the queue of a session left idle by a cancel")
+}
+
+// TestCancelAll_SummarizeKeyClearsSessionQueue guards the key
+// normalization: a summarizing session is tracked in activeRequests under
+// the synthetic "<id>-summarize" key, while its queue is stored under the
+// real session ID. Passing the synthetic key straight to ClearQueue makes
+// it a silent no-op, so the queued RunID would never be notified.
+func TestCancelAll_SummarizeKeyClearsSessionQueue(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	const sessionID = "cancel-all-summarize"
+	summarizeKey := sessionID + summarizeKeySuffix
+	// Releasing the active entry mirrors Summarize's cleanup, so
+	// CancelAll's busy-wait finishes immediately.
+	a.activeRequests.Set(summarizeKey, &activeCancel{
+		cancel: func() { a.activeRequests.Del(summarizeKey) },
+	})
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{SessionID: sessionID, RunID: "run-queued", Prompt: "queued", acceptSeq: 1},
+	})
+
+	a.CancelAll()
+
+	requireSingleCancelledRunComplete(t, ch, sessionID, "run-queued")
+	require.Equal(t, 0, a.QueuedPrompts(sessionID),
+		"the summarize key must be normalized to the session whose queue it owns")
+}

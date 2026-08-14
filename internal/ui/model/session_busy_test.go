@@ -159,7 +159,7 @@ func (w *countingWorkspace) resetCounters() {
 // "s1", enough state for Update to run end to end.
 func newBusyUI(ws *countingWorkspace) *UI {
 	com := common.DefaultCommon(ws)
-	return &UI{
+	m := &UI{
 		com:         com,
 		status:      NewStatus(com, nil),
 		chat:        NewChat(com, config.ScrollbarDefault),
@@ -173,6 +173,11 @@ func newBusyUI(ws *countingWorkspace) *UI {
 		dialog:      dialog.NewOverlay(),
 		attachments: attachments.New(nil, attachments.Keymap{}),
 	}
+	// -1 is "not browsing history", the state production is in once
+	// history has loaded or a prompt has been submitted. The struct's zero
+	// value (0) would instead mean the editor is showing history entry 0.
+	m.promptHistory.index = -1
+	return m
 }
 
 // pinTTLs makes the TTL backstop inert for the duration of the test so
@@ -1335,10 +1340,10 @@ func (d *actionDialog) HandleMsg(tea.Msg) dialog.Action { return d.action }
 
 func (d *actionDialog) Draw(uv.Screen, uv.Rectangle) *tea.Cursor { return nil }
 
-// TestClearQueueCommandDiscardsQueue pins the bulk escape hatch: escape is
-// turn-scoped now and preserves the queue, and shift+up pops one message at a
-// time, so the commands-dialog entry is the only way to discard a queue built
-// up by accident. The clear is a synchronous HTTP round-trip in client/server
+// TestClearQueueCommandDiscardsQueue pins the commands-dialog escape
+// hatch, which discards the queue regardless of whether the agent is busy
+// (idle esc only covers the stopped case, and shift+up pops one message at
+// a time). The clear is a synchronous HTTP round-trip in client/server
 // mode, so Update must dispatch it rather than call it.
 func TestClearQueueCommandDiscardsQueue(t *testing.T) {
 	pinTTLs(t)
@@ -1387,4 +1392,116 @@ func TestClearQueueResultAfterSessionSwitchKeepsCurrentQueue(t *testing.T) {
 	require.Equal(t, []string{"a"}, m.promptQueueItems,
 		"another session's clear must not empty this session's queue")
 	require.Equal(t, 1, m.promptQueue)
+}
+
+// TestIdleEscapeClearsQueue covers the state a cancel leaves behind:
+// cancellation is turn-scoped, so stopping the agent keeps the queue, and
+// the queue then has no owner — the next submission would drag it along.
+// Once the agent is idle, esc is therefore the bulk discard for it. The
+// clear is an HTTP round-trip in client/server mode, so Update must
+// dispatch it, and nothing may arm the double-press cancel: there is no
+// turn to stop.
+func TestIdleEscapeClearsQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, queued: []string{"a", "b"}}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"a", "b"}
+	ws.resetCounters()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Zero(t, ws.clearQueueCalls, "the clear must run off the Update goroutine")
+	require.False(t, m.isCanceling, "esc must not arm cancellation when the agent is idle")
+	require.Zero(t, ws.cancelCalls, "there is no turn to cancel")
+
+	runCmds(m, cmd)
+
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Empty(t, ws.queued, "the agent queue must be discarded")
+	require.Empty(t, m.promptQueueItems)
+	require.Zero(t, m.promptQueue)
+	require.Equal(t, util.InfoTypeInfo, m.status.msg.Type)
+	require.Equal(t, "Queued messages cleared.", m.status.msg.Msg)
+}
+
+// TestIdleEscapeWithoutQueueClearsNothing keeps esc inert on an idle
+// session with nothing queued: the binding acts only when the UI is
+// showing a queue to discard.
+func TestIdleEscapeWithoutQueueClearsNothing(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	ws.resetCounters()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.Zero(t, ws.clearQueueCalls)
+	require.Zero(t, ws.cancelCalls)
+	require.False(t, m.isCanceling)
+}
+
+// TestBusyEscapeCancelsAndKeepsQueue pins the precedence: while the agent
+// is busy, esc still means cancel-the-turn (double press) and must not
+// discard the queue — that is the whole point of the turn-scoped cancel.
+func TestBusyEscapeCancelsAndKeepsQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"a"}}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"a"}
+	ws.resetCounters()
+
+	// The first press only arms the double-press window; the command it
+	// returns is the arming timer, deliberately not run here (it blocks for
+	// the whole window before emitting its expiry).
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.NotNil(t, cmd, "the first esc press must return the arming timer")
+	require.True(t, m.isCanceling, "the first esc press must arm cancellation")
+	require.Zero(t, ws.clearQueueCalls, "canceling must preserve the queue")
+	require.Equal(t, []string{"a"}, m.promptQueueItems)
+
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+	require.Equal(t, 1, ws.cancelCalls, "the second esc press must cancel the agent")
+	require.Zero(t, ws.clearQueueCalls, "canceling must preserve the queue")
+	require.Equal(t, []string{"a"}, m.promptQueueItems)
+}
+
+// TestIdleEscapeDuringHistoryNavigationKeepsQueue: esc keeps its more
+// local meaning while the user is browsing prompt history — it restores
+// the draft — so a queue must not be discarded by the same press.
+func TestIdleEscapeDuringHistoryNavigationKeepsQueue(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, queued: []string{"a"}}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.promptQueue = 1
+	m.promptQueueItems = []string{"a"}
+	m.promptHistory.messages = []string{"older prompt"}
+	m.promptHistory.index = 0
+	m.promptHistory.draft = "draft"
+	m.textarea.SetValue("older prompt")
+	ws.resetCounters()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+
+	require.Zero(t, ws.clearQueueCalls, "esc must leave history navigation first")
+	require.Equal(t, []string{"a"}, m.promptQueueItems)
+	require.Equal(t, "draft", m.textarea.Value(), "esc must restore the draft")
+	require.Equal(t, -1, m.promptHistory.index)
+
+	// A second press, now that history navigation is over, clears.
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	runCmds(m, cmd)
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Empty(t, m.promptQueueItems)
 }

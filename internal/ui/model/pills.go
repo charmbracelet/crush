@@ -361,6 +361,13 @@ func (m *UI) renderPills() {
 		// row is visible exactly when the binding is usable.
 		popHint := pillHelpHint(t, "shift/alt+up", "pop message")
 		helpHint = lipgloss.JoinHorizontal(lipgloss.Center, helpHint, " ", popHint)
+		// esc clears the queue only once the agent has stopped; while it
+		// is busy esc arms and carries out cancellation instead, so the
+		// hint would be advertising a binding that does something else.
+		if !m.isAgentBusy() {
+			clearHint := pillHelpHint(t, "esc", "clear the queue")
+			helpHint = lipgloss.JoinHorizontal(lipgloss.Center, helpHint, " ", clearHint)
+		}
 	}
 	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
 

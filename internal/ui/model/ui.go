@@ -2524,10 +2524,30 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// Handle cancel key when agent is busy.
+	// Handle the cancel key: it stops the agent while it is busy, and once
+	// the agent has stopped it discards what is still queued.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
 		if m.isAgentBusy() {
 			if cmd := m.cancelAgent(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return tea.Batch(cmds...)
+		}
+		// Idle with queued prompts: cancellation is turn-scoped, so
+		// stopping the agent leaves the queue intact and esc becomes the
+		// bulk discard for it. The memoized count gates this — the same
+		// value that gates the queue pill and the pop — so the key only
+		// acts when the UI is showing something to discard. The clear is
+		// an HTTP round-trip in client/server mode, so it runs as a cmd
+		// and the pill empties when promptQueueClearedMsg lands. Nothing
+		// here arms isCanceling or starts the cancel timer: there is no
+		// turn to stop.
+		//
+		// Escape keeps its more local meanings: it still closes the
+		// completions popup and still leaves prompt-history navigation
+		// (which restores the draft), both handled further down.
+		if m.promptQueue > 0 && !m.completionsOpen && !m.isBrowsingHistory() {
+			if cmd := m.clearQueuedMessages(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return tea.Batch(cmds...)

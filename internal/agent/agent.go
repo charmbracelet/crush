@@ -58,6 +58,10 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	// summarizeKeySuffix distinguishes a session's summarize entry from
+	// its regular run entry in activeRequests.
+	summarizeKeySuffix = "-summarize"
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -125,6 +129,12 @@ type SessionAgentCall struct {
 	// paths treat as covered by any present mark, preserving the
 	// pre-sequence behavior.
 	acceptSeq uint64
+	// dequeued marks a call that Run itself pulled out of the session
+	// queue and handed back to Run (the completion handoff and the
+	// summarize tail). Such a call is already ahead of everything still
+	// queued, so the dispatch decision must run it rather than swap it
+	// behind the queue again. It is meaningless on a queued call.
+	dequeued bool
 	// OnAuthRefresh, when non-nil, is called by fantasy when a stream
 	// fails with an authentication error (HTTP 401). The callback should
 	// refresh credentials and return nil on success, in which case
@@ -384,6 +394,30 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 	queued.Accepted = nil
 	existing = append(existing, queued)
 	a.messageQueue.Set(call.SessionID, existing)
+}
+
+// swapWithQueueHead sends call to the tail of its session's queue and
+// returns the call at the head, which Run then executes in call's place.
+// Callers must hold the session's dispatch mutex and must only call this
+// for a session whose queue is non-empty, which also guarantees the queue
+// is left non-empty (call itself is in it).
+//
+// The returned call inherits call's accept reservation — queued calls
+// carry none, enqueueCall strips it — so the single Close in Run's idle
+// path still balances the caller's reservation exactly once and
+// acceptedRuns never dips to 0 across the swap, keeping the session
+// observable to a concurrent Cancel.
+func (a *sessionAgent) swapWithQueueHead(call SessionAgentCall) SessionAgentCall {
+	a.enqueueCall(call)
+	queued, _ := a.messageQueue.Get(call.SessionID)
+	head := queued[0]
+	// Reslicing from the front is safe for lock-free queue readers
+	// (QueuedPrompts, QueuedPromptsList): a later append writes past the
+	// end of the original slice, never into a window a reader that
+	// captured the pre-swap header is still ranging over.
+	a.messageQueue.Set(call.SessionID, queued[1:])
+	head.Accepted = call.Accepted
+	return head
 }
 
 // drainQueueForStep partitions the session's queued calls for the current
@@ -686,6 +720,36 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		sessMu.Unlock()
 		return nil, nil
+	}
+
+	// Idle, but prompts are already queued for this session. A canceled
+	// turn leaves its queue intact (see Cancel), so this is the state the
+	// user restarts the agent from after "esc esc". Becoming the active
+	// run for this call would jump it ahead of every prompt already
+	// waiting, so hand it to the tail of the queue and take the queue
+	// head as this invocation's turn instead: submissions then execute
+	// strictly oldest-first, with the rest of the queue (this caller's
+	// prompt last) draining behind the head through the completion
+	// handoff below.
+	//
+	// The swap runs under the same lock as the busy check, so the
+	// promoted head is registered in activeRequests before the lock is
+	// dropped: two concurrent submissions to an idle session with a queue
+	// still start exactly one run.
+	//
+	// The head's queued accept sequence is deliberately not re-checked
+	// against the session's cancel mark. A cancel ends the turn in
+	// progress and never discards queued prompts, so a mark recorded
+	// while the head sat in the queue must not poison it now that the
+	// user has explicitly restarted the agent — the same reasoning that
+	// hands the completion handoff's dequeued call a fresh accept
+	// reservation above the mark.
+	//
+	// Calls the internal promotion paths dequeued (call.dequeued) are
+	// already ahead of the queue; swapping them back in would rotate the
+	// queue and invert the very order this branch exists to preserve.
+	if !call.dequeued && a.QueuedPrompts(call.SessionID) > 0 {
+		call = a.swapWithQueueHead(call)
 	}
 
 	// Idle: become the active run. Register the cancel func before dropping
@@ -1331,6 +1395,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 	}
 	firstQueuedMessage := queuedMessages[0]
+	// Mark the promotion so the recursive Run executes this call instead
+	// of swapping it behind the prompts still queued after it.
+	firstQueuedMessage.dequeued = true
 	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
 	// Reserve a fresh accept for the dequeued prompt before dropping the
 	// lock so acceptedRuns > 0 across the handoff into the recursive
@@ -1500,6 +1567,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 	firstQueuedMessage := queuedMessages[0]
+	// Mark the promotion so Run executes this call instead of swapping it
+	// behind the prompts still queued after it.
+	firstQueuedMessage.dequeued = true
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
@@ -2008,7 +2078,7 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	}
 
 	// Also check for summarize requests.
-	if ac, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && ac != nil {
+	if ac, ok := a.activeRequests.Get(sessionID + summarizeKeySuffix); ok && ac != nil {
 		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		ac.cancel()
 	}
@@ -2050,13 +2120,31 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 // discards each canceled session's queue, which publishes the terminal
 // cancelled RunComplete a non-interactive caller (e.g. `crush run`)
 // blocking on a queued prompt's RunID needs in order to exit.
+//
+// The teardown set is the union of sessions with an active request and
+// sessions that merely hold a queue: Cancel is turn-scoped, so a canceled
+// session goes idle with its queue intact, and that state — no active
+// request, non-empty queue — is the common one after "esc esc". Keying
+// only on activeRequests would return early (nothing busy) or skip such a
+// session entirely, and its queued RunIDs would never see a terminal
+// event. Keys are normalized to real session IDs so ClearQueue cannot be
+// handed a synthetic "<id>-summarize" key, on which it is a silent no-op.
 func (a *sessionAgent) CancelAll() {
-	if !a.IsBusy() {
+	teardown := make(map[string]struct{})
+	for key := range a.activeRequests.Seq2() {
+		teardown[strings.TrimSuffix(key, summarizeKeySuffix)] = struct{}{}
+	}
+	for sessionID, queued := range a.messageQueue.Seq2() {
+		if len(queued) > 0 {
+			teardown[sessionID] = struct{}{}
+		}
+	}
+	if len(teardown) == 0 {
 		return
 	}
-	for key := range a.activeRequests.Seq2() {
-		a.Cancel(key) // key is sessionID
-		a.ClearQueue(key)
+	for sessionID := range teardown {
+		a.Cancel(sessionID)
+		a.ClearQueue(sessionID)
 	}
 
 	timeout := time.After(5 * time.Second)

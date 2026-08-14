@@ -388,3 +388,102 @@ func TestRun_IdleWithQueueRunsSubmissionsOldestFirst(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+// errStreamModel fails every Stream call with a fixed error, the way a
+// provider that rejects the request does. PrepareStep has already created
+// the assistant message by then, so the turn takes Run's stream-error
+// branch and publishes an errored terminal event.
+type errStreamModel struct {
+	err error
+}
+
+func (m *errStreamModel) Provider() string { return "fake" }
+func (m *errStreamModel) Model() string    { return "fake-model" }
+
+func (m *errStreamModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
+	return nil, m.err
+}
+
+func (m *errStreamModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	return nil, m.err
+}
+
+func (m *errStreamModel) GenerateObject(ctx context.Context, call fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *errStreamModel) StreamObject(ctx context.Context, call fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+// TestRun_SwappedHeadFailureIsNotAttributedToTheRequeuedSubmission pins
+// the attribution contract of the FIFO swap: when a submission to an idle
+// session with a queue is requeued behind the queue head and the head's
+// turn then fails, the failure belongs to the head's RunID alone. The
+// submission's prompt has not run, so it must get no terminal event yet —
+// otherwise its `crush run` waiter would exit on a foreign prompt's error
+// and the prompt would publish a second terminal event for the same RunID
+// when its own turn finally ran.
+func TestRun_SwappedHeadFailureIsNotAttributedToTheRequeuedSubmission(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	streamErr := errors.New("provider rejected the request")
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel:  Model{Model: &errStreamModel{err: streamErr}, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		SmallModel:  Model{Model: &finishStreamModel{text: "title"}, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		IsYolo:      true,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	// A prompt survived a cancel and sits queued on an idle session.
+	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-a", Prompt: "queued"})
+	require.False(t, sa.IsSessionBusy(sess.ID))
+
+	// The user restarts the agent with a new prompt, dispatched the way
+	// backend.runAgent does it.
+	ctx := WithRunCompleteMarker(WithRunID(t.Context(), "run-b"))
+	_, err = sa.Run(ctx, SessionAgentCall{
+		SessionID: sess.ID,
+		RunID:     "run-b",
+		Prompt:    "new",
+	})
+	require.ErrorIs(t, err, streamErr, "the promoted head's failure propagates to the caller")
+
+	// The caller's own prompt never ran: it is still queued, and the
+	// dispatcher must be told so it does not report the head's failure
+	// under run-b.
+	require.Equal(t, []string{"new"}, sa.QueuedPromptsList(sess.ID),
+		"the requeued submission must still be queued after the head failed")
+	ranID, requeued := RequeuedRun(ctx)
+	require.True(t, requeued, "the swap must record that the dispatched prompt was requeued")
+	require.Equal(t, "run-a", ranID, "the invocation's outcome belongs to the promoted head")
+
+	// Exactly one terminal event, errored, for the head's RunID.
+	select {
+	case ev := <-ch:
+		require.Equal(t, "run-a", ev.Payload.RunID,
+			"the failed turn's terminal event must carry the RunID of the prompt that ran")
+		require.Contains(t, ev.Payload.Error, streamErr.Error())
+		require.False(t, ev.Payload.Cancelled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the promoted head published no terminal RunComplete; its waiter would hang")
+	}
+	select {
+	case extra := <-ch:
+		t.Fatalf("terminal event for a prompt that has not run: %+v", extra.Payload)
+	case <-time.After(200 * time.Millisecond):
+	}
+}

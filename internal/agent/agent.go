@@ -407,6 +407,18 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // path still balances the caller's reservation exactly once and
 // acceptedRuns never dips to 0 across the swap, keeping the session
 // observable to a concurrent Cancel.
+//
+// The accept reservation is the only thing it inherits. In particular
+// the head keeps the nil OnComplete enqueueCall gave it, rather than
+// borrowing call's hook: the coordinator's hook only buffers the payload
+// and publishes it after Run returns, so routing the head's terminal
+// event through it would hold that event back until every prompt behind
+// the head — call's own included — had finished, publishing it out of
+// execution order. With the hook left nil the head's terminal publishes
+// to the broker the moment its turn ends, under the head's own RunID.
+// Run records the swap on the context instead (MarkRunRequeued) so the
+// dispatch boundary stops attributing this invocation's outcome to
+// call.RunID.
 func (a *sessionAgent) swapWithQueueHead(call SessionAgentCall) SessionAgentCall {
 	a.enqueueCall(call)
 	queued, _ := a.messageQueue.Get(call.SessionID)
@@ -733,8 +745,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Calls the internal promotion paths dequeued (call.dequeued) are
 	// already ahead of the queue; swapping them back in would rotate the
 	// queue and invert the very order this branch exists to preserve.
+	// That also means only the dispatched (top-level) call can swap, so
+	// the requeue recorded below always describes the RunID the
+	// dispatcher is waiting on.
 	if !call.dequeued && a.QueuedPrompts(call.SessionID) > 0 {
 		call = a.swapWithQueueHead(call)
+		// This invocation now runs the queue head, not the prompt it was
+		// dispatched with: that prompt is queued and publishes its own
+		// terminal event when it runs. Tell the dispatch boundary
+		// (backend.runAgent), which otherwise reads this invocation's
+		// error as its own run's failure and both reports it under the
+		// still-queued RunID and publishes a terminal event for a prompt
+		// that has not run — which the prompt's own turn would later
+		// publish a second time.
+		MarkRunRequeued(ctx, call.RunID)
 	}
 
 	// Idle: become the active run. Register the cancel func before dropping

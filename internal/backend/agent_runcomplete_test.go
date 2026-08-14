@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -20,9 +21,15 @@ import (
 // the run-complete marker on the context before returning, simulating a
 // real coordinator that already published the run's authoritative
 // terminal RunComplete (so runAgent must not emit a duplicate fallback).
+// When requeued is true it instead stamps the requeue marker with
+// ranRunID, simulating sessionAgent.Run's FIFO swap: the dispatched
+// prompt went back into the session queue and the error belongs to the
+// queued prompt that ran in its place.
 type errorCoordinator struct {
 	err           error
 	markPublished bool
+	requeued      bool
+	ranRunID      string
 }
 
 func (c *errorCoordinator) Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
@@ -32,6 +39,9 @@ func (c *errorCoordinator) Run(ctx context.Context, sessionID, prompt string, at
 func (c *errorCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if c.markPublished {
 		agent.MarkRunCompletePublished(ctx)
+	}
+	if c.requeued {
+		agent.MarkRunRequeued(ctx, c.ranRunID)
 	}
 	return nil, c.err
 }
@@ -161,6 +171,50 @@ func TestRunAgent_CancellationPublishesNoErrorTerminal(t *testing.T) {
 	select {
 	case ev := <-ch:
 		t.Fatalf("cancellation must not publish a terminal RunComplete: %+v", ev.Payload)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestRunAgent_RequeuedRunAttributesErrorToTheRunThatRan covers the FIFO
+// swap's dispatch contract: when sessionAgent.Run requeues the
+// dispatched prompt behind the session's queue and runs a queued prompt
+// instead, the error it returns belongs to that queued prompt. runAgent
+// must report it under that prompt's RunID and publish no terminal
+// RunComplete for the dispatched one, which is still queued and owes
+// exactly one terminal event when its own turn ends. Attributing either
+// event to the dispatched RunID makes its `crush run` waiter exit on a
+// foreign prompt's failure and yields a second terminal event for that
+// RunID once the prompt actually runs.
+func TestRunAgent_RequeuedRunAttributesErrorToTheRunThatRan(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	runErr := errors.New("provider rejected the request")
+	ws := insertRunCompleteWorkspace(t, b, context.Background(),
+		&errorCoordinator{err: runErr, requeued: true, ranRunID: "run-a"})
+
+	subCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	terminals := ws.RunCompletions().Subscribe(subCtx)
+	notifications := ws.AgentNotifications().Subscribe(subCtx)
+
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-b", Prompt: "hi"})
+	require.NoError(t, err)
+
+	ws.runWG.Wait()
+
+	select {
+	case ev := <-notifications:
+		require.Equal(t, notify.TypeAgentError, ev.Payload.Type)
+		require.Equal(t, "run-a", ev.Payload.RunID,
+			"the error must be attributed to the prompt that actually ran")
+		require.Equal(t, runErr.Error(), ev.Payload.Message)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no agent error notification published for the failed turn")
+	}
+
+	select {
+	case ev := <-terminals:
+		t.Fatalf("terminal RunComplete published for a prompt that has not run: %+v", ev.Payload)
 	case <-time.After(200 * time.Millisecond):
 	}
 }

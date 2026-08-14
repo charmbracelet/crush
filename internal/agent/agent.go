@@ -59,8 +59,6 @@ const (
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
 
-	// summarizeKeySuffix distinguishes a session's summarize entry from
-	// its regular run entry in activeRequests.
 	summarizeKeySuffix = "-summarize"
 )
 
@@ -143,7 +141,8 @@ type SessionAgentCall struct {
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
 }
 
-// QueuedMessage is the frontend-safe content of a queued agent call.
+// QueuedMessage is the frontend-safe portion of a SessionAgentCall (prompt
+// and attachments, with the attachment bytes owned by the caller).
 type QueuedMessage struct {
 	Prompt      string
 	Attachments []message.Attachment
@@ -406,9 +405,9 @@ func (a *sessionAgent) endHandoff(sessionID string) {
 	a.handoffs.Set(sessionID, count-1)
 }
 
-// handoffInFlight reports whether a handoff has promoted (or is about to
-// promote) a queued call for this session that has not yet reached its
-// dispatch decision.
+// handoffInFlight reports whether a queued call for this session has been
+// promoted (or is about to be) but has not yet reached its dispatch
+// decision.
 func (a *sessionAgent) handoffInFlight(sessionID string) bool {
 	a.acceptedMu.Lock()
 	defer a.acceptedMu.Unlock()

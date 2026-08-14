@@ -185,8 +185,6 @@ func TestRun_PrepareStepDrainKeepsQueuedOnPendingCancel(t *testing.T) {
 		"the queued follow-up must run as its own turn, not be folded into the canceled one")
 	require.Equal(t, []string{"queued-followup", "main"}, prompts)
 
-	// The queue drained through the handoff and the pending cancel is
-	// consumed.
 	require.Equal(t, 0, sa.QueuedPrompts(sess.ID))
 	require.False(t, sa.hasPendingCancel(sess.ID))
 }

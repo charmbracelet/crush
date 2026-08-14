@@ -302,8 +302,8 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	return nil
 }
 
-// noQueuedMessages is the banner shown when a pop finds nothing to restore,
-// either from the memoized count or from the workspace itself.
+// noQueuedMessages is the banner shown when a pop or a restore drain finds
+// nothing to bring back.
 const noQueuedMessages = "No queued messages."
 
 // popQueuedMessage removes the newest queued message off the Update
@@ -597,8 +597,6 @@ func (m *UI) parkQueuedMessages(sessionID string, queued []agent.QueuedMessage) 
 	m.queuedRestoreOrphans[sessionID] = append(m.queuedRestoreOrphans[sessionID], queued...)
 }
 
-// queuedMessagesLabel renders a queued-message count for banner text: "the
-// queued message" for one, "3 queued messages" beyond that.
 func queuedMessagesLabel(n int) string {
 	if n == 1 {
 		return "the queued message"
@@ -606,8 +604,6 @@ func queuedMessagesLabel(n int) string {
 	return fmt.Sprintf("%d queued messages", n)
 }
 
-// parkedQueuedMessagesBanner is the warning shown when messages are parked
-// for a session the user has left.
 func parkedQueuedMessagesBanner(n int) string {
 	return fmt.Sprintf("Session changed: %s will be restored when you return to that session.",
 		queuedMessagesLabel(n))

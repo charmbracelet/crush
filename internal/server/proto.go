@@ -940,7 +940,8 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 	jsonEncode(w, proto.ClearQueueResponse{Messages: messages})
 }
 
-// handlePostWorkspaceAgentSessionPromptPop removes the newest queued message.
+// handlePostWorkspaceAgentSessionPromptPop removes the newest queued message
+// from the session's prompt queue, reporting whether one was found.
 //
 //	@Summary		Pop newest queued message
 //	@Tags			agent

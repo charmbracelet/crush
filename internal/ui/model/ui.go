@@ -2537,9 +2537,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// Handle the cancel key: it stops the agent while it is busy, and it
-	// takes the queue off the agent, moving the queued prompts into the
-	// input field rather than destroying them.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
 		if m.isAgentBusy() {
 			// The double-press machine lives in cancelAgent, which drains
@@ -3194,9 +3191,8 @@ func (m *UI) ShortHelp() []key.Binding {
 	case uiInitialize:
 		binds = append(binds, k.Quit)
 	case uiChat:
-		// Show cancel binding if agent is busy. Cancel is turn-scoped and
-		// leaves queued prompts intact, so the help text must never
-		// advertise clearing the queue.
+		// Cancel help must not advertise queue clearing: cancel is
+		// turn-scoped and leaves queued prompts intact.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
@@ -3290,9 +3286,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Quit,
 			})
 	case uiChat:
-		// Show cancel binding if agent is busy. Cancel is turn-scoped and
-		// leaves queued prompts intact, so the help text must never
-		// advertise clearing the queue.
+		// Cancel help must not advertise queue clearing: cancel is
+		// turn-scoped and leaves queued prompts intact.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {

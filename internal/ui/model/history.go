@@ -89,9 +89,6 @@ func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
 	return m.updateTextarea(msg)
 }
 
-// isBrowsingHistory reports whether the editor is currently showing a
-// message from prompt history rather than the user's own draft, which is
-// the state Escape leaves by restoring the draft.
 func (m *UI) isBrowsingHistory() bool {
 	return m.promptHistory.index >= 0
 }

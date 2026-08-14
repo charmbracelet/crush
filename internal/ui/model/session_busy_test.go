@@ -516,8 +516,6 @@ func TestCancelAgentDrainsQueueOnConfirmingPress(t *testing.T) {
 	require.Zero(t, m.promptQueue)
 }
 
-// cancelHelp returns the description the help panes show for the esc/cancel
-// binding, or "" when no cancel binding is offered.
 func cancelHelp(t *testing.T, binds []key.Binding) string {
 	t.Helper()
 	for _, b := range binds {
@@ -1209,8 +1207,6 @@ func TestPopQueuedMessageEmptyResultAfterSessionSwitchKeepsCurrentQueue(t *testi
 	require.Zero(t, ws.queueListCalls, "another session's empty pop must not re-fetch this queue")
 }
 
-// helpDesc returns the description the help panes show for the binding
-// rendered under helpKey, or "" when no such binding is offered.
 func helpDesc(groups [][]key.Binding, helpKey string) string {
 	for _, group := range groups {
 		for _, b := range group {
@@ -1854,9 +1850,8 @@ func TestIdleEscapeDrainWithStaleCountReportsEmptyQueue(t *testing.T) {
 	require.Empty(t, m.queuedRestoreOrphans, "an empty drain must not park anything")
 }
 
-// TestIdleEscapeWithoutQueueClearsNothing keeps esc inert on an idle
-// session with nothing queued: the binding acts only when the UI is
-// showing a queue to move.
+// TestIdleEscapeWithoutQueueClearsNothing: the esc binding acts only when
+// the UI is showing a queue to move.
 func TestIdleEscapeWithoutQueueClearsNothing(t *testing.T) {
 	pinTTLs(t)
 

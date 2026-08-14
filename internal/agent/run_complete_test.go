@@ -401,9 +401,8 @@ func requireNoRunComplete(t *testing.T, ch <-chan pubsub.Event[notify.RunComplet
 // the queue by the explicit ClearQueue path (which routes through
 // publishCanceledQueueDrops) must emit exactly one cancelled RunComplete
 // on the broker for its RunID. A queued prompt without a RunID is dropped
-// silently. This is the coverage the earlier drain test lacked: it
-// asserted the returned bookkeeping slice, not the published event a
-// `crush run` caller awaits.
+// silently. The assertions observe the published event a `crush run`
+// caller awaits.
 func TestClearQueue_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
 	t.Parallel()
 
@@ -742,9 +741,9 @@ func TestCancelAll_ShutdownDiscardsQueueAndNotifies(t *testing.T) {
 // contract for the state Cancel actually leaves behind. Cancel is
 // turn-scoped: it ends the active turn and keeps the queue, so after
 // "esc esc" the session has *no* active request and a non-empty queue.
-// Keying the teardown on activeRequests alone made CancelAll return
-// early (nothing is busy) and the queued RunIDs never got a terminal
-// event, hanging any caller blocking on one.
+// Keying the teardown on activeRequests alone would make CancelAll return
+// early (nothing is busy), leaving the queued RunIDs without a terminal
+// event and hanging any caller blocking on one.
 func TestCancelAll_ShutdownDiscardsQueueOnIdleSession(t *testing.T) {
 	t.Parallel()
 

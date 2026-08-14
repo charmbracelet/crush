@@ -21,7 +21,6 @@ type configWorkspace struct {
 
 func (configWorkspace) Config() *config.Config { return &config.Config{} }
 
-// hasCommandAction reports whether any built command carries the action.
 func hasCommandAction(items []*CommandItem, action Action) bool {
 	for _, item := range items {
 		if item.Action() == action {

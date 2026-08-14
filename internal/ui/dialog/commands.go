@@ -527,9 +527,6 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
 	}
 
-	// Queued prompts are only removable one at a time (shift+up pops the
-	// newest back into the editor), so offer a bulk discard whenever the
-	// queue is non-empty.
 	if c.hasQueue {
 		commands = append(commands, NewCommandItem(c.com.Styles, "clear_queue", "Clear Queued Messages", "", ActionClearQueue{}))
 	}

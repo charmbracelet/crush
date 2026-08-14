@@ -259,7 +259,9 @@ func (b *Backend) QueuedPromptsList(workspaceID, sessionID string) ([]string, er
 	return ws.AgentCoordinator.QueuedPromptsList(sessionID), nil
 }
 
-// PopQueuedMessage removes and returns the newest queued message for a session.
+// PopQueuedMessage removes and returns the newest queued message for a
+// session. A workspace with no coordinator has no queue, so it reports
+// an empty pop rather than an error.
 func (b *Backend) PopQueuedMessage(workspaceID, sessionID string) (agent.QueuedMessage, bool, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {

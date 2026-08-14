@@ -10,11 +10,10 @@ import (
 
 // TestAppWorkspace_QueueOpsWithUninitializedAgent pins the local half of the
 // queue contract for a workspace whose coder agent was never initialized.
-// Popping used to return ErrAgentNotInitialized here while the remote path
-// answered "empty queue" (Backend.PopQueuedMessage, covered by
-// TestPopQueuedMessageEmptyAndErrors), so the same key press showed an error
-// banner locally and did nothing in client/server mode. No coordinator means
-// no queue, so every queue operation collapses to zero values.
+// Local must answer like client/server does (the remote path is
+// Backend.PopQueuedMessage, covered by TestPopQueuedMessageEmptyAndErrors):
+// no coordinator means no queue, so every queue operation collapses to zero
+// values rather than an error.
 func TestAppWorkspace_QueueOpsWithUninitializedAgent(t *testing.T) {
 	t.Parallel()
 
@@ -33,7 +32,6 @@ func TestAppWorkspace_QueueOpsWithUninitializedAgent(t *testing.T) {
 	require.Zero(t, ws.AgentQueuedPrompts("session"))
 	require.Empty(t, ws.AgentQueuedPromptsList("session"))
 
-	// The uninitialized agent is still reported where the UI acts on it.
 	require.ErrorIs(t, ws.AgentReadyErr(), ErrAgentNotInitialized)
 	require.False(t, ws.AgentIsReady())
 }

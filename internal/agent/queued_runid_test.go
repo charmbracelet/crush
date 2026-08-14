@@ -185,9 +185,7 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 
 // TestRun_CancelKeepsQueuedPromptsForEditing is the end-to-end proof for
 // issue #3558: with a turn active and prompts queued behind it, "esc esc"
-// must cancel the active turn and nothing else. Before this, Cancel called
-// clearQueueAndNotify, so cancelling destroyed every queued prompt — the
-// data loss the pop feature exists to prevent. The canceled turn returns
+// must cancel the active turn and nothing else. The canceled turn returns
 // through the error path (before the completion handoff), so the queue is
 // left intact, in order, for the user to pop and edit; still-queued
 // prompts are not reported as cancelled to a waiting caller, because they
@@ -222,7 +220,6 @@ func TestRun_CancelKeepsQueuedPromptsForEditing(t *testing.T) {
 	defer subCancel()
 	ch := broker.Subscribe(subCtx)
 
-	// Start the main turn; it blocks inside Stream once active.
 	mainDone := make(chan error, 1)
 	go func() {
 		_, runErr := sa.Run(t.Context(), SessionAgentCall{
@@ -256,8 +253,7 @@ func TestRun_CancelKeepsQueuedPromptsForEditing(t *testing.T) {
 	require.ErrorIs(t, <-mainDone, context.Canceled,
 		"the active turn must end canceled")
 
-	// The queue survived the cancel, in its original order, and the
-	// newest entry is still poppable for editing.
+	// The newest entry is still poppable for editing.
 	require.Equal(t, []string{"queued-one", "queued-two"}, sa.QueuedPromptsList(sess.ID),
 		"cancelling must not discard queued prompts")
 	popped, ok := sa.PopQueuedMessage(sess.ID)
@@ -302,8 +298,9 @@ func TestRun_CancelKeepsQueuedPromptsForEditing(t *testing.T) {
 // agent after "esc esc": cancellation is turn-scoped, so the session is
 // left idle with its queue intact, and the prompt the user sends to get
 // going again must run *behind* what is already queued. Keying the
-// dispatch decision on IsSessionBusy alone made the new prompt the active
-// run, so it overtook every queued prompt and they drained after it.
+// dispatch decision on IsSessionBusy alone would make the new prompt the
+// active run, overtaking every queued prompt and leaving them to drain
+// after it.
 //
 // Each prompt carries a RunID, so none of them can be folded into another
 // turn: every one runs as its own turn and owes exactly one terminal
@@ -339,7 +336,6 @@ func TestRun_IdleWithQueueRunsSubmissionsOldestFirst(t *testing.T) {
 	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-two", Prompt: "queued-two"})
 	require.False(t, sa.IsSessionBusy(sess.ID))
 
-	// The user restarts the agent with a new prompt.
 	_, err = sa.Run(t.Context(), SessionAgentCall{
 		SessionID: sess.ID,
 		RunID:     "run-new",
@@ -488,7 +484,6 @@ func TestRun_SubmissionDuringCompletionHandoffRunsAfterTheQueue(t *testing.T) {
 	defer subCancel()
 	ch := broker.Subscribe(subCtx)
 
-	// Turn one is active, parked inside Stream.
 	firstDone := make(chan error, 1)
 	go func() {
 		_, runErr := sa.Run(t.Context(), SessionAgentCall{
@@ -640,8 +635,8 @@ func TestRun_SwappedHeadFailureIsNotAttributedToTheRequeuedSubmission(t *testing
 	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-a", Prompt: "queued"})
 	require.False(t, sa.IsSessionBusy(sess.ID))
 
-	// The user restarts the agent with a new prompt, dispatched the way
-	// backend.runAgent does it.
+	// Dispatched the way backend.runAgent does it: the RunID and run-complete
+	// marker live on the ctx.
 	ctx := WithRunCompleteMarker(WithRunID(t.Context(), "run-b"))
 	_, err = sa.Run(ctx, SessionAgentCall{
 		SessionID: sess.ID,

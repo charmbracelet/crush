@@ -472,7 +472,8 @@ func (c *Client) ClearAgentSessionQueuedPrompts(ctx context.Context, id string, 
 	return drained, nil
 }
 
-// PopAgentSessionQueuedMessage removes and returns the newest queued message.
+// PopAgentSessionQueuedMessage removes and returns the newest queued message
+// for a session; the boolean reports whether the queue held one.
 func (c *Client) PopAgentSessionQueuedMessage(ctx context.Context, id, sessionID string) (agent.QueuedMessage, bool, error) {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/prompts/pop", id, sessionID), nil, nil, nil)
 	if err != nil {

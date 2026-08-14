@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-// QueuedMessage is the transport-safe content of a queued agent call.
+// QueuedMessage is the JSON-safe form of agent.QueuedMessage.
 type QueuedMessage struct {
 	Prompt      string       `json:"prompt"`
 	Attachments []Attachment `json:"attachments"`

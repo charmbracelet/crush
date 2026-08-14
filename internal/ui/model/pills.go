@@ -133,8 +133,6 @@ func escapeQueueItem(item string) string {
 	return strings.ReplaceAll(item, "\t", `\t`)
 }
 
-// pillHelpHint renders one compact keystroke/action hint with the shared pill
-// help styling.
 func pillHelpHint(t *styles.Styles, key, desc string) string {
 	keyView := t.Pills.HelpKey.Render(key)
 	descView := t.Pills.HelpText.Render(desc)

@@ -524,6 +524,72 @@ func TestClearQueue_HoldsSessionDispatchMutex(t *testing.T) {
 	}
 }
 
+// TestSummarize_QueuePromotionHoldsSessionDispatchMutex pins the
+// synchronization of the promotion at the end of Summarize. The tail
+// releases the active request first, so the session reads idle for the
+// whole promotion: a submission landing in that window takes Run's
+// idle-with-queue branch, which swaps the submission into the queue and
+// starts the queue head. Promoting without the dispatch mutex writes the
+// tail's stale pre-swap snapshot back over that swap — the submission is
+// wiped from the queue (never run, no terminal RunComplete for its RunID)
+// and the head, already active, is re-queued and runs a second time.
+func TestSummarize_QueuePromotionHoldsSessionDispatchMutex(t *testing.T) {
+	t.Parallel()
+
+	sa, env := newStreamTestAgent(t)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	// Summarize returns early on an empty session.
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "history"},
+		},
+	})
+	require.NoError(t, err)
+
+	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "queued"})
+
+	mu := sa.sessionMu(sess.ID)
+	mu.Lock()
+
+	done := make(chan error, 1)
+	go func() { done <- sa.Summarize(context.WithoutCancel(t.Context()), sess.ID, nil, nil) }()
+
+	// Persisting the summary on the session is the last step before the
+	// tail, so once it lands the only work left is the promotion.
+	require.Eventually(t, func() bool {
+		s, err := env.sessions.Get(t.Context(), sess.ID)
+		return err == nil && s.SummaryMessageID != ""
+	}, 10*time.Second, 10*time.Millisecond,
+		"summarize never reached its queue-promotion tail")
+
+	time.Sleep(100 * time.Millisecond)
+	require.Equal(t, 1, sa.QueuedPrompts(sess.ID),
+		"the summarize tail dequeued the queue head without the session dispatch mutex")
+
+	mu.Unlock()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Summarize never completed after the dispatch mutex was released")
+	}
+
+	require.Equal(t, 0, sa.QueuedPrompts(sess.ID),
+		"the queued prompt must be promoted once the lock is available")
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	var ranQueued bool
+	for _, msg := range msgs {
+		if msg.Role == message.User && msg.Content().String() == "queued" {
+			ranQueued = true
+		}
+	}
+	require.True(t, ranQueued, "the promoted prompt must have run as its own turn")
+}
+
 // TestCancel_PreservesQueuedPrompts is the regression test for issue
 // #3558: Escape must cancel the turn in progress without discarding
 // queued prompts. It drives the public Cancel path with an active request

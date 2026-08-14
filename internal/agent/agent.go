@@ -1317,6 +1317,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		// If the agent wasn't done...
 		if len(currentAssistant.ToolCalls()) > 0 {
+			// Re-queue the continuation under the per-session dispatch
+			// mutex. Every other queue read-modify-write (the dispatch
+			// decision, the PrepareStep drain, ClearQueue, and both
+			// promotions) holds it, so an unlocked append here can be
+			// lost to a concurrent drain that read the queue before the
+			// append and wrote after it — or resurrect a prompt that
+			// drain removed.
+			mu := a.sessionMu(call.SessionID)
+			mu.Lock()
 			existing, ok := a.messageQueue.Get(call.SessionID)
 			if !ok {
 				existing = []SessionAgentCall{}
@@ -1324,6 +1333,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
+			mu.Unlock()
 		}
 	}
 
@@ -1570,9 +1580,21 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	a.activeRequests.Del(sessionID)
 	cancel()
 
-	// Process any messages that were queued while summarizing.
+	// Process any messages that were queued while summarizing. The
+	// dequeue holds the per-session dispatch mutex because the release
+	// above makes the session read idle: a submission landing here takes
+	// Run's idle-with-queue branch, which swaps itself into the queue and
+	// starts the head. An unlocked read/promote/write would write this
+	// stale snapshot back over that swap, dropping the new submission
+	// (never run, never restored, and no terminal RunComplete for its
+	// RunID, so a `crush run` waiter hangs) and re-queueing a head that
+	// is already running — which then runs a second time and publishes a
+	// second terminal event for its RunID.
+	mu := a.sessionMu(sessionID)
+	mu.Lock()
 	queuedMessages, ok := a.messageQueue.Get(sessionID)
 	if !ok || len(queuedMessages) == 0 {
+		mu.Unlock()
 		return nil
 	}
 	firstQueuedMessage := queuedMessages[0]
@@ -1580,6 +1602,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	// behind the prompts still queued after it.
 	firstQueuedMessage.dequeued = true
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
+	mu.Unlock()
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
 }

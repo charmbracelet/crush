@@ -389,6 +389,194 @@ func TestRun_IdleWithQueueRunsSubmissionsOldestFirst(t *testing.T) {
 	}
 }
 
+// TestRun_HandoffInFlightQueuesSubmissionBehindThePromotion pins the
+// dispatch decision for the window a session handoff opens. A finished
+// turn (and the Summarize tail) releases its activeRequests entry before
+// it promotes the queue head, so the session reads idle for the whole
+// transition while the promoted call is neither active nor in the queue.
+// A submission landing there took the idle-with-queue branch and swapped
+// itself in, starting the *new* head ahead of the call already promoted;
+// it must be queued at the tail instead, with nothing new started.
+func TestRun_HandoffInFlightQueuesSubmissionBehindThePromotion(t *testing.T) {
+	t.Parallel()
+
+	sa, env := newStreamTestAgent(t)
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	// The state a handoff leaves behind: one prompt still queued, the
+	// promoted call on its way into Run, and no active request.
+	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-queued", Prompt: "queued"})
+	sa.beginHandoff(sess.ID)
+	require.False(t, sa.IsSessionBusy(sess.ID))
+
+	res, err := sa.Run(t.Context(), SessionAgentCall{
+		SessionID: sess.ID,
+		RunID:     "run-new",
+		Prompt:    "new",
+	})
+	require.NoError(t, err)
+	require.Nil(t, res, "a submission landing in the handoff window must enqueue and return (nil, nil)")
+	require.Equal(t, []string{"queued", "new"}, sa.QueuedPromptsList(sess.ID),
+		"the submission must land behind the queue instead of swapping itself ahead of the promoted call")
+	require.False(t, sa.IsSessionBusy(sess.ID), "no run may start inside the handoff window")
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Empty(t, msgs, "the queued submission must not have started a turn")
+
+	// The promoted call releases the ticket at its own dispatch decision.
+	// With the transition over, the next submission takes the swap branch
+	// again and the queue drains oldest-first — proving the ticket, not
+	// some other state, is what gated the window.
+	sa.endHandoff(sess.ID)
+	require.False(t, sa.handoffInFlight(sess.ID))
+
+	_, err = sa.Run(t.Context(), SessionAgentCall{
+		SessionID: sess.ID,
+		RunID:     "run-last",
+		Prompt:    "last",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, sa.QueuedPrompts(sess.ID), "the whole queue must have drained")
+
+	msgs, err = env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	prompts := make([]string, 0, 3)
+	for _, m := range msgs {
+		if m.Role == message.User {
+			prompts = append(prompts, m.Content().String())
+		}
+	}
+	require.Equal(t, []string{"queued", "new", "last"}, prompts,
+		"the prompt queued during the window keeps its place ahead of the newer submission")
+}
+
+// TestRun_SubmissionDuringCompletionHandoffRunsAfterTheQueue drives the
+// real completion handoff with a submission landing inside it. The
+// finished turn promotes the queue head and only then enters the
+// recursive Run, so between those two points the session is observably
+// idle with a queue: a submission that wins the dispatch mutex there used
+// to swap itself in and start the next head, and the promoted call then
+// found the session busy and was re-queued *behind* the submission —
+// execution order inverted to Q3, X, Q2 with the oldest queued prompt
+// last. Both prompts and both terminal events must stay oldest-first.
+func TestRun_SubmissionDuringCompletionHandoffRunsAfterTheQueue(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	large := &gatedStreamModel{
+		text:    "done",
+		gate:    make(chan struct{}),
+		entered: make(chan struct{}),
+	}
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel:  Model{Model: large, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		SmallModel:  Model{Model: &finishStreamModel{text: "title"}, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		IsYolo:      true,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	// Turn one is active, parked inside Stream.
+	firstDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{
+			SessionID: sess.ID,
+			RunID:     "run-one",
+			Prompt:    "active",
+		})
+		firstDone <- runErr
+	}()
+	select {
+	case <-large.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first run never entered Stream")
+	}
+	require.True(t, sa.IsSessionBusy(sess.ID))
+
+	// Two RunID-bearing prompts queue up behind it, so neither can be
+	// folded into another turn.
+	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-two", Prompt: "queued-two"})
+	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-three", Prompt: "queued-three"})
+
+	// Hold the dispatch mutex so the handoff parks on it, and dispatch the
+	// submission so it parks on it too. When the lock is released either
+	// of them may win it: the submission must end up behind the queue in
+	// both interleavings.
+	mu := sa.sessionMu(sess.ID)
+	mu.Lock()
+	newDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{
+			SessionID: sess.ID,
+			RunID:     "run-new",
+			Prompt:    "new",
+		})
+		newDone <- runErr
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// Let turn one finish. It releases its active request and then parks
+	// on the dispatch mutex, which is exactly the window under test.
+	close(large.gate)
+	require.Eventually(t, func() bool {
+		return !sa.IsSessionBusy(sess.ID)
+	}, 10*time.Second, 10*time.Millisecond,
+		"the first turn never reached its completion handoff")
+
+	mu.Unlock()
+	require.NoError(t, <-newDone)
+	select {
+	case runErr := <-firstDone:
+		require.NoError(t, runErr)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the handoff never drained the queue")
+	}
+	require.Equal(t, 0, sa.QueuedPrompts(sess.ID), "the whole queue must have drained")
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	prompts := make([]string, 0, 4)
+	for _, m := range msgs {
+		if m.Role == message.User {
+			prompts = append(prompts, m.Content().String())
+		}
+	}
+	require.Equal(t, []string{"active", "queued-two", "queued-three", "new"}, prompts,
+		"a submission landing in the handoff window must run after the prompts already queued")
+
+	var order []string
+	deadline := time.After(10 * time.Second)
+	for len(order) < 4 {
+		select {
+		case ev := <-ch:
+			require.Empty(t, ev.Payload.Error)
+			require.False(t, ev.Payload.Cancelled)
+			order = append(order, ev.Payload.RunID)
+		case <-deadline:
+			t.Fatalf("timed out waiting for terminal events; got %v", order)
+		}
+	}
+	require.Equal(t, []string{"run-one", "run-two", "run-three", "run-new"}, order,
+		"the submission's RunID must not complete before the prompts queued ahead of it")
+	select {
+	case extra := <-ch:
+		t.Fatalf("unexpected extra terminal event: %+v", extra.Payload)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 // errStreamModel fails every Stream call with a fixed error, the way a
 // provider that rejects the request does. PrepareStep has already created
 // the assistant message by then, so the turn takes Run's stream-error

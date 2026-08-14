@@ -222,15 +222,25 @@ type sessionAgent struct {
 	// cancel. It is only raised by Cancel when acceptedRuns > 0, so an
 	// idle Escape never records a mark.
 	cancelMark *csync.Map[string, uint64]
+	// handoffs counts in-flight session handoffs: a finished turn (or the
+	// Summarize tail) that has stopped being observable as busy but has
+	// not yet handed the session over to the queued call it promoted. A
+	// count > 0 makes the dispatch decision in Run treat the session as
+	// busy for newly submitted prompts, so a submission landing in the
+	// transition is queued behind the promotion instead of swapping
+	// itself in front of it. It is mutated under acceptedMu, like the
+	// other dispatch counters.
+	handoffs *csync.Map[string, int]
 	// dispatchMuCreate guards lazy creation of per-session entries in
 	// dispatchMu so two goroutines can't race to lock different mutex
 	// instances for the same session.
 	dispatchMuCreate sync.Mutex
-	// acceptedMu serializes increments/decrements of acceptedRuns and
-	// the assignment of accept sequence numbers from acceptSeqGen. It
-	// is separate from dispatchMu so AcceptedRun.Close (which may run
-	// while Run holds dispatchMu for the same session) does not
-	// deadlock by re-entering the dispatch lock.
+	// acceptedMu serializes increments/decrements of the dispatch
+	// counters (acceptedRuns, handoffs) and the assignment of accept
+	// sequence numbers from acceptSeqGen. It is separate from dispatchMu
+	// so AcceptedRun.Close (which may run while Run holds dispatchMu for
+	// the same session) does not deadlock by re-entering the dispatch
+	// lock.
 	acceptedMu sync.Mutex
 	// acceptSeqGen is the monotonic source of accept sequence numbers.
 	// Each BeginAccepted increments it under acceptedMu and stamps the
@@ -276,6 +286,7 @@ func NewSessionAgent(
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
+		handoffs:             csync.NewMap[string, int](),
 	}
 }
 
@@ -352,6 +363,57 @@ func (a *sessionAgent) endAccepted(sessionID string) {
 		return
 	}
 	a.acceptedRuns.Set(sessionID, count-1)
+}
+
+// beginHandoff records that a finished turn (or the Summarize tail) has
+// started handing the session over to whatever is queued for it. It must
+// be called before the handoff stops being observable as busy, i.e.
+// before activeRequests is released, so no dispatch decision can see the
+// session as idle-with-a-queue while the handoff is choosing a prompt to
+// promote.
+//
+// The ticket exists because the handoff is invisible in that window: the
+// finished turn's activeRequests entry is gone, the promoted call is no
+// longer in the queue, and the dispatch decision consults only those two
+// pieces of state. A submission landing there would take Run's
+// idle-with-queue branch, swap itself into the queue and start the *new*
+// head — running it ahead of the call the handoff already promoted and
+// inverting the strictly-oldest-first order that branch exists to
+// guarantee. While the ticket is held such a submission is queued
+// instead, so it lands behind the promotion.
+func (a *sessionAgent) beginHandoff(sessionID string) {
+	a.acceptedMu.Lock()
+	defer a.acceptedMu.Unlock()
+	count, _ := a.handoffs.Get(sessionID)
+	a.handoffs.Set(sessionID, count+1)
+}
+
+// endHandoff releases the ticket taken by beginHandoff. It is called by
+// the promoted call itself, from its dispatch decision under the session
+// dispatch mutex, and by a handoff that found nothing to promote. Every
+// beginHandoff is paired with exactly one of those two releases: a
+// promoted call always reaches its dispatch decision (it was validated
+// when it was first dispatched, and Run's only earlier return releases
+// the ticket too).
+func (a *sessionAgent) endHandoff(sessionID string) {
+	a.acceptedMu.Lock()
+	defer a.acceptedMu.Unlock()
+	count, ok := a.handoffs.Get(sessionID)
+	if !ok || count <= 1 {
+		a.handoffs.Del(sessionID)
+		return
+	}
+	a.handoffs.Set(sessionID, count-1)
+}
+
+// handoffInFlight reports whether a handoff has promoted (or is about to
+// promote) a queued call for this session that has not yet reached its
+// dispatch decision.
+func (a *sessionAgent) handoffInFlight(sessionID string) bool {
+	a.acceptedMu.Lock()
+	defer a.acceptedMu.Unlock()
+	count, _ := a.handoffs.Get(sessionID)
+	return count > 0
 }
 
 // sessionMu returns the per-session dispatch mutex, creating it on first
@@ -646,6 +708,15 @@ func ValidateCall(call SessionAgentCall) error {
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
+		if call.dequeued {
+			// A promoted call carries the handoff ticket taken for it, and
+			// this is the one path that returns before the dispatch
+			// decision releases it. Releasing it here keeps a structurally
+			// invalid promotion (unreachable today: queued calls were
+			// validated when they were first dispatched) from leaving the
+			// session permanently undispatchable.
+			a.endHandoff(call.SessionID)
+		}
 		return nil, err
 	}
 
@@ -668,6 +739,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// runs on the same session.
 	sessMu := a.sessionMu(call.SessionID)
 	sessMu.Lock()
+
+	if call.dequeued {
+		// This call is the promotion a handoff reserved a ticket for, and
+		// it has now reached the dispatch decision under the same mutex
+		// the handoff promoted it under: the transition is over, so
+		// release the ticket. Releasing it here — rather than when Run
+		// returns — keeps the window closed for exactly as long as it is
+		// open.
+		a.endHandoff(call.SessionID)
+	}
 
 	if call.Accepted != nil && a.canceledBySeq(call.SessionID, call.Accepted.seq) {
 		// Cancel-on-entry: a cancel arrived while this accepted run was
@@ -698,12 +779,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, nil
 	}
 
-	if a.IsSessionBusy(call.SessionID) {
-		// Busy: an earlier prompt is active. Queue this call so it is
-		// folded into (or sequenced after) the active turn, and release any
-		// accept reservation. A Cancel arriving after this point sees the
-		// active entry and ends that turn; this queued call survives the
-		// cancel and waits for the next handoff.
+	// A handoff in flight counts as busy for a newly submitted prompt: the
+	// session is mid-transition to a call that was promoted out of the
+	// queue, and the swap branch below would start the new queue head
+	// ahead of it. Promoted calls themselves ignore the ticket (their own
+	// is already released above): they are ahead of the queue, and the
+	// activeRequests check is what keeps two runs from starting.
+	if a.IsSessionBusy(call.SessionID) || (!call.dequeued && a.handoffInFlight(call.SessionID)) {
+		// Busy: an earlier prompt is active, or a finished turn is handing
+		// the session to a prompt it promoted out of the queue. Queue this
+		// call so it is folded into (or sequenced after) that turn, and
+		// release any accept reservation. A Cancel arriving after this
+		// point sees the active entry and ends that turn; this queued call
+		// survives the cancel and waits for the next handoff.
 		//
 		// enqueueCall strips OnComplete: the caller that supplied the hook
 		// (typically coordinator.Run) has its own retry/coalesce scope that
@@ -1337,6 +1425,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 	}
 
+	// Take the handoff ticket before releasing the active request: from
+	// here until the promoted call reaches its dispatch decision the
+	// session is observably idle, and the ticket is the only thing that
+	// tells a submission landing in that window to queue behind the
+	// promotion instead of swapping itself in front of it.
+	a.beginHandoff(call.SessionID)
+
 	// Release active request before publishing the notification.
 	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
 	// tea.Msg arrives, so the cleanup must precede the notify or
@@ -1387,6 +1482,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if inFlight == 0 {
 			a.cancelMark.Del(call.SessionID)
 		}
+		// Nothing was promoted, so no dispatch decision is coming to
+		// release the handoff ticket: this is where the transition ends.
+		a.endHandoff(call.SessionID)
 		mu.Unlock()
 		return result, err
 	}
@@ -1575,6 +1673,13 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
+	// Take the handoff ticket before releasing the active request: the
+	// tail is the same kind of transition as the completion handoff in
+	// Run, and a submission landing between the release below and the
+	// promoted call's dispatch decision must queue behind the promotion
+	// rather than swap itself ahead of it.
+	a.beginHandoff(sessionID)
+
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.
 	a.activeRequests.Del(sessionID)
@@ -1594,6 +1699,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	mu.Lock()
 	queuedMessages, ok := a.messageQueue.Get(sessionID)
 	if !ok || len(queuedMessages) == 0 {
+		// Nothing was promoted, so no dispatch decision is coming to
+		// release the handoff ticket.
+		a.endHandoff(sessionID)
 		mu.Unlock()
 		return nil
 	}

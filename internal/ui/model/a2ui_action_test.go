@@ -369,8 +369,11 @@ func TestReportA2UIErrorCallsErrorTool(t *testing.T) {
 	require.Equal(t, "booking", ws.lastArgs["surfaceId"])
 }
 
-// assistantCollidingForm is an assistant-authored surface reusing the same
-// surface ID an MCP server already owns ("booking").
+// assistantCollidingForm is an assistant-authored surface that happens to use
+// the same surface ID as the MCP-served form above. Surface IDs are only
+// unique within whatever authored them, and both the assistant and MCP
+// servers habitually reuse a small set of names ("default", "form"), so the
+// collision is ordinary rather than contrived.
 const assistantCollidingForm = `<a2ui-json>{"version":"v0.9","updateComponents":{"surfaceId":"booking","components":[` +
 	`{"component":"Card","id":"root","child":"col"},` +
 	`{"component":"Column","id":"col","children":["who","btn-go"]},` +

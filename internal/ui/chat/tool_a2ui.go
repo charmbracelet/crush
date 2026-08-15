@@ -110,6 +110,31 @@ type A2UISurfaceItem interface {
 	ApplyToolA2UIUpdate(surfaceID string, msgs []a2ui.ServerMessage) bool
 }
 
+// dropToolA2UISurfaces discards the live surface models and the scan state
+// that guards rebuilding them, so the next syncToolA2UISurfaces rebuilds
+// from the result metadata. Provenance and retirement live outside these
+// fields and are unaffected.
+func (t *baseToolMessageItem) dropToolA2UISurfaces() {
+	t.a2ui.surfaces = nil
+	t.a2ui.surfaceIDs = nil
+	t.a2ui.surfaceOwners = nil
+	t.surfaceSrcHash = 0
+	t.surfaceScanned = false
+	t.surfaceBuildFailed = 0
+}
+
+// clearCache drops the rendered strings and the A2UI surface models.
+//
+// The surfaces must go with them: buildA2UISurfaces bakes the theme's
+// render.Styles into each model at build time, and the only caller of
+// clearCache is the theme-change path, so a kept model would keep drawing
+// the previous palette beside newly-themed chat. AssistantMessageItem drops
+// its surfaces here for exactly the same reason.
+func (t *baseToolMessageItem) clearCache() {
+	t.cachedMessageItem.clearCache()
+	t.dropToolA2UISurfaces()
+}
+
 // hasToolA2UISurfaces reports whether this item carries live MCP surfaces.
 func (t *baseToolMessageItem) hasToolA2UISurfaces() bool {
 	return t.a2ui.hasLive()

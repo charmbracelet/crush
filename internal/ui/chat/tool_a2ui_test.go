@@ -148,3 +148,58 @@ func TestMCPToolRendersA2UIFromMetadata(t *testing.T) {
 	require.Contains(t, plain, "Recipe Card")
 	require.NotContains(t, plain, "do not repeat")
 }
+
+// TestToolA2UIClearCacheDropsSurfacesForRestyle pins the theme-change path for
+// tool-result surfaces. buildA2UISurfaces bakes the active theme's
+// render.Styles into each a2tea model, and clearCache is only ever called from
+// the theme-change path (applyTheme -> refreshStyles ->
+// InvalidateRenderCaches -> ClearItemCaches), so a surface kept across it goes
+// on drawing the previous palette beside newly-themed chat. The assistant item
+// has had this drop since the surfaces landed; the tool item did not.
+func TestToolA2UIClearCacheDropsSurfacesForRestyle(t *testing.T) {
+	t.Parallel()
+
+	item := newA2UIToolItem(t, []string{a2uiToolSurface}, []string{"recipe"}, "mcp_recipe_card")
+	_ = item.RawRender(100)
+	require.True(t, item.hasToolA2UISurfaces(), "surfaces must build on first render")
+	require.True(t, item.surfaceScanned)
+
+	item.clearCache()
+
+	require.False(t, item.surfaceScanned, "the scan guard must reset so the next render rebuilds")
+	require.Zero(t, item.surfaceSrcHash, "a kept hash would short-circuit the rebuild")
+	require.False(t, item.hasToolA2UISurfaces(), "stale themed models must be dropped")
+
+	// The surfaces come back on the next render, now built from current styles.
+	_ = item.RawRender(100)
+	require.True(t, item.hasToolA2UISurfaces(), "surfaces must rebuild after a restyle")
+}
+
+// TestToolRenderDoesNotCacheLiveSurfaceFrame pins that Render never writes a
+// frame containing a live surface into the prefixed-render cache. The surfaces
+// are built inside RawRender, so the hasToolA2UISurfaces() check that guards
+// the cache is still false when Render first consults it — caching there froze
+// the surface's opening frame, and getCachedPrefixedRender keys on
+// (width, prefix) alone, so once the server deleted the surface the dead frame
+// was served for the rest of the item's life.
+func TestToolRenderDoesNotCacheLiveSurfaceFrame(t *testing.T) {
+	t.Parallel()
+
+	// The tool name must not itself contain the surface's text, or the
+	// rendered header would satisfy the replay assertion below.
+	item := newA2UIToolItem(t, []string{a2uiToolSurface}, []string{"recipe"}, "mcp_recipe_fetch")
+
+	_ = item.Render(100)
+	require.True(t, item.hasToolA2UISurfaces(), "the render must have built a live surface")
+	require.Empty(t, item.prefixedRendered,
+		"a frame holding a live surface must not be cached")
+
+	// Drop the surface the way a server-sent deleteSurface does. With the
+	// frame wrongly cached, the next Render would replay it and keep drawing
+	// the surface that no longer exists.
+	item.dropToolA2UISurfaces()
+	item.result.Metadata = ""
+	out := item.Render(100)
+	require.NotContains(t, ansi.Strip(out), "Recipe Card",
+		"a deleted surface must not be replayed from the cache")
+}

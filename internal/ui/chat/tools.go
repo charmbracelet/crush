@@ -405,6 +405,11 @@ func (t *baseToolMessageItem) Render(width int) string {
 	// Bypass the cache while spinning (RawRender output is
 	// frame-dependent), while a highlight range is active, or while
 	// live MCP surfaces can change between frames.
+	//
+	// This decides whether the cache may be READ. It is not sufficient for
+	// the write: the surfaces do not exist yet on the first frame — it is
+	// RawRender below that builds them — so the surface check here is
+	// still false at that point and is re-run after RawRender.
 	useCache := !t.isSpinning() && !t.isHighlighted() && !t.hasToolA2UISurfaces()
 	var key uint64
 	switch {
@@ -433,7 +438,14 @@ func (t *baseToolMessageItem) Render(width int) string {
 		lines[i] = prefix + ln
 	}
 	out := strings.Join(lines, "\n")
-	if useCache {
+	// Re-check now that RawRender has built the surfaces. Caching a frame
+	// that contains a live surface freezes it: getCachedPrefixedRender
+	// keys on (width, prefix) alone and ignores Version(), so once the
+	// server deletes the surface — flipping hasToolA2UISurfaces() back to
+	// false and re-enabling the cache — that first frame would be served
+	// again for the rest of the item's life, still drawing the surface
+	// that no longer exists. RawRender guards its own cache the same way.
+	if useCache && !t.hasToolA2UISurfaces() {
 		t.setCachedPrefixedRender(out, width, key)
 	}
 	return out

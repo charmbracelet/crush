@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"text/template"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
+	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/skills"
 	a2tea "github.com/joestump-agent/a2tea"
 	"github.com/stretchr/testify/require"
 	a2ui "github.com/tmc/a2ui"
@@ -35,6 +38,74 @@ func TestCoderPromptA2UIGate(t *testing.T) {
 	// The example payload advertises the protocol version the pinned a2ui
 	// library actually speaks, not a hardcoded string.
 	require.Contains(t, on, `"version":"`+a2ui.Version+`"`)
+}
+
+// a2uiPromptSection returns the rendered <a2ui> block with A2UI enabled —
+// the configuration real users get, since the coordinator enables A2UI unless
+// options.disable_a2ui is set.
+func a2uiPromptSection(t *testing.T) string {
+	t.Helper()
+	full := renderCoderTemplate(t, prompt.PromptDat{A2UI: true, A2UIVersion: a2ui.Version})
+	start := strings.Index(full, "<a2ui>")
+	end := strings.Index(full, "</a2ui>")
+	require.GreaterOrEqual(t, start, 0, "prompt must contain an <a2ui> section")
+	require.Greater(t, end, start, "prompt must contain a closing </a2ui>")
+	return full[start:end]
+}
+
+// TestA2UIPromptNamesRealTools guards the <a2ui> section against telling the
+// model to call a tool that does not exist. The section ships enabled by
+// default (coordinator.go applies WithA2UI unless disable_a2ui), but the
+// recorded TestCoderAgent cassettes build the prompt WITHOUT A2UI — so no
+// cassette covers this text and a fabricated tool name would otherwise reach
+// users with the suite green.
+func TestA2UIPromptNamesRealTools(t *testing.T) {
+	t.Parallel()
+
+	section := a2uiPromptSection(t)
+
+	// Every MCP identifier the section mentions must be either a real
+	// registered tool or a real parameter of one. Extend these sets when the
+	// section starts naming something else.
+	knownTools := map[string]bool{
+		tools.ReadMCPResourceToolName:  true,
+		tools.ListMCPResourcesToolName: true,
+	}
+	knownParams := map[string]bool{"mcp_name": true}
+	for _, name := range regexp.MustCompile(`[a-z][a-z0-9_]{3,}`).FindAllString(section, -1) {
+		if !strings.Contains(name, "mcp") || knownParams[name] {
+			continue
+		}
+		require.True(t, knownTools[name],
+			"the <a2ui> section names %q, which is not a registered tool", name)
+	}
+
+	// read_mcp_resource requires mcp_name; a call example that omits it
+	// produces a tool error rather than a surface.
+	if strings.Contains(section, tools.ReadMCPResourceToolName) {
+		require.Contains(t, section, "mcp_name",
+			"the section tells the model to call %s but never mentions its required mcp_name parameter",
+			tools.ReadMCPResourceToolName)
+	}
+}
+
+// TestA2UIPromptInputEditabilityMatchesHost pins the section's claim about
+// input components to what the host actually does. Inputs are live: a button
+// press harvests FieldValues() and submits them (see A2UISubmissionPrompt and
+// internal/ui/model/a2ui_submit_test.go), and the a2ui skill documents them
+// under an "input components (editable)" heading. A prompt claiming they are
+// read-only talks the model out of a feature that works.
+func TestA2UIPromptInputEditabilityMatchesHost(t *testing.T) {
+	t.Parallel()
+
+	section := a2uiPromptSection(t)
+	require.NotContains(t, strings.ToLower(section), "read-only",
+		"input components are editable and submitted; the prompt must not call them read-only")
+
+	skill, err := skills.BuiltinFS().ReadFile("builtin/a2ui/SKILL.md")
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(string(skill)), "input components (editable)",
+		"precondition: the a2ui skill documents inputs as editable")
 }
 
 // TestA2UIPromptCatalogRenders guards the prompt's component catalog against

@@ -369,12 +369,22 @@ Adapt verbosity to match the work completed:
 </final_answers>
 {{if .A2UI}}
 <a2ui>
-You MAY include an A2UI surface when a compact visual genuinely helps — a status card, an option list, a progress readout. Most replies need none; prose stays primary.
+You MAY include an A2UI surface when a compact visual genuinely helps — a status card, an option list, a progress readout, a short form. Most replies need none; prose stays primary.
 
-Emit a single inline `<a2ui-json>{...}</a2ui-json>` block containing one `updateComponents` message, as in this example:
+**Two ways to surface A2UI — prefer the first when it applies:**
+1. **Read an MCP `/a2ui` resource** for server-owned data (a queue, a bundle, a trace, a dashboard). Find one with `list_mcp_resources`, then call `read_mcp_resource` with both the `mcp_name` and a concrete `uri` — resolve every `{placeholder}` in the template first (e.g. `mcp_name="switchboard", uri="switchboard://queue/reviews/a2ui"`). The host renders it for the user and hands you a one-line placeholder, NOT the JSON. Never re-echo or repeat that surface's JSON — the user can already see it.
+2. **Emit your own** with a single inline `<a2ui-json>{...}</a2ui-json>` block containing one `updateComponents` message, for ad-hoc visuals no server provides:
+
 <a2ui-json>{"version":"{{.A2UIVersion}}","updateComponents":{"surfaceId":"s1","components":[{"component":"Card","id":"root","child":"col"},{"component":"Column","id":"col","children":["title","body"]},{"component":"Text","id":"title","variant":"h2","text":"Build passed"},{"component":"Text","id":"body","text":"142 tests, 0 failures."}]}}</a2ui-json>
 
-Renderable components: Text (variants h1-h5, caption), Card, Column, Row, List, Divider, Button; input components render read-only. Never put code in a surface — use fenced code blocks.
+**Rules for self-authored surfaces:**
+- Components are a FLAT list linked by `id`. Every `child`/`children` id must reference a component in the array — a dangling id renders an error placeholder.
+- Renderable: Text (variants h1-h5, caption), Card, Column, Row, List, Divider, Button. Input components (TextField, CheckBox, ChoicePicker, Slider, DateTimeInput) are editable — their values come back to you when the user presses a Button on the surface.
+- A Button's label is a child Text component — NEVER a `text`/`label` field on the Button.
+- Never put code, logs, or long text in a surface — use fenced code blocks for those.
+- Do NOT append a width hint (`?w=`) yourself; the host sizes surfaces.
+
+Load the `a2ui` skill for the full component catalog and form templates.
 </a2ui>
 {{end}}
 <env>

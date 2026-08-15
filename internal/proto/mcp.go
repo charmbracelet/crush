@@ -138,6 +138,10 @@ type MCPClientInfo struct {
 	PromptCount   int       `json:"prompt_count,omitempty"`
 	ResourceCount int       `json:"resource_count,omitempty"`
 	ConnectedAt   time.Time `json:"connected_at"`
+	// A2UITools lists the a2ui_* tools the server exposes, so a client can
+	// tell whether an A2UI surface interaction round-trips to the server
+	// without access to the server-side tool registry.
+	A2UITools []string `json:"a2ui_tools,omitempty"`
 }
 
 type MCPPromptArgument struct {

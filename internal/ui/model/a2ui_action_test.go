@@ -37,6 +37,30 @@ type a2uiActionWorkspace struct {
 	// lastPrompt records the content of the most recent AgentRun, so the
 	// fallback path's submission prompt can be asserted on.
 	lastPrompt string
+	// a2uiTools maps an MCP server name to the a2ui_* tools it exposes,
+	// mirroring what a real workspace publishes in ClientInfo.A2UITools.
+	a2uiTools map[string][]string
+}
+
+// serveA2UITools makes the workspace report that mcpName exposes the given
+// a2ui_* tools, the way a connected server's published state would.
+func (w *a2uiActionWorkspace) serveA2UITools(mcpName string, toolNames ...string) {
+	if w.a2uiTools == nil {
+		w.a2uiTools = map[string][]string{}
+	}
+	w.a2uiTools[mcpName] = toolNames
+}
+
+func (w *a2uiActionWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {
+	out := make(map[string]mcptools.ClientInfo, len(w.a2uiTools))
+	for name, toolNames := range w.a2uiTools {
+		out[name] = mcptools.ClientInfo{
+			Name:      name,
+			State:     mcptools.StateConnected,
+			A2UITools: toolNames,
+		}
+	}
+	return out
 }
 
 func (w *a2uiActionWorkspace) AgentIsReady() bool     { return true }
@@ -115,16 +139,15 @@ func newA2UIActionUIItem(t *testing.T, ws *a2uiActionWorkspace, mcpName string) 
 func TestHandleA2UIButtonClickedMCPSurfaceRoundTrips(t *testing.T) {
 	t.Parallel()
 
-	// The MCP tool registry is process-global; a per-test server name keeps
-	// parallel tests from overwriting each other's capabilities.
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
 	srv := t.Name()
 
 	ws := &a2uiActionWorkspace{
 		response: workspace.MCPToolCallResult{Content: "Booking confirmed"},
 	}
 	m := newA2UIActionUI(t, ws, srv)
-	cleanup := mcptools.SetToolsForTest(srv, "a2ui_action")
-	t.Cleanup(cleanup)
+	ws.serveA2UITools(srv, "a2ui_action")
 
 	cmd := m.handleA2UIButtonClicked(event.ButtonClicked{
 		Source: event.Source{ComponentID: "btn-confirm", SurfaceID: "booking"},
@@ -155,15 +178,14 @@ func TestHandleA2UIButtonClickedMCPSurfaceRoundTrips(t *testing.T) {
 func TestHandleA2UIButtonClickedMCPSurfaceWithoutActionToolFallsBack(t *testing.T) {
 	t.Parallel()
 
-	// The MCP tool registry is process-global; a per-test server name keeps
-	// parallel tests from overwriting each other's capabilities.
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
 	srv := t.Name()
 
 	ws := &a2uiActionWorkspace{}
 	m := newA2UIActionUI(t, ws, srv)
 	// Server serves surfaces but NOT a2ui_action.
-	cleanup := mcptools.SetToolsForTest(srv, "some_other_tool")
-	t.Cleanup(cleanup)
+	ws.serveA2UITools(srv, "some_other_tool")
 
 	cmd := m.handleA2UIButtonClicked(event.ButtonClicked{
 		Source: event.Source{ComponentID: "btn-confirm", SurfaceID: "booking"},
@@ -187,14 +209,13 @@ func TestHandleA2UIButtonClickedMCPSurfaceWithoutActionToolFallsBack(t *testing.
 func TestHandleA2UIActionResultAppliesSurfacePayload(t *testing.T) {
 	t.Parallel()
 
-	// The MCP tool registry is process-global; a per-test server name keeps
-	// parallel tests from overwriting each other's capabilities.
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
 	srv := t.Name()
 
 	ws := &a2uiActionWorkspace{}
 	m, item := newA2UIActionUIItem(t, ws, srv)
-	cleanup := mcptools.SetToolsForTest(srv, "a2ui_action")
-	t.Cleanup(cleanup)
+	ws.serveA2UITools(srv, "a2ui_action")
 
 	require.Contains(t, item.RawRender(100), "Confirm", "precondition: the original label renders")
 
@@ -223,14 +244,13 @@ func TestHandleA2UIActionResultAppliesSurfacePayload(t *testing.T) {
 func TestHandleA2UIActionResultInvalidPayloadReportsToServer(t *testing.T) {
 	t.Parallel()
 
-	// The MCP tool registry is process-global; a per-test server name keeps
-	// parallel tests from overwriting each other's capabilities.
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
 	srv := t.Name()
 
 	ws := &a2uiActionWorkspace{}
 	m := newA2UIActionUI(t, ws, srv)
-	cleanup := mcptools.SetToolsForTest(srv, "a2ui_action", "a2ui_error")
-	t.Cleanup(cleanup)
+	ws.serveA2UITools(srv, "a2ui_action", "a2ui_error")
 
 	// A malformed payload must round-trip an a2ui_error back to the server:
 	// the command reportA2UIError builds has to actually reach Bubble Tea.
@@ -254,14 +274,13 @@ func TestHandleA2UIActionResultInvalidPayloadReportsToServer(t *testing.T) {
 func TestHandleA2UIActionResultHonorsPayloadSurfaceID(t *testing.T) {
 	t.Parallel()
 
-	// The MCP tool registry is process-global; a per-test server name keeps
-	// parallel tests from overwriting each other's capabilities.
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
 	srv := t.Name()
 
 	ws := &a2uiActionWorkspace{}
 	m, item := newA2UIActionUIItem(t, ws, srv)
-	cleanup := mcptools.SetToolsForTest(srv, "a2ui_action", "a2ui_error")
-	t.Cleanup(cleanup)
+	ws.serveA2UITools(srv, "a2ui_action", "a2ui_error")
 
 	// The server answers the "booking" click by targeting a DIFFERENT
 	// surface. That payload must not be forced onto "booking".
@@ -286,14 +305,13 @@ func TestHandleA2UIActionResultHonorsPayloadSurfaceID(t *testing.T) {
 func TestHandleA2UIActionResultDeletedSurfaceGoesAway(t *testing.T) {
 	t.Parallel()
 
-	// The MCP tool registry is process-global; a per-test server name keeps
-	// parallel tests from overwriting each other's capabilities.
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
 	srv := t.Name()
 
 	ws := &a2uiActionWorkspace{}
 	m := newA2UIActionUI(t, ws, srv)
-	cleanup := mcptools.SetToolsForTest(srv, "a2ui_action", "a2ui_error")
-	t.Cleanup(cleanup)
+	ws.serveA2UITools(srv, "a2ui_action", "a2ui_error")
 
 	// The server dismisses the form. The surface must be released, not left
 	// behind as a dead widget that still takes focus and swallows keys —
@@ -313,8 +331,8 @@ func TestHandleA2UIActionResultDeletedSurfaceGoesAway(t *testing.T) {
 func TestHandleA2UIActionResultErrorReports(t *testing.T) {
 	t.Parallel()
 
-	// The MCP tool registry is process-global; a per-test server name keeps
-	// parallel tests from overwriting each other's capabilities.
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
 	srv := t.Name()
 
 	ws := &a2uiActionWorkspace{}
@@ -331,14 +349,13 @@ func TestHandleA2UIActionResultErrorReports(t *testing.T) {
 func TestReportA2UIErrorCallsErrorTool(t *testing.T) {
 	t.Parallel()
 
-	// The MCP tool registry is process-global; a per-test server name keeps
-	// parallel tests from overwriting each other's capabilities.
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
 	srv := t.Name()
 
 	ws := &a2uiActionWorkspace{}
 	m := newA2UIActionUI(t, ws, srv)
-	cleanup := mcptools.SetToolsForTest(srv, "a2ui_error")
-	t.Cleanup(cleanup)
+	ws.serveA2UITools(srv, "a2ui_error")
 
 	// An empty server name exercises the surface-owner resolution path.
 	cmd := m.reportA2UIError("", "booking", "INVALID_JSON", "bad payload")
@@ -383,8 +400,7 @@ func TestHandleA2UIButtonClickedAssistantSurfaceWinsOverMCPProvenance(t *testing
 	}
 	// Registers "booking" -> srv in both the item and the global registry.
 	m := newA2UIActionUI(t, ws, srv)
-	cleanup := mcptools.SetToolsForTest(srv, "a2ui_action")
-	t.Cleanup(cleanup)
+	ws.serveA2UITools(srv, "a2ui_action")
 
 	// The assistant now emits its own form reusing the same surface ID.
 	msg := &message.Message{

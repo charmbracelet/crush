@@ -195,6 +195,15 @@ type ClientInfo struct {
 	Client      *ClientSession
 	Counts      Counts
 	ConnectedAt time.Time
+	// A2UITools lists the a2ui_* tools this server exposes. It rides on the
+	// state rather than being read from the tool registry via HasTool
+	// because the registry only exists in the process that owns the MCP
+	// sessions: a client/server TUI has an empty one, so a HasTool gate
+	// there is permanently false and the surface round-trip it guards can
+	// never fire. Only the a2ui_* subset is carried — the UI asks nothing
+	// else, and a full tool list would put every server's whole catalog on
+	// the wire on every state change.
+	A2UITools []string
 
 	// Config is the configuration the server last successfully connected
 	// with. Reconcile compares it against the live config to decide whether
@@ -209,6 +218,11 @@ type ClientInfo struct {
 	// progress rather than the last successful one, which would leave the
 	// server skipped as "starting" and never restarted for the new config.
 	PendingConfig *config.MCPConfig
+}
+
+// ServesA2UITool reports whether the server exposes the named a2ui_* tool.
+func (c ClientInfo) ServesA2UITool(toolName string) bool {
+	return slices.Contains(c.A2UITools, toolName)
 }
 
 // SubscribeEvents returns a channel for MCP events.
@@ -822,6 +836,9 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	info.Error = err
 	info.Client = client
 	info.Counts = counts
+	// Snapshot the a2ui_* capability alongside the counts so a remote
+	// client learns it without reading this process's tool registry.
+	info.A2UITools = a2uiToolNames(name)
 	for _, opt := range opts {
 		opt(&info)
 	}

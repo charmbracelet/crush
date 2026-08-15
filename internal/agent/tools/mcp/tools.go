@@ -69,29 +69,22 @@ func Tools() iter.Seq2[string, []*Tool] {
 	return allTools.Seq2()
 }
 
-// HasTool reports whether the named MCP server currently exposes a tool with
-// the given name. It backs the A2UI action round-trip: a server that serves
-// interactive surfaces may also expose the a2ui_action / a2ui_error tools
-// the client round-trips interactions through, and the client needs to know
-// before it commits to that path.
-func HasTool(name, toolName string) bool {
+// a2uiToolNames returns the a2ui_* tools an MCP server exposes, for
+// ClientInfo.A2UITools. The names travel with the state so a client/server
+// TUI — which never populates this registry — can still tell whether a
+// server speaks the surface round-trip.
+func a2uiToolNames(name string) []string {
 	tools, ok := allTools.Get(name)
 	if !ok {
-		return false
+		return nil
 	}
-	return slices.ContainsFunc(tools, func(t *Tool) bool { return t.Name == toolName })
-}
-
-// SetToolsForTest installs the given tool names for an MCP server in the
-// shared registry and returns a cleanup that removes them. It exists for
-// tests outside this package that need HasTool to observe a server's tools.
-func SetToolsForTest(name string, toolNames ...string) func() {
-	tools := make([]*Tool, len(toolNames))
-	for i, n := range toolNames {
-		tools[i] = &Tool{Name: n}
+	var out []string
+	for _, t := range tools {
+		if strings.HasPrefix(t.Name, "a2ui_") {
+			out = append(out, t.Name)
+		}
 	}
-	allTools.Set(name, tools)
-	return func() { allTools.Del(name) }
+	return out
 }
 
 // RunTool runs an MCP tool with the given input parameters.

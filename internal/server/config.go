@@ -536,6 +536,7 @@ func (c *controllerV1) handleGetWorkspaceMCPStates(w http.ResponseWriter, r *htt
 			PromptCount:   v.Counts.Prompts,
 			ResourceCount: v.Counts.Resources,
 			ConnectedAt:   v.ConnectedAt,
+			A2UITools:     v.A2UITools,
 		}
 	}
 	jsonEncode(w, result)

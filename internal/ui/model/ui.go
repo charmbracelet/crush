@@ -5073,7 +5073,7 @@ func (m *UI) handleA2UIButtonClicked(clicked a2uievent.ButtonClicked) tea.Cmd {
 		}
 	}
 	if isMCP && clicked.Action != nil {
-		if mcp.HasTool(mcpName, "a2ui_action") {
+		if m.mcpServesTool(mcpName, "a2ui_action") {
 			return m.runA2UIAction(mcpName, clicked)
 		}
 		// The server serves surfaces but not the action round-trip: keep
@@ -5088,6 +5088,24 @@ func (m *UI) handleA2UIButtonClicked(clicked a2uievent.ButtonClicked) tea.Cmd {
 		values, _ = m.chat.A2UISurfaceFieldValues(clicked.SurfaceID)
 	}
 	return m.sendMessage(chat.A2UISubmissionPrompt(clicked, values))
+}
+
+// mcpServesTool reports whether the named MCP server exposes toolName.
+//
+// It reads the workspace's published MCP state rather than mcp.HasTool: that
+// registry is only populated in the process that owns the MCP sessions, so
+// in client/server mode it is permanently empty and every HasTool gate is
+// false — which silently disabled the whole A2UI action round-trip on a
+// remote client and left its /mcp/call-tool route unreachable.
+func (m *UI) mcpServesTool(mcpName, toolName string) bool {
+	if mcpName == "" {
+		return false
+	}
+	info, ok := m.com.Workspace.MCPGetStates()[mcpName]
+	if !ok {
+		return false
+	}
+	return info.ServesA2UITool(toolName)
 }
 
 // a2uiActionResultMsg carries the outcome of an a2ui_action round-trip back
@@ -5207,7 +5225,7 @@ func (m *UI) reportA2UIError(mcpName, surfaceID, code, message string) tea.Cmd {
 			mcpName, ok = chat.A2UISurfaceProvenance(surfaceID)
 		}
 	}
-	if !ok || !mcp.HasTool(mcpName, "a2ui_error") {
+	if !ok || !m.mcpServesTool(mcpName, "a2ui_error") {
 		return nil
 	}
 	args := map[string]any{"code": code, "message": message, "surfaceId": surfaceID}

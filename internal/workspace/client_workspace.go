@@ -657,6 +657,7 @@ func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
 				Resources: v.ResourceCount,
 			},
 			ConnectedAt: v.ConnectedAt,
+			A2UITools:   v.A2UITools,
 		}
 	}
 	return result

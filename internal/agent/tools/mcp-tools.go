@@ -175,31 +175,53 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 // <a2ui-json> tags on ReadMCPResourceResponseMetadata, with a single-line
 // placeholder left for the model so it cannot echo the JSON back and
 // double-render the surface. When divert is false the raw payload is folded
-// back into the model-facing content (except payloads the server annotated
-// for the user only — hiding those from the model is the annotation's whole
-// point), so the model can still relay or summarize the data.
+// back into the model-facing content, so the model can still relay or
+// summarize the data.
+//
+// The audience annotation decides each surface's path (see a2uiAudience),
+// but only among renderers that actually exist: a ["user"]-only payload
+// renders and is withheld from the model; an ["assistant"]-only payload
+// reaches the model but is never rendered; an empty audience does both.
+//
+// The ["user"] case is conditional on something rendering it. The
+// annotation means "the user can already see this, don't repeat it" — so
+// when divert is false nothing renders the surface, the user sees nothing,
+// and the model is their only path to it. Withholding the payload there
+// leaves a headless run with an empty tool result and the agent replying
+// with nothing or a hallucinated summary.
 func splitMCPToolResult(result mcp.ToolResult, mcpName string, divert bool) (string, ReadMCPResourceResponseMetadata) {
 	var metadata ReadMCPResourceResponseMetadata
 	content := result.Content
-	for _, surface := range result.Surfaces {
-		if divert {
-			metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+surface.Payload+"</a2ui-json>")
-			metadata.MCPSurfaceProvenance = append(metadata.MCPSurfaceProvenance, mcpName)
-			uri := strings.NewReplacer("\n", " ", "\r", " ").Replace(surface.URI)
-			placeholder := A2UISurfacePlaceholderPrefix + uri + " from MCP server " + mcpName + " — the user can already see it; do not repeat or echo its JSON payload]"
-			if content != "" {
-				content += "\n"
-			}
-			content += placeholder
-			continue
-		}
-		if !surface.AssistantVisible {
-			continue
-		}
+	appendToContent := func(s string) {
 		if content != "" {
 			content += "\n"
 		}
-		content += surface.Payload
+		content += s
+	}
+	for _, surface := range result.Surfaces {
+		if divert && surface.RenderForUser {
+			// Render for the user via metadata; the model gets a
+			// placeholder so it cannot echo the JSON back and double-render.
+			metadata.A2UISurfaces = append(metadata.A2UISurfaces, "<a2ui-json>"+surface.Payload+"</a2ui-json>")
+			metadata.MCPSurfaceProvenance = append(metadata.MCPSurfaceProvenance, mcpName)
+			uri := strings.NewReplacer("\n", " ", "\r", " ").Replace(surface.URI)
+			appendToContent(A2UISurfacePlaceholderPrefix + uri + " from MCP server " + mcpName + " — the user can already see it; do not repeat or echo its JSON payload]")
+			continue
+		}
+		if !divert {
+			// Nothing will render this surface — it is a headless run, or
+			// the deployment disabled surfaces. The model is the user's
+			// only path to the payload, so fold it back whatever the
+			// audience says.
+			appendToContent(surface.Payload)
+			continue
+		}
+		// A chat UI is rendering this turn's surfaces, but not this one:
+		// it is ["assistant"]-only. It reaches the model alone.
+		if !surface.AssistantVisible {
+			continue
+		}
+		appendToContent(surface.Payload)
 	}
 	return content, metadata
 }

@@ -116,19 +116,25 @@ func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {
 }
 
 // refreshSessionResources re-fetches a session's resources and resource
-// templates (best-effort: a listing failure degrades to an empty registry
-// and a warn, never an error) and installs them in the registries. It
-// returns the combined count for ClientInfo.Counts.Resources, so callers
-// publishing a StateConnected transition report exactly what the
-// registries hold.
-func refreshSessionResources(ctx context.Context, name string, session *ClientSession) int {
+// templates and installs them in the registries. It returns the combined
+// count for ClientInfo.Counts.Resources, so callers publishing a
+// StateConnected transition report exactly what the registries hold.
+//
+// The resources/list error is returned rather than swallowed: publishing
+// StateConnected over a failed listing shows the server as healthy while
+// every one of its resources has silently vanished from the completions
+// popup. Callers that must not fail on it — the startup path, where a
+// hang would stall WaitForInit — ignore it explicitly. Templates stay
+// best-effort: they are genuinely optional, and getResourceTemplates
+// already swallows method-not-found.
+func refreshSessionResources(ctx context.Context, name string, session *ClientSession) (int, error) {
 	resources, err := getResources(ctx, session)
 	if err != nil {
 		slog.Warn("Error listing MCP resources", "name", name, "error", err)
 		resources = nil
 	}
 	templates := listTemplatesBestEffort(ctx, session, name)
-	return updateResources(name, resources) + updateResourceTemplates(name, templates)
+	return updateResources(name, resources) + updateResourceTemplates(name, templates), err
 }
 
 // listTemplatesBestEffort lists a session's resource templates, treating any

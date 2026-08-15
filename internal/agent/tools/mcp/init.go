@@ -580,8 +580,10 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 	// the listing with the same per-server timeout createSession enforces: a
 	// server that connects but then hangs on resources/list would otherwise
 	// stall startup — with the bound it degrades to a warn and a zero count.
+	// The listing error is ignored here for that reason: on the startup
+	// critical path a failed listing must not fail the connection.
 	listCtx, cancelList := context.WithTimeout(ctx, mcpTimeout(m))
-	resourceCount := refreshSessionResources(listCtx, name, session)
+	resourceCount, _ := refreshSessionResources(listCtx, name, session)
 	cancelList()
 
 	sessions.Set(name, session)
@@ -756,13 +758,22 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	updatePrompts(name, prompts)
 	counts.Prompts = len(prompts)
 
-	resources, err := getResources(ctx, newSess)
+	// Resource templates go back in alongside the resources: A2UI surfaces
+	// are served through them, so a renewal that re-registers only the
+	// plain resources drops every surface URI out of the completions popup
+	// until the next restart.
+	//
+	// A listing failure here is fatal, exactly as it is for tools and
+	// prompts above: this is a renewal of a session we already refused
+	// once, so handing the caller a server that reports StateConnected
+	// with an empty resource registry hides the breakage behind a healthy
+	// status while every '@' completion for it silently disappears.
+	counts.Resources, err = refreshSessionResources(ctx, name, newSess)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		closeSession(name, newSess)
 		return nil, err
 	}
-	counts.Resources = updateResources(name, resources)
 
 	// Re-check before publishing: if a teardown landed during registration a
 	// newer attempt owns the registries now, so leave them and our session

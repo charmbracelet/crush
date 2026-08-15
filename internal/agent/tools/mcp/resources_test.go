@@ -111,7 +111,8 @@ func TestRefreshSessionResources_CountsSumResourcesAndTemplates(t *testing.T) {
 		},
 	)
 
-	count := refreshSessionResources(context.Background(), name, sess)
+	count, err := refreshSessionResources(context.Background(), name, sess)
+	require.NoError(t, err)
 	require.Equal(t, 3, count, "count must sum resources and templates")
 
 	resources, ok := allResources.Get(name)
@@ -151,4 +152,36 @@ func TestRefreshResources_UpdatesRegistriesAndCount(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, StateConnected, info.State)
 	require.Equal(t, 2, info.Counts.Resources, "state count must sum resources and templates")
+}
+
+// TestRefreshSessionResources_ReturnsListingError pins that a resources/list
+// failure is reported rather than swallowed.
+//
+// The reconnect path (getOrRenewClient) treats it as fatal: it is renewing a
+// session that already failed once, so publishing StateConnected over a
+// failed listing shows the server as healthy in the MCP sidebar while every
+// one of its resources silently vanishes from the '@' completions popup. The
+// startup path deliberately ignores the error instead — a server that hangs
+// on resources/list must not stall WaitForInit — so the decision has to
+// belong to the caller, which means the error has to reach it.
+func TestRefreshSessionResources_ReturnsListingError(t *testing.T) {
+	const name = "test-refresh-resources-error"
+	t.Cleanup(func() {
+		allResources.Del(name)
+		allResourceTemplates.Del(name)
+	})
+
+	sess := liveResourceSession(t,
+		[]*mcp.Resource{{Name: "doc-a", URI: "test://doc-a"}},
+		nil,
+	)
+
+	// A cancelled context fails the listing the same way a wedged transport
+	// or a server bug on resources/list would.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	count, err := refreshSessionResources(ctx, name, sess)
+	require.Error(t, err, "a resources/list failure must reach the caller")
+	require.Zero(t, count, "a failed listing must not report a resource count")
 }

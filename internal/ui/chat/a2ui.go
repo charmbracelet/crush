@@ -792,6 +792,25 @@ func (a *AssistantMessageItem) a2uiSurfaceRetired(i int) bool {
 	return a.a2uiRetired[a.a2uiSurfaceIDs[i]]
 }
 
+// HasLiveA2UISurface reports whether this assistant message holds a
+// non-retired surface with the given ID. Surface IDs are only unique within
+// the thing that authored them — an assistant-authored form and an MCP
+// server both commonly use "default" — so callers deciding where a button
+// press should go must ask this before consulting any MCP provenance, or an
+// ID collision routes the user's form submission to an unrelated server.
+func (a *AssistantMessageItem) HasLiveA2UISurface(surfaceID string) bool {
+	if surfaceID == "" {
+		return false
+	}
+	for i, s := range a.a2uiSurfaces {
+		if s == nil || i >= len(a.a2uiSurfaceIDs) || a.a2uiSurfaceIDs[i] != surfaceID {
+			continue
+		}
+		return !a.a2uiRetired[surfaceID]
+	}
+	return false
+}
+
 // RetireA2UISurface retires the live surface with the given A2UI surface ID
 // after a button press (#45): it reads the surface's current field values,
 // revokes its focus, and marks it retired so the form cannot be re-submitted

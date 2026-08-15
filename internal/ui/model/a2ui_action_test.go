@@ -351,3 +351,65 @@ func TestReportA2UIErrorCallsErrorTool(t *testing.T) {
 	require.Equal(t, "INVALID_JSON", ws.lastArgs["code"])
 	require.Equal(t, "booking", ws.lastArgs["surfaceId"])
 }
+
+// assistantCollidingForm is an assistant-authored surface reusing the same
+// surface ID an MCP server already owns ("booking").
+const assistantCollidingForm = `<a2ui-json>{"version":"v0.9","updateComponents":{"surfaceId":"booking","components":[` +
+	`{"component":"Card","id":"root","child":"col"},` +
+	`{"component":"Column","id":"col","children":["who","btn-go"]},` +
+	`{"component":"TextField","id":"who","label":"Who","value":"Joe"},` +
+	`{"component":"Button","id":"btn-go","child":"btn-go-t","action":{"event":{"name":"go"}}},` +
+	`{"component":"Text","id":"btn-go-t","text":"Go"}` +
+	`]}}</a2ui-json>`
+
+// TestHandleA2UIButtonClickedAssistantSurfaceWinsOverMCPProvenance pins that
+// an assistant-authored surface is never routed to an MCP server, even when
+// its ID collides with one that server owns.
+//
+// Assistant items do not implement chat.A2UISurfaceItem and never appear in
+// the global surfaceID->server registry, so both provenance lookups used to
+// resolve the collision in the MCP server's favour: the user's form values
+// were shipped to that server's a2ui_action tool, the surface was never
+// retired, and no agent turn ever started — the button just looked dead.
+func TestHandleA2UIButtonClickedAssistantSurfaceWinsOverMCPProvenance(t *testing.T) {
+	t.Parallel()
+
+	// Surface provenance is recorded in a process-global registry; a
+	// per-test server name keeps parallel tests from clobbering it.
+	srv := t.Name()
+
+	ws := &a2uiActionWorkspace{
+		response: workspace.MCPToolCallResult{Content: "should never be called"},
+	}
+	// Registers "booking" -> srv in both the item and the global registry.
+	m := newA2UIActionUI(t, ws, srv)
+	cleanup := mcptools.SetToolsForTest(srv, "a2ui_action")
+	t.Cleanup(cleanup)
+
+	// The assistant now emits its own form reusing the same surface ID.
+	msg := &message.Message{
+		ID:   "assistant-form",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "Confirm:\n\n" + assistantCollidingForm},
+		},
+	}
+	item, ok := chat.NewAssistantMessageItem(m.com.Styles, msg).(*chat.AssistantMessageItem)
+	require.True(t, ok)
+	m.chat.AppendMessages(item)
+	_ = item.RawRender(80)
+	require.True(t, m.chat.HasAssistantA2UISurface("booking"),
+		"the assistant item must hold a live surface with the colliding ID")
+
+	cmd := m.handleA2UIButtonClicked(event.ButtonClicked{
+		Source: event.Source{ComponentID: "btn-go", SurfaceID: "booking"},
+		ID:     "btn-go",
+		Action: &a2ui.EventAction{Name: "go"},
+	})
+	require.NotNil(t, cmd, "the submission must go somewhere")
+	runCmdTree(cmd)
+
+	require.Empty(t, ws.toolCalls,
+		"an assistant surface must never round-trip to an MCP server")
+	require.NotEmpty(t, ws.lastPrompt, "the submission must start an agent turn")
+}

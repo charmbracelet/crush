@@ -5057,9 +5057,20 @@ func (m *UI) handleA2UIButtonClicked(clicked a2uievent.ButtonClicked) tea.Cmd {
 	// claims it: surface IDs are server-scoped (typically "default"), so two
 	// servers would otherwise clobber each other in that registry and route
 	// one another's clicks.
-	mcpName, isMCP := m.chat.A2UISurfaceOwner(clicked.SurfaceID)
-	if !isMCP {
-		mcpName, isMCP = chat.A2UISurfaceProvenance(clicked.SurfaceID)
+	//
+	// An assistant-authored surface is never MCP-owned, whatever the
+	// registry says: assistant items do not implement chat.A2UISurfaceItem,
+	// and the global registry is keyed by surface ID alone — so an
+	// assistant surface sharing an ID with a server's ("default" on both
+	// sides is the common case) would otherwise ship the user's form
+	// submission to that server instead of starting an agent turn.
+	var mcpName string
+	var isMCP bool
+	if !m.chat.HasAssistantA2UISurface(clicked.SurfaceID) {
+		mcpName, isMCP = m.chat.A2UISurfaceOwner(clicked.SurfaceID)
+		if !isMCP {
+			mcpName, isMCP = chat.A2UISurfaceProvenance(clicked.SurfaceID)
+		}
 	}
 	if isMCP && clicked.Action != nil {
 		if mcp.HasTool(mcpName, "a2ui_action") {

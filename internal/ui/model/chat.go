@@ -816,6 +816,22 @@ func (m *Chat) RetireA2UISurface(surfaceID string) (map[string]any, bool) {
 	return nil, false
 }
 
+// HasAssistantA2UISurface reports whether a live assistant-authored surface
+// carries the given ID. Assistant items do not implement A2UISurfaceItem and
+// are absent from the MCP provenance registry, so without this check a
+// surface ID an assistant happens to share with an MCP server (both default
+// to "default") resolves as MCP-owned and the user's submission is shipped
+// to that server instead of starting an agent turn.
+func (m *Chat) HasAssistantA2UISurface(surfaceID string) bool {
+	for i := range m.list.Len() {
+		item, ok := m.list.ItemAt(i).(*chat.AssistantMessageItem)
+		if ok && item.HasLiveA2UISurface(surfaceID) {
+			return true
+		}
+	}
+	return false
+}
+
 // a2uiSurfaceItem locates the chat item holding the named MCP surface.
 // Surface IDs are only unique within a server — invoking the same tool twice
 // appends two items carrying the same ID — so the focused surface wins: that

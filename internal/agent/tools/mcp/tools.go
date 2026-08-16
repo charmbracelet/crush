@@ -107,7 +107,7 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	// a2ui there earns a surface payload that gets folded into model-facing
 	// content as raw JSON instead of an answer.
 	result, err := c.CallTool(ctx, &mcp.CallToolParams{
-		Meta:      a2uiRequestMeta(ctx, cfg.Config().Options.DisableA2UI),
+		Meta:      a2uiRequestMeta(ctx, a2uiDisabled(cfg)),
 		Name:      toolName,
 		Arguments: args,
 	})

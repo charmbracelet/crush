@@ -64,7 +64,7 @@ func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string
 	// Resource templates are how most A2UI surfaces are served, so this RPC
 	// carries the same capability claim as tools/call.
 	result, err := session.ReadResource(ctx, &mcp.ReadResourceParams{
-		Meta: a2uiRequestMeta(ctx, cfg.Config().Options.DisableA2UI),
+		Meta: a2uiRequestMeta(ctx, a2uiDisabled(cfg)),
 		URI:  uri,
 	})
 	if err != nil {

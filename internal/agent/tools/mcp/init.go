@@ -925,7 +925,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	// Advertise A2UI support in the initialize handshake so an A2UI-over-MCP
 	// server knows it can send surfaces. A host that won't render A2UI must
 	// not claim the capability.
-	if !cfg.Config().Options.DisableA2UI {
+	if !a2uiDisabled(cfg) {
 		transport = &a2uiInitTransport{inner: transport}
 	}
 
@@ -958,7 +958,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 				level := parseLevel(string(req.Params.Level))
 				slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
 			},
-			Capabilities: a2uiSDKCapabilities(cfg.Config().Options.DisableA2UI),
+			Capabilities: a2uiSDKCapabilities(a2uiDisabled(cfg)),
 		},
 	)
 

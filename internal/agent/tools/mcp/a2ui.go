@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
+
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	a2ui "github.com/tmc/a2ui"
@@ -19,6 +21,26 @@ import (
 var A2UIBasicCatalogID = "https://a2ui.org/specification/" +
 	strings.ReplaceAll(a2ui.Version, ".", "_") +
 	"/catalogs/basic/catalog.json"
+
+// a2uiDisabled reports whether this host has opted out of rendering A2UI
+// surfaces, and is the only way this package should read that option.
+//
+// Config.Options is a pointer and the config may not be loaded at all on
+// every path that opens a session — the OAuth re-auth flow reaches
+// createSession through BeginAuth, and a store built for a test carries a
+// Config with no Options at all. A bare cfg.Config().Options.DisableA2UI
+// panics on both. Absent configuration means "not disabled", matching the
+// zero value the option has once a config is loaded.
+func a2uiDisabled(cfg *config.ConfigStore) bool {
+	if cfg == nil {
+		return false
+	}
+	c := cfg.Config()
+	if c == nil || c.Options == nil {
+		return false
+	}
+	return c.Options.DisableA2UI
+}
 
 // a2uiClientCapabilities builds the A2UI capability payload a client
 // declares to an A2UI-over-MCP server, per the spec's capability negotiation:

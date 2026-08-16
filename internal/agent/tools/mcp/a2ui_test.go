@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
@@ -238,4 +239,28 @@ func TestA2UIBasicCatalogIDTracksVersion(t *testing.T) {
 	slug := strings.ReplaceAll(a2ui.Version, ".", "_")
 	require.Contains(t, A2UIBasicCatalogID, "/"+slug+"/",
 		"catalog ID must carry the compiled-in a2ui version %q", a2ui.Version)
+}
+
+// TestA2UIDisabledToleratesAbsentOptions pins that reading the A2UI opt-out
+// never panics on a partially-populated config.
+//
+// Config.Options is a pointer, and createSession is reached from the OAuth
+// re-auth flow (BeginAuth -> runAuthFlow -> connectAndRegister) with whatever
+// store the caller held. A bare cfg.Config().Options.DisableA2UI crashed
+// TestBeginAuth_Concurrent outright, taking the process down with it rather
+// than failing one test.
+func TestA2UIDisabledToleratesAbsentOptions(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, a2uiDisabled(nil), "a nil store must read as not-disabled")
+	require.False(t, a2uiDisabled(config.NewTestStore(nil)),
+		"a store with no config must read as not-disabled")
+	require.False(t, a2uiDisabled(config.NewTestStore(&config.Config{})),
+		"a config with no Options must read as not-disabled")
+	require.False(t, a2uiDisabled(config.NewTestStore(&config.Config{
+		Options: &config.Options{},
+	})), "an explicit zero Options means A2UI stays enabled")
+	require.True(t, a2uiDisabled(config.NewTestStore(&config.Config{
+		Options: &config.Options{DisableA2UI: true},
+	})), "the opt-out must still be honored")
 }

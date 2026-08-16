@@ -968,6 +968,25 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	}, nil
 }
 
+// transportWrapper is implemented by every transport decorator crush layers
+// around a base transport, so diagnostics that need the innermost transport
+// can reach it without knowing which decorators are in play.
+type transportWrapper interface {
+	unwrapTransport() mcp.Transport
+}
+
+// unwrapTransport peels every decorator off a transport and returns the
+// innermost one.
+func unwrapTransport(transport mcp.Transport) mcp.Transport {
+	for {
+		w, ok := transport.(transportWrapper)
+		if !ok {
+			return transport
+		}
+		transport = w.unwrapTransport()
+	}
+}
+
 // maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail
 // to parse, and the cli will then close it, causing the EOF error.
 // so, if we got an EOF err, and the transport is STDIO, we try to exec it
@@ -979,6 +998,13 @@ func maybeStdioErr(err error, transport mcp.Transport) error {
 	if !errors.Is(err, io.EOF) {
 		return err
 	}
+	// The transport is wrapped in one or more decorators before Connect (the
+	// channel gate today); the stdio transport we're probing for is the
+	// innermost one. Unwrap all of them — without this the assertion below
+	// never matches and stdio startup failures report a bare EOF instead of
+	// the child's actual output. Every wrapper must implement
+	// unwrapTransport or it will hide this diagnostic again.
+	transport = unwrapTransport(transport)
 	ct, ok := transport.(*mcp.CommandTransport)
 	if !ok {
 		return err

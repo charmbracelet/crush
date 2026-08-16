@@ -469,7 +469,7 @@ func TestNewToolMessageItemRoutesCronTools(t *testing.T) {
 	for _, name := range []string{tools.CronCreateToolName, tools.CronListToolName, tools.CronDeleteToolName} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{ID: "call-1", Name: name, Input: "{}"}, nil, false)
+			item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{ID: "call-1", Name: name, Input: "{}"}, nil, false, "")
 			require.IsType(t, &baseToolMessageItem{}, item)
 			base, ok := item.(*baseToolMessageItem)
 			require.True(t, ok)

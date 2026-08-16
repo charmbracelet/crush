@@ -870,13 +870,14 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		if old, ok := sessions.Take(name); ok {
 			closeSession(name, old)
 		}
-		// Drop every registry entry for the dead server. Leaving prompts or
-		// resources behind lets a disconnected server keep advertising
-		// capabilities the agent can no longer fulfil, the same divergence the
-		// tool clear prevents.
+		// Drop every registry entry for the dead server. Leaving prompts,
+		// resources, or resource templates behind lets a disconnected server
+		// keep advertising capabilities the agent can no longer fulfil, the
+		// same divergence the tool clear prevents.
 		allTools.Del(name)
 		allPrompts.Del(name)
 		allResources.Del(name)
+		allResourceTemplates.Del(name)
 	}
 	states.Set(name, info)
 
@@ -1322,12 +1323,13 @@ func clearOAuthToken(cfg *config.ConfigStore, name string) {
 }
 
 // clearMCPData removes a stale MCP server's tools, prompts,
-// resources, and auth handlers from global state so they are not
-// served to the agent.
+// resources, resource templates, and auth handlers from global state so they
+// are not served to the agent.
 func clearMCPData(name string) {
 	allTools.Del(name)
 	allPrompts.Del(name)
 	allResources.Del(name)
+	allResourceTemplates.Del(name)
 	if h, ok := authURLs.Get(name); ok {
 		h.Close()
 		authURLs.Del(name)

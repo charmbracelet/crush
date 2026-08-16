@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"errors"
+	"io"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"

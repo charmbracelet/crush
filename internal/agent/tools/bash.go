@@ -252,19 +252,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
 
-			isSafeReadOnly := false
-			cmdLower := strings.ToLower(params.Command)
-
-			if !containsCommandChaining(params.Command) {
-				for _, safe := range safeCommands {
-					if strings.HasPrefix(cmdLower, safe) {
-						if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
-							isSafeReadOnly = true
-							break
-						}
-					}
-				}
-			}
+			safeReadOnly := isSafeReadOnly(params.Command)
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
@@ -274,10 +262,11 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Check whether the command is dangerous so we can surface a
 			// warning in the permission dialog.
 			dangerReason := ""
-			if !isSafeReadOnly {
+			if !safeReadOnly {
 				dangerReason = shell.BlockedCommandReason(params.Command, blockFuncs(blocked))
 
-				approved, err := permissions.Request(ctx,
+				p, err := permissions.Request(
+					ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        execWorkingDir,
@@ -292,7 +281,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
-				if !approved {
+				if !p {
 					return NewPermissionDeniedResponse(), nil
 				}
 			}

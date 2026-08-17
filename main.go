@@ -15,6 +15,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/crush/internal/cmd"
 	_ "github.com/charmbracelet/crush/internal/dns"
@@ -22,6 +23,14 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		exe, _ := os.Executable()
+
+		if filepath.Clean(os.Args[1]) == filepath.Clean(exe) {
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		}
+	}
+	
 	if os.Getenv("CRUSH_PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")

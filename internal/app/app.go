@@ -311,7 +311,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
-	// Wait for MCP initialization to complete before reading MCP tools.
+	// Non-interactive runs get a single shot at the tool palette, so wait for
+	// MCP initialization to settle before reading MCP tools. The coordinator
+	// waits again for the same reason (it is the gate the client/server path
+	// goes through); doing it here too surfaces the failure before we create a
+	// session, and lets the UpdateModels below see every MCP tool.
 	if err := mcp.WaitForInit(ctx); err != nil {
 		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
@@ -328,6 +332,14 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 	if continueSessionID != "" || useLast {
 		slog.Info("Continuing session for non-interactive run", "session_id", sess.ID)
+		// If no explicit model override was requested, restore the
+		// model/provider from the last assistant message in the
+		// session, provided it is still available.
+		if largeModel == "" && smallModel == "" {
+			if err := app.restoreModelFromSession(ctx, sess.ID); err != nil {
+				slog.Warn("Failed to restore model from session", "error", err)
+			}
+		}
 	} else {
 		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
@@ -430,6 +442,54 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 		return fmt.Errorf("agent configuration is missing")
 	}
 	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// restoreModelFromSession reads the last assistant message in the
+// session and, if it used a different provider/model than the current
+// config, overrides the preferred model in-memory (non-persistent)
+// provided the provider/model is still available. This ensures that
+// continuing a session uses the same model that produced the last
+// response.
+func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) error {
+	lastMsg, err := app.Messages.GetLastAssistantMessage(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("failed to get last assistant message: %w", err)
+	}
+	if lastMsg.Provider == "" || lastMsg.Model == "" {
+		return nil
+	}
+
+	cfg := app.config.Config()
+	currentLarge := cfg.Models[config.SelectedModelTypeLarge]
+	if currentLarge.Provider == lastMsg.Provider && currentLarge.Model == lastMsg.Model {
+		return nil
+	}
+
+	if !cfg.IsModelAvailable(lastMsg.Provider, lastMsg.Model) {
+		slog.Debug("Skipping model restoration: provider/model not available",
+			"provider", lastMsg.Provider,
+			"model", lastMsg.Model)
+		return nil
+	}
+
+	app.config.OverridePreferredModel(config.SelectedModelTypeLarge, config.SelectedModel{
+		Provider: lastMsg.Provider,
+		Model:    lastMsg.Model,
+	})
+	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+		smallModel := app.GetDefaultSmallModel(lastMsg.Provider)
+		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallModel)
+	}
+	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
+		return fmt.Errorf("failed to update agent models: %w", err)
+	}
+	slog.Info("Restored model from session",
+		"provider", lastMsg.Provider,
+		"model", lastMsg.Model)
+	return nil
 }
 
 // overrideModelsForNonInteractive parses the model strings and temporarily

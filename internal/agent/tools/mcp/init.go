@@ -113,6 +113,16 @@ func ArmInit() {
 	initMu.Unlock()
 }
 
+// DisarmInit undoes ArmInit so WaitForInit stops blocking and returns
+// immediately. It exists for tests in other packages that arm the gate
+// without ever running Initialize and must not leak a permanently-blocking
+// gate into the rest of the test binary. Production code never needs it.
+func DisarmInit() {
+	initMu.Lock()
+	initStarted = false
+	initMu.Unlock()
+}
+
 // renewLock returns the per-server mutex used to serialize session renewals,
 // creating it on first use.
 func renewLock(name string) *sync.Mutex {
@@ -282,6 +292,7 @@ func Close(ctx context.Context) error {
 func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
 	ArmInit()
 	slog.Info("Initializing MCP clients")
+	start := time.Now()
 
 	var wg sync.WaitGroup
 	// Initialize states for all configured MCPs
@@ -298,6 +309,10 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	}
 	wg.Wait()
 	initOnce.Do(func() { close(initDone) })
+	// Non-interactive runs wait for this to finish before sending a prompt, so
+	// the total is the floor on their startup latency. Interactive runs do not
+	// wait, but the total still explains when late-arriving tools show up.
+	slog.Debug("Finished initializing MCP clients", "duration", time.Since(start).Truncate(time.Millisecond).String())
 }
 
 // WaitForInit blocks until MCP initialization is complete, i.e. until
@@ -609,9 +624,14 @@ func goInitClient(ctx context.Context, cfg *config.ConfigStore, name string, m c
 				slog.Error("Panic in MCP client initialization", "error", err, "name", name)
 			}
 		}()
-		if err := initClient(ctx, cfg, name, m, gen, cfg.Resolver()); err != nil {
-			slog.Debug("Failed to initialize MCP client", "name", name, "error", err)
-		}
+		start := time.Now()
+		err := initClient(ctx, cfg, name, m, gen, cfg.Resolver())
+		slog.Debug(
+			"MCP client initialization finished",
+			"name", name,
+			"duration", time.Since(start).Truncate(time.Millisecond).String(),
+			"error", err,
+		)
 	}()
 }
 

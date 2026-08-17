@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -202,4 +205,112 @@ func TestHyperSync_GetCacheStoreError(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to create directory for provider cache")
 	require.Equal(t, "Hyper", provider.Name) // Provider is still returned.
+}
+
+func TestRealHyperClient_RetryOn401(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	expectedProvider := catwalk.Provider{
+		Name: "Hyper",
+		ID:   "hyper",
+		Models: []catwalk.Model{
+			{ID: "model-1", Name: "Model 1"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := callCount.Add(1)
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(expectedProvider) //nolint:errcheck
+	}))
+	defer server.Close()
+
+	refreshCalled := false
+	client := realHyperClient{
+		baseURL:      server.URL,
+		resolveKey:   func() string { return "test-key" },
+		refreshToken: func(ctx context.Context) error { refreshCalled = true; return nil },
+	}
+
+	provider, err := client.Get(t.Context(), "")
+	require.NoError(t, err)
+	require.Equal(t, "Hyper", provider.Name)
+	require.True(t, refreshCalled, "token refresher should have been called")
+	require.Equal(t, int32(2), callCount.Load(), "should have made two requests")
+}
+
+func TestRealHyperClient_NoRetryWithoutRefresher(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	client := realHyperClient{
+		baseURL:    server.URL,
+		resolveKey: func() string { return "test-key" },
+	}
+
+	_, err := client.Get(t.Context(), "")
+	require.ErrorIs(t, err, errUnauthorized)
+	require.Equal(t, int32(1), callCount.Load(), "should not retry without refresher")
+}
+
+func TestRealHyperClient_RefreshFailureReturnsOriginalError(t *testing.T) {
+	t.Parallel()
+
+	var callCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	client := realHyperClient{
+		baseURL:      server.URL,
+		resolveKey:   func() string { return "test-key" },
+		refreshToken: func(ctx context.Context) error { return errors.New("refresh failed") },
+	}
+
+	_, err := client.Get(t.Context(), "")
+	require.ErrorIs(t, err, errUnauthorized)
+	require.Equal(t, int32(1), callCount.Load(), "should not retry when refresh fails")
+}
+
+func TestRealHyperClient_SuccessWithoutRetry(t *testing.T) {
+	t.Parallel()
+
+	expectedProvider := catwalk.Provider{
+		Name: "Hyper",
+		ID:   "hyper",
+		Models: []catwalk.Model{
+			{ID: "model-1", Name: "Model 1"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(expectedProvider) //nolint:errcheck
+	}))
+	defer server.Close()
+
+	refreshCalled := false
+	client := realHyperClient{
+		baseURL:      server.URL,
+		resolveKey:   func() string { return "test-key" },
+		refreshToken: func(ctx context.Context) error { refreshCalled = true; return nil },
+	}
+
+	provider, err := client.Get(t.Context(), "")
+	require.NoError(t, err)
+	require.Equal(t, "Hyper", provider.Name)
+	require.False(t, refreshCalled, "refresher should not be called on success")
 }

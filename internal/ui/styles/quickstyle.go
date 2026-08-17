@@ -960,6 +960,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.ContentPanel = base.Background(o.bgLessVisible).Foreground(o.fgBase).Padding(1, 2)
+	s.Dialog.ContentPanelBg = o.bgLessVisible
 	s.Dialog.Spinner = base.Foreground(o.secondary)
 	s.Dialog.ScrollbarThumb = base.Foreground(o.secondary)
 	s.Dialog.ScrollbarTrack = base.Foreground(o.separator)

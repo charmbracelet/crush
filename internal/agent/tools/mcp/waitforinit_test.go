@@ -34,11 +34,14 @@ func swapInitGate(t *testing.T) chan struct{} {
 	return initDone
 }
 
-// TestWaitForInit_BlocksUntilInitCompletes pins the contract the coordinator
-// relies on: WaitForInit blocks while MCP initialization is still in flight and
-// returns once it completes. The coordinator calls it before reading the tool
-// registry so slow-to-start servers (e.g. stdio Python via uv) have registered
-// their tools first.
+// TestWaitForInit_BlocksUntilInitCompletes pins the contract the
+// non-interactive path relies on: WaitForInit blocks while MCP initialization
+// is still in flight and returns once it completes. Non-interactive runs
+// (`crush run`) wait on it before reading the tool registry so slow-to-start
+// servers (e.g. stdio Python via uv) have registered their tools first.
+// Interactive runs deliberately do not gate on it (a slow server froze the
+// TUI's first prompt); they build the tool palette from whatever is registered
+// at send time and pick up late servers on later runs. See coordinator.run.
 func TestWaitForInit_BlocksUntilInitCompletes(t *testing.T) {
 	gate := swapInitGate(t)
 
@@ -54,11 +57,11 @@ func TestWaitForInit_BlocksUntilInitCompletes(t *testing.T) {
 		"WaitForInit must return once initialization has completed")
 }
 
-// TestWaitForInit_ReturnsWhenNotArmed is the regression test for coordinators
-// built outside app startup. Those paths never call mcp.Initialize (which is
+// TestWaitForInit_ReturnsWhenNotArmed is the regression test for callers
+// outside app startup. Those paths never call mcp.Initialize (which is
 // what arms the gate), so WaitForInit must return immediately instead of
-// blocking on a channel that will never close. Before the fix it blocked until
-// ctx was cancelled, hanging coordinator.run's readyWg forever.
+// blocking on a channel that will never close. Before the fix it blocked
+// until ctx was cancelled, hanging RunNonInteractive's gate forever.
 func TestWaitForInit_ReturnsWhenNotArmed(t *testing.T) {
 	// Ensure the gate looks unarmed regardless of test ordering.
 	initMu.Lock()
@@ -77,12 +80,12 @@ func TestWaitForInit_ReturnsWhenNotArmed(t *testing.T) {
 		"WaitForInit must return immediately when initialization was never armed")
 }
 
-// TestWaitForInit_ToolsVisibleAfterInit is the regression test for the bug the
-// coordinator fix addresses: buildTools read allTools concurrently with MCP
-// initialization, so a slow server's tools were silently missing from the LLM's
-// palette even though crush_info later reported the server as connected. Gating
-// on WaitForInit fixes it — any tool registered before initialization completes
-// must be visible once WaitForInit returns.
+// TestWaitForInit_ToolsVisibleAfterInit pins the visibility guarantee
+// WaitForInit gives the non-interactive path: any tool registered before
+// initialization completes must be visible once WaitForInit returns. The
+// interactive coordinator deliberately no longer relies on this (it reads the
+// registry ungated and picks up late tools on subsequent runs); this test
+// keeps the guarantee for non-interactive runs, which still wait.
 func TestWaitForInit_ToolsVisibleAfterInit(t *testing.T) {
 	const name = "test-waitforinit-tools"
 	t.Cleanup(func() {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -37,7 +38,9 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/logo"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -144,6 +147,7 @@ crush --continue
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
 		}
+		printSessionResume(model)
 		return nil
 	},
 }
@@ -162,9 +166,84 @@ var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
            ▀▀▀▀▀▀
 `)
 
+// printSessionResume prints the session title and resume hint to stdout after
+// the TUI exits, so the user can resume the session with `crush -s <id>`.
+// Nothing is printed when there is no active session.
+func printSessionResume(model *ui.UI) {
+	out := colorprofile.NewWriter(os.Stderr, os.Environ())
+
+	t := styles.ThemeForProvider("")
+	crushLogo := logo.Render(t.Logo.GradCanvas, version.Version, true, logo.Opts{
+		FieldColor:   t.Logo.FieldColor,
+		TitleColorA:  t.Logo.TitleColorA,
+		TitleColorB:  t.Logo.TitleColorB,
+		CharmColor:   t.Logo.CharmColor,
+		VersionColor: t.Logo.VersionColor,
+		Hyper:        false,
+	})
+
+	sess := model.CurrentSession()
+	hasSession := sess != nil && sess.ID != ""
+
+	tw, _, _ := term.GetSize(os.Stdout.Fd())
+	style := lipgloss.NewStyle().Padding(1, 3)
+	contentWidth := tw - style.GetHorizontalFrameSize()
+
+	info := crushLogo +
+		"\nThanks for using Crush! " +
+		lipgloss.NewStyle().Width(contentWidth).Render(randomExitMessage())
+
+	if hasSession {
+		title := strings.ReplaceAll(sess.Title, "\n", " ")
+
+		labelWidth := lipgloss.Width("Session  ")
+		titleWidth := contentWidth - labelWidth
+		if titleWidth > 0 {
+			title = ansi.Truncate(title, titleWidth, "…")
+		}
+
+		hash := session.HashID(sess.ID)[:7]
+		sessionLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Session  ") + title
+		continueLine := lipgloss.NewStyle().Foreground(charmtone.Charple).Render("Continue ") + "crush -s " + hash
+		info += "\n\n" + sessionLine + "\n" + continueLine
+	}
+
+	body := style.Width(tw).Render(info)
+
+	fmt.Fprintln(out, body)
+}
+
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
 `
+
+// randomExitMessage returns a random exit message.
+func randomExitMessage() string {
+	messages := []string{
+		"",
+		"See ya later.",
+		"You look great.",
+		"Have a gorgeous time.",
+		"Get some rest.",
+		"Come back soon.",
+		"You worked handsomely.",
+		"Time for a snack.",
+		"Who’s hungry?",
+		"That was fun.",
+		"See you at breakfast?",
+		"Time for a nap.",
+		"Who wants some spaghetti?",
+		"Take care of yourself.",
+		"Remember to hydrate.",
+		"Time for a swim?",
+		"You’re quite glamorous, you know.",
+		"Nice work.",
+		"You’re a sensation.",
+		"Where’s my eyeliner?",
+		"It’s tea time.",
+	}
+	return messages[rand.IntN(len(messages))]
+}
 
 func Execute() {
 	// FIXME: config.Load uses slog internally during provider resolution,

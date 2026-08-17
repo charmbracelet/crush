@@ -456,7 +456,8 @@ type Styles struct {
 		Spinner lipgloss.Style
 
 		// ContentPanel is used for content blocks with subtle background.
-		ContentPanel lipgloss.Style
+		ContentPanel   lipgloss.Style
+		ContentPanelBg color.Color // Background color for ContentPanel syntax highlighting.
 
 		// Scrollbar styles for scrollable content.
 		ScrollbarThumb lipgloss.Style

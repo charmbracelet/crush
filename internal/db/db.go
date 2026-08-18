@@ -51,6 +51,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAverageResponseTimeStmt, err = db.PrepareContext(ctx, getAverageResponseTime); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAverageResponseTime: %w", err)
 	}
+	if q.getCompressedPartsStmt, err = db.PrepareContext(ctx, getCompressedParts); err != nil {
+		return nil, fmt.Errorf("error preparing query GetCompressedParts: %w", err)
+	}
 	if q.getFileStmt, err = db.PrepareContext(ctx, getFile); err != nil {
 		return nil, fmt.Errorf("error preparing query GetFile: %w", err)
 	}
@@ -186,6 +189,11 @@ func (q *Queries) Close() error {
 	if q.getAverageResponseTimeStmt != nil {
 		if cerr := q.getAverageResponseTimeStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAverageResponseTimeStmt: %w", cerr)
+		}
+	}
+	if q.getCompressedPartsStmt != nil {
+		if cerr := q.getCompressedPartsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getCompressedPartsStmt: %w", cerr)
 		}
 	}
 	if q.getFileStmt != nil {
@@ -381,6 +389,7 @@ type Queries struct {
 	deleteSessionFilesStmt               *sql.Stmt
 	deleteSessionMessagesStmt            *sql.Stmt
 	getAverageResponseTimeStmt           *sql.Stmt
+	getCompressedPartsStmt               *sql.Stmt
 	getFileStmt                          *sql.Stmt
 	getFileByPathAndSessionStmt          *sql.Stmt
 	getFileReadStmt                      *sql.Stmt
@@ -425,6 +434,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteSessionFilesStmt:               q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:            q.deleteSessionMessagesStmt,
 		getAverageResponseTimeStmt:           q.getAverageResponseTimeStmt,
+		getCompressedPartsStmt:               q.getCompressedPartsStmt,
 		getFileStmt:                          q.getFileStmt,
 		getFileByPathAndSessionStmt:          q.getFileByPathAndSessionStmt,
 		getFileReadStmt:                      q.getFileReadStmt,

@@ -637,13 +637,23 @@ func gatherStats(ctx context.Context, conn *sql.DB) (*Stats, error) {
 	}
 	stats.AvgResponseTimeMs = toFloat64(avgResp) * 1000
 
-	// Tool usage.
-	partsRows, err := queries.GetToolUsage(ctx)
+	// Tool usage: legacy plain-JSON rows aggregate in SQL (json_each);
+	// compressed rows are decoded in Go and merged into the same counts.
+	toolUsage, err := queries.GetToolUsage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get tool usage: %w", err)
 	}
 	callCounts := make(map[string]int64)
-	for _, stored := range partsRows {
+	for _, t := range toolUsage {
+		if name, ok := t.ToolName.(string); ok && name != "" {
+			callCounts[name] += t.CallCount
+		}
+	}
+	compressedParts, err := queries.GetCompressedParts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get compressed parts for tool usage: %w", err)
+	}
+	for _, stored := range compressedParts {
 		parts, err := message.DecodeStoredParts(stored)
 		if err != nil {
 			return nil, fmt.Errorf("decode parts for tool usage: %w", err)

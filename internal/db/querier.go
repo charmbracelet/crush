@@ -18,6 +18,7 @@ type Querier interface {
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	GetAverageResponseTime(ctx context.Context) (int64, error)
+	GetCompressedParts(ctx context.Context) ([][]byte, error)
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
@@ -27,10 +28,13 @@ type Querier interface {
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
-	// Raw parts per message; tool-call aggregation happens in Go because
-	// parts may be zstd-compressed (see internal/message/parts_codec.go),
-	// which SQLite's json_each cannot read.
-	GetToolUsage(ctx context.Context) ([][]byte, error)
+	// Aggregates legacy plain-JSON rows. Compressed rows (zstd, see
+	// internal/message/parts_codec.go) cannot be parsed by json_each and
+	// are handled by GetCompressedParts in Go. The substr magic-number
+	// filter discriminates the two: stored JSON starts with '[' (TEXT),
+	// zstd frames start with 0x28B52FFD (BLOB); a TEXT value never
+	// compares equal to the BLOB constant in SQLite.
+	GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error)
 	GetTotalStats(ctx context.Context) (GetTotalStatsRow, error)
 	GetUsageByDay(ctx context.Context) ([]GetUsageByDayRow, error)
 	GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error)

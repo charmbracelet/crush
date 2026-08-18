@@ -187,7 +187,9 @@ option reset <list-key>    # clear a list option back to empty
   `assisted-by`) and `attribution-generated-with` (boolean).
 - **UI settings**: `option ui compact BOOL`, `option ui diff unified|split`,
   `option ui transparent BOOL`, `option ui scrollbar default|always|never`,
-  `option ui completions-max-depth N`, `option ui completions-max-items N`.
+  `option ui completions-max-depth N`, `option ui completions-max-items N`,
+  `option ui working-dir-format FMT` (header working-dir format with
+  `{cwd}`, `{user}`, `{host}` placeholders; default `{user}@{host}:{cwd}`).
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).

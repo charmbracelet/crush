@@ -2,7 +2,10 @@ package model
 
 import (
 	"fmt"
+	"os"
+	"os/user"
 	"strings"
+	"sync"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -21,6 +24,47 @@ const (
 	rightPadding         = 1
 	diagToDetailsSpacing = 1 // space between diagonal pattern and details section
 )
+
+// defaultWorkingDirFormat is used when options.tui.working_dir_format is
+// unset. It mirrors the familiar user@host:cwd shell prompt so the header
+// stays unambiguous when hopping between hosts.
+const defaultWorkingDirFormat = "{user}@{host}:{cwd}"
+
+// currentUserHost resolves the current username and hostname once per
+// process. The hostname is shortened to its first label so long FQDNs do
+// not crowd the header.
+var currentUserHost = sync.OnceValue(func() userHost {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "localhost"
+	}
+	if label, _, ok := strings.Cut(host, "."); ok && label != "" {
+		host = label
+	}
+	username, err := user.Current()
+	if err != nil || username.Username == "" {
+		return userHost{name: os.Getenv("USER"), host: host}
+	}
+	return userHost{name: username.Username, host: host}
+})
+
+type userHost struct {
+	name string
+	host string
+}
+
+// formatWorkingDir expands {cwd}, {user} and {host} placeholders in a
+// working directory format string. Unknown placeholders are left verbatim.
+func formatWorkingDir(format, cwd, user, host string) string {
+	if strings.TrimSpace(format) == "" {
+		format = defaultWorkingDirFormat
+	}
+	return strings.NewReplacer(
+		"{cwd}", cwd,
+		"{user}", user,
+		"{host}", host,
+	).Replace(format)
+}
 
 type header struct {
 	// cached logo and compact logo
@@ -173,7 +217,13 @@ func renderHeaderDetails(
 
 	const dirTrimLimit = 4
 	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
-	cwd = t.Header.WorkingDir.Render(cwd)
+
+	format := defaultWorkingDirFormat
+	if cfg := com.Config().Options.TUI; cfg != nil && strings.TrimSpace(cfg.WorkingDirFormat) != "" {
+		format = cfg.WorkingDirFormat
+	}
+	uh := currentUserHost()
+	cwd = t.Header.WorkingDir.Render(formatWorkingDir(format, cwd, uh.name, uh.host))
 
 	result := cwd + metadata
 	return ansi.Truncate(result, max(0, availWidth), "…")

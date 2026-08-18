@@ -73,14 +73,12 @@ WHERE role = 'assistant'
   AND finished_at > created_at;
 
 -- name: GetToolUsage :many
+-- Raw parts per message; tool-call aggregation happens in Go because
+-- parts may be zstd-compressed (see internal/message/parts_codec.go),
+-- which SQLite's json_each cannot read.
 SELECT
-    json_extract(value, '$.data.name') as tool_name,
-    COUNT(*) as call_count
-FROM messages, json_each(parts)
-WHERE json_extract(value, '$.type') = 'tool_call'
-  AND json_extract(value, '$.data.name') IS NOT NULL
-GROUP BY tool_name
-ORDER BY call_count DESC;
+    parts
+FROM messages;
 
 -- name: GetHourDayHeatmap :many
 SELECT

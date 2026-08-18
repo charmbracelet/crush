@@ -116,33 +116,26 @@ func (q *Queries) GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow
 
 const getToolUsage = `-- name: GetToolUsage :many
 SELECT
-    json_extract(value, '$.data.name') as tool_name,
-    COUNT(*) as call_count
-FROM messages, json_each(parts)
-WHERE json_extract(value, '$.type') = 'tool_call'
-  AND json_extract(value, '$.data.name') IS NOT NULL
-GROUP BY tool_name
-ORDER BY call_count DESC
+    parts
+FROM messages
 `
 
-type GetToolUsageRow struct {
-	ToolName  interface{} `json:"tool_name"`
-	CallCount int64       `json:"call_count"`
-}
-
-func (q *Queries) GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error) {
+// Raw parts per message; tool-call aggregation happens in Go because
+// parts may be zstd-compressed (see internal/message/parts_codec.go),
+// which SQLite's json_each cannot read.
+func (q *Queries) GetToolUsage(ctx context.Context) ([][]byte, error) {
 	rows, err := q.query(ctx, q.getToolUsageStmt, getToolUsage)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []GetToolUsageRow{}
+	items := [][]byte{}
 	for rows.Next() {
-		var i GetToolUsageRow
-		if err := rows.Scan(&i.ToolName, &i.CallCount); err != nil {
+		var parts []byte
+		if err := rows.Scan(&parts); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, parts)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

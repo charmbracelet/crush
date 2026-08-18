@@ -127,3 +127,47 @@ func TestLegacyRowsStillReadable(t *testing.T) {
 	}
 	require.True(t, found, "legacy row must be returned by List")
 }
+
+// TestUpdatedPartsStayCompressed covers the debounced Update/flush path:
+// an UpdateMessage write must also store a zstd frame, not just Create.
+func TestUpdatedPartsStayCompressed(t *testing.T) {
+	svc, sessionID, conn := newTestServiceWithDB(t)
+	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{
+		Role:  Assistant,
+		Parts: []ContentPart{TextContent{Text: "initial"}},
+		Model: "test-model",
+	})
+	require.NoError(t, err)
+
+	msg.Parts = append(msg.Parts, TextContent{Text: strings.Repeat("appended reasoning delta ", 256)})
+	require.NoError(t, svc.Update(t.Context(), msg))
+	require.NoError(t, svc.FlushAll(t.Context()))
+
+	var stored []byte
+	err = conn.QueryRowContext(t.Context(), "SELECT parts FROM messages WHERE id = ?", msg.ID).Scan(&stored)
+	require.NoError(t, err)
+	require.Equal(t, zstdMagic, stored[:4], "updated parts should still be a zstd frame")
+
+	back, err := svc.List(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, back, 1)
+	require.Len(t, back[0].Parts, 2) // initial text + appended (Finish only auto-added for non-assistant)
+}
+
+// TestCorruptFrameErrors: a truncated/corrupt zstd frame must surface a
+// decompression error, never pass through as garbage JSON.
+func TestCorruptFrameErrors(t *testing.T) {
+	svc, sessionID, conn := newTestServiceWithDB(t)
+	frame := compressParts([]byte(`[{"type":"text","data":{"text":"payload"}}]`))
+	corrupt := frame[:len(frame)-3] // truncate mid-frame
+
+	_, err := conn.ExecContext(
+		t.Context(),
+		"INSERT INTO messages (id, session_id, role, parts, model, provider, is_summary_message, created_at, updated_at) VALUES (?, ?, 'user', ?, NULL, NULL, 0, 0, 0)",
+		"corrupt-row", sessionID, corrupt,
+	)
+	require.NoError(t, err)
+
+	_, err = svc.List(t.Context(), sessionID)
+	require.Error(t, err, "corrupt frame must not decode silently")
+}

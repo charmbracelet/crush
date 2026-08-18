@@ -72,6 +72,24 @@ func TestFormatWorkingDir(t *testing.T) {
 	}
 }
 
+func TestShortHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		{"lir", "lir"},
+		{"lir.stump.rocks", "lir"},
+		{"lir.stump.rocks.", "lir"},
+		{".leading", ".leading"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := shortHost(tt.host); got != tt.want {
+			t.Errorf("shortHost(%q) = %q, want %q", tt.host, got, tt.want)
+		}
+	}
+}
+
 func TestCurrentUserHost(t *testing.T) {
 	uh := currentUserHost()
 	if uh.name == "" {

@@ -38,9 +38,7 @@ var currentUserHost = sync.OnceValue(func() userHost {
 	if err != nil || host == "" {
 		host = "localhost"
 	}
-	if label, _, ok := strings.Cut(host, "."); ok && label != "" {
-		host = label
-	}
+	host = shortHost(host)
 	username, err := user.Current()
 	if err != nil || username.Username == "" {
 		return userHost{name: os.Getenv("USER"), host: host}
@@ -51,6 +49,15 @@ var currentUserHost = sync.OnceValue(func() userHost {
 type userHost struct {
 	name string
 	host string
+}
+
+// shortHost shortens a hostname to its first label so long FQDNs do not
+// crowd the header.
+func shortHost(host string) string {
+	if label, _, ok := strings.Cut(host, "."); ok && label != "" {
+		return label
+	}
+	return host
 }
 
 // formatWorkingDir expands {cwd}, {user} and {host} placeholders in a

@@ -31,7 +31,7 @@ type CreateMessageParams struct {
 	ID               string         `json:"id"`
 	SessionID        string         `json:"session_id"`
 	Role             string         `json:"role"`
-	Parts            string         `json:"parts"`
+	Parts            []byte         `json:"parts"`
 	Model            sql.NullString `json:"model"`
 	Provider         sql.NullString `json:"provider"`
 	IsSummaryMessage int64          `json:"is_summary_message"`
@@ -353,7 +353,7 @@ WHERE id = ?
 `
 
 type UpdateMessageParams struct {
-	Parts                   string          `json:"parts"`
+	Parts                   []byte          `json:"parts"`
 	PrismModelID            sql.NullString  `json:"prism_model_id"`
 	PrismModelName          sql.NullString  `json:"prism_model_name"`
 	PrismHypercreditSavings sql.NullFloat64 `json:"prism_hypercredit_savings"`

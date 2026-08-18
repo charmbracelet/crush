@@ -14,7 +14,10 @@ import (
 // start with a 4-byte magic number, so the two never collide and reads
 // stay compatible with existing databases without a migration.
 
-// zstdMagic is the first four bytes of every zstd frame.
+// zstdMagic is the first four bytes of every zstd frame: the format's
+// fixed Magic_Number 0xFD2FB528 (RFC 8878 section 3.1.1.1), stored
+// little-endian. Every conformant encoder emits it; the klauspost
+// decoder validates the same constant (framedec.go frameMagic).
 var zstdMagic = []byte{0x28, 0xb5, 0x2f, 0xfd}
 
 // Both are safe for concurrent use: EncodeAll and DecodeAll operate on

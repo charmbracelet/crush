@@ -162,38 +162,6 @@ func TestOption_UIUnknownKey(t *testing.T) {
 	require.Contains(t, err.Error(), "unknown key")
 }
 
-func TestOption_UIWorkingDirFormat(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "crushrc")
-	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`option ui working-dir-format {host}:{cwd}`))
-	require.NoError(t, err)
-
-	var result map[string]any
-	require.NoError(t, json.Unmarshal(jsonBytes, &result))
-
-	ui := result["options"].(map[string]any)["tui"].(map[string]any)
-	require.Equal(t, "{host}:{cwd}", ui["working_dir_format"])
-}
-
-func TestOption_UIWorkingDirFormatRequiresValue(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "crushrc")
-	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui working-dir-format ""`))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "requires a value")
-}
-
-func TestOption_UIWorkingDirFormatRequiresPlaceholder(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "crushrc")
-	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui working-dir-format "{pwd}"`))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "expects at least one of")
-}
-
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 

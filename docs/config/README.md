@@ -532,10 +532,6 @@ Available Keys:
                                 always, or never
   completions-max-depth int     maximum directory depth shown by completions
   completions-max-items int     maximum items returned to completions
-  working-dir-format string     how the header shows the working directory,
-                                with {cwd}, {user} and {host} placeholders;
-                                defaults to {user}@{host}:{cwd}; falls back
-                                to {cwd} when the header is too narrow
 ```
 
 ```bash
@@ -545,7 +541,6 @@ option ui transparent true
 option ui scrollbar always
 option ui completions-max-depth 4
 option ui completions-max-items 200
-option ui working-dir-format "{host}:{cwd}"
 ```
 
 > [!IMPORTANT]

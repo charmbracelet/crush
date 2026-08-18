@@ -1,7 +1,9 @@
 package model
 
 import (
+	"cmp"
 	"fmt"
+	"net"
 	"os"
 	"os/user"
 	"strings"
@@ -35,15 +37,17 @@ const defaultWorkingDirFormat = "{user}@{host}:{cwd}"
 // not crowd the header.
 var currentUserHost = sync.OnceValue(func() userHost {
 	host, err := os.Hostname()
-	if err != nil || host == "" {
-		host = "localhost"
+	if err != nil {
+		host = ""
 	}
-	host = shortHost(host)
-	username, err := user.Current()
-	if err != nil || username.Username == "" {
-		return userHost{name: os.Getenv("USER"), host: host}
+	name := ""
+	if u, err := user.Current(); err == nil {
+		name = u.Username
 	}
-	return userHost{name: username.Username, host: host}
+	if name == "" {
+		name = cmp.Or(os.Getenv("USER"), os.Getenv("USERNAME"), os.Getenv("LOGNAME"))
+	}
+	return userHost{name: shortUsername(name), host: shortHostname(host)}
 })
 
 type userHost struct {
@@ -51,26 +55,41 @@ type userHost struct {
 	host string
 }
 
-// shortHost shortens a hostname to its first label so long FQDNs do not
-// crowd the header.
-func shortHost(host string) string {
+// shortHostname reduces a hostname to its first DNS label so long FQDNs do
+// not crowd the header. IP literals are left intact and an empty hostname
+// falls back to "localhost".
+func shortHostname(host string) string {
+	if host == "" {
+		return "localhost"
+	}
+	if net.ParseIP(host) != nil {
+		return host
+	}
 	if label, _, ok := strings.Cut(host, "."); ok && label != "" {
 		return label
 	}
 	return host
 }
 
+// shortUsername strips a Windows-style DOMAIN\ prefix from a username.
+func shortUsername(name string) string {
+	if _, short, ok := strings.Cut(name, `\`); ok && short != "" {
+		return short
+	}
+	return name
+}
+
 // formatWorkingDir expands {cwd}, {user} and {host} placeholders in a
 // working directory format string. Unknown placeholders are left verbatim.
+// A blank format falls back to defaultWorkingDirFormat.
 func formatWorkingDir(format, cwd, user, host string) string {
 	if strings.TrimSpace(format) == "" {
 		format = defaultWorkingDirFormat
 	}
-	return strings.NewReplacer(
-		"{cwd}", cwd,
-		"{user}", user,
-		"{host}", host,
-	).Replace(format)
+	// Sequential ReplaceAll avoids building a Replacer trie on every frame.
+	out := strings.ReplaceAll(format, "{host}", host)
+	out = strings.ReplaceAll(out, "{user}", user)
+	return strings.ReplaceAll(out, "{cwd}", cwd)
 }
 
 type header struct {
@@ -225,13 +244,18 @@ func renderHeaderDetails(
 	const dirTrimLimit = 4
 	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
 
-	format := defaultWorkingDirFormat
-	if cfg := com.Config().Options.TUI; cfg != nil && strings.TrimSpace(cfg.WorkingDirFormat) != "" {
+	format := ""
+	if cfg := com.Config().Options.TUI; cfg != nil {
 		format = cfg.WorkingDirFormat
 	}
 	uh := currentUserHost()
-	cwd = t.Header.WorkingDir.Render(formatWorkingDir(format, cwd, uh.name, uh.host))
-
-	result := cwd + metadata
+	dir := formatWorkingDir(format, cwd, uh.name, uh.host)
+	// Truncation drops from the right, which is where the metadata lives.
+	// When the formatted directory would crowd out the metadata, fall back
+	// to the bare path rather than losing the token usage and keystroke hint.
+	if lipgloss.Width(dir+metadata) > availWidth && lipgloss.Width(cwd+metadata) <= availWidth {
+		dir = cwd
+	}
+	result := t.Header.WorkingDir.Render(dir) + metadata
 	return ansi.Truncate(result, max(0, availWidth), "…")
 }

@@ -534,7 +534,8 @@ Available Keys:
   completions-max-items int     maximum items returned to completions
   working-dir-format string     how the header shows the working directory,
                                 with {cwd}, {user} and {host} placeholders;
-                                defaults to {user}@{host}:{cwd}
+                                defaults to {user}@{host}:{cwd}; falls back
+                                to {cwd} when the header is too narrow
 ```
 
 ```bash

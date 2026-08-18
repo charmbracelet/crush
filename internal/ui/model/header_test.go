@@ -1,8 +1,14 @@
 package model
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestFormatWorkingDir(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		format string
@@ -63,39 +69,51 @@ func TestFormatWorkingDir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := formatWorkingDir(tt.format, tt.cwd, tt.user, tt.host)
-			if got != tt.want {
-				t.Errorf("formatWorkingDir(%q, %q, %q, %q) = %q, want %q",
-					tt.format, tt.cwd, tt.user, tt.host, got, tt.want)
-			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestShortHost(t *testing.T) {
-	tests := []struct {
-		host string
-		want string
-	}{
-		{"lir", "lir"},
-		{"lir.stump.rocks", "lir"},
-		{"lir.stump.rocks.", "lir"},
-		{".leading", ".leading"},
-		{"", ""},
+func TestShortHostname(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"":                  "localhost",
+		"lir":               "lir",
+		"lir.stump.rocks":   "lir",
+		"192.168.1.5":       "192.168.1.5",
+		"::1":               "::1",
+		".weird":            ".weird",
+		"DESKTOP-8F2A1C":    "DESKTOP-8F2A1C",
+		"host.example.com.": "host",
 	}
-	for _, tt := range tests {
-		if got := shortHost(tt.host); got != tt.want {
-			t.Errorf("shortHost(%q) = %q, want %q", tt.host, got, tt.want)
-		}
+	for in, want := range tests {
+		require.Equal(t, want, shortHostname(in), "input %q", in)
+	}
+}
+
+func TestShortUsername(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"":              "",
+		"joestump":      "joestump",
+		`MYCORP\jstump`: "jstump",
+		`\`:             `\`,
+	}
+	for in, want := range tests {
+		require.Equal(t, want, shortUsername(in), "input %q", in)
 	}
 }
 
 func TestCurrentUserHost(t *testing.T) {
+	t.Parallel()
+
+	// The username depends on the ambient environment and may legitimately
+	// be empty (e.g. containers with no passwd entry), but the hostname
+	// always falls back to "localhost".
 	uh := currentUserHost()
-	if uh.name == "" {
-		t.Error("currentUserHost returned an empty username")
-	}
-	if uh.host == "" {
-		t.Error("currentUserHost returned an empty hostname")
-	}
+	require.NotEmpty(t, uh.host)
 }

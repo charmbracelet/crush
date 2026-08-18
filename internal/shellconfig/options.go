@@ -235,8 +235,12 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 		}
 		ui["scrollbar"] = value
 	case "working-dir-format":
-		if strings.TrimSpace(value) == "" {
+		value = strings.TrimSpace(value)
+		if value == "" {
 			return usage(stderr, "option ui working-dir-format requires a value, e.g. {user}@{host}:{cwd} ({cwd}, {user}, {host} placeholders)")
+		}
+		if !strings.Contains(value, "{cwd}") && !strings.Contains(value, "{user}") && !strings.Contains(value, "{host}") {
+			return usage(stderr, fmt.Sprintf("option ui working-dir-format expects at least one of {cwd}, {user}, {host}, got %q", value))
 		}
 		ui["working_dir_format"] = value
 	case "completions-max-depth", "completions-max-items":

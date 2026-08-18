@@ -185,6 +185,15 @@ func TestOption_UIWorkingDirFormatRequiresValue(t *testing.T) {
 	require.Contains(t, err.Error(), "requires a value")
 }
 
+func TestOption_UIWorkingDirFormatRequiresPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui working-dir-format "{pwd}"`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects at least one of")
+}
+
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 

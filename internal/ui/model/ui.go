@@ -407,8 +407,8 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		key.WithHelp("home", "line start"),
 	)
 	ta.KeyMap.SelectAll = key.NewBinding(
-		key.WithKeys("ctrl+a"),
-		key.WithHelp("ctrl+a", "select all"),
+		key.WithKeys("ctrl+shift+a"),
+		key.WithHelp("ctrl+shift+a", "select all"),
 	)
 	// Copying is handled by crush's keymap (Editor.CopySelection) so it can
 	// use crush's clipboard backend and user feedback; disable the
@@ -2598,6 +2598,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				cmds = append(cmds, m.pasteImageFromClipboard)
+			case key.Matches(msg, m.keyMap.Editor.PasteText):
+				cmds = append(cmds, m.pasteTextFromClipboard)
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				prevHeight := m.textarea.Height()
@@ -3304,6 +3306,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.Newline,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
+				k.Editor.PasteText,
+				k.Editor.SelectAll,
+				k.Editor.CopySelection,
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
@@ -3375,6 +3380,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.Newline,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
+				k.Editor.PasteText,
+				k.Editor.SelectAll,
+				k.Editor.CopySelection,
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
@@ -4936,6 +4944,19 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 			Content:  content,
 		}
 	}
+}
+
+// pasteTextFromClipboard reads text from the system clipboard and returns a
+// tea.PasteMsg so it flows through the same paste logic as bracketed paste.
+func (m *UI) pasteTextFromClipboard() tea.Msg {
+	textData, err := clipboard.Read(clipboard.FormatText)
+	if err != nil || len(textData) == 0 {
+		return util.InfoMsg{
+			Type: util.InfoTypeError,
+			Msg:  "Clipboard is empty or does not contain text",
+		}
+	}
+	return tea.PasteMsg{Content: string(textData)}
 }
 
 // pasteImageFromClipboard reads image data from the system clipboard and

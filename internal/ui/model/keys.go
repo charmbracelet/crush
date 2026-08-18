@@ -24,6 +24,13 @@ type KeyMap struct {
 		// CopySelection copies the current textarea selection to the
 		// clipboard.
 		CopySelection key.Binding
+
+		// SelectAll selects all text in the textarea.
+		SelectAll key.Binding
+
+		// PasteText pastes clipboard text into the textarea, as an
+		// alternative to bracketed paste.
+		PasteText key.Binding
 	}
 
 	Chat struct {
@@ -131,8 +138,12 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+f", "add image"),
 	)
 	km.Editor.PasteImage = key.NewBinding(
-		key.WithKeys("ctrl+v", "super+v"),
+		key.WithKeys("ctrl+v"),
 		key.WithHelp("ctrl+v", "paste image from clipboard"),
+	)
+	km.Editor.PasteText = key.NewBinding(
+		key.WithKeys("ctrl+shift+v"),
+		key.WithHelp("ctrl+shift+v", "paste text"),
 	)
 	km.Editor.MentionFile = key.NewBinding(
 		key.WithKeys("@"),
@@ -163,6 +174,10 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.CopySelection = key.NewBinding(
 		key.WithKeys("ctrl+shift+c"),
 		key.WithHelp("ctrl+shift+c", "copy selection"),
+	)
+	km.Editor.SelectAll = key.NewBinding(
+		key.WithKeys("ctrl+shift+a"),
+		key.WithHelp("ctrl+shift+a", "select all"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(

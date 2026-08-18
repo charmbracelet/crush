@@ -31,7 +31,7 @@ type CreateMessageParams struct {
 	ID               string         `json:"id"`
 	SessionID        string         `json:"session_id"`
 	Role             string         `json:"role"`
-	Parts            string         `json:"parts"`
+	Parts            []byte         `json:"parts"`
 	Model            sql.NullString `json:"model"`
 	Provider         sql.NullString `json:"provider"`
 	IsSummaryMessage int64          `json:"is_summary_message"`
@@ -266,7 +266,7 @@ WHERE id = ?
 `
 
 type UpdateMessageParams struct {
-	Parts      string        `json:"parts"`
+	Parts      []byte        `json:"parts"`
 	FinishedAt sql.NullInt64 `json:"finished_at"`
 	ID         string        `json:"id"`
 }

@@ -27,7 +27,10 @@ type Querier interface {
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
-	GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error)
+	// Raw parts per message; tool-call aggregation happens in Go because
+	// parts may be zstd-compressed (see internal/message/parts_codec.go),
+	// which SQLite's json_each cannot read.
+	GetToolUsage(ctx context.Context) ([][]byte, error)
 	GetTotalStats(ctx context.Context) (GetTotalStatsRow, error)
 	GetUsageByDay(ctx context.Context) ([]GetUsageByDayRow, error)
 	GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error)

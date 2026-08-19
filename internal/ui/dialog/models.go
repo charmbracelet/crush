@@ -82,14 +82,14 @@ type Models struct {
 	showConfiguredOnly bool
 
 	keyMap struct {
-		Tab            key.Binding
-		UpDown         key.Binding
-		Select         key.Binding
-		Edit           key.Binding
-		Next           key.Binding
-		Previous       key.Binding
-		ToggleFilter   key.Binding
-		Close          key.Binding
+		Tab          key.Binding
+		UpDown       key.Binding
+		Select       key.Binding
+		Edit         key.Binding
+		Next         key.Binding
+		Previous     key.Binding
+		ToggleFilter key.Binding
+		Close        key.Binding
 	}
 	list  *ModelsList
 	input textinput.Model
@@ -215,25 +215,25 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.ToggleFilter):
-				if m.isOnboarding {
-					break
-				}
-				m.showConfiguredOnly = !m.showConfiguredOnly
-				if err := m.setProviderItems(); err != nil {
-					return util.ReportError(err)
-				}
-			case key.Matches(msg, m.keyMap.Tab):
-				if m.isOnboarding {
-					break
-				}
-				if m.modelType == ModelTypeLarge {
-					m.modelType = ModelTypeSmall
-				} else {
-					m.modelType = ModelTypeLarge
-				}
-				if err := m.setProviderItems(); err != nil {
-					return util.ReportError(err)
-				}
+			if m.isOnboarding {
+				break
+			}
+			m.showConfiguredOnly = !m.showConfiguredOnly
+			if err := m.setProviderItems(); err != nil {
+				return util.ReportError(err)
+			}
+		case key.Matches(msg, m.keyMap.Tab):
+			if m.isOnboarding {
+				break
+			}
+			if m.modelType == ModelTypeLarge {
+				m.modelType = ModelTypeSmall
+			} else {
+				m.modelType = ModelTypeLarge
+			}
+			if err := m.setProviderItems(); err != nil {
+				return util.ReportError(err)
+			}
 		default:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)

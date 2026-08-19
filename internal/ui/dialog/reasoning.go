@@ -146,11 +146,14 @@ func (r *Reasoning) HandleMsg(msg tea.Msg) Action {
 			return ActionSelectReasoningEffort{Effort: reasoningItem.effort}
 		default:
 			var cmd tea.Cmd
+			query := r.input.Value()
 			r.input, cmd = r.input.Update(msg)
-			value := r.input.Value()
-			r.list.SetFilter(value)
-			r.list.ScrollToTop()
-			r.list.SetSelected(0)
+			// Only reset the cursor when the query actually changed.
+			if value := r.input.Value(); value != query {
+				r.list.SetFilter(value)
+				r.list.ScrollToTop()
+				r.list.SetSelected(0)
+			}
 			return ActionCmd{cmd}
 		}
 	}

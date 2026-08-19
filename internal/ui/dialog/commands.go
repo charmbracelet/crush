@@ -228,11 +228,14 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 					}
 				}
 			}
+			query := c.input.Value()
 			c.input, cmd = c.input.Update(msg)
-			value := c.input.Value()
-			c.list.SetFilter(value)
-			c.list.ScrollToTop()
-			c.list.SetSelected(0)
+			// Only reset the cursor when the query actually changed.
+			if value := c.input.Value(); value != query {
+				c.list.SetFilter(value)
+				c.list.ScrollToTop()
+				c.list.SetSelected(0)
+			}
 			return ActionCmd{cmd}
 		}
 	}

@@ -222,12 +222,15 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			}
 		default:
 			var cmd tea.Cmd
+			query := m.input.Value()
 			m.input, cmd = m.input.Update(msg)
-			value := m.input.Value()
 			m.list.Focus()
-			m.list.SetFilter(value)
-			m.list.SelectFirst()
-			m.list.ScrollToTop()
+			// Only reset the cursor when the query actually changed.
+			if value := m.input.Value(); value != query {
+				m.list.SetFilter(value)
+				m.list.SelectFirst()
+				m.list.ScrollToTop()
+			}
 			return ActionCmd{cmd}
 		}
 	}

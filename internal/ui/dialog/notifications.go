@@ -155,11 +155,14 @@ func (n *Notifications) HandleMsg(msg tea.Msg) Action {
 			return ActionSelectNotificationStyle{Style: notifItem.style.ID}
 		default:
 			var cmd tea.Cmd
+			query := n.input.Value()
 			n.input, cmd = n.input.Update(msg)
-			value := n.input.Value()
-			n.list.SetFilter(value)
-			n.list.ScrollToTop()
-			n.list.SetSelected(0)
+			// Only reset the cursor when the query actually changed.
+			if value := n.input.Value(); value != query {
+				n.list.SetFilter(value)
+				n.list.ScrollToTop()
+				n.list.SetSelected(0)
+			}
 			return ActionCmd{cmd}
 		}
 	}

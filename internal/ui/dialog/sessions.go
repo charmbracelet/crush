@@ -209,11 +209,16 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				}
 			default:
 				var cmd tea.Cmd
+				query := s.input.Value()
 				s.input, cmd = s.input.Update(msg)
-				value := s.input.Value()
-				s.list.SetFilter(value)
-				s.list.ScrollToTop()
-				s.list.SetSelected(0)
+				// Only reset the cursor when the query actually changed.
+				// Terminals report bare modifier presses as key events, and
+				// those must leave the selection alone.
+				if value := s.input.Value(); value != query {
+					s.list.SetFilter(value)
+					s.list.ScrollToTop()
+					s.list.SetSelected(0)
+				}
 				return ActionCmd{cmd}
 			}
 		}

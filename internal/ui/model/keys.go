@@ -25,6 +25,10 @@ type KeyMap struct {
 		// clipboard.
 		CopySelection key.Binding
 
+		// CutSelection copies the current textarea selection to the
+		// clipboard and deletes it from the textarea.
+		CutSelection key.Binding
+
 		// SelectAll selects all text in the textarea.
 		SelectAll key.Binding
 
@@ -174,6 +178,10 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.CopySelection = key.NewBinding(
 		key.WithKeys("ctrl+shift+c"),
 		key.WithHelp("ctrl+shift+c", "copy selection"),
+	)
+	km.Editor.CutSelection = key.NewBinding(
+		key.WithKeys("ctrl+shift+x"),
+		key.WithHelp("ctrl+shift+x", "cut selection"),
 	)
 	km.Editor.SelectAll = key.NewBinding(
 		key.WithKeys("ctrl+shift+a"),

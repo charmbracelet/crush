@@ -417,6 +417,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	cfg.Overrides().SkipPermissionRequests = args.YOLO
+	cfg.Overrides().SystemPromptPath = args.SystemPromptPath
 	cfg.Overrides().EnabledChannels = args.Channels
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
@@ -1069,15 +1070,16 @@ func validateClientID(id string) (string, error) {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	out := proto.Workspace{
-		ID:       ws.ID,
-		Path:     ws.Path,
-		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
-		Channels: ws.Cfg.Overrides().EnabledChannels,
-		DataDir:  cfg.Options.DataDirectory,
-		Debug:    cfg.Options.Debug,
-		Config:   cfg,
-		Env:      ws.Env,
-		Version:  version.Version,
+		ID:               ws.ID,
+		Path:             ws.Path,
+		YOLO:             ws.Cfg.Overrides().SkipPermissionRequests,
+		Channels:         ws.Cfg.Overrides().EnabledChannels,
+		DataDir:          cfg.Options.DataDirectory,
+		SystemPromptPath: ws.Cfg.Overrides().SystemPromptPath,
+		Debug:            cfg.Options.Debug,
+		Config:           cfg,
+		Env:              ws.Env,
+		Version:          version.Version,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())

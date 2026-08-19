@@ -135,6 +135,7 @@ mcp add filesystem --command node --args /path/to/mcp-server.js
 lsp add <name> --command CMD [flags]
 lsp remove <name>                     # alias: rm
 ```
+```
 
 Flags: `--args ARG` (repeatable), `--env KEY VALUE` (repeatable),
 `--filetypes TYPE` (repeatable), `--root-markers MARKER` (repeatable),
@@ -182,7 +183,8 @@ option reset <list-key>    # clear a list option back to empty
 - **Boolean keys phrased positively** (stored as the negated field): `metrics`,
   `auto-summarize`, `provider-auto-update`,
   `default-providers`. Example: `option metrics false` disables metrics.
-- **String keys**: `data-directory`, `initialize-as`, `notifications`.
+- **String keys**: `data-directory`, `initialize-as`, `notifications`,
+  `system-prompt-path`.
 - **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
   `assisted-by`) and `attribution-generated-with` (boolean).
 - **UI settings**: `option ui compact BOOL`, `option ui diff unified|split`,
@@ -205,6 +207,24 @@ option ui diff unified
 > [!IMPORTANT] These skill paths are loaded by default and do NOT need
 > `skill-path`: `.agents/skills`, `.crush/skills`, `.claude/skills`,
 > `.cursor/skills`.
+
+## Custom System Prompt
+
+Set `options.system_prompt_path` to replace Crush's default coder system
+prompt body with a Markdown file. Crush still appends its managed runtime
+sections such as environment, memory, skills, and tool instructions.
+
+```bash
+# crushrc — relative paths resolve from the project/workspace directory.
+option system-prompt-path .crush/system-prompt.md
+```
+
+Project-level config applies only in that project; global config
+(`~/.config/crush/crushrc`) applies across projects, and project config wins.
+You can also set the same option in the workspace data config at
+`.crush/crush.json`, which loads after project config and can override it.
+For a one-off run, `crush --sys-prompt /path/to/system-prompt.md` or
+`crush -p /path/to/system-prompt.md` overrides configured values.
 
 ## Hooks runtime
 

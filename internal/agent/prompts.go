@@ -11,6 +11,9 @@ import (
 //go:embed templates/coder.md.tpl
 var coderPromptTmpl []byte
 
+//go:embed templates/default_system_prompt.md
+var defaultSystemPrompt []byte
+
 //go:embed templates/task.md.tpl
 var taskPromptTmpl []byte
 
@@ -18,6 +21,7 @@ var taskPromptTmpl []byte
 var initializePromptTmpl []byte
 
 func coderPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
+	opts = append([]prompt.Option{prompt.WithSystemPrompt(string(defaultSystemPrompt))}, opts...)
 	systemPrompt, err := prompt.NewPrompt("coder", string(coderPromptTmpl), opts...)
 	if err != nil {
 		return nil, err

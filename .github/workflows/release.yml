@@ -15,7 +15,7 @@ jobs:
   goreleaser:
     uses: charmbracelet/meta/.github/workflows/goreleaser.yml@main
     with:
-      go_version: "1.26"
+      go_version: "1.26.6"
       macos_sign_entitlements: "./.github/entitlements.plist"
     secrets:
       docker_username: ${{ secrets.DOCKERHUB_USERNAME }}

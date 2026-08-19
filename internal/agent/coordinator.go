@@ -123,6 +123,7 @@ type coordinator struct {
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
+	env         []string
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -151,6 +152,11 @@ type CoordinatorOptions struct {
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
 	Interactive bool
+	// Env is the client's environment (as sent by the connecting client).
+	// It is merged with the server's os.Environ() when the bash tool
+	// spawns shells so that client-side variables like TMUX and TMUX_PANE
+	// are visible to agent commands.
+	Env []string
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -183,6 +189,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
+		env:          opts.Env,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -712,7 +719,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, c.env),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),

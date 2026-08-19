@@ -68,6 +68,13 @@ type App struct {
 
 	config *config.ConfigStore
 
+	// env is the client's environment (sent by the connecting client in
+	// client/server mode). It is merged with os.Environ() when spawning
+	// agent shells so that client-side variables like TMUX and TMUX_PANE
+	// are visible to the bash tool. In local mode this is nil, which
+	// causes NewShell to fall back to os.Environ() (already correct).
+	env []string
+
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
 	events          *pubsub.Broker[tea.Msg]
@@ -94,7 +101,7 @@ type App struct {
 // per-workspace skill discovery results computed by the caller; the
 // caller is responsible for constructing it (typically via
 // skills.NewManager + skills.DiscoverFromConfig).
-func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, env []string) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
@@ -125,6 +132,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+
+		env: env,
 	}
 
 	app.setupEvents()
@@ -694,6 +703,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		RunComplete: app.runCompletions,
 		Skills:      app.Skills,
 		Interactive: interactive,
+		Env:         app.env,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

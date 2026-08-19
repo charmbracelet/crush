@@ -3,7 +3,7 @@ module github.com/charmbracelet/crush
 go 1.26.5
 
 require (
-	charm.land/bubbles/v2 v2.1.1
+	charm.land/bubbles/v2 v2.2.0
 	charm.land/bubbletea/v2 v2.0.8
 	charm.land/catwalk v0.51.6
 	charm.land/fang/v2 v2.0.1
@@ -219,5 +219,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace charm.land/bubbles/v2 => github.com/andrinoff/bubbles/v2 v2.0.0-20260804161509-83763324ccd7

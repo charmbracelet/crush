@@ -39,6 +39,27 @@ func TestTextareaSelectionKeys(t *testing.T) {
 	require.Equal(t, "he", u.textarea.SelectedText())
 }
 
+func TestTextareaCutSelection(t *testing.T) {
+	t.Parallel()
+
+	u := newSelectionTestUI()
+	u.keyMap = DefaultKeyMap()
+
+	for _, r := range "hello" {
+		u.textarea.InsertRune(r)
+	}
+	u.textarea.CursorStart()
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	require.True(t, u.textarea.HasSelection())
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl | tea.ModShift})
+
+	require.False(t, u.textarea.HasSelection())
+	require.Equal(t, "llo", u.textarea.Value())
+}
+
 func TestTextareaMouseSelection(t *testing.T) {
 	t.Parallel()
 

@@ -2608,6 +2608,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					))
 					m.textarea.ClearSelection()
 				}
+			case key.Matches(msg, m.keyMap.Editor.CutSelection):
+				if m.textarea.HasSelection() {
+					cmds = append(cmds, common.CopyToClipboardWithCallback(
+						m.textarea.SelectedText(),
+						"Selection cut to clipboard",
+						nil,
+					))
+					m.textarea.DeleteSelection()
+				}
 			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 				cmd := m.handleHistoryUp(msg)
 				if cmd != nil {
@@ -3234,6 +3243,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.PasteText,
 				k.Editor.SelectAll,
 				k.Editor.CopySelection,
+				k.Editor.CutSelection,
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
@@ -3307,6 +3317,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.PasteText,
 				k.Editor.SelectAll,
 				k.Editor.CopySelection,
+				k.Editor.CutSelection,
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)

@@ -231,15 +231,11 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			prevValue := c.input.Value()
 			c.input, cmd = c.input.Update(msg)
 			value := c.input.Value()
-			// Only reset the filter and selection when the query actually
-			// changed. Modifier-only keys (Ctrl, Shift, Alt) and other
-			// keys that don't change the input must not move the selection.
-			if value == prevValue {
-				return ActionCmd{cmd}
+			if value != prevValue {
+				c.list.SetFilter(value)
+				c.list.ScrollToTop()
+				c.list.SetSelected(0)
 			}
-			c.list.SetFilter(value)
-			c.list.ScrollToTop()
-			c.list.SetSelected(0)
 			return ActionCmd{cmd}
 		}
 	}

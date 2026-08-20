@@ -158,15 +158,12 @@ func (n *Notifications) HandleMsg(msg tea.Msg) Action {
 			var cmd tea.Cmd
 			n.input, cmd = n.input.Update(msg)
 			value := n.input.Value()
-			// Only reset the filter and selection when the query actually
-			// changed. Modifier-only keys (Ctrl, Shift, Alt) and other
-			// keys that don't change the input must not move the selection.
-			if value == prevValue {
-				return ActionCmd{cmd}
+			if value != prevValue {
+				n.list.SetFilter(value)
+				n.list.ScrollToTop()
+				n.list.SetSelected(0)
 			}
-			n.list.SetFilter(value)
-			n.list.ScrollToTop()
-			n.list.SetSelected(0)
+
 			return ActionCmd{cmd}
 		}
 	}

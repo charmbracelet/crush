@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"os"
@@ -113,11 +114,11 @@ func TestUpdatePreferredModel_PersistsModelAndRecents(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := &Config{}
-	cfg.setDefaults(dir, "")
+	cfg.setDefaults(context.Background(), dir, "")
 	store := testStoreWithPath(cfg, dir)
 
 	sel := SelectedModel{Provider: "openai", Model: "gpt-4o"}
-	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, sel))
+	require.NoError(t, store.UpdatePreferredModel(context.Background(), ScopeGlobal, SelectedModelTypeLarge, sel))
 
 	// in-memory state (read through the store; copy-on-write publishes a
 	// new Config, so the seed cfg pointer is intentionally unchanged).
@@ -139,17 +140,17 @@ func TestUpdatePreferredModel_TypeIsolation(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := &Config{}
-	cfg.setDefaults(dir, "")
+	cfg.setDefaults(context.Background(), dir, "")
 	store := testStoreWithPath(cfg, dir)
 
 	largeModel := SelectedModel{Provider: "openai", Model: "gpt-4o"}
 	smallModel := SelectedModel{Provider: "anthropic", Model: "claude"}
-	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, largeModel))
-	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeSmall, smallModel))
+	require.NoError(t, store.UpdatePreferredModel(context.Background(), ScopeGlobal, SelectedModelTypeLarge, largeModel))
+	require.NoError(t, store.UpdatePreferredModel(context.Background(), ScopeGlobal, SelectedModelTypeSmall, smallModel))
 
 	// Adding to large leaves small untouched.
 	anotherLarge := SelectedModel{Provider: "google", Model: "gemini"}
-	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, anotherLarge))
+	require.NoError(t, store.UpdatePreferredModel(context.Background(), ScopeGlobal, SelectedModelTypeLarge, anotherLarge))
 
 	require.Len(t, store.Config().RecentModels[SelectedModelTypeLarge], 2)
 	require.Equal(t, anotherLarge, store.Config().RecentModels[SelectedModelTypeLarge][0])

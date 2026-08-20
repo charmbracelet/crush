@@ -30,7 +30,7 @@ func TestRunShellCommand_SkipsPersistenceForMissingSession(t *testing.T) {
 		Path:         t.TempDir(),
 		resolvedPath: t.TempDir(),
 		clients:      make(map[string]*clientState),
-		shutdownFn:   func() {},
+		shutdownFn:   func(context.Context) {},
 	}
 	ws.App = &app.App{
 		Sessions: sessions,

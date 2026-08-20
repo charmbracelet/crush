@@ -112,7 +112,7 @@ func (s *Manager) Start(ctx context.Context, path string) {
 	var wg sync.WaitGroup
 	for name, server := range s.manager.GetServers() {
 		wg.Go(func() {
-			s.startServer(name, path, server)
+			s.startServer(ctx, name, path, server)
 		})
 	}
 	wg.Wait()
@@ -150,7 +150,7 @@ var skipAutoStartCommands = map[string]bool{
 	"tflint":  true,
 }
 
-func (s *Manager) startServer(name, filepath string, server *powernapconfig.ServerConfig) {
+func (s *Manager) startServer(ctx context.Context, name, filepath string, server *powernapconfig.ServerConfig) {
 	var (
 		isUserConfigured = s.isUserConfigured(name)
 		autoLSP          = s.cfg.Config().Options.AutoLSP
@@ -230,7 +230,7 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	// context may have a short timeout or be canceled when the tool call
 	// completes, but LSP initialization can take several seconds and the
 	// server must persist beyond any single request.
-	initCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
+	initCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
 	defer cancel()
 
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {

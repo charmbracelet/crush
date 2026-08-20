@@ -225,10 +225,10 @@ func isMarkdownFile(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".md")
 }
 
-func GetMCPPrompt(cfg *config.ConfigStore, clientID, promptID string, args map[string]string) (string, error) {
+func GetMCPPrompt(ctx context.Context, cfg *config.ConfigStore, clientID, promptID string, args map[string]string) (string, error) {
 	// Create a context with timeout since tea.Cmd doesn't support context passing.
 	// The MCP client has its own timeout, but this provides an additional safeguard.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	result, err := mcp.GetPromptMessages(ctx, cfg, clientID, promptID, args)

@@ -61,13 +61,13 @@ func (b *Backend) GetWorkspaceConfig(workspaceID string) (*config.Config, error)
 
 // GetWorkspaceProviders returns the configured providers for a
 // workspace.
-func (b *Backend) GetWorkspaceProviders(workspaceID string) (any, error) {
+func (b *Backend) GetWorkspaceProviders(ctx context.Context, workspaceID string) (any, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	providers, _ := config.Providers(ws.Cfg.Config())
+	providers, _ := config.Providers(ctx, ws.Cfg.Config())
 	return providers, nil
 }
 
@@ -136,7 +136,7 @@ func (b *Backend) MCPAuthenticate(ctx context.Context, workspaceID, name string)
 	if err != nil {
 		return err
 	}
-	finish, cancel, err := mcptools.BeginAuth(ws.Cfg, name)
+	finish, cancel, err := mcptools.BeginAuth(ctx, ws.Cfg, name)
 	if err != nil {
 		return err
 	}

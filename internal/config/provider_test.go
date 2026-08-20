@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -48,7 +49,7 @@ func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {
 		},
 	}
 
-	providers, err := Providers(cfg)
+	providers, err := Providers(context.Background(), cfg)
 	require.NoError(t, err)
 	require.NotNil(t, providers)
 	require.Greater(t, len(providers), 5, "Expected embedded providers")
@@ -348,7 +349,7 @@ func TestProviders_KeepsCatalogWhenCachingFails(t *testing.T) {
 	require.Error(t, hyperErr, "cache write should fail")
 	require.Equal(t, "Hyper", hyperProvider.Name)
 
-	providers, err := Providers(&Config{Options: &Options{}})
+	providers, err := Providers(context.Background(), &Config{Options: &Options{}})
 
 	// The failure is reported, but as a warning alongside a usable catalog.
 	require.Error(t, err)
@@ -377,7 +378,7 @@ func TestProviders_FallsBackToEmbeddedHyper(t *testing.T) {
 	_, _ = catwalkSyncer.Get(t.Context())
 	_, _ = hyperSyncer.Get(t.Context())
 
-	providers, err := Providers(&Config{Options: &Options{}})
+	providers, err := Providers(context.Background(), &Config{Options: &Options{}})
 	require.NoError(t, err)
 	require.Len(t, providers, 2)
 	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[0].ID)
@@ -392,7 +393,7 @@ func TestProviders_HonorsDisableDefaultProviders(t *testing.T) {
 	resetProviderState()
 	defer resetProviderState()
 
-	providers, err := Providers(&Config{
+	providers, err := Providers(context.Background(), &Config{
 		Options: &Options{DisableDefaultProviders: true},
 	})
 	require.NoError(t, err)

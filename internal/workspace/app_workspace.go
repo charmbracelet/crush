@@ -238,8 +238,8 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 	return w.app.InitCoderAgentNonInteractive(ctx)
 }
 
-func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	return w.app.GetDefaultSmallModel(providerID)
+func (w *AppWorkspace) GetDefaultSmallModel(ctx context.Context, providerID string) config.SelectedModel {
+	return w.app.GetDefaultSmallModel(ctx, providerID)
 }
 
 // -- Permissions --
@@ -343,32 +343,32 @@ func (w *AppWorkspace) Resolver() config.VariableResolver {
 
 // -- Config mutations --
 
-func (w *AppWorkspace) UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
-	return w.store.UpdatePreferredModel(scope, modelType, model)
+func (w *AppWorkspace) UpdatePreferredModel(ctx context.Context, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
+	return w.store.UpdatePreferredModel(ctx, scope, modelType, model)
 }
 
-func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
-	return w.store.SetCompactMode(scope, enabled)
+func (w *AppWorkspace) SetCompactMode(ctx context.Context, scope config.Scope, enabled bool) error {
+	return w.store.SetCompactMode(ctx, scope, enabled)
 }
 
-func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
-	if err := w.store.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
+func (w *AppWorkspace) SetProviderAPIKey(ctx context.Context, scope config.Scope, providerID string, apiKey any) error {
+	if err := w.store.SetProviderAPIKey(ctx, scope, providerID, apiKey); err != nil {
 		return err
 	}
 	w.store.SignalAuthComplete(providerID)
 	return nil
 }
 
-func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
-	return w.store.SetConfigField(scope, key, value)
+func (w *AppWorkspace) SetConfigField(ctx context.Context, scope config.Scope, key string, value any) error {
+	return w.store.SetConfigField(ctx, scope, key, value)
 }
 
-func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {
-	return w.store.RemoveConfigField(scope, key)
+func (w *AppWorkspace) RemoveConfigField(ctx context.Context, scope config.Scope, key string) error {
+	return w.store.RemoveConfigField(ctx, scope, key)
 }
 
-func (w *AppWorkspace) ImportCopilot() (*oauth.Token, bool) {
-	return w.store.ImportCopilot()
+func (w *AppWorkspace) ImportCopilot(ctx context.Context) (*oauth.Token, bool) {
+	return w.store.ImportCopilot(ctx)
 }
 
 func (w *AppWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
@@ -385,8 +385,8 @@ func (w *AppWorkspace) MarkProjectInitialized() error {
 	return config.MarkProjectInitialized(w.store)
 }
 
-func (w *AppWorkspace) InitializePrompt() (string, error) {
-	return agent.InitializePrompt(w.store)
+func (w *AppWorkspace) InitializePrompt(ctx context.Context) (string, error) {
+	return agent.InitializePrompt(ctx, w.store)
 }
 
 func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, error) {
@@ -438,12 +438,12 @@ func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, er
 	return commands.LoadMCPPrompts()
 }
 
-func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
-	return commands.GetMCPPrompt(w.store, clientID, promptID, args)
+func (w *AppWorkspace) GetMCPPrompt(ctx context.Context, clientID, promptID string, args map[string]string) (string, error) {
+	return commands.GetMCPPrompt(ctx, w.store, clientID, promptID, args)
 }
 
 func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
-	mcpConfig, err := w.store.PrepareDockerMCPConfig()
+	mcpConfig, err := w.store.PrepareDockerMCPConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -454,7 +454,7 @@ func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
-	if err := w.store.PersistDockerMCPConfig(mcpConfig); err != nil {
+	if err := w.store.PersistDockerMCPConfig(ctx, mcpConfig); err != nil {
 		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
 		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
@@ -463,11 +463,11 @@ func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
 	return nil
 }
 
-func (w *AppWorkspace) DisableDockerMCP() error {
+func (w *AppWorkspace) DisableDockerMCP(ctx context.Context) error {
 	if err := mcptools.DisableSingle(w.store, config.DockerMCPName); err != nil {
 		return fmt.Errorf("failed to disable docker MCP: %w", err)
 	}
-	return w.store.DisableDockerMCP()
+	return w.store.DisableDockerMCP(ctx)
 }
 
 func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
@@ -478,7 +478,7 @@ func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
 	return mcptools.PendingAuthMCPs(w.store)
 }
 
-func (w *AppWorkspace) MCPAuthURL(name string) string {
+func (w *AppWorkspace) MCPAuthURL(_ context.Context, name string) string {
 	return mcptools.MCPAuthURL(name)
 }
 
@@ -488,8 +488,8 @@ func (w *AppWorkspace) Subscribe(program *tea.Program) {
 	w.app.Subscribe(program)
 }
 
-func (w *AppWorkspace) Shutdown() {
-	w.app.Shutdown()
+func (w *AppWorkspace) Shutdown(ctx context.Context) {
+	w.app.Shutdown(ctx)
 }
 
 // App returns the underlying app.App instance.

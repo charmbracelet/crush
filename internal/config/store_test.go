@@ -61,7 +61,7 @@ func TestConfigStore_SetConfigField_WorkspaceScopeGuard(t *testing.T) {
 		workspacePath:  "",
 	}
 
-	err := store.SetConfigField(ScopeWorkspace, "foo", "bar")
+	err := store.SetConfigField(context.Background(), ScopeWorkspace, "foo", "bar")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNoWorkspaceConfig))
 }
@@ -76,7 +76,7 @@ func TestConfigStore_SetConfigField_GlobalScopeAlwaysWorks(t *testing.T) {
 		globalDataPath: globalPath,
 	}
 
-	err := store.SetConfigField(ScopeGlobal, "foo", "bar")
+	err := store.SetConfigField(context.Background(), ScopeGlobal, "foo", "bar")
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(globalPath)
@@ -93,7 +93,7 @@ func TestConfigStore_RemoveConfigField_WorkspaceScopeGuard(t *testing.T) {
 		workspacePath:  "",
 	}
 
-	err := store.RemoveConfigField(ScopeWorkspace, "foo")
+	err := store.RemoveConfigField(context.Background(), ScopeWorkspace, "foo")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNoWorkspaceConfig))
 }
@@ -345,7 +345,7 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config properly
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath for the test (Load doesn't set this directly)
@@ -398,7 +398,7 @@ func TestSetConfigField_AutoReloads(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Verify initial state
@@ -409,7 +409,7 @@ func TestSetConfigField_AutoReloads(t *testing.T) {
 	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// Use SetConfigField to change debug to true
-	err = store.SetConfigField(ScopeGlobal, "options.debug", true)
+	err = store.SetConfigField(context.Background(), ScopeGlobal, "options.debug", true)
 	require.NoError(t, err)
 
 	// Verify in-memory state was automatically reloaded and reflects the change
@@ -433,7 +433,7 @@ func TestRemoveConfigField_AutoReloads(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath and capture snapshot
@@ -444,7 +444,7 @@ func TestRemoveConfigField_AutoReloads(t *testing.T) {
 	require.True(t, store.config.Options.Debug)
 
 	// Remove the debug field
-	err = store.RemoveConfigField(ScopeGlobal, "options.debug")
+	err = store.RemoveConfigField(context.Background(), ScopeGlobal, "options.debug")
 	require.NoError(t, err)
 
 	// Verify auto-reload occurred and stale state is clean
@@ -468,7 +468,7 @@ func TestSetConfigField_AutoReloadSkipsWhenNoWorkingDir(t *testing.T) {
 	}
 
 	// SetConfigField should succeed even without workingDir (auto-reload skips)
-	err := store.SetConfigField(ScopeGlobal, "foo", "bar")
+	err := store.SetConfigField(context.Background(), ScopeGlobal, "foo", "bar")
 	require.NoError(t, err)
 
 	// Verify file was still written
@@ -499,7 +499,7 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 
 	// Load will trigger configureProviders which removes anthropic OAuth config.
 	// This should NOT cause infinite recursion — writeMu prevents re-entrant reloads.
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Capture snapshot and verify reload also works without recursion
@@ -528,7 +528,7 @@ func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config.
-	store, err := Load(dir, dir, false)
+	store, err := Load(context.Background(), dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath and capture snapshot.
@@ -536,7 +536,7 @@ func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
 	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// Write multiple fields atomically.
-	err = store.SetConfigFields(ScopeGlobal, map[string]any{
+	err = store.SetConfigFields(context.Background(), ScopeGlobal, map[string]any{
 		"options.debug":  true,
 		"options.custom": "hello",
 	})
@@ -760,7 +760,7 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 				key := fmt.Sprintf("goroutine_%d_field_%d", id, j)
 				kv[key] = fmt.Sprintf("value_%d_%d", id, j)
 			}
-			errs <- store.SetConfigFields(ScopeGlobal, kv)
+			errs <- store.SetConfigFields(context.Background(), ScopeGlobal, kv)
 		}(i)
 	}
 

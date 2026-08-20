@@ -38,18 +38,18 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
-func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 
-	configPaths := lookupConfigs(workingDir)
+	configPaths := lookupConfigs(ctx, workingDir)
 
-	cfg, loadedPaths, err := loadFromConfigPaths(context.Background(), configPaths)
+	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
 
-	cfg.setDefaults(workingDir, dataDir)
+	cfg.setDefaults(ctx, workingDir, dataDir)
 
 	store := &ConfigStore{
 		config:         cfg,
@@ -73,7 +73,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 			// Preserve defaults that setDefaults already applied.
 			dataDir := cfg.Options.DataDirectory
 			*cfg = *merged
-			cfg.setDefaults(workingDir, dataDir)
+			cfg.setDefaults(ctx, workingDir, dataDir)
 			store.config = cfg
 			store.loadedPaths = append(store.loadedPaths, store.workspacePath)
 		}
@@ -85,7 +85,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
 
-	if !isInsideWorktree() {
+	if !isInsideWorktree(ctx) {
 		const depth = 2
 		const items = 100
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
@@ -105,7 +105,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// list is fatal: starting up without providers is worse than starting
 	// up with slightly stale ones. Pass a Hyper token refresher so the
 	// catalog fetch can retry on 401.
-	providers, err := Providers(cfg, func(ctx context.Context) error {
+	providers, err := Providers(ctx, cfg, func(ctx context.Context) error {
 		return store.RefreshOAuthToken(ctx, ScopeGlobal, "hyper")
 	})
 	if err != nil {
@@ -130,7 +130,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// like AWS_PROFILE are visible to the AWS SDK credential chain.
 	cfg.applyEnv(valueResolver)
 
-	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
+	if err := cfg.configureProviders(ctx, store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
@@ -148,14 +148,14 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 	// Persist any fallback corrections while we still hold writeMu.
 	if resolved.LargeFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+		if err := store.updateLocked(ctx, ScopeGlobal, func(c *Config) map[string]any {
 			return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
 		}); err != nil {
 			return nil, fmt.Errorf("failed to update preferred large model: %w", err)
 		}
 	}
 	if resolved.SmallFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
+		if err := store.updateLocked(ctx, ScopeGlobal, func(c *Config) map[string]any {
 			return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
 		}); err != nil {
 			return nil, fmt.Errorf("failed to update preferred small model: %w", err)
@@ -309,7 +309,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			// state is kept consistent by the Providers.Del call below; any
 			// concurrent reload that races with this write will also see the
 			// removal because it re-reads from disk.
-			store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
+			store.RemoveConfigField(ctx, ScopeGlobal, "providers.anthropic")
 			c.Providers.Del(string(p.ID))
 			continue
 		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
@@ -536,7 +536,7 @@ func (c *Config) applyEnv(resolver VariableResolver) {
 	}
 }
 
-func (c *Config) setDefaults(workingDir, dataDir string) {
+func (c *Config) setDefaults(ctx context.Context, workingDir, dataDir string) {
 	if c.Options == nil {
 		c.Options = &Options{}
 	}
@@ -556,7 +556,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.LookupClosestBounded(workingDir, projectBoundary(workingDir), defaultDataDirectory); ok {
+		if path, ok := fsext.LookupClosestBounded(workingDir, projectBoundary(ctx, workingDir), defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
@@ -603,7 +603,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 
 	// Project specific skills dirs.
-	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
+	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(ctx, workingDir)...)
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
@@ -912,7 +912,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 // so an unrelated crush.json placed above the project is never picked
 // up. Global user-level config locations are always included
 // regardless of the boundary.
-func lookupConfigs(cwd string) []string {
+func lookupConfigs(ctx context.Context, cwd string) []string {
 	// Prepend global user config and machine-owned data JSON. Only the user
 	// config directory contributes a crushrc; the data directory is writable
 	// machine state and must never be executed as Bash. Missing files are
@@ -935,7 +935,7 @@ func lookupConfigs(cwd string) []string {
 		appName + ".json",
 	}
 
-	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
+	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(ctx, cwd), configNames...)
 	if err != nil {
 		// returns at least default configs
 		return configPaths
@@ -1219,8 +1219,8 @@ func GlobalCacheDir() string {
 }
 
 // ProjectConfigs returns list of current project configs paths.
-func ProjectConfigs(cwd string) []string {
-	return lookupConfigs(cwd)
+func ProjectConfigs(ctx context.Context, cwd string) []string {
+	return lookupConfigs(ctx, cwd)
 }
 
 // GlobalConfigData returns the path to the main data directory for the application.
@@ -1262,9 +1262,9 @@ func assignIfNil[T any](ptr **T, val T) {
 	}
 }
 
-func isInsideWorktree() bool {
+func isInsideWorktree(ctx context.Context) bool {
 	bts, err := exec.CommandContext(
-		context.Background(),
+		ctx,
 		"git", "rev-parse",
 		"--is-inside-work-tree",
 	).CombinedOutput()
@@ -1282,18 +1282,18 @@ func isInsideWorktree() bool {
 // value is the resolved root ("" when dir is not in a git worktree).
 var worktreeRootCache sync.Map // map[string]string
 
-func worktreeRoot(dir string) string {
+func worktreeRoot(ctx context.Context, dir string) string {
 	if cached, ok := worktreeRootCache.Load(dir); ok {
 		return cached.(string)
 	}
-	root := computeWorktreeRoot(dir)
+	root := computeWorktreeRoot(ctx, dir)
 	worktreeRootCache.Store(dir, root)
 	return root
 }
 
-func computeWorktreeRoot(dir string) string {
+func computeWorktreeRoot(ctx context.Context, dir string) string {
 	cmd := exec.CommandContext(
-		context.Background(),
+		ctx,
 		"git", "rev-parse", "--show-toplevel",
 	)
 	cmd.Dir = dir
@@ -1317,8 +1317,8 @@ func computeWorktreeRoot(dir string) string {
 // one can be detected, otherwise dir itself. Returning dir as a
 // fallback keeps Crush from silently adopting state files placed above
 // the current project.
-func projectBoundary(dir string) string {
-	if root := worktreeRoot(dir); root != "" {
+func projectBoundary(ctx context.Context, dir string) string {
+	if root := worktreeRoot(ctx, dir); root != "" {
 		return root
 	}
 	abs, err := filepath.Abs(dir)
@@ -1377,7 +1377,7 @@ var projectSkillSubdirs = []string{
 // discovered when the user is inside a subdirectory.
 // Working-directory paths come first so local skills take precedence
 // over monorepo-level ones.
-func ProjectSkillsDir(workingDir string) []string {
+func ProjectSkillsDir(ctx context.Context, workingDir string) []string {
 	dirs := make([]string, 0, len(projectSkillSubdirs)*2)
 	for _, sub := range projectSkillSubdirs {
 		dirs = append(dirs, filepath.Join(workingDir, sub))
@@ -1385,7 +1385,7 @@ func ProjectSkillsDir(workingDir string) []string {
 
 	// When the working directory is inside a git repository, also look at
 	// the repository root so monorepo-level .agents/skills are found.
-	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
+	if root := worktreeRoot(ctx, workingDir); root != "" && root != workingDir {
 		for _, sub := range projectSkillSubdirs {
 			dirs = append(dirs, filepath.Join(root, sub))
 		}

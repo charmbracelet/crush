@@ -27,7 +27,7 @@ import (
 // agent.ValidateCall (ErrEmptyPrompt, ErrSessionMissing) when the prompt
 // or session is missing, and ErrWorkspaceClosing if the workspace is
 // being torn down.
-func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error {
+func (b *Backend) SendMessage(ctx context.Context, workspaceID string, msg proto.AgentMessage) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
@@ -56,7 +56,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	ws.runWG.Add(1)
 	ws.runMu.Unlock()
 
-	go b.runAgent(ws, msg, accept)
+	go b.runAgent(ws, msg, accept) //nolint:contextcheck // runAgent uses ws.ctx (workspace lifecycle), not the request context
 	return nil
 }
 
@@ -88,6 +88,11 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	defer ws.runWG.Done()
 	defer accept.Close()
 
+	// ws.ctx is the workspace lifecycle context, cancelled by
+	// Workspace.Shutdown via w.cancel(). This is the safety net for
+	// goroutines that haven't entered the coordinator yet: CancelAll
+	// only iterates activeRequests, so a not-yet-started run would be
+	// uncancellable without the ws.ctx parent.
 	ctx := ws.ctx
 	if msg.RunID != "" {
 		ctx = agent.WithRunID(ctx, msg.RunID)
@@ -106,9 +111,6 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 		Message:   err.Error(),
 	})
 
-	// Reliable terminal fallback. Only needed when a RunID waiter
-	// exists and the coordinator has not already emitted the run's
-	// terminal RunComplete; otherwise this would be a duplicate.
 	if msg.RunID == "" || agent.RunCompletePublished(ctx) {
 		return
 	}
@@ -235,13 +237,13 @@ func (b *Backend) QueuedPromptsList(workspaceID, sessionID string) ([]string, er
 }
 
 // GetDefaultSmallModel returns the default small model for a provider.
-func (b *Backend) GetDefaultSmallModel(workspaceID, providerID string) (config.SelectedModel, error) {
+func (b *Backend) GetDefaultSmallModel(ctx context.Context, workspaceID, providerID string) (config.SelectedModel, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return config.SelectedModel{}, err
 	}
 
-	return ws.GetDefaultSmallModel(providerID), nil
+	return ws.GetDefaultSmallModel(ctx, providerID), nil
 }
 
 // RunShellCommand runs a shell command in the workspace directory and

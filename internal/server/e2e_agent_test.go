@@ -252,7 +252,7 @@ func newAgentE2EHarness(t *testing.T) *agentE2EHarness {
 		Path: t.TempDir(),
 		App:  a,
 	}
-	backend.SetWorkspaceShutdownFnForTest(ws, func() {})
+	backend.SetWorkspaceShutdownFnForTest(ws, func(context.Context) {})
 	backend.InsertWorkspaceForTest(h.backend, ws)
 
 	h.workspace = ws

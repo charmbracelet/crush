@@ -266,7 +266,7 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 		p.timer = time.AfterFunc(s.debounce, func() {
 			// Detached from caller ctx so a cancelled stream context
 			// does not strand the buffered write.
-			_ = s.flushOne(context.Background(), id, false)
+			_ = s.flushOne(context.WithoutCancel(ctx), id, false)
 		})
 	}
 	s.mu.Unlock()

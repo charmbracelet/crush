@@ -130,10 +130,10 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	// The backend is created with a shutdown callback that triggers
 	// a graceful server shutdown (e.g. when the last workspace is
 	// removed).
-	s.backend = backend.New(context.Background(), cfg, func() {
+	s.backend = backend.New(context.Background(), cfg, func(ctx context.Context) {
 		go func() {
 			slog.Info("Shutting down server...")
-			if err := s.Shutdown(context.Background()); err != nil {
+			if err := s.Shutdown(ctx); err != nil {
 				slog.Error("Failed to shutdown server", "error", err)
 			}
 		}()

@@ -145,9 +145,16 @@ func (r *Reasoning) HandleMsg(msg tea.Msg) Action {
 			}
 			return ActionSelectReasoningEffort{Effort: reasoningItem.effort}
 		default:
+			prevValue := r.input.Value()
 			var cmd tea.Cmd
 			r.input, cmd = r.input.Update(msg)
 			value := r.input.Value()
+			// Only reset the filter and selection when the query actually
+			// changed. Modifier-only keys (Ctrl, Shift, Alt) and other
+			// keys that don't change the input must not move the selection.
+			if value == prevValue {
+				return ActionCmd{cmd}
+			}
 			r.list.SetFilter(value)
 			r.list.ScrollToTop()
 			r.list.SetSelected(0)

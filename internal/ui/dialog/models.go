@@ -221,9 +221,16 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				return util.ReportError(err)
 			}
 		default:
+			prevValue := m.input.Value()
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			value := m.input.Value()
+			// Only reset the filter and selection when the query actually
+			// changed. Modifier-only keys (Ctrl, Shift, Alt) and other
+			// keys that don't change the input must not move the selection.
+			if value == prevValue {
+				return ActionCmd{cmd}
+			}
 			m.list.Focus()
 			m.list.SetFilter(value)
 			m.list.SelectFirst()

@@ -208,9 +208,17 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 					return ActionSelectSession{sessionItem.Session}
 				}
 			default:
+				prevValue := s.input.Value()
 				var cmd tea.Cmd
 				s.input, cmd = s.input.Update(msg)
 				value := s.input.Value()
+				// Only reset the filter and selection when the query
+				// actually changed. Modifier-only keys (Ctrl, Shift, Alt)
+				// and other keys that don't change the input must not
+				// move the selection.
+				if value == prevValue {
+					return ActionCmd{cmd}
+				}
 				s.list.SetFilter(value)
 				s.list.ScrollToTop()
 				s.list.SetSelected(0)

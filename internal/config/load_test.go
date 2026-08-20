@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,10 +38,21 @@ func TestMain(m *testing.M) {
 	os.Exit(exitVal)
 }
 
-// inheritedCredentialEnvNames returns the names in environ that a test
-// process must not inherit. CRUSH_ prefixed variables count because
+// Provider configuration is resolved from the environment on every load,
+// so anything below can silently steer a test. The suffixes cover the
+// per-provider variables the provider registry declares, which are mostly
+// but not all named *_API_KEY: huggingface uses HF_TOKEN and scaleway uses
+// SCW_SECRET_KEY. The prefixes cover the credential chains load.go reads
+// directly for Bedrock, Azure and Vertex AI. CRUSH_ is here because
 // PushPopCrushEnv copies CRUSH_FOO over FOO on every load, so clearing
 // HYPER_API_KEY alone leaves CRUSH_HYPER_API_KEY to reinstate it.
+var (
+	credentialEnvSuffixes = []string{"_API_KEY", "_API_ENDPOINT", "_TOKEN", "_SECRET_KEY"}
+	credentialEnvPrefixes = []string{"CRUSH_", "AWS_", "AZURE_", "VERTEXAI_"}
+)
+
+// inheritedCredentialEnvNames returns the names in environ that a test
+// process must not inherit.
 func inheritedCredentialEnvNames(environ []string) []string {
 	var names []string
 	for _, ev := range environ {
@@ -48,7 +60,13 @@ func inheritedCredentialEnvNames(environ []string) []string {
 		if !ok {
 			continue
 		}
-		if strings.HasSuffix(name, "_API_KEY") || strings.HasPrefix(name, "CRUSH_") {
+		suffixed := slices.ContainsFunc(credentialEnvSuffixes, func(s string) bool {
+			return strings.HasSuffix(name, s)
+		})
+		prefixed := slices.ContainsFunc(credentialEnvPrefixes, func(p string) bool {
+			return strings.HasPrefix(name, p)
+		})
+		if suffixed || prefixed {
 			names = append(names, name)
 		}
 	}
@@ -61,19 +79,34 @@ func TestInheritedCredentialEnvNames(t *testing.T) {
 	names := inheritedCredentialEnvNames([]string{
 		"PATH=/usr/bin",
 		"HOME=/home/dev",
-		"HYPER_API_KEY=live-key",
-		"CRUSH_HYPER_API_KEY=live-key",
-		"VENICE_API_KEY=live-key",
-		"CRUSH_GLOBAL_CONFIG=/home/dev/.config/crush",
+		"TOKEN=not-suffixed",
 		"API_KEY_SUFFIXED_WRONG=x",
 		"MALFORMED",
+		"HYPER_API_KEY=live",
+		"VENICE_API_KEY=live",
+		"CRUSH_HYPER_API_KEY=live",
+		"CRUSH_GLOBAL_CONFIG=/home/dev/.config/crush",
+		"HF_TOKEN=live",
+		"SCW_SECRET_KEY=live",
+		"ANTHROPIC_API_ENDPOINT=https://proxy.example",
+		"AWS_PROFILE=work",
+		"AWS_BEARER_TOKEN_BEDROCK=live",
+		"AZURE_OPENAI_API_VERSION=2026-01-01",
+		"VERTEXAI_PROJECT=my-project",
 	})
 
 	require.ElementsMatch(t, []string{
 		"HYPER_API_KEY",
-		"CRUSH_HYPER_API_KEY",
 		"VENICE_API_KEY",
+		"CRUSH_HYPER_API_KEY",
 		"CRUSH_GLOBAL_CONFIG",
+		"HF_TOKEN",
+		"SCW_SECRET_KEY",
+		"ANTHROPIC_API_ENDPOINT",
+		"AWS_PROFILE",
+		"AWS_BEARER_TOKEN_BEDROCK",
+		"AZURE_OPENAI_API_VERSION",
+		"VERTEXAI_PROJECT",
 	}, names)
 }
 

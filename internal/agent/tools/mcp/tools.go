@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -81,6 +82,7 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 	}
 
 	textContent := strings.Join(textParts, "\n")
+	textContent = capToolResult(textContent, maxToolResultBytes(cfg, name))
 
 	// We need to make sure the data is base64
 	// when using something like docker + playwright the data was not returned correctly.
@@ -192,6 +194,80 @@ func filterTools(mcpCfg config.MCPConfig, tools []*Tool) []*Tool {
 	}
 
 	return tools
+}
+
+// defaultMaxToolResultBytes is the default cap applied to MCP tool result
+// text before it is added to the model context, matching the size suggested
+// in the config schema default. Oversized results from third-party MCP
+// servers are the most common way a single tool call blows past a model's
+// context window (see #2835 for the built-in tool precedent).
+const defaultMaxToolResultBytes = 131072
+
+// maxToolResultBytes returns the configured cap for the MCP server, falling
+// back to the default when the server doesn't set one.
+func maxToolResultBytes(cfg *config.ConfigStore, name string) int {
+	m := cfg.Config().MCP[name]
+	if m.MaxToolResultBytes > 0 {
+		return m.MaxToolResultBytes
+	}
+	return defaultMaxToolResultBytes
+}
+
+// capToolResult caps text content to maxBytes, keeping the head (~75%) and
+// tail (~25%) of the cap and inserting a marker that states how much was
+// dropped. Keeping the tail preserves the final error/exit summary, and the
+// marker teaches the model to narrow its next call instead of retrying the
+// same oversized one. Content within the cap is returned unchanged. The
+// split points are adjusted so the result never splits a multi-byte UTF-8
+// rune.
+func capToolResult(content string, maxBytes int) string {
+	if maxBytes <= 0 || len(content) <= maxBytes {
+		return content
+	}
+
+	headBytes := maxBytes * 3 / 4
+	tailBytes := maxBytes - headBytes
+
+	head := content[:trimRune(content, headBytes)]
+	tail := content[trimRuneBack(content, len(content)-tailBytes):]
+
+	dropped := len(content) - len(head) - len(tail)
+	return fmt.Sprintf("%s\n\n[... %s truncated (returned first %s + last %s). Narrow the command with head/tail/grep, or write to a file and sample it. ...]\n\n%s",
+		head, formatBytes(dropped), formatBytes(len(head)), formatBytes(len(tail)), tail)
+}
+
+// trimRune returns the largest index <= n that is a UTF-8 rune boundary in s,
+// so a byte slice ending there never splits a rune.
+func trimRune(s string, n int) int {
+	for n > 0 && n < len(s) && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return n
+}
+
+// trimRuneBack returns the smallest index >= n that is a UTF-8 rune boundary
+// in s, so a byte slice starting there never splits a rune.
+func trimRuneBack(s string, n int) int {
+	for n < len(s) && !utf8.RuneStart(s[n]) {
+		n++
+	}
+	return n
+}
+
+// formatBytes renders a byte count in a human-readable form, e.g. 41.2 MB.
+func formatBytes(bytes int) string {
+	const (
+		kb = 1024
+		mb = kb * 1024
+	)
+	switch {
+	case bytes >= mb:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+	case bytes >= kb:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
 }
 
 // ensureRawBytes normalizes MCP media data into raw binary bytes.

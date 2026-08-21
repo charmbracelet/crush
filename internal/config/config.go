@@ -267,6 +267,55 @@ type TUIOptions struct {
 	Scrollbar   string                 `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
 }
 
+// UnmarshalJSON tolerates the legacy string form of the "theme" field.
+// Older Crush builds stored the selected theme as a plain string
+// (`"theme": "gruvbox-dark"`) instead of the current map of palette
+// overrides. When a string is encountered it is promoted to the active
+// theme name and registered in the theme map as an unmodified built-in,
+// so existing configs keep loading instead of failing outright.
+func (t *TUIOptions) UnmarshalJSON(data []byte) error {
+	type tuiOptionsAlias TUIOptions
+	var alias tuiOptionsAlias
+	if err := json.Unmarshal(data, &alias); err == nil {
+		*t = TUIOptions(alias)
+		return nil
+	}
+
+	// The strict decode failed. The most common reason is a legacy string
+	// "theme" value, so retry with theme decoded loosely and migrated.
+	var loose struct {
+		tuiOptionsAlias
+		Theme json.RawMessage `json:"theme"`
+	}
+	if err := json.Unmarshal(data, &loose); err != nil {
+		return err
+	}
+	*t = TUIOptions(loose.tuiOptionsAlias)
+
+	var legacyName string
+	if err := json.Unmarshal(loose.Theme, &legacyName); err != nil {
+		// Not a string either; surface the original object error.
+		var themeMap map[string]ThemeConfig
+		if err := json.Unmarshal(loose.Theme, &themeMap); err != nil {
+			return err
+		}
+		t.Theme = themeMap
+		return nil
+	}
+	if legacyName != "" && t.ActiveTheme == "" {
+		t.ActiveTheme = legacyName
+	}
+	if t.Theme == nil {
+		t.Theme = map[string]ThemeConfig{}
+	}
+	if legacyName != "" {
+		if _, ok := t.Theme[legacyName]; !ok {
+			t.Theme[legacyName] = ThemeConfig{}
+		}
+	}
+	return nil
+}
+
 // ThemeConfig stores palette overrides for a single theme. Empty objects
 // use the built-in theme with no modifications. Objects with fields
 // override specific palette colors on top of the base theme (if specified).

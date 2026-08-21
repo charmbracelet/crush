@@ -71,8 +71,13 @@ type (
 		Palette styles.Palette
 	}
 	ActionSaveThemePalette struct {
+		Name    string
 		Base    string
 		Palette styles.Palette
+	}
+	// ActionEditTheme opens the theme editor for a specific theme.
+	ActionEditTheme struct {
+		Name string
 	}
 	ActionRevertThemePalette struct{}
 	ActionDeleteThemeFile    struct {

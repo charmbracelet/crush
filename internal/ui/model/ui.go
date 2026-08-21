@@ -1994,10 +1994,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.applyTheme(newStyles)
 		m.preThemeStyles = nil
-		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
-			"options.tui.active_theme":       themeName,
-			"options.tui.theme." + themeName: map[string]any{},
-		}); err != nil {
+		fields := map[string]any{
+			"options.tui.active_theme": themeName,
+		}
+		// Only custom themes need a persisted map entry; writing an empty
+		// object for a built-in would create a spurious override that shows
+		// up as a user theme.
+		if !styles.IsBuiltinTheme(themeName) {
+			fields["options.tui.theme."+themeName] = map[string]any{}
+		}
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, fields); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2038,10 +2044,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.applyTheme(newStyles)
 		m.preThemeStyles = nil
 
+		// The theme is stored under its own name; Base only identifies the
+		// built-in palette its colors are derived from.
+		themeName := msg.Name
+		if themeName == "" {
+			themeName = msg.Base
+		}
+
 		// Save to user theme file.
 		dirs := styles.ThemeDirs()
 		if len(dirs) > 0 {
-			savePath := filepath.Join(dirs[len(dirs)-1], msg.Base+".json")
+			savePath := filepath.Join(dirs[len(dirs)-1], themeName+".json")
 			tf := &styles.ThemeFile{Base: msg.Base, Palette: msg.Palette}
 			if err := styles.SaveThemeFile(savePath, tf); err != nil {
 				cmds = append(cmds, util.ReportError(err))
@@ -2055,13 +2068,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
-			"options.tui.theme." + msg.Base: value,
+			"options.tui.theme." + themeName: value,
 		}); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
 		cmds = append(cmds, util.ReportInfo("Theme saved"))
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
+	case dialog.ActionEditTheme:
+		m.openThemeEditorDialog(msg.Name)
 	case dialog.ActionRevertThemePalette:
 		if m.preThemeStyles != nil {
 			m.applyTheme(*m.preThemeStyles)
@@ -2118,7 +2133,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, util.ReportInfo("Created new theme: "+name))
 		m.dialog.CloseDialog(dialog.ThemeNewID)
 		m.dialog.CloseDialog(dialog.ThemeID)
-		m.openThemeEditorDialog()
+		m.openThemeEditorDialog(name)
 	case dialog.ActionRenameTheme:
 		oldName := msg.OldName
 		newName := strings.ToLower(msg.NewName)
@@ -4281,13 +4296,14 @@ func (m *UI) openThemeDialog() {
 	m.dialog.OpenDialog(themeDialog)
 }
 
-// openThemeEditorDialog opens the theme editor dialog.
-func (m *UI) openThemeEditorDialog() {
+// openThemeEditorDialog opens the theme editor dialog for the given theme.
+// An empty themeName edits the currently active theme.
+func (m *UI) openThemeEditorDialog(themeName string) {
 	if m.dialog.ContainsDialog(dialog.ThemeEditorID) {
 		m.dialog.BringToFront(dialog.ThemeEditorID)
 		return
 	}
-	themeDialog := dialog.NewThemeEditor(m.com)
+	themeDialog := dialog.NewThemeEditor(m.com, themeName)
 	m.dialog.OpenDialog(themeDialog)
 }
 
@@ -4540,7 +4556,7 @@ func (m *UI) openDialog(id string) tea.Cmd {
 	case dialog.ThemeNewID:
 		m.openThemeNewDialog()
 	case dialog.ThemeEditorID:
-		m.openThemeEditorDialog()
+		m.openThemeEditorDialog("")
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)

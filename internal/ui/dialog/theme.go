@@ -259,7 +259,7 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 				if !ok || themeItem.name == newThemeItemName {
 					break
 				}
-				return ActionOpenDialog{ThemeEditorID}
+				return ActionEditTheme{Name: themeItem.name}
 			case key.Matches(msg, th.keyMap.Rename):
 				selectedItem := th.list.SelectedItem()
 				if selectedItem == nil {
@@ -505,27 +505,35 @@ func (th *Theme) setThemeItems() {
 		items = append(items, th.newThemeItem(info, currentTheme))
 	}
 
-	// Spacer between sections.
-	items = append(items, &themeSpacer{Versioned: &list.Versioned{}, height: 1})
-
-	// User section.
-	items = append(items, &ThemeSectionHeader{
-		Versioned: &list.Versioned{},
-		title:     "User",
-		t:         th.com.Styles,
-	})
-	for _, info := range userThemes {
-		items = append(items, th.newThemeItem(info, currentTheme))
+	// User section — only shown when custom themes exist.
+	if len(userThemes) > 0 {
+		items = append(items, &themeSpacer{Versioned: &list.Versioned{}, height: 1})
+		items = append(items, &ThemeSectionHeader{
+			Versioned: &list.Versioned{},
+			title:     "User",
+			t:         th.com.Styles,
+		})
+		for _, info := range userThemes {
+			items = append(items, th.newThemeItem(info, currentTheme))
+		}
 	}
 
 	th.list.SetItems(items...)
 
-	// Restore selection or default to current theme.
-	if th.mode == themesModeRenaming && th.selectedIndex >= 0 && th.selectedIndex < len(items) {
+	// Restore selection or default to the currently active theme, matching
+	// the behavior of the session and model pickers.
+	switch {
+	case th.mode == themesModeRenaming && th.selectedIndex >= 0 && th.selectedIndex < len(items):
 		th.list.SetSelected(th.selectedIndex)
-	} else {
-		// Default to "New Theme..." (index 0).
-		th.list.SetSelected(0)
+	default:
+		selected := 0
+		for i, it := range items {
+			if ti, ok := it.(*ThemeItem); ok && ti.name == currentTheme && ti.name != newThemeItemName {
+				selected = i
+				break
+			}
+		}
+		th.list.SetSelected(selected)
 	}
 	th.list.ScrollToSelected()
 }

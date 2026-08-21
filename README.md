@@ -362,30 +362,35 @@ Open the command palette with `ctrl+p`, select **Edit Theme**, and edit the
 active theme palette. Changes preview live as you type. Press `enter` or
 `ctrl+s` to save, or `esc` to cancel and revert.
 
-You can also set a theme directly in your config:
+You can also select a theme directly in your config with `active_theme`:
 
 ```json
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
     "tui": {
-      "theme": "gruvbox-dark"
+      "active_theme": "gruvbox-dark"
     }
   }
 }
 ```
 
-Or override colors on top of a built-in theme:
+Or define a custom theme that overrides colors on top of a built-in one.
+Themes live under `theme` keyed by name, and `active_theme` selects which one
+to use:
 
 ```json
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
     "tui": {
+      "active_theme": "my-theme",
       "theme": {
-        "base": "gruvbox-dark",
-        "primary": "#ff6b6b",
-        "bg_base": "#1a1a2e"
+        "my-theme": {
+          "base": "gruvbox-dark",
+          "primary": "#ff6b6b",
+          "bg_base": "#1a1a2e"
+        }
       }
     }
   }

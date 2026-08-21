@@ -28,16 +28,20 @@ type paletteSlot struct {
 	set  func(*styles.Palette, string)
 }
 
-// ThemeEditor edits the active theme palette with live preview.
+// ThemeEditor edits a theme palette with live preview. name is the theme
+// being edited (the key under which it is stored); base is the built-in
+// theme its palette is derived from.
 type ThemeEditor struct {
 	com     *common.Common
 	help    help.Model
 	input   textinput.Model
+	name    string
 	base    string
 	palette styles.Palette
 	slots   []paletteSlot
 	index   int
 	scroll  int
+	invalid bool
 
 	keyMap struct {
 		Save     key.Binding
@@ -49,8 +53,10 @@ type ThemeEditor struct {
 
 var _ Dialog = (*ThemeEditor)(nil)
 
-func NewThemeEditor(com *common.Common) *ThemeEditor {
-	ed := &ThemeEditor{com: com, base: "charmtone", slots: newPaletteSlots()}
+// NewThemeEditor creates an editor for the given theme. When themeName is
+// empty the currently active theme is edited.
+func NewThemeEditor(com *common.Common, themeName string) *ThemeEditor {
+	ed := &ThemeEditor{com: com, name: themeName, base: "charmtone", slots: newPaletteSlots()}
 
 	h := help.New()
 	h.Styles = com.Styles.DialogHelpStyles()
@@ -63,11 +69,11 @@ func NewThemeEditor(com *common.Common) *ThemeEditor {
 	ed.input.Focus()
 
 	ed.keyMap.Save = key.NewBinding(key.WithKeys("enter", "ctrl+s"), key.WithHelp("enter", "save"))
-	ed.keyMap.Next = key.NewBinding(key.WithKeys("down", "ctrl+n", "tab"), key.WithHelp("↓", "next"))
-	ed.keyMap.Previous = key.NewBinding(key.WithKeys("up", "ctrl+p", "shift+tab"), key.WithHelp("↑", "previous"))
+	ed.keyMap.Next = key.NewBinding(key.WithKeys("down", "tab"), key.WithHelp("↓", "next"))
+	ed.keyMap.Previous = key.NewBinding(key.WithKeys("up", "shift+tab"), key.WithHelp("↑", "previous"))
 	ed.keyMap.Close = CloseKey
 
-	ed.loadCurrentTheme()
+	ed.loadTheme()
 	ed.syncInput()
 	return ed
 }
@@ -84,7 +90,7 @@ func (ed *ThemeEditor) HandleMsg(msg tea.Msg) Action {
 			return ActionRevertThemePalette{}
 		case key.Matches(msg, ed.keyMap.Save):
 			ed.applyInput()
-			return ActionSaveThemePalette{Base: ed.base, Palette: ed.palette}
+			return ActionSaveThemePalette{Name: ed.name, Base: ed.base, Palette: ed.palette}
 		case key.Matches(msg, ed.keyMap.Previous):
 			ed.applyInput()
 			if ed.index == 0 {
@@ -134,7 +140,7 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	ed.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)
-	rc.Title = fmt.Sprintf("Edit Theme: %s", ed.base)
+	rc.Title = fmt.Sprintf("Edit Theme: %s", ed.name)
 	rc.Gap = 1
 	listView := t.Dialog.List.MarginBottom(0).Height(listHeight).Render(ed.renderSlots(listWidth, listHeight))
 	scrollbar := common.Scrollbar(t, listHeight, len(ed.slots), listHeight, ed.scroll)
@@ -183,19 +189,25 @@ func (ed *ThemeEditor) FullHelp() [][]key.Binding {
 	return [][]key.Binding{{ed.keyMap.Previous, ed.keyMap.Next, ed.keyMap.Save, ed.keyMap.Close}}
 }
 
-func (ed *ThemeEditor) loadCurrentTheme() {
+func (ed *ThemeEditor) loadTheme() {
 	cfg := ed.com.Config()
 	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
-		ed.loadBuiltin("charmtone")
+		if ed.name == "" {
+			ed.name = "charmtone"
+		}
+		ed.loadBuiltin(ed.name)
 		return
 	}
-	activeTheme := cfg.Options.TUI.ActiveTheme
-	if activeTheme == "" {
-		activeTheme = "charmtone"
+	// Fall back to the active theme when no specific theme was requested.
+	if ed.name == "" {
+		ed.name = cfg.Options.TUI.ActiveTheme
+	}
+	if ed.name == "" {
+		ed.name = "charmtone"
 	}
 
 	// Check for a user theme file first.
-	if path, err := styles.FindThemeFile(activeTheme); err == nil {
+	if path, err := styles.FindThemeFile(ed.name); err == nil {
 		if tf, terr := styles.LoadThemeFile(path); terr == nil {
 			base := tf.Base
 			if base == "" {
@@ -210,16 +222,16 @@ func (ed *ThemeEditor) loadCurrentTheme() {
 		}
 	}
 
-	theme, ok := cfg.Options.TUI.Theme[activeTheme]
+	theme, ok := cfg.Options.TUI.Theme[ed.name]
 	if !ok {
-		ed.loadBuiltin(activeTheme)
+		ed.loadBuiltin(ed.name)
 		return
 	}
 	if theme.IsObject() {
 		ed.loadObject(theme)
 		return
 	}
-	ed.loadBuiltin(activeTheme)
+	ed.loadBuiltin(ed.name)
 }
 
 func (ed *ThemeEditor) loadBuiltin(name string) {
@@ -259,12 +271,23 @@ func (ed *ThemeEditor) selectedSlot() paletteSlot {
 
 func (ed *ThemeEditor) applyInput() {
 	raw := strings.TrimSpace(ed.input.Value())
-	if resolved := styles.ParseColor(raw); resolved != "" {
-		ed.selectedSlot().set(&ed.palette, resolved)
+	if raw == "" {
+		ed.invalid = false
+		return
 	}
+	resolved := styles.ParseColor(raw)
+	if resolved == "" {
+		// Keep the existing color but flag the input so the user gets
+		// feedback instead of the value being silently dropped.
+		ed.invalid = true
+		return
+	}
+	ed.invalid = false
+	ed.selectedSlot().set(&ed.palette, resolved)
 }
 
 func (ed *ThemeEditor) syncInput() {
+	ed.invalid = false
 	ed.input.SetValue(ed.selectedSlot().get(ed.palette))
 	ed.input.CursorEnd()
 }
@@ -295,7 +318,13 @@ func (ed *ThemeEditor) renderSlots(width, height int) string {
 		{
 			value := slot.get(ed.palette)
 			colorStr := styles.ColorString(value)
-			swatch = lipgloss.NewStyle().Foreground(lipgloss.Color(colorStr)).Render(styles.ColorSwatchIcon)
+			swatchColor := colorStr
+			if selected && ed.invalid {
+				// Signal that the typed value is not a valid color and
+				// will not be applied, rather than dropping it silently.
+				swatchColor = styles.ColorString(ed.palette.Error)
+			}
+			swatch = lipgloss.NewStyle().Foreground(lipgloss.Color(swatchColor)).Render(styles.ColorSwatchIcon)
 		}
 
 		var line string

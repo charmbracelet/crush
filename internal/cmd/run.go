@@ -161,8 +161,8 @@ crush run --continue "Follow up on your last response"
 func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
 	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
-	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
-	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
+	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers. Optionally append an OMP-style reasoning-effort suffix such as ':high' or ':xhigh' (off, minimal, low, medium, high, xhigh, max)")
+	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider. Accepts the same model syntax as --model, including a reasoning-effort suffix")
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
@@ -491,6 +491,9 @@ func overrideModels(
 
 	providers := cfg.Providers.Copy()
 
+	largeModel, largeEffort := config.SplitModelEffort(largeModel)
+	smallModel, smallEffort := config.SplitModelEffort(smallModel)
+
 	largeMatches, smallMatches := findModelMatches(providers, largeModel, smallModel)
 
 	var largeProviderID string
@@ -501,10 +504,11 @@ func overrideModels(
 			return err
 		}
 		largeProviderID = found.provider
-		slog.Info("Overriding large model", "provider", found.provider, "model", found.modelID)
+		slog.Info("Overriding large model", "provider", found.provider, "model", found.modelID, "reasoning_effort", largeEffort)
 		if err := c.UpdatePreferredModel(ctx, ws.ID, config.ScopeWorkspace, config.SelectedModelTypeLarge, config.SelectedModel{
-			Provider: found.provider,
-			Model:    found.modelID,
+			Provider:        found.provider,
+			Model:           found.modelID,
+			ReasoningEffort: config.ResolveModelReasoningEffort(providers[found.provider], found.modelID, largeEffort),
 		}); err != nil {
 			return fmt.Errorf("failed to set large model: %w", err)
 		}
@@ -516,10 +520,11 @@ func overrideModels(
 		if err != nil {
 			return err
 		}
-		slog.Info("Overriding small model", "provider", found.provider, "model", found.modelID)
+		slog.Info("Overriding small model", "provider", found.provider, "model", found.modelID, "reasoning_effort", smallEffort)
 		if err := c.UpdatePreferredModel(ctx, ws.ID, config.ScopeWorkspace, config.SelectedModelTypeSmall, config.SelectedModel{
-			Provider: found.provider,
-			Model:    found.modelID,
+			Provider:        found.provider,
+			Model:           found.modelID,
+			ReasoningEffort: config.ResolveModelReasoningEffort(providers[found.provider], found.modelID, smallEffort),
 		}); err != nil {
 			return fmt.Errorf("failed to set small model: %w", err)
 		}

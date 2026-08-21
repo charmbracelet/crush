@@ -198,6 +198,7 @@ type Workspace interface {
 
 	// Config (read-only data)
 	Config() *config.Config
+	ConfigStore() *config.ConfigStore
 	WorkingDir() string
 	Resolver() config.VariableResolver
 

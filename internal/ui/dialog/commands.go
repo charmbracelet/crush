@@ -531,6 +531,16 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	notificationLabel := "Notification Style"
 	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
 
+	// Add trust commands for previously decided project configs.
+	if store := c.com.ConfigStore(); store != nil {
+		if rejected := store.RejectedProjectPaths(); len(rejected) > 0 {
+			commands = append(commands, NewCommandItem(c.com.Styles, "trust_config", "Trust this config?", "", ActionRetrustProjectConfigs{}))
+		}
+		if trusted := store.TrustedProjectPaths(); len(trusted) > 0 {
+			commands = append(commands, NewCommandItem(c.com.Styles, "dont_trust_config", "Don't trust", "", ActionUntrustProjectConfigs{}))
+		}
+	}
+
 	commands = append(
 		commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),

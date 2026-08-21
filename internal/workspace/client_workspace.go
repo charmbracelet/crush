@@ -518,6 +518,15 @@ func (w *ClientWorkspace) Config() *config.Config {
 	return w.cached().Config
 }
 
+func (w *ClientWorkspace) ConfigStore() *config.ConfigStore {
+	return nil
+}
+
+// ApplyTrustedConfig is a no-op in client mode: project config trust is
+// decided and applied server-side, and the client's ConfigStore is nil so
+// the trust dialog never opens here.
+func (w *ClientWorkspace) ApplyTrustedConfig(context.Context) {}
+
 func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
 }

@@ -14,6 +14,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/config/trust"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -99,6 +100,11 @@ type ConfigStore struct {
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
 
+	// Trust management for project-level configs.
+	trustStore            *trust.TrustStore
+	untrustedProjectPaths []string // project configs awaiting user trust
+	allProjectPaths       []string // all discovered project config paths
+
 	// configMu guards the config pointer field against concurrent
 	// readers (Config) and the writeMu-serialised swap (setConfig). It
 	// protects the pointer word only; the pointed-to Config is treated
@@ -154,6 +160,99 @@ func (s *ConfigStore) setConfig(cfg *Config) {
 // WorkingDir returns the current working directory.
 func (s *ConfigStore) WorkingDir() string {
 	return s.workingDir
+}
+
+// UntrustedProjectPaths returns project config paths that have not been
+// trusted by the user. The UI uses this to decide whether to show a
+// trust prompt.
+func (s *ConfigStore) UntrustedProjectPaths() []string {
+	return s.untrustedProjectPaths
+}
+
+// HasUntrustedProjectConfigs reports whether any project configs are
+// awaiting user trust.
+func (s *ConfigStore) HasUntrustedProjectConfigs() bool {
+	return len(s.untrustedProjectPaths) > 0
+}
+
+// AcceptProjectTrust marks all currently untrusted project configs as
+// trusted, persists the trust decisions, and reloads the config from
+// disk so the newly trusted files take effect immediately.
+func (s *ConfigStore) AcceptProjectTrust(ctx context.Context) error {
+	if len(s.untrustedProjectPaths) == 0 {
+		return nil
+	}
+
+	for _, p := range s.untrustedProjectPaths {
+		if err := s.trustStore.Trust(p); err != nil {
+			return fmt.Errorf("trusting %s: %w", p, err)
+		}
+	}
+
+	if err := s.trustStore.Save(); err != nil {
+		return fmt.Errorf("saving trust store: %w", err)
+	}
+
+	paths := s.untrustedProjectPaths
+	s.untrustedProjectPaths = nil
+
+	if err := s.ReloadFromDisk(ctx); err != nil {
+		return fmt.Errorf("reloading config after trusting %v: %w", paths, err)
+	}
+	return nil
+}
+
+// RejectProjectTrust records "no" decisions for the currently untrusted
+// project configs. Their content hashes are stored as rejected so they
+// stay excluded on future runs without prompting again, until their
+// content changes.
+func (s *ConfigStore) RejectProjectTrust() error {
+	for _, p := range s.untrustedProjectPaths {
+		if err := s.trustStore.Reject(p); err != nil {
+			return fmt.Errorf("rejecting %s: %w", p, err)
+		}
+	}
+	if err := s.trustStore.Save(); err != nil {
+		return fmt.Errorf("saving trust store: %w", err)
+	}
+	s.untrustedProjectPaths = nil
+	return nil
+}
+
+// TrustedProjectPaths returns the project config paths that are currently
+// marked as trusted with matching content hashes.
+func (s *ConfigStore) TrustedProjectPaths() []string {
+	return s.trustStore.TrustedPaths(s.allProjectPaths)
+}
+
+// RejectedProjectPaths returns the project config paths that are currently
+// marked as rejected with matching content hashes.
+func (s *ConfigStore) RejectedProjectPaths() []string {
+	return s.trustStore.RejectedPaths(s.allProjectPaths)
+}
+
+// PromptProjectTrust clears previous trust decisions for the given
+// project config paths and marks them as awaiting a trust decision, so
+// the UI re-asks the trust question for them. The paths are removed from
+// the loaded config until a decision is made.
+func (s *ConfigStore) PromptProjectTrust(ctx context.Context, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	for _, p := range paths {
+		s.trustStore.Untrust(p)
+	}
+	if err := s.trustStore.Save(); err != nil {
+		return fmt.Errorf("saving trust store: %w", err)
+	}
+
+	s.untrustedProjectPaths = paths
+
+	if err := s.ReloadFromDisk(ctx); err != nil {
+		return fmt.Errorf("reloading config after clearing trust decisions: %w", err)
+	}
+	return nil
 }
 
 // Resolver returns the variable resolver.
@@ -1178,6 +1277,13 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	migrateDisableNotifications()
 
 	configPaths := lookupConfigs(s.workingDir)
+	// Re-apply trust filtering so reloads never bypass trust decisions:
+	// rejected and not-yet-trusted project configs stay excluded. Stores
+	// built without a trust store (tests) skip the filtering.
+	var untrustedPaths []string
+	if s.trustStore != nil {
+		configPaths, untrustedPaths = filterProjectConfigsByTrust(s.trustStore, s.workingDir, configPaths)
+	}
 	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
 	if err != nil {
 		return fmt.Errorf("failed to reload config: %w", err)
@@ -1221,6 +1327,8 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	oldKnownProviders := s.knownProviders
 	oldOverrides := s.overrides
 	oldWorkspacePath := s.workspacePath
+	oldUntrustedPaths := s.untrustedProjectPaths
+	oldAllProjectPaths := s.allProjectPaths
 
 	// Preserve runtime overrides
 	overrides := s.overrides
@@ -1259,6 +1367,8 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	s.knownProviders = providers
 	s.overrides = overrides
 	s.workspacePath = workspacePath
+	s.untrustedProjectPaths = untrustedPaths
+	s.allProjectPaths = lookupProjectConfigs(s.workingDir)
 
 	// Mirror startup flow: setup models and agents against NEW config.
 	var setupErr error
@@ -1283,6 +1393,8 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		s.knownProviders = oldKnownProviders
 		s.overrides = oldOverrides
 		s.workspacePath = oldWorkspacePath
+		s.untrustedProjectPaths = oldUntrustedPaths
+		s.allProjectPaths = oldAllProjectPaths
 		return setupErr
 	}
 

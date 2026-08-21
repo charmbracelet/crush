@@ -502,5 +502,25 @@ func (w *AppWorkspace) Store() *config.ConfigStore {
 	return w.store
 }
 
+// ConfigStore returns the underlying config store.
+func (w *AppWorkspace) ConfigStore() *config.ConfigStore {
+	return w.store
+}
+
+// ApplyTrustedConfig reconciles the running app with the config after a
+// project trust decision: MCP servers defined by configs that just
+// entered the active configuration are started, and servers whose
+// configs left it are torn down. Agent tools don't need rebuilding
+// here: every run refreshes them from the current config, and MCP
+// tools register as their servers connect.
+func (w *AppWorkspace) ApplyTrustedConfig(ctx context.Context) {
+	// Wait for startup MCP initialization so we don't race it: servers it
+	// covers already recorded state and are left alone by Reinitialize.
+	if err := mcptools.WaitForInit(ctx); err != nil {
+		slog.Warn("Failed to wait for MCP initialization", "error", err)
+	}
+	mcptools.Reinitialize(ctx, w.store)
+}
+
 // Compile-time check that AppWorkspace implements Workspace.
 var _ Workspace = (*AppWorkspace)(nil)

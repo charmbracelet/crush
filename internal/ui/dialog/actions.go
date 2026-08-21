@@ -97,6 +97,12 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionRetrustProjectConfigs is a message to clear rejection
+	// decisions for project configs and re-ask the trust question.
+	ActionRetrustProjectConfigs struct{}
+	// ActionUntrustProjectConfigs is a message to clear trust decisions
+	// for project configs and re-ask the trust question.
+	ActionUntrustProjectConfigs struct{}
 )
 
 // Messages for MCP OAuth authentication dialog.

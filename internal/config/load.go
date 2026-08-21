@@ -21,6 +21,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/config/trust"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/env"
@@ -44,6 +45,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 	configPaths := lookupConfigs(workingDir)
 
+	// Initialize trust store and filter untrusted project configs.
+	trustStore := trust.New()
+	_ = trustStore.Load()
+
+	configPaths, untrustedProjectPaths := filterProjectConfigsByTrust(trustStore, workingDir, configPaths)
+
 	cfg, loadedPaths, err := loadFromConfigPaths(context.Background(), configPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
@@ -52,11 +59,14 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	cfg.setDefaults(workingDir, dataDir)
 
 	store := &ConfigStore{
-		config:         cfg,
-		workingDir:     workingDir,
-		globalDataPath: GlobalConfigData(),
-		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
-		loadedPaths:    loadedPaths,
+		config:                cfg,
+		workingDir:            workingDir,
+		globalDataPath:        GlobalConfigData(),
+		workspacePath:         filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+		loadedPaths:           loadedPaths,
+		trustStore:            trustStore,
+		untrustedProjectPaths: untrustedProjectPaths,
+		allProjectPaths:       lookupProjectConfigs(workingDir),
 	}
 
 	if debug {
@@ -945,6 +955,122 @@ func lookupConfigs(cwd string) []string {
 	slices.Reverse(foundConfigs)
 
 	return append(configPaths, foundConfigs...)
+}
+
+// lookupProjectConfigs returns only the project-level config paths
+// discovered by walking up from cwd to the project boundary.
+func lookupProjectConfigs(cwd string) []string {
+	configNames := []string{
+		"." + appName + "rc",
+		appName + "rc",
+		"." + appName + ".json",
+		appName + ".json",
+	}
+	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
+	if err != nil {
+		return nil
+	}
+	slices.Reverse(foundConfigs)
+	return foundConfigs
+}
+
+// lookupGlobalConfigs returns config paths that are always loaded
+// regardless of trust state (system, user-level, and data configs).
+func lookupGlobalConfigs() []string {
+	return []string{
+		systemConfigPath,
+		GlobalConfig(),
+		shellConfigSibling(GlobalConfig()),
+		GlobalConfigData(),
+	}
+}
+
+// filterTrustedPaths removes untrusted paths from the full config path
+// list, preserving global configs and trusted project configs.
+func filterTrustedPaths(all, untrusted []string) []string {
+	untrustedSet := make(map[string]bool, len(untrusted))
+	for _, p := range untrusted {
+		untrustedSet[p] = true
+	}
+	var filtered []string
+	for _, p := range all {
+		if !untrustedSet[p] {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
+
+// filterProjectConfigsByTrust applies project config trust verification to
+// configPaths. It returns the filtered path list and the project configs
+// that still need a trust decision (new, or changed since the last
+// decision). Rejected-but-unchanged configs are filtered out without a
+// prompt because the user already answered "no" for that content. Global
+// options and CRUSH_TRUST_ALL can bypass trust verification entirely.
+func filterProjectConfigsByTrust(trustStore *trust.TrustStore, workingDir string, configPaths []string) ([]string, []string) {
+	projectPaths := lookupProjectConfigs(workingDir)
+	if len(projectPaths) == 0 {
+		return configPaths, nil
+	}
+
+	// CRUSH_TRUST_ALL bypasses trust verification entirely.
+	// Intended for CI and testing only.
+	if os.Getenv("CRUSH_TRUST_ALL") == "1" {
+		for _, p := range projectPaths {
+			_ = trustStore.Trust(p)
+		}
+		_ = trustStore.Save()
+		return configPaths, nil
+	}
+
+	// Scan global config files for trust-related options before
+	// loading any project configs.
+	skipProjectConfigs := false
+	autoTrustAll := false
+	for _, gp := range lookupGlobalConfigs() {
+		data, readErr := os.ReadFile(gp)
+		if readErr != nil || len(data) == 0 {
+			continue
+		}
+		if isShellConfig(gp) {
+			continue
+		}
+		trustVal := gjson.GetBytes(data, "options.trust_project_configs")
+		if trustVal.Exists() && trustVal.Type == gjson.False {
+			skipProjectConfigs = true
+			break
+		}
+		autoVal := gjson.GetBytes(data, "options.auto_trust_all")
+		if autoVal.Exists() && autoVal.Type == gjson.True {
+			autoTrustAll = true
+		}
+	}
+
+	switch {
+	case skipProjectConfigs:
+		// trust_project_configs=false: skip all project configs.
+		slog.Info("Project config loading disabled by trust_project_configs=false")
+		return filterTrustedPaths(configPaths, projectPaths), nil
+	case autoTrustAll:
+		// auto_trust_all=true: trust everything without prompting.
+		// This is extremely dangerous and should only be used in
+		// controlled environments.
+		for _, p := range projectPaths {
+			_ = trustStore.Trust(p)
+		}
+		_ = trustStore.Save()
+		slog.Warn("DANGEROUS: auto_trust_all is enabled. All project configs are trusted without verification.")
+		return configPaths, nil
+	default:
+		// Default: check trust for each project config. New or changed
+		// configs will trigger a trust prompt in the UI.
+		untrusted := trustStore.UntrustedPaths(projectPaths)
+		rejected := trustStore.RejectedPaths(projectPaths)
+		if len(untrusted) == 0 && len(rejected) == 0 {
+			return configPaths, untrusted
+		}
+		return filterTrustedPaths(configPaths, slices.Concat(rejected, untrusted)), untrusted
+	}
 }
 
 func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []string, error) {

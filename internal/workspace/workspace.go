@@ -198,6 +198,7 @@ type Workspace interface {
 
 	// Config (read-only data)
 	Config() *config.Config
+	ConfigStore() *config.ConfigStore
 	WorkingDir() string
 	Resolver() config.VariableResolver
 
@@ -209,6 +210,13 @@ type Workspace interface {
 	RemoveConfigField(scope config.Scope, key string) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
+
+	// ApplyTrustedConfig reconciles the runtime with config changes made
+	// by a project trust decision: MCP servers defined by configs that
+	// joined the active configuration (e.g. a project config the user just
+	// trusted) are started, and servers whose configs left it are torn
+	// down.
+	ApplyTrustedConfig(ctx context.Context)
 
 	// Project lifecycle
 	ProjectNeedsInitialization() (bool, error)

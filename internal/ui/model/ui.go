@@ -2142,12 +2142,37 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cfg := m.com.Config()
-		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.ActiveTheme == oldName {
-			if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
-				"options.tui.active_theme": newName,
-			}); err != nil {
+		fields := map[string]any{}
+		// Move any stored palette overrides to the new name so the renamed
+		// theme keeps its configuration.
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			if entry, ok := cfg.Options.TUI.Theme[oldName]; ok {
+				if len(entry.RawObject) > 0 {
+					var v any
+					if err := json.Unmarshal(entry.RawObject, &v); err == nil {
+						fields["options.tui.theme."+newName] = v
+					}
+				} else {
+					fields["options.tui.theme."+newName] = map[string]any{}
+				}
+			}
+			if cfg.Options.TUI.ActiveTheme == oldName {
+				fields["options.tui.active_theme"] = newName
+			}
+		}
+		if len(fields) > 0 {
+			if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, fields); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 				break
+			}
+		}
+		// Drop the stale entry keyed by the old name.
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			if _, ok := cfg.Options.TUI.Theme[oldName]; ok {
+				if err := m.com.Workspace.RemoveConfigField(config.ScopeGlobal, "options.tui.theme."+oldName); err != nil {
+					cmds = append(cmds, util.ReportError(err))
+					break
+				}
 			}
 		}
 		cmds = append(cmds, util.ReportInfo("Renamed theme "+oldName+" to "+newName))

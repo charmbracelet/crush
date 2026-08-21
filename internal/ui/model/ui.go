@@ -461,7 +461,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	if cfg := com.Config(); cfg != nil {
 		if cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.Theme != "" {
 			ui.themeKey = cfg.Options.TUI.Theme
-			ui.applyTheme(styles.ThemeForName(cfg.Options.TUI.Theme))
+			// set the styles directly: refreshStyles() needs the header,
+			// layout and sidebar, which are not constructed yet at New
+			*ui.com.Styles = styles.ThemeForName(cfg.Options.TUI.Theme)
 		} else {
 			ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
 		}

@@ -64,6 +64,7 @@ func init() {
 	_ = rootCmd.PersistentFlags().MarkHidden("channels")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	rootCmd.Flags().Bool("tui", false, "Run TUI with ACP server on unix socket")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
 
 	rootCmd.AddCommand(
@@ -88,6 +89,9 @@ var rootCmd = &cobra.Command{
 # Run in interactive mode
 crush
 
+# Run TUI with ACP server on unix socket
+crush --tui
+
 # Run non-interactively
 crush run "Guess my 5 favorite Pokémon"
 
@@ -110,6 +114,12 @@ crush --session {session-id}
 crush --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		tuiFlag, _ := cmd.Flags().GetBool("tui")
+		if tuiFlag {
+			dataDir, _ := cmd.Flags().GetString("data-dir")
+			return runACPCommand(cmd.Context(), false, true, dataDir, "")
+		}
+
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
 

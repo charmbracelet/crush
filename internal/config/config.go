@@ -311,6 +311,13 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 	}
 }
 
+// ACPConfig defines options for the ACP (Agent Client Protocol) integration.
+type ACPConfig struct {
+	// ZedControl enables routing file and terminal operations through
+	// the connected ACP client instead of executing them locally.
+	ZedControl bool `json:"zed_control,omitempty" jsonschema:"description=Route file and terminal operations through the ACP client instead of executing them locally,default=false"`
+}
+
 type Options struct {
 	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
 	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/crush/CRUSH.md,default=~/.config/AGENTS.md"`
@@ -334,6 +341,7 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	ACP                       *ACPConfig   `json:"acp,omitempty" jsonschema:"description=Agent Client Protocol integration options"`
 }
 
 type MCPs map[string]MCPConfig

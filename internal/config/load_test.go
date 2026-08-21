@@ -25,6 +25,10 @@ import (
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	// Bypass trust verification in tests so project configs written to
+	// temp directories are loaded without a trust prompt.
+	os.Setenv("CRUSH_TRUST_ALL", "1")
+
 	exitVal := m.Run()
 	os.Exit(exitVal)
 }

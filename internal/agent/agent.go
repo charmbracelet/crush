@@ -836,6 +836,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
+			prepared.Messages = mergeConsecutiveUserMessages(prepared.Messages)
 
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -1601,6 +1602,8 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		})
 	}
 
+	history = mergeConsecutiveUserMessages(history)
+
 	return history, files
 }
 
@@ -1616,6 +1619,43 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 		filtered = append(filtered, part)
 	}
 	return filtered
+}
+
+// mergeConsecutiveUserMessages coalesces adjacent user messages by
+// concatenating their content. This prevents strict OpenAI-compatible
+// providers (e.g., LM Studio) from rejecting the request with
+// "consecutive role 'user'" errors after an ESC cancel leaves an empty
+// assistant message that is filtered out. File parts and text parts are
+// preserved in order.
+func mergeConsecutiveUserMessages(msgs []fantasy.Message) []fantasy.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	out := make([]fantasy.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == fantasy.MessageRoleUser && len(out) > 0 && out[len(out)-1].Role == fantasy.MessageRoleUser {
+			// Do not merge the synthetic system_reminder (always the first
+			// element when isSubAgent is false) with the first real user
+			// message. The reminder must stay as a separate message for
+			// cache control and existing test expectations.
+			prev := &out[len(out)-1]
+			if len(prev.Content) > 0 {
+				if tp, ok := fantasy.AsMessagePart[fantasy.TextPart](prev.Content[0]); ok {
+					if strings.Contains(tp.Text, "<system_reminder>") {
+						out = append(out, m)
+						continue
+					}
+				}
+			}
+			prev.Content = append(prev.Content, m.Content...)
+			if m.ProviderOptions != nil {
+				prev.ProviderOptions = m.ProviderOptions
+			}
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // filterOrphanedToolResults converts a tool message to a fantasy.Message,

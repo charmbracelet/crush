@@ -126,7 +126,13 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 
 			resp, err := client.Do(req)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to download from URL: %w", err)
+				// Preserve abort semantics when the caller cancelled the run.
+				if requestCtx.Err() == context.Canceled {
+					return fantasy.ToolResponse{}, err
+				}
+				// Network failures (timeouts, DNS errors) should degrade to a
+				// recoverable tool error so the agent can retry or move on.
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to download from URL: %s", err)), nil
 			}
 			defer resp.Body.Close()
 

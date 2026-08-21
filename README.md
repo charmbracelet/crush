@@ -299,7 +299,7 @@ does not execute a `crushrc` from them.)
 [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
 What about the old JSON format? It’s still supported, but it should be
-consdiered deprecated. See: [the config docs](./docs/config/) for details.
+considered deprecated. See: [the config docs](./docs/config/) for details.
 
 > [!TIP]
 > You can override the user and data config locations by setting:

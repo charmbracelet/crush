@@ -571,7 +571,7 @@ func (p *Permissions) renderBashContent(width int) string {
 	}
 
 	cmd := common.StripBashDisplayPrefix(params.Command, p.com.Workspace.WorkingDir())
-	command, err := common.SyntaxHighlightLexerName(p.com.Styles, cmd, "bash", nil)
+	command, err := common.SyntaxHighlightLexerName(p.com.Styles, cmd, "bash", p.com.Styles.Dialog.ContentPanelBg)
 	if err != nil {
 		command = cmd
 	}

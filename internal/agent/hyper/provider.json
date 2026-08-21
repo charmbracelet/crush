@@ -26,19 +26,23 @@
     {
       "id": "deepseek-v4-flash-0731",
       "name": "DeepSeek V4 Flash 0731",
-      "cost_per_1m_in": 0.152432,
-      "cost_per_1m_out": 0.304864,
+      "cost_per_1m_in": 0.13,
+      "cost_per_1m_out": 0.26,
       "cost_per_1m_in_cached": 0,
-      "cost_per_1m_out_cached": 0.032664,
+      "cost_per_1m_out_cached": 0.028,
       "context_window": 1048576,
       "default_max_tokens": 384000,
       "can_reason": true,
       "reasoning_levels": [
         "none",
+        "minimal",
+        "low",
+        "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
-      "default_reasoning_effort": "high",
+      "default_reasoning_effort": "medium",
       "supports_attachments": false
     },
     {
@@ -59,6 +63,24 @@
       "supports_attachments": false
     },
     {
+      "id": "deepseek-v4-pro-0813",
+      "name": "DeepSeek V4 Pro 0813",
+      "cost_per_1m_in": 1.437216,
+      "cost_per_1m_out": 4.311648,
+      "cost_per_1m_in_cached": 0,
+      "cost_per_1m_out_cached": 0.0479072,
+      "context_window": 1048576,
+      "default_max_tokens": 262144,
+      "can_reason": true,
+      "reasoning_levels": [
+        "none",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "high",
+      "supports_attachments": false
+    },
+    {
       "id": "gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B A4B",
       "cost_per_1m_in": 0.124,
@@ -71,6 +93,18 @@
       "supports_attachments": false
     },
     {
+      "id": "glm-5",
+      "name": "GLM-5",
+      "cost_per_1m_in": 0.8,
+      "cost_per_1m_out": 2.582,
+      "cost_per_1m_in_cached": 0.4,
+      "cost_per_1m_out_cached": 0,
+      "context_window": 202752,
+      "default_max_tokens": 20275,
+      "can_reason": true,
+      "supports_attachments": false
+    },
+    {
       "id": "glm-5.1",
       "name": "GLM-5.1",
       "cost_per_1m_in": 1.52432,
@@ -78,7 +112,7 @@
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.283088,
       "context_window": 202800,
-      "default_max_tokens": 131072,
+      "default_max_tokens": 3276,
       "can_reason": true,
       "reasoning_levels": [
         "high",
@@ -95,7 +129,7 @@
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.28,
       "context_window": 1000000,
-      "default_max_tokens": 128000,
+      "default_max_tokens": 32768,
       "can_reason": true,
       "reasoning_levels": [
         "high",
@@ -107,10 +141,10 @@
     {
       "id": "gpt-oss-120b",
       "name": "gpt-oss-120b",
-      "cost_per_1m_in": 0.178,
-      "cost_per_1m_out": 0.71,
-      "cost_per_1m_in_cached": 0.089,
-      "cost_per_1m_out_cached": 0,
+      "cost_per_1m_in": 0.16332,
+      "cost_per_1m_out": 0.65328,
+      "cost_per_1m_in_cached": 0,
+      "cost_per_1m_out_cached": 0.0152432,
       "context_window": 131072,
       "default_max_tokens": 13107,
       "can_reason": true,
@@ -125,9 +159,9 @@
     {
       "id": "kimi-k2.5",
       "name": "Kimi K2.5",
-      "cost_per_1m_in": 0.55,
-      "cost_per_1m_out": 2.89,
-      "cost_per_1m_in_cached": 0.275,
+      "cost_per_1m_in": 0.51,
+      "cost_per_1m_out": 2.7,
+      "cost_per_1m_in_cached": 0.255,
       "cost_per_1m_out_cached": 0,
       "context_window": 262144,
       "default_max_tokens": 26214,
@@ -139,10 +173,10 @@
       "name": "Kimi K2.6",
       "cost_per_1m_in": 0.95,
       "cost_per_1m_out": 4,
-      "cost_per_1m_in_cached": 0.16,
-      "cost_per_1m_out_cached": 0,
+      "cost_per_1m_in_cached": 0,
+      "cost_per_1m_out_cached": 0.16,
       "context_window": 262000,
-      "default_max_tokens": 262000,
+      "default_max_tokens": 26214,
       "can_reason": true,
       "reasoning_levels": [
         "low",
@@ -167,10 +201,10 @@
     {
       "id": "kimi-k3",
       "name": "Kimi K3",
-      "cost_per_1m_in": 3.2664,
-      "cost_per_1m_out": 16.332,
+      "cost_per_1m_in": 3,
+      "cost_per_1m_out": 15,
       "cost_per_1m_in_cached": 0,
-      "cost_per_1m_out_cached": 0.32664,
+      "cost_per_1m_out_cached": 0.3,
       "context_window": 1048576,
       "default_max_tokens": 131072,
       "can_reason": true,
@@ -185,9 +219,9 @@
     {
       "id": "llama-3.3-70b-instruct",
       "name": "Llama 3.3 70B Instruct",
-      "cost_per_1m_in": 0.6066,
-      "cost_per_1m_out": 1.0386,
-      "cost_per_1m_in_cached": 0.3033,
+      "cost_per_1m_in": 0.598,
+      "cost_per_1m_out": 0.738,
+      "cost_per_1m_in_cached": 0.299,
       "cost_per_1m_out_cached": 0,
       "context_window": 128000,
       "default_max_tokens": 12800,
@@ -209,9 +243,9 @@
     {
       "id": "minimax-m2.7",
       "name": "MiniMax M2.7",
-      "cost_per_1m_in": 0.436,
-      "cost_per_1m_out": 1.72,
-      "cost_per_1m_in_cached": 0.218,
+      "cost_per_1m_in": 0.41,
+      "cost_per_1m_out": 1.52,
+      "cost_per_1m_in_cached": 0.205,
       "cost_per_1m_out_cached": 0,
       "context_window": 262100,
       "default_max_tokens": 6553,
@@ -323,9 +357,9 @@
     {
       "id": "qwen3-coder-480b-a35b-instruct-int4-mixed-ar",
       "name": "Qwen3 Coder 480B A35B Instruct INT4 Mixed AR",
-      "cost_per_1m_in": 0.569,
-      "cost_per_1m_out": 2.135,
-      "cost_per_1m_in_cached": 0.2845,
+      "cost_per_1m_in": 0.445,
+      "cost_per_1m_out": 2.145,
+      "cost_per_1m_in_cached": 0.2225,
       "cost_per_1m_out_cached": 0,
       "context_window": 106000,
       "default_max_tokens": 10600,

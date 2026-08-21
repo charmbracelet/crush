@@ -228,6 +228,13 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	rendered := m.list.Render()
+	// If we're in follow mode but the render revealed we're no longer at
+	// the bottom (e.g. streaming content grew an item), re-anchor and
+	// re-render so the view stays pinned to the end.
+	if m.follow && !m.list.AtBottom() {
+		m.list.ScrollToBottom()
+		rendered = m.list.Render()
+	}
 	method, ok := scr.WidthMethod().(ansi.Method)
 	if !ok {
 		// Width method isn't an ansi.Method (unlikely in practice — both
@@ -616,6 +623,15 @@ func (m *Chat) ScrollToTopAndAnimate() tea.Cmd {
 // restart any paused animations that are now visible.
 func (m *Chat) ScrollToBottomAndAnimate() tea.Cmd {
 	return tea.Batch(m.ScrollToBottom(), m.RestartPausedVisibleAnimations())
+}
+
+// ScrollToBottomAndSelectLast scrolls the chat view to the bottom, selects
+// the last item, and returns a command to restart any paused animations that
+// are now visible.
+func (m *Chat) ScrollToBottomAndSelectLast() tea.Cmd {
+	cmd := m.ScrollToBottomAndAnimate()
+	m.SelectLast()
+	return cmd
 }
 
 // ScrollByAndAnimate scrolls the chat view by the given number of line deltas and returns

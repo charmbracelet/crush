@@ -103,8 +103,11 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// Load known providers, this loads the config from catwalk. A failed
 	// refresh still yields the cached or embedded catalog, so only an empty
 	// list is fatal: starting up without providers is worse than starting
-	// up with slightly stale ones.
-	providers, err := Providers(cfg)
+	// up with slightly stale ones. Pass a Hyper token refresher so the
+	// catalog fetch can retry on 401.
+	providers, err := Providers(cfg, func(ctx context.Context) error {
+		return store.RefreshOAuthToken(ctx, ScopeGlobal, "hyper")
+	})
 	if err != nil {
 		if len(providers) == 0 {
 			return nil, err

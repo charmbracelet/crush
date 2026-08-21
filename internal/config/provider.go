@@ -89,6 +89,27 @@ func UpdateProviders(pathOrURL string) error {
 	return nil
 }
 
+// resolveHyperAPIKey returns the Hyper API key from the environment or
+// the raw config value. The env var takes precedence.
+func resolveHyperAPIKey(cfg *Config) string {
+	if key := os.Getenv("HYPER_API_KEY"); key != "" {
+		return key
+	}
+	if cfg == nil || cfg.Providers == nil {
+		return ""
+	}
+	pc, ok := cfg.Providers.Get("hyper")
+	if !ok {
+		return ""
+	}
+	return pc.APIKey
+}
+
+// HyperTokenRefresher is a function that refreshes the Hyper OAuth
+// token. It is passed to Providers so the catalog fetch can retry on
+// 401 without relying on package-global state.
+type HyperTokenRefresher func(context.Context) error
+
 // UpdateHyper updates the Hyper provider information from a specified URL.
 func UpdateHyper(pathOrURL string) error {
 	var provider catwalk.Provider
@@ -98,7 +119,10 @@ func UpdateHyper(pathOrURL string) error {
 	case pathOrURL == "embedded":
 		provider = hyper.Embedded()
 	case strings.HasPrefix(pathOrURL, "http://") || strings.HasPrefix(pathOrURL, "https://"):
-		client := realHyperClient{baseURL: pathOrURL}
+		client := realHyperClient{
+			baseURL:    pathOrURL,
+			resolveKey: func() string { return resolveHyperAPIKey(nil) },
+		}
 		var err error
 		provider, err = client.Get(context.Background(), "")
 		if err != nil {
@@ -143,7 +167,7 @@ var (
 // using the returned list. A refresh that simply could not reach the network
 // is not an error at all: the cached or embedded catalog is a sound answer, so
 // those are logged and the fallback is returned.
-func Providers(cfg *Config) ([]catwalk.Provider, error) {
+func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup
 		providers := csync.NewSlice[catwalk.Provider]()
@@ -184,7 +208,16 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 				return
 			}
 			path := cachePathFor("hyper")
-			hyperSyncer.Init(realHyperClient{baseURL: hyper.BaseURL()}, path, autoupdate)
+			cfgSnapshot := cfg
+			var refresher func(context.Context) error
+			if len(opts) > 0 {
+				refresher = opts[0]
+			}
+			hyperSyncer.Init(realHyperClient{
+				baseURL:      hyper.BaseURL(),
+				resolveKey:   func() string { return resolveHyperAPIKey(cfgSnapshot) },
+				refreshToken: refresher,
+			}, path, autoupdate)
 
 			// As above: keep whatever provider we were handed. The syncer
 			// already falls back to the cached or embedded copy, so an
@@ -209,6 +242,21 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		providerErr = errors.Join(catwalkErr, hyperErr)
 	})
 	return providerList, providerErr
+}
+
+// UpdateProviderInList replaces a provider in the memoized provider list
+// returned by Providers(). This is used after re-fetching a single
+// provider (e.g. Hyper after OAuth) so that all callers of Providers()
+// see the updated entry without needing to reset sync.Once.
+func UpdateProviderInList(provider catwalk.Provider) {
+	for i, p := range providerList {
+		if p.ID == provider.ID {
+			providerList[i] = provider
+			return
+		}
+	}
+	// Provider not found in list; prepend it.
+	providerList = append([]catwalk.Provider{provider}, providerList...)
 }
 
 type cache[T any] struct {

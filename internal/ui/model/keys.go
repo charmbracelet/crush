@@ -43,6 +43,7 @@ type KeyMap struct {
 		HalfPageUp     key.Binding
 		Home           key.Binding
 		End            key.Binding
+		EndFollow      key.Binding
 		Copy           key.Binding
 		ClearHighlight key.Binding
 		Expand         key.Binding
@@ -236,6 +237,9 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.End = key.NewBinding(
 		key.WithKeys("G", "end"),
 		key.WithHelp("G", "end"),
+	)
+	km.Chat.EndFollow = key.NewBinding(
+		key.WithKeys("ctrl+end"),
 	)
 	km.Chat.Copy = key.NewBinding(
 		key.WithKeys("c", "y", "C", "Y"),

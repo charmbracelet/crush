@@ -524,6 +524,57 @@ To disable tools from MCP servers, see the [MCP config section](#mcps).
 You can also skip all permission prompts completely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
+### Project Config Trust
+
+Crush can load project-level configuration files (`crush.json`, `crushrc`) from
+the repository you're working in. Because these files can define providers, MCP
+servers, hooks (arbitrary shell commands), and other settings that affect how
+Crush operates, Crush verifies trust before loading them.
+
+When Crush encounters a project config it has not seen before (or one that has
+changed since it was last trusted), it shows a **trust screen** asking whether
+you trust the file. If you accept, Crush stores a SHA-256 hash of the file's
+contents. On subsequent runs, unchanged configs load silently. Modified or new
+configs trigger the prompt again.
+
+Trust decisions are stored in `~/.local/share/crush/trusted_configs.json`.
+
+#### Disabling project configs entirely
+
+To prevent Crush from loading any project-level configs (useful for shared
+machines or untrusted repositories):
+
+```json
+{
+  "options": {
+    "trust_project_configs": false
+  }
+}
+```
+
+Or in `crushrc`:
+
+```bash
+option trust-project-configs false
+```
+
+#### Auto-trust all (DANGEROUS)
+
+> [!CAUTION]
+> **This option is extremely dangerous.** It bypasses all trust verification
+> and loads every project config without prompting. A malicious repository
+> could use a `crushrc` to execute arbitrary shell commands on your machine.
+> Only enable this in fully controlled environments where you trust every
+> repository you open.
+
+```json
+{
+  "options": {
+    "auto_trust_all": true
+  }
+}
+```
+
 ### Disabling Skills
 
 You can prevent Crush from using certain skills entirely. Disabled skills are

@@ -176,6 +176,20 @@ type (
 	creditsUpdatedMsg struct {
 		credits *int
 	}
+
+	// reloadSessionMessagesMsg is sent to reload messages for the current session.
+	reloadSessionMessagesMsg struct {
+		messages []message.Message
+	}
+
+	// undoSuccessMsg is sent after a successful undo. It carries the messages
+	// that were deleted (so they can be pushed onto the redo stack) and the
+	// remaining messages to display.
+	undoSuccessMsg struct {
+		sessionID string
+		deleted   []message.Message
+		remaining []message.Message
+	}
 )
 
 // UI represents the main user interface model.
@@ -380,6 +394,15 @@ type UI struct {
 		messages []string
 		index    int
 		draft    string
+	}
+
+	// redoStack holds batches of messages deleted by undo operations so they
+	// can be restored by a subsequent redo. It is scoped to the current
+	// session and is cleared whenever the session changes or a new message is
+	// sent.
+	redoStack struct {
+		sessionID string
+		entries   [][]message.Message
 	}
 }
 
@@ -761,6 +784,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		// Clear the redo stack whenever we switch to a different session.
+		m.redoStack.sessionID = ""
+		m.redoStack.entries = nil
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {
@@ -802,6 +828,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			paths = append(paths, f.LatestVersion.Path)
 		}
 		cmds = append(cmds, m.startLSPs(paths))
+
+	case reloadSessionMessagesMsg:
+		if cmd := m.setSessionMessages(msg.messages); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
+	case undoSuccessMsg:
+		// Only push onto the redo stack when the session hasn't changed.
+		if m.hasSession() && m.session.ID == msg.sessionID {
+			if m.redoStack.sessionID != msg.sessionID {
+				m.redoStack.sessionID = msg.sessionID
+				m.redoStack.entries = nil
+			}
+			m.redoStack.entries = append(m.redoStack.entries, msg.deleted)
+		}
+		if cmd := m.setSessionMessages(msg.remaining); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -1491,6 +1535,22 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	return cmds
 }
 
+// reloadSessionMessages reloads the messages for the current session.
+func (m *UI) reloadSessionMessages() tea.Cmd {
+	return func() tea.Msg {
+		if !m.hasSession() {
+			return nil
+		}
+
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
+		return reloadSessionMessagesMsg{messages: msgs}
+	}
+}
+
 // loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
 func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 	for _, item := range items {
@@ -1899,6 +1959,20 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.newSession(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionUndo:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before undoing..."))
+			break
+		}
+		cmds = append(cmds, m.handleUndoCommand())
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRedo:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before redoing..."))
+			break
+		}
+		cmds = append(cmds, m.handleRedoCommand())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
@@ -4078,6 +4152,92 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 	}
 }
 
+// handleRedoCommand restores the most recently undone message batch.
+func (m *UI) handleRedoCommand() tea.Cmd {
+	if !m.hasSession() {
+		return util.ReportWarn("No active session to redo")
+	}
+	if m.redoStack.sessionID != m.session.ID || len(m.redoStack.entries) == 0 {
+		return util.ReportWarn("Nothing to redo")
+	}
+
+	// Pop the top entry off the stack before launching the Cmd so that a
+	// second redo press while the first is in-flight doesn't re-pop.
+	n := len(m.redoStack.entries)
+	toRestore := m.redoStack.entries[n-1]
+	m.redoStack.entries = m.redoStack.entries[:n-1]
+
+	sessionID := m.session.ID
+
+	return func() tea.Msg {
+		ctx := context.Background()
+		if err := m.com.Workspace.RestoreMessages(ctx, toRestore); err != nil {
+			return util.ReportError(fmt.Errorf("Failed to redo: %w", err))
+		}
+		msgs, err := m.com.Workspace.ListMessages(ctx, sessionID)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("Failed to reload messages: %w", err))
+		}
+		return reloadSessionMessagesMsg{messages: msgs}
+	}
+}
+
+// handleUndoCommand deletes the last user message and all messages after it.
+func (m *UI) handleUndoCommand() tea.Cmd {
+	return func() tea.Msg {
+		if !m.hasSession() {
+			return util.ReportWarn("No active session to undo")
+		}
+
+		ctx := context.Background()
+		sessionID := m.session.ID
+
+		// Get all messages in ascending order before mutating anything.
+		allMsgs, err := m.com.Workspace.ListMessages(ctx, sessionID)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("Failed to list messages: %w", err))
+		}
+
+		// Get user messages ordered by created_at DESC to find the last one.
+		userMessages, err := m.com.Workspace.ListUserMessages(ctx, sessionID)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("Failed to list messages: %w", err))
+		}
+
+		if len(userMessages) == 0 {
+			return util.ReportWarn("No messages to undo")
+		}
+
+		// The last user message (first in DESC order).
+		lastUserMessage := userMessages[0]
+
+		// Split allMsgs into remaining (before lastUserMessage) and deleted
+		// (at or after lastUserMessage, mirroring the SQL >= comparison).
+		splitIdx := len(allMsgs)
+		for i, msg := range allMsgs {
+			if msg.CreatedAt >= lastUserMessage.CreatedAt {
+				splitIdx = i
+				break
+			}
+		}
+		remaining := allMsgs[:splitIdx]
+		deleted := make([]message.Message, len(allMsgs[splitIdx:]))
+		copy(deleted, allMsgs[splitIdx:])
+
+		// Delete the last user message and all messages after it.
+		err = m.com.Workspace.DeleteMessagesAfter(ctx, sessionID, lastUserMessage.ID)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("Failed to undo: %w", err))
+		}
+
+		return undoSuccessMsg{
+			sessionID: sessionID,
+			deleted:   deleted,
+			remaining: remaining,
+		}
+	}
+}
+
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if err := m.com.Workspace.AgentReadyErr(); err != nil {
@@ -4086,6 +4246,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 
 	// Start the turn timer.
 	common.StartTurn()
+
+	// Sending a new message invalidates any buffered redo history.
+	m.redoStack.sessionID = ""
+	m.redoStack.entries = nil
 
 	var cmds []tea.Cmd
 	if !m.hasSession() {
@@ -4680,6 +4844,8 @@ func (m *UI) newSession() tea.Cmd {
 	m.invalidatePromptQueue()
 	m.pillsView = ""
 	m.historyReset()
+	m.redoStack.sessionID = ""
+	m.redoStack.entries = nil
 	agenttools.ResetCache()
 	return tea.Batch(
 		func() tea.Msg {

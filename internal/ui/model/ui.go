@@ -459,7 +459,14 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// Seed the active theme key from the large model provider so the
 	// first model selection can correctly skip a redundant theme swap.
 	if cfg := com.Config(); cfg != nil {
-		ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
+		if cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.Theme != "" {
+			ui.themeKey = cfg.Options.TUI.Theme
+			// set the styles directly: refreshStyles() needs the header,
+			// layout and sidebar, which are not constructed yet at New
+			*ui.com.Styles = styles.ThemeForName(cfg.Options.TUI.Theme)
+		} else {
+			ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
+		}
 	}
 
 	// Seed the yolo cache once at construction; afterwards it is kept
@@ -2001,6 +2008,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.handleSelectModel(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionApplyTheme:
+		m.dialog.CloseFrontDialog()
+		m.applyThemeByName(msg.Name)
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", msg.Name); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("theme: %s", msg.Name)))
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -2383,6 +2398,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return true
 		case key.Matches(msg, m.keyMap.Models):
 			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Theme):
+			if cmd := m.openThemeDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return true
@@ -4014,12 +4034,23 @@ func (m *UI) cacheSidebarLogo(width int) {
 // invalidating the markdown renderer cache and re-rendering the entire
 // transcript for no visible change.
 func (m *UI) applyThemeForProvider(providerID string) {
+	// a user-chosen theme wins over the provider-derived default
+	if cfg := m.com.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.Theme != "" {
+		return
+	}
 	key := styles.ThemeKeyForProvider(providerID)
 	if key == m.themeKey {
 		return
 	}
 	m.themeKey = key
 	m.applyTheme(styles.ThemeForProvider(providerID))
+}
+
+// applyThemeByName swaps to a named theme and records it as the active key,
+// so the theme menu and the provider-derivation agree on what is applied.
+func (m *UI) applyThemeByName(name string) {
+	m.themeKey = name
+	m.applyTheme(styles.ThemeForName(name))
 }
 
 // applyTheme replaces the active styles with the given theme, drops the
@@ -4314,6 +4345,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ThemeID:
+		if cmd := m.openThemeDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4404,6 +4439,27 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(reasoningDialog)
+	return nil
+}
+
+// openThemeDialog opens the theme picker dialog, marking the active theme.
+func (m *UI) openThemeDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ThemeID) {
+		m.dialog.BringToFront(dialog.ThemeID)
+		return nil
+	}
+
+	current := ""
+	if cfg := m.com.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+		current = cfg.Options.TUI.Theme
+	}
+
+	themeDialog, err := dialog.NewTheme(m.com, current)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(themeDialog)
 	return nil
 }
 

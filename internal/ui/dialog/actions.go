@@ -46,14 +46,20 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession              struct{}
-	ActionToggleHelp              struct{}
-	ActionToggleCompactMode       struct{}
-	ActionToggleThinking          struct{}
-	ActionTogglePills             struct{}
-	ActionExternalEditor          struct{}
-	ActionToggleYoloMode          struct{}
-	ActionToggleNotifications     struct{}
+	ActionNewSession          struct{}
+	ActionToggleHelp          struct{}
+	ActionToggleCompactMode   struct{}
+	ActionToggleThinking      struct{}
+	ActionTogglePills         struct{}
+	ActionExternalEditor      struct{}
+	ActionToggleYoloMode      struct{}
+	ActionToggleNotifications struct{}
+	// ActionClearQueue discards every prompt queued for the current
+	// session. It is the destructive discard: esc moves the whole queue
+	// into the input field and shift+up moves one message at a time, so
+	// this is the way to throw away a queue built up by accident instead
+	// of having it pasted back into the editor.
+	ActionClearQueue              struct{}
 	ActionSelectNotificationStyle struct {
 		Style string
 	}

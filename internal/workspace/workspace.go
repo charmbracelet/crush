@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
@@ -152,7 +153,12 @@ type Workspace interface {
 	AgentReadyErr() error
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
-	AgentClearQueue(sessionID string)
+	// AgentClearQueue removes and returns every prompt queued for the
+	// session, oldest to newest; an error may follow a successful removal.
+	AgentClearQueue(sessionID string) ([]agent.QueuedMessage, error)
+	// AgentPopQueuedMessage removes and returns the newest queued
+	// message; the bool reports whether anything was queued.
+	AgentPopQueuedMessage(sessionID string) (agent.QueuedMessage, bool, error)
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error

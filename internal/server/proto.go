@@ -909,24 +909,63 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptQueued(w http.Respons
 	jsonEncode(w, queued)
 }
 
-// handlePostWorkspaceAgentSessionPromptClear clears the prompt queue for a session.
+// handlePostWorkspaceAgentSessionPromptClear clears the prompt queue for a
+// session and returns the messages it removed, oldest to newest.
 //
 //	@Summary		Clear prompt queue
 //	@Tags			agent
+//	@Produce		json
 //	@Param			id	path	string	true	"Workspace ID"
 //	@Param			sid	path	string	true	"Session ID"
-//	@Success		200
+//	@Success		200	{object}	proto.ClearQueueResponse
 //	@Failure		404	{object}	proto.Error
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/clear [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
-	if err := c.backend.ClearQueue(id, sid); err != nil {
+	drained, err := c.backend.ClearQueue(id, sid)
+	if err != nil {
 		c.handleError(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+
+	messages := make([]proto.QueuedMessage, len(drained))
+	for i, queued := range drained {
+		messages[i] = proto.QueuedMessage{
+			Prompt:      queued.Prompt,
+			Attachments: proto.AttachmentsFromMessage(queued.Attachments),
+		}
+	}
+	jsonEncode(w, proto.ClearQueueResponse{Messages: messages})
+}
+
+// handlePostWorkspaceAgentSessionPromptPop removes the newest queued message
+// from the session's prompt queue, reporting whether one was found.
+//
+//	@Summary		Pop newest queued message
+//	@Tags			agent
+//	@Produce		json
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Success		200	{object}	proto.PopQueuedMessageResponse
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/pop [post]
+func (c *controllerV1) handlePostWorkspaceAgentSessionPromptPop(w http.ResponseWriter, r *http.Request) {
+	queued, ok, err := c.backend.PopQueuedMessage(r.PathValue("id"), r.PathValue("sid"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+
+	jsonEncode(w, proto.PopQueuedMessageResponse{
+		Found: ok,
+		Message: proto.QueuedMessage{
+			Prompt:      queued.Prompt,
+			Attachments: proto.AttachmentsFromMessage(queued.Attachments),
+		},
+	})
 }
 
 // handlePostWorkspaceAgentSessionSummarize summarizes a session.

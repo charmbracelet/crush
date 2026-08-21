@@ -89,11 +89,15 @@ func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
 	return m.updateTextarea(msg)
 }
 
+func (m *UI) isBrowsingHistory() bool {
+	return m.promptHistory.index >= 0
+}
+
 // handleHistoryEscape handles escape for exiting history navigation.
 func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 	prevHeight := m.textarea.Height()
 	// Return to current draft when browsing history.
-	if m.promptHistory.index >= 0 {
+	if m.isBrowsingHistory() {
 		m.promptHistory.index = -1
 		m.textarea.Reset()
 		m.textarea.InsertString(m.promptHistory.draft)

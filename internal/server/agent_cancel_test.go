@@ -73,15 +73,38 @@ func (s *runCoordinator) IsBusy() bool  { return false }
 func (s *runCoordinator) IsSessionBusy(string) bool {
 	return false
 }
-func (s *runCoordinator) QueuedPrompts(string) int          { return 0 }
-func (s *runCoordinator) QueuedPromptsList(string) []string { return nil }
-func (s *runCoordinator) ClearQueue(string)                 {}
+func (s *runCoordinator) QueuedPrompts(string) int                { return 0 }
+func (s *runCoordinator) QueuedPromptsList(string) []string       { return nil }
+func (s *runCoordinator) ClearQueue(string) []agent.QueuedMessage { return nil }
+func (s *runCoordinator) PopQueuedMessage(string) (agent.QueuedMessage, bool) {
+	return agent.QueuedMessage{}, false
+}
+
 func (s *runCoordinator) Summarize(context.Context, string) error {
 	return nil
 }
 func (s *runCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (s *runCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *runCoordinator) GenerateTitle(context.Context, string, string) {}
+
+type popRunCoordinator struct {
+	*runCoordinator
+	message agent.QueuedMessage
+	found   bool
+}
+
+func (s *popRunCoordinator) PopQueuedMessage(string) (agent.QueuedMessage, bool) {
+	return s.message, s.found
+}
+
+type clearRunCoordinator struct {
+	*runCoordinator
+	drained []agent.QueuedMessage
+}
+
+func (s *clearRunCoordinator) ClearQueue(string) []agent.QueuedMessage {
+	return s.drained
+}
 
 func (s *runCoordinator) capturedCtx() context.Context {
 	s.mu.Lock()
@@ -120,6 +143,111 @@ func postAgent(t *testing.T, c *controllerV1, ctx context.Context, wsID, session
 	rec := httptest.NewRecorder()
 	c.handlePostWorkspaceAgent(rec, req)
 	return rec
+}
+
+func TestPostWorkspaceAgentSessionPromptPop(t *testing.T) {
+	t.Parallel()
+	want := agent.QueuedMessage{
+		Prompt: "queued",
+		Attachments: []message.Attachment{{
+			FilePath: "/tmp/notes.txt",
+			FileName: "notes.txt",
+			MimeType: "text/plain",
+			Content:  []byte("content"),
+		}},
+	}
+	coord := &popRunCoordinator{
+		runCoordinator: newRunCoordinator(func(context.Context) error { return nil }),
+		message:        want,
+		found:          true,
+	}
+	c, wsID := buildAgentWorkspace(t, coord)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+	req.SetPathValue("id", wsID)
+	req.SetPathValue("sid", "S1")
+	rec := httptest.NewRecorder()
+
+	c.handlePostWorkspaceAgentSessionPromptPop(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got proto.PopQueuedMessageResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
+	require.True(t, got.Found)
+	require.Equal(t, want.Prompt, got.Message.Prompt)
+	require.Equal(t, want.Attachments, proto.AttachmentsToMessage(got.Message.Attachments))
+}
+
+func TestPostWorkspaceAgentSessionPromptPopEmpty(t *testing.T) {
+	t.Parallel()
+	coord := &popRunCoordinator{
+		runCoordinator: newRunCoordinator(func(context.Context) error { return nil }),
+	}
+	c, wsID := buildAgentWorkspace(t, coord)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+	req.SetPathValue("id", wsID)
+	req.SetPathValue("sid", "S1")
+	rec := httptest.NewRecorder()
+
+	c.handlePostWorkspaceAgentSessionPromptPop(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got proto.PopQueuedMessageResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
+	require.False(t, got.Found)
+}
+
+func TestPostWorkspaceAgentSessionPromptClear(t *testing.T) {
+	t.Parallel()
+	want := []agent.QueuedMessage{
+		{Prompt: "oldest"},
+		{
+			Prompt: "newest",
+			Attachments: []message.Attachment{{
+				FilePath: "/tmp/notes.txt",
+				FileName: "notes.txt",
+				MimeType: "text/plain",
+				Content:  []byte("content"),
+			}},
+		},
+	}
+	coord := &clearRunCoordinator{
+		runCoordinator: newRunCoordinator(func(context.Context) error { return nil }),
+		drained:        want,
+	}
+	c, wsID := buildAgentWorkspace(t, coord)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+	req.SetPathValue("id", wsID)
+	req.SetPathValue("sid", "S1")
+	rec := httptest.NewRecorder()
+
+	c.handlePostWorkspaceAgentSessionPromptClear(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got proto.ClearQueueResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
+	require.Len(t, got.Messages, 2)
+	require.Equal(t, []string{"oldest", "newest"},
+		[]string{got.Messages[0].Prompt, got.Messages[1].Prompt})
+	require.Equal(t, want[1].Attachments, proto.AttachmentsToMessage(got.Messages[1].Attachments))
+}
+
+func TestPostWorkspaceAgentSessionPromptClearEmpty(t *testing.T) {
+	t.Parallel()
+	coord := &clearRunCoordinator{
+		runCoordinator: newRunCoordinator(func(context.Context) error { return nil }),
+	}
+	c, wsID := buildAgentWorkspace(t, coord)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+	req.SetPathValue("id", wsID)
+	req.SetPathValue("sid", "S1")
+	rec := httptest.NewRecorder()
+
+	c.handlePostWorkspaceAgentSessionPromptClear(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got proto.ClearQueueResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
+	require.Empty(t, got.Messages)
 }
 
 // TestPostAgent_ReturnsOKOnContextCanceled verifies that when another

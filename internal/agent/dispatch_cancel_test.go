@@ -129,11 +129,18 @@ func TestRun_BusyWithPendingCancelTakesCancelOnEntry(t *testing.T) {
 	assert.Equal(t, message.FinishReasonCanceled, msgs[1].FinishReason())
 }
 
-// TestRun_PrepareStepDrainSkipsQueuedOnPendingCancel verifies that the
-// queue drain inside PrepareStep skips queued follow-up prompts when a
-// cancel has been recorded for the session: the queued prompt must not
-// be folded into the active turn as an extra user message.
-func TestRun_PrepareStepDrainSkipsQueuedOnPendingCancel(t *testing.T) {
+// TestRun_PrepareStepDrainKeepsQueuedOnPendingCancel verifies that the
+// queue drain inside PrepareStep does not fold a cancel-covered queued
+// prompt into the turn being canceled — folding would destroy the prompt
+// along with that turn. It stays queued and runs as its own turn instead,
+// so cancellation never discards queued work.
+//
+// The new submission ("main") lands on a session that is idle with a
+// non-empty queue, so the dispatch decision swaps it behind the queue:
+// the queued follow-up runs first as its own turn and "main" runs last.
+// Both prompts therefore get their own user/assistant pair; a fold would
+// instead produce two user messages under one assistant.
+func TestRun_PrepareStepDrainKeepsQueuedOnPendingCancel(t *testing.T) {
 	t.Parallel()
 	sa, env := newStreamTestAgent(t)
 
@@ -143,6 +150,13 @@ func TestRun_PrepareStepDrainSkipsQueuedOnPendingCancel(t *testing.T) {
 	// A follow-up prompt sits queued for the session.
 	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "queued-followup"})
 	// A cancel was recorded for the session while it sat in the queue.
+	// Mirror production ordering: Cancel raises the mark to the latest
+	// accept sequence assigned so far, so any reservation created after
+	// the cancel — including the one the completion handoff hands to the
+	// dequeued prompt — sits strictly above the mark.
+	sa.acceptedMu.Lock()
+	sa.acceptSeqGen = 1
+	sa.acceptedMu.Unlock()
 	sa.cancelMark.Set(sess.ID, 1)
 
 	result, err := sa.Run(t.Context(), SessionAgentCall{
@@ -152,20 +166,25 @@ func TestRun_PrepareStepDrainSkipsQueuedOnPendingCancel(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	// Only the main prompt produced a user message; the queued
-	// follow-up was skipped, not folded into the turn.
+	// Each prompt produced its own user/assistant pair, oldest first: the
+	// queued follow-up was neither folded into a turn nor overtaken by the
+	// prompt submitted after it.
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
-	var userMsgs []message.Message
-	for _, m := range msgs {
+	roles := make([]message.MessageRole, len(msgs))
+	prompts := make([]string, 0, 2)
+	for i, m := range msgs {
+		roles[i] = m.Role
 		if m.Role == message.User {
-			userMsgs = append(userMsgs, m)
+			prompts = append(prompts, m.Content().String())
 		}
 	}
-	require.Len(t, userMsgs, 1, "queued follow-up must not create a user message")
-	assert.Equal(t, "main", userMsgs[0].Content().String())
+	require.Equal(t,
+		[]message.MessageRole{message.User, message.Assistant, message.User, message.Assistant},
+		roles,
+		"the queued follow-up must run as its own turn, not be folded into the canceled one")
+	require.Equal(t, []string{"queued-followup", "main"}, prompts)
 
-	// The queue was drained and the pending cancel consumed.
 	require.Equal(t, 0, sa.QueuedPrompts(sess.ID))
 	require.False(t, sa.hasPendingCancel(sess.ID))
 }

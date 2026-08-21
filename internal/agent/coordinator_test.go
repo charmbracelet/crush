@@ -22,6 +22,9 @@ type mockSessionAgent struct {
 	model     Model
 	runFunc   func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error)
 	cancelled []string
+	popped    QueuedMessage
+	popOK     bool
+	drained   []QueuedMessage
 }
 
 func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -44,11 +47,37 @@ func (m *mockSessionAgent) IsSessionBusy(sessionID string) bool         { return
 func (m *mockSessionAgent) IsBusy() bool                                { return false }
 func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
-func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
+func (m *mockSessionAgent) ClearQueue(sessionID string) []QueuedMessage { return m.drained }
+func (m *mockSessionAgent) PopQueuedMessage(sessionID string) (QueuedMessage, bool) {
+	return m.popped, m.popOK
+}
+
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
 	return nil
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
+
+func TestCoordinatorPopQueuedMessage(t *testing.T) {
+	t.Parallel()
+
+	want := QueuedMessage{Prompt: "queued"}
+	mock := &mockSessionAgent{popped: want, popOK: true}
+	c := &coordinator{currentAgent: mock}
+
+	got, ok := c.PopQueuedMessage("session")
+	require.True(t, ok)
+	require.Equal(t, want, got)
+}
+
+func TestCoordinatorClearQueue(t *testing.T) {
+	t.Parallel()
+
+	want := []QueuedMessage{{Prompt: "oldest"}, {Prompt: "newest"}}
+	mock := &mockSessionAgent{drained: want}
+	c := &coordinator{currentAgent: mock}
+
+	require.Equal(t, want, c.ClearQueue("session"))
+}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {

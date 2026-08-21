@@ -27,6 +27,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
@@ -342,6 +343,15 @@ type UI struct {
 	// in-flight fetch captures it at dispatch and its result is discarded
 	// if the generation has moved on (see workspace_cache.go).
 	promptQueueGen uint64
+	// queuedPopInFlight guards the destructive pop: without it key
+	// autorepeat would pop several messages and keep only the last.
+	queuedPopInFlight bool
+	// queueClearInFlight is the same guard for the drain: a second press
+	// during the round-trip would drain an already-emptied queue.
+	queueClearInFlight bool
+	// queuedRestoreOrphans holds queue removals that landed after a
+	// session switch, keyed by session, for restoreParkedQueuedMessages.
+	queuedRestoreOrphans map[string][]agent.QueuedMessage
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
@@ -715,6 +725,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.applyBusyState(msg)...)
 	case promptQueueMsg:
 		cmds = append(cmds, m.applyPromptQueue(msg)...)
+	case queuedMessagePoppedMsg:
+		cmds = append(cmds, m.applyQueuedMessagePop(msg)...)
+	case promptQueueClearedMsg:
+		cmds = append(cmds, m.applyPromptQueueCleared(msg)...)
 	case lspStatesMsg:
 		if cmd := m.applyLSPStates(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -793,6 +807,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+		// Messages parked across the session switch come back now.
+		if cmd := m.restoreParkedQueuedMessages(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.updateLayoutAndSize()
 
 	case sessionFilesUpdatesMsg:
@@ -846,6 +864,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.DeletedEvent {
+			// The session can never be loaded again, so messages parked
+			// for it can never be restored.
+			delete(m.queuedRestoreOrphans, msg.Payload.ID)
 			if m.session != nil && m.session.ID == msg.Payload.ID {
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -855,7 +876,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
-			prevPillsHeight := m.pillsAreaHeight()
+			prevPillsHeight := m.pillsAreaHeight(m.layout.main.Dx())
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
@@ -868,7 +889,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// When the footprint is unchanged we still re-render the pill
 			// content so status changes (e.g. the in-progress spinner)
 			// show up.
-			if m.pillsAreaHeight() != prevPillsHeight {
+			if m.pillsAreaHeight(m.layout.main.Dx()) != prevPillsHeight {
 				m.updateLayoutAndSize()
 			} else {
 				m.renderPills()
@@ -1937,6 +1958,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionClearQueue:
+		// The destructive discard: both Escape paths restore instead.
+		if cmd := m.clearQueuedMessages(false); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			cfg := m.com.Config()
@@ -2493,10 +2520,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// Handle cancel key when agent is busy.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
 		if m.isAgentBusy() {
+			// cancelAgent's double-press machine drains on the confirming
+			// press; the arming press must stay queue-neutral.
 			if cmd := m.cancelAgent(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return tea.Batch(cmds...)
+		}
+		// Idle with queued prompts there is no turn to stop, so a single
+		// press drains the queue; the gates keep Escape's local meanings.
+		if m.promptQueue > 0 && !m.completionsOpen && !m.isBrowsingHistory() &&
+			!m.attachments.Deleting() {
+			if cmd := m.clearQueuedMessages(true); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return tea.Batch(cmds...)
@@ -2626,6 +2663,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+			case key.Matches(msg, m.keyMap.Editor.PopQueuedMessage):
+				// Unconditional: the popped prompt is prepended above the
+				// draft, so repeated presses walk the queue back.
+				if cmd := m.popQueuedMessage(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 				cmd := m.handleHistoryUp(msg)
 				if cmd != nil {
@@ -3112,13 +3155,12 @@ func (m *UI) ShortHelp() []key.Binding {
 	case uiInitialize:
 		binds = append(binds, k.Quit)
 	case uiChat:
-		// Show cancel binding if agent is busy.
+		// Cancel help must not advertise queue clearing: cancel is
+		// turn-scoped and leaves queued prompts intact.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, cancelBinding)
 		}
@@ -3208,13 +3250,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Quit,
 			})
 	case uiChat:
-		// Show cancel binding if agent is busy.
+		// Cancel help must not advertise queue clearing: cancel is
+		// turn-scoped and leaves queued prompts intact.
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
 		}
@@ -3251,6 +3292,11 @@ func (m *UI) FullHelp() [][]key.Binding {
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
+			}
+			// Editor focus only (chat focus binds the chord to
+			// UpOneItem) and only with a queue; ShortHelp has no room.
+			if m.promptQueue > 0 {
+				editorBinds = append(editorBinds, k.Editor.PopQueuedMessage)
 			}
 			binds = append(binds, editorBinds)
 			if hasAttachments {
@@ -3595,7 +3641,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.header = headerRect
-			pillsHeight := m.pillsAreaHeight()
+			pillsHeight := m.pillsAreaHeight(mainRect.Dx())
 			if pillsHeight > 0 {
 				pillsHeight = min(pillsHeight, mainRect.Dy())
 				var chatRect, pillsRect image.Rectangle
@@ -3635,7 +3681,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.sidebar = sideRect
-			pillsHeight := m.pillsAreaHeight()
+			pillsHeight := m.pillsAreaHeight(mainRect.Dx())
 			if pillsHeight > 0 {
 				pillsHeight = min(pillsHeight, mainRect.Dy())
 				var chatRect, pillsRect image.Rectangle
@@ -4242,9 +4288,8 @@ func cancelTimerCmd() tea.Cmd {
 	})
 }
 
-// cancelAgent handles the cancel key press. The first press sets isCanceling to true
-// and starts a timer. The second press (before the timer expires) actually
-// cancels the agent.
+// cancelAgent handles the cancel key press. The first press arms the timer;
+// the second cancels the turn and drains the queue into the input field.
 func (m *UI) cancelAgent() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -4274,21 +4319,11 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.todoIsSpinning = false
 		m.invalidateBusyCaches()
 		m.renderPills()
+		// The drain runs as a cmd; the prompts land when promptQueueClearedMsg arrives.
+		if m.promptQueue > 0 {
+			return tea.Batch(m.dispatchBusyRefresh(), m.clearQueuedMessages(true))
+		}
 		return m.dispatchBusyRefresh()
-	}
-
-	// Queued prompts pending: esc clears the queue. Decide from the cached
-	// count (event-driven) instead of a synchronous workspace probe.
-	if m.promptQueue > 0 {
-		m.com.Workspace.AgentClearQueue(m.session.ID)
-		m.promptQueue = 0
-		m.promptQueueItems = nil
-		m.promptQueueCheckedAt = time.Now()
-		// Bump the queue generation so a fetch started before this clear
-		// cannot land and repopulate the pill we just emptied.
-		m.invalidatePromptQueue()
-		m.updateLayoutAndSize()
-		return nil
 	}
 
 	// First escape press - set canceling state and start timer.

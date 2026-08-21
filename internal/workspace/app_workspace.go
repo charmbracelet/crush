@@ -213,10 +213,25 @@ func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) []string {
 	return w.app.AgentCoordinator.QueuedPromptsList(sessionID)
 }
 
-func (w *AppWorkspace) AgentClearQueue(sessionID string) {
-	if w.app.AgentCoordinator != nil {
-		w.app.AgentCoordinator.ClearQueue(sessionID)
+func (w *AppWorkspace) AgentClearQueue(sessionID string) ([]agent.QueuedMessage, error) {
+	if w.app.AgentCoordinator == nil {
+		return nil, nil
 	}
+	return w.app.AgentCoordinator.ClearQueue(sessionID), nil
+}
+
+// AgentPopQueuedMessage removes and returns the newest queued message for
+// the session. A nil coordinator is reported as an empty queue, not an
+// error: no coordinator means no queue exists, so nothing can be popped
+// and nothing can be lost. This matches the other queue operations and,
+// crucially, Backend.PopQueuedMessage, so the same user action behaves
+// identically in client/server mode.
+func (w *AppWorkspace) AgentPopQueuedMessage(sessionID string) (agent.QueuedMessage, bool, error) {
+	if w.app.AgentCoordinator == nil {
+		return agent.QueuedMessage{}, false, nil
+	}
+	queued, ok := w.app.AgentCoordinator.PopQueuedMessage(sessionID)
+	return queued, ok, nil
 }
 
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {

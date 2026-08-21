@@ -5,6 +5,25 @@ import (
 	"errors"
 )
 
+// QueuedMessage is the JSON-safe form of agent.QueuedMessage.
+type QueuedMessage struct {
+	Prompt      string       `json:"prompt"`
+	Attachments []Attachment `json:"attachments"`
+}
+
+// PopQueuedMessageResponse distinguishes an empty queue from an empty message.
+type PopQueuedMessageResponse struct {
+	Found   bool          `json:"found"`
+	Message QueuedMessage `json:"message"`
+}
+
+// ClearQueueResponse carries the messages a queue clear removed, oldest to
+// newest, so the caller can hand them back to the user instead of losing
+// them.
+type ClearQueueResponse struct {
+	Messages []QueuedMessage `json:"messages"`
+}
+
 // AgentEventType represents the type of agent event.
 type AgentEventType string
 

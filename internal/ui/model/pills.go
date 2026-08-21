@@ -17,8 +17,6 @@ const (
 	pillHeightWithBorder = 3
 	// maxTaskDisplayLength is the maximum length of a task name in the pill.
 	maxTaskDisplayLength = 40
-	// maxQueueDisplayLength is the maximum length of a queue item in the list.
-	maxQueueDisplayLength = 60
 )
 
 // pillSection represents which section of the pills panel is focused.
@@ -111,22 +109,113 @@ func todoList(sessionTodos []session.Todo, spinnerView string, t *styles.Styles,
 }
 
 // queueList renders the expanded queue items list.
-func queueList(queueItems []string, t *styles.Styles) string {
+func queueList(queueItems []string, t *styles.Styles, width int) string {
 	if len(queueItems) == 0 {
 		return ""
 	}
 
-	var lines []string
+	prefix := t.Pills.QueueItemPrefix.Render() + " "
+	textWidth := max(width-ansi.StringWidth(prefix), 0)
+	lines := make([]string, 0, len(queueItems))
 	for _, item := range queueItems {
-		text := item
-		if ansi.StringWidth(text) > maxQueueDisplayLength {
-			text = ansi.Truncate(text, maxQueueDisplayLength-1, "…")
-		}
-		prefix := t.Pills.QueueItemPrefix.Render() + " "
+		text := escapeQueueItem(item)
+		text = ansi.Truncate(text, textWidth, "…")
 		lines = append(lines, prefix+t.Pills.QueueItemText.Render(text))
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func escapeQueueItem(item string) string {
+	item = strings.ReplaceAll(item, "\r\n", "\n")
+	item = strings.ReplaceAll(item, "\r", "\n")
+	item = strings.ReplaceAll(item, "\n", `\n`)
+	return strings.ReplaceAll(item, "\t", `\t`)
+}
+
+func pillHelpHint(t *styles.Styles, key, desc string) string {
+	keyView := t.Pills.HelpKey.Render(key)
+	descView := t.Pills.HelpText.Render(desc)
+	return lipgloss.JoinHorizontal(lipgloss.Center, keyView, " ", descView)
+}
+
+func packPillHints(hints []string, firstBudget, continuationBudget int) []string {
+	lines := []string{""}
+	budget := max(firstBudget, 0)
+	for _, hint := range hints {
+		line := lines[len(lines)-1]
+		separatorWidth := 0
+		if line != "" {
+			separatorWidth = 1
+		}
+		if ansi.StringWidth(line)+separatorWidth+ansi.StringWidth(hint) <= budget {
+			if line == "" {
+				lines[len(lines)-1] = hint
+			} else {
+				lines[len(lines)-1] = line + " " + hint
+			}
+			continue
+		}
+
+		lines = append(lines, hint)
+		budget = max(continuationBudget, 0)
+	}
+	return lines
+}
+
+func layoutPillHints(hints []string, sideBudget, contentWidth int) ([]string, bool) {
+	column := true
+	for _, hint := range hints {
+		if ansi.StringWidth(hint) > sideBudget {
+			column = false
+			break
+		}
+	}
+	if column {
+		return packPillHints(hints, sideBudget, sideBudget), true
+	}
+	return packPillHints(hints, sideBudget, contentWidth), false
+}
+
+func pillHintRows(lines []string, column bool) int {
+	if column {
+		return max(pillHeightWithBorder, len(lines)+1)
+	}
+	return pillHeightWithBorder + len(lines) - 1
+}
+
+func (m *UI) pillsRowParts(t *styles.Styles) (string, []string) {
+	hasIncomplete := hasIncompleteTodos(m.session.Todos)
+	hasQueue := m.promptQueue > 0
+
+	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
+	if m.todoIsSpinning {
+		inProgressIcon = m.todoSpinner.View()
+	}
+
+	var pills []string
+	if hasIncomplete {
+		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
+	}
+	if hasQueue {
+		pills = append(pills, queuePill(m.promptQueue, t))
+	}
+
+	helpDesc := "open"
+	if m.pillsExpanded {
+		helpDesc = "close"
+	}
+	hints := []string{pillHelpHint(t, "ctrl+t", helpDesc)}
+	if hasQueue {
+		hints = append(hints, pillHelpHint(t, "shift/alt+up", "pop message"))
+		escKey, escDesc := "esc", "pop all messages"
+		if m.isAgentBusy() {
+			escKey, escDesc = "esc esc", "cancel + pop all messages"
+		}
+		hints = append(hints, pillHelpHint(t, escKey, escDesc))
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, pills...), hints
 }
 
 // pillsHeightReasonableTerminalHeight is the minimum terminal height at which
@@ -247,7 +336,7 @@ func (m *UI) effectiveFocusedSection() pillSection {
 }
 
 // pillsAreaHeight calculates the total height needed for the pills area.
-func (m *UI) pillsAreaHeight() int {
+func (m *UI) pillsAreaHeight(width int) int {
 	if !m.hasSession() {
 		return 0
 	}
@@ -263,7 +352,12 @@ func (m *UI) pillsAreaHeight() int {
 		return 0
 	}
 
-	pillsAreaHeight := pillHeightWithBorder
+	const paddingLeft = 3
+	contentWidth := max(width-paddingLeft, 0)
+	pillsRow, hints := m.pillsRowParts(m.com.Styles)
+	sideBudget := max(contentWidth-lipgloss.Width(pillsRow)-1, 0)
+	hintLines, column := layoutPillHints(hints, sideBudget, contentWidth)
+	pillsAreaHeight := pillHintRows(hintLines, column)
 	if m.pillsExpanded {
 		switch m.effectiveFocusedSection() {
 		case pillSectionTodos:
@@ -314,14 +408,7 @@ func (m *UI) renderPills() {
 	if m.todoIsSpinning {
 		inProgressIcon = m.todoSpinner.View()
 	}
-
-	var pills []string
-	if hasIncomplete {
-		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
-	}
-	if hasQueue {
-		pills = append(pills, queuePill(m.promptQueue, t))
-	}
+	pillsRow, hints := m.pillsRowParts(t)
 
 	var expandedList string
 	if m.pillsExpanded {
@@ -332,25 +419,34 @@ func (m *UI) renderPills() {
 			// workspace_cache.go): renderPills runs on the Update/View
 			// path and must never block on a workspace round-trip.
 			if len(m.promptQueueItems) > 0 {
-				expandedList = queueList(m.promptQueueItems, t)
+				expandedList = queueList(m.promptQueueItems, t, contentWidth)
 			}
 		}
 	}
 
-	if len(pills) == 0 {
+	if pillsRow == "" {
 		return
 	}
 
-	pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
-
-	helpDesc := "open"
-	if m.pillsExpanded {
-		helpDesc = "close"
+	sideBudget := max(contentWidth-lipgloss.Width(pillsRow)-1, 0)
+	hintLines, column := layoutPillHints(hints, sideBudget, contentWidth)
+	if column {
+		hintColumn := lipgloss.JoinVertical(lipgloss.Left,
+			append([]string{""}, hintLines...)...)
+		pillsRow = lipgloss.JoinHorizontal(lipgloss.Top,
+			pillsRow, " ", hintColumn)
+	} else {
+		firstLine := pillsRow
+		if hintLines[0] != "" {
+			firstLine = lipgloss.JoinHorizontal(lipgloss.Center,
+				pillsRow, " ", hintLines[0])
+		}
+		pillsRow = firstLine
+		if len(hintLines) > 1 {
+			pillsRow = lipgloss.JoinVertical(lipgloss.Left,
+				append([]string{pillsRow}, hintLines[1:]...)...)
+		}
 	}
-	helpKey := t.Pills.HelpKey.Render("ctrl+t")
-	helpText := t.Pills.HelpText.Render(helpDesc)
-	helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
-	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
 
 	pillsArea := pillsRow
 	if expandedList != "" {

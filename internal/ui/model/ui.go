@@ -679,6 +679,12 @@ func (m *UI) Init() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+	// Open trust dialog if there are untrusted project configs.
+	if m.com.ConfigStore() != nil && m.com.ConfigStore().HasUntrustedProjectConfigs() {
+		if cmd := m.openTrustDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	// Prime the memoized LSP state off-thread.
@@ -1612,6 +1618,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			slog.Error("Error reported", "error", msg.Msg)
 		}
 		cmds = append(cmds, m.status.Show(msg))
+	case promptProjectTrustMsg:
+		if cmd := m.handlePromptProjectTrust(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case app.UpdateAvailableMsg:
 		text := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
@@ -2679,6 +2689,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
+	case dialog.ActionTrustAccept:
+		cmds = append(cmds, m.acceptProjectTrust())
+	case dialog.ActionTrustReject:
+		cmds = append(cmds, m.rejectProjectTrust())
+	case dialog.ActionRetrustProjectConfigs:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.retrustProjectConfigs())
+	case dialog.ActionUntrustProjectConfigs:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.untrustProjectConfigs())
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.enableDockerMCP)

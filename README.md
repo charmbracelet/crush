@@ -346,6 +346,64 @@ Values support the same `$VAR` and `$(command)` expansion as other config
 fields, so you can reference existing environment variables or shell out for
 a value.
 
+### Themes
+
+Crush ships with built-in color themes.
+
+#### Switching Themes
+
+Open the command palette with `ctrl+p`, select **Switch Theme**, and browse
+the list. The UI previews each theme as you navigate, and pressing `enter`
+confirms the selection. Press `esc` to cancel and revert.
+
+#### Editing Themes
+
+Open the command palette with `ctrl+p`, select **Edit Theme**, and edit the
+active theme palette. Changes preview live as you type. Press `enter` or
+`ctrl+s` to save, or `esc` to cancel and revert.
+
+You can also select a theme directly in your config with `active_theme`:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "active_theme": "gruvbox-dark"
+    }
+  }
+}
+```
+
+Or define a custom theme that overrides colors on top of a built-in one.
+Themes live under `theme` keyed by name, and `active_theme` selects which one
+to use:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "active_theme": "my-theme",
+      "theme": {
+        "my-theme": {
+          "base": "gruvbox-dark",
+          "primary": "#ff6b6b",
+          "bg_base": "#1a1a2e"
+        }
+      }
+    }
+  }
+}
+```
+
+#### Built-In Themes
+
+| Theme | Name |
+| --- | --- |
+| Charmtone | `charmtone` (default) |
+| Gruvbox Dark | `gruvbox-dark` |
+
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just

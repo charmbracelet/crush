@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -364,6 +365,9 @@ type UI struct {
 	// Todo spinner
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
+
+	// preThemeStyles stores the styles before a theme preview so we can revert.
+	preThemeStyles *styles.Styles
 
 	// mouse highlighting related state
 	lastClickTime time.Time
@@ -1981,6 +1985,199 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Transparent background " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSwitchTheme:
+		themeName := msg.Theme
+		newStyles, err := styles.LoadTheme(themeName)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		m.applyTheme(newStyles)
+		m.preThemeStyles = nil
+		fields := map[string]any{
+			"options.tui.active_theme": themeName,
+		}
+		// Only custom themes need a persisted map entry; writing an empty
+		// object for a built-in would create a spurious override that shows
+		// up as a user theme.
+		if !styles.IsBuiltinTheme(themeName) {
+			fields["options.tui.theme."+themeName] = map[string]any{}
+		}
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, fields); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Theme switched to "+themeName))
+		m.dialog.CloseDialog(dialog.ThemeID)
+	case dialog.ActionPreviewTheme:
+		newStyles, err := styles.LoadTheme(msg.Theme)
+		if err != nil {
+			break
+		}
+		if m.preThemeStyles == nil {
+			saved := m.com.Styles.Clone()
+			m.preThemeStyles = &saved
+		}
+		m.applyTheme(newStyles)
+	case dialog.ActionRevertThemePreview:
+		if m.preThemeStyles != nil {
+			m.applyTheme(*m.preThemeStyles)
+			m.preThemeStyles = nil
+		}
+		m.dialog.CloseDialog(dialog.ThemeID)
+	case dialog.ActionPreviewThemePalette:
+		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
+		if err != nil {
+			break
+		}
+		if m.preThemeStyles == nil {
+			saved := m.com.Styles.Clone()
+			m.preThemeStyles = &saved
+		}
+		m.applyTheme(newStyles)
+	case dialog.ActionSaveThemePalette:
+		newStyles, err := styles.LoadPaletteTheme(msg.Base, msg.Palette)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		m.applyTheme(newStyles)
+		m.preThemeStyles = nil
+
+		// The theme is stored under its own name; Base only identifies the
+		// built-in palette its colors are derived from.
+		themeName := msg.Name
+		if themeName == "" {
+			themeName = msg.Base
+		}
+
+		// Save to user theme file.
+		dirs := styles.ThemeDirs()
+		if len(dirs) > 0 {
+			savePath := filepath.Join(dirs[len(dirs)-1], themeName+".json")
+			tf := &styles.ThemeFile{Base: msg.Base, Palette: msg.Palette}
+			if err := styles.SaveThemeFile(savePath, tf); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+		}
+
+		value, err := themePaletteConfigValue(msg.Base, msg.Palette)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
+			"options.tui.theme." + themeName: value,
+		}); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Theme saved"))
+		m.dialog.CloseDialog(dialog.ThemeEditorID)
+	case dialog.ActionEditTheme:
+		m.openThemeEditorDialog(msg.Name)
+	case dialog.ActionRevertThemePalette:
+		if m.preThemeStyles != nil {
+			m.applyTheme(*m.preThemeStyles)
+			m.preThemeStyles = nil
+		}
+		m.dialog.CloseDialog(dialog.ThemeEditorID)
+	case dialog.ActionDeleteThemeFile:
+		if path, err := styles.FindThemeFile(msg.Name); err == nil {
+			if err := os.Remove(path); err != nil {
+				cmds = append(cmds, util.ReportError(fmt.Errorf("delete theme file: %w", err)))
+				break
+			}
+			cmds = append(cmds, util.ReportInfo("Theme "+msg.Name+" reset to builtin"))
+		}
+		m.dialog.CloseDialog(dialog.ThemeEditorID)
+	case dialog.ActionCreateTheme:
+		base := msg.Base
+		if base == "" {
+			base = "charmtone"
+		}
+		name := msg.Name
+		if err := styles.ValidateThemeName(name); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		exported, err := styles.ExportResolvedPalette(base)
+		if err != nil {
+			// Fall back to charmtone when the base theme is no longer
+			// resolvable (e.g. a user theme that was since deleted).
+			base = "charmtone"
+			exported, err = styles.ExportResolvedPalette(base)
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+		}
+		dirs := styles.ThemeDirs()
+		if len(dirs) == 0 {
+			cmds = append(cmds, util.ReportError(fmt.Errorf("no theme directory available")))
+			break
+		}
+		savePath := filepath.Join(dirs[len(dirs)-1], name+".json")
+		exported.Base = base
+		if err := styles.SaveThemeFile(savePath, exported); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
+			"options.tui.active_theme": name,
+		}); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Created new theme: "+name))
+		m.dialog.CloseDialog(dialog.ThemeNewID)
+		m.dialog.CloseDialog(dialog.ThemeID)
+		m.openThemeEditorDialog(name)
+	case dialog.ActionRenameTheme:
+		oldName := msg.OldName
+		newName := strings.ToLower(msg.NewName)
+		if err := styles.RenameThemeFile(oldName, newName); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cfg := m.com.Config()
+		fields := map[string]any{}
+		// Move any stored palette overrides to the new name so the renamed
+		// theme keeps its configuration.
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			if entry, ok := cfg.Options.TUI.Theme[oldName]; ok {
+				if len(entry.RawObject) > 0 {
+					var v any
+					if err := json.Unmarshal(entry.RawObject, &v); err == nil {
+						fields["options.tui.theme."+newName] = v
+					}
+				} else {
+					fields["options.tui.theme."+newName] = map[string]any{}
+				}
+			}
+			if cfg.Options.TUI.ActiveTheme == oldName {
+				fields["options.tui.active_theme"] = newName
+			}
+		}
+		if len(fields) > 0 {
+			if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, fields); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+		}
+		// Drop the stale entry keyed by the old name.
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			if _, ok := cfg.Options.TUI.Theme[oldName]; ok {
+				if err := m.com.Workspace.RemoveConfigField(config.ScopeGlobal, "options.tui.theme."+oldName); err != nil {
+					cmds = append(cmds, util.ReportError(err))
+					break
+				}
+			}
+		}
+		cmds = append(cmds, util.ReportInfo("Renamed theme "+oldName+" to "+newName))
+		m.dialog.CloseDialog(dialog.ThemeID)
+		m.openThemeDialog()
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
@@ -4007,13 +4204,33 @@ func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
 }
 
+func themePaletteConfigValue(base string, palette styles.Palette) (map[string]any, error) {
+	data, err := json.Marshal(palette)
+	if err != nil {
+		return nil, err
+	}
+	value := map[string]any{}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return nil, err
+	}
+	if base != "" {
+		value["base"] = base
+	}
+	return value, nil
+}
+
 // applyThemeForProvider swaps the active theme to the one associated with
 // the given provider, but only when that theme differs from the one
 // already applied. Most providers share a single theme, so re-selecting a
 // model from the same theme family would otherwise pay the full cost of
 // invalidating the markdown renderer cache and re-rendering the entire
 // transcript for no visible change.
+// A theme explicitly selected in the config always wins, so provider
+// changes never discard the user's choice.
 func (m *UI) applyThemeForProvider(providerID string) {
+	if common.ThemeNameFromConfig(m.com.Config()) != "" {
+		return
+	}
 	key := styles.ThemeKeyForProvider(providerID)
 	if key == m.themeKey {
 		return
@@ -4023,11 +4240,11 @@ func (m *UI) applyThemeForProvider(providerID string) {
 }
 
 // applyTheme replaces the active styles with the given theme, drops the
-// shared markdown renderer cache, and refreshes every component that
-// caches style data.
+// shared style caches, and refreshes every component that caches style
+// data.
 func (m *UI) applyTheme(s styles.Styles) {
 	*m.com.Styles = s
-	common.InvalidateMarkdownRendererCache()
+	common.InvalidateStyleCaches()
 	m.refreshStyles()
 }
 
@@ -4052,6 +4269,11 @@ func (m *UI) refreshStyles() {
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	m.chat.InvalidateRenderCaches()
+	if d := m.dialog.Dialog(dialog.ThemeID); d != nil {
+		if td, ok := d.(*dialog.Theme); ok {
+			td.RefreshStyles()
+		}
+	}
 }
 
 // attachSkill reads a skill's content by ID and returns it as a markdown
@@ -4076,6 +4298,38 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 			Content:  content,
 		}
 	}
+}
+
+// openThemeNewDialog opens the new theme naming dialog. The new theme
+// inherits its palette from the currently active theme.
+func (m *UI) openThemeNewDialog() {
+	if m.dialog.ContainsDialog(dialog.ThemeNewID) {
+		m.dialog.BringToFront(dialog.ThemeNewID)
+		return
+	}
+	base := common.ThemeNameFromConfig(m.com.Config())
+	m.dialog.OpenDialog(dialog.NewThemeNew(m.com, base))
+}
+
+// openThemeDialog opens the theme picker dialog.
+func (m *UI) openThemeDialog() {
+	if m.dialog.ContainsDialog(dialog.ThemeID) {
+		m.dialog.BringToFront(dialog.ThemeID)
+		return
+	}
+	themeDialog := dialog.NewTheme(m.com)
+	m.dialog.OpenDialog(themeDialog)
+}
+
+// openThemeEditorDialog opens the theme editor dialog for the given theme.
+// An empty themeName edits the currently active theme.
+func (m *UI) openThemeEditorDialog(themeName string) {
+	if m.dialog.ContainsDialog(dialog.ThemeEditorID) {
+		m.dialog.BringToFront(dialog.ThemeEditorID)
+		return
+	}
+	themeDialog := dialog.NewThemeEditor(m.com, themeName)
+	m.dialog.OpenDialog(themeDialog)
 }
 
 // sendMessage sends a message with the given content and attachments.
@@ -4322,6 +4576,12 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ThemeID:
+		m.openThemeDialog()
+	case dialog.ThemeNewID:
+		m.openThemeNewDialog()
+	case dialog.ThemeEditorID:
+		m.openThemeEditorDialog("")
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)

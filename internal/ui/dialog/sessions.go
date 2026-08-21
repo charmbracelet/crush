@@ -268,39 +268,8 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			return nil
 		}
 		cur = item.Cursor()
-		if cur == nil {
-			break
-		}
-
 		start, end := s.list.VisibleItemIndices()
-		selectedIndex := s.list.Selected()
-
-		titleStyle := t.Dialog.Sessions.RenamingingTitle
-		dialogStyle := t.Dialog.Sessions.RenamingView
-		inputStyle := t.Dialog.InputPrompt
-
-		// Adjust cursor position to account for dialog layout + message
-		cur.X += inputStyle.GetBorderLeftSize() +
-			inputStyle.GetMarginLeft() +
-			inputStyle.GetPaddingLeft() +
-			dialogStyle.GetBorderLeftSize() +
-			dialogStyle.GetPaddingLeft() +
-			dialogStyle.GetMarginLeft()
-		cur.Y += titleStyle.GetVerticalFrameSize() +
-			inputStyle.GetBorderTopSize() +
-			inputStyle.GetMarginTop() +
-			inputStyle.GetPaddingTop() +
-			inputStyle.GetBorderBottomSize() +
-			inputStyle.GetMarginBottom() +
-			inputStyle.GetPaddingBottom() +
-			dialogStyle.GetPaddingTop() +
-			dialogStyle.GetBorderTopSize() +
-			lipgloss.Height(message) - 1
-
-		// move the cursor by one down until we see the selectedIndex
-		for ; start <= end && start != selectedIndex && selectedIndex > -1; start++ {
-			cur.Y += 1
-		}
+		cur = renameCursorOffset(t, cur, lipgloss.Height(message), start, end, s.list.Selected())
 	default:
 		inputView := t.Dialog.InputPrompt.Render(s.input.View())
 		cur = s.Cursor()

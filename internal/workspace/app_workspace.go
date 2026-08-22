@@ -482,6 +482,16 @@ func (w *AppWorkspace) MCPAuthURL(name string) string {
 	return mcptools.MCPAuthURL(name)
 }
 
+func (w *AppWorkspace) MCPReconnect(ctx context.Context, name string) error {
+	if err := mcptools.DisableSingle(w.store, name); err != nil {
+		return fmt.Errorf("failed to disconnect MCP %q: %w", name, err)
+	}
+	if err := w.store.ReloadFromDisk(ctx); err != nil {
+		slog.Warn("Failed to reload config from disk before reconnecting MCP; using existing config", "name", name, "error", err)
+	}
+	return mcptools.InitializeSingle(ctx, name, w.store)
+}
+
 // -- Lifecycle --
 
 func (w *AppWorkspace) Subscribe(program *tea.Program) {

@@ -54,3 +54,10 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
+
+# Local developer config (may contain API keys)
+/crush.json.bak
+/crush.local.json
+
+# FlowRAG local storage
+/flowrag_workflows.json

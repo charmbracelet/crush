@@ -411,6 +411,10 @@ func formatOutput(stdout, stderr string, execErr error) string {
 		errorMessage += fmt.Sprintf("Exit code %d", exitCode)
 	}
 
+	if strings.Contains(stderr, "gpg failed to sign the data") || strings.Contains(stderr, "gpg: signing failed") {
+		errorMessage += "\n\nHint: git commit signing needs GPG's pinentry to prompt for a passphrase, but commands run by this tool have no TTY for that prompt. Either pre-warm the gpg-agent passphrase cache before asking for a commit (e.g. `echo test | gpg --clearsign`), or switch to SSH-based commit signing (`git config --global gpg.format ssh`), which doesn't require a TTY."
+	}
+
 	hasBothOutputs := stdout != "" && stderr != ""
 
 	if hasBothOutputs {

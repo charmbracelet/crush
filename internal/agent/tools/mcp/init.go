@@ -74,9 +74,13 @@ var (
 
 	// initStarted records whether Initialize has been armed. WaitForInit only
 	// blocks once initialization is expected; coordinators built outside app
-	// startup never arm it and so must not wait forever.
+	// startup never arm it and so must not wait forever. initArmedAt anchors
+	// WaitForInitBudget's deadline: the budget is measured from arming, not
+	// from each call, so sequential waiters share one deadline instead of
+	// stacking fresh budgets.
 	initMu      sync.Mutex
 	initStarted bool
+	initArmedAt time.Time
 
 	// renewMus serializes lazy session renewals per server so concurrent tool
 	// calls cannot race to rebuild the same session.
@@ -110,6 +114,7 @@ type suppressBrowserKey struct{}
 func ArmInit() {
 	initMu.Lock()
 	initStarted = true
+	initArmedAt = time.Now()
 	initMu.Unlock()
 }
 
@@ -333,6 +338,46 @@ func WaitForInit(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// InitWaitBudget bounds how long a message turn waits for MCP
+// initialization before proceeding without the servers that have not
+// finished. It is generously above a healthy stdio server's startup
+// (uv/npx take a few seconds) but far below the per-server handshake
+// timeouts (15s-120s): a server that wedges mid-handshake — e.g. one
+// that never answers the SEP-2575 server/discover probe — must not
+// make the whole app look dead while its timeout runs out.
+const InitWaitBudget = 10 * time.Second
+
+// WaitForInitBudget blocks like WaitForInit, but only until the budget —
+// measured from when initialization was armed, not from this call —
+// elapses. Anchoring the deadline at arming means the several sequential
+// waiters on a turn's path (readyWg's tool build, then the turn itself)
+// share one deadline instead of each stacking a fresh budget while a
+// server is wedged, and turns arriving after the deadline don't wait at
+// all. It returns nil both when initialization completed and when the
+// budget elapsed first — in the latter case the caller proceeds with
+// whatever servers have registered so far, and stragglers appear on a
+// later turn once they finish. The caller's own context ending is still
+// reported as an error.
+func WaitForInitBudget(ctx context.Context, budget time.Duration) error {
+	initMu.Lock()
+	started := initStarted
+	armedAt := initArmedAt
+	initMu.Unlock()
+	if !started {
+		return nil
+	}
+	waitCtx, cancel := context.WithDeadline(ctx, armedAt.Add(budget))
+	defer cancel()
+	if err := WaitForInit(waitCtx); err == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	slog.Warn("MCP initialization still pending after wait budget; continuing without unfinished servers", "budget", budget)
+	return nil
 }
 
 // InitializeSingle initializes a single MCP client by name.

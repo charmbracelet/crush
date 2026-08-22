@@ -874,6 +874,12 @@ the open source Crush provider database. This means that when new providers and
 models are available, or when model metadata changes, Crush automatically
 updates your local configuration.
 
+### Custom provider catalog
+
+You can also override [Catwalk](https://github.com/charmbracelet/catwalk) default URL (for testing, using a fork).
+
+You can do so by setting `CATWALK_URL` enviromental variable. (e.g. `export CATWALK_URL=http://localhost:8000`)
+
 ### Disabling automatic provider updates
 
 For those with restricted internet access, or those who prefer to work in

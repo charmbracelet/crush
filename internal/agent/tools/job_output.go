@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -63,9 +64,17 @@ func NewJobOutputTool() fantasy.AgentTool {
 			if done {
 				status = "completed"
 				if err != nil {
-					exitCode := shell.ExitCode(err)
-					if exitCode != 0 {
-						outputParts = append(outputParts, fmt.Sprintf("Exit code %d", exitCode))
+					if shell.IsInterrupt(err) {
+						if errors.Is(err, context.DeadlineExceeded) {
+							outputParts = append(outputParts, "Command timed out")
+						} else {
+							outputParts = append(outputParts, "Command was aborted before completion")
+						}
+					} else {
+						exitCode := shell.ExitCode(err)
+						if exitCode != 0 {
+							outputParts = append(outputParts, fmt.Sprintf("Exit code %d", exitCode))
+						}
 					}
 				}
 			}

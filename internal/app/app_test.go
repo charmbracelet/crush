@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -30,9 +31,6 @@ func TestSetupSubscriber_NormalFlow(t *testing.T) {
 	var wg sync.WaitGroup
 	setupSubscriber(ctx, &wg, "test", src.Subscribe, out)
 
-	// Yield so the subscriber goroutine can call src.Subscribe before we publish.
-	time.Sleep(10 * time.Millisecond)
-
 	src.Publish(pubsub.CreatedEvent, "hello")
 	src.Publish(pubsub.CreatedEvent, "world")
 
@@ -42,6 +40,44 @@ func TestSetupSubscriber_NormalFlow(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for forwarded event")
 		}
+	}
+
+	cancel()
+	wg.Wait()
+}
+
+// TestSetupSubscriber_PublishBeforeGoroutineScheduled reproduces the
+// subscriber-before-publisher race: Subscribe must run before setupSubscriber
+// returns, otherwise a Publish that races the fan-in goroutine's startup can
+// be delivered to zero subscribers and silently dropped. Pinning GOMAXPROCS
+// to 1 makes the race deterministic, since the fan-in goroutine cannot run
+// until the calling goroutine blocks.
+func TestSetupSubscriber_PublishBeforeGoroutineScheduled(t *testing.T) {
+	prev := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(prev)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	src := pubsub.NewBroker[string]()
+	defer src.Shutdown()
+	out := pubsub.NewBroker[tea.Msg]()
+	defer out.Shutdown()
+
+	outCh := out.Subscribe(ctx)
+
+	var wg sync.WaitGroup
+	setupSubscriber(ctx, &wg, "test", src.Subscribe, out)
+
+	// Publish immediately — no yield, no sleep. With GOMAXPROCS=1 the
+	// fan-in goroutine has not been scheduled yet, so this only passes
+	// if Subscribe already ran synchronously before setupSubscriber returned.
+	src.Publish(pubsub.CreatedEvent, "race-event")
+
+	select {
+	case <-outCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("event lost: setupSubscriber's goroutine had not subscribed when Publish was called")
 	}
 
 	cancel()

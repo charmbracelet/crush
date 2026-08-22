@@ -234,6 +234,13 @@ func (p *Permissions) ToolCallID() string {
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// #2799: swallow SPACE so a stray keystroke from the chat editor
+		// can't trigger viewport scroll or any other action when this
+		// dialog opens mid-typing. Approval requires an explicit
+		// Enter / a / s / d / mouse selection.
+		if msg.String() == "space" {
+			return nil
+		}
 		switch {
 		case key.Matches(msg, p.keyMap.Close):
 			// Escape denies the permission request.

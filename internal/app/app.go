@@ -264,7 +264,7 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool, showEvents bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	// Re-initialize the coder agent without interactive-only tools.
@@ -374,6 +374,14 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	messageReadBytes := make(map[string]int)
 	var printed bool
 
+	// When showEvents is on, create an event printer for stderr and
+	// suppress the spinner (events replace it).
+	var eventPrinter *format.EventPrinter
+	if showEvents {
+		eventPrinter = format.NewEventPrinter(os.Stderr)
+		hideSpinner = true
+	}
+
 	defer func() {
 		if progress && stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
@@ -405,30 +413,47 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 		case event := <-messageEvents:
 			msg := event.Payload
-			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
-				stopSpinner()
-
-				content := msg.Content().String()
-				readBytes := messageReadBytes[msg.ID]
-
-				if len(content) < readBytes {
-					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-				}
-
-				part := content[readBytes:]
-				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and intentation, which we don't want here.
-				if readBytes == 0 {
-					part = strings.TrimLeft(part, " \t")
-				}
-				// Ignore initial whitespace-only messages.
-				if printed || strings.TrimSpace(part) != "" {
-					printed = true
-					fmt.Fprint(output, part)
-				}
-				messageReadBytes[msg.ID] = len(content)
+			if msg.SessionID != sess.ID || len(msg.Parts) == 0 {
+				continue
 			}
+
+			// When showEvents is on, print tool calls and results
+			// as compact one-line summaries to stderr.
+			if showEvents && eventPrinter != nil {
+				for _, tc := range msg.ToolCalls() {
+					eventPrinter.PrintToolCall(tc.Name, tc.ID, tc.Input, tc.Finished)
+				}
+				for _, tr := range msg.ToolResults() {
+					eventPrinter.PrintToolResult(tr.Name, tr.Content, tr.IsError)
+				}
+			}
+
+			// Only Assistant messages carry streamable text to stdout.
+			if msg.Role != message.Assistant {
+				continue
+			}
+			stopSpinner()
+
+			content := msg.Content().String()
+			readBytes := messageReadBytes[msg.ID]
+
+			if len(content) < readBytes {
+				slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
+				return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+			}
+
+			part := content[readBytes:]
+			// Trim leading whitespace. Sometimes the LLM includes leading
+			// formatting and intentation, which we don't want here.
+			if readBytes == 0 {
+				part = strings.TrimLeft(part, " \t")
+			}
+			// Ignore initial whitespace-only messages.
+			if printed || strings.TrimSpace(part) != "" {
+				printed = true
+				fmt.Fprint(output, part)
+			}
+			messageReadBytes[msg.ID] = len(content)
 
 		case <-ctx.Done():
 			stopSpinner()

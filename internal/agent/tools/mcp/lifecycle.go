@@ -179,6 +179,7 @@ func mcpConfigEqual(a, b config.MCPConfig) bool {
 		slices.Equal(a.DisabledTools, b.DisabledTools) &&
 		slices.Equal(a.EnabledTools, b.EnabledTools) &&
 		a.Timeout == b.Timeout &&
+		a.MaxToolResultBytes == b.MaxToolResultBytes &&
 		maps.Equal(a.Headers, b.Headers) &&
 		a.OAuth == b.OAuth &&
 		a.OAuthClientID == b.OAuthClientID &&

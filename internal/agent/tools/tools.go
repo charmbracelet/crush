@@ -3,11 +3,14 @@ package tools
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"html/template"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/fsext"
 )
 
 type (
@@ -59,6 +62,28 @@ func GetSupportsImagesFromContext(ctx context.Context) bool {
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
+}
+
+// ignoredPathResponse reports whether filePath is excluded by .gitignore or
+// .crushignore rules relative to workingDir.
+func ignoredPathResponse(workingDir, filePath string) (fantasy.ToolResponse, bool) {
+	absWorkingDir, err := filepath.Abs(workingDir)
+	if err != nil {
+		return fantasy.ToolResponse{}, false
+	}
+
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		return fantasy.ToolResponse{}, false
+	}
+
+	if fsext.ShouldExcludeFile(absWorkingDir, absFilePath) {
+		return fantasy.NewTextErrorResponse(
+			fmt.Sprintf("Path is ignored by .gitignore or .crushignore: %s", filePath),
+		), true
+	}
+
+	return fantasy.ToolResponse{}, false
 }
 
 // NewPermissionDeniedResponse returns a tool response indicating the user

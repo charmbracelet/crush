@@ -167,6 +167,13 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		slog.Warn("No agent configuration found")
 		return app, nil
 	}
+	// Without a selected model there is nothing to talk to yet. The TUI
+	// prompts for one; non-interactive runs pick the first available model
+	// when they initialize the agent.
+	if !cfg.HasSelectedModel(config.SelectedModelTypeLarge) {
+		slog.Warn("No model selected")
+		return app, nil
+	}
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
@@ -672,7 +679,31 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 // InitCoderAgentNonInteractive initializes the coder agent without
 // interactive-only tools (e.g. question).
 func (app *App) InitCoderAgentNonInteractive(ctx context.Context) error {
+	app.ensureModelForNonInteractive()
 	return app.initCoderAgent(ctx, false)
+}
+
+// ensureModelForNonInteractive selects the first available model when the
+// user has never chosen one. Non-interactive runs cannot show the model
+// picker, so they fall back to the top of the model list rather than
+// failing. The choice lives in memory only and is never written to the
+// user's config.
+func (app *App) ensureModelForNonInteractive() {
+	cfg := app.config.Config()
+	if cfg.HasSelectedModel(config.SelectedModelTypeLarge) {
+		return
+	}
+	knownProviders, err := config.Providers(cfg)
+	if err != nil {
+		slog.Warn("Failed to load providers while selecting a fallback model", "error", err)
+	}
+	model, ok := cfg.FirstAvailableModel(knownProviders)
+	if !ok {
+		return
+	}
+	slog.Info("No model selected, falling back to first available model", "provider", model.Provider, "model", model.Model)
+	app.config.OverridePreferredModel(config.SelectedModelTypeLarge, model)
+	app.config.OverridePreferredModel(config.SelectedModelTypeSmall, app.GetDefaultSmallModel(model.Provider))
 }
 
 func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {

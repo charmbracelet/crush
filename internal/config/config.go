@@ -721,6 +721,99 @@ func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
 }
 
+// HasSelectedModel reports whether a usable model is selected for the
+// given type. It is false on a fresh install even when credentials are
+// present in the environment, since Crush no longer guesses a provider.
+func (c *Config) HasSelectedModel(modelType SelectedModelType) bool {
+	selected, ok := c.Models[modelType]
+	if !ok || selected.Provider == "" || selected.Model == "" {
+		return false
+	}
+	return c.GetModel(selected.Provider, selected.Model) != nil
+}
+
+// applySelectedModels stores the resolved selections, dropping any type
+// that could not be resolved so callers can detect that no model has been
+// chosen yet.
+func (c *Config) applySelectedModels(resolved resolvedModels) {
+	if c.Models == nil {
+		c.Models = make(map[SelectedModelType]SelectedModel)
+	}
+	for modelType, entry := range map[SelectedModelType]struct {
+		model SelectedModel
+		ok    bool
+	}{
+		SelectedModelTypeLarge: {resolved.Large, resolved.HasLarge},
+		SelectedModelTypeSmall: {resolved.Small, resolved.HasSmall},
+	} {
+		if entry.ok {
+			c.Models[modelType] = entry.model
+		} else {
+			delete(c.Models, modelType)
+		}
+	}
+}
+
+// orderedProviders returns the enabled providers that have models, in
+// catalog order first and then alphabetically by ID. The stable order keeps
+// model lookups reproducible across runs, unlike map iteration.
+func (c *Config) orderedProviders(knownProviders []catwalk.Provider) []ProviderConfig {
+	ordered := make([]ProviderConfig, 0, c.Providers.Len())
+	seen := make(map[string]bool, c.Providers.Len())
+	add := func(providerConfig ProviderConfig) {
+		if providerConfig.Disable || len(providerConfig.Models) == 0 || seen[providerConfig.ID] {
+			return
+		}
+		seen[providerConfig.ID] = true
+		ordered = append(ordered, providerConfig)
+	}
+
+	for _, p := range knownProviders {
+		if providerConfig, ok := c.Providers.Get(string(p.ID)); ok {
+			add(providerConfig)
+		}
+	}
+
+	remaining := slices.Collect(c.Providers.Seq())
+	slices.SortFunc(remaining, func(a, b ProviderConfig) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	for _, providerConfig := range remaining {
+		add(providerConfig)
+	}
+	return ordered
+}
+
+// FirstAvailableModel returns the first model of the first enabled
+// provider, preferring catalog order so the result matches the top of the
+// model list shown in the TUI. It exists for non-interactive runs, which
+// have no way to prompt for a selection; the result is never persisted.
+func (c *Config) FirstAvailableModel(knownProviders []catwalk.Provider) (SelectedModel, bool) {
+	for _, providerConfig := range c.orderedProviders(knownProviders) {
+		model := providerConfig.Models[0]
+		return SelectedModel{
+			Provider:        providerConfig.ID,
+			Model:           model.ID,
+			MaxTokens:       model.DefaultMaxTokens,
+			ReasoningEffort: model.DefaultReasoningEffort,
+		}, true
+	}
+	return SelectedModel{}, false
+}
+
+// providerForModel finds the enabled provider offering the given model ID.
+// It lets a config name a model without naming a provider.
+func (c *Config) providerForModel(knownProviders []catwalk.Provider, modelID string) (string, bool) {
+	for _, providerConfig := range c.orderedProviders(knownProviders) {
+		if slices.ContainsFunc(providerConfig.Models, func(m catwalk.Model) bool {
+			return m.ID == modelID
+		}) {
+			return providerConfig.ID, true
+		}
+	}
+	return "", false
+}
+
 func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	if providerConfig, ok := c.Providers.Get(provider); ok {
 		for _, m := range providerConfig.Models {

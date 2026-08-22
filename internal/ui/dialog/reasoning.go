@@ -145,12 +145,15 @@ func (r *Reasoning) HandleMsg(msg tea.Msg) Action {
 			}
 			return ActionSelectReasoningEffort{Effort: reasoningItem.effort}
 		default:
+			prevValue := r.input.Value()
 			var cmd tea.Cmd
 			r.input, cmd = r.input.Update(msg)
 			value := r.input.Value()
-			r.list.SetFilter(value)
-			r.list.ScrollToTop()
-			r.list.SetSelected(0)
+			if value != prevValue {
+				r.list.SetFilter(value)
+				r.list.ScrollToTop()
+				r.list.SetSelected(0)
+			}
 			return ActionCmd{cmd}
 		}
 	}

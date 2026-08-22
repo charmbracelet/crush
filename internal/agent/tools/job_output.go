@@ -46,7 +46,23 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			if params.Wait {
-				bgShell.WaitContext(ctx)
+				if !bgShell.WaitContext(ctx) {
+					stdout, stderr, _, _ := bgShell.GetOutput()
+					output := stdout + stderr
+					if output == "" {
+						output = BashNoOutput
+					}
+					output = TruncateOutput(output)
+					metadata := JobOutputResponseMetadata{
+						ShellID:          params.ShellID,
+						Command:          bgShell.Command,
+						Description:      bgShell.Description,
+						Done:             false,
+						WorkingDirectory: bgShell.WorkingDir,
+					}
+					result := fmt.Sprintf("Status: interrupted\n\nWait was interrupted before the job completed. Use job_output without wait to check current progress.\n\n%s", output)
+					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
+				}
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()

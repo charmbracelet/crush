@@ -444,6 +444,13 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
+func (app *App) ReloadSkills(ctx context.Context) error {
+	if app.AgentCoordinator == nil {
+		return fmt.Errorf("agent configuration is missing")
+	}
+	return app.AgentCoordinator.ReloadSkills(ctx)
+}
+
 // restoreModelFromSession reads the last assistant message in the
 // session and, if it used a different provider/model than the current
 // config, overrides the preferred model in-memory (non-persistent)

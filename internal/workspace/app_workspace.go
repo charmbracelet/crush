@@ -230,6 +230,10 @@ func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.app.UpdateAgentModel(ctx)
 }
 
+func (w *AppWorkspace) ReloadSkills(ctx context.Context) error {
+	return w.app.ReloadSkills(ctx)
+}
+
 func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
 }
@@ -386,7 +390,11 @@ func (w *AppWorkspace) MarkProjectInitialized() error {
 }
 
 func (w *AppWorkspace) InitializePrompt() (string, error) {
-	return agent.InitializePrompt(w.store)
+	var active []*skills.Skill
+	if w.app.Skills != nil {
+		active = w.app.Skills.ActiveSkills()
+	}
+	return agent.InitializePrompt(w.store, active)
 }
 
 func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, error) {

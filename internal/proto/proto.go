@@ -25,6 +25,13 @@ type Workspace struct {
 	// Channels lists the MCP servers opted in as channels for this workspace
 	// (from the --channels flag).
 	Channels []string `json:"channels,omitempty"`
+	// AllowAllCommands removes every bash-tool command block for this
+	// workspace (from the --allow-all-commands flag or CRUSH_ALLOW_ALL_COMMANDS).
+	AllowAllCommands bool `json:"allow_all_commands,omitempty"`
+	// AllowedCommands lists commands to drop from the bash tool's default
+	// banned list for this workspace (from the --allow-commands flag or
+	// CRUSH_ALLOW_COMMANDS).
+	AllowedCommands []string `json:"allowed_commands,omitempty"`
 	// Skills carries the snapshot of skill discovery state at workspace
 	// creation time. Subsequent updates flow through the SSE event
 	// stream.

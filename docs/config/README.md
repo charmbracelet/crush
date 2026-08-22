@@ -528,6 +528,10 @@ Available Keys:
   compact bool                  use the compact chat layout
   diff unified|split            choose unified or side-by-side diffs
   transparent bool              use the terminal background
+  mouse bool                    enable terminal mouse capture for clicks,
+                                selection, and scrolling in the TUI (default
+                                true); disable to let the terminal emulator
+                                or tmux handle text selection and copy/paste
   scrollbar string              control chat scrollbar visibility: default,
                                 always, or never
   completions-max-depth int     maximum directory depth shown by completions
@@ -538,6 +542,7 @@ Available Keys:
 option ui compact true
 option ui diff unified
 option ui transparent true
+option ui mouse false
 option ui scrollbar always
 option ui completions-max-depth 4
 option ui completions-max-items 200

@@ -186,7 +186,9 @@ option reset <list-key>    # clear a list option back to empty
 - **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
   `assisted-by`) and `attribution-generated-with` (boolean).
 - **UI settings**: `option ui compact BOOL`, `option ui diff unified|split`,
-  `option ui transparent BOOL`, `option ui scrollbar default|always|never`,
+  `option ui transparent BOOL`, `option ui mouse BOOL` (default `true`;
+  disable to let the terminal/tmux handle selection, copy/paste, and
+  scrolling), `option ui scrollbar default|always|never`,
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`

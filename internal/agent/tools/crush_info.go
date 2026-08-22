@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
@@ -350,18 +351,24 @@ func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {
 	c := cfg.Config()
 	overrides := cfg.Overrides()
 
-	if c.Permissions == nil {
-		if !overrides.SkipPermissionRequests {
-			return
-		}
-	} else if !overrides.SkipPermissionRequests && len(c.Permissions.AllowedTools) == 0 {
+	hasAllowedTools := c.Permissions != nil && len(c.Permissions.AllowedTools) > 0
+	isNonNormalMode := overrides.PermissionMode == permission.PermissionModeYolo ||
+		overrides.PermissionMode == permission.PermissionModeSysadmin
+
+	if !isNonNormalMode && !hasAllowedTools {
 		return
 	}
+
 	b.WriteString("[permissions]\n")
-	if overrides.SkipPermissionRequests {
+	switch overrides.PermissionMode {
+	case permission.PermissionModeSysadmin:
+		b.WriteString("mode = sysadmin\n")
+	case permission.PermissionModeYolo:
 		b.WriteString("mode = yolo\n")
+	default:
+		b.WriteString("mode = normal\n")
 	}
-	if c.Permissions != nil && len(c.Permissions.AllowedTools) > 0 {
+	if hasAllowedTools {
 		sorted := slices.Clone(c.Permissions.AllowedTools)
 		slices.Sort(sorted)
 		fmt.Fprintf(b, "allowed_tools = %s\n", strings.Join(sorted, ", "))

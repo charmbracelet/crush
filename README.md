@@ -626,12 +626,13 @@ the agent finishes its turn. They're only sent when the terminal window isn't
 focused _and_ your terminal supports reporting the focus state.
 
 ```bash
-# Choose auto, native, osc, bell, or disabled.
+# Choose auto, native, osc, bell, herdr, or disabled.
 option notifications disabled
 ```
 
 `auto` uses native notifications locally and OSC notifications over SSH when
-supported.
+supported. `herdr` surfaces toasts in herdr's own UI and only works when Crush
+runs inside a herdr pane; outside one it falls back to OSC.
 
 ### Initialization
 

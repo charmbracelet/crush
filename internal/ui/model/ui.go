@@ -37,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -589,6 +590,13 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 		case "bell":
 			slog.Debug("Using bell backend (user preference)")
 			return notification.NewBellBackend()
+		case "herdr":
+			if client := herdr.Init(); client != nil {
+				slog.Debug("Using herdr backend (user preference)")
+				return notification.NewHerdrBackend(client)
+			}
+			slog.Debug("Herdr backend unavailable outside a herdr pane; using OSC backend", "osc99_supported", caps.OSC99Notifications)
+			return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
 		case "disabled":
 			slog.Debug("Notifications disabled (user preference)")
 			return notification.NoopBackend{}

@@ -571,6 +571,11 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "disable_a2ui": {
+          "type": "boolean",
+          "description": "Disable A2UI entirely: drops the prompt section inviting the model to emit renderable \u003ca2ui-json\u003e surfaces and stops advertising the a2ui capability to MCP servers",
+          "default": false
         }
       },
       "additionalProperties": false,

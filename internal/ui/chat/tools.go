@@ -98,6 +98,13 @@ type ToolRenderOpts struct {
 	Compact         bool
 	IsSpinning      bool
 	Status          ToolStatus
+	// LiveSurfaces renders the item's live MCP A2UI surface models at the
+	// given width, and reports how many of the metadata's surfaces failed
+	// to draw. Set only when the result metadata carried renderable
+	// surfaces; nil otherwise, in which case renderers fall back to the
+	// static/text paths. Carried on the opts because the ToolRenderer
+	// interface does not see the owning item.
+	LiveSurfaces func(width int) (string, int)
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -158,6 +165,20 @@ type baseToolMessageItem struct {
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
+
+	// a2ui holds the live surface models for an MCP-served A2UI payload:
+	// a read_mcp_resource or mcp_* tool whose result metadata carries
+	// surfaces. They render interactively and, being long-lived app UIs,
+	// are never retired on interaction. Nil for tools without surfaces.
+	// surfaceSrcHash fingerprints the metadata the models were built from
+	// so a re-render with the same metadata reuses the live models (and
+	// their edited values) instead of rebuilding; surfaceBuildFailed
+	// counts payloads that never produced a drawable model, so the
+	// renderer can alert on them.
+	a2ui               a2uiSurfaceHost
+	surfaceSrcHash     uint64
+	surfaceScanned     bool
+	surfaceBuildFailed int
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
@@ -191,6 +212,7 @@ func newBaseToolMessageItem(
 		status:                   status,
 		hasCappedWidth:           hasCappedWidth,
 	}
+	t.a2ui.sty = sty
 	t.anim = anim.New(anim.Settings{
 		ID:          toolCall.ID,
 		Size:        15,
@@ -335,9 +357,20 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 		toolItemWidth = cappedMessageWidth(width)
 	}
 
+	// Build or refresh the live MCP surface models from the result
+	// metadata. While surfaces are live the content cache is
+	// bypassed: a surface's View reflects the current focus ring and
+	// edited values, not a frozen frame.
+	t.syncToolA2UISurfaces()
+	liveSurfaces := t.hasToolA2UISurfaces()
+	var liveRender func(width int) (string, int)
+	if liveSurfaces {
+		liveRender = t.renderToolA2UISurfaces
+	}
+
 	content, height, ok := t.getCachedRender(toolItemWidth)
 	// if we are spinning or there is no cache rerender
-	if !ok || t.isSpinning() {
+	if !ok || t.isSpinning() || liveSurfaces {
 		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
 			ToolCall:        t.toolCall,
 			Result:          t.result,
@@ -346,6 +379,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			Compact:         t.isCompact,
 			IsSpinning:      t.isSpinning(),
 			Status:          t.computeStatus(),
+			LiveSurfaces:    liveRender,
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.
@@ -356,8 +390,11 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 		}
 
 		height = lipgloss.Height(content)
-		// cache the rendered content
-		t.setCachedRender(content, toolItemWidth, height)
+		// cache the rendered content — but not while surfaces are live:
+		// the next interaction changes the view.
+		if !liveSurfaces {
+			t.setCachedRender(content, toolItemWidth, height)
+		}
 	}
 
 	return t.renderHighlighted(content, toolItemWidth, height)
@@ -367,8 +404,14 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 func (t *baseToolMessageItem) Render(width int) string {
 	// Cache the prefixed output keyed by (width, prefix variant).
 	// Bypass the cache while spinning (RawRender output is
-	// frame-dependent) or while a highlight range is active.
-	useCache := !t.isSpinning() && !t.isHighlighted()
+	// frame-dependent), while a highlight range is active, or while
+	// live MCP surfaces can change between frames.
+	//
+	// This decides whether the cache may be READ. It is not sufficient for
+	// the write: the surfaces do not exist yet on the first frame — it is
+	// RawRender below that builds them — so the surface check here is
+	// still false at that point and is re-run after RawRender.
+	useCache := !t.isSpinning() && !t.isHighlighted() && !t.hasToolA2UISurfaces()
 	var key uint64
 	switch {
 	case t.isCompact:
@@ -396,7 +439,14 @@ func (t *baseToolMessageItem) Render(width int) string {
 		lines[i] = prefix + ln
 	}
 	out := strings.Join(lines, "\n")
-	if useCache {
+	// Re-check now that RawRender has built the surfaces. Caching a frame
+	// that contains a live surface freezes it: getCachedPrefixedRender
+	// keys on (width, prefix) alone and ignores Version(), so once the
+	// server deletes the surface — flipping hasToolA2UISurfaces() back to
+	// false and re-enabling the cache — that first frame would be served
+	// again for the rest of the item's life, still drawing the surface
+	// that no longer exists. RawRender guards its own cache the same way.
+	if useCache && !t.hasToolA2UISurfaces() {
 		t.setCachedPrefixedRender(out, width, key)
 	}
 	return out
@@ -417,6 +467,9 @@ func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
+	// New metadata may carry different surfaces; force a rebuild on the
+	// next render while preserving focus/edits when it is unchanged.
+	t.surfaceScanned = false
 	t.clearCache()
 	t.Bump()
 }
@@ -504,13 +557,34 @@ func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) b
 	return btn == ansi.MouseLeft
 }
 
-// HandleKeyEvent implements KeyEventHandler.
+// HandleKeyEvent implements KeyEventHandler. A focused live MCP surface
+// gets first claim on the keys it understands — Tab/Shift+Tab cycle
+// its focus ring, Enter activates a button (surfacing an
+// a2uievent.ButtonClicked the UI model routes per provenance) — and
+// every other key falls through, so the copy shortcut keeps working
+// whenever no surface consumes the key.
 func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
+	if handled, cmd := t.handleA2UIKeyEvent(key); handled {
+		return true, cmd
+	}
 	if k := key.String(); k == "c" || k == "y" {
 		text := t.formatToolForCopy()
 		return true, common.CopyToClipboard(text, "Tool content copied to clipboard")
 	}
 	return false, nil
+}
+
+// SetFocused implements MessageItem. Focus also drives the live MCP
+// surfaces: gaining focus grants it to the first live surface,
+// losing focus blurs them all — so the focus ring only ever lives on the
+// selected item.
+func (t *baseToolMessageItem) SetFocused(focused bool) {
+	t.focusableMessageItem.SetFocused(focused)
+	if focused {
+		t.focusToolA2UISurfaces()
+	} else {
+		t.blurToolA2UISurfaces()
+	}
 }
 
 // pendingTool renders a tool that is still in progress with an animation.

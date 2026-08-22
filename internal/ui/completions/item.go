@@ -2,6 +2,7 @@ package completions
 
 import (
 	"slices"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/list"
@@ -21,6 +22,14 @@ type ResourceCompletionValue struct {
 	URI      string
 	Title    string
 	MIMEType string
+}
+
+// IsTemplate reports whether the completion's URI is an unexpanded RFC 6570
+// URI template (it still contains a "{expression}") rather than a concrete,
+// readable resource URI. Templates come from resources/templates/list and
+// cannot be read until their placeholders are filled in.
+func (r ResourceCompletionValue) IsTemplate() bool {
+	return strings.Contains(r.URI, "{")
 }
 
 // CompletionItem represents an item in the completions list.

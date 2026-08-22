@@ -24,6 +24,9 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.addSessionCostStmt, err = db.PrepareContext(ctx, addSessionCost); err != nil {
+		return nil, fmt.Errorf("error preparing query AddSessionCost: %w", err)
+	}
 	if q.createFileStmt, err = db.PrepareContext(ctx, createFile); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateFile: %w", err)
 	}
@@ -99,11 +102,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
 	}
+	if q.listChildSessionsStmt, err = db.PrepareContext(ctx, listChildSessions); err != nil {
+		return nil, fmt.Errorf("error preparing query ListChildSessions: %w", err)
+	}
 	if q.listFilesByPathStmt, err = db.PrepareContext(ctx, listFilesByPath); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesByPath: %w", err)
 	}
 	if q.listFilesBySessionStmt, err = db.PrepareContext(ctx, listFilesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesBySession: %w", err)
+	}
+	if q.listFilesBySessionWithChildrenStmt, err = db.PrepareContext(ctx, listFilesBySessionWithChildren); err != nil {
+		return nil, fmt.Errorf("error preparing query ListFilesBySessionWithChildren: %w", err)
 	}
 	if q.listLatestSessionFilesStmt, err = db.PrepareContext(ctx, listLatestSessionFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListLatestSessionFiles: %w", err)
@@ -143,6 +152,11 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.addSessionCostStmt != nil {
+		if cerr := q.addSessionCostStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing addSessionCostStmt: %w", cerr)
+		}
+	}
 	if q.createFileStmt != nil {
 		if cerr := q.createFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createFileStmt: %w", cerr)
@@ -268,6 +282,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
 		}
 	}
+	if q.listChildSessionsStmt != nil {
+		if cerr := q.listChildSessionsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listChildSessionsStmt: %w", cerr)
+		}
+	}
 	if q.listFilesByPathStmt != nil {
 		if cerr := q.listFilesByPathStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listFilesByPathStmt: %w", cerr)
@@ -276,6 +295,11 @@ func (q *Queries) Close() error {
 	if q.listFilesBySessionStmt != nil {
 		if cerr := q.listFilesBySessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listFilesBySessionStmt: %w", cerr)
+		}
+	}
+	if q.listFilesBySessionWithChildrenStmt != nil {
+		if cerr := q.listFilesBySessionWithChildrenStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listFilesBySessionWithChildrenStmt: %w", cerr)
 		}
 	}
 	if q.listLatestSessionFilesStmt != nil {
@@ -336,7 +360,7 @@ func (q *Queries) Close() error {
 	return err
 }
 
-func (q *Queries) exec(ctx context.Context, stmt *sql.Stmt, query string, args ...interface{}) (sql.Result, error) {
+func (q *Queries) exec(ctx context.Context, stmt *sql.Stmt, query string, args ...any) (sql.Result, error) {
 	switch {
 	case stmt != nil && q.tx != nil:
 		return q.tx.StmtContext(ctx, stmt).ExecContext(ctx, args...)
@@ -347,7 +371,7 @@ func (q *Queries) exec(ctx context.Context, stmt *sql.Stmt, query string, args .
 	}
 }
 
-func (q *Queries) query(ctx context.Context, stmt *sql.Stmt, query string, args ...interface{}) (*sql.Rows, error) {
+func (q *Queries) query(ctx context.Context, stmt *sql.Stmt, query string, args ...any) (*sql.Rows, error) {
 	switch {
 	case stmt != nil && q.tx != nil:
 		return q.tx.StmtContext(ctx, stmt).QueryContext(ctx, args...)
@@ -358,7 +382,7 @@ func (q *Queries) query(ctx context.Context, stmt *sql.Stmt, query string, args 
 	}
 }
 
-func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, args ...interface{}) *sql.Row {
+func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, args ...any) *sql.Row {
 	switch {
 	case stmt != nil && q.tx != nil:
 		return q.tx.StmtContext(ctx, stmt).QueryRowContext(ctx, args...)
@@ -372,6 +396,7 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 type Queries struct {
 	db                                   DBTX
 	tx                                   *sql.Tx
+	addSessionCostStmt                   *sql.Stmt
 	createFileStmt                       *sql.Stmt
 	createMessageStmt                    *sql.Stmt
 	createSessionStmt                    *sql.Stmt
@@ -397,8 +422,10 @@ type Queries struct {
 	getUsageByHourStmt                   *sql.Stmt
 	getUsageByModelStmt                  *sql.Stmt
 	listAllUserMessagesStmt              *sql.Stmt
+	listChildSessionsStmt                *sql.Stmt
 	listFilesByPathStmt                  *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
+	listFilesBySessionWithChildrenStmt   *sql.Stmt
 	listLatestSessionFilesStmt           *sql.Stmt
 	listMessagesBySessionStmt            *sql.Stmt
 	listNewFilesStmt                     *sql.Stmt
@@ -416,6 +443,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
 		db:                                   tx,
 		tx:                                   tx,
+		addSessionCostStmt:                   q.addSessionCostStmt,
 		createFileStmt:                       q.createFileStmt,
 		createMessageStmt:                    q.createMessageStmt,
 		createSessionStmt:                    q.createSessionStmt,
@@ -441,8 +469,10 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUsageByHourStmt:                   q.getUsageByHourStmt,
 		getUsageByModelStmt:                  q.getUsageByModelStmt,
 		listAllUserMessagesStmt:              q.listAllUserMessagesStmt,
+		listChildSessionsStmt:                q.listChildSessionsStmt,
 		listFilesByPathStmt:                  q.listFilesByPathStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
+		listFilesBySessionWithChildrenStmt:   q.listFilesBySessionWithChildrenStmt,
 		listLatestSessionFilesStmt:           q.listLatestSessionFilesStmt,
 		listMessagesBySessionStmt:            q.listMessagesBySessionStmt,
 		listNewFilesStmt:                     q.listNewFilesStmt,

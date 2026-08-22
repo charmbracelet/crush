@@ -189,7 +189,8 @@ option reset <list-key>    # clear a list option back to empty
   `option ui transparent BOOL`, `option ui scrollbar default|always|never`,
   `option ui completions-max-depth N`, `option ui completions-max-items N`.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
-  `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
+  `global-context-path`, `skill-path`, `disable-skill`, `subagent-path`,
+  `disable-subagent`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).
 
 ```bash
@@ -345,6 +346,8 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
+| `option subagent-path ./agents`      | `options.subagents_paths = ["./agents"]`               |
+| `option disable-subagent NAME`       | `options.disabled_subagents = ["NAME"]`                |
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |

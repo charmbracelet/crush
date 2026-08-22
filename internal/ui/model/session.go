@@ -95,6 +95,40 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 	return tea.Batch(load, m.reportCurrentSession(sessionID))
 }
 
+// fetchParentMeta fetches the parent session title (for the breadcrumb) and
+// this child's subagent color (from the in-memory runtime). Both lookups run
+// off the Update path. childSessionID may be empty when only the title
+// matters. The closure captures only locals (never m) so it is safe
+// off-thread.
+func (m *UI) fetchParentMeta(parentSessionID, childSessionID string) tea.Cmd {
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		sess, err := ws.GetSession(context.Background(), parentSessionID)
+		if err != nil {
+			return nil
+		}
+		var color string
+		for _, entry := range ws.RunningSubagents(parentSessionID) {
+			if entry.ChildSessionID == childSessionID {
+				color = entry.Color
+				break
+			}
+		}
+		return parentTitleMsg{forSession: childSessionID, title: sess.Title, color: color}
+	}
+}
+
+// refreshRunningSubagents resolves the running-subagent list for sessionID off
+// the Update path (RunningSubagents hits the DB to enrich token counts) and
+// delivers it as a runningSubagentsMsg. The closure captures only locals
+// (never m) so it is safe off-thread.
+func (m *UI) refreshRunningSubagents(sessionID string) tea.Cmd {
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		return runningSubagentsMsg{forSession: sessionID, list: ws.RunningSubagents(sessionID)}
+	}
+}
+
 // reportCurrentSession returns a fire-and-forget tea.Cmd that
 // informs the workspace which session this client is currently
 // viewing. Errors are logged at debug only; the call is a hint
@@ -161,7 +195,10 @@ func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
 // handleFileEvent processes file change events and updates the session file
 // list with new or updated file information.
 func (m *UI) handleFileEvent(file history.File) tea.Cmd {
-	if m.session == nil || file.SessionID != m.session.ID {
+	if m.session == nil {
+		return nil
+	}
+	if file.SessionID != m.session.ID && !m.knownChildSessionIDs[file.SessionID] {
 		return nil
 	}
 

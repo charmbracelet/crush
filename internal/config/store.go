@@ -352,6 +352,33 @@ func (s *ConfigStore) HasConfigField(scope Scope, key string) bool {
 	return gjson.Get(string(data), key).Exists()
 }
 
+// StringSliceConfigField reads a string array straight from the config file for
+// the given scope, ignoring every other scope. Config() returns the merged view
+// of global + workspace, so a read-modify-write of a list field must go through
+// this instead: merging in entries the user set at another scope and writing
+// them back would silently pin them at this one.
+//
+// Returns nil when the scope has no config file or the key is absent.
+func (s *ConfigStore) StringSliceConfigField(scope Scope, key string) []string {
+	path, err := s.configPath(scope)
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	result := gjson.Get(string(data), key)
+	if !result.Exists() {
+		return nil
+	}
+	var out []string
+	for _, v := range result.Array() {
+		out = append(out, v.String())
+	}
+	return out
+}
+
 // SetConfigField sets a key/value pair in the config file for the given scope.
 // After a successful write, it automatically reloads config to keep in-memory
 // state fresh.
@@ -991,6 +1018,15 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 		loadedPaths: loadedPaths,
 		resolver:    NewShellVariableResolver(env.New()),
 	}
+}
+
+// NewTestStoreWithWorkingDir creates a ConfigStore for testing purposes with
+// an explicit working directory set. This is required for scope-detection
+// tests in the workspace package.
+func NewTestStoreWithWorkingDir(cfg *Config, workingDir string, loadedPaths ...string) *ConfigStore {
+	s := NewTestStore(cfg, loadedPaths...)
+	s.workingDir = workingDir
+	return s
 }
 
 // ImportCopilot attempts to import a GitHub Copilot token from disk.

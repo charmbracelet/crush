@@ -70,8 +70,17 @@ type Service interface {
 	Get(ctx context.Context, id string) (Session, error)
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
+	// ListChildSessions returns the direct child sessions (task/subagent
+	// sessions created via CreateTaskSession) of parentSessionID. It does
+	// not recurse into grandchildren.
+	ListChildSessions(ctx context.Context, parentSessionID string) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
+	// AddCost atomically adds delta to a session's cost, e.g. accumulating a
+	// completed subagent's cost onto its parent session, without a
+	// fetch-modify-save race against other concurrent updates to that
+	// session (title, tokens, todos).
+	AddCost(ctx context.Context, sessionID string, delta float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
 
@@ -236,6 +245,25 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 	return nil
 }
 
+// AddCost atomically adds delta to a session's cost, leaving title, tokens,
+// and todos untouched. This is safer than fetching, modifying, and saving the
+// entire session, which would race against and clobber other concurrent
+// updates to those other fields.
+func (s *service) AddCost(ctx context.Context, sessionID string, delta float64) error {
+	rows, err := s.q.AddSessionCost(ctx, db.AddSessionCostParams{
+		ID:   sessionID,
+		Cost: delta,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	s.publishSessionUpdate(ctx, sessionID)
+	return nil
+}
+
 // Rename updates only the title of a session without touching updated_at or
 // usage fields.
 func (s *service) Rename(ctx context.Context, id string, title string) error {
@@ -251,6 +279,21 @@ func (s *service) Rename(ctx context.Context, id string, title string) error {
 
 func (s *service) List(ctx context.Context) ([]Session, error) {
 	dbSessions, err := s.q.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, len(dbSessions))
+	for i, dbSession := range dbSessions {
+		sessions[i] = s.fromDBItem(dbSession)
+		s.applyEstimatedUsageState(&sessions[i])
+	}
+	return sessions, nil
+}
+
+// ListChildSessions returns the direct child sessions of parentSessionID.
+// It does not recurse into grandchildren.
+func (s *service) ListChildSessions(ctx context.Context, parentSessionID string) ([]Session, error) {
+	dbSessions, err := s.q.ListChildSessions(ctx, sql.NullString{String: parentSessionID, Valid: true})
 	if err != nil {
 		return nil, err
 	}

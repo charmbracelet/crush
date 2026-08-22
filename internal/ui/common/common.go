@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/clipboard"
@@ -19,6 +20,56 @@ const MaxAttachmentSize = int64(5 * 1024 * 1024)
 
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
+
+// AllowedTextFileTypes defines text-based file types that can be attached
+// and inlined into the prompt as text attachments.
+var AllowedTextFileTypes = []string{
+	".css", ".html", ".htm", ".json", ".yaml", ".yml", ".md", ".txt",
+	".conf", ".csv", ".xml", ".js", ".ts", ".tsx", ".jsx", ".go",
+	".py", ".sh", ".bash", ".zsh", ".toml", ".ini", ".env", ".log",
+	".sql", ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".rb", ".php",
+	".swift", ".kt", ".scala", ".lua", ".r", ".dart", ".vue", ".svelte",
+	".graphql", ".gql", ".proto", ".tf", ".dockerfile", ".makefile",
+	".gitignore", ".editorconfig", ".lock", ".diff", ".patch",
+}
+
+// AllAllowedAttachmentTypes returns the combined list of image and text file
+// types that can be attached.
+func AllAllowedAttachmentTypes() []string {
+	result := make([]string, 0, len(AllowedImageTypes)+len(AllowedTextFileTypes))
+	result = append(result, AllowedImageTypes...)
+	result = append(result, AllowedTextFileTypes...)
+	return result
+}
+
+// IsAllowedAttachmentType reports whether the given file path has an
+// extension that is in the allowed image or text file type list.
+func IsAllowedAttachmentType(path string) bool {
+	lower := strings.ToLower(path)
+	for _, ext := range AllowedImageTypes {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	for _, ext := range AllowedTextFileTypes {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsAllowedImageType reports whether the given file path has an allowed image
+// extension.
+func IsAllowedImageType(path string) bool {
+	lower := strings.ToLower(path)
+	for _, ext := range AllowedImageTypes {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
 
 // Common defines common UI options and configurations.
 type Common struct {

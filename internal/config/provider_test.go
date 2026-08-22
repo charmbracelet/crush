@@ -274,36 +274,48 @@ func TestCache_GetInvalidJSON(t *testing.T) {
 
 func TestCachePathFor(t *testing.T) {
 	tests := []struct {
-		name        string
-		xdgDataHome string
-		expected    string
+		name            string
+		cacheName       string
+		crushGlobalData string
+		xdgDataHome     string
+		expected        string
 	}{
 		{
-			name:        "with XDG_DATA_HOME",
+			name:            "CRUSH_GLOBAL_DATA providers cache",
+			cacheName:       "providers",
+			crushGlobalData: "/isolated/data",
+			xdgDataHome:     "/custom/data",
+			expected:        "/isolated/data/providers.json",
+		},
+		{
+			name:            "CRUSH_GLOBAL_DATA Hyper cache",
+			cacheName:       "hyper",
+			crushGlobalData: "/isolated/data",
+			expected:        "/isolated/data/hyper.json",
+		},
+		{
+			name:        "XDG_DATA_HOME",
+			cacheName:   "providers",
 			xdgDataHome: "/custom/data",
 			expected:    "/custom/data/crush/providers.json",
 		},
 		{
-			name:        "without XDG_DATA_HOME",
-			xdgDataHome: "",
-			expected:    "", // Will use platform-specific default.
+			name:      "platform default",
+			cacheName: "providers",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.xdgDataHome != "" {
-				t.Setenv("XDG_DATA_HOME", tt.xdgDataHome)
-			} else {
-				t.Setenv("XDG_DATA_HOME", "")
-			}
+			t.Setenv("CRUSH_GLOBAL_DATA", tt.crushGlobalData)
+			t.Setenv("XDG_DATA_HOME", tt.xdgDataHome)
 
-			result := cachePathFor("providers")
+			result := cachePathFor(tt.cacheName)
 			if tt.expected != "" {
 				require.Equal(t, tt.expected, filepath.ToSlash(result))
 			} else {
 				require.Contains(t, result, "crush")
-				require.Contains(t, result, "providers.json")
+				require.Contains(t, result, tt.cacheName+".json")
 			}
 		})
 	}

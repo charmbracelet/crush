@@ -726,6 +726,14 @@ func (w *ClientWorkspace) DisableDockerMCP() error {
 	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
 }
 
+func (w *ClientWorkspace) MCPEnable(ctx context.Context, name string) error {
+	return w.client.MCPEnable(ctx, w.workspaceID(), name)
+}
+
+func (w *ClientWorkspace) MCPDisable(name string) error {
+	return w.client.MCPDisable(context.Background(), w.workspaceID(), name)
+}
+
 func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
 	// The server suppresses its own browser open for this flow; the client
 	// polls the auth URL and opens it locally so the user authorizes on

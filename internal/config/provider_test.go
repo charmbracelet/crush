@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -305,4 +306,33 @@ func TestCachePathFor(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProviderConfig_TestConnection_ResolveError(t *testing.T) {
+	t.Parallel()
+
+	// Mock resolver that returns an error.
+	mockResolver := &errorResolver{err: fmt.Errorf("variable $API_KEY not found")}
+
+	cfg := &ProviderConfig{
+		ID:     "test-provider",
+		Name:   "Test Provider",
+		Type:   catwalk.TypeOpenAI,
+		APIKey: "${API_KEY}",
+		BaseURL: "https://api.openai.com/v1",
+	}
+
+	err := cfg.TestConnection(mockResolver)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to resolve API key")
+	require.Contains(t, err.Error(), "test-provider")
+}
+
+// errorResolver is a VariableResolver that always returns an error.
+type errorResolver struct {
+	err error
+}
+
+func (e *errorResolver) ResolveValue(value string) (string, error) {
+	return "", e.err
 }

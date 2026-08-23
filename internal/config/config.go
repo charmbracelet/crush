@@ -571,8 +571,12 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		providerID = catwalk.InferenceProvider(c.ID)
 		testURL    = ""
 		headers    = make(map[string]string)
-		apiKey, _  = resolver.ResolveValue(c.APIKey)
 	)
+
+	apiKey, err := resolver.ResolveValue(c.APIKey)
+	if err != nil {
+		return fmt.Errorf("failed to resolve API key for provider %s: %w", c.ID, err)
+	}
 
 	switch providerID {
 	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:

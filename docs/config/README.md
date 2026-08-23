@@ -309,6 +309,9 @@ mcp add github --type http \
   --header Authorization "Bearer $GH_PAT"
 ```
 
+To pair a phone as a spectator (not `crush serve`), add the Build Remote Agent
+stdio MCP. See [Pair a phone with Build Remote Agent](./gbr.md).
+
 As with providers, a header whose value resolves to the empty string is
 dropped from the outgoing request.
 

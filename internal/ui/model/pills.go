@@ -133,7 +133,7 @@ func cronPill(tasks []scheduler.Task, t *styles.Styles) string {
 	if len(tasks) == 0 {
 		return ""
 	}
-	icon := t.Pills.QueueLabel.Render("⏱")
+	icon := t.Pills.QueueLabel.Render(styles.CronOneShotIcon)
 	label := t.Pills.QueueLabel.Render(fmt.Sprintf("%d Scheduled", len(tasks)))
 	content := fmt.Sprintf("%s %s", icon, label)
 	return t.Pills.Focused.Render(content)
@@ -158,11 +158,9 @@ func cronList(tasks []scheduler.Task, t *styles.Styles) string {
 		if ansi.StringWidth(prompt) > maxQueueDisplayLength {
 			prompt = ansi.Truncate(prompt, maxQueueDisplayLength-1, "…")
 		}
-		recurring := ""
-		if task.Recurring {
-			recurring = " ↻"
-		}
-		text := fmt.Sprintf("%s %s%s — %s", task.ID, nextRun, recurring, prompt)
+		// Recurrence is carried by the prefix glyph; repeating it inline
+		// would print ↻ twice on the same row.
+		text := fmt.Sprintf("%s %s — %s", task.ID, nextRun, prompt)
 		// The prefix glyph distinguishes recurring from one-shot tasks,
 		// keeping scheduled items visually distinct from the queued-prompt
 		// list directly above them when both sections are expanded.
@@ -177,7 +175,11 @@ func cronList(tasks []scheduler.Task, t *styles.Styles) string {
 // item: ↻ for recurring, ⏱ for one-shot.
 func cronItemPrefix(task scheduler.Task, t *styles.Styles) string {
 	if task.Recurring {
-		return t.Tool.CronRecurringIcon.Render()
+		// Tool.CronRecurringIcon carries no SetString — unlike the Pills
+		// styles, which do — so the glyph has to be passed in. Rendering
+		// it with no argument styles the empty string and the row loses
+		// its prefix entirely.
+		return t.Tool.CronRecurringIcon.Render(styles.CronRecurringIcon)
 	}
 	return t.Pills.CronItemPrefix.Render()
 }

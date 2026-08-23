@@ -235,7 +235,13 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	coderPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	// TODO: make this dynamic when we support multiple agents
+	// The cron tools below are registered unconditionally in buildAgent, so
+	// the matching prompt guidance is always on for the coder agent.
+	coderPrompt, err := coderPrompt(
+		prompt.WithWorkingDir(c.cfg.WorkingDir()),
+		prompt.WithScheduling(),
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -43,7 +43,7 @@ const (
 	TodoInProgressIcon string = "→"
 
 	CronRecurringIcon string = "↻"
-	CronOneShotIcon   string = "•"
+	CronOneShotIcon   string = "⏱"
 	CronDeletedIcon   string = "✕"
 
 	ImageIcon  string = "■"

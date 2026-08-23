@@ -13,6 +13,7 @@ To schedule N minutes from now, add N to the current minute (handling hour/day r
 - "Check every hour": "0 * * * *", recurring: true
 - "Every day at 9am": "0 9 * * *", recurring: true
 - "At 2:30pm today": "30 14 <today_dom> <today_month> *", recurring: false
+- "Run every 5 minutes for the next 2 hours": "*/5 * * * *", recurring: true — then CronDelete when the work is done. Do NOT create 24 separate one-shots.
 
 Expressions that are syntactically valid but can never match — "0 0 30 2 *", February 30th — are rejected rather than accepted as a task that silently never runs.
 

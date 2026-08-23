@@ -1962,6 +1962,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return nil
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSaveSummary:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before saving the summary..."))
+			break
+		}
+		cmds = append(cmds, m.saveSummaryToFile(msg.SessionID))
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -4505,9 +4512,10 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.session.ID
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
+	hasSummary := hasSession && m.session.SummaryMessageID != ""
 	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasSummary, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -4815,6 +4823,30 @@ func (m *UI) newSession() tea.Cmd {
 		m.loadPromptHistory(),
 		m.reportCurrentSession(""),
 	)
+}
+
+// saveSummaryToFile writes the session's latest summary message to a
+// markdown file inside the data directory so it can be reused later,
+// e.g. as the initial context of a new session.
+func (m *UI) saveSummaryToFile(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		sess, err := m.com.Workspace.GetSession(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		path, err := saveSummaryExport(m.com.Config().Options.DataDirectory, sess, msgs)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return util.CmdHandler(util.InfoMsg{
+			Type: util.InfoTypeSuccess,
+			Msg:  "Summary saved to " + path,
+		})()
+	}
 }
 
 // checkBangModeAfterPaste engages bang mode when pasted text starts with

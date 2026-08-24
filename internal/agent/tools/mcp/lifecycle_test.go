@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"errors"
+	"io"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -392,4 +394,64 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 	require.Equal(t, StateConnected, info.State)
 	require.Equal(t, Counts{Tools: 1, Prompts: 1, Resources: 1}, info.Counts,
 		"reported counts must match the restored registries")
+}
+
+// testTransportWrapper is a second, test-local decorator. maybeStdioErr must
+// see through an arbitrary stack of them, not just the one wrapper that
+// happens to exist in createSession today.
+type testTransportWrapper struct {
+	mcp.Transport
+	inner mcp.Transport
+}
+
+func (t *testTransportWrapper) unwrapTransport() mcp.Transport { return t.inner }
+
+// TestMaybeStdioErr_UnwrapsChannelTransport pins that maybeStdioErr sees
+// through the channelTransport wrapper to the inner CommandTransport.
+//
+// Every transport is wrapped in a channelTransport before Connect, so the
+// *mcp.CommandTransport assertion never matched and a failed stdio server (a
+// missing npx, node not on PATH) reported a bare EOF with the child's stderr
+// thrown away — the exact diagnostic stdioCheck exists to provide. We assert
+// both that the unwrap reaches the command (the error is no longer bare EOF)
+// and that the re-executed child's output surfaces in the joined error.
+func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo 'startup failed: bad config'; exit 3")
+	inner := &mcp.CommandTransport{Command: cmd}
+	wrapped := &channelTransport{inner: inner, name: "t", gate: newChannelGate()}
+
+	got := maybeStdioErr(io.EOF, wrapped)
+	require.Error(t, got)
+	require.NotEqual(t, io.EOF, got, "the unwrap must reach the command transport")
+	require.ErrorContains(t, got, "startup failed: bad config",
+		"the re-executed child's output must surface in the error")
+}
+
+// TestMaybeStdioErr_UnwrapsEveryWrapper pins the unwrap against future
+// decorators: it must peel the whole stack, not a fixed number of layers.
+func TestMaybeStdioErr_UnwrapsEveryWrapper(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo boom-diagnostic >&2; exit 3")
+	var transport mcp.Transport = &mcp.CommandTransport{Command: cmd}
+	transport = &channelTransport{inner: transport, name: "t", gate: newChannelGate()}
+	transport = &testTransportWrapper{inner: transport}
+
+	got := maybeStdioErr(io.EOF, transport)
+	require.ErrorContains(t, got, "boom-diagnostic",
+		"stdio diagnostics must survive every transport decorator")
+}
+
+// TestStdioCheck_DoesNotDuplicateArgv0 pins the argv0 handling in the
+// diagnostic re-run. exec.Cmd.Args carries argv0 as its first element and
+// exec.CommandContext prepends Path as argv0 itself, so passing Args through
+// whole re-ran "sh sh -c ..." — and the error reported that malformed
+// command's failure instead of the child's real startup output.
+func TestStdioCheck_DoesNotDuplicateArgv0(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo 'real startup error'; exit 3")
+
+	err := stdioCheck(cmd)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "real startup error",
+		"the re-run must execute the original command, not a duplicated argv0")
+	require.NotContains(t, err.Error(), "cannot execute binary file",
+		"a duplicated argv0 makes the shell try to exec itself as a script")
 }

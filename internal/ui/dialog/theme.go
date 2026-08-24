@@ -159,8 +159,8 @@ func NewTheme(com *common.Common) *Theme {
 		key.WithHelp("esc", "cancel"),
 	)
 	th.keyMap.NewTheme = key.NewBinding(
-		key.WithKeys("ctrl+n"),
-		key.WithHelp("ctrl+n", "new theme"),
+		key.WithKeys("ctrl+shift+n"),
+		key.WithHelp("ctrl+shift+n", "new theme"),
 	)
 	th.keyMap.Close = CloseKey
 

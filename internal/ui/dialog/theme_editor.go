@@ -69,8 +69,8 @@ func NewThemeEditor(com *common.Common, themeName string) *ThemeEditor {
 	ed.input.Focus()
 
 	ed.keyMap.Save = key.NewBinding(key.WithKeys("enter", "ctrl+s"), key.WithHelp("enter", "save"))
-	ed.keyMap.Next = key.NewBinding(key.WithKeys("down", "tab"), key.WithHelp("↓", "next"))
-	ed.keyMap.Previous = key.NewBinding(key.WithKeys("up", "shift+tab"), key.WithHelp("↑", "previous"))
+	ed.keyMap.Next = key.NewBinding(key.WithKeys("down", "ctrl+n", "tab"), key.WithHelp("↓", "next"))
+	ed.keyMap.Previous = key.NewBinding(key.WithKeys("up", "ctrl+p", "shift+tab"), key.WithHelp("↑", "previous"))
 	ed.keyMap.Close = CloseKey
 
 	ed.loadTheme()

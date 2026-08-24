@@ -428,5 +428,15 @@ func loadMCPResources() []ResourceCompletionValue {
 			})
 		}
 	}
+	for mcpName, mcpTemplates := range mcp.ResourceTemplates() {
+		for _, t := range mcpTemplates {
+			resources = append(resources, ResourceCompletionValue{
+				MCPName:  mcpName,
+				URI:      t.URITemplate,
+				Title:    t.Name,
+				MIMEType: t.MIMEType,
+			})
+		}
+	}
 	return resources
 }

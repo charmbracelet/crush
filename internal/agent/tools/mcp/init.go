@@ -205,6 +205,15 @@ type ClientInfo struct {
 	Client      *ClientSession
 	Counts      Counts
 	ConnectedAt time.Time
+	// A2UITools lists the a2ui_* tools this server exposes. It rides on the
+	// state rather than being read from the tool registry via HasTool
+	// because the registry only exists in the process that owns the MCP
+	// sessions: a client/server TUI has an empty one, so a HasTool gate
+	// there is permanently false and the surface round-trip it guards can
+	// never fire. Only the a2ui_* subset is carried — the UI asks nothing
+	// else, and a full tool list would put every server's whole catalog on
+	// the wire on every state change.
+	A2UITools []string
 
 	// Config is the configuration the server last successfully connected
 	// with. Reconcile compares it against the live config to decide whether
@@ -219,6 +228,11 @@ type ClientInfo struct {
 	// progress rather than the last successful one, which would leave the
 	// server skipped as "starting" and never restarted for the new config.
 	PendingConfig *config.MCPConfig
+}
+
+// ServesA2UITool reports whether the server exposes the named a2ui_* tool.
+func (c ClientInfo) ServesA2UITool(toolName string) bool {
+	return slices.Contains(c.A2UITools, toolName)
 }
 
 // SubscribeEvents returns a channel for MCP events.
@@ -573,11 +587,26 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 	}
 
 	updatePrompts(name, prompts)
+
+	// Fetch resources and resource templates eagerly so the status display
+	// reflects the real count from the first connection, not a stale zero.
+	// Both helpers are no-ops when the server doesn't advertise the
+	// resources capability, and gracefully handle "method not found". Bound
+	// the listing with the same per-server timeout createSession enforces: a
+	// server that connects but then hangs on resources/list would otherwise
+	// stall startup — with the bound it degrades to a warn and a zero count.
+	// The listing error is ignored here for that reason: on the startup
+	// critical path a failed listing must not fail the connection.
+	listCtx, cancelList := context.WithTimeout(ctx, mcpTimeout(m))
+	resourceCount, _ := refreshSessionResources(listCtx, name, session)
+	cancelList()
+
 	sessions.Set(name, session)
 
 	updateState(name, StateConnected, nil, session, Counts{
-		Tools:   toolCount,
-		Prompts: len(prompts),
+		Tools:     toolCount,
+		Prompts:   len(prompts),
+		Resources: resourceCount,
 	}, withConfig(m))
 
 	return session, nil
@@ -749,13 +778,22 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	updatePrompts(name, prompts)
 	counts.Prompts = len(prompts)
 
-	resources, err := getResources(ctx, newSess)
+	// Resource templates go back in alongside the resources: A2UI surfaces
+	// are served through them, so a renewal that re-registers only the
+	// plain resources drops every surface URI out of the completions popup
+	// until the next restart.
+	//
+	// A listing failure here is fatal, exactly as it is for tools and
+	// prompts above: this is a renewal of a session we already refused
+	// once, so handing the caller a server that reports StateConnected
+	// with an empty resource registry hides the breakage behind a healthy
+	// status while every '@' completion for it silently disappears.
+	counts.Resources, err = refreshSessionResources(ctx, name, newSess)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		closeSession(name, newSess)
 		return nil, err
 	}
-	counts.Resources = updateResources(name, resources)
 
 	// Re-check before publishing: if a teardown landed during registration a
 	// newer attempt owns the registries now, so leave them and our session
@@ -829,6 +867,9 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	info.Error = err
 	info.Client = client
 	info.Counts = counts
+	// Snapshot the a2ui_* capability alongside the counts so a remote
+	// client learns it without reading this process's tool registry.
+	info.A2UITools = a2uiToolNames(name)
 	for _, opt := range opts {
 		opt(&info)
 	}
@@ -849,13 +890,14 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		if old, ok := sessions.Take(name); ok {
 			closeSession(name, old)
 		}
-		// Drop every registry entry for the dead server. Leaving prompts or
-		// resources behind lets a disconnected server keep advertising
-		// capabilities the agent can no longer fulfil, the same divergence the
-		// tool clear prevents.
+		// Drop every registry entry for the dead server. Leaving prompts,
+		// resources, or resource templates behind lets a disconnected server
+		// keep advertising capabilities the agent can no longer fulfil, the
+		// same divergence the tool clear prevents.
 		allTools.Del(name)
 		allPrompts.Del(name)
 		allResources.Del(name)
+		allResourceTemplates.Del(name)
 	}
 	states.Set(name, info)
 
@@ -901,6 +943,13 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	channelGate := newChannelGate()
 	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
+	// Advertise A2UI support in the initialize handshake so an A2UI-over-MCP
+	// server knows it can send surfaces. A host that won't render A2UI must
+	// not claim the capability.
+	if !a2uiDisabled(cfg) {
+		transport = &a2uiInitTransport{inner: transport}
+	}
+
 	client := mcp.NewClient(
 		&mcp.Implementation{
 			Name:    "crush",
@@ -930,6 +979,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 				level := parseLevel(string(req.Params.Level))
 				slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
 			},
+			Capabilities: a2uiSDKCapabilities(a2uiDisabled(cfg)),
 		},
 	)
 
@@ -975,10 +1025,40 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 // error.
 // this happens particularly when starting things with npx, e.g. if node can't
 // be found or some other error like that.
+// transportWrapper is implemented by every transport decorator crush layers
+// around the real transport, so diagnostics that need the underlying
+// transport (see maybeStdioErr) can reach it regardless of wrapping order.
+type transportWrapper interface {
+	unwrapTransport() mcp.Transport
+}
+
+// unwrapTransport peels every crush-owned decorator off a transport and
+// returns the innermost one.
+func unwrapTransport(transport mcp.Transport) mcp.Transport {
+	for {
+		w, ok := transport.(transportWrapper)
+		if !ok {
+			return transport
+		}
+		inner := w.unwrapTransport()
+		if inner == nil {
+			return transport
+		}
+		transport = inner
+	}
+}
+
 func maybeStdioErr(err error, transport mcp.Transport) error {
 	if !errors.Is(err, io.EOF) {
 		return err
 	}
+	// Transports are wrapped in one or more decorators before Connect (the
+	// channel gate, the A2UI capability injector); the stdio transport we're
+	// probing for is the innermost one. Unwrap all of them — without this the
+	// assertion below never matches and stdio startup failures report a bare
+	// EOF instead of the child's actual output. Every wrapper must implement
+	// unwrapTransport or it will hide this diagnostic again.
+	transport = unwrapTransport(transport)
 	ct, ok := transport.(*mcp.CommandTransport)
 	if !ok {
 		return err
@@ -1263,12 +1343,13 @@ func clearOAuthToken(cfg *config.ConfigStore, name string) {
 }
 
 // clearMCPData removes a stale MCP server's tools, prompts,
-// resources, and auth handlers from global state so they are not
-// served to the agent.
+// resources, resource templates, and auth handlers from global state so they
+// are not served to the agent.
 func clearMCPData(name string) {
 	allTools.Del(name)
 	allPrompts.Del(name)
 	allResources.Del(name)
+	allResourceTemplates.Del(name)
 	if h, ok := authURLs.Get(name); ok {
 		h.Close()
 		authURLs.Del(name)
@@ -1278,7 +1359,14 @@ func clearMCPData(name string) {
 func stdioCheck(old *exec.Cmd) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, old.Path, old.Args...)
+	// old.Args includes argv0 as the first element; exec.CommandContext
+	// prepends old.Path as argv0, so we must skip it to avoid duplication
+	// (e.g. "npx npx -y pkg" instead of "npx -y pkg").
+	args := old.Args
+	if len(args) > 0 {
+		args = args[1:]
+	}
+	cmd := exec.CommandContext(ctx, old.Path, args...)
 	cmd.Env = old.Env
 	out, err := cmd.CombinedOutput()
 	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {

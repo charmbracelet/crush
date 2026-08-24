@@ -1572,6 +1572,169 @@
                 }
             }
         },
+        "/workspaces/{id}/mcp/auth": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Authenticate an MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "MCP name request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPNameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/auth-url": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP OAuth authorization URL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "MCP server name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/call-tool": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Call MCP tool",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "MCP call tool request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPCallToolRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/mcp/docker/disable": {
             "post": {
                 "tags": [
@@ -1681,6 +1844,49 @@
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/pending-auth": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP servers pending OAuth",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.MCPPendingAuthServer"
+                            }
                         }
                     },
                     "404": {
@@ -3485,6 +3691,9 @@
                 "debug_lsp": {
                     "type": "boolean"
                 },
+                "disable_a2ui": {
+                    "type": "boolean"
+                },
                 "disable_auto_summarize": {
                     "type": "boolean"
                 },
@@ -3671,6 +3880,10 @@
                     "items": {
                         "$ref": "#/definitions/proto.Attachment"
                     }
+                },
+                "content_width": {
+                    "description": "ContentWidth is the client UI's chat content width hint in cells\n(0 when the turn has no interactive UI). It is a per-turn context\nvalue on the server side, so it must travel as an explicit wire\nfield — context values do not cross the HTTP boundary. See\nShellCommandRequest.TermWidth for the same pattern.",
+                    "type": "integer"
                 },
                 "prompt": {
                     "type": "string"
@@ -3917,9 +4130,40 @@
                 }
             }
         },
+        "proto.MCPAuthResponse": {
+            "type": "object",
+            "properties": {
+                "auth_url": {
+                    "description": "AuthURL is the OAuth authorization URL the user must visit, when\nthe flow is still in progress.",
+                    "type": "string"
+                }
+            }
+        },
+        "proto.MCPCallToolRequest": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tool_name": {
+                    "type": "string"
+                }
+            }
+        },
         "proto.MCPClientInfo": {
             "type": "object",
             "properties": {
+                "a2ui_tools": {
+                    "description": "A2UITools lists the a2ui_* tools the server exposes, so a client can\ntell whether an A2UI surface interaction round-trips to the server\nwithout access to the server-side tool registry.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "connected_at": {
                     "type": "string"
                 },
@@ -3970,6 +4214,17 @@
             "type": "object",
             "properties": {
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.MCPPendingAuthServer": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "url": {
                     "type": "string"
                 }
             }

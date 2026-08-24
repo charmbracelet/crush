@@ -191,7 +191,13 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	// A2UI is on unless the user disables it; see prompt.WithA2UI for the
+	// host-capability trade-off.
+	promptOpts := []prompt.Option{prompt.WithWorkingDir(c.cfg.WorkingDir())}
+	if !c.cfg.Config().Options.DisableA2UI {
+		promptOpts = append(promptOpts, prompt.WithA2UI())
+	}
+	prompt, err := coderPrompt(promptOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -297,6 +303,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			RunID:            runID,
+			ContentWidth:     ContentWidthFromContext(ctx),
 			Prompt:           prompt,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
@@ -1428,7 +1435,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	// Run the agent
 	run := func() (*fantasy.AgentResult, error) {
 		return params.Agent.Run(ctx, SessionAgentCall{
-			SessionID:        session.ID,
+			SessionID: session.ID,
+			// Inherit the parent turn's UI width hint: the sub-agent's
+			// PrepareStep stamps call.ContentWidth over the tool-call
+			// context unconditionally, so leaving this zero would clobber
+			// the value the parent already carries.
+			ContentWidth:     tools.GetContentWidthFromContext(ctx),
 			Prompt:           params.Prompt,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  getProviderOptions(model, providerCfg),

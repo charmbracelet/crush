@@ -3159,7 +3159,6 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
-
 		}
 	default:
 		// TODO: other states

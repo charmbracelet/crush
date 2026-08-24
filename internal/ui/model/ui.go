@@ -2595,6 +2595,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 			case key.Matches(msg, m.keyMap.Editor.PasteImage):
 				if !m.currentModelSupportsImages() {
+					cmds = append(cmds, util.ReportWarn(fmt.Sprintf("%s doesn't support images", m.currentModelName())))
 					break
 				}
 				cmds = append(cmds, m.pasteImageFromClipboard)
@@ -3434,6 +3435,25 @@ func (m *UI) currentModelSupportsImages() bool {
 	}
 	model := cfg.GetModelByType(agentCfg.Model)
 	return model != nil && model.SupportsImages
+}
+
+// currentModelName returns the display name of the coder agent's current
+// model for user-facing messages, falling back to "current model" when the
+// selection cannot be resolved.
+func (m *UI) currentModelName() string {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return "current model"
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return "current model"
+	}
+	selected, ok := cfg.Models[agentCfg.Model]
+	if !ok || selected.Model == "" {
+		return "current model"
+	}
+	return selected.Model
 }
 
 // toggleCompactMode toggles compact mode between uiChat and uiChatCompact states.
@@ -4849,6 +4869,27 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 
 	if m.focus != uiFocusEditor {
 		return nil
+	}
+
+	// When the pasted content is strictly empty, the clipboard likely holds
+	// a non-text format (e.g. an image copied from Preview on macOS). On
+	// macOS, terminal emulators intercept CMD+V and send the clipboard's
+	// text via bracketed paste; if the clipboard has an image instead of
+	// text, the resulting PasteMsg is empty. Fall back to reading image data
+	// from the native clipboard so the paste is not silently swallowed.
+	//
+	// The check is a strict == "" rather than TrimSpace: the macOS repro
+	// produces a strictly empty message, and trimming would also swallow
+	// genuine whitespace-only pastes (silently dropping them when no image is
+	// found). Mirroring the key-bound path, the fallback is gated to
+	// image-capable models so a text-only model doesn't attach an image chip
+	// that would be silently dropped at send time — but warn instead of
+	// no-oping so the user knows why nothing landed.
+	if msg.Content == "" {
+		if m.currentModelSupportsImages() {
+			return m.pasteImageFromClipboard
+		}
+		return util.ReportWarn(fmt.Sprintf("%s doesn't support images", m.currentModelName()))
 	}
 
 	if hasPasteExceededThreshold(msg) {

@@ -91,6 +91,17 @@ func (c *eventCollector) reset() {
 	c.events = nil
 }
 
+// waitFor blocks until at least n events have been collected. Tests use
+// this instead of sleeping before reset: the collector appends from its
+// own goroutine, so a fixed sleep can expire before an already-published
+// event lands and the reset then fails to drop it.
+func (c *eventCollector) waitFor(t *testing.T, n int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return len(c.snapshot()) >= n
+	}, time.Second, time.Millisecond)
+}
+
 func TestUpdate_DebouncesTextDeltas(t *testing.T) {
 	t.Parallel()
 
@@ -107,7 +118,7 @@ func TestUpdate_DebouncesTextDeltas(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// Drop the CreatedEvent emitted by Create.
-	time.Sleep(5 * time.Millisecond)
+	collector.waitFor(t, 1)
 	collector.reset()
 
 	// Push 5 deltas inside a single debounce window.
@@ -147,7 +158,8 @@ func TestUpdate_TerminalUpdatesFlushSynchronously(t *testing.T) {
 
 	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
 	require.NoError(t, err)
-	time.Sleep(5 * time.Millisecond)
+	// Drop the CreatedEvent emitted by Create.
+	collector.waitFor(t, 1)
 	collector.reset()
 
 	// AddFinish makes the message terminal; Update must flush

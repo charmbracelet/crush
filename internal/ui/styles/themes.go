@@ -207,6 +207,19 @@ func gruvboxDarkOpts() quickStyleOpts {
 	}
 }
 
+// gruvboxDarkOverrides applies Gruvbox-specific tweaks on top of the
+// token-driven base styles.
+func gruvboxDarkOverrides(s Styles) Styles {
+	// The shared quickStyle renders inline code as the destructive
+	// (bright red) color on the code background. In Gruvbox that pairing
+	// (#fb4934 on #504945) is only ~2.6:1 contrast, which is hard to
+	// read. Use Gruvbox orange on the darkest background instead, which
+	// keeps a warm "code" feel while clearing WCAG AA (~5.8:1).
+	s.Markdown.Code.Color = hex(lipgloss.Color("#fe8019"))
+	s.Markdown.Code.BackgroundColor = hex(lipgloss.Color("#282828"))
+	return s
+}
+
 // builtinThemes maps theme names to their quickStyleOpts palette definitions.
 var builtinThemes = map[string]func() quickStyleOpts{
 	"charmtone":    charmtoneOpts,
@@ -217,7 +230,8 @@ var builtinThemes = map[string]func() quickStyleOpts{
 // theme-specific style tweaks on top of the styles produced by
 // [quickStyle]. Themes without overrides are absent from the map.
 var builtinThemeOverrides = map[string]func(Styles) Styles{
-	"charmtone": charmtoneOverrides,
+	"charmtone":    charmtoneOverrides,
+	"gruvbox-dark": gruvboxDarkOverrides,
 }
 
 // BuiltinThemeNames returns the names of all built-in themes, sorted.

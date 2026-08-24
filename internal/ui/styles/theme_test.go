@@ -1,6 +1,11 @@
 package styles
 
-import "testing"
+import (
+	"math"
+	"strconv"
+	"strings"
+	"testing"
+)
 
 func TestLoadTheme_Builtin(t *testing.T) {
 	_, err := LoadTheme("charmtone")
@@ -73,5 +78,47 @@ func TestCloneDoesNotAlias(t *testing.T) {
 	}
 	if *s.Markdown.Document.Color == "#ff0000" {
 		t.Error("modifying clone mutated original")
+	}
+}
+
+// relativeLuminance and contrastRatio implement the WCAG 2.x formulas so we
+// can assert that inline code stays legible in built-in themes.
+func relativeLuminance(hexColor string) float64 {
+	h := strings.TrimPrefix(hexColor, "#")
+	if len(h) != 6 {
+		return 0
+	}
+	channel := func(offset int) float64 {
+		v, _ := strconv.ParseInt(h[offset:offset+2], 16, 0)
+		c := float64(v) / 255
+		if c <= 0.03928 {
+			return c / 12.92
+		}
+		return math.Pow((c+0.055)/1.055, 2.4)
+	}
+	r, g, b := channel(0), channel(2), channel(4)
+	return 0.2126*r + 0.7152*g + 0.0722*b
+}
+
+func contrastRatio(fg, bg string) float64 {
+	lf, lb := relativeLuminance(fg), relativeLuminance(bg)
+	hi, lo := math.Max(lf, lb), math.Min(lf, lb)
+	return (hi + 0.05) / (lo + 0.05)
+}
+
+func TestGruvboxDark_InlineCodeContrast(t *testing.T) {
+	// Regression test for the reported low-contrast inline code in Gruvbox
+	// Dark (bright red on the code background was only ~2.6:1).
+	const minAA = 4.5
+	s, err := LoadTheme("gruvbox-dark")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	code := s.Markdown.Code
+	if code.Color == nil || code.BackgroundColor == nil {
+		t.Fatal("inline code style is missing fg/bg colors")
+	}
+	if ratio := contrastRatio(*code.Color, *code.BackgroundColor); ratio < minAA {
+		t.Errorf("gruvbox-dark inline code contrast %.2f is below WCAG AA (%.1f)", ratio, minAA)
 	}
 }

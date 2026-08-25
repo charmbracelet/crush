@@ -434,7 +434,7 @@ Crush has preliminary support for hooks. For details, see
 ### Sharing a workspace across clients
 
 When Crush is run against a shared backend (for example two TUIs talking to
-the same `crush serve`), clients are grouped into **workspaces** keyed by
+the same `crush server`), clients are grouped into **workspaces** keyed by
 their resolved `--cwd`. Two clients with the same `--cwd` join the same
 underlying workspace, so they share the session list, message history,
 permission queue, LSP, and MCP state.

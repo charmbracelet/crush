@@ -168,21 +168,6 @@ provider add deepseek \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
 
-[MindsHub](https://mindshub.ai) fronts multiple vendors' models (Claude,
-GPT, Kimi, DeepSeek, and more) behind one OpenAI-compatible API and key:
-
-```bash
-provider add mindshub \
-  --type openai-compat \
-  --base-url "https://api.mindshub.ai/v1" \
-  --api-key "${MINDSHUB_API_KEY:?set MINDSHUB_API_KEY}"
-
-model add mindshub/sonnet --name "Claude Sonnet 5" --context-window 200000
-```
-
-See the [MindsHub inference docs](https://docs.mindshub.ai/inference/) for
-the full catalog of aliases and pricing.
-
 Headers whose value resolves to the empty string (an unset `$VAR`, a
 `$(...)` that prints nothing, or a literal `""`) are dropped from the
 outgoing request. This makes env-gated headers safe:

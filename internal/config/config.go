@@ -201,6 +201,12 @@ type MCPConfig struct {
 	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
 
+	// MaxToolResultBytes caps the text content of a tool result before it is
+	// added to the model context. Zero uses the package default so oversized
+	// results from third-party MCP servers cannot blow past the context
+	// window.
+	MaxToolResultBytes int `json:"max_tool_result_bytes,omitempty" jsonschema:"description=Maximum number of bytes of a tool result to include in the model context,default=131072,example=131072,example=1048576"`
+
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
 	// work. A header whose value resolves to the empty string (unset

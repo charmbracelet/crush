@@ -13,7 +13,7 @@ import (
 //
 //	mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...]
 //	    [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...]
-//	    [--timeout N] [--disabled true|false]
+//	    [--timeout N] [--max-tool-result-bytes N] [--disabled true|false]
 //	    [--disabled-tools TOOL ...] [--enabled-tools TOOL ...]
 //	    [--oauth true|false] [--oauth-client-id ID]
 //	    [--oauth-client-secret SECRET] [--oauth-callback-port PORT]
@@ -49,6 +49,7 @@ var mcpAddFlags = []flagSpec{
 	{name: "--url", jsonKey: "url", kind: flagString, op: opSet},
 	{name: "--header", child: "headers", kind: flagKeyValue, op: opSetChild},
 	{name: "--timeout", jsonKey: "timeout", kind: flagInt, op: opSet},
+	{name: "--max-tool-result-bytes", jsonKey: "max_tool_result_bytes", kind: flagInt, op: opSet},
 	{name: "--disabled", jsonKey: "disabled", kind: flagBool, op: opSet},
 	{name: "--disabled-tools", jsonKey: "disabled_tools", kind: flagString, op: opAppend},
 	{name: "--enabled-tools", jsonKey: "enabled_tools", kind: flagString, op: opAppend},
@@ -60,7 +61,7 @@ var mcpAddFlags = []flagSpec{
 
 func mcpAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if len(args) < 3 {
-		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...] [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...] [--timeout N] [--disabled true|false] [--disabled-tools TOOL ...] [--enabled-tools TOOL ...] [--oauth true|false] [--oauth-client-id ID] [--oauth-client-secret SECRET] [--oauth-callback-port PORT]")
+		return usage(stderr, "usage: mcp add <name> --type stdio|sse|http [--command CMD] [--args ARG ...] [--env KEY VALUE ...] [--url URL] [--header KEY VALUE ...] [--timeout N] [--max-tool-result-bytes N] [--disabled true|false] [--disabled-tools TOOL ...] [--enabled-tools TOOL ...] [--oauth true|false] [--oauth-client-id ID] [--oauth-client-secret SECRET] [--oauth-callback-port PORT]")
 	}
 	name := args[2]
 	slog.Info("MCP server defined in shell config", "name", name)

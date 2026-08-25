@@ -2037,18 +2037,21 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleMouseSupport:
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
+			break
+		}
+		// Flip the field on the main update path so it never races with
+		// View() reading m.mouseEnabled from a background command's
+		// goroutine; only the (possibly slow) config write is deferred.
+		mouseEnabled := cfg.Options == nil || cfg.Options.TUI.Mouse == nil || *cfg.Options.TUI.Mouse
+		newValue := !mouseEnabled
+		m.mouseEnabled = newValue
 		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			mouseEnabled := cfg.Options == nil || cfg.Options.TUI.Mouse == nil || *cfg.Options.TUI.Mouse
-			newValue := !mouseEnabled
 			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.mouse", newValue); err != nil {
 				return util.ReportError(err)()
 			}
-			m.mouseEnabled = newValue
 
 			status := "disabled"
 			if newValue {

@@ -7,9 +7,17 @@ import (
 )
 
 // TestServerCmdAcceptsServeAlias guards the `serve` alias on `crush server`.
-// The README describes the shared backend as "crush serve", and cobra does no
-// prefix matching, so without the alias that invocation fails with "unknown
-// command" — the documented name and the real one have to agree.
+//
+// `serve` is the spelling people reach for — the README itself said "crush
+// serve" until the commit that added this test, which is how the mismatch was
+// found. Cobra does no prefix matching and EnablePrefixMatching is off, so
+// without an explicit alias that invocation dies with `unknown command
+// "serve" for "crush"` rather than starting a server.
+//
+// Note that fang does not render Aliases in help output, so this test is the
+// only place the alias is written down. Don't delete it as unmotivated: the
+// motivation is that the alias has no other discoverability, not that some
+// doc currently spells it that way.
 func TestServerCmdAcceptsServeAlias(t *testing.T) {
 	t.Parallel()
 

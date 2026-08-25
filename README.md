@@ -700,33 +700,6 @@ model add deepseek/deepseek-chat \
   --price-cache-hit 0.07
 ```
 
-[MindsHub](https://mindshub.ai) is an OpenAI-compatible inference gateway
-that puts Claude, GPT, Kimi, DeepSeek, and other catalog models behind one
-API key and one bill. Don't forget to set `MINDSHUB_API_KEY` in your
-environment.
-
-```bash
-provider add mindshub --type openai-compat \
-  --base-url "https://api.mindshub.ai/v1" \
-  --api-key "$MINDSHUB_API_KEY"
-
-model add mindshub/sonnet \
-  --name "Claude Sonnet 5" \
-  --context-window 200000 \
-  --can-reason true \
-  --supports-images true \
-  --price-input 2 \
-  --price-output 10 \
-  --price-cache-create 2.5 \
-  --price-cache-hit 0.2
-```
-
-Any other alias from MindsHub's [model catalog](https://docs.mindshub.ai/inference/models)
-(`opus`, `kimi`, `deepseek`, `gpt`, `gpt-codex`, `gemini`, and more) works the
-same way — register it with another `model add mindshub/<alias>` line. See
-the [MindsHub inference docs](https://docs.mindshub.ai/inference/) for
-current aliases and pricing.
-
 #### Anthropic-Compatible APIs
 
 Custom Anthropic-compatible providers follow this format:

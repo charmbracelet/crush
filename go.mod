@@ -3,7 +3,7 @@ module github.com/charmbracelet/crush
 go 1.26.6
 
 require (
-	charm.land/bubbles/v2 v2.2.0
+	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/catwalk v0.52.8
 	charm.land/fang/v2 v2.0.1

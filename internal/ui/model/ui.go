@@ -399,11 +399,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.DynamicHeight = true
 	ta.MinHeight = TextareaMinHeight
 	ta.MaxHeight = TextareaMaxHeight
-	// "ctrl+a" is bound to line-start in the textarea; crush uses "ctrl+g"
-	// for help, so bind select-all to "ctrl+a" instead (line-start remains
-	// available via "home").
+	// Keep "ctrl+a" for line-start (the textarea default); bind select-all
+	// to "ctrl+shift+a" instead (line-start is also available via "home").
 	ta.KeyMap.LineStart = key.NewBinding(
-		key.WithKeys("home"),
+		key.WithKeys("home", "ctrl+a"),
 		key.WithHelp("home", "line start"),
 	)
 	ta.KeyMap.SelectAll = key.NewBinding(

@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/stringext"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // DefaultHighlighter is the default highlighter function that applies inverse style.
@@ -23,23 +24,153 @@ type Highlighter func(x, y int, c *uv.Cell) *uv.Cell
 
 // HighlightContent returns the content with highlighted regions based on the specified parameters.
 func HighlightContent(content string, area image.Rectangle, startLine, startCol, endLine, endCol int) string {
-	var sb strings.Builder
-	pos := image.Pt(-1, -1)
-	HighlightBuffer(content, area, startLine, startCol, endLine, endCol, func(x, y int, c *uv.Cell) *uv.Cell {
-		pos.X = x
-		if pos.Y == -1 {
-			pos.Y = y
-		} else if y > pos.Y {
-			sb.WriteString(strings.Repeat("\n", y-pos.Y))
-			pos.Y = y
-		}
-		sb.WriteString(c.Content)
-		return c
-	})
-	if sb.Len() > 0 {
-		sb.WriteString("\n")
+	content = stringext.NormalizeSpace(content)
+
+	if startLine < 0 || startCol < 0 {
+		return ""
 	}
-	return sb.String()
+
+	width, height := area.Dx(), area.Dy()
+	buf := renderBuffer(content, area, width, height)
+
+	// Treat -1 as "end of content".
+	if endLine < 0 {
+		endLine = height - 1
+	}
+	if endCol < 0 {
+		endCol = width
+	}
+
+	rows := extractRows(buf, startLine, startCol, endLine, endCol, height)
+	return joinRows(rows, width) + "\n"
+}
+
+// renderBuffer draws content into a screen buffer of the given dimensions.
+func renderBuffer(content string, area image.Rectangle, width, height int) uv.ScreenBuffer {
+	buf := uv.NewScreenBuffer(width, height)
+	styled := uv.NewStyledString(content)
+	styled.Draw(&buf, area)
+	return buf
+}
+
+// extractRows extracts the text of the selected region from the buffer,
+// one string per row, trimmed to the last cell holding content.
+func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, height int) []string {
+	rows := make([]string, 0, endLine-startLine+1)
+	for y := startLine; y <= endLine && y < height; y++ {
+		if y >= buf.Height() {
+			break
+		}
+
+		line := buf.Line(y)
+		colStart := 0
+		if y == startLine {
+			colStart = min(startCol, len(line))
+		}
+		colEnd := len(line)
+		if y == endLine {
+			colEnd = min(endCol, len(line))
+		}
+
+		rows = append(rows, extractRow(line, colStart, colEnd))
+	}
+	return rows
+}
+
+// extractRow returns the text of a single buffer line between colStart and
+// colEnd, trimmed to the last cell holding any content (including explicit
+// spaces: renderers like glamour pad rows with real space cells, so content
+// usually reaches the full width).
+func extractRow(line uv.Line, colStart, colEnd int) string {
+	lastCellX := -1
+	for x := colStart; x < colEnd; x++ {
+		cell := line.At(x)
+		if cell != nil && cell.Content != "" {
+			lastCellX = x
+		}
+	}
+
+	var row strings.Builder
+	for x := colStart; x <= lastCellX; x++ {
+		cell := line.At(x)
+		if cell != nil {
+			row.WriteString(cell.Content)
+		}
+	}
+	return row.String()
+}
+
+// joinRows stitches screen rows back into text, deciding per row boundary
+// whether it was a real newline or a word wrap. Blank rows are paragraph
+// breaks; otherwise isWordWrap decides.
+func joinRows(rows []string, width int) string {
+	var sb strings.Builder
+	for i, row := range rows {
+		text := strings.TrimRight(row, " ")
+		sb.WriteString(text)
+		if i == len(rows)-1 {
+			break
+		}
+
+		next := rows[i+1]
+		switch {
+		case strings.TrimSpace(next) == "":
+			// Blank row: paragraph break.
+			sb.WriteString("\n")
+		case isWordWrap(text, next, width):
+			sb.WriteString(" ")
+		default:
+			sb.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// isWordWrap reports whether the boundary between the current row and the
+// next is a renderer word wrap rather than a real newline.
+//
+// Renderers like glamour word-wrap paragraphs, filling each wrapped row
+// close to the full width; a row whose text reaches past the wrap
+// threshold therefore continues on the next row, while a shorter row ends
+// a block (a heading, a list item, the last line of a paragraph). The
+// threshold is generous because glamour fills wrapped rows to roughly 80%
+// or more of the width.
+//
+// Two overrides apply: a blank next row is a paragraph break (handled by
+// the caller), and a next row that starts a new markdown block — a bullet
+// or a heading — always begins on its own line, even if the current row is
+// full-width (a list item can itself wrap right up to the width before the
+// following item).
+func isWordWrap(text, next string, width int) bool {
+	if startsBlock(next) {
+		return false
+	}
+	return width > 0 && ansi.StringWidth(text) >= width*3/5
+}
+
+// startsBlock reports whether a row begins a new markdown block such as a
+// list item or heading, rather than continuing a wrapped paragraph.
+// Indented rows are continuations of nested content (e.g. the second line
+// of a list item), not new blocks.
+func startsBlock(row string) bool {
+	if row != strings.TrimLeft(row, " ") {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(row, "- "), strings.HasPrefix(row, "* "),
+		strings.HasPrefix(row, "+ "), strings.HasPrefix(row, "• "),
+		strings.HasPrefix(row, "#"):
+		return true
+	}
+	if i := strings.IndexAny(row, ".)"); i > 0 && i < 4 {
+		for j := range i {
+			if row[j] < '0' || row[j] > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // Highlight highlights a region of text within the given content and region.

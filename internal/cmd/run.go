@@ -250,6 +250,13 @@ func runNonInteractive(
 		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
 
+	// Non-interactive runs have nobody to answer permission prompts, so
+	// auto-approve this session, exactly like the in-process path does
+	// (see app.RunNonInteractive).
+	if err := c.AutoApproveSession(ctx, ws.ID, sess.ID); err != nil {
+		return fmt.Errorf("failed to auto-approve session: %w", err)
+	}
+
 	events, err := c.SubscribeEvents(ctx, ws.ID)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to events: %w", err)

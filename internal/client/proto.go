@@ -761,6 +761,20 @@ func (c *Client) GetPermissionsSkipRequests(ctx context.Context, id string) (boo
 	return skip.Skip, nil
 }
 
+// AutoApproveSession auto-approves every permission request in a single
+// session for the given workspace.
+func (c *Client) AutoApproveSession(ctx context.Context, id, sessionID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/auto-approve", id), nil, jsonBody(proto.PermissionAutoApproveRequest{SessionID: sessionID}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to auto-approve session: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to auto-approve session: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // GetConfig retrieves the workspace-specific configuration.
 func (c *Client) GetConfig(ctx context.Context, id string) (*config.Config, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/config", id), nil, nil)

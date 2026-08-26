@@ -50,7 +50,6 @@ type Theme struct {
 		Rename        key.Binding
 		ConfirmRename key.Binding
 		CancelRename  key.Binding
-		NewTheme      key.Binding
 		Close         key.Binding
 	}
 }
@@ -157,10 +156,6 @@ func NewTheme(com *common.Common) *Theme {
 	th.keyMap.CancelRename = key.NewBinding(
 		key.WithKeys("esc"),
 		key.WithHelp("esc", "cancel"),
-	)
-	th.keyMap.NewTheme = key.NewBinding(
-		key.WithKeys("ctrl+shift+n"),
-		key.WithHelp("ctrl+shift+n", "new theme"),
 	)
 	th.keyMap.Close = CloseKey
 
@@ -275,8 +270,6 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 				th.selectedIndex = th.list.Selected()
 				th.mode = themesModeRenaming
 				th.setThemeItems()
-			case key.Matches(msg, th.keyMap.NewTheme):
-				return ActionOpenDialog{ThemeNewID}
 			case key.Matches(msg, th.keyMap.Previous):
 				th.list.Focus()
 				th.selectPrevTheme()

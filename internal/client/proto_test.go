@@ -197,6 +197,42 @@ func TestAutoApproveSessionNonOKStatusIsError(t *testing.T) {
 	require.Contains(t, err.Error(), "status code 400")
 }
 
+// TestRevokeAutoApproveSessionDeletesSession pins the exit call: the
+// session is named in the path, so the server drops exactly the hold
+// this run took instead of leaving the session auto-approved for
+// whichever client keeps the workspace alive afterwards.
+func TestRevokeAutoApproveSessionDeletesSession(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.RevokeAutoApproveSession(context.Background(), "ws1", "sess1"))
+
+	require.Equal(t, http.MethodDelete, gotMethod)
+	require.Equal(t, "/v1/workspaces/ws1/permissions/auto-approve/sess1", gotPath)
+}
+
+func TestRevokeAutoApproveSessionNonOKStatusIsError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	err := c.RevokeAutoApproveSession(context.Background(), "ws1", "sess1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 404")
+}
+
 func marshalSSEPayload(t *testing.T) []byte {
 	t.Helper()
 

@@ -78,7 +78,14 @@ type Service interface {
 	// already been resolved or is unknown.
 	Deny(permission PermissionRequest) bool
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
+	// AutoApproveSession adds an auto-approval hold on a session, so
+	// every permission request in it is granted without prompting.
+	// Holds are counted: a session stays auto-approved until every
+	// holder has revoked.
 	AutoApproveSession(sessionID string)
+	// RevokeAutoApproveSession drops one auto-approval hold on a
+	// session. Revoking a session that has no hold is a no-op.
+	RevokeAutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
@@ -95,11 +102,16 @@ type PermissionKey struct {
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
-	notificationBroker    *pubsub.Broker[PermissionNotification]
-	workingDir            string
-	sessionPermissions    *csync.Map[PermissionKey, bool]
-	pendingRequests       *csync.Map[string, chan bool]
-	autoApproveSessions   map[string]bool
+	notificationBroker *pubsub.Broker[PermissionNotification]
+	workingDir         string
+	sessionPermissions *csync.Map[PermissionKey, bool]
+	pendingRequests    *csync.Map[string, chan bool]
+	// autoApproveSessions counts the outstanding auto-approval holds
+	// per session ID. It is a count rather than a flag so overlapping
+	// holders — two `crush run --continue` invocations resolve to the
+	// same session — cannot revoke each other's approval and hang the
+	// run that is still going.
+	autoApproveSessions   map[string]int
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
@@ -210,7 +222,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	})
 
 	s.autoApproveSessionsMu.RLock()
-	autoApprove := s.autoApproveSessions[opts.SessionID]
+	autoApprove := s.autoApproveSessions[opts.SessionID] > 0
 	s.autoApproveSessionsMu.RUnlock()
 
 	if autoApprove {
@@ -279,7 +291,17 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Lock()
-	s.autoApproveSessions[sessionID] = true
+	s.autoApproveSessions[sessionID]++
+	s.autoApproveSessionsMu.Unlock()
+}
+
+func (s *permissionService) RevokeAutoApproveSession(sessionID string) {
+	s.autoApproveSessionsMu.Lock()
+	if holds := s.autoApproveSessions[sessionID]; holds > 1 {
+		s.autoApproveSessions[sessionID] = holds - 1
+	} else {
+		delete(s.autoApproveSessions, sessionID)
+	}
 	s.autoApproveSessionsMu.Unlock()
 }
 
@@ -301,7 +323,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
 		workingDir:          workingDir,
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
-		autoApproveSessions: make(map[string]bool),
+		autoApproveSessions: make(map[string]int),
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}

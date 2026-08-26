@@ -168,6 +168,11 @@ func init() {
 	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
 }
 
+// revokeAutoApproveTimeout bounds the auto-approval revoke that runs as
+// the non-interactive run exits. The run is over by then, so a server
+// that has stopped answering must not keep the process alive.
+const revokeAutoApproveTimeout = 5 * time.Second
+
 // runNonInteractive executes the agent via the server and streams output
 // to stdout.
 func runNonInteractive(
@@ -256,6 +261,19 @@ func runNonInteractive(
 	if err := c.AutoApproveSession(ctx, ws.ID, sess.ID); err != nil {
 		return fmt.Errorf("failed to auto-approve session: %w", err)
 	}
+	defer func() {
+		// The in-process path drops the approval by exiting; here the
+		// server's permission service outlives this process whenever
+		// another client holds the workspace, so leaving the hold in
+		// place would silently grant every later request in this
+		// session — including ones an interactive TUI makes. ctx is
+		// already canceled after a Ctrl-C, hence the fresh one.
+		revokeCtx, cancelRevoke := context.WithTimeout(context.Background(), revokeAutoApproveTimeout)
+		defer cancelRevoke()
+		if err := c.RevokeAutoApproveSession(revokeCtx, ws.ID, sess.ID); err != nil {
+			slog.Error("Failed to revoke session auto-approval", "session_id", sess.ID, "error", err)
+		}
+	}()
 
 	events, err := c.SubscribeEvents(ctx, ws.ID)
 	if err != nil {

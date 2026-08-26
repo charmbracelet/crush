@@ -1186,6 +1186,29 @@ func (c *controllerV1) handlePostWorkspacePermissionsAutoApprove(w http.Response
 	}
 }
 
+// handleDeleteWorkspacePermissionsAutoApprove drops one auto-approval hold
+// on a session.
+//
+//	@Summary		Revoke a session auto-approval
+//	@Tags			permissions
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/auto-approve/{sid} [delete]
+func (c *controllerV1) handleDeleteWorkspacePermissionsAutoApprove(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+
+	if err := c.backend.RevokeAutoApproveSession(id, sid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleError maps backend errors to HTTP status codes and writes the
 // JSON error response.
 //

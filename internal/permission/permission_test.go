@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -611,5 +612,81 @@ func TestPermissionService_ResolveIdempotency(t *testing.T) {
 		case <-time.After(50 * time.Millisecond):
 			// good: no notification.
 		}
+	})
+}
+
+// TestPermissionService_AutoApproveRevoke pins the hold lifecycle a
+// non-interactive run depends on. The run takes a hold while it drives a
+// session and gives it back as it exits, so the service must prompt
+// again once the last holder is gone: the service can outlive the run
+// (another client keeps the workspace alive), and a stale hold would
+// silently grant every later request in that session. Holds are counted
+// so two overlapping runs on the same session cannot revoke each other's
+// approval.
+func TestPermissionService_AutoApproveRevoke(t *testing.T) {
+	t.Parallel()
+
+	// request never blocks for long: an auto-approved session answers
+	// immediately, and anything else is supposed to wait for a human
+	// who is not there, which the deadline reports.
+	request := func(t *testing.T, service Service, sessionID string) (bool, error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer cancel()
+		return service.Request(ctx, CreatePermissionRequest{
+			SessionID:   sessionID,
+			ToolCallID:  "call-" + sessionID,
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "test command",
+			Path:        "/tmp",
+		})
+	}
+
+	t.Run("revoked session waits for an answer again", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		service.AutoApproveSession("s1")
+		granted, err := request(t, service, "s1")
+		require.NoError(t, err)
+		assert.True(t, granted)
+
+		service.RevokeAutoApproveSession("s1")
+		granted, err = request(t, service, "s1")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.False(t, granted)
+	})
+
+	t.Run("overlapping holds survive one revoke", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		service.AutoApproveSession("s1")
+		service.AutoApproveSession("s1")
+
+		service.RevokeAutoApproveSession("s1")
+		granted, err := request(t, service, "s1")
+		require.NoError(t, err, "a second holder still wants this session approved")
+		assert.True(t, granted)
+
+		service.RevokeAutoApproveSession("s1")
+		granted, err = request(t, service, "s1")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.False(t, granted)
+	})
+
+	t.Run("revoke without a hold is a no-op", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		service.RevokeAutoApproveSession("s1")
+
+		// An unbalanced revoke must not go negative: a later hold has
+		// to take effect on its own.
+		service.AutoApproveSession("s1")
+		granted, err := request(t, service, "s1")
+		require.NoError(t, err)
+		assert.True(t, granted)
 	})
 }

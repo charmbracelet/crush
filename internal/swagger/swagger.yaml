@@ -2532,6 +2532,37 @@ paths:
       summary: Auto-approve a session
       tags:
       - permissions
+  /workspaces/{id}/permissions/auto-approve/{sid}:
+    delete:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Revoke a session auto-approval
+      tags:
+      - permissions
   /workspaces/{id}/permissions/grant:
     post:
       consumes:

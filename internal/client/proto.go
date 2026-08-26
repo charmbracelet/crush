@@ -775,6 +775,21 @@ func (c *Client) AutoApproveSession(ctx context.Context, id, sessionID string) e
 	return nil
 }
 
+// RevokeAutoApproveSession drops the auto-approval hold this client took
+// on a session. The server's workspace can outlive this process, so the
+// hold has to be given back explicitly.
+func (c *Client) RevokeAutoApproveSession(ctx context.Context, id, sessionID string) error {
+	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/permissions/auto-approve/%s", id, sessionID), nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to revoke session auto-approval: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to revoke session auto-approval: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // GetConfig retrieves the workspace-specific configuration.
 func (c *Client) GetConfig(ctx context.Context, id string) (*config.Config, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/config", id), nil, nil)

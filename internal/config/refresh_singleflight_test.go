@@ -194,6 +194,31 @@ func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
 // live refresh token fails the way a real reuse-detecting server would.
 // Tokens are handed out as at<n>/rt<n> starting at next. The returned
 // counters report successful exchanges and reuse attempts.
+func TestRefreshOAuthToken_RetryMergesFromNewerDiskToken(t *testing.T) {
+	isolateHyperCredentials(t)
+
+	configPath := filepath.Join(t.TempDir(), "crush.json")
+	var attempts atomic.Int64
+	store := newRefreshTestStore(t, configPath, func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+		if attempts.Add(1) == 1 {
+			writeTokenToDisk(t, configPath, &oauth.Token{
+				AccessToken:  "at1",
+				RefreshToken: "rt1",
+				ExpiresIn:    3600,
+				ExpiresAt:    time.Now().Add(-time.Minute).Unix(),
+			})
+			return nil, fmt.Errorf("stale refresh token")
+		}
+		return &oauth.Token{AccessToken: "at2"}, nil
+	})
+
+	require.NoError(t, store.RefreshOAuthToken(context.Background(), ScopeGlobal, "hyper"))
+	require.Equal(t, int64(2), attempts.Load())
+	provider, ok := store.config.Providers.Get("hyper")
+	require.True(t, ok)
+	require.Equal(t, "rt1", provider.OAuthToken.RefreshToken)
+}
+
 func rotatingExchange(live string, next int) (exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error), exchanges, reuse *atomic.Int64) {
 	var (
 		mu        sync.Mutex

@@ -151,10 +151,18 @@ type SessionAgent interface {
 }
 
 type Model struct {
-	Model      fantasy.LanguageModel
-	CatwalkCfg catwalk.Model
-	ModelCfg   config.SelectedModel
-	FlatRate   bool
+	Model               fantasy.LanguageModel
+	CatwalkCfg          catwalk.Model
+	ModelCfg            config.SelectedModel
+	FlatRate            bool
+	OmitMaxOutputTokens bool
+}
+
+func maxOutputTokens(model Model, configured int64) *int64 {
+	if model.OmitMaxOutputTokens || configured <= 0 {
+		return nil
+	}
+	return &configured
 }
 
 // activeCancel wraps a context.CancelFunc with a unique pointer identity.
@@ -789,10 +797,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	var shouldSummarize bool
 	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
-	var maxOutputTokens *int64
-	if call.MaxOutputTokens > 0 {
-		maxOutputTokens = &call.MaxOutputTokens
-	}
+	maxOutputTokens := maxOutputTokens(largeModel, call.MaxOutputTokens)
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -1747,13 +1752,11 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
-	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
-		return fantasy.NewAgent(
-			m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
-			fantasy.WithMaxOutputTokens(tok),
-			fantasy.WithUserAgent(userAgent),
-		)
+	newAgent := func(model Model, p []byte, tok int64) fantasy.Agent {
+		if model.OmitMaxOutputTokens {
+			return fantasy.NewAgent(model.Model, fantasy.WithSystemPrompt(string(p)+"\n /no_think"), fantasy.WithUserAgent(userAgent))
+		}
+		return fantasy.NewAgent(model.Model, fantasy.WithSystemPrompt(string(p)+"\n /no_think"), fantasy.WithMaxOutputTokens(tok), fantasy.WithUserAgent(userAgent))
 	}
 
 	streamCall := fantasy.AgentStreamCall{
@@ -1788,7 +1791,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		if attempt.model.CatwalkCfg.CanReason {
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
-		agent := newAgent(attempt.model.Model, titlePrompt, tok)
+		agent := newAgent(attempt.model, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model

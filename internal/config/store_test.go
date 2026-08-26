@@ -726,6 +726,24 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 	require.Equal(t, "refresh-abc", updatedConfig.OAuthToken.RefreshToken)
 }
 
+func TestMergeRefreshedTokenPreservesMissingMetadata(t *testing.T) {
+	t.Parallel()
+
+	previous := &oauth.Token{
+		RefreshToken: "refresh-token",
+		AccountID:    "account-id",
+		Residency:    "us",
+		IDToken:      "id-token",
+	}
+	refreshed := &oauth.Token{AccessToken: "new-access-token"}
+	mergeRefreshedToken(previous, refreshed)
+
+	require.Equal(t, previous.RefreshToken, refreshed.RefreshToken)
+	require.Equal(t, previous.AccountID, refreshed.AccountID)
+	require.Equal(t, previous.Residency, refreshed.Residency)
+	require.Equal(t, previous.IDToken, refreshed.IDToken)
+}
+
 // TestConfigStore_SetConfigFields_concurrentInProcess verifies that
 // concurrent in-process writes do not lose data when serialized by the
 // s.mu mutex. This does not exercise the cross-process flock; testing

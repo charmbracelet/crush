@@ -1885,6 +1885,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	switch msg := action.(type) {
 	// Generic dialog messages
+	case dialog.ActionCloseOAuth:
+		m.dialog.CloseFrontDialog()
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
+		if isOnboarding {
+			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case dialog.ActionClose:
 		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
 			break
@@ -2047,6 +2057,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionSelectAuthMethod:
+		m.dialog.CloseDialog(dialog.AuthMethodID)
+		if cmd := m.openAuthenticationDialogWithMethod(msg.Provider, msg.Model, msg.ModelType, msg.OAuth); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
@@ -2390,6 +2405,14 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 }
 
 func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
+	if provider.ID == catwalk.InferenceProviderOpenAI {
+		m.dialog.OpenDialogWithGrace(dialog.NewAuthMethod(m.com, provider, model, modelType))
+		return nil
+	}
+	return m.openAuthenticationDialogWithMethod(provider, model, modelType, provider.ID == "hyper" || provider.ID == catwalk.InferenceProviderCopilot)
+}
+
+func (m *UI) openAuthenticationDialogWithMethod(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, useOAuth bool) tea.Cmd {
 	var (
 		dlg dialog.Dialog
 		cmd tea.Cmd
@@ -2402,6 +2425,12 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+	case catwalk.InferenceProviderOpenAI:
+		if useOAuth {
+			dlg, cmd = dialog.NewOAuthOpenAI(m.com, isOnboarding, provider, model, modelType)
+		} else {
+			dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		}
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}

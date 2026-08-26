@@ -31,6 +31,9 @@ type Token struct {
 	ExpiresIn    int          `json:"expires_in"`
 	ExpiresAt    int64        `json:"expires_at"`
 	Client       *OAuthClient `json:"client,omitempty"`
+	IDToken      string       `json:"id_token,omitempty"`
+	AccountID    string       `json:"account_id,omitempty"`
+	Residency    string       `json:"residency,omitempty"`
 }
 
 // SetExpiresAt calculates and sets the ExpiresAt field based on the

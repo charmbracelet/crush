@@ -201,6 +201,19 @@ type MCPConfig struct {
 	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
 
+	// Sessionless marks a server that does not maintain an MCP session (it
+	// never issues a Mcp-Session-Id). When true, Crush omits the
+	// tools/prompts/resources list-changed handlers: the go-sdk opens a
+	// SEP-2575 "subscriptions/listen" stream whenever any of those handlers
+	// is set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)
+	// answer that POST with 404 ("session not found"), which the SDK treats
+	// as fatal. The cost is no live list-changed notifications from this
+	// server.
+	//
+	// When nil, Crush auto-detects a set of known sessionless servers (see
+	// IsSessionless); set it explicitly to override that detection.
+	Sessionless *bool `json:"sessionless,omitempty" jsonschema:"description=Mark a sessionless MCP server (no Mcp-Session-Id) so Crush skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP),default=false"`
+
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
 	// work. A header whose value resolves to the empty string (unset
@@ -438,6 +451,33 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 		return "", fmt.Errorf("url: %w", err)
 	}
 	return v, nil
+}
+
+// knownSessionlessMCPs is the set of MCP endpoint URLs (normalized, no
+// trailing slash) that are known not to maintain an MCP session — they
+// never issue a Mcp-Session-Id and reject the SEP-2575
+// "subscriptions/listen" stream. Add an entry when a server is confirmed to
+// behave this way.
+var knownSessionlessMCPs = map[string]struct{}{
+	"https://api.github.com/mcp":        {},
+	"https://api.githubcopilot.com/mcp": {},
+}
+
+// IsSessionless reports whether the server should be treated as sessionless.
+// An explicit Sessionless value wins; when unset, the resolved URL is matched
+// against knownSessionlessMCPs (trailing slash ignored). The URL is resolved
+// through r so $VAR-expanded endpoints are detected too; on a resolution
+// error the explicit value (or false) is used.
+func (m MCPConfig) IsSessionless(r VariableResolver) bool {
+	if m.Sessionless != nil {
+		return *m.Sessionless
+	}
+	url, err := m.ResolvedURL(r)
+	if err != nil {
+		return false
+	}
+	_, ok := knownSessionlessMCPs[strings.TrimSuffix(url, "/")]
+	return ok
 }
 
 // ResolvedHeaders returns m.Headers with every value expanded through

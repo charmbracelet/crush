@@ -295,6 +295,11 @@
             120
           ]
         },
+        "sessionless": {
+          "type": "boolean",
+          "description": "Mark a sessionless MCP server (no Mcp-Session-Id) so Crush skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP)",
+          "default": false
+        },
         "headers": {
           "additionalProperties": {
             "type": "string"

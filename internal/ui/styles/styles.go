@@ -4,6 +4,7 @@ package styles
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/filepicker"
@@ -47,6 +48,8 @@ const (
 	SkillIcon  string = "▲"
 	RemoveIcon string = "✕"
 
+	SubagentIcon string = "●"
+
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
 
@@ -71,6 +74,12 @@ type Styles struct {
 	// Crush's background. Defining them here keeps output readable and
 	// on-brand regardless of terminal configuration.
 	ANSI [16]color.Color
+
+	// SubagentPalette holds the eight distinct hues used to identify
+	// subagents in the running panel, Library, and breadcrumbs, indexed by
+	// [SubagentColorNames]. Themes set these from their own palette; see
+	// [Styles.SubagentDot].
+	SubagentPalette [8]color.Color
 
 	// Header
 	Header struct {
@@ -636,6 +645,20 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 // DialogHelpStyles returns the styles for dialog help.
 func (s *Styles) DialogHelpStyles() help.Styles {
 	return help.Styles(s.Dialog.Help)
+}
+
+// SubagentColorNames are the palette color names accepted in a subagent's
+// `color:` frontmatter, in [Styles.SubagentPalette] order.
+var SubagentColorNames = [8]string{"red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink"}
+
+// SubagentDot returns a colored "●" marker for the named subagent palette
+// color; see [SubagentColorNames]. Unrecognized names return an unstyled dot.
+func (s *Styles) SubagentDot(name string) string {
+	idx := slices.Index(SubagentColorNames[:], name)
+	if idx < 0 {
+		return SubagentIcon
+	}
+	return lipgloss.NewStyle().Foreground(s.SubagentPalette[idx]).SetString(SubagentIcon).String()
 }
 
 // hex returns a pointer to the "#rrggbb" representation of c. It's used to

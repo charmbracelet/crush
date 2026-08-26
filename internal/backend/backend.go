@@ -32,6 +32,7 @@ var (
 	ErrLSPClientNotFound       = errors.New("LSP client not found")
 	ErrAgentNotInitialized     = errors.New("agent coordinator not initialized")
 	ErrPathRequired            = errors.New("path is required")
+	ErrSessionIDRequired       = errors.New("session_id is required")
 	ErrInvalidPermissionAction = errors.New("invalid permission action")
 	ErrUnknownCommand          = errors.New("unknown command")
 	ErrInvalidClientID         = errors.New("invalid client_id")

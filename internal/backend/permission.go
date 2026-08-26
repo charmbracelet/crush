@@ -58,3 +58,19 @@ func (b *Backend) GetPermissionsSkip(workspaceID string) (bool, error) {
 
 	return ws.Permissions.SkipRequests(), nil
 }
+
+// AutoApproveSession auto-approves every permission request in a single
+// session, without changing workspace-wide skip behavior.
+func (b *Backend) AutoApproveSession(workspaceID, sessionID string) error {
+	if sessionID == "" {
+		return ErrSessionIDRequired
+	}
+
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	ws.Permissions.AutoApproveSession(sessionID)
+	return nil
+}

@@ -268,6 +268,12 @@ type PermissionSkipRequest struct {
 	Skip bool `json:"skip"`
 }
 
+// PermissionAutoApproveRequest represents a request to auto-approve
+// every permission request in a session.
+type PermissionAutoApproveRequest struct {
+	SessionID string `json:"session_id"`
+}
+
 // LSPEventType represents the type of LSP event.
 type LSPEventType string
 

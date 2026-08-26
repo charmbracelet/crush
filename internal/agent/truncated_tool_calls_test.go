@@ -1,0 +1,228 @@
+package agent
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// scriptedStep is one model turn: optional text, an optional tool call,
+// and the finish reason the step ends with.
+type scriptedStep struct {
+	text         string
+	toolCallID   string
+	toolName     string
+	toolInput    string
+	finishReason fantasy.FinishReason
+}
+
+// scriptedStreamModel replays a fixed script, one step per Stream call.
+// The last step repeats if the agent loop asks for more, so a script
+// ending in a non-continuing finish reason terminates the turn.
+//
+// Use it as the large model only. Title generation streams the small
+// model concurrently and would consume script positions; give the agent
+// a separate small model that finishes cleanly so the title never falls
+// back to the large one.
+type scriptedStreamModel struct {
+	steps []scriptedStep
+	calls atomic.Int64
+}
+
+func (m *scriptedStreamModel) Provider() string { return "fake" }
+func (m *scriptedStreamModel) Model() string    { return "fake-model" }
+
+func (m *scriptedStreamModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{
+		Content:      fantasy.ResponseContent{fantasy.TextContent{Text: "title"}},
+		FinishReason: fantasy.FinishReasonStop,
+	}, nil
+}
+
+func (m *scriptedStreamModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+	idx := min(int(m.calls.Add(1))-1, len(m.steps)-1)
+	step := m.steps[idx]
+	return func(yield func(fantasy.StreamPart) bool) {
+		if step.text != "" {
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "text-1"}) {
+				return
+			}
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "text-1", Delta: step.text}) {
+				return
+			}
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "text-1"}) {
+				return
+			}
+		}
+		if step.toolCallID != "" {
+			if !yield(fantasy.StreamPart{
+				Type:         fantasy.StreamPartTypeToolInputStart,
+				ID:           step.toolCallID,
+				ToolCallName: step.toolName,
+			}) {
+				return
+			}
+			if !yield(fantasy.StreamPart{
+				Type:  fantasy.StreamPartTypeToolInputDelta,
+				ID:    step.toolCallID,
+				Delta: step.toolInput,
+			}) {
+				return
+			}
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputEnd, ID: step.toolCallID}) {
+				return
+			}
+			if !yield(fantasy.StreamPart{
+				Type:          fantasy.StreamPartTypeToolCall,
+				ID:            step.toolCallID,
+				ToolCallName:  step.toolName,
+				ToolCallInput: step.toolInput,
+			}) {
+				return
+			}
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: step.finishReason})
+	}, nil
+}
+
+func (m *scriptedStreamModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *scriptedStreamModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+type echoToolParams struct {
+	Value string `json:"value"`
+}
+
+// newEchoTool returns a trivial tool plus the counter of how many times
+// it actually ran, so a test can prove a tool call was never dispatched.
+func newEchoTool() (fantasy.AgentTool, *atomic.Int64) {
+	var runs atomic.Int64
+	tool := fantasy.NewAgentTool(
+		"echo",
+		"Echoes its input back.",
+		func(_ context.Context, params echoToolParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			runs.Add(1)
+			return fantasy.NewTextResponse("echoed: " + params.Value), nil
+		},
+	)
+	return tool, &runs
+}
+
+// toolResultFor returns the stored tool result for the given tool call
+// ID, or nil when the transcript has none.
+func toolResultFor(msgs []message.Message, toolCallID string) *message.ToolResult {
+	for _, m := range msgs {
+		if m.Role != message.Tool {
+			continue
+		}
+		for _, tr := range m.ToolResults() {
+			if tr.ToolCallID == toolCallID {
+				return &tr
+			}
+		}
+	}
+	return nil
+}
+
+// TestRun_TruncatedStepFinalizesUnrunToolCalls is the regression test for
+// the reported mid-run freeze. fantasy skips the whole buffered tool
+// dispatch when a step ends with finish_reason=length and still returns
+// no error, while crush has already persisted the tool calls. The turn
+// used to end "successfully" with tool calls that had no result, which
+// every client renders as still running, forever.
+//
+// Run must instead write a terminal error result for each un-run call
+// and fail the turn with ErrToolCallsNotRun.
+func TestRun_TruncatedStepFinalizesUnrunToolCalls(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	tool, runs := newEchoTool()
+	model := &scriptedStreamModel{steps: []scriptedStep{{
+		toolCallID:   "call-1",
+		toolName:     "echo",
+		toolInput:    `{"value":"hi"}`,
+		finishReason: fantasy.FinishReasonLength,
+	}}}
+	titleModel := &finishStreamModel{text: "a title"}
+	sa := testSessionAgent(env, model, titleModel, "system", tool).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "write three files"})
+	require.ErrorIs(t, err, ErrToolCallsNotRun,
+		"a turn whose tool calls never ran must not report success")
+	assert.Zero(t, runs.Load(), "the truncated tool call must not have executed")
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+
+	var assistant *message.Message
+	for i, m := range msgs {
+		if m.Role == message.Assistant {
+			assistant = &msgs[i]
+		}
+	}
+	require.NotNil(t, assistant)
+	require.Len(t, assistant.ToolCalls(), 1)
+	assert.Equal(t, message.FinishReasonMaxTokens, assistant.FinishReason(),
+		"the truncation must still be recorded on the assistant message")
+
+	result := toolResultFor(msgs, "call-1")
+	require.NotNil(t, result, "the un-run tool call must get a terminal result")
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content, "output token limit",
+		"a truncated turn must say why the call never ran")
+}
+
+// TestRun_HealthyToolCallTurnKeepsRealResults pins that the orphan check
+// does not fire on a normal tool-calling turn: the tool runs, its real
+// result is stored, and the turn succeeds.
+func TestRun_HealthyToolCallTurnKeepsRealResults(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	tool, runs := newEchoTool()
+	model := &scriptedStreamModel{steps: []scriptedStep{
+		{
+			toolCallID:   "call-1",
+			toolName:     "echo",
+			toolInput:    `{"value":"hi"}`,
+			finishReason: fantasy.FinishReasonToolCalls,
+		},
+		{text: "all done", finishReason: fantasy.FinishReasonStop},
+	}}
+	titleModel := &finishStreamModel{text: "a title"}
+	sa := testSessionAgent(env, model, titleModel, "system", tool).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	result, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "echo hi"})
+	require.NoError(t, err, "a healthy tool-calling turn must not be failed")
+	require.NotNil(t, result)
+	assert.Equal(t, int64(1), runs.Load(), "the tool must have executed")
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	stored := toolResultFor(msgs, "call-1")
+	require.NotNil(t, stored)
+	assert.False(t, stored.IsError)
+	assert.Equal(t, "echoed: hi", stored.Content)
+	for _, m := range msgs {
+		for _, tr := range m.ToolResults() {
+			assert.False(t, strings.Contains(tr.Content, "never run"),
+				"a healthy turn must not get a synthetic un-run result")
+		}
+	}
+}

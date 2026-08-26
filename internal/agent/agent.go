@@ -563,6 +563,65 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
+// finalizeUnresolvedToolCalls writes a terminal error tool result for
+// every tool call on msg that never produced one, so the stored
+// transcript cannot leave a tool call rendering as running forever. A
+// tool call whose input never finished streaming is marked finished
+// with an empty input first, for the same reason. It returns how many
+// results it wrote.
+//
+// ctx must be detached from the run context and bounded: every caller
+// reaches this after the run context is already cancelled or about to
+// be, and these writes still have to land.
+func (a *sessionAgent) finalizeUnresolvedToolCalls(ctx context.Context, msg *message.Message, content string) (int, error) {
+	toolCalls := msg.ToolCalls()
+	if len(toolCalls) == 0 {
+		return 0, nil
+	}
+	msgs, err := a.messages.List(ctx, msg.SessionID)
+	if err != nil {
+		return 0, err
+	}
+	resulted := make(map[string]struct{}, len(toolCalls))
+	for _, m := range msgs {
+		if m.Role != message.Tool {
+			continue
+		}
+		for _, tr := range m.ToolResults() {
+			resulted[tr.ToolCallID] = struct{}{}
+		}
+	}
+	written := 0
+	for _, tc := range toolCalls {
+		if !tc.Finished {
+			tc.Finished = true
+			tc.Input = "{}"
+			msg.AddToolCall(tc)
+			if err := a.messages.Update(ctx, *msg); err != nil {
+				return written, err
+			}
+		}
+		if _, ok := resulted[tc.ID]; ok {
+			continue
+		}
+		if _, err := a.messages.Create(ctx, msg.SessionID, message.CreateMessageParams{
+			Role: message.Tool,
+			Parts: []message.ContentPart{
+				message.ToolResult{
+					ToolCallID: tc.ID,
+					Name:       tc.Name,
+					Content:    content,
+					IsError:    true,
+				},
+			},
+		}); err != nil {
+			return written, err
+		}
+		written++
+	}
+	return written, nil
+}
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -1098,59 +1157,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		defer cleanupCancel()
 		// Ensure we finish thinking on error to close the reasoning state.
 		currentAssistant.FinishThinking()
-		toolCalls := currentAssistant.ToolCalls()
-		// INFO: we use the cleanup context here because the genCtx has been cancelled.
-		msgs, createErr := a.messages.List(cleanupCtx, currentAssistant.SessionID)
-		if createErr != nil {
-			return nil, createErr
+		// INFO: we use the cleanup context here because the genCtx has
+		// been cancelled.
+		content := "There was an error while executing the tool"
+		if isCancelErr {
+			content = "Error: user cancelled assistant tool calling"
 		}
-		for _, tc := range toolCalls {
-			if !tc.Finished {
-				tc.Finished = true
-				tc.Input = "{}"
-				currentAssistant.AddToolCall(tc)
-				updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
-				if updateErr != nil {
-					return nil, updateErr
-				}
-			}
-
-			found := false
-			for _, msg := range msgs {
-				if msg.Role == message.Tool {
-					for _, tr := range msg.ToolResults() {
-						if tr.ToolCallID == tc.ID {
-							found = true
-							break
-						}
-					}
-				}
-				if found {
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			content := "There was an error while executing the tool"
-			if isCancelErr {
-				content = "Error: user cancelled assistant tool calling"
-			}
-			toolResult := message.ToolResult{
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-				Content:    content,
-				IsError:    true,
-			}
-			_, createErr = a.messages.Create(cleanupCtx, currentAssistant.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					toolResult,
-				},
-			})
-			if createErr != nil {
-				return nil, createErr
-			}
+		if _, finalizeErr := a.finalizeUnresolvedToolCalls(cleanupCtx, currentAssistant, content); finalizeErr != nil {
+			return nil, finalizeErr
 		}
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
@@ -1187,6 +1201,40 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, updateErr
 		}
 		return nil, err
+	}
+
+	// A step that ends truncated (finish_reason=length) never dispatches
+	// its buffered tool calls, and Stream still returns no error, so the
+	// tool calls already persisted by OnToolCall can never get a result.
+	// The same stored state is reachable whenever a result row fails to
+	// write, because fantasy discards the error OnToolResult returns.
+	// Detect the orphans rather than the finish reason: repair the
+	// transcript, then fail the turn. Reporting success would tell the
+	// caller the tools ran and leave every client rendering them as
+	// still running, forever.
+	//
+	// This sits before the summarize block on purpose, so a truncated
+	// turn is not re-queued as a continuation of tool calls that never
+	// ran.
+	if currentAssistant != nil {
+		content := "The tool call was never run: the model's response was cut off before the call could be dispatched."
+		if finish := currentAssistant.FinishPart(); finish != nil && finish.Reason == message.FinishReasonMaxTokens {
+			content = "The tool call was never run: the model's response hit the output token limit before the call could be dispatched."
+		}
+		// Detached and bounded for the same reason as the error path:
+		// workspace shutdown can cancel ctx before these writes land.
+		orphanCtx, orphanCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		written, finalizeErr := a.finalizeUnresolvedToolCalls(orphanCtx, currentAssistant, content)
+		orphanCancel()
+		if finalizeErr != nil {
+			return nil, finalizeErr
+		}
+		if written > 0 {
+			slog.Error("Turn ended with tool calls that never ran",
+				"session_id", call.SessionID,
+				"count", written)
+			return nil, ErrToolCallsNotRun
+		}
 	}
 
 	if shouldSummarize {

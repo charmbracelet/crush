@@ -158,6 +158,45 @@ func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
 	require.Contains(t, err.Error(), "status code 500")
 }
 
+// TestAutoApproveSessionPostsSessionID pins the request `crush run`
+// makes in client/server mode: the session it is about to drive must be
+// named in the body, otherwise the server has nothing to approve and
+// the run hangs on the first permission prompt (issue 3648).
+func TestAutoApproveSessionPostsSessionID(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath string
+	var got proto.PermissionAutoApproveRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.AutoApproveSession(context.Background(), "ws1", "sess1"))
+
+	require.Equal(t, http.MethodPost, gotMethod)
+	require.Equal(t, "/v1/workspaces/ws1/permissions/auto-approve", gotPath)
+	require.Equal(t, "sess1", got.SessionID)
+}
+
+func TestAutoApproveSessionNonOKStatusIsError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	err := c.AutoApproveSession(context.Background(), "ws1", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 400")
+}
+
 func marshalSSEPayload(t *testing.T) []byte {
 	t.Helper()
 

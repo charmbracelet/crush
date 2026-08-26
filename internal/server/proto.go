@@ -1157,6 +1157,35 @@ func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, 
 	jsonEncode(w, proto.PermissionSkipRequest{Skip: skip})
 }
 
+// handlePostWorkspacePermissionsAutoApprove auto-approves every permission
+// request in a single session.
+//
+//	@Summary		Auto-approve a session
+//	@Tags			permissions
+//	@Accept			json
+//	@Param			id		path	string								true	"Workspace ID"
+//	@Param			request	body	proto.PermissionAutoApproveRequest	true	"Permission auto-approve request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/auto-approve [post]
+func (c *controllerV1) handlePostWorkspacePermissionsAutoApprove(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.PermissionAutoApproveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.AutoApproveSession(id, req.SessionID); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+}
+
 // handleError maps backend errors to HTTP status codes and writes the
 // JSON error response.
 //
@@ -1177,6 +1206,8 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 	case errors.Is(err, backend.ErrAgentNotInitialized):
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrPathRequired):
+		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrSessionIDRequired):
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrInvalidPermissionAction):
 		status = http.StatusBadRequest

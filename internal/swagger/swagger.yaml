@@ -514,6 +514,8 @@ definitions:
         items:
           $ref: '#/definitions/proto.Attachment'
         type: array
+      auto_approve:
+        type: boolean
       prompt:
         type: string
       run_id:
@@ -796,11 +798,6 @@ definitions:
     - PermissionAllow
     - PermissionAllowForSession
     - PermissionDeny
-  proto.PermissionAutoApproveRequest:
-    properties:
-      session_id:
-        type: string
-    type: object
   proto.PermissionGrant:
     properties:
       action:
@@ -2498,71 +2495,6 @@ paths:
       summary: Get all user messages for workspace
       tags:
       - workspaces
-  /workspaces/{id}/permissions/auto-approve:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Permission auto-approve request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/proto.PermissionAutoApproveRequest'
-      responses:
-        "200":
-          description: OK
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Auto-approve a session
-      tags:
-      - permissions
-  /workspaces/{id}/permissions/auto-approve/{sid}:
-    delete:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Session ID
-        in: path
-        name: sid
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Revoke a session auto-approval
-      tags:
-      - permissions
   /workspaces/{id}/permissions/grant:
     post:
       consumes:

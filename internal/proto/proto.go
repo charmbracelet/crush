@@ -141,11 +141,19 @@ func (a AgentInfo) IsZero() bool {
 // callers must fall back to SessionID-only filtering, which
 // remains correct only when no other turns are in flight for the
 // same session.
+//
+// AutoApprove asks the server to grant every permission request the
+// resulting turn makes, for the duration of that turn only. It is for
+// callers with nobody to answer a permission prompt (`crush run`). The
+// hold belongs to the run, so a client that exits early can neither
+// strand the turn on an unanswerable prompt nor leave the session
+// silently approved for whoever keeps the workspace alive.
 type AgentMessage struct {
 	SessionID   string       `json:"session_id"`
 	RunID       string       `json:"run_id,omitempty"`
 	Prompt      string       `json:"prompt"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	AutoApprove bool         `json:"auto_approve,omitempty"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.
@@ -266,12 +274,6 @@ type QuestionNotification struct {
 // PermissionSkipRequest represents a request to skip permission prompts.
 type PermissionSkipRequest struct {
 	Skip bool `json:"skip"`
-}
-
-// PermissionAutoApproveRequest represents a request to auto-approve
-// every permission request in a session.
-type PermissionAutoApproveRequest struct {
-	SessionID string `json:"session_id"`
 }
 
 // LSPEventType represents the type of LSP event.

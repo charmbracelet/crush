@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -176,7 +177,7 @@ func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "hello"))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", proto.AgentMessage{SessionID: "sess1", Prompt: "hello"}))
 }
 
 func TestSendMessageAcceptsStatusOK(t *testing.T) {
@@ -188,7 +189,7 @@ func TestSendMessageAcceptsStatusOK(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "hello"))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", proto.AgentMessage{SessionID: "sess1", Prompt: "hello"}))
 }
 
 func TestSendMessageDecodesErrorBody(t *testing.T) {
@@ -201,7 +202,7 @@ func TestSendMessageDecodesErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", proto.AgentMessage{Prompt: "hello"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 400")
 	require.Contains(t, err.Error(), "session id is required")
@@ -217,7 +218,7 @@ func TestSendMessageFallsBackOnMalformedErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", proto.AgentMessage{SessionID: "sess1", Prompt: "hello"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 	require.NotContains(t, err.Error(), "not json")
@@ -232,84 +233,64 @@ func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "hello")
+	err := c.SendMessage(context.Background(), "ws1", proto.AgentMessage{SessionID: "sess1", Prompt: "hello"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "status code 500")
 }
 
-// TestAutoApproveSessionPostsSessionID pins the request `crush run`
-// makes in client/server mode: the session it is about to drive must be
-// named in the body, otherwise the server has nothing to approve and
-// the run hangs on the first permission prompt (issue 3648).
-func TestAutoApproveSessionPostsSessionID(t *testing.T) {
+// TestSendMessagePostsAutoApproveFlag pins the request `crush run`
+// makes in client/server mode. Nothing on this side can answer a
+// permission prompt, so the prompt itself has to carry the approval
+// (issue 3648); the server then holds it for exactly the turn it runs.
+func TestSendMessagePostsAutoApproveFlag(t *testing.T) {
 	t.Parallel()
 
-	var gotMethod, gotPath string
-	var got proto.PermissionAutoApproveRequest
+	var gotPath string
+	var got proto.AgentMessage
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
 		gotPath = r.URL.Path
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.AutoApproveSession(context.Background(), "ws1", "sess1"))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", proto.AgentMessage{
+		SessionID:   "sess1",
+		RunID:       "run1",
+		Prompt:      "hello",
+		AutoApprove: true,
+	}))
 
-	require.Equal(t, http.MethodPost, gotMethod)
-	require.Equal(t, "/v1/workspaces/ws1/permissions/auto-approve", gotPath)
+	require.Equal(t, "/v1/workspaces/ws1/agent", gotPath)
 	require.Equal(t, "sess1", got.SessionID)
+	require.Equal(t, "run1", got.RunID)
+	require.True(t, got.AutoApprove,
+		"a non-interactive run must ask the server to approve its own turn")
 }
 
-func TestAutoApproveSessionNonOKStatusIsError(t *testing.T) {
+// TestSendMessageOmitsAutoApproveByDefault pins the interactive
+// contract: a TUI prompt must not silently switch its session into
+// auto-approval.
+func TestSendMessageOmitsAutoApproveByDefault(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-	}))
-	defer srv.Close()
-
-	c := captureClient(t, srv)
-	err := c.AutoApproveSession(context.Background(), "ws1", "")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "status code 400")
-}
-
-// TestRevokeAutoApproveSessionDeletesSession pins the exit call: the
-// session is named in the path, so the server drops exactly the hold
-// this run took instead of leaving the session auto-approved for
-// whichever client keeps the workspace alive afterwards.
-func TestRevokeAutoApproveSessionDeletesSession(t *testing.T) {
-	t.Parallel()
-
-	var gotMethod, gotPath string
+	var body []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotPath = r.URL.Path
-		w.WriteHeader(http.StatusOK)
+		var err error
+		body, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer srv.Close()
 
 	c := captureClient(t, srv)
-	require.NoError(t, c.RevokeAutoApproveSession(context.Background(), "ws1", "sess1"))
-
-	require.Equal(t, http.MethodDelete, gotMethod)
-	require.Equal(t, "/v1/workspaces/ws1/permissions/auto-approve/sess1", gotPath)
-}
-
-func TestRevokeAutoApproveSessionNonOKStatusIsError(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", proto.AgentMessage{
+		SessionID: "sess1",
+		Prompt:    "hello",
 	}))
-	defer srv.Close()
 
-	c := captureClient(t, srv)
-	err := c.RevokeAutoApproveSession(context.Background(), "ws1", "sess1")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "status code 404")
+	require.NotContains(t, string(body), "auto_approve")
 }
 
 func marshalSSEPayload(t *testing.T) []byte {

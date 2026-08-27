@@ -58,38 +58,3 @@ func (b *Backend) GetPermissionsSkip(workspaceID string) (bool, error) {
 
 	return ws.Permissions.SkipRequests(), nil
 }
-
-// AutoApproveSession auto-approves every permission request in a single
-// session, without changing workspace-wide skip behavior.
-func (b *Backend) AutoApproveSession(workspaceID, sessionID string) error {
-	if sessionID == "" {
-		return ErrSessionIDRequired
-	}
-
-	ws, err := b.GetWorkspace(workspaceID)
-	if err != nil {
-		return err
-	}
-
-	ws.Permissions.AutoApproveSession(sessionID)
-	return nil
-}
-
-// RevokeAutoApproveSession drops the auto-approval hold a caller took
-// with AutoApproveSession. A workspace outlives the client that took the
-// hold, so a non-interactive run must give it back on the way out or
-// every later permission request in that session — including ones an
-// interactive client makes — is granted silently.
-func (b *Backend) RevokeAutoApproveSession(workspaceID, sessionID string) error {
-	if sessionID == "" {
-		return ErrSessionIDRequired
-	}
-
-	ws, err := b.GetWorkspace(workspaceID)
-	if err != nil {
-		return err
-	}
-
-	ws.Permissions.RevokeAutoApproveSession(sessionID)
-	return nil
-}

@@ -293,10 +293,14 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// the coalesce closure publishes the final outcome under that
 	// same correlator.
 	runID := RunIDFromContext(ctx)
+	// Auto-approval is carried the same way and copied onto the call so
+	// the hold's lifetime is the turn's, owned by sessionAgent.Run.
+	autoApprove := AutoApproveFromContext(ctx)
 	run := func() (*fantasy.AgentResult, error) {
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			RunID:            runID,
+			AutoApprove:      autoApprove,
 			Prompt:           prompt,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
@@ -641,6 +645,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		Permissions:          c.permissions,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the

@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -83,7 +84,14 @@ type SessionAgentCall struct {
 	// reliable completion contract (e.g. `crush run` against a
 	// session that may be busy) MUST set it; SessionID alone is
 	// ambiguous when concurrent turns share the same session.
-	RunID            string
+	RunID string
+	// AutoApprove asks the run to grant every permission request the
+	// turn makes. The hold is taken when this call becomes the active
+	// turn and released when the turn ends, so it cannot be revoked
+	// mid-turn by a caller that exited, and it cannot outlive the run.
+	// It survives the busy-session queue, so a queued prompt gets its
+	// own hold when its own turn starts.
+	AutoApprove      bool
 	Prompt           string
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
@@ -180,6 +188,10 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	// permissions is only needed for SessionAgentCall.AutoApprove, so
+	// it may be nil: constructors that never set that flag (tests,
+	// sub-agents built without a permission service) keep working.
+	permissions permission.Service
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -235,6 +247,9 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	// Permissions backs SessionAgentCall.AutoApprove. Leave it nil when
+	// no caller sets that flag.
+	Permissions permission.Service
 }
 
 func NewSessionAgent(
@@ -253,6 +268,7 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		permissions:          opts.Permissions,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -714,6 +730,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// concurrent run registers in the completion window, silently wiping
 	// the new run's cancel and breaking cancellation.
 	defer a.activeRequests.CompareAndDelete(call.SessionID, ac)
+
+	// This call owns the turn now, so take its auto-approval hold here
+	// and give it back on every exit path. Callers with nobody to answer
+	// a permission prompt (`crush run`) ask for it per prompt; binding
+	// the hold to the turn instead of to the caller means an early client
+	// exit can neither strand a live turn on an unanswerable request nor
+	// leave the session silently approved afterwards. Holds are counted,
+	// so concurrent runs on one session do not cancel each other out.
+	if call.AutoApprove && a.permissions != nil {
+		a.permissions.AutoApproveSession(call.SessionID)
+		defer a.permissions.RevokeAutoApproveSession(call.SessionID)
+	}
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()

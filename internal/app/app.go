@@ -344,9 +344,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
 
-	// Automatically approve all permission requests for this non-interactive
-	// session.
-	app.Permissions.AutoApproveSession(sess.ID)
+	// Non-interactive runs have nobody to answer permission prompts, so
+	// ask the run itself to grant them. The agent holds the approval for
+	// the turn and gives it back when the turn ends, so it cannot outlive
+	// the run — the same mechanism the client/server path uses.
+	ctx = agent.WithAutoApprove(ctx)
 
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)

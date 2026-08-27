@@ -108,6 +108,59 @@ model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
 
 `large` is the primary coding model; `small` is used for summarization.
 
+#### Reasoning models
+
+Three model fields control reasoning; they matter only for models that
+actually support it:
+
+- `can_reason` (bool, default `false`) marks the model as reasoning-capable.
+  Set it with `model add --can-reason true`.
+- `reasoning_levels` (array of strings) lists the effort levels the model
+  accepts and populates the UI reasoning picker. Use the provider's native
+  names (`low`/`medium`/`high`, or `xhigh`/`max`, etc.) — Crush does not
+  translate them. There is no `model add` flag for this field; set it in
+  `crush.json` (see [Legacy JSON format](#legacy-json-format)).
+- `default_reasoning_effort` (string) is the level Crush sends when the user
+  has not chosen one. `model add --reasoning-effort <level>` writes this
+  field — note the flag is named after the value, not the JSON key.
+
+There are two `--reasoning-effort` flags and they set different things:
+
+- `model add … --reasoning-effort L` sets the model's
+  `default_reasoning_effort` (the per-model default).
+- `model large`/`model small … --reasoning-effort L` sets the selected slot's
+  `reasoning_effort` (the user's active choice).
+
+Crush resolves the effective effort in this order: the active
+`reasoning_effort` if it is one of `reasoning_levels` → `default_reasoning_effort`
+if valid → the first entry of `reasoning_levels`. An invalid or missing
+`default_reasoning_effort` is ignored, so omitting it is safe.
+
+Because `reasoning_levels` is JSON-only, a fully custom reasoning model is
+defined in `crush.json`:
+
+```json
+{
+  "providers": {
+    "deepseek": {
+      "type": "openai-compat",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "$DEEPSEEK_API_KEY",
+      "models": [
+        {
+          "id": "deepseek-reasoner",
+          "name": "Deepseek R1",
+          "context_window": 64000,
+          "can_reason": true,
+          "reasoning_levels": ["low", "medium", "high", "max"],
+          "default_reasoning_effort": "medium"
+        }
+      ]
+    }
+  }
+}
+```
+
 ### mcp
 
 ```bash

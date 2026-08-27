@@ -690,3 +690,65 @@ func TestPermissionService_AutoApproveRevoke(t *testing.T) {
 		assert.True(t, granted)
 	})
 }
+
+// TestPermissionService_ConcurrentRequestsAreIndependent pins the fix for
+// the workspace-wide freeze. Request used to hold one mutex from before
+// the "requested" notification until after the human answered, so a
+// single unanswered prompt stalled every other permission request in the
+// workspace — including those of unrelated sessions — and the waiting
+// requests were invisible: their notification had not been published
+// yet, so no dialog could ever appear for them.
+//
+// Both requests must now be published straight away and be answerable in
+// either order.
+func TestPermissionService_ConcurrentRequestsAreIndependent(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", false, nil)
+
+	requests := service.Subscribe(t.Context())
+
+	type verdict struct {
+		granted bool
+		err     error
+	}
+	results := make(map[string]chan verdict, 2)
+	for _, sessionID := range []string{"s1", "s2"} {
+		results[sessionID] = make(chan verdict, 1)
+		go func() {
+			granted, err := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:   sessionID,
+				ToolCallID:  "call-" + sessionID,
+				ToolName:    "bash",
+				Action:      "execute",
+				Description: "test command",
+				Path:        "/tmp",
+			})
+			results[sessionID] <- verdict{granted: granted, err: err}
+		}()
+	}
+
+	// Both requests must reach subscribers while both are still
+	// unanswered. Before the fix only the first was ever published.
+	published := make(map[string]PermissionRequest, 2)
+	for range 2 {
+		select {
+		case ev := <-requests:
+			published[ev.Payload.SessionID] = ev.Payload
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of 2 concurrent requests were published: %v", len(published), published)
+		}
+	}
+	require.Contains(t, published, "s1")
+	require.Contains(t, published, "s2")
+
+	// Answer the second one first: neither request depends on the other.
+	require.True(t, service.Deny(published["s2"]))
+	got := <-results["s2"]
+	require.NoError(t, got.err)
+	assert.False(t, got.granted)
+
+	require.True(t, service.Grant(published["s1"]))
+	got = <-results["s1"]
+	require.NoError(t, got.err)
+	assert.True(t, got.granted)
+}

@@ -71,6 +71,11 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
 				SessionTitle:   "New Agent Session",
+				// The delegated turn is part of this run, so it needs
+				// the same approval. Without it a `crush run` blocks
+				// forever on the child session's first permission
+				// request: nobody is there to answer it.
+				AutoApprove: AutoApproveFromContext(ctx),
 			})
 		},
 	), nil

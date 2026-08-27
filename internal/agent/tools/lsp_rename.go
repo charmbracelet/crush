@@ -64,6 +64,7 @@ func NewRenameTool(
 			if sessionID != "" && permissions != nil {
 				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
+					ToolCallID:  call.ID,
 					ToolName:    RenameToolName,
 					Description: fmt.Sprintf("Rename '%s' to '%s'", params.Symbol, params.NewName),
 				})

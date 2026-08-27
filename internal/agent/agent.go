@@ -229,45 +229,10 @@ type sessionAgent struct {
 	// sub-agents built without a permission service) keep working.
 	permissions permission.Service
 
-	messageQueue   *csync.Map[string, []SessionAgentCall]
-	activeRequests *csync.Map[string, *activeCancel]
-
-	// dispatchMu holds a per-session mutex that serializes the
-	// accepted -> (cancel-on-entry | queued | active) transition in
-	// Run against a concurrent Cancel. The lock is held only during
-	// the brief handoff (no DB or LLM I/O under the lock).
-	dispatchMu *csync.Map[string, *sync.Mutex]
-	// acceptedRuns counts dispatched-but-not-yet-active runs per
-	// session. A counter > 0 means a dispatched prompt is in flight
-	// and has not yet completed the dispatch handoff in Run. Only
-	// BeginAccepted increments it; only AcceptedRun.Close decrements
-	// it.
-	acceptedRuns *csync.Map[string, int]
-	// cancelMark records, per session, a high-water accept sequence: an
-	// accepted handle is canceled by it iff the handle's sequence is at
-	// or below the mark. Cancel raises the mark to the latest sequence
-	// assigned at cancel time, so a single Cancel covers every prompt
-	// accepted-but-not-yet-active then, while a prompt accepted later
-	// (higher sequence) is never poisoned. Absent or 0 means no pending
-	// cancel. It is only raised by Cancel when acceptedRuns > 0, so an
-	// idle Escape never records a mark.
-	cancelMark *csync.Map[string, uint64]
-	// dispatchMuCreate guards lazy creation of per-session entries in
-	// dispatchMu so two goroutines can't race to lock different mutex
-	// instances for the same session.
-	dispatchMuCreate sync.Mutex
-	// acceptedMu serializes increments/decrements of acceptedRuns and
-	// the assignment of accept sequence numbers from acceptSeqGen. It
-	// is separate from dispatchMu so AcceptedRun.Close (which may run
-	// while Run holds dispatchMu for the same session) does not
-	// deadlock by re-entering the dispatch lock.
-	acceptedMu sync.Mutex
-	// acceptSeqGen is the monotonic source of accept sequence numbers.
-	// Each BeginAccepted increments it under acceptedMu and stamps the
-	// returned handle, so sequences strictly increase in accept order
-	// across the agent. Cancel uses its current value as the per-session
-	// high-water mark.
-	acceptSeqGen uint64
+	// sessionOwnership is the per-session run bookkeeping. It is a
+	// pointer because every agent a coordinator builds shares one: a
+	// session has one turn at a time whichever agent runs it.
+	*sessionOwnership
 }
 
 type SessionAgentOptions struct {
@@ -286,6 +251,10 @@ type SessionAgentOptions struct {
 	// Permissions backs SessionAgentCall.AutoApprove. Leave it nil when
 	// no caller sets that flag.
 	Permissions permission.Service
+	// Ownership, when non-nil, is the per-session run bookkeeping this
+	// agent shares with the rest of its coordinator's agents. Leave it
+	// nil for a standalone agent, which then owns its sessions alone.
+	Ownership *sessionOwnership
 }
 
 func NewSessionAgent(
@@ -305,11 +274,7 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		permissions:          opts.Permissions,
-		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:       csync.NewMap[string, *activeCancel](),
-		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:         csync.NewMap[string, int](),
-		cancelMark:           csync.NewMap[string, uint64](),
+		sessionOwnership:     cmp.Or(opts.Ownership, newSessionOwnership()),
 	}
 }
 
@@ -910,7 +875,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// that spawned it. Stamping from the call (rather than trusting the
 	// incoming ctx) is what keeps the queued-prompt recursion honest: a
 	// dequeued prompt is its own run with its own models.
+	//
+	// The turn's auto-approval decision rides along for the same reason:
+	// a sub-agent turn is part of this run, so it takes its own hold on
+	// its child session, and a prompt this frame dequeued must not
+	// inherit the approval of the turn it queued behind.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	runCtx = withTurnAutoApprove(runCtx, call.AutoApprove)
 	if call.Models != nil {
 		runCtx = withRunModels(runCtx, call.Models)
 	}

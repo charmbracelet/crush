@@ -374,15 +374,16 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Equal(t, "Failed to generate response: provider request failed", resp.Content)
 	})
 
-	t.Run("session setup callback is invoked", func(t *testing.T) {
+	t.Run("auto-approval is passed to the child turn", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		var setupCalledWith string
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		var gotCall SessionAgentCall
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			gotCall = call
 			return agentResultWithText("ok"), nil
 		})
 
@@ -394,12 +395,13 @@ func TestRunSubAgent(t *testing.T) {
 			ToolCallID:     "call-1",
 			Prompt:         "test",
 			SessionTitle:   "Test",
-			SessionSetup: func(sessionID string) {
-				setupCalledWith = sessionID
-			},
+			AutoApprove:    true,
 		})
 		require.NoError(t, err)
-		assert.NotEmpty(t, setupCalledWith, "SessionSetup should have been called")
+		assert.True(t, gotCall.AutoApprove,
+			"the child turn must take its own hold, not rely on the parent's session")
+		assert.NotEqual(t, parentSession.ID, gotCall.SessionID,
+			"the hold must be taken on the child session")
 	})
 
 	t.Run("cost propagation to parent session", func(t *testing.T) {

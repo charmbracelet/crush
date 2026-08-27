@@ -132,6 +132,13 @@ type coordinator struct {
 	currentReady *agentReadiness
 	agents       map[string]SessionAgent
 
+	// ownership is the per-session run bookkeeping every agent built
+	// here shares, so a child session running on the `agent` tool's
+	// sub-agent is visible to IsSessionBusy, reachable by Cancel, and
+	// cannot have a second concurrent turn started on it by a prompt
+	// dispatched on the coder agent.
+	ownership *sessionOwnership
+
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
@@ -181,6 +188,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		notify:       opts.Notify,
 		runComplete:  opts.RunComplete,
 		agents:       make(map[string]SessionAgent),
+		ownership:    newSessionOwnership(),
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
@@ -834,6 +842,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
 		Permissions:          c.permissions,
+		Ownership:            c.ownership,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -1635,9 +1644,12 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
-	// SessionSetup is an optional callback invoked after session creation
-	// but before agent execution, for custom session configuration.
-	SessionSetup func(sessionID string)
+	// AutoApprove asks the child turn to grant its own permission
+	// requests. The child agent's Run takes the hold when the turn
+	// starts and gives it back when the turn ends, so a delegated turn
+	// of a `crush run` never blocks on a prompt nobody can answer and
+	// the child session is not left approved afterwards.
+	AutoApprove bool
 }
 
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
@@ -1653,11 +1665,6 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
-	}
-
-	// Call session setup function if provided
-	if params.SessionSetup != nil {
-		params.SessionSetup(session.ID)
 	}
 
 	// Get model configuration
@@ -1686,6 +1693,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
 			SubAgent:         true,
 			NonInteractive:   true,
+			AutoApprove:      params.AutoApprove,
 			Models:           params.Models,
 			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg, c.runModelsRefresher(params.Models)),
 		})

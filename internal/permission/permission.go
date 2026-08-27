@@ -115,11 +115,6 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
-
-	// used to make sure we only process one request at a time
-	requestMu       sync.Mutex
-	activeRequest   *PermissionRequest
-	activeRequestMu sync.Mutex
 }
 
 // resolve atomically removes the pending request entry for the given
@@ -159,11 +154,6 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 	// so this send never blocks.
 	respCh <- granted
 
-	s.activeRequestMu.Lock()
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
-	s.activeRequestMu.Unlock()
 	return true
 }
 
@@ -213,10 +203,9 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
-
-	// tell the UI that a permission was requested
+	// Tell the UI a permission was requested. This happens before any
+	// of the checks below so that every request is visible the moment it
+	// is made, including one that ends up waiting on a human.
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: opts.ToolCallID,
 	})
@@ -270,10 +259,13 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	s.activeRequestMu.Lock()
-	s.activeRequest = &permission
-	s.activeRequestMu.Unlock()
-
+	// Nothing is serialized from here on. Requests are registered by ID
+	// and answered by ID, so each one waits on its own channel: a
+	// request nobody answers blocks its own tool call and nothing else.
+	// This used to run under a workspace-wide mutex held across the
+	// human wait, which froze every other permission request in the
+	// workspace — including those of unrelated sessions — behind the
+	// unanswered one.
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
 	defer s.pendingRequests.Del(permission.ID)

@@ -198,6 +198,8 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,
+				Permissions:          c.permissions,
+				Ownership:            c.ownership,
 			})
 
 			return c.runSubAgent(ctx, subAgentParams{
@@ -208,9 +210,12 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				ToolCallID:     call.ID,
 				Prompt:         fullPrompt,
 				SessionTitle:   "Fetch Analysis",
-				SessionSetup: func(sessionID string) {
-					c.permissions.AutoApproveSession(sessionID)
-				},
+				// The fetch turn reads a scratch copy of a page in a
+				// temp dir, so it is always approved — the user already
+				// approved the `agentic_fetch` call itself. Binding the
+				// hold to the child turn is what gives it back: the
+				// previous session-setup hold was never revoked.
+				AutoApprove: true,
 			})
 		},
 	), nil

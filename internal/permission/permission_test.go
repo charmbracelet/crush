@@ -752,3 +752,83 @@ func TestPermissionService_ConcurrentRequestsAreIndependent(t *testing.T) {
 	require.NoError(t, got.err)
 	assert.True(t, got.granted)
 }
+
+// TestPermissionService_CancellationPublishesTerminalNotification pins
+// the terminal event a cancelled request owes its subscribers. Request
+// used to return on ctx.Done() with no verdict, so a client that had
+// queued the request kept an entry — and possibly an open dialog — that
+// nothing could ever resolve: every later live request waited behind the
+// dead ones and every answer to them was a service no-op. With parallel
+// tool calls one cancelled run stranded a whole batch of them.
+func TestPermissionService_CancellationPublishesTerminalNotification(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", false, nil)
+
+	requests := service.Subscribe(t.Context())
+	notifications := service.SubscribeNotifications(t.Context())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	type verdict struct {
+		granted bool
+		err     error
+	}
+	done := make(chan verdict, 1)
+	go func() {
+		granted, err := service.Request(ctx, CreatePermissionRequest{
+			SessionID:   "s1",
+			ToolCallID:  "call-1",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "test command",
+			Path:        "/tmp",
+		})
+		done <- verdict{granted: granted, err: err}
+	}()
+
+	// Wait until the request is actually pending, so the cancellation
+	// lands on the human wait and not on one of the early returns.
+	var published PermissionRequest
+	select {
+	case ev := <-requests:
+		published = ev.Payload
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request was never published")
+	}
+
+	select {
+	case ev := <-notifications:
+		require.Equal(t, "call-1", ev.Payload.ToolCallID)
+		require.False(t, ev.Payload.Granted, "the initial notification carries no verdict")
+		require.False(t, ev.Payload.Denied, "the initial notification carries no verdict")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the initial notification was never published")
+	}
+
+	cancel()
+
+	got := <-done
+	require.ErrorIs(t, got.err, context.Canceled)
+	assert.False(t, got.granted)
+
+	select {
+	case ev := <-notifications:
+		assert.Equal(t, "call-1", ev.Payload.ToolCallID)
+		assert.True(t, ev.Payload.Denied, "cancellation must resolve the request")
+		assert.False(t, ev.Payload.Granted)
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation published no terminal notification")
+	}
+
+	// Single winner: the entry is gone, so a late answer from a client
+	// that still had the dialog up neither resolves the request nor
+	// publishes a second, contradicting verdict.
+	assert.False(t, service.Grant(published),
+		"a cancelled request must report itself already resolved")
+	select {
+	case ev := <-notifications:
+		t.Fatalf("a resolved request published a second verdict: %+v", ev.Payload)
+	case <-time.After(100 * time.Millisecond):
+	}
+}

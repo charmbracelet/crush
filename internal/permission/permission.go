@@ -131,8 +131,9 @@ type permissionService struct {
 // that lost to a Deny does not leak an auto-approve entry.
 //
 // All three public resolution methods (Grant, GrantPersistent, Deny)
-// route through this helper so multi-subscriber UIs can race safely:
-// the first caller wins, the rest become no-ops.
+// route through this helper, as does Request's own cancellation path,
+// so multi-subscriber UIs can race safely: the first caller wins, the
+// rest become no-ops.
 func (s *permissionService) resolve(permission PermissionRequest, granted, denied bool, onResolve func()) bool {
 	respCh, ok := s.pendingRequests.Take(permission.ID)
 	if !ok {
@@ -268,6 +269,8 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// unanswered one.
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
+	// Backstop only: both select arms below take the entry themselves,
+	// so this is a no-op unless a future exit path is added above them.
 	defer s.pendingRequests.Del(permission.ID)
 
 	// Publish the request
@@ -275,6 +278,14 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	select {
 	case <-ctx.Done():
+		// A cancelled run still owes its subscribers a terminal event.
+		// Without one, a client that queued this request keeps a dead
+		// entry — and possibly an open dialog — that nothing can
+		// resolve, so later live requests wait behind it and every
+		// answer to it is a no-op. resolve's Take is the single-winner
+		// rule: if a concurrent Grant or Deny already took the entry,
+		// this publishes nothing.
+		s.resolve(permission, false, true, nil)
 		return false, ctx.Err()
 	case granted := <-respCh:
 		return granted, nil

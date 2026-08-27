@@ -14,6 +14,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/lsp/util"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -77,7 +78,7 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 func groupByFilename(locations []protocol.Location) map[string][]protocol.Location {
 	files := make(map[string][]protocol.Location)
 	for _, loc := range locations {
-		path, err := loc.URI.Path()
+		path, err := util.PathFromURI(loc.URI)
 		if err != nil {
 			slog.Error("Failed to convert location URI to path", "uri", loc.URI, "error", err)
 			continue

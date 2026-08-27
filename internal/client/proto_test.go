@@ -293,6 +293,65 @@ func TestSendMessageOmitsAutoApproveByDefault(t *testing.T) {
 	require.NotContains(t, string(body), "auto_approve")
 }
 
+// TestSendMessagePostsNonInteractiveFlag pins the other half of the
+// `crush run` request. Interactivity is a property of the run, not of
+// the workspace: the server keeps one coordinator per workspace, so a
+// headless prompt has to say on the wire that nobody can answer a
+// question. A TUI prompt to the same workspace must not say it.
+func TestSendMessagePostsNonInteractiveFlag(t *testing.T) {
+	t.Parallel()
+
+	bodies := make(chan []byte, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		bodies <- body
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", proto.AgentMessage{
+		SessionID:      "sess1",
+		Prompt:         "hello",
+		NonInteractive: true,
+	}))
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", proto.AgentMessage{
+		SessionID: "sess1",
+		Prompt:    "hello",
+	}))
+
+	var headless proto.AgentMessage
+	require.NoError(t, json.Unmarshal(<-bodies, &headless))
+	require.True(t, headless.NonInteractive,
+		"a headless run must tell the server no human can answer a question")
+	require.NotContains(t, string(<-bodies), "non_interactive")
+}
+
+// TestInitiateAgentProcessingPostsWithoutBody pins the init request. The
+// server keeps the coordinator a workspace already has, so init carries
+// nothing: it only makes sure a coordinator exists.
+func TestInitiateAgentProcessingPostsWithoutBody(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		var err error
+		body, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.InitiateAgentProcessing(context.Background(), "ws1"))
+
+	require.Equal(t, "/v1/workspaces/ws1/agent/init", gotPath)
+	require.Empty(t, body)
+}
+
 func marshalSSEPayload(t *testing.T) []byte {
 	t.Helper()
 

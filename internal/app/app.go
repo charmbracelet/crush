@@ -60,7 +60,11 @@ type App struct {
 	Questions   question.Service
 	FileTracker filetracker.Service
 
+	// AgentCoordinator is built once per workspace and never replaced.
+	// See InitCoderAgent. agentInitMu makes that check-and-set atomic
+	// against concurrent client attaches.
 	AgentCoordinator agent.Coordinator
+	agentInitMu      sync.Mutex
 
 	LSPManager *lsp.Manager
 
@@ -267,13 +271,16 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
 
-	// Re-initialize the coder agent without interactive-only tools.
-	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
-		return fmt.Errorf("failed to reinitialize agent for non-interactive mode: %w", err)
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// Mark the whole run non-interactive. Nobody here can answer an
+	// interactive tool, and the run gets a single shot at the tool
+	// palette, so the coordinator has to know before it dispatches.
+	// This used to be done by rebuilding the coordinator without
+	// interactive-only tools; the coordinator is now built once per
+	// workspace and the distinction belongs to the run.
+	ctx = agent.WithNonInteractive(ctx)
 
 	if largeModel != "" || smallModel != "" {
 		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
@@ -667,23 +674,33 @@ func setupSubscriberMustDeliver[T any](
 	})
 }
 
+// InitCoderAgent builds the coder agent coordinator for this workspace,
+// once. A workspace keeps the coordinator it already has.
+//
+// Everything that arbitrates a session lives on the coordinator
+// instance: Cancel, IsBusy/IsSessionBusy, the active-request map, the
+// per-session dispatch mutex and the prompt queue. Replacing it would
+// leave runs already in flight on the old instance, where cancel and
+// busy state can no longer reach them, and would let a new prompt start
+// a second concurrent turn on a session that is already streaming.
+// Every client attach and every client reconnect calls this, so it has
+// to be a no-op after the first success.
+//
+// Whether a run is interactive is a property of the run, not of the
+// coordinator: see agent.WithNonInteractive. One workspace serves an
+// attached TUI and headless `crush run` prompts at the same time.
 func (app *App) InitCoderAgent(ctx context.Context) error {
-	return app.initCoderAgent(ctx, true)
-}
+	app.agentInitMu.Lock()
+	defer app.agentInitMu.Unlock()
+	if app.AgentCoordinator != nil {
+		return nil
+	}
 
-// InitCoderAgentNonInteractive initializes the coder agent without
-// interactive-only tools (e.g. question).
-func (app *App) InitCoderAgentNonInteractive(ctx context.Context) error {
-	return app.initCoderAgent(ctx, false)
-}
-
-func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
-	var err error
-	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+	coordinator, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:      app.config,
 		Sessions:    app.Sessions,
 		Messages:    app.Messages,
@@ -695,12 +712,12 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Notify:      app.agentNotifications,
 		RunComplete: app.runCompletions,
 		Skills:      app.Skills,
-		Interactive: interactive,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+	app.AgentCoordinator = coordinator
 	return nil
 }
 

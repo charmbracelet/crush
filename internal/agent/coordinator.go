@@ -123,7 +123,6 @@ type coordinator struct {
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
-	interactive bool
 
 	// agentMu guards currentAgent, currentReady and the agents map.
 	// Runs read the pair under it so a rebuild can never hand a run one
@@ -154,7 +153,6 @@ type CoordinatorOptions struct {
 	Notify      pubsub.Publisher[notify.Notification]
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
-	Interactive bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -186,7 +184,6 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
-		interactive:  opts.Interactive,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -232,6 +229,11 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, err
 	}
 
+	// Whether this run is interactive is a property of the run, not of
+	// the coordinator: one workspace serves an attached TUI and headless
+	// `crush run` prompts at the same time. See WithNonInteractive.
+	nonInteractive := NonInteractiveFromContext(ctx)
+
 	// MCP servers connect asynchronously (see mcp.Initialize).
 	//
 	// Interactive runs never wait for that to finish: the tool list below
@@ -246,7 +248,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// do wait for initialization to settle. The wait is bounded by each
 	// server's own connect timeout, so a hung server cannot stall the run
 	// indefinitely.
-	if !c.interactive {
+	if nonInteractive {
 		if err := mcp.WaitForInit(ctx); err != nil {
 			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 		}
@@ -308,6 +310,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			SessionID:        sessionID,
 			RunID:            runID,
 			AutoApprove:      autoApprove,
+			NonInteractive:   nonInteractive,
 			Prompt:           prompt,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
@@ -825,8 +828,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	// Question tool is interactive-only and not available to sub-agents.
-	if !isSubAgent && c.interactive {
+	// The question tool is never available to sub-agents. It is also
+	// withheld from non-interactive turns, but that is decided per turn
+	// in sessionAgent.turnTools, since one agent serves both kinds of
+	// caller.
+	if !isSubAgent {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
 	}
 
@@ -1543,6 +1549,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			TopK:             model.ModelCfg.TopK,
 			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
+			SubAgent:         true,
 			NonInteractive:   true,
 			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 		})

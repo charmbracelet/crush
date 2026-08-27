@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,7 +102,18 @@ type SessionAgentCall struct {
 	TopK             *int64
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
-	NonInteractive   bool
+	// SubAgent marks a turn started by the `agent` tool on a child
+	// session. Such a turn publishes no user-facing "agent finished"
+	// notification: the parent turn is still running and owns that
+	// signal.
+	SubAgent bool
+	// NonInteractive marks a turn nobody can answer prompts for
+	// (`crush run`, local or client/server). Interactive-only tools
+	// are withheld from its palette, because a call to one would
+	// block until the run was cancelled. It is a property of the
+	// turn, not of the agent: one workspace on the shared server
+	// serves an attached TUI and headless prompts at the same time.
+	NonInteractive bool
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -790,7 +802,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	cacheControl := a.getCacheControlOptions()
-	agentTools := withCacheControl(a.tools.Copy(), cacheControl)
+	agentTools := a.turnTools(call, cacheControl)
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
@@ -945,7 +957,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			// Use latest tools (updated by SetTools when MCP tools change).
-			prepared.Tools = withCacheControl(a.tools.Copy(), cacheControl)
+			prepared.Tools = a.turnTools(call, cacheControl)
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -1357,10 +1369,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for
-	// nested/non-interactive sessions, and for a failed turn: the error
-	// paths above return before this point, so a turn that ends in
-	// turnErr must not claim it finished either).
-	if turnErr == nil && !call.NonInteractive && a.notify != nil {
+	// sub-agent sessions, whose parent turn is still running and owns
+	// that signal, and for a failed turn: the error paths above return
+	// before this point, so a turn that ends in turnErr must not claim
+	// it finished either). A non-interactive turn does publish it: the
+	// event is the TUI's busy->idle edge, and an attached TUI has to see
+	// a `crush run` turn on this session end.
+	if turnErr == nil && !call.SubAgent && a.notify != nil {
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,
@@ -1686,6 +1701,24 @@ func withCacheControl(agentTools []fantasy.AgentTool, opts fantasy.ProviderOptio
 	last := len(agentTools) - 1
 	agentTools[last] = &toolProviderOptions{AgentTool: agentTools[last], opts: opts}
 	return agentTools
+}
+
+// turnTools is the tool palette for one turn: a per-request copy of the
+// agent's current tools, with interactive-only tools removed when nobody
+// is watching the turn, and the last one marked for cache control.
+//
+// The palette is filtered per turn rather than per agent because one
+// agent serves both kinds of caller at once on the shared server. A
+// `crush run` turn that was offered the question tool would block on the
+// first call to it until the run was cancelled.
+func (a *sessionAgent) turnTools(call SessionAgentCall, cacheControl fantasy.ProviderOptions) []fantasy.AgentTool {
+	palette := a.tools.Copy()
+	if call.NonInteractive {
+		palette = slices.DeleteFunc(palette, func(tool fantasy.AgentTool) bool {
+			return tool.Info().Name == tools.QuestionToolName
+		})
+	}
+	return withCacheControl(palette, cacheControl)
 }
 
 // sessionHeaders returns the HTTP headers we use for cache affinity on

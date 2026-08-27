@@ -234,10 +234,6 @@ func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
 }
 
-func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
-	return w.app.InitCoderAgentNonInteractive(ctx)
-}
-
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	return w.app.GetDefaultSmallModel(providerID)
 }

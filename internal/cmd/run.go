@@ -109,7 +109,7 @@ crush run --continue "Follow up on your last response"
 			}
 
 			clientWs := workspace.NewClientWorkspace(c, *ws)
-			if err := clientWs.InitCoderAgentNonInteractive(ctx); err != nil {
+			if err := clientWs.InitCoderAgent(ctx); err != nil {
 				return fmt.Errorf("failed to initialize agent: %w", err)
 			}
 
@@ -265,12 +265,19 @@ func runNonInteractive(
 	// permission prompt: nobody here can answer one. The server holds
 	// the approval for exactly the turn it runs, so an early exit here
 	// neither strands that turn nor leaves the session approved.
+	//
+	// NonInteractive says the same thing about tools: the turn must not
+	// be offered the question tool, and it waits for MCP servers to
+	// finish connecting because it gets one shot at the tool palette.
+	// The workspace's agent may be shared with an attached TUI, so this
+	// travels per message rather than being set on the agent.
 	runID := uuid.New().String()
 	if err := c.SendMessage(ctx, ws.ID, proto.AgentMessage{
-		SessionID:   sess.ID,
-		RunID:       runID,
-		Prompt:      prompt,
-		AutoApprove: true,
+		SessionID:      sess.ID,
+		RunID:          runID,
+		Prompt:         prompt,
+		AutoApprove:    true,
+		NonInteractive: true,
 	}); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}

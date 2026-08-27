@@ -799,7 +799,9 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// handlePostWorkspaceAgentInit initializes the agent for a workspace.
+// handlePostWorkspaceAgentInit makes sure the workspace has an agent.
+// The route is idempotent: a workspace keeps the coordinator it already
+// has, so a reconnecting client cannot strand runs that are still going.
 //
 //	@Summary		Initialize agent
 //	@Tags			agent
@@ -811,16 +813,7 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 func (c *controllerV1) handlePostWorkspaceAgentInit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	var req proto.AgentInitRequest
-	if r.Body != nil && r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			c.server.logError(r, "Failed to decode agent init request", "error", err)
-			jsonError(w, http.StatusBadRequest, "failed to decode request")
-			return
-		}
-	}
-
-	if err := c.backend.InitAgent(r.Context(), id, req.Interactive); err != nil {
+	if err := c.backend.InitAgent(r.Context(), id); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

@@ -148,12 +148,20 @@ func (a AgentInfo) IsZero() bool {
 // hold belongs to the run, so a client that exits early can neither
 // strand the turn on an unanswerable prompt nor leave the session
 // silently approved for whoever keeps the workspace alive.
+//
+// NonInteractive tells the server that nobody on this side can answer a
+// prompt from the turn (`crush run`). Interactive-only tools are
+// withheld from it, and it waits for MCP initialization to settle
+// because it gets a single shot at the tool palette. It is per message
+// because one workspace serves an attached TUI and headless prompts at
+// the same time.
 type AgentMessage struct {
-	SessionID   string       `json:"session_id"`
-	RunID       string       `json:"run_id,omitempty"`
-	Prompt      string       `json:"prompt"`
-	Attachments []Attachment `json:"attachments,omitempty"`
-	AutoApprove bool         `json:"auto_approve,omitempty"`
+	SessionID      string       `json:"session_id"`
+	RunID          string       `json:"run_id,omitempty"`
+	Prompt         string       `json:"prompt"`
+	Attachments    []Attachment `json:"attachments,omitempty"`
+	AutoApprove    bool         `json:"auto_approve,omitempty"`
+	NonInteractive bool         `json:"non_interactive,omitempty"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.

@@ -3831,6 +3831,9 @@ const docTemplate = `{
                 "auto_approve": {
                     "type": "boolean"
                 },
+                "non_interactive": {
+                    "type": "boolean"
+                },
                 "prompt": {
                     "type": "string"
                 },

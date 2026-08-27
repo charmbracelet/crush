@@ -122,8 +122,9 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 // port); what matters is that they neither panic nor fail because of another
 // run's readiness.
 func TestConcurrentRunsDoNotShareOneReadinessGroup(t *testing.T) {
-	// Interactive so the runs do not park on the MCP init gate.
-	coord := newGateTestCoordinator(t, true)
+	// The runs are interactive by default, so they do not park on the MCP
+	// init gate.
+	coord := newGateTestCoordinator(t)
 
 	const (
 		rounds  = 4
@@ -170,7 +171,7 @@ func TestConcurrentRunsDoNotShareOneReadinessGroup(t *testing.T) {
 // Readiness belongs to the agent now, so a run reports its own agent's setup
 // failure, and a rebuilt agent starts clean.
 func TestFailedAgentBuildDoesNotPoisonLaterRuns(t *testing.T) {
-	coord := newGateTestCoordinator(t, true)
+	coord := newGateTestCoordinator(t)
 
 	p, err := coderPrompt(prompt.WithWorkingDir(coord.cfg.WorkingDir()))
 	require.NoError(t, err)

@@ -84,9 +84,12 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // notify.RunComplete event with that correlator. A run-complete marker
 // is also attached so the coordinator can report whether it published
 // the terminal event, letting runAgent avoid a duplicate fallback.
-// msg.AutoApprove travels the same way: the agent takes a permission
-// hold for the turn it actually runs, so the approval cannot outlive
-// the run or be revoked out from under it by a client that exited.
+//
+// msg.AutoApprove and msg.NonInteractive travel the same way. The agent
+// takes a permission hold for the turn it actually runs, so the approval
+// cannot outlive the run or be revoked out from under it by a client
+// that exited; and the turn it runs, not the workspace, is what decides
+// whether interactive tools and the MCP-initialization wait apply.
 func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun) {
 	defer ws.runWG.Done()
 	defer accept.Close()
@@ -97,6 +100,9 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	}
 	if msg.AutoApprove {
 		ctx = agent.WithAutoApprove(ctx)
+	}
+	if msg.NonInteractive {
+		ctx = agent.WithNonInteractive(ctx)
 	}
 	ctx = agent.WithRunCompleteMarker(ctx)
 
@@ -147,17 +153,17 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	return agentInfo, nil
 }
 
-// InitAgent initializes the coder agent for the workspace.
-func (b *Backend) InitAgent(ctx context.Context, workspaceID string, interactive bool) error {
+// InitAgent makes sure the workspace has a coder agent. A workspace
+// keeps the coordinator it already has, so a second attach or a client
+// reconnect cannot strand runs that are already in flight; see
+// app.InitCoderAgent.
+func (b *Backend) InitAgent(ctx context.Context, workspaceID string) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
 
-	if interactive {
-		return ws.InitCoderAgent(ctx)
-	}
-	return ws.InitCoderAgentNonInteractive(ctx)
+	return ws.InitCoderAgent(ctx)
 }
 
 // UpdateAgent reloads the agent model configuration.

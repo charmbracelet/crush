@@ -3,8 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -164,6 +166,33 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 		Command:     "ls && rm -rf /",
 	})
 
+	require.Equal(t, 1, perms.requestCount)
+	require.Contains(t, resp.Content, "User denied permission")
+}
+
+func TestBashTool_GitMutationRequiresPermission(t *testing.T) {
+	workingDir := t.TempDir()
+	testCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	require.NoError(t, exec.CommandContext(testCtx, "git", "init", workingDir).Run())
+	require.NoError(t, exec.CommandContext(
+		testCtx,
+		"git", "-C", workingDir,
+		"-c", "user.name=Crush Test",
+		"-c", "user.email=crush@example.com",
+		"commit", "--allow-empty", "-m", "initial",
+	).Run())
+	tool, perms := newBashToolWithRecordingPerms(workingDir, false)
+	ctx := context.WithValue(testCtx, SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "create git branch",
+		Command:     "git branch new-branch",
+	})
+
+	branches, err := exec.CommandContext(testCtx, "git", "-C", workingDir, "branch", "--list", "new-branch").Output()
+	require.NoError(t, err)
+	require.Empty(t, branches, "denied command must not create the branch")
 	require.Equal(t, 1, perms.requestCount)
 	require.Contains(t, resp.Content, "User denied permission")
 }

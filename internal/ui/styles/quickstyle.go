@@ -98,8 +98,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Populate color fields
 	s.WorkingGradFromColor = o.primary
 	s.WorkingGradToColor = o.secondary
-	s.WorkingLabelColor = o.fgMostSubtle
+	s.WorkingLabelColor = o.fgMoreSubtle
 	s.WorkingTimerColor = o.fgMostSubtle
+	s.WorkingEllipsisColor = o.fgMostSubtle
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{

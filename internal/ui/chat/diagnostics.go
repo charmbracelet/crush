@@ -26,8 +26,9 @@ func NewDiagnosticsToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &DiagnosticsToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &DiagnosticsToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // DiagnosticsToolRenderContext renders diagnostics tool messages.

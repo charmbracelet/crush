@@ -21,8 +21,9 @@ func NewGenericToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &GenericToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &GenericToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // GenericToolRenderContext renders unknown/generic tool messages.

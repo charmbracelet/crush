@@ -24,8 +24,9 @@ func NewQuestionToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &QuestionToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &QuestionToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // QuestionToolRenderContext renders question tool messages.

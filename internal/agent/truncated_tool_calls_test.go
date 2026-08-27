@@ -246,6 +246,88 @@ func TestRun_HealthyToolCallTurnKeepsRealResults(t *testing.T) {
 	}
 }
 
+// dropToolResultService drops the first stored result for one tool call
+// and passes every other write through. That is the second route into a
+// transcript with unanswered tool calls: fantasy discards the error the
+// OnToolResult callback returns (executeSingleTool), so the tool has
+// already run, the model sees its output, and the turn carries on while
+// nothing records the result.
+type dropToolResultService struct {
+	message.Service
+	toolCallID string
+	dropped    atomic.Bool
+}
+
+func (s *dropToolResultService) Create(ctx context.Context, sessionID string, params message.CreateMessageParams) (message.Message, error) {
+	if params.Role == message.Tool {
+		for _, part := range params.Parts {
+			tr, ok := part.(message.ToolResult)
+			if ok && tr.ToolCallID == s.toolCallID && s.dropped.CompareAndSwap(false, true) {
+				return message.Message{}, errors.New("simulated tool result write failure")
+			}
+		}
+	}
+	return s.Service.Create(ctx, sessionID, params)
+}
+
+// TestRun_LostToolResultOnEarlierStepIsRepaired pins the repair to the
+// whole turn rather than its last step. PrepareStep creates one
+// assistant message per step, so a result lost on step one is invisible
+// to a scan of the final step's message: the turn used to report
+// success with that call still rendering as running, forever.
+//
+// The tool did run here, so the stored result must not claim otherwise —
+// a transcript that says a call never ran invites the model to repeat
+// the side effect — and the turn must fail with ErrToolResultsMissing
+// rather than the truncation error.
+func TestRun_LostToolResultOnEarlierStepIsRepaired(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dropper := &dropToolResultService{Service: env.messages, toolCallID: "call-1"}
+	env.messages = dropper
+	tool, runs := newEchoTool()
+	model := &scriptedStreamModel{steps: []scriptedStep{
+		{
+			toolCallID:   "call-1",
+			toolName:     "echo",
+			toolInput:    `{"value":"hi"}`,
+			finishReason: fantasy.FinishReasonToolCalls,
+		},
+		{text: "all done", finishReason: fantasy.FinishReasonStop},
+	}}
+	titleModel := &finishStreamModel{text: "a title"}
+	sa := testSessionAgent(env, model, titleModel, "system", tool).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "echo hi"})
+	require.ErrorIs(t, err, ErrToolResultsMissing,
+		"a turn that lost a tool result must not report success")
+	require.True(t, dropper.dropped.Load(), "the test never dropped a result write")
+	assert.Equal(t, int64(1), runs.Load(),
+		"the tool ran; only the write of its result failed")
+	assert.Equal(t, int64(2), model.calls.Load(),
+		"the lost write must not stop the turn early")
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	result := toolResultFor(msgs, "call-1")
+	require.NotNil(t, result,
+		"the unanswered call from the first step must be repaired")
+	assert.True(t, result.IsError)
+	assert.NotContains(t, result.Content, "never run",
+		"the tool ran, so the transcript must not say it did not")
+	assert.Contains(t, result.Content, "No result was recorded")
+
+	// The repair also has to leave the session usable: its result row is
+	// appended after the second step's assistant message, so the next
+	// prompt is only valid if the answer is paired with its call rather
+	// than sent from where it was stored.
+	history, _ := sa.preparePrompt(msgs, true)
+	requireAdjacentToolResult(t, history, "call-1")
+}
+
 // collectRunCompletes reads terminal events off the broker until it has
 // one per expected RunID, keyed by RunID. It fails the test rather than
 // blocking forever when an expected event never arrives, which is the

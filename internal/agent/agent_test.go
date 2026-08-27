@@ -893,6 +893,102 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	require.Equal(t, 1, syntheticCount, "expected exactly one synthetic result for the orphaned call")
 }
 
+// TestPreparePrompt_ToolResultStoredAfterLaterAssistant pins that a tool
+// result is sent behind the message that made its call, wherever it was
+// stored. Rows are appended in write order, so an end-of-turn repair of
+// a call from an earlier step stores its result after the later
+// assistant messages. Sending it there would put a tool result between
+// two assistant messages, which providers reject on every later turn.
+func TestPreparePrompt_ToolResultStoredAfterLaterAssistant(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "hello"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Step one: an assistant message with a tool call.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{
+				ID:       "call_late",
+				Name:     "view",
+				Input:    `{"path":"/foo"}`,
+				Finished: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// Step two: a later assistant message, stored before the result.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "all done"},
+		},
+	})
+	require.NoError(t, err)
+
+	// The repaired result, appended last.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call_late",
+				Name:       "view",
+				Content:    "file contents",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs, true)
+
+	result := requireAdjacentToolResult(t, history, "call_late")
+	output, isText := result.Output.(fantasy.ToolResultOutputContentText)
+	require.True(t, isText, "the stored result must be used, not a synthetic error")
+	require.Equal(t, "file contents", output.Text)
+}
+
+// requireAdjacentToolResult asserts the prompt answers the given tool
+// call exactly once, in the message directly behind the one that made
+// it, and returns that answer. Provider APIs reject any other
+// placement, and they reject it on every later turn of the session.
+func requireAdjacentToolResult(t *testing.T, history []fantasy.Message, toolCallID string) fantasy.ToolResultPart {
+	t.Helper()
+	callIdx, resultIdx, answers := -1, -1, 0
+	var result fantasy.ToolResultPart
+	for i, msg := range history {
+		for _, part := range msg.Content {
+			if tc, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](part); ok && tc.ToolCallID == toolCallID {
+				callIdx = i
+			}
+			if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok && tr.ToolCallID == toolCallID {
+				resultIdx, result = i, tr
+				answers++
+			}
+		}
+	}
+	require.NotEqual(t, -1, callIdx, "the tool call must reach the prompt")
+	require.Equal(t, 1, answers, "the tool call must be answered exactly once")
+	require.Equal(t, callIdx+1, resultIdx,
+		"the answer must directly follow the message holding the call")
+	return result
+}
+
 func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, nil, "test prompt")

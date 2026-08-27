@@ -579,27 +579,40 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
-// finalizeUnresolvedToolCalls writes a terminal error tool result for
-// every tool call on msg that never produced one, so the stored
+// finalizeUnresolvedToolCalls writes a terminal tool result for every
+// tool call across msgs that never produced one, so the stored
 // transcript cannot leave a tool call rendering as running forever. A
 // tool call whose input never finished streaming is marked finished
-// with an empty input first, for the same reason. It returns how many
-// results it wrote.
+// with an empty input first, for the same reason. contentFor supplies
+// the result text for a given message, which lets a caller describe
+// why that step's calls went unanswered. It returns how many results
+// it wrote.
+//
+// Every assistant message of the turn has to be checked, not just the
+// last one: fantasy creates one per step and discards the error from
+// the OnToolResult callback, so a result row that failed to write
+// leaves an unanswered call on a step the turn has already moved past.
 //
 // ctx must be detached from the run context and bounded: every caller
 // reaches this after the run context is already cancelled or about to
 // be, and these writes still have to land.
-func (a *sessionAgent) finalizeUnresolvedToolCalls(ctx context.Context, msg *message.Message, content string) (int, error) {
-	toolCalls := msg.ToolCalls()
-	if len(toolCalls) == 0 {
+func (a *sessionAgent) finalizeUnresolvedToolCalls(ctx context.Context, msgs []*message.Message, contentFor func(*message.Message) string) (int, error) {
+	anyToolCalls := false
+	for _, msg := range msgs {
+		if len(msg.ToolCalls()) > 0 {
+			anyToolCalls = true
+			break
+		}
+	}
+	if !anyToolCalls {
 		return 0, nil
 	}
-	msgs, err := a.messages.List(ctx, msg.SessionID)
+	stored, err := a.messages.List(ctx, msgs[0].SessionID)
 	if err != nil {
 		return 0, err
 	}
-	resulted := make(map[string]struct{}, len(toolCalls))
-	for _, m := range msgs {
+	resulted := make(map[string]struct{})
+	for _, m := range stored {
 		if m.Role != message.Tool {
 			continue
 		}
@@ -608,34 +621,53 @@ func (a *sessionAgent) finalizeUnresolvedToolCalls(ctx context.Context, msg *mes
 		}
 	}
 	written := 0
-	for _, tc := range toolCalls {
-		if !tc.Finished {
-			tc.Finished = true
-			tc.Input = "{}"
-			msg.AddToolCall(tc)
-			if err := a.messages.Update(ctx, *msg); err != nil {
-				return written, err
-			}
-		}
-		if _, ok := resulted[tc.ID]; ok {
+	for _, msg := range msgs {
+		toolCalls := msg.ToolCalls()
+		if len(toolCalls) == 0 {
 			continue
 		}
-		if _, err := a.messages.Create(ctx, msg.SessionID, message.CreateMessageParams{
-			Role: message.Tool,
-			Parts: []message.ContentPart{
-				message.ToolResult{
-					ToolCallID: tc.ID,
-					Name:       tc.Name,
-					Content:    content,
-					IsError:    true,
+		content := contentFor(msg)
+		for _, tc := range toolCalls {
+			if !tc.Finished {
+				tc.Finished = true
+				tc.Input = "{}"
+				msg.AddToolCall(tc)
+				if err := a.messages.Update(ctx, *msg); err != nil {
+					return written, err
+				}
+			}
+			if _, ok := resulted[tc.ID]; ok {
+				continue
+			}
+			if _, err := a.messages.Create(ctx, msg.SessionID, message.CreateMessageParams{
+				Role: message.Tool,
+				Parts: []message.ContentPart{
+					message.ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+						Content:    content,
+						IsError:    true,
+					},
 				},
-			},
-		}); err != nil {
-			return written, err
+			}); err != nil {
+				return written, err
+			}
+			written++
 		}
-		written++
 	}
 	return written, nil
+}
+
+// unansweredToolCallContent is the tool result text stored for a call
+// that a turn ended without answering. Only a step that hit the output
+// token limit proves the call was never dispatched; any other cause
+// means the tool may well have run, and telling the model it did not
+// invites it to repeat a side effect.
+func unansweredToolCallContent(msg *message.Message) string {
+	if finish := msg.FinishPart(); finish != nil && finish.Reason == message.FinishReasonMaxTokens {
+		return "The tool call was never run: the model's response hit the output token limit before the call could be dispatched."
+	}
+	return "No result was recorded for this tool call."
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
@@ -832,6 +864,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
+	// turnAssistants collects every assistant message of this turn, in
+	// step order, because the end-of-turn tool call repair below has to
+	// check all of them: an unanswered call is not necessarily on the
+	// last step.
+	var turnAssistants []*message.Message
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -975,6 +1012,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
+			turnAssistants = append(turnAssistants, currentAssistant)
 			return callContext, prepared, err
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -1212,7 +1250,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if isCancelErr {
 			content = "Error: user cancelled assistant tool calling"
 		}
-		if _, finalizeErr := a.finalizeUnresolvedToolCalls(cleanupCtx, currentAssistant, content); finalizeErr != nil {
+		sameContent := func(*message.Message) string { return content }
+		if _, finalizeErr := a.finalizeUnresolvedToolCalls(cleanupCtx, turnAssistants, sameContent); finalizeErr != nil {
 			return nil, finalizeErr
 		}
 		var fantasyErr *fantasy.Error
@@ -1257,10 +1296,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// tool calls already persisted by OnToolCall can never get a result.
 	// The same stored state is reachable whenever a result row fails to
 	// write, because fantasy discards the error OnToolResult returns.
-	// Detect the orphans rather than the finish reason: repair the
-	// transcript, then fail the turn. Reporting success would tell the
-	// caller the tools ran and leave every client rendering them as
-	// still running, forever.
+	// Detect the unanswered calls rather than the finish reason, across
+	// every step of the turn: repair the transcript, then fail the turn.
+	// Reporting success would tell the caller the tools ran and leave
+	// every client rendering them as still running, forever.
 	//
 	// This sits before the summarize block on purpose, so a truncated
 	// turn is not re-queued as a continuation of tool calls that never
@@ -1271,15 +1310,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// returning here would leave it in the queue with nothing left to
 	// start it.
 	var turnErr error
-	if currentAssistant != nil {
-		content := "The tool call was never run: the model's response was cut off before the call could be dispatched."
-		if finish := currentAssistant.FinishPart(); finish != nil && finish.Reason == message.FinishReasonMaxTokens {
-			content = "The tool call was never run: the model's response hit the output token limit before the call could be dispatched."
-		}
+	if len(turnAssistants) > 0 {
 		// Detached and bounded for the same reason as the error path:
 		// workspace shutdown can cancel ctx before these writes land.
 		orphanCtx, orphanCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		written, finalizeErr := a.finalizeUnresolvedToolCalls(orphanCtx, currentAssistant, content)
+		written, finalizeErr := a.finalizeUnresolvedToolCalls(orphanCtx, turnAssistants, unansweredToolCallContent)
 		orphanCancel()
 		switch {
 		case finalizeErr != nil:
@@ -1288,10 +1323,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// be stranded by a write that failed for reasons of its own.
 			turnErr = finalizeErr
 		case written > 0:
-			slog.Error("Turn ended with tool calls that never ran",
+			slog.Error("Turn ended with tool calls that have no result",
 				"session_id", call.SessionID,
 				"count", written)
-			turnErr = ErrToolCallsNotRun
+			// Only a truncated final step proves the calls never ran.
+			// Anything else got here through a lost result row, where
+			// the tool did run.
+			turnErr = ErrToolResultsMissing
+			if finish := currentAssistant.FinishPart(); finish != nil && finish.Reason == message.FinishReasonMaxTokens {
+				turnErr = ErrToolCallsNotRun
+			}
 		}
 	}
 
@@ -1659,24 +1700,27 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			),
 		))
 	}
-	// Collect all tool call IDs present in assistant messages and all tool
-	// result IDs present in tool messages. This lets us detect both orphaned
-	// tool results (result without a call) and orphaned tool calls (call
-	// without a result).
-	knownToolCallIDs := make(map[string]struct{})
-	knownToolResultIDs := make(map[string]struct{})
+	// Index every stored tool result by the ID of the tool call it
+	// answers. Provider APIs require a tool result to sit directly
+	// behind the message holding its call, and the stored order does
+	// not guarantee that: a transcript repaired at the end of a turn
+	// appends the missing results after the later assistant messages.
+	// Pairing by ID instead of by position keeps the prompt valid
+	// wherever a result was stored. The first result stored for a call
+	// wins, so a repair row can never displace a real result.
+	resultsByToolCallID := make(map[string]message.ToolResult)
 	for _, m := range msgs {
-		switch m.Role {
-		case message.Assistant:
-			for _, tc := range m.ToolCalls() {
-				knownToolCallIDs[tc.ID] = struct{}{}
+		if m.Role != message.Tool {
+			continue
+		}
+		for _, tr := range m.ToolResults() {
+			if _, seen := resultsByToolCallID[tr.ToolCallID]; seen {
+				continue
 			}
-		case message.Tool:
-			for _, tr := range m.ToolResults() {
-				knownToolResultIDs[tr.ToolCallID] = struct{}{}
-			}
+			resultsByToolCallID[tr.ToolCallID] = tr
 		}
 	}
+	paired := make(map[string]struct{}, len(resultsByToolCallID))
 
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
@@ -1686,10 +1730,11 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
+		// Tool messages are never emitted from their stored position:
+		// every result is emitted behind its own call below, and one
+		// with no matching call is dropped (it would fail API
+		// validation on every later turn, locking the session).
 		if m.Role == message.Tool {
-			if msg, ok := filterOrphanedToolResults(m, knownToolCallIDs); ok {
-				history = append(history, msg)
-			}
 			continue
 		}
 		aiMsgs := m.ToAIMessage()
@@ -1703,9 +1748,18 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		history = append(history, aiMsgs...)
 
 		if m.Role == message.Assistant {
-			if msg, ok := syntheticToolResultsForOrphanedCalls(m, knownToolResultIDs); ok {
+			if msg, ok := toolResultsForCalls(m, resultsByToolCallID, paired); ok {
 				history = append(history, msg)
 			}
+		}
+	}
+
+	for id := range resultsByToolCallID {
+		if _, ok := paired[id]; !ok {
+			slog.Warn(
+				"Dropping orphaned tool result with no matching tool call",
+				"tool_call_id", id,
+			)
 		}
 	}
 
@@ -1741,51 +1795,29 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 	return filtered
 }
 
-// filterOrphanedToolResults converts a tool message to a fantasy.Message,
-// dropping any tool result parts whose tool_call_id has no matching tool call
-// in the known set. An orphaned result causes API validation to fail on every
-// subsequent turn, permanently locking the session. Returns the filtered
-// message and true if at least one valid part remains.
-func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]struct{}) (fantasy.Message, bool) {
-	aiMsgs := m.ToAIMessage()
-	if len(aiMsgs) == 0 {
+// toolResultsForCalls returns the tool message that answers every tool
+// call in the given assistant message: the stored result when one
+// exists, or a synthetic error result when none does. It records the
+// tool call IDs it answered in paired so a stored result is emitted
+// exactly once.
+//
+// LLM APIs require every tool call to be answered directly behind the
+// message that made it. An interrupted session leaves calls with no
+// result at all, and a session whose transcript was repaired at the end
+// of a turn stores the missing results after later messages; either
+// shape fails API validation on every subsequent turn and permanently
+// locks the conversation.
+func toolResultsForCalls(m message.Message, results map[string]message.ToolResult, paired map[string]struct{}) (fantasy.Message, bool) {
+	toolCalls := m.ToolCalls()
+	if len(toolCalls) == 0 {
 		return fantasy.Message{}, false
 	}
-	var validParts []fantasy.MessagePart
-	for _, part := range aiMsgs[0].Content {
-		tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part)
-		if !ok {
-			validParts = append(validParts, part)
-			continue
-		}
-		if _, known := knownToolCallIDs[tr.ToolCallID]; known {
-			validParts = append(validParts, part)
-		} else {
-			slog.Warn(
-				"Dropping orphaned tool result with no matching tool call",
-				"tool_call_id", tr.ToolCallID,
-			)
-		}
-	}
-	if len(validParts) == 0 {
-		return fantasy.Message{}, false
-	}
-	msg := aiMsgs[0]
-	msg.Content = validParts
-	return msg, true
-}
-
-// syntheticToolResultsForOrphanedCalls returns a tool message containing
-// synthetic tool results for any tool calls in the assistant message that
-// have no matching result in knownToolResultIDs. LLM APIs require every
-// tool_use to be immediately followed by a tool_result; an interrupted
-// session can leave orphaned tool_use blocks that permanently lock the
-// conversation. Returns the message and true if any synthetic results were
-// produced.
-func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs map[string]struct{}) (fantasy.Message, bool) {
-	var syntheticParts []fantasy.MessagePart
-	for _, tc := range m.ToolCalls() {
-		if _, hasResult := knownToolResultIDs[tc.ID]; hasResult {
+	parts := make([]message.ContentPart, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		result, ok := results[tc.ID]
+		if _, alreadyPaired := paired[tc.ID]; ok && !alreadyPaired {
+			paired[tc.ID] = struct{}{}
+			parts = append(parts, result)
 			continue
 		}
 		slog.Warn(
@@ -1793,20 +1825,19 @@ func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs 
 			"tool_call_id", tc.ID,
 			"tool_name", tc.Name,
 		)
-		syntheticParts = append(syntheticParts, fantasy.ToolResultPart{
+		parts = append(parts, message.ToolResult{
 			ToolCallID: tc.ID,
-			Output: fantasy.ToolResultOutputContentError{
-				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
-			},
+			Name:       tc.Name,
+			Content:    "tool call was interrupted and did not produce a result, you may retry this call if the result is still needed",
+			IsError:    true,
 		})
 	}
-	if len(syntheticParts) == 0 {
+	toolMsg := message.Message{Role: message.Tool, Parts: parts}
+	aiMsgs := toolMsg.ToAIMessage()
+	if len(aiMsgs) == 0 {
 		return fantasy.Message{}, false
 	}
-	return fantasy.Message{
-		Role:    fantasy.MessageRoleTool,
-		Content: syntheticParts,
-	}, true
+	return aiMsgs[0], true
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {

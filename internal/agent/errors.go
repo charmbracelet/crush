@@ -12,4 +12,10 @@ var (
 	// calls could be dispatched, so they produced no results. The turn
 	// must fail rather than report success with a broken transcript.
 	ErrToolCallsNotRun = errors.New("the model's response was cut off before its tool calls could run")
+	// ErrToolResultsMissing reports a turn that ended with tool calls
+	// that have no stored result for another reason: the tools ran, but
+	// writing a result failed and fantasy discards that error. The
+	// transcript is repaired, and the turn fails rather than report a
+	// success the stored history does not support.
+	ErrToolResultsMissing = errors.New("the turn ended with tool calls that have no result")
 )

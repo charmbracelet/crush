@@ -1385,14 +1385,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	if turnErr == nil && shouldSummarize {
-		a.activeRequests.Del(call.SessionID)
+		// Auto-compaction is part of this turn, so it runs under this
+		// frame's ownership: the activeRequests entry stays installed
+		// and summarizeSession does no bookkeeping of its own. Dropping
+		// the entry here — which is what made the exported Summarize's
+		// busy check pass — left the session unowned across the
+		// summarize's DB reads, so IsSessionBusy reported an idle
+		// session while this turn was still live, a concurrent dispatch
+		// could start a second run on it, and Cancel reached the
+		// summarize's context instead of this run's.
 		summarizeCall := SummarizeCall{
 			SessionID:       call.SessionID,
 			ProviderOptions: call.ProviderOptions,
 			Models:          call.Models,
 			OnAuthRefresh:   call.OnAuthRefresh,
 		}
-		if summarizeErr := a.Summarize(genCtx, summarizeCall); summarizeErr != nil {
+		if summarizeErr := a.summarizeSession(ctx, genCtx, summarizeCall); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1411,7 +1419,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
 	// tea.Msg arrives, so the cleanup must precede the notify or
 	// subscribers see stale busy state at the moment of receipt.
-	a.activeRequests.Del(call.SessionID)
+	//
+	// Own-entry-only: a plain Del would remove whatever entry is
+	// registered, so a frame that installed its own would be left live
+	// but invisible to IsSessionBusy and beyond Cancel's reach.
+	a.activeRequests.CompareAndDelete(call.SessionID, ac)
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for
@@ -1547,11 +1559,69 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
+// Summarize replaces the session's history with a summary. It owns the
+// session for the whole call.
+//
+// The busy check and the registration happen together under the
+// per-session dispatch mutex, the same lock Run's dispatch decision
+// uses, so a Run and a Summarize can never both believe they own one
+// session. Without the lock the three DB round trips inside
+// summarizeSession sat between the two, a Run dispatched in that window
+// passed its own busy check, and whichever registered second silently
+// overwrote the other's *activeCancel: the overwritten frame could no
+// longer be cancelled, its deferred CompareAndDelete no-oped, and
+// IsSessionBusy reported an idle session that was still streaming.
 func (a *sessionAgent) Summarize(ctx context.Context, call SummarizeCall) error {
 	sessionID := call.SessionID
+
+	sessMu := a.sessionMu(sessionID)
+	sessMu.Lock()
 	if a.IsSessionBusy(sessionID) {
+		sessMu.Unlock()
 		return ErrSessionBusy
 	}
+	genCtx, cancel := context.WithCancel(ctx)
+	ac := &activeCancel{cancel: cancel}
+	a.activeRequests.Set(sessionID, ac)
+	sessMu.Unlock()
+
+	defer a.activeRequests.CompareAndDelete(sessionID, ac)
+	defer cancel()
+
+	if err := a.summarizeSession(ctx, genCtx, call); err != nil {
+		return err
+	}
+
+	// Release the session before processing queued messages so that Run
+	// does not see it as busy. Own-entry-only: a plain Del here would
+	// remove whatever entry is registered, including one another frame
+	// installed, leaving a live run invisible to IsSessionBusy and
+	// beyond Cancel's reach.
+	a.activeRequests.CompareAndDelete(sessionID, ac)
+	cancel()
+
+	// Process any messages that were queued while summarizing.
+	queuedMessages, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedMessages) == 0 {
+		return nil
+	}
+	firstQueuedMessage := queuedMessages[0]
+	a.messageQueue.Set(sessionID, queuedMessages[1:])
+	_, qErr := a.Run(ctx, firstQueuedMessage)
+	return qErr
+}
+
+// summarizeSession writes the summary for one session. It does no
+// ownership bookkeeping and no queued-prompt handoff: the caller must
+// already own the session's activeRequests entry, which is what lets an
+// auto-compaction inside a turn run under that turn's ownership.
+//
+// genCtx is the owner's cancellable run context: the model stream and
+// its streaming writes use it, so a Cancel of the owner stops the
+// summary too. ctx is the owner's caller context, used for the cleanup
+// writes that still have to land after such a cancel.
+func (a *sessionAgent) summarizeSession(ctx, genCtx context.Context, call SummarizeCall) error {
+	sessionID := call.SessionID
 
 	// Copy mutable fields under lock to avoid races with SetModels.
 	largeModel := a.largeModel.Get()
@@ -1575,11 +1645,6 @@ func (a *sessionAgent) Summarize(ctx context.Context, call SummarizeCall) error 
 
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
 
-	genCtx, cancel := context.WithCancel(ctx)
-	ac := &activeCancel{cancel: cancel}
-	a.activeRequests.Set(sessionID, ac)
-	defer a.activeRequests.CompareAndDelete(sessionID, ac)
-	defer cancel()
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after summarize", "error", flushErr)
@@ -1685,24 +1750,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, call SummarizeCall) error 
 	currentSession.PromptTokens = 0
 	currentSession.EstimatedUsage = usageIsZero(usage)
 	_, err = a.sessions.Save(genCtx, currentSession)
-	if err != nil {
-		return err
-	}
-
-	// Release the active request before processing queued messages so that
-	// Run() does not see the session as busy.
-	a.activeRequests.Del(sessionID)
-	cancel()
-
-	// Process any messages that were queued while summarizing.
-	queuedMessages, ok := a.messageQueue.Get(sessionID)
-	if !ok || len(queuedMessages) == 0 {
-		return nil
-	}
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(sessionID, queuedMessages[1:])
-	_, qErr := a.Run(ctx, firstQueuedMessage)
-	return qErr
+	return err
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
@@ -2240,18 +2288,14 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Cancel regular requests. Don't use Take() here - we need the entry to
-	// remain in activeRequests so IsBusy() returns true until the goroutine
-	// fully completes (including error handling that may access the DB).
-	// The defer in processRequest will clean up the entry.
+	// Cancel the session's active frame, whether that is a run or a
+	// summarize: both register under the plain session ID. Don't use
+	// Take() here - we need the entry to remain in activeRequests so
+	// IsBusy() returns true until the goroutine fully completes
+	// (including error handling that may access the DB). The owning
+	// frame's deferred CompareAndDelete will clean the entry up.
 	if ac, ok := a.activeRequests.Get(sessionID); ok && ac != nil {
 		slog.Debug("Request cancellation initiated", "session_id", sessionID)
-		ac.cancel()
-	}
-
-	// Also check for summarize requests.
-	if ac, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && ac != nil {
-		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		ac.cancel()
 	}
 

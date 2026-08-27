@@ -18,12 +18,15 @@ import (
 )
 
 // scriptedStep is one model turn: optional text, an optional tool call,
-// and the finish reason the step ends with.
+// the usage the step reports, and the finish reason it ends with. Usage
+// matters because the auto-summarize stop condition reads the session's
+// token counters, which are fed from the step's usage.
 type scriptedStep struct {
 	text         string
 	toolCallID   string
 	toolName     string
 	toolInput    string
+	usage        fantasy.Usage
 	finishReason fantasy.FinishReason
 }
 
@@ -107,7 +110,11 @@ func (m *scriptedStreamModel) Stream(ctx context.Context, _ fantasy.Call) (fanta
 				return
 			}
 		}
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: step.finishReason})
+		yield(fantasy.StreamPart{
+			Type:         fantasy.StreamPartTypeFinish,
+			FinishReason: step.finishReason,
+			Usage:        step.usage,
+		})
 	}, nil
 }
 

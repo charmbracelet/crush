@@ -418,16 +418,24 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 		existing = []SessionAgentCall{}
 	}
 	queued := call
-	if call.Accepted != nil {
-		// Preserve the accept sequence after the handle is stripped so
-		// the queue-drain paths can tell a follow-up queued before a
-		// cancel (covered by the mark) from one queued after it.
-		queued.acceptSeq = call.Accepted.seq
-	}
+	// Preserve the accept sequence after the handle is stripped so the
+	// queue-drain paths can tell a follow-up queued before a cancel
+	// (covered by the mark) from one queued after it.
+	queued.acceptSeq = acceptSeqOf(call)
 	queued.OnComplete = nil
 	queued.Accepted = nil
 	existing = append(existing, queued)
 	a.messageQueue.Set(call.SessionID, existing)
+}
+
+// acceptSeqOf reports the accept sequence a call carries into the queue:
+// its live accept handle's sequence when it has one, otherwise the
+// sequence it was already stamped with when it was queued before.
+func acceptSeqOf(call SessionAgentCall) uint64 {
+	if call.Accepted != nil {
+		return call.Accepted.seq
+	}
+	return call.acceptSeq
 }
 
 // drainQueueForStep partitions the session's queued calls for the current
@@ -520,6 +528,119 @@ func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
 		return
 	}
 	a.publishCanceledQueueDrops(queued)
+}
+
+// queuedHandoff is the outcome of handOffQueue: the finished frame's
+// decision about what runs next on the session.
+type queuedHandoff struct {
+	// Next is the prompt the caller must run in place of the frame that
+	// just finished; Started reports whether there was one.
+	Next    SessionAgentCall
+	Started bool
+	// OwesRunComplete reports whether the finishing frame still has to
+	// publish its own terminal RunComplete. It does when it hands off to
+	// a different prompt, because each RunID has its own lifecycle and a
+	// caller waiting on this one would otherwise hang. It does not when
+	// the dequeued prompt carries the same RunID — the auto-compaction
+	// continuation — because that prompt's own terminal event covers it.
+	OwesRunComplete bool
+}
+
+// handOffQueue is the single end-of-turn handoff to a session's queue,
+// shared by Run and Summarize. It runs under the per-session dispatch
+// mutex so the transition from the finished frame to the queued one is
+// atomic against a concurrent Cancel: the finished frame has already
+// removed its activeRequests entry, so without the lock there is a
+// window in which the session looks idle and a cancel becomes a no-op
+// that fails to stop the queued prompt.
+//
+// Under that lock it drops the queued prompts a pending cancel covers
+// (publishing their terminal cancelled RunComplete, so no caller is left
+// waiting on a RunID that never runs), appends continuation when the
+// caller has one and nothing else is queued, clears the queue and any
+// stale cancel mark when nothing is left, and mints a fresh accept
+// reservation for the dequeued prompt so acceptedRuns stays above zero
+// across the handoff into the caller's recursive Run.
+//
+// continuation is the auto-compaction resume: the just-finished turn's
+// own call, re-prompted to pick its work back up after the summary. It
+// is appended only when the queue is empty, because a prompt the user
+// queued supersedes the interrupted work — resuming it after
+// acknowledging the newer prompt is the agent contradicting what the
+// user just asked for — and only when no pending cancel covers it.
+// ownerRunID is the finishing frame's RunID, "" for a summarize.
+func (a *sessionAgent) handOffQueue(sessionID, ownerRunID string, continuation *SessionAgentCall) queuedHandoff {
+	mu := a.sessionMu(sessionID)
+	mu.Lock()
+
+	queued, _ := a.messageQueue.Get(sessionID)
+	var canceledDrops []SessionAgentCall
+	if mark, ok := a.cancelMark.Get(sessionID); ok && mark > 0 && len(queued) > 0 {
+		// A cancel was recorded for this session (e.g. it arrived while
+		// this frame was active and follow-ups had been queued). Drop
+		// the queued prompts it covers (accept sequence at or below the
+		// mark, or untracked); keep any queued after the cancel (higher
+		// sequence) so they still run.
+		var kept []SessionAgentCall
+		for _, q := range queued {
+			if a.canceledBySeq(sessionID, q.acceptSeq) {
+				if q.RunID != "" {
+					canceledDrops = append(canceledDrops, q)
+				}
+				continue
+			}
+			kept = append(kept, q)
+		}
+		queued = kept
+		a.messageQueue.Set(sessionID, kept)
+	}
+
+	if continuation != nil && len(queued) == 0 &&
+		!a.canceledBySeq(sessionID, acceptSeqOf(*continuation)) {
+		a.enqueueCall(*continuation)
+		queued, _ = a.messageQueue.Get(sessionID)
+	}
+
+	if len(queued) == 0 {
+		// No queued work. Clear the cancel mark only when no accepted
+		// run remains in flight that it might still cover; otherwise a
+		// sibling prompt (sequence at or below the mark) waiting to
+		// enter Run would lose its cancellation. When accepted runs are
+		// gone, this also clears a stale mark so it can't catch a
+		// future run.
+		a.messageQueue.Del(sessionID)
+		a.acceptedMu.Lock()
+		inFlight, _ := a.acceptedRuns.Get(sessionID)
+		a.acceptedMu.Unlock()
+		if inFlight == 0 {
+			a.cancelMark.Del(sessionID)
+		}
+		mu.Unlock()
+		a.publishCanceledQueueDrops(canceledDrops)
+		return queuedHandoff{}
+	}
+
+	handoff := queuedHandoff{Next: queued[0], Started: true, OwesRunComplete: ownerRunID != ""}
+	for _, q := range queued {
+		if q.RunID == ownerRunID {
+			handoff.OwesRunComplete = false
+			break
+		}
+	}
+	a.messageQueue.Set(sessionID, queued[1:])
+	// Reserve a fresh accept for the dequeued prompt before dropping the
+	// lock so acceptedRuns > 0 across the handoff into the recursive
+	// Run. This closes the window between this dequeue and that Run
+	// registering its activeRequests entry: a cancel arriving in that
+	// window now records a pending cancel (acceptedRuns > 0) that the
+	// recursive Run's accepted path observes as cancel-on-entry.
+	handoff.Next.Accepted = a.BeginAccepted(sessionID)
+	mu.Unlock()
+	// Publish outside the lock: a must-deliver publish can block for
+	// seconds, and the per-session dispatch mutex gates every cancel and
+	// dispatch on the session.
+	a.publishCanceledQueueDrops(canceledDrops)
+	return handoff
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
@@ -1384,6 +1505,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 	}
 
+	// continuation is the auto-compaction resume: this same call,
+	// re-prompted, handed to the end-of-turn handoff below so the turn
+	// picks its work back up after the summary. The handoff decides
+	// whether it actually runs — a prompt the user queued meanwhile
+	// supersedes it, and a pending cancel drops it.
+	var continuation *SessionAgentCall
 	if turnErr == nil && shouldSummarize {
 		// Auto-compaction is part of this turn, so it runs under this
 		// frame's ownership: the activeRequests entry stays installed
@@ -1400,18 +1527,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			Models:          call.Models,
 			OnAuthRefresh:   call.OnAuthRefresh,
 		}
-		if summarizeErr := a.summarizeSession(ctx, genCtx, summarizeCall); summarizeErr != nil {
-			return nil, summarizeErr
-		}
-		// If the agent wasn't done...
-		if len(currentAssistant.ToolCalls()) > 0 {
-			existing, ok := a.messageQueue.Get(call.SessionID)
-			if !ok {
-				existing = []SessionAgentCall{}
-			}
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			existing = append(existing, call)
-			a.messageQueue.Set(call.SessionID, existing)
+		switch summarizeErr := a.summarizeSession(ctx, genCtx, summarizeCall); {
+		case summarizeErr != nil:
+			// Recorded rather than returned, for the same reason as the
+			// tool-repair failure above: this turn still owes the
+			// end-of-turn handoff, and a prompt queued behind it is an
+			// independent request whose client waits for a terminal
+			// event under its own RunID. Returning here would leave it
+			// in the queue with nothing left to start it.
+			turnErr = summarizeErr
+		case len(currentAssistant.ToolCalls()) > 0:
+			// The model was still working when the context window
+			// filled, so the turn resumes after the summary.
+			resume := call
+			resume.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			continuation = &resume
 		}
 	}
 
@@ -1441,60 +1571,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		})
 	}
 
-	// Hand off to the next queued prompt (if any) under dispatchMu so
-	// the transition from this finished run to the queued run is atomic
-	// against a concurrent Cancel. activeRequests for this session was
-	// just deleted above, so without the lock there is a window in
-	// which the session looks idle and a cancel becomes a no-op that
-	// fails to stop the queued prompt. Holding the lock lets us observe
-	// a pending cancel recorded against the session and drop the queue
-	// instead of running it, and (for the recursion) hand a fresh
-	// accept reservation to the dequeued call so acceptedRuns stays > 0
-	// across the recursive Run's own dispatch handoff — keeping the
-	// session observable to Cancel for the entire transition and
-	// closing the dequeue -> re-register window.
-	mu := a.sessionMu(call.SessionID)
-	mu.Lock()
-	queuedMessages, _ := a.messageQueue.Get(call.SessionID)
-	if mark, ok := a.cancelMark.Get(call.SessionID); ok && mark > 0 && len(queuedMessages) > 0 {
-		// A cancel was recorded for this session (e.g. it arrived while
-		// this run was active and follow-ups had been queued). Drop the
-		// queued prompts it covers (accept sequence at or below the
-		// mark, or untracked); keep any queued after the cancel (higher
-		// sequence) so they still run.
-		var kept []SessionAgentCall
-		var canceledRunIDDrops []SessionAgentCall
-		for _, q := range queuedMessages {
-			if q.acceptSeq == 0 || q.acceptSeq <= mark {
-				if q.RunID != "" {
-					canceledRunIDDrops = append(canceledRunIDDrops, q)
-				}
-				continue
-			}
-			kept = append(kept, q)
-		}
-		queuedMessages = kept
-		a.messageQueue.Set(call.SessionID, kept)
-		// A dropped prompt carrying a RunID must still publish its
-		// terminal cancelled RunComplete so a caller waiting on that
-		// RunID does not hang.
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
-	}
-	if len(queuedMessages) == 0 {
-		// No queued work. Clear the cancel mark only when no accepted
-		// run remains in flight that it might still cover; otherwise a
-		// sibling prompt (sequence at or below the mark) waiting to
-		// enter Run would lose its cancellation. When accepted runs are
-		// gone, this also clears a stale mark so it can't catch a
-		// future run.
-		a.messageQueue.Del(call.SessionID)
-		a.acceptedMu.Lock()
-		inFlight, _ := a.acceptedRuns.Get(call.SessionID)
-		a.acceptedMu.Unlock()
-		if inFlight == 0 {
-			a.cancelMark.Del(call.SessionID)
-		}
-		mu.Unlock()
+	// Hand off to the next queued prompt, if any. The shared helper does
+	// it under dispatchMu so the transition from this finished run to
+	// the queued one is atomic against a concurrent Cancel:
+	// activeRequests for this session was just deleted above, so without
+	// the lock there is a window in which the session looks idle and a
+	// cancel becomes a no-op that fails to stop the queued prompt.
+	handoff := a.handOffQueue(call.SessionID, call.RunID, continuation)
+	if !handoff.Started {
 		if turnErr != nil {
 			return nil, turnErr
 		}
@@ -1505,35 +1589,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// (named-return clobbering through the return below) against this
 	// turn's MessageID/Text and publish a mixed, racing event.
 	skipRunComplete = true
-	// Decide whether this turn still owes its own terminal RunComplete.
-	// Each submitted prompt with a RunID has its own lifecycle, so a turn
-	// that is finished and handing off to a *different* queued prompt must
-	// publish its own RunComplete here — leaving it to the recursive turn
-	// (which carries a different RunID) would hang a caller waiting on
-	// this turn's RunID. The exception is the summarize-continuation path,
-	// which re-queues this same call (same RunID) to resume after a
-	// summary; in that case the eventual terminal turn for this RunID
-	// publishes, so publishing now would double-emit.
-	outerOwesRunComplete := call.RunID != ""
-	if outerOwesRunComplete {
-		for _, q := range queuedMessages {
-			if q.RunID == call.RunID {
-				outerOwesRunComplete = false
-				break
-			}
-		}
-	}
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
-	// Reserve a fresh accept for the dequeued prompt before dropping the
-	// lock so acceptedRuns > 0 across the handoff into the recursive
-	// Run. This closes the window between this dequeue and the recursive
-	// Run registering its activeRequests entry: a cancel arriving in
-	// that window now records a pending cancel (acceptedRuns > 0) that
-	// the recursive Run's accepted path observes as cancel-on-entry.
-	firstQueuedMessage.Accepted = a.BeginAccepted(call.SessionID)
-	mu.Unlock()
-	if outerOwesRunComplete {
+	if handoff.OwesRunComplete {
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
 		if currentAssistant != nil {
 			complete.MessageID = currentAssistant.ID
@@ -1553,10 +1609,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// turn's own failure. The queued turn owns its own outcome and
 		// publishes it under its own RunID, so its error is not this
 		// call's to return.
-		_, _ = a.Run(ctx, firstQueuedMessage)
+		_, _ = a.Run(ctx, handoff.Next)
 		return nil, turnErr
 	}
-	return a.Run(ctx, firstQueuedMessage)
+	return a.Run(ctx, handoff.Next)
 }
 
 // Summarize replaces the session's history with a summary. It owns the
@@ -1588,27 +1644,40 @@ func (a *sessionAgent) Summarize(ctx context.Context, call SummarizeCall) error 
 	defer a.activeRequests.CompareAndDelete(sessionID, ac)
 	defer cancel()
 
-	if err := a.summarizeSession(ctx, genCtx, call); err != nil {
-		return err
-	}
+	sumErr := a.summarizeSession(ctx, genCtx, call)
 
-	// Release the session before processing queued messages so that Run
-	// does not see it as busy. Own-entry-only: a plain Del here would
-	// remove whatever entry is registered, including one another frame
-	// installed, leaving a live run invisible to IsSessionBusy and
-	// beyond Cancel's reach.
+	// Release the session before handing off to the queue so the
+	// dequeued prompt's Run does not see it as busy and re-queue itself,
+	// which would leave it with nothing left to start it. Own-entry-only:
+	// a plain Del here would remove whatever entry is registered,
+	// including one another frame installed, leaving a live run invisible
+	// to IsSessionBusy and beyond Cancel's reach.
 	a.activeRequests.CompareAndDelete(sessionID, ac)
 	cancel()
 
-	// Process any messages that were queued while summarizing.
-	queuedMessages, ok := a.messageQueue.Get(sessionID)
-	if !ok || len(queuedMessages) == 0 {
-		return nil
+	// Hand off through the same guarded helper Run uses. The handoff this
+	// replaced was an unlocked messageQueue.Get/Set pair: it raced
+	// Cancel, ClearQueue, enqueueCall and drainQueueForStep, so a prompt
+	// enqueued in the window could be dropped with no terminal event
+	// (blocking its caller on a RunID forever) or run twice, it ignored
+	// the session's cancel mark, so a prompt the user had cancelled ran
+	// anyway, and no accept reservation covered the dequeue.
+	//
+	// A failed summarize hands off too: each queued prompt is an
+	// independent request whose client waits for a terminal event under
+	// its own RunID, and returning here would strand it in the queue on
+	// an idle session with nothing left to start it.
+	handoff := a.handOffQueue(sessionID, "", nil)
+	if !handoff.Started {
+		return sumErr
 	}
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(sessionID, queuedMessages[1:])
-	_, qErr := a.Run(ctx, firstQueuedMessage)
-	return qErr
+	_, runErr := a.Run(ctx, handoff.Next)
+	if sumErr != nil {
+		// This call's own outcome. The queued turn owns and publishes
+		// its own under its RunID.
+		return sumErr
+	}
+	return runErr
 }
 
 // summarizeSession writes the summary for one session. It does no

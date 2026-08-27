@@ -954,6 +954,20 @@ export CRUSH_DISABLE_METRICS=1
 Crush also respects the [`DO_NOT_TRACK`](https://donottrack.sh/) convention
 which can be enabled via `export DO_NOT_TRACK=1`.
 
+## Local Data
+
+Your sessions and chat history are stored locally in a SQLite database. By
+default, deleted content is left in place on disk (SQLite's default), which
+keeps updates fast. If you want deleted content scrubbed with zeros, opt in:
+
+```bash
+export CRUSH_SECURE_DELETE=1
+```
+
+Note that scrubbing is best-effort: it does not protect data on
+copy-on-write filesystems or wear-leveled SSDs, and deleted rows remain in
+the write-ahead log until it is checkpointed.
+
 ## Q&A
 
 ### Why is clipboard copy and paste not working?

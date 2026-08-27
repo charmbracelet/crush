@@ -11,6 +11,11 @@ concurrency:
   group: goreleaser
   cancel-in-progress: true
 
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
 jobs:
   goreleaser:
     uses: charmbracelet/meta/.github/workflows/goreleaser.yml@main

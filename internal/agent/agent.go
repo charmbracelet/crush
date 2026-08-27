@@ -57,6 +57,13 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	// titleGenerationTimeout bounds one call to GenerateTitle, covering
+	// both the small-model attempt and the large-model retry. Titles from
+	// a reasoning model can take tens of seconds, so the bound is
+	// generous; it exists to keep a stalled request finite, not to cut
+	// slow ones short.
+	titleGenerationTimeout = 60 * time.Second
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -220,6 +227,12 @@ type sessionAgent struct {
 	// across the agent. Cancel uses its current value as the per-session
 	// high-water mark.
 	acceptSeqGen uint64
+	// titleWG tracks in-flight title generation. Those goroutines run on
+	// a context detached from the run (see startTitleGeneration), so a
+	// cancel cannot stop them and nothing else knows they exist. The
+	// group is what lets Run and CancelAll join them before whoever owns
+	// the database closes it.
+	titleWG sync.WaitGroup
 }
 
 type SessionAgentOptions struct {
@@ -649,6 +662,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	sessMu.Unlock()
 
+	// waitForTitle is set below when this run spawns title generation. It
+	// is deferred here, ahead of the cancel and the activeRequests
+	// cleanup, so it runs last: the session stops reporting busy and the
+	// run context is released before Run blocks on the title write.
+	var waitForTitle func()
+	defer func() {
+		if waitForTitle != nil {
+			waitForTitle()
+		}
+	}()
+
 	defer cancel()
 	// Conditional cleanup: only remove our entry if it hasn't been replaced
 	// by a newer run. Without this guard, the deferred Del fires after a
@@ -701,12 +725,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	// Generate title from the first real (non-shell) user prompt.
-	// can take tens of seconds. Blocking Run on it delays the
-	// response to the caller. Use a detached context so the title
-	// goroutine survives Run's cancel.
 	if !hasUserTextMessage(msgs) {
-		titleCtx := context.WithoutCancel(ctx)
-		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
+		waitForTitle = a.startTitleGeneration(ctx, call.SessionID, call.Prompt)
 	}
 
 	// Add the user message to the session.
@@ -1724,11 +1744,60 @@ func hasUserTextMessage(msgs []message.Message) bool {
 	return false
 }
 
+// startTitleGeneration generates the session title on its own goroutine and
+// returns a function that blocks until that goroutine is done.
+//
+// The title call can take tens of seconds on a reasoning model, so it must not
+// sit in front of the model's response, and it runs on a context detached from
+// the run so a cancel (or a workspace shutdown) can't drop the title write.
+// That detachment is exactly why the caller has to join it: nothing can stop
+// this goroutine, and if it outlives the database handle its writes fail with
+// "sql: database is closed" and the session keeps its placeholder title. Run
+// defers the returned wait and CancelAll drains the same group, so a title
+// write is never left in flight past the lifetime of whoever owns the
+// database. GenerateTitle bounds itself with titleGenerationTimeout, so both
+// waits terminate.
+func (a *sessionAgent) startTitleGeneration(ctx context.Context, sessionID, userPrompt string) func() {
+	titleCtx := context.WithoutCancel(ctx)
+	done := make(chan struct{})
+	a.titleWG.Add(1)
+	go func() {
+		// Done first, so a caller released by done also observes the
+		// group as drained.
+		defer close(done)
+		defer a.titleWG.Done()
+		a.GenerateTitle(titleCtx, sessionID, userPrompt)
+	}()
+	return func() { <-done }
+}
+
+// waitForTitles blocks until every in-flight title generation has finished or
+// timeout elapses, whichever comes first.
+func (a *sessionAgent) waitForTitles(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		a.titleWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
+}
+
 // GenerateTitle generates a session title based on the initial prompt.
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
 		return
 	}
+
+	// Bound the attempt. Callers hand this a context detached from the
+	// run, so without a deadline a stalled request would pin the
+	// goroutine, and anything waiting on it, for the life of the
+	// process. The fallback below re-detaches, so it still runs after
+	// this deadline fires.
+	ctx, cancelTitle := context.WithTimeout(ctx, titleGenerationTimeout)
+	defer cancelTitle()
 
 	// Ensure the session always gets a title even if every path below
 	// fails or the context is cancelled before we finish.
@@ -2016,6 +2085,18 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 }
 
 func (a *sessionAgent) CancelAll() {
+	a.cancelActiveRuns()
+
+	// Title generation is detached from the run context, so the cancels
+	// above don't reach it and IsBusy never reported it. Drain it here:
+	// callers use CancelAll to make the agent quiescent before closing
+	// the database (see app.Shutdown).
+	a.waitForTitles(5 * time.Second)
+}
+
+// cancelActiveRuns cancels every active run and waits, within a bounded
+// budget, for them to unwind.
+func (a *sessionAgent) cancelActiveRuns() {
 	if !a.IsBusy() {
 		return
 	}

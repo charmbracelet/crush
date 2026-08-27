@@ -11,3 +11,10 @@ jobs:
       golangci_path: .golangci.yml
       golangci_version: v2.13.1
       timeout: 10m
+      # The shared workflow checks this repo out into a subdirectory, so
+      # setup-go never finds go.mod and never restores a module cache.
+      # golangci-lint would then download the whole module graph from
+      # inside its package load, where one dropped proxy stream is
+      # reported as a typechecking error and fails the job. Warm the
+      # cache first, with one retry.
+      pre-run: "go mod download || go mod download"

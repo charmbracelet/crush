@@ -423,6 +423,36 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 	return fold, canceledWithRunID
 }
 
+type foldedPromptInsertion struct {
+	index    int
+	messages []fantasy.Message
+}
+
+// applyFoldedPromptInsertions restores queued prompts that PrepareStep added
+// during an earlier autonomous step. Fantasy rebuilds each step from its
+// original prompt plus model/tool responses, so PrepareStep-only additions
+// otherwise disappear on the following step and invalidate the prompt prefix.
+func applyFoldedPromptInsertions(messages []fantasy.Message, insertions []foldedPromptInsertion) []fantasy.Message {
+	if len(insertions) == 0 {
+		return messages
+	}
+
+	extra := 0
+	for _, insertion := range insertions {
+		extra += len(insertion.messages)
+	}
+	result := make([]fantasy.Message, 0, len(messages)+extra)
+	start := 0
+	for _, insertion := range insertions {
+		index := min(max(insertion.index, start), len(messages))
+		result = append(result, messages[start:index]...)
+		result = append(result, insertion.messages...)
+		start = index
+	}
+	result = append(result, messages[start:]...)
+	return result
+}
+
 // publishCanceledQueueDrops emits a terminal cancelled RunComplete for
 // every dropped queued call that carries a RunID. A queued prompt removed
 // from the queue without ever running — covered by a pending cancel, or
@@ -786,6 +816,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	a.eventPromptSent(call.SessionID)
 
 	var stepMessages []fantasy.Message
+	var foldedPromptInsertions []foldedPromptInsertion
 	var shouldSummarize bool
 	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
@@ -806,11 +837,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			for i := range prepared.Messages {
-				prepared.Messages[i].ProviderOptions = nil
-			}
-
 			// Use latest tools (updated by SetTools when MCP tools change).
 			prepared.Tools = a.tools.Copy()
 
@@ -827,12 +853,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// RunComplete) via the recursive run path below.
 			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
 			a.publishCanceledQueueDrops(canceledRunIDs)
+			var foldedMessages []fantasy.Message
 			for _, queued := range fold {
 				userMessage, createErr := a.createUserMessage(callContext, queued)
 				if createErr != nil {
 					return callContext, prepared, createErr
 				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				foldedMessages = append(foldedMessages, userMessage.ToAIMessage()...)
+			}
+			if len(foldedMessages) > 0 {
+				foldedPromptInsertions = append(foldedPromptInsertions, foldedPromptInsertion{
+					index:    len(options.Messages),
+					messages: foldedMessages,
+				})
+			}
+
+			prepared.Messages = applyFoldedPromptInsertions(options.Messages, foldedPromptInsertions)
+			for i := range prepared.Messages {
+				prepared.Messages[i].ProviderOptions = nil
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
@@ -906,13 +944,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnTextDelta: func(id string, text string) error {
-			// Strip leading newline from initial text content. This is is
-			// particularly important in non-interactive mode where leading
-			// newlines are very visible.
-			if len(currentAssistant.Parts) == 0 {
-				text = strings.TrimPrefix(text, "\n")
-			}
-
 			currentAssistant.AppendContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},

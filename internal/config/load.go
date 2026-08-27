@@ -536,13 +536,30 @@ func (c *Config) applyEnv(resolver VariableResolver) {
 	}
 }
 
-func (c *Config) setDefaults(workingDir, dataDir string) {
+// NormalizeOptions allocates Options and Options.TUI and fills in the option
+// defaults the UI relies on, so readers can dereference them without guarding.
+// Configs loaded from disk get this via setDefaults; configs arriving over the
+// wire from a Crush server need the same treatment before the UI reads them.
+//
+// DiffMode is deliberately left alone: the permissions dialog reads its zero
+// value as "choose split or unified from the terminal width".
+func (c *Config) NormalizeOptions() {
 	if c.Options == nil {
 		c.Options = &Options{}
 	}
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
 	}
+	if c.Options.TUI.Scrollbar == "" {
+		c.Options.TUI.Scrollbar = ScrollbarDefault
+	}
+	if c.Options.TUI.ExitBanner == "" {
+		c.Options.TUI.ExitBanner = ExitBannerDefault
+	}
+}
+
+func (c *Config) setDefaults(workingDir, dataDir string) {
+	c.NormalizeOptions()
 	if len(c.Options.GlobalContextPaths) == 0 {
 		crushConfigDir := filepath.Dir(GlobalConfig())
 		c.Options.GlobalContextPaths = []string{

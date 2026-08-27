@@ -278,6 +278,14 @@ type TUIOptions struct {
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+}
+
+// IsTransparent reports whether the TUI draws a transparent background. The
+// nil receiver and the unset pointer both mean opaque, so callers can ask
+// without unwrapping either.
+func (t *TUIOptions) IsTransparent() bool {
+	return t != nil && t.Transparent != nil && *t.Transparent
 }
 
 // Completions defines options for the completions UI.
@@ -286,15 +294,38 @@ type Completions struct {
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
 }
 
+// Limits returns the configured completion limits. Zero means the user has not
+// pinned that limit, and callers fall back to their own built-in cap.
 func (c Completions) Limits() (depth, items int) {
 	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
 }
+
+// Diff mode options.
+const (
+	DiffModeUnified = "unified" // Inline unified diffs
+	DiffModeSplit   = "split"   // Side-by-side diffs
+)
 
 // Scrollbar visibility options.
 const (
 	ScrollbarDefault = "default" // Auto-hide after 2 seconds
 	ScrollbarAlways  = "always"  // Always show when content exceeds viewport
 	ScrollbarNever   = "never"   // Never show scrollbar
+)
+
+// ExitBanner selects what Crush prints after the TUI exits.
+type ExitBanner string
+
+const (
+	// ExitBannerDefault renders the full ASCII art logo with padding. It is
+	// also what the zero value and any unrecognized value fall back to.
+	ExitBannerDefault ExitBanner = "default"
+	// ExitBannerCompact renders only the session and resume lines, with no
+	// logo and no padding. With no active session it renders nothing at all,
+	// so Crush exits silently.
+	ExitBannerCompact ExitBanner = "compact"
+	// ExitBannerNone renders nothing.
+	ExitBannerNone ExitBanner = "none"
 )
 
 type Permissions struct {

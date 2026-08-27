@@ -815,6 +815,16 @@
           ],
           "description": "Chat scrollbar visibility",
           "default": "default"
+        },
+        "exit_banner": {
+          "type": "string",
+          "enum": [
+            "default",
+            "compact",
+            "none"
+          ],
+          "description": "Exit banner style after quitting Crush",
+          "default": "default"
         }
       },
       "additionalProperties": false,

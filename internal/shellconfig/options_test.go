@@ -162,6 +162,24 @@ func TestOption_UIUnknownKey(t *testing.T) {
 	require.Contains(t, err.Error(), "unknown key")
 }
 
+func TestOption_UIExitBanner(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "crushrc")
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`option ui exit-banner compact`))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	ui := result["options"].(map[string]any)["tui"].(map[string]any)
+	require.Equal(t, "compact", ui["exit_banner"])
+
+	_, err = LoadShellConfig(t.Context(), path, []byte(`option ui exit-banner bogus`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects default, compact, or none")
+}
+
 func TestOption_BoolShorthand(t *testing.T) {
 	t.Parallel()
 

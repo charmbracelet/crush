@@ -140,16 +140,19 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				break
 			}
 			if err != nil {
-				if ctx.Err() != nil {
-					return
+				// A read error other than a clean EOF is
+				// permanent: this bufio.Reader is bound to
+				// this response body, so the same read can
+				// never recover. Retrying it spun forever and
+				// kept the channel open, which hung every
+				// consumer that waits for the close —
+				// `crush run`'s stream loop and the TUI's
+				// resubscribe loop. Stop and let the deferred
+				// close(events) report the loss.
+				if ctx.Err() == nil {
+					slog.Error("Reading from events stream", "error", err)
 				}
-				slog.Error("Reading from events stream", "error", err)
-				select {
-				case <-time.After(time.Second * 2):
-				case <-ctx.Done():
-					return
-				}
-				continue
+				break
 			}
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {

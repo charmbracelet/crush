@@ -88,6 +88,85 @@ func TestSubscribeEventsContextCancelClosesEvents(t *testing.T) {
 	}
 }
 
+// TestSubscribeEventsServerEndsStreamClosesEvents pins the ordinary
+// end-of-stream case: when the server's handler returns, the reader
+// must close the event channel so consumers stop waiting on it.
+func TestSubscribeEventsServerEndsStreamClosesEvents(t *testing.T) {
+	t.Parallel()
+
+	payload := marshalSSEPayload(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		require.True(t, ok)
+		_, err := fmt.Fprintf(w, "data: %s\n\n", payload)
+		require.NoError(t, err)
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	events, err := c.SubscribeEvents(t.Context(), "ws1")
+	require.NoError(t, err)
+
+	select {
+	case <-events:
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "timed out waiting for first event")
+	}
+
+	select {
+	case _, ok := <-events:
+		require.False(t, ok, "event channel must close when the stream ends")
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "timed out waiting for event channel close")
+	}
+}
+
+// TestSubscribeEventsAbruptConnectionLossClosesEvents is the
+// regression test for the hang in `crush run`: a server that dies (or
+// a dropped connection) mid-frame makes the body read fail with
+// something other than io.EOF. The reader used to log that error,
+// sleep two seconds and retry the same dead bufio.Reader forever, so
+// the event channel never closed and every consumer waiting on it —
+// `crush run`'s stream loop and the TUI's resubscribe loop — waited
+// for an event that could never arrive.
+func TestSubscribeEventsAbruptConnectionLossClosesEvents(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		require.True(t, ok)
+		conn, buf, err := hj.Hijack()
+		require.NoError(t, err)
+		// Send a valid chunked SSE response head plus one chunk
+		// holding an incomplete frame (no trailing newline), then
+		// drop the socket without the terminating zero-length
+		// chunk. That is what a killed server looks like to the
+		// client: an unexpected EOF, not a clean one.
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\n" +
+			"Content-Type: text/event-stream\r\n" +
+			"Transfer-Encoding: chunked\r\n\r\n")
+		const frame = `data: {"type":`
+		_, _ = fmt.Fprintf(buf, "%x\r\n%s\r\n", len(frame), frame)
+		require.NoError(t, buf.Flush())
+		require.NoError(t, conn.Close())
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	events, err := c.SubscribeEvents(t.Context(), "ws1")
+	require.NoError(t, err)
+
+	select {
+	case _, ok := <-events:
+		require.False(t, ok, "event channel must close after an abrupt connection loss")
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "event channel never closed: the reader is retrying a dead connection")
+	}
+}
+
 func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	t.Parallel()
 

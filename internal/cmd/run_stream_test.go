@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -414,4 +415,33 @@ func TestRunStream_NoRunIDFallsBackToSessionID(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Equal(t, "DONE", buf.String())
+}
+
+// TestRunStream_ClosedStreamWithoutRunCompleteFails is the regression
+// test for the silent success: the event stream can end at any time
+// (server shutdown, workspace teardown, dropped connection) and
+// `crush run` used to return nil there, so a run whose outcome was
+// never observed exited 0 and looked successful.
+func TestRunStream_ClosedStreamWithoutRunCompleteFails(t *testing.T) {
+	t.Parallel()
+
+	s := &runStream{sessionID: "S", runID: "R", out: &bytes.Buffer{}, read: map[string]int{}}
+
+	err := s.closedError(nil)
+	require.Error(t, err, "a stream that closed before RunComplete must not report success")
+	require.Contains(t, err.Error(), "event stream closed before the run completed")
+	require.Contains(t, err.Error(), "S", "the error must name the session")
+}
+
+// TestRunStream_ClosedStreamAfterCancelReportsCancel pins the Ctrl-C
+// path. Cancelling the run context also closes the event channel, and
+// the caller's select picks between the two cases at random, so the
+// context error has to win to keep the reported reason stable.
+func TestRunStream_ClosedStreamAfterCancelReportsCancel(t *testing.T) {
+	t.Parallel()
+
+	s := &runStream{sessionID: "S", runID: "R", out: &bytes.Buffer{}, read: map[string]int{}}
+
+	err := s.closedError(context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
 }

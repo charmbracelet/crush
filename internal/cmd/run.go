@@ -318,7 +318,7 @@ func runNonInteractive(
 		case ev, ok := <-events:
 			if !ok {
 				stopSpinner()
-				return nil
+				return stream.closedError(ctx.Err())
 			}
 
 			// Forward events to herdr if running inside a herdr pane.
@@ -477,6 +477,24 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 		return true, fmt.Errorf("agent error: %w", e.Payload.Error)
 	}
 	return false, nil
+}
+
+// closedError reports the outcome of an event stream that ended before
+// the correlated RunComplete arrived. That terminal event is the only
+// success condition of the run loop, so a closed channel always means
+// the run's result is unknown: a server shutdown, a workspace teardown
+// or a dropped connection all land here. Returning nil there exited 0
+// on a run that may never have finished — and on about half of all
+// Ctrl-Cs, because the caller's select picks at random between the
+// closed channel and ctx.Done().
+//
+// ctxErr therefore wins when set: an interrupted run is reported as
+// cancelled, not as a lost stream.
+func (s *runStream) closedError(ctxErr error) error {
+	if ctxErr != nil {
+		return ctxErr
+	}
+	return fmt.Errorf("event stream closed before the run completed (session %s)", s.sessionID)
 }
 
 // waitForAgent polls GetAgentInfo until the agent is ready, with a

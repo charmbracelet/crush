@@ -224,10 +224,13 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
-	// The interactive TUI does not consume notify.RunComplete for
-	// completion detection (it observes message events directly),
-	// so passing an empty RunID is correct here: it skips the
-	// correlator stamping path without functional consequences.
+	// No RunID: the interactive TUI does not consume notify.RunComplete
+	// for completion detection (it observes message events directly), so
+	// it needs no terminal-event correlator. The omission is not inert
+	// though — a queued prompt with no RunID is folded into the active
+	// turn by drainQueueForStep instead of running as its own turn, which
+	// is the follow-up behavior the TUI has always had. Minting a RunID
+	// here would change that.
 	return w.client.SendMessage(ctx, w.workspaceID(), proto.AgentMessage{
 		SessionID:   sessionID,
 		Prompt:      prompt,
@@ -1224,12 +1227,13 @@ func protoToMCPEventType(t proto.MCPEventType) mcp.EventType {
 }
 
 // protoToSession converts a wire-level proto.Session into the domain
-// session.Session. Fields that exist only on the wire (computed-on-read
-// signals like IsBusy, and any future presence counters) are
-// intentionally dropped here: session.Session models persisted state,
-// not transient runtime signals. UI features that need those signals
-// should either extend session.Session or read them from the proto
-// payload directly before this conversion runs.
+// session.Session. Wire-only fields that model persisted state have no
+// domain counterpart and are dropped (AttachedClients). IsBusy is
+// carried across into session.Busy, which the session switcher renders:
+// the server computes it per read from the agent coordinator, so it is
+// the only per-session busy signal a client has without a probe per row.
+// It is absent (false) on the SSE Session event path, which never sets
+// it.
 func protoToSession(s proto.Session) session.Session {
 	return session.Session{
 		ID:               s.ID,
@@ -1243,6 +1247,7 @@ func protoToSession(s proto.Session) session.Session {
 		Todos:            protoToTodos(s.Todos),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
+		Busy:             s.IsBusy,
 	}
 }
 

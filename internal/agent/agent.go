@@ -701,97 +701,6 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
-// finalizeUnresolvedToolCalls writes a terminal tool result for every
-// tool call across msgs that never produced one, so the stored
-// transcript cannot leave a tool call rendering as running forever. A
-// tool call whose input never finished streaming is marked finished
-// with an empty input first, for the same reason. contentFor supplies
-// the result text for a given message, which lets a caller describe
-// why that step's calls went unanswered. It returns how many results
-// it wrote.
-//
-// Every assistant message of the turn has to be checked, not just the
-// last one: fantasy creates one per step and discards the error from
-// the OnToolResult callback, so a result row that failed to write
-// leaves an unanswered call on a step the turn has already moved past.
-//
-// ctx must be detached from the run context and bounded: every caller
-// reaches this after the run context is already cancelled or about to
-// be, and these writes still have to land.
-func (a *sessionAgent) finalizeUnresolvedToolCalls(ctx context.Context, msgs []*message.Message, contentFor func(*message.Message) string) (int, error) {
-	anyToolCalls := false
-	for _, msg := range msgs {
-		if len(msg.ToolCalls()) > 0 {
-			anyToolCalls = true
-			break
-		}
-	}
-	if !anyToolCalls {
-		return 0, nil
-	}
-	stored, err := a.messages.List(ctx, msgs[0].SessionID)
-	if err != nil {
-		return 0, err
-	}
-	resulted := make(map[string]struct{})
-	for _, m := range stored {
-		if m.Role != message.Tool {
-			continue
-		}
-		for _, tr := range m.ToolResults() {
-			resulted[tr.ToolCallID] = struct{}{}
-		}
-	}
-	written := 0
-	for _, msg := range msgs {
-		toolCalls := msg.ToolCalls()
-		if len(toolCalls) == 0 {
-			continue
-		}
-		content := contentFor(msg)
-		for _, tc := range toolCalls {
-			if !tc.Finished {
-				tc.Finished = true
-				tc.Input = "{}"
-				msg.AddToolCall(tc)
-				if err := a.messages.Update(ctx, *msg); err != nil {
-					return written, err
-				}
-			}
-			if _, ok := resulted[tc.ID]; ok {
-				continue
-			}
-			if _, err := a.messages.Create(ctx, msg.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					message.ToolResult{
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-						Content:    content,
-						IsError:    true,
-					},
-				},
-			}); err != nil {
-				return written, err
-			}
-			written++
-		}
-	}
-	return written, nil
-}
-
-// unansweredToolCallContent is the tool result text stored for a call
-// that a turn ended without answering. Only a step that hit the output
-// token limit proves the call was never dispatched; any other cause
-// means the tool may well have run, and telling the model it did not
-// invites it to repeat a side effect.
-func unansweredToolCallContent(msg *message.Message) string {
-	if finish := msg.FinishPart(); finish != nil && finish.Reason == message.FinishReasonMaxTokens {
-		return "The tool call was never run: the model's response hit the output token limit before the call could be dispatched."
-	}
-	return "No result was recorded for this tool call."
-}
-
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
@@ -1391,7 +1300,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			content = "Error: user cancelled assistant tool calling"
 		}
 		sameContent := func(*message.Message) string { return content }
-		if _, finalizeErr := a.finalizeUnresolvedToolCalls(cleanupCtx, turnAssistants, sameContent); finalizeErr != nil {
+		if _, finalizeErr := finalizeUnresolvedToolCalls(cleanupCtx, a.messages, turnAssistants, sameContent); finalizeErr != nil {
 			return nil, finalizeErr
 		}
 		var fantasyErr *fantasy.Error
@@ -1454,7 +1363,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// Detached and bounded for the same reason as the error path:
 		// workspace shutdown can cancel ctx before these writes land.
 		orphanCtx, orphanCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		written, finalizeErr := a.finalizeUnresolvedToolCalls(orphanCtx, turnAssistants, unansweredToolCallContent)
+		written, finalizeErr := finalizeUnresolvedToolCalls(orphanCtx, a.messages, turnAssistants, unansweredToolCallContent)
 		orphanCancel()
 		switch {
 		case finalizeErr != nil:

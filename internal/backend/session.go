@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
@@ -77,6 +78,17 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 	// debounce timer in message.Service.
 	if err := ws.Messages.FlushAll(ctx); err != nil {
 		return nil, err
+	}
+	// A run that died with its server (a kill, an OOM, an upgrade) leaves
+	// its assistant messages with no finish part and its tool calls with
+	// no result, which the chat renders as a spinner forever. Give that
+	// transcript a terminal state before anyone reads it, but only while
+	// no run owns the session: the repair rewrites messages an in-flight
+	// turn is still streaming into.
+	if ws.AgentCoordinator == nil || !ws.AgentCoordinator.IsSessionBusy(sessionID) {
+		if err := agent.RepairInterruptedSession(ctx, ws.Messages, sessionID); err != nil {
+			return nil, err
+		}
 	}
 	return ws.Messages.List(ctx, sessionID)
 }

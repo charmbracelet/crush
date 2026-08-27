@@ -4414,7 +4414,10 @@ func (m *UI) cancelAgent() tea.Cmd {
 	}
 
 	// Queued prompts pending: esc clears the queue. Decide from the cached
-	// count (event-driven) instead of a synchronous workspace probe.
+	// count (event-driven) instead of a synchronous workspace probe. This
+	// falls through to arming the cancel timer rather than returning, so
+	// esc esc stops the run whether or not a queue was in the way; before,
+	// the queue swallowed a press and the run kept going for a third.
 	if m.promptQueue > 0 {
 		m.com.Workspace.AgentClearQueue(m.session.ID)
 		m.promptQueue = 0
@@ -4424,7 +4427,6 @@ func (m *UI) cancelAgent() tea.Cmd {
 		// cannot land and repopulate the pill we just emptied.
 		m.invalidatePromptQueue()
 		m.updateLayoutAndSize()
-		return nil
 	}
 
 	// First escape press - set canceling state and start timer.

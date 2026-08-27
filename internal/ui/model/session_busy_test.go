@@ -416,7 +416,8 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 
 // TestCancelAgentClearsQueueFromCachedCount: the queue-clear decision must
 // come from the memoized count — no synchronous AgentQueuedPrompts probe —
-// and clearing must zero the cached count immediately.
+// and clearing must zero the cached count immediately. The same press also
+// arms cancellation, so a queue never costs the user an extra esc.
 func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
 	pinTTLs(t)
 
@@ -428,13 +429,36 @@ func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
 	ws.resetCounters()
 
 	cmd := m.cancelAgent()
-	require.Nil(t, cmd)
+	require.NotNil(t, cmd, "the press must start the double-press timer")
 	require.Equal(t, 1, ws.clearQueueCalls, "esc with a queue must clear it")
 	require.Zero(t, ws.queuedCalls, "the decision must use the cached count, not a probe")
 	require.Zero(t, ws.queueListCalls, "the decision must use the cached count, not a probe")
 	require.Zero(t, m.promptQueue, "the cached count must be zeroed immediately")
 	require.Empty(t, m.promptQueueItems)
-	require.False(t, m.isCanceling, "clearing the queue must not arm cancellation")
+	require.True(t, m.isCanceling, "the same press must arm cancellation")
+}
+
+// TestCancelAgentWithQueueCancelsInTwoPresses pins the fix for esc being
+// swallowed by the queue: with prompts queued behind a run, the first
+// press cleared the queue and did nothing else, so stopping the run took
+// three presses. Two must be enough, queue or no queue.
+func TestCancelAgentWithQueueCancelsInTwoPresses(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, queued: []string{"a", "b"}}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.promptQueue = 2
+	m.promptQueueItems = []string{"a", "b"}
+	ws.resetCounters()
+
+	m.cancelAgent()
+	require.Equal(t, 1, ws.clearQueueCalls)
+	require.Zero(t, ws.cancelCalls, "the first press must not cancel outright")
+
+	m.cancelAgent()
+	require.Equal(t, 1, ws.cancelCalls, "the second press must stop the run")
+	require.Equal(t, 1, ws.clearQueueCalls, "the queue is already empty")
 }
 
 // TestBackstopRefreshesStaleCaches: when the memoized state outlives its TTL

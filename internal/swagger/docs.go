@@ -3831,6 +3831,9 @@ const docTemplate = `{
                 "auto_approve": {
                     "type": "boolean"
                 },
+                "large_model": {
+                    "$ref": "#/definitions/config.SelectedModel"
+                },
                 "non_interactive": {
                     "type": "boolean"
                 },
@@ -3842,6 +3845,9 @@ const docTemplate = `{
                 },
                 "session_id": {
                     "type": "string"
+                },
+                "small_model": {
+                    "$ref": "#/definitions/config.SelectedModel"
                 }
             }
         },

@@ -147,10 +147,20 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %s", err)
 			}
 
-			_, small, err := c.buildAgentModels(ctx, true)
+			// Fetch analysis never needs the large model, so this
+			// sub-agent runs the run's small model in both slots. The
+			// selection still comes from the run that asked for the
+			// fetch, not from the workspace's config.
+			selection, err := c.runSelection(ctx)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			selection.Large = selection.Small
+			models, err := c.buildRunModels(ctx, selection, true)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
 			}
+			small := models.Small()
 
 			systemPrompt, err := promptTemplate.Build(ctx, small.Model.Provider(), small.Model.Model(), c.cfg)
 			if err != nil {
@@ -192,6 +202,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			return c.runSubAgent(ctx, subAgentParams{
 				Agent:          agent,
+				Models:         models,
 				SessionID:      validationResult.SessionID,
 				AgentMessageID: validationResult.AgentMessageID,
 				ToolCallID:     call.ID,

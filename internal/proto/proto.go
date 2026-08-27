@@ -155,13 +155,23 @@ func (a AgentInfo) IsZero() bool {
 // because it gets a single shot at the tool palette. It is per message
 // because one workspace serves an attached TUI and headless prompts at
 // the same time.
+//
+// LargeModel and SmallModel, when set, are the models the resulting turn
+// must run on, overriding the workspace's configured pair for that turn
+// only. `crush run -m` sends them. The model is a property of the run
+// for the same reason NonInteractive is: one workspace serves several
+// clients, so a one-shot model choice must not change what anything else
+// runs on — and must not rewrite the project's saved model. A nil entry
+// keeps the workspace's model for that slot.
 type AgentMessage struct {
-	SessionID      string       `json:"session_id"`
-	RunID          string       `json:"run_id,omitempty"`
-	Prompt         string       `json:"prompt"`
-	Attachments    []Attachment `json:"attachments,omitempty"`
-	AutoApprove    bool         `json:"auto_approve,omitempty"`
-	NonInteractive bool         `json:"non_interactive,omitempty"`
+	SessionID      string                `json:"session_id"`
+	RunID          string                `json:"run_id,omitempty"`
+	Prompt         string                `json:"prompt"`
+	Attachments    []Attachment          `json:"attachments,omitempty"`
+	AutoApprove    bool                  `json:"auto_approve,omitempty"`
+	NonInteractive bool                  `json:"non_interactive,omitempty"`
+	LargeModel     *config.SelectedModel `json:"large_model,omitempty"`
+	SmallModel     *config.SelectedModel `json:"small_model,omitempty"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.

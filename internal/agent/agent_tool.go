@@ -55,9 +55,17 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
+			// The delegated turn runs on the models of the run that
+			// asked for it, rebuilt with sub-agent provider settings.
+			models, err := c.subAgentModels(ctx)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+
 			return c.runSubAgent(ctx, subAgentParams{
 				Agent:          agent,
 				Ready:          ready,
+				Models:         models,
 				SessionID:      sessionID,
 				AgentMessageID: agentMessageID,
 				ToolCallID:     call.ID,

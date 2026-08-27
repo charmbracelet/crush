@@ -516,6 +516,8 @@ definitions:
         type: array
       auto_approve:
         type: boolean
+      large_model:
+        $ref: '#/definitions/config.SelectedModel'
       non_interactive:
         type: boolean
       prompt:
@@ -524,6 +526,8 @@ definitions:
         type: string
       session_id:
         type: string
+      small_model:
+        $ref: '#/definitions/config.SelectedModel'
     type: object
   proto.AgentSession:
     properties:

@@ -92,7 +92,17 @@ type SessionAgentCall struct {
 	// mid-turn by a caller that exited, and it cannot outlive the run.
 	// It survives the busy-session queue, so a queued prompt gets its
 	// own hold when its own turn starts.
-	AutoApprove      bool
+	AutoApprove bool
+	// Models, when non-nil, is the model pair this run owns. It is
+	// resolved once when the run starts and is the only model state the
+	// turn reads, so a workspace-wide model change (the picker,
+	// UpdateModels) cannot alter the turn's model between steps, and two
+	// concurrent runs started with different models cannot steal each
+	// other's. It survives the busy-session queue, so a prompt queued
+	// behind another turn still runs on the model it asked for. When nil
+	// the turn falls back to the agent's own models, which is what
+	// in-package callers that build a SessionAgent directly rely on.
+	Models           *runModels
 	Prompt           string
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
@@ -152,6 +162,20 @@ type SessionAgentCall struct {
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
 }
 
+// SummarizeCall is one request to replace a session's history with a
+// summary. Auto-compaction issues it from inside a turn, so it carries
+// the same per-run state a SessionAgentCall does.
+type SummarizeCall struct {
+	SessionID       string
+	ProviderOptions fantasy.ProviderOptions
+	// Models, when non-nil, is the model pair to summarize with. Auto
+	// compaction is part of the run that filled the context window, so
+	// it must summarize on that run's model rather than the workspace's.
+	Models *runModels
+	// OnAuthRefresh mirrors SessionAgentCall.OnAuthRefresh.
+	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
+}
+
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
@@ -165,7 +189,7 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	Summarize(context.Context, SummarizeCall) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -541,7 +565,7 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 			return err
 		}
 	}
-	largeModel := a.largeModel.Get()
+	largeModel, _ := a.turnModels(call)
 	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
 		Parts:    []message.ContentPart{},
@@ -759,7 +783,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Idle: become the active run. Register the cancel func before dropping
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
+	//
+	// The run's models go on the context too, so a sub-agent started by
+	// one of this turn's tool calls inherits the selection of the run
+	// that spawned it. Stamping from the call (rather than trusting the
+	// incoming ctx) is what keeps the queued-prompt recursion honest: a
+	// dequeued prompt is its own run with its own models.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	if call.Models != nil {
+		runCtx = withRunModels(runCtx, call.Models)
+	}
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(call.SessionID, ac)
@@ -803,7 +836,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	cacheControl := a.getCacheControlOptions()
 	agentTools := a.turnTools(call, cacheControl)
-	largeModel := a.largeModel.Get()
+	largeModel, smallModel := a.turnModels(call)
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
@@ -846,7 +879,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// goroutine survives Run's cancel.
 	if !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
-		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
+		go a.generateTitle(titleCtx, call.SessionID, call.Prompt, largeModel, smallModel)
 	}
 
 	// Add the user message to the session.
@@ -1086,8 +1119,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 		},
 		OnAuthRefresh: call.OnAuthRefresh,
+		// Called on every step and on every retry attempt, so it must
+		// read the run's own pair: the shared agent's model can change
+		// under a live turn, and a refresh rebuilds this run's pair in
+		// place so the retry gets fresh credentials.
 		ModelProvider: func() fantasy.LanguageModel {
-			m := a.largeModel.Get()
+			m := largeModel
+			if call.Models != nil {
+				m = call.Models.Large()
+			}
 			slog.Info("ModelProvider called",
 				"provider", m.ModelCfg.Provider,
 				"model", m.ModelCfg.Model)
@@ -1346,7 +1386,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if turnErr == nil && shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		summarizeCall := SummarizeCall{
+			SessionID:       call.SessionID,
+			ProviderOptions: call.ProviderOptions,
+			Models:          call.Models,
+			OnAuthRefresh:   call.OnAuthRefresh,
+		}
+		if summarizeErr := a.Summarize(genCtx, summarizeCall); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1501,13 +1547,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+func (a *sessionAgent) Summarize(ctx context.Context, call SummarizeCall) error {
+	sessionID := call.SessionID
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
 
 	// Copy mutable fields under lock to avoid races with SetModels.
 	largeModel := a.largeModel.Get()
+	if call.Models != nil {
+		largeModel = call.Models.Large()
+	}
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
@@ -1557,10 +1607,13 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
-		ProviderOptions: opts,
-		OnAuthRefresh:   onAuthRefresh,
+		ProviderOptions: call.ProviderOptions,
+		OnAuthRefresh:   call.OnAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
-			return a.largeModel.Get().Model
+			if call.Models != nil {
+				return call.Models.Large().Model
+			}
+			return largeModel.Model
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
@@ -1941,8 +1994,17 @@ func hasUserTextMessage(msgs []message.Message) bool {
 	return false
 }
 
-// GenerateTitle generates a session title based on the initial prompt.
+// GenerateTitle generates a session title based on the initial prompt,
+// using the workspace's current models. Turns that own a model pair go
+// through generateTitle so the title comes from the same model the run
+// asked for.
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
+	a.generateTitle(ctx, sessionID, userPrompt, a.largeModel.Get(), a.smallModel.Get())
+}
+
+// generateTitle names the session with smallModel, falling back to
+// largeModel when the small one truncates.
+func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string, largeModel, smallModel Model) {
 	if userPrompt == "" {
 		return
 	}
@@ -1960,8 +2022,6 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		}
 	}()
 
-	smallModel := a.smallModel.Get()
-	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
@@ -2302,6 +2362,19 @@ func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 
 func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
+}
+
+// turnModels returns the models one turn must use. A call that carries
+// its own pair (every production caller does; see
+// SessionAgentCall.Models) is pinned to it for the whole turn, so a
+// concurrent SetModels cannot change the model the turn is streaming on.
+// Callers that supply none get the agent's own models, which is what the
+// models passed to NewSessionAgent are for.
+func (a *sessionAgent) turnModels(call SessionAgentCall) (large, small Model) {
+	if call.Models != nil {
+		return call.Models.Large(), call.Models.Small()
+	}
+	return a.largeModel.Get(), a.smallModel.Get()
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.

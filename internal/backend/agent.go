@@ -85,11 +85,12 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // is also attached so the coordinator can report whether it published
 // the terminal event, letting runAgent avoid a duplicate fallback.
 //
-// msg.AutoApprove and msg.NonInteractive travel the same way. The agent
-// takes a permission hold for the turn it actually runs, so the approval
-// cannot outlive the run or be revoked out from under it by a client
-// that exited; and the turn it runs, not the workspace, is what decides
-// whether interactive tools and the MCP-initialization wait apply.
+// msg.AutoApprove, msg.NonInteractive and the requested models travel
+// the same way. The agent takes a permission hold for the turn it
+// actually runs, so the approval cannot outlive the run or be revoked
+// out from under it by a client that exited; and the turn it runs, not
+// the workspace, is what decides whether interactive tools and the
+// MCP-initialization wait apply, and which model streams.
 func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun) {
 	defer ws.runWG.Done()
 	defer accept.Close()
@@ -104,6 +105,7 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	if msg.NonInteractive {
 		ctx = agent.WithNonInteractive(ctx)
 	}
+	ctx = agent.WithRequestedModels(ctx, msg.LargeModel, msg.SmallModel)
 	ctx = agent.WithRunCompleteMarker(ctx)
 
 	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)

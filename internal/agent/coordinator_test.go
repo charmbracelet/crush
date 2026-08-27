@@ -45,7 +45,7 @@ func (m *mockSessionAgent) IsBusy() bool                                { return
 func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
 func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
-func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
+func (m *mockSessionAgent) Summarize(context.Context, SummarizeCall) error {
 	return nil
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
@@ -75,6 +75,14 @@ func newMockAgent(providerID string, maxTokens int64, runFunc func(context.Conte
 		},
 		runFunc: runFunc,
 	}
+}
+
+// mockRunModels builds the run model pair a sub-agent turn inherits,
+// from the mock's own model. runSubAgent reads the run's models rather
+// than the agent's, so tests have to supply them.
+func mockRunModels(m *mockSessionAgent) *runModels {
+	selection := modelSelection{Large: m.model.ModelCfg, Small: m.model.ModelCfg}
+	return newRunModels(selection, true, m.model, m.model)
 }
 
 // agentResultWithText creates a minimal AgentResult with the given text response.
@@ -107,6 +115,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -116,6 +125,46 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "done", resp.Content)
 		assert.False(t, resp.IsError)
+	})
+
+	t.Run("uses the spawning run's model, not the agent's", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		// The sub-agent was built with the workspace's model. The run
+		// that spawned it asked for a different one, and that is what
+		// the delegated turn has to use.
+		agent := newMockAgent("workspace-provider", 4096, nil)
+		runModel := Model{
+			CatwalkCfg: catwalk.Model{DefaultMaxTokens: 1234},
+			ModelCfg:   config.SelectedModel{Provider: providerID, Model: "run-model"},
+		}
+		models := newRunModels(
+			modelSelection{Large: runModel.ModelCfg, Small: runModel.ModelCfg},
+			true, runModel, runModel,
+		)
+		agent.runFunc = func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			assert.Equal(t, int64(1234), call.MaxOutputTokens,
+				"the delegated turn must be sized by the run's model")
+			assert.Same(t, models, call.Models,
+				"the delegated turn must run on the spawning run's models")
+			return agentResultWithText("done"), nil
+		}
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			Models:         models,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "done", resp.Content)
 	})
 
 	t.Run("cost update failure preserves output", func(t *testing.T) {
@@ -128,6 +177,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      "missing-parent-session",
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -152,6 +202,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -176,6 +227,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -200,6 +252,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -236,6 +289,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -261,6 +315,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		_, err = coord.runSubAgent(ctx, subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -282,6 +337,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		_, err = coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -305,6 +361,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -331,6 +388,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		_, err = coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",
@@ -367,6 +425,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		_, err = coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
+			Models:         mockRunModels(agent),
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
 			ToolCallID:     "call-1",

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -297,6 +298,28 @@ func runNonInteractive(
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
+	// The server keeps a run going after the request that started it
+	// returns, so an exit from here that is not a finished run has to
+	// say so, or the turn keeps working with nobody left to read it.
+	// Retiring the client on the way out covers the same ground, but not
+	// while the workspace was pre-existing and other clients keep it
+	// alive, and not the ordering between the two. This is the direct
+	// signal.
+	//
+	// The context is fresh and bounded because the usual reason to get
+	// here is Ctrl-C, which has already cancelled ctx.
+	runFinished := false
+	defer func() {
+		if runFinished {
+			return
+		}
+		cancelCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer stop()
+		if err := c.CancelAgentRun(cancelCtx, ws.ID, runID); err != nil {
+			slog.Warn("Failed to cancel the agent run while exiting", "run_id", runID, "error", err)
+		}
+	}()
+
 	stream := &runStream{
 		sessionID: sess.ID,
 		runID:     runID,
@@ -338,6 +361,7 @@ func runNonInteractive(
 				return err
 			}
 			if done {
+				runFinished = true
 				return nil
 			}
 
@@ -347,6 +371,12 @@ func runNonInteractive(
 		}
 	}
 }
+
+// errRunCancelled reports a run the server ended before it finished.
+// The server bounds a run's life (maximum duration, and the claim of
+// the client that asked for it), so a cancelled terminal event is a
+// failed `crush run`, not a quiet success.
+var errRunCancelled = errors.New("agent run cancelled")
 
 // runStream tracks the per-message stdout cursor and the
 // reconciliation state used by [runNonInteractive] to translate
@@ -372,11 +402,11 @@ type runStream struct {
 }
 
 // handle processes one SSE event. Returns done=true when the run
-// loop should exit (RunComplete observed); returns an error only
-// when the agent run failed (not on context cancel — that path is
-// handled by the caller's select). stopSpinner is called on the
-// first observable assistant output and on completion; passing nil
-// is safe for tests.
+// loop should exit (RunComplete observed); returns an error when the
+// agent run failed or was cancelled by the server (not on context
+// cancel — that path is handled by the caller's select). stopSpinner is
+// called on the first observable assistant output and on completion;
+// passing nil is safe for tests.
 func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 	stop := func() {
 		if stopSpinner != nil {
@@ -435,7 +465,21 @@ func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
 			return false, nil
 		}
 		stop()
-		if e.Payload.Error != "" && !e.Payload.Cancelled {
+		// A cancelled run did not do what was asked, so it must not
+		// look like success. The server can end a run on its own now —
+		// the maximum run duration, or the claim of the client that
+		// asked for it going away — and reporting exit 0 for a turn
+		// stopped partway would hide it. Ctrl-C does not come through
+		// here: it cancels the context and the event loop returns
+		// ctx.Err().
+		//
+		// The event's Error on a cancelled run is only the context
+		// error, so it is dropped; why the server ended the run is in
+		// the server log.
+		if e.Payload.Cancelled {
+			return true, errRunCancelled
+		}
+		if e.Payload.Error != "" {
 			return true, fmt.Errorf("agent run failed: %s", e.Payload.Error)
 		}
 		// Reconcile stdout against the authoritative final

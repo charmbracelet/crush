@@ -786,17 +786,49 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 
 	// The run's lifetime is detached from the prompting client's HTTP
 	// request: SendMessage validates and accepts the prompt, dispatches
-	// the run on a goroutine bound to the workspace context, and returns
+	// the run on a goroutine bound to a per-run context, and returns
 	// immediately. A dropping its TCP connection (network blip, TUI
 	// restart) or B canceling the session via the explicit cancel
 	// endpoint can no longer tear down a turn that other subscribed
-	// clients are still watching. Only the explicit cancel endpoint
-	// should be able to end a run.
+	// clients are still watching.
+	//
+	// Detached is not unbounded. The run ends when the run-cancel
+	// endpoint is called for it, when the claim of the client named in
+	// msg.ClientID is removed (a clean exit, or a client that never
+	// reconnects), or when it hits the server's maximum run duration.
 	if err := c.backend.SendMessage(id, msg); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// handlePostWorkspaceAgentRunCancel ends a single dispatched agent run,
+// leaving the rest of its session's work alone. This is what a client
+// calls for a run it owns and no longer wants — a `crush run` on its way
+// out — where cancelling the whole session would stop an attached TUI's
+// turn too.
+//
+// Cancelling a run that already finished succeeds: the server no longer
+// has a record of it, and a client's cleanup path always races normal
+// completion.
+//
+//	@Summary		Cancel agent run
+//	@Tags			agent
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			rid	path	string	true	"Run ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/runs/{rid}/cancel [post]
+func (c *controllerV1) handlePostWorkspaceAgentRunCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rid := r.PathValue("rid")
+	if err := c.backend.CancelRun(id, rid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // handlePostWorkspaceAgentInit makes sure the workspace has an agent.

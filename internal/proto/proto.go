@@ -163,9 +163,19 @@ func (a AgentInfo) IsZero() bool {
 // clients, so a one-shot model choice must not change what anything else
 // runs on — and must not rewrite the project's saved model. A nil entry
 // keeps the workspace's model for that slot.
+//
+// ClientID names the client that asked for the run, so the server can
+// end a run whose requester is gone. The claim a client holds on the
+// workspace is the liveness signal: when it is removed — a clean exit, or
+// the detach grace expiring on a client that never reconnects — every run
+// it owns is cancelled, even while other clients keep the workspace
+// alive. `client.Client.SendMessage` fills it in from the per-process
+// client ID; an empty value means "unowned" and leaves the run bounded
+// only by the server's maximum run duration.
 type AgentMessage struct {
 	SessionID      string                `json:"session_id"`
 	RunID          string                `json:"run_id,omitempty"`
+	ClientID       string                `json:"client_id,omitempty"`
 	Prompt         string                `json:"prompt"`
 	Attachments    []Attachment          `json:"attachments,omitempty"`
 	AutoApprove    bool                  `json:"auto_approve,omitempty"`

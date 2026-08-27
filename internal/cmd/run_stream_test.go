@@ -162,20 +162,31 @@ func TestRunStream_ErrorRunComplete(t *testing.T) {
 	require.Contains(t, err.Error(), "model temporarily unavailable")
 }
 
-// TestRunStream_CancelledRunCompleteIsClean ensures a cancelled
-// run (e.g. Ctrl+C while `crush run` waits) exits cleanly rather
-// than reporting the cancellation as a failure.
-func TestRunStream_CancelledRunCompleteIsClean(t *testing.T) {
+// TestRunStream_CancelledRunCompleteFails ensures a run the server ended
+// early reports failure. The server bounds a run's life now — the
+// maximum run duration, and the claim of the client that asked for it —
+// so exiting 0 would tell a script that a turn stopped partway had
+// succeeded. Ctrl-C does not arrive here: it cancels
+// runNonInteractive's context and the event loop returns ctx.Err().
+//
+// The event's own Error text is dropped: on a cancelled run it only
+// repeats the context error.
+func TestRunStream_CancelledRunCompleteFails(t *testing.T) {
 	t.Parallel()
 
-	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
-	done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{
-		SessionID: "S",
-		Error:     "context canceled",
-		Cancelled: true,
-	}}, nil)
-	require.True(t, done)
-	require.NoError(t, err)
+	for name, payload := range map[string]proto.RunComplete{
+		"with error text": {SessionID: "S", Error: "context canceled", Cancelled: true},
+		"bare":            {SessionID: "S", Cancelled: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+			done, err := s.handle(pubsub.Event[proto.RunComplete]{Payload: payload}, nil)
+			require.True(t, done)
+			require.ErrorIs(t, err, errRunCancelled)
+		})
+	}
 }
 
 // TestRunStream_LeadingWhitespaceTrimmedOnce mirrors the

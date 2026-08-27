@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
@@ -14,12 +15,19 @@ import (
 )
 
 // SendMessage validates and accepts a prompt for the workspace's agent,
-// then dispatches the run on a goroutine bound to the workspace context
-// and returns immediately. It does not wait for the LLM turn to
-// complete: the run's lifetime is owned by the workspace, not by the
-// caller. Errors from the dispatched run reach observers through the
-// agent event channels (a notify.TypeAgentError notification), not
-// through this return value.
+// then dispatches the run on a goroutine bound to a per-run context and
+// returns immediately. It does not wait for the LLM turn to complete:
+// the run's lifetime is owned by the workspace and by whoever asked for
+// it, not by the HTTP request that delivered the prompt. Errors from the
+// dispatched run reach observers through the agent event channels (a
+// notify.TypeAgentError notification), not through this return value.
+//
+// The run context is a child of the workspace context, so workspace
+// shutdown still ends it, and it is registered in ws.runs before the
+// goroutine is scheduled so that a cancel arriving in that window is not
+// lost. Three things end a run early: [Backend.CancelRun], the removal
+// of msg.ClientID's claim on the workspace, and the maximum run
+// duration.
 //
 // SendMessage returns synchronously when the request cannot be accepted:
 // ErrWorkspaceNotFound if the workspace is missing, ErrAgentNotInitialized
@@ -56,14 +64,15 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	ws.runWG.Add(1)
 	ws.runMu.Unlock()
 
-	go b.runAgent(ws, msg, accept)
+	go b.runAgent(ws, msg, accept, ws.newRun(msg, b.runDuration()))
 	return nil
 }
 
 // runAgent executes an accepted agent run for the workspace. It owns the
-// accept reservation (releasing it on return) and the runWG ticket added
-// by SendMessage. The run is bound to the workspace context so its
-// lifetime is independent of any client's HTTP request.
+// accept reservation (releasing it on return), the runWG ticket added by
+// SendMessage, and the run handle SendMessage registered: the deferred
+// end() stops the duration timer, cancels the run context and
+// deregisters the handle.
 //
 // On a non-cancel error it surfaces the failure to observers via a
 // notify.TypeAgentError notification (lossy, best-effort). That alone is
@@ -91,11 +100,12 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // out from under it by a client that exited; and the turn it runs, not
 // the workspace, is what decides whether interactive tools and the
 // MCP-initialization wait apply, and which model streams.
-func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun) {
+func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun, run *runHandle) {
 	defer ws.runWG.Done()
 	defer accept.Close()
+	defer ws.end(run)
 
-	ctx := ws.ctx
+	ctx := run.ctx
 	if msg.RunID != "" {
 		ctx = agent.WithRunID(ctx, msg.RunID)
 	}
@@ -127,12 +137,27 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 		return
 	}
 	if rc := ws.RunCompletions(); rc != nil {
-		rc.PublishMustDeliver(ctx, pubsub.UpdatedEvent, notify.RunComplete{
+		// Detached and bounded: the run context may already be
+		// cancelled (the run was ended by a client loss or by the
+		// duration bound), and a must-deliver publish on a cancelled
+		// context delivers nothing. The event still has to reach a
+		// waiter that has not gone away.
+		pubCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer stop()
+		rc.PublishMustDeliver(pubCtx, pubsub.UpdatedEvent, notify.RunComplete{
 			SessionID: msg.SessionID,
 			RunID:     msg.RunID,
 			Error:     err.Error(),
 		})
 	}
+}
+
+// runDuration reports the current ceiling on how long a dispatched run
+// may live. Read under b.mu because SetMaxRunDuration can change it.
+func (b *Backend) runDuration() time.Duration {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.maxRunDuration
 }
 
 // GetAgentInfo returns the agent's model and busy status.

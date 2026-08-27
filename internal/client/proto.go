@@ -491,7 +491,13 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 // reachable without another positional parameter: see proto.AgentMessage
 // for RunID (terminal-event correlation) and AutoApprove (a permission
 // hold for the turn the server is about to run).
+//
+// The caller's ClientID is always this client's, so it is stamped here
+// rather than asked for: it makes this process the owner of the run, and
+// the server ends the run when this client's claim on the workspace goes
+// away.
 func (c *Client) SendMessage(ctx context.Context, id string, msg proto.AgentMessage) error {
+	msg.ClientID = c.clientID
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(msg),
 		http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
@@ -856,6 +862,27 @@ func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID st
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to cancel agent session: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// CancelAgentRun ends one dispatched agent run by its RunID, leaving the
+// session's other work alone. Use it instead of CancelAgentSession when
+// the caller owns a specific run — a `crush run` on its way out, say —
+// because a session can be shared with an attached TUI whose turn must
+// not be stopped too.
+//
+// Ending a run that already finished is not an error: the server has no
+// record of it and reports success, which is what makes this safe to
+// call unconditionally from a deferred cleanup racing normal completion.
+func (c *Client) CancelAgentRun(ctx context.Context, id string, runID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/runs/%s/cancel", id, runID), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to cancel agent run: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to cancel agent run: status code %d", rsp.StatusCode)
 	}
 	return nil
 }

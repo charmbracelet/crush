@@ -516,6 +516,8 @@ definitions:
         type: array
       auto_approve:
         type: boolean
+      client_id:
+        type: string
       large_model:
         $ref: '#/definitions/config.SelectedModel'
       non_interactive:
@@ -1358,6 +1360,33 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Initialize agent
+      tags:
+      - agent
+  /workspaces/{id}/agent/runs/{rid}/cancel:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run ID
+        in: path
+        name: rid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Cancel agent run
       tags:
       - agent
   /workspaces/{id}/agent/sessions/{sid}:

@@ -33,7 +33,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, true)
+	agent, ready, err := c.buildAgent(ctx, prompt, agentCfg, true)
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +57,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 
 			return c.runSubAgent(ctx, subAgentParams{
 				Agent:          agent,
+				Ready:          ready,
 				SessionID:      sessionID,
 				AgentMessageID: agentMessageID,
 				ToolCallID:     call.ID,

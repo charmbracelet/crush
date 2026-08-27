@@ -789,7 +789,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
-	agentTools := a.tools.Copy()
+	cacheControl := a.getCacheControlOptions()
+	agentTools := withCacheControl(a.tools.Copy(), cacheControl)
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
@@ -807,11 +808,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if s := instructions.String(); s != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
-	}
-
-	if len(agentTools) > 0 {
-		// Add Anthropic caching to the last tool.
-		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 
 	agent := fantasy.NewAgent(
@@ -949,7 +945,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			// Use latest tools (updated by SetTools when MCP tools change).
-			prepared.Tools = a.tools.Copy()
+			prepared.Tools = withCacheControl(a.tools.Copy(), cacheControl)
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -1656,6 +1652,40 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
 		},
 	}
+}
+
+// toolProviderOptions overrides one tool's provider options for a single
+// request without touching the tool it wraps.
+//
+// The agent's tool instances are shared by every run on this agent, and
+// a server runs several sessions against one agent at a time. Calling
+// SetProviderOptions on a shared instance therefore wrote a field that
+// another run's request build was reading (fantasy reads
+// tool.ProviderOptions() for every step) — a data race on any workspace
+// with two concurrent runs.
+type toolProviderOptions struct {
+	fantasy.AgentTool
+	opts fantasy.ProviderOptions
+}
+
+func (t *toolProviderOptions) ProviderOptions() fantasy.ProviderOptions {
+	return t.opts
+}
+
+func (t *toolProviderOptions) SetProviderOptions(opts fantasy.ProviderOptions) {
+	t.opts = opts
+}
+
+// withCacheControl marks the last tool of a request with Anthropic-style
+// cache control, so the provider caches the prefix that ends with it. It
+// takes ownership of agentTools, which must be a per-request copy.
+func withCacheControl(agentTools []fantasy.AgentTool, opts fantasy.ProviderOptions) []fantasy.AgentTool {
+	if len(agentTools) == 0 {
+		return agentTools
+	}
+	last := len(agentTools) - 1
+	agentTools[last] = &toolProviderOptions{AgentTool: agentTools[last], opts: opts}
+	return agentTools
 }
 
 // sessionHeaders returns the HTTP headers we use for cache affinity on

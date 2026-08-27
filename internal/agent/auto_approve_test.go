@@ -277,6 +277,69 @@ func TestRun_QueuedPromptTakesItsOwnHold(t *testing.T) {
 		"the queued prompt must get its hold when its own turn runs")
 }
 
+// TestRun_QueuedPromptDoesNotInheritTheHold is the inverse: the active
+// turn's approval must not extend to the prompt that runs after it. The
+// queued turn starts from inside the active turn's frame (Run recurses
+// into it), so a hold released only when the outer Run returns would
+// silently approve a prompt that never asked — e.g. a TUI prompt queued
+// behind an active `crush run`.
+func TestRun_QueuedPromptDoesNotInheritTheHold(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	perms := permission.NewPermissionService(env.workingDir, false, nil)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	verdicts := make(chan bool, 2)
+	tool := newAskingTool(t, perms, sess.ID, verdicts)
+	large := &gatedToolStreamModel{
+		gate:       make(chan struct{}),
+		entered:    make(chan struct{}),
+		toolName:   "ask",
+		toolInput:  `{"value":"hi"}`,
+		toolCallID: "call",
+	}
+	sa := autoApproveAgent(t, env, perms, large, tool)
+
+	mainDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{
+			SessionID:   sess.ID,
+			RunID:       "run-main",
+			Prompt:      "main",
+			AutoApprove: true,
+		})
+		mainDone <- runErr
+	}()
+
+	select {
+	case <-large.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("main run never entered Stream")
+	}
+	require.True(t, sa.IsSessionBusy(sess.ID))
+
+	// Queue an ordinary prompt behind the auto-approved turn. A RunID
+	// keeps it out of the fold path, so it runs as its own turn.
+	res, err := sa.Run(t.Context(), SessionAgentCall{
+		SessionID: sess.ID,
+		RunID:     "run-follow",
+		Prompt:    "follow",
+	})
+	require.NoError(t, err)
+	require.Nil(t, res)
+	require.Equal(t, 1, sa.QueuedPrompts(sess.ID))
+
+	close(large.gate)
+	require.NoError(t, <-mainDone)
+
+	require.True(t, <-verdicts,
+		"the active turn asked for auto-approval, so its tool call is granted")
+	require.False(t, <-verdicts,
+		"the queued prompt did not ask for auto-approval, so it must still prompt")
+}
+
 // TestRun_CancelledTurnReleasesTheHold covers the exit path that started
 // this change: `crush run` can go away mid-turn (Ctrl-C, a dead stream,
 // a killed client). The server-side run owns the hold, so however the

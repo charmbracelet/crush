@@ -738,9 +738,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// exit can neither strand a live turn on an unanswerable request nor
 	// leave the session silently approved afterwards. Holds are counted,
 	// so concurrent runs on one session do not cancel each other out.
+	//
+	// The release is idempotent because this frame does not end with the
+	// turn: it hands off to other calls' turns (the summarize dequeue and
+	// the queued-prompt recursion below), which must not inherit this
+	// call's approval. The explicit release right after the model stream
+	// keeps them out; the defer covers every path that returns first.
+	releaseAutoApprove := func() {}
 	if call.AutoApprove && a.permissions != nil {
 		a.permissions.AutoApproveSession(call.SessionID)
-		defer a.permissions.RevokeAutoApproveSession(call.SessionID)
+		var releaseOnce sync.Once
+		releaseAutoApprove = func() {
+			releaseOnce.Do(func() {
+				a.permissions.RevokeAutoApproveSession(call.SessionID)
+			})
+		}
+		defer releaseAutoApprove()
 	}
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
@@ -1150,6 +1163,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	})
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
+
+	// Tool dispatch happens entirely inside agent.Stream, so the turn's
+	// auto-approval hold has done its job by here. Give it back before
+	// the rest of this frame, which can start another call's turn: the
+	// summarize dequeue and the queued-prompt recursion below both run
+	// Run again in place, and a prompt that did not ask for approval
+	// (an interactive one, say) must still get a permission prompt.
+	releaseAutoApprove()
 
 	if err != nil {
 		isHyper := largeModel.ModelCfg.Provider == hyper.Name

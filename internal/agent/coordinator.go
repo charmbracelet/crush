@@ -826,18 +826,23 @@ func (c *coordinator) setActiveAgent(name string, agent SessionAgent, ready *age
 
 // buildAgent builds a session agent and returns it with the readiness
 // handle for its asynchronous setup. The agent must not run before that
-// handle reports ready: until then it has no system prompt and no tools.
+// handle reports ready: until then it has no tools.
+//
+// A nil prompt means the agent's turns bring their own
+// (SessionAgentCall.SystemPrompt) and none is rendered here. The `agent`
+// tool builds one per delegated turn, because a delegated turn runs on
+// the models it inherited from its parent run rather than on the
+// workspace's, and one shared sub-agent instance serves every parent
+// run.
 func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, *agentReadiness, error) {
 	large, small, err := c.buildAgentModels(ctx, isSubAgent)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
@@ -863,15 +868,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// values; the work is local and always completes.
 	initCtx := context.WithoutCancel(ctx)
 
-	ready := newAgentReadiness(
-		func() error {
-			systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
-			if err != nil {
-				return err
-			}
-			result.SetSystemPrompt(systemPrompt)
-			return nil
-		},
+	setup := []func() error{
 		func() error {
 			tools, err := c.buildTools(initCtx, agent, isSubAgent)
 			if err != nil {
@@ -880,9 +877,19 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 			result.SetTools(tools)
 			return nil
 		},
-	)
+	}
+	if prompt != nil {
+		setup = append(setup, func() error {
+			systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
+			if err != nil {
+				return err
+			}
+			result.SetSystemPrompt(systemPrompt)
+			return nil
+		})
+	}
 
-	return result, ready, nil
+	return result, newAgentReadiness(setup...), nil
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
@@ -1109,15 +1116,17 @@ func (c *coordinator) buildModels(ctx context.Context, selection modelSelection,
 	}
 
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
+			Model:              largeModel,
+			CatwalkCfg:         *largeCatwalkModel,
+			ModelCfg:           largeModelCfg,
+			FlatRate:           largeProviderCfg.FlatRate,
+			SystemPromptPrefix: largeProviderCfg.SystemPromptPrefix,
 		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
+			Model:              smallModel,
+			CatwalkCfg:         *smallCatwalkModel,
+			ModelCfg:           smallModelCfg,
+			FlatRate:           smallProviderCfg.FlatRate,
+			SystemPromptPrefix: smallProviderCfg.SystemPromptPrefix,
 		}, nil
 }
 
@@ -1650,6 +1659,11 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
+	// SystemPrompt, when non-empty, is the system prompt this delegated
+	// turn runs with instead of the Agent's own. The `agent` tool sets
+	// it: its sub-agent instance is shared by every parent run, while
+	// the prompt is rendered for the model this one turn inherited.
+	SystemPrompt string
 	// AutoApprove asks the child turn to grant its own permission
 	// requests. The child agent's Run takes the hold when the turn
 	// starts and gives it back when the turn ends, so a delegated turn
@@ -1690,6 +1704,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return params.Agent.Run(ctx, SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
+			SystemPrompt:     params.SystemPrompt,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  getProviderOptions(model, providerCfg),
 			Temperature:      model.ModelCfg.Temperature,

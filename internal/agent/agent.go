@@ -102,7 +102,16 @@ type SessionAgentCall struct {
 	// behind another turn still runs on the model it asked for. When nil
 	// the turn falls back to the agent's own models, which is what
 	// in-package callers that build a SessionAgent directly rely on.
-	Models           *runModels
+	Models *runModels
+	// SystemPrompt, when non-empty, is the system prompt this turn runs
+	// with instead of the agent's own. It exists because the prompt is
+	// rendered for a specific provider and model
+	// (prompt.Prompt.Build), so a turn that pinned a model other than
+	// the one the shared agent was built for has to bring its own. The
+	// `agent` tool sets it: a delegated turn inherits the spawning
+	// run's models, and one shared sub-agent instance serves every
+	// parent run, so its prompt cannot live on the instance.
+	SystemPrompt     string
 	Prompt           string
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
@@ -207,6 +216,15 @@ type Model struct {
 	CatwalkCfg catwalk.Model
 	ModelCfg   config.SelectedModel
 	FlatRate   bool
+	// SystemPromptPrefix is the extra system message this model's
+	// provider wants in front of every prompt
+	// (ProviderConfig.SystemPromptPrefix). It rides on the model
+	// because that is the only thing that knows which provider a turn
+	// is actually talking to: a run can pin a model other than the
+	// workspace's (`crush run -m`), a delegated turn inherits its
+	// parent's, and the large and small slots can belong to different
+	// providers.
+	SystemPromptPrefix string
 }
 
 // activeCancel wraps a context.CancelFunc with a unique pointer identity.
@@ -219,11 +237,10 @@ type activeCancel struct {
 }
 
 type sessionAgent struct {
-	largeModel         *csync.Value[Model]
-	smallModel         *csync.Value[Model]
-	systemPromptPrefix *csync.Value[string]
-	systemPrompt       *csync.Value[string]
-	tools              *csync.Slice[fantasy.AgentTool]
+	largeModel   *csync.Value[Model]
+	smallModel   *csync.Value[Model]
+	systemPrompt *csync.Value[string]
+	tools        *csync.Slice[fantasy.AgentTool]
 
 	isSubAgent           bool
 	sessions             session.Service
@@ -246,7 +263,6 @@ type sessionAgent struct {
 type SessionAgentOptions struct {
 	LargeModel           Model
 	SmallModel           Model
-	SystemPromptPrefix   string
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
@@ -271,7 +287,6 @@ func NewSessionAgent(
 	return &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
-		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
@@ -991,8 +1006,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	cacheControl := a.getCacheControlOptions()
 	agentTools := a.turnTools(call, cacheControl)
 	largeModel, smallModel := a.turnModels(call)
-	systemPrompt := a.systemPrompt.Get()
-	promptPrefix := a.systemPromptPrefix.Get()
+	systemPrompt := a.turnSystemPrompt(call)
+	promptPrefix := largeModel.SystemPromptPrefix
 	var instructions strings.Builder
 
 	for _, server := range mcp.GetStates() {
@@ -1754,7 +1769,9 @@ func (a *sessionAgent) summarizeSession(ctx, genCtx context.Context, call Summar
 	if call.Models != nil {
 		largeModel = call.Models.Large()
 	}
-	systemPromptPrefix := a.systemPromptPrefix.Get()
+	// The prefix belongs to the provider being summarized on, which is
+	// the run's model when auto-compaction is part of a turn.
+	systemPromptPrefix := largeModel.SystemPromptPrefix
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -1806,13 +1823,7 @@ func (a *sessionAgent) summarizeSession(ctx, genCtx context.Context, call Summar
 			}
 			return largeModel.Model
 		},
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
+		PrepareStep: prefixPrepareStep(systemPromptPrefix),
 		OnReasoningDelta: func(id string, text string) error {
 			summaryMessage.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, summaryMessage)
@@ -2196,8 +2207,6 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		}
 	}()
 
-	systemPromptPrefix := a.systemPromptPrefix.Get()
-
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(
 			m,
@@ -2210,15 +2219,6 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	streamCall := fantasy.AgentStreamCall{
 		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		Headers: sessionHeaders(sessionID),
-		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = opts.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{
-					fantasy.NewSystemMessage(systemPromptPrefix),
-				}, prepared.Messages...)
-			}
-			return callCtx, prepared, nil
-		},
 	}
 
 	type modelAttempt struct {
@@ -2239,6 +2239,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		if attempt.model.CatwalkCfg.CanReason {
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
+		// The two attempts can be different providers' models, so the
+		// prefix has to be the one belonging to the model about to be
+		// streamed.
+		streamCall.PrepareStep = prefixPrepareStep(attempt.model.SystemPromptPrefix)
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
@@ -2545,6 +2549,33 @@ func (a *sessionAgent) turnModels(call SessionAgentCall) (large, small Model) {
 		return call.Models.Large(), call.Models.Small()
 	}
 	return a.largeModel.Get(), a.smallModel.Get()
+}
+
+// turnSystemPrompt returns the system prompt one turn must use. A call
+// that brings its own (see SessionAgentCall.SystemPrompt) is pinned to
+// it, so a turn streaming a model the shared agent was not built for
+// still sends a prompt rendered for that model. Everything else uses
+// the agent's own, which is what SetSystemPrompt maintains.
+func (a *sessionAgent) turnSystemPrompt(call SessionAgentCall) string {
+	if call.SystemPrompt != "" {
+		return call.SystemPrompt
+	}
+	return a.systemPrompt.Get()
+}
+
+// prefixPrepareStep returns a PrepareStep that puts a provider's system
+// prompt prefix in front of every step's messages. The prefix is passed
+// in rather than read from the agent because it belongs to the provider
+// of the model being streamed, which differs per turn and, during title
+// generation, per attempt.
+func prefixPrepareStep(prefix string) fantasy.PrepareStepFunction {
+	return func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+		prepared.Messages = opts.Messages
+		if prefix != "" {
+			prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(prefix)}, prepared.Messages...)
+		}
+		return callCtx, prepared, nil
+	}
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.

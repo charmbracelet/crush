@@ -23,8 +23,8 @@ func newStoreWorkspace(t *testing.T, b *Backend, coord *blockingCoordinator) (*W
 	messages := message.NewService(q)
 
 	ws := insertAgentWorkspace(t, b, coord)
-	ws.App.Sessions = sessions
-	ws.App.Messages = messages
+	ws.Sessions = sessions
+	ws.Messages = messages
 	return ws, sessions, messages
 }
 

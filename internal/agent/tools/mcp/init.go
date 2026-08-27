@@ -901,36 +901,46 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	channelGate := newChannelGate()
 	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
+	// When the server is marked Sessionless, the tools/prompts/resources
+	// list-changed handlers are omitted. The go-sdk opens a SEP-2575
+	// "subscriptions/listen" stream whenever any of those handlers is set
+	// (client.go), and sessionless streamable-HTTP servers such as GitHub MCP
+	// answer that POST with 404 ("session not found"), which the SDK treats
+	// as fatal and tears the connection down. Setting the flag lets those
+	// servers connect at the cost of live list-changed notifications.
+	opts := &mcp.ClientOptions{
+		LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
+			level := parseLevel(string(req.Params.Level))
+			slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
+		},
+	}
+	if !m.IsSessionless(resolver) {
+		opts.ToolListChangedHandler = func(context.Context, *mcp.ToolListChangedRequest) {
+			broker.Publish(pubsub.UpdatedEvent, Event{
+				Type: EventToolsListChanged,
+				Name: name,
+			})
+		}
+		opts.PromptListChangedHandler = func(context.Context, *mcp.PromptListChangedRequest) {
+			broker.Publish(pubsub.UpdatedEvent, Event{
+				Type: EventPromptsListChanged,
+				Name: name,
+			})
+		}
+		opts.ResourceListChangedHandler = func(context.Context, *mcp.ResourceListChangedRequest) {
+			broker.Publish(pubsub.UpdatedEvent, Event{
+				Type: EventResourcesListChanged,
+				Name: name,
+			})
+		}
+	}
 	client := mcp.NewClient(
 		&mcp.Implementation{
 			Name:    "crush",
 			Version: version.Version,
 			Title:   "Crush",
 		},
-		&mcp.ClientOptions{
-			ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
-					Type: EventToolsListChanged,
-					Name: name,
-				})
-			},
-			PromptListChangedHandler: func(context.Context, *mcp.PromptListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
-					Type: EventPromptsListChanged,
-					Name: name,
-				})
-			},
-			ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
-					Type: EventResourcesListChanged,
-					Name: name,
-				})
-			},
-			LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
-				level := parseLevel(string(req.Params.Level))
-				slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
-			},
-		},
+		opts,
 	)
 
 	session, err := client.Connect(mcpCtx, transport, nil)

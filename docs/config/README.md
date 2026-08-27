@@ -534,6 +534,10 @@ Available Keys:
                                 or tmux handle text selection and copy/paste
   scrollbar string              control chat scrollbar visibility: default,
                                 always, or never
+  exit-banner default|compact|none
+                                control the post-session banner: default shows
+                                the Crush logo, compact shows only the resume
+                                hint, none hides it entirely
   completions-max-depth int     maximum directory depth shown by completions
   completions-max-items int     maximum items returned to completions
 ```
@@ -544,6 +548,7 @@ option ui diff unified
 option ui transparent true
 option ui mouse false
 option ui scrollbar always
+option ui exit-banner compact
 option ui completions-max-depth 4
 option ui completions-max-items 200
 ```

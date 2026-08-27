@@ -265,9 +265,34 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NotNil(t, cfg.MCP)
 		require.Equal(t, filepath.Join(workingDir, ".crush"), cfg.Options.DataDirectory)
 		require.Equal(t, "AGENTS.md", cfg.Options.InitializeAs)
+		// DiffMode is deliberately left empty: the permissions dialog treats
+		// the zero value as "pick split or unified based on terminal width".
+		require.Empty(t, cfg.Options.TUI.DiffMode)
+		require.Equal(t, ScrollbarDefault, cfg.Options.TUI.Scrollbar)
+		require.Equal(t, ExitBannerDefault, cfg.Options.TUI.ExitBanner)
 		for _, path := range defaultContextPaths {
 			require.Contains(t, cfg.Options.ContextPaths, path)
 		}
+	})
+
+	t.Run("sets TUI defaults only when unset", func(t *testing.T) {
+		cfg := &Config{}
+		workingDir := t.TempDir()
+
+		cfg.setDefaults(workingDir, "")
+
+		require.Empty(t, cfg.Options.TUI.DiffMode)
+		require.Equal(t, ScrollbarDefault, cfg.Options.TUI.Scrollbar)
+		require.Equal(t, ExitBannerDefault, cfg.Options.TUI.ExitBanner)
+
+		cfg.Options.TUI.DiffMode = DiffModeSplit
+		cfg.Options.TUI.Scrollbar = ScrollbarNever
+		cfg.Options.TUI.ExitBanner = ExitBannerCompact
+		cfg.setDefaults(workingDir, "")
+
+		require.Equal(t, DiffModeSplit, cfg.Options.TUI.DiffMode)
+		require.Equal(t, ScrollbarNever, cfg.Options.TUI.Scrollbar)
+		require.Equal(t, ExitBannerCompact, cfg.Options.TUI.ExitBanner)
 	})
 
 	t.Run("prunes orphaned OAuth token MCP entries but keeps real ones", func(t *testing.T) {

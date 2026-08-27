@@ -1264,7 +1264,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	//
 	// This sits before the summarize block on purpose, so a truncated
 	// turn is not re-queued as a continuation of tool calls that never
-	// ran.
+	// ran. The failure is recorded in turnErr rather than returned,
+	// because this turn still owes the end-of-turn handoff below: a
+	// prompt queued behind it is an independent request with its own
+	// RunID and its own client waiting for a terminal event, and
+	// returning here would leave it in the queue with nothing left to
+	// start it.
+	var turnErr error
 	if currentAssistant != nil {
 		content := "The tool call was never run: the model's response was cut off before the call could be dispatched."
 		if finish := currentAssistant.FinishPart(); finish != nil && finish.Reason == message.FinishReasonMaxTokens {
@@ -1275,18 +1281,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		orphanCtx, orphanCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		written, finalizeErr := a.finalizeUnresolvedToolCalls(orphanCtx, currentAssistant, content)
 		orphanCancel()
-		if finalizeErr != nil {
-			return nil, finalizeErr
-		}
-		if written > 0 {
+		switch {
+		case finalizeErr != nil:
+			// A half-repaired transcript is still a failed turn, and it
+			// takes the same handoff: a prompt queued behind it must not
+			// be stranded by a write that failed for reasons of its own.
+			turnErr = finalizeErr
+		case written > 0:
 			slog.Error("Turn ended with tool calls that never ran",
 				"session_id", call.SessionID,
 				"count", written)
-			return nil, ErrToolCallsNotRun
+			turnErr = ErrToolCallsNotRun
 		}
 	}
 
-	if shouldSummarize {
+	if turnErr == nil && shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
 			return nil, summarizeErr
@@ -1311,8 +1320,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for
-	// nested/non-interactive sessions).
-	if !call.NonInteractive && a.notify != nil {
+	// nested/non-interactive sessions, and for a failed turn: the error
+	// paths above return before this point, so a turn that ends in
+	// turnErr must not claim it finished either).
+	if turnErr == nil && !call.NonInteractive && a.notify != nil {
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,
@@ -1374,6 +1385,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			a.cancelMark.Del(call.SessionID)
 		}
 		mu.Unlock()
+		if turnErr != nil {
+			return nil, turnErr
+		}
 		return result, err
 	}
 	// There are queued messages, restart the loop. Suppress the outer
@@ -1415,10 +1429,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			complete.MessageID = currentAssistant.ID
 			complete.Text = currentAssistant.Content().String()
 		}
+		if turnErr != nil {
+			complete.Error = turnErr.Error()
+		}
 		if ctx.Err() != nil {
 			complete.Cancelled = true
 		}
 		a.publishRunComplete(ctx, call, complete)
+	}
+	if turnErr != nil {
+		// This turn failed, but the prompt behind it is an independent
+		// request that has not run yet: start it, then report this
+		// turn's own failure. The queued turn owns its own outcome and
+		// publishes it under its own RunID, so its error is not this
+		// call's to return.
+		_, _ = a.Run(ctx, firstQueuedMessage)
+		return nil, turnErr
 	}
 	return a.Run(ctx, firstQueuedMessage)
 }

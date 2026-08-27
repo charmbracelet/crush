@@ -6,9 +6,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,13 +31,20 @@ type scriptedStep struct {
 // The last step repeats if the agent loop asks for more, so a script
 // ending in a non-continuing finish reason terminates the turn.
 //
+// When entered and gate are set, the first Stream call reports that it
+// started and then blocks until the gate is closed. That is what holds
+// the first turn "active" long enough for a test to queue a prompt
+// behind it.
+//
 // Use it as the large model only. Title generation streams the small
 // model concurrently and would consume script positions; give the agent
 // a separate small model that finishes cleanly so the title never falls
 // back to the large one.
 type scriptedStreamModel struct {
-	steps []scriptedStep
-	calls atomic.Int64
+	steps   []scriptedStep
+	entered chan struct{}
+	gate    chan struct{}
+	calls   atomic.Int64
 }
 
 func (m *scriptedStreamModel) Provider() string { return "fake" }
@@ -46,8 +57,16 @@ func (m *scriptedStreamModel) Generate(context.Context, fantasy.Call) (*fantasy.
 	}, nil
 }
 
-func (m *scriptedStreamModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
-	idx := min(int(m.calls.Add(1))-1, len(m.steps)-1)
+func (m *scriptedStreamModel) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	n := int(m.calls.Add(1))
+	if n == 1 && m.entered != nil {
+		close(m.entered)
+		select {
+		case <-m.gate:
+		case <-ctx.Done():
+		}
+	}
+	idx := min(n-1, len(m.steps)-1)
 	step := m.steps[idx]
 	return func(yield func(fantasy.StreamPart) bool) {
 		if step.text != "" {
@@ -225,4 +244,118 @@ func TestRun_HealthyToolCallTurnKeepsRealResults(t *testing.T) {
 				"a healthy turn must not get a synthetic un-run result")
 		}
 	}
+}
+
+// collectRunCompletes reads terminal events off the broker until it has
+// one per expected RunID, keyed by RunID. It fails the test rather than
+// blocking forever when an expected event never arrives, which is the
+// exact symptom of a stranded queued prompt.
+func collectRunCompletes(t *testing.T, ch <-chan pubsub.Event[notify.RunComplete], runIDs ...string) map[string]notify.RunComplete {
+	t.Helper()
+	got := make(map[string]notify.RunComplete, len(runIDs))
+	deadline := time.After(10 * time.Second)
+	for len(got) < len(runIDs) {
+		select {
+		case ev := <-ch:
+			got[ev.Payload.RunID] = ev.Payload
+		case <-deadline:
+			t.Fatalf("timed out waiting for RunComplete events %v, got %v", runIDs, got)
+		}
+	}
+	for _, id := range runIDs {
+		require.Contains(t, got, id, "missing the terminal event for %q", id)
+	}
+	return got
+}
+
+// TestRun_TruncatedTurnStillRunsQueuedPrompt covers the queue side of the
+// truncated-turn failure. A queued prompt that carries a RunID is left in
+// the queue on purpose (drainQueueForStep) so it runs as its own turn and
+// publishes its own terminal event; a second `crush run` against a busy
+// session is exactly that shape, and it exits only on a RunComplete for
+// its own RunID.
+//
+// Failing the active turn must therefore not skip the end-of-turn queue
+// handoff: the queued prompt would stay in the queue with the session no
+// longer busy, nothing would start it, and its client would wait forever.
+func TestRun_TruncatedTurnStillRunsQueuedPrompt(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	tool, runs := newEchoTool()
+	// The first turn blocks inside Stream until the gate opens, which is
+	// what makes the session busy long enough to queue behind it, and
+	// then truncates. The queued turn gets the clean second step.
+	model := &scriptedStreamModel{
+		entered: make(chan struct{}),
+		gate:    make(chan struct{}),
+		steps: []scriptedStep{
+			{
+				toolCallID:   "call-1",
+				toolName:     "echo",
+				toolInput:    `{"value":"hi"}`,
+				finishReason: fantasy.FinishReasonLength,
+			},
+			{text: "the queued turn ran", finishReason: fantasy.FinishReasonStop},
+		},
+	}
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel:  Model{Model: model, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		SmallModel:  Model{Model: &finishStreamModel{text: "a title"}, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		Tools:       []fantasy.AgentTool{tool},
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	events := broker.Subscribe(subCtx)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	mainDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{
+			SessionID: sess.ID,
+			RunID:     "run-main",
+			Prompt:    "main",
+		})
+		mainDone <- runErr
+	}()
+
+	select {
+	case <-model.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first run never entered Stream")
+	}
+	require.True(t, sa.IsSessionBusy(sess.ID))
+
+	res, err := sa.Run(t.Context(), SessionAgentCall{
+		SessionID: sess.ID,
+		RunID:     "run-follow",
+		Prompt:    "follow",
+	})
+	require.NoError(t, err)
+	require.Nil(t, res, "the second prompt must be queued, not run inline")
+	require.Equal(t, 1, sa.QueuedPrompts(sess.ID))
+
+	close(model.gate)
+	require.ErrorIs(t, <-mainDone, ErrToolCallsNotRun,
+		"the turn whose tool call never ran must still fail")
+
+	completes := collectRunCompletes(t, events, "run-main", "run-follow")
+	assert.Equal(t, ErrToolCallsNotRun.Error(), completes["run-main"].Error,
+		"the failed turn must report its own failure under its own RunID")
+	assert.Empty(t, completes["run-follow"].Error,
+		"the queued turn ran on its own and succeeded")
+	assert.False(t, completes["run-follow"].Cancelled,
+		"the queued prompt was never cancelled")
+
+	assert.Zero(t, sa.QueuedPrompts(sess.ID), "the queue must be drained")
+	assert.Zero(t, runs.Load(), "the truncated tool call must not have executed")
+	assert.Equal(t, int64(2), model.calls.Load(), "the queued prompt must reach the model")
 }

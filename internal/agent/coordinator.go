@@ -329,6 +329,11 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// Auto-approval is carried the same way and copied onto the call so
 	// the hold's lifetime is the turn's, owned by sessionAgent.Run.
 	autoApprove := AutoApproveFromContext(ctx)
+	// The dispatched run's own lifetime, when the dispatcher gave it one
+	// (backend.runAgent does; in-process callers do not). It is what
+	// keeps a prompt queued behind a busy session bound to the run that
+	// asked for it instead of to the turn that dequeues it.
+	lifetime := RunLifetimeFromContext(ctx)
 	run := func() (*fantasy.AgentResult, error) {
 		return active.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
@@ -347,6 +352,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			OnComplete:       onComplete,
 			Accepted:         accept,
 			Models:           models,
+			Lifetime:         lifetime,
 			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg, c.runModelsRefresher(models)),
 		})
 	}

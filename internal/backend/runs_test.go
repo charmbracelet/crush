@@ -388,6 +388,78 @@ func TestSendMessage_FinishedRunLeavesNoHandle(t *testing.T) {
 	require.NoError(t, b.CancelRun(ws.ID, runID))
 }
 
+// lifetimeRecorder is an agent.Coordinator that captures the run
+// lifetime the dispatcher attached to each run's context, then blocks
+// until that run ends.
+type lifetimeRecorder struct {
+	*blockingCoordinator
+
+	mu   sync.Mutex
+	seen map[string]*agent.RunLifetime
+}
+
+func newLifetimeRecorder() *lifetimeRecorder {
+	return &lifetimeRecorder{
+		blockingCoordinator: newBlockingCoordinator(),
+		seen:                make(map[string]*agent.RunLifetime),
+	}
+}
+
+func (c *lifetimeRecorder) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	c.mu.Lock()
+	c.seen[agent.RunIDFromContext(ctx)] = agent.RunLifetimeFromContext(ctx)
+	c.mu.Unlock()
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (c *lifetimeRecorder) lifetime(t *testing.T, runID string) *agent.RunLifetime {
+	t.Helper()
+	var l *agent.RunLifetime
+	require.Eventually(t, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		var ok bool
+		l, ok = c.seen[runID]
+		return ok
+	}, 3*time.Second, 5*time.Millisecond, "run %s never entered the coordinator", runID)
+	return l
+}
+
+// TestSendMessage_RunCarriesItsOwnLifetime pins the wiring every queued
+// prompt depends on. A prompt dispatched into a busy session is queued
+// and only runs later, in the frame of the turn it queued behind, so the
+// agent needs this run's own context to run it under and a rendezvous
+// that keeps this dispatch on the stack until it has. Without them the
+// queued prompt inherited the cancellation scope of an unrelated,
+// already-finished run, and its own run — handle deregistered, ceiling
+// timer stopped — could no longer be reached at all.
+func TestSendMessage_RunCarriesItsOwnLifetime(t *testing.T) {
+	t.Parallel()
+
+	b, _ := newTestBackend(t)
+	coord := newLifetimeRecorder()
+	ws := insertAgentWorkspace(t, b, coord)
+
+	runID := sendRun(t, b, ws, newClientID(t))
+	lifetime := coord.lifetime(t, runID)
+	require.NotNil(t, lifetime, "every dispatched run must carry its own lifetime")
+	require.NoError(t, lifetime.Ctx.Err(), "a live run's lifetime context must be live")
+	require.Equal(t, runID, agent.RunIDFromContext(lifetime.Ctx),
+		"the lifetime must carry the run's own decorated context")
+	require.NoError(t, registeredRunCtx(t, ws, runID).Err(),
+		"the run must still be registered while its prompt could be queued")
+
+	// Every per-run end path goes through that context, so it reaches a
+	// prompt still queued under it.
+	require.NoError(t, b.CancelRun(ws.ID, runID))
+	select {
+	case <-lifetime.Ctx.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelling a run must cancel the context its queued prompt would run under")
+	}
+}
+
 // registeredRunCtx returns the live context of the named registered
 // run, read from the registry so the test sees the same context the
 // cancel paths act on.

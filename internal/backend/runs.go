@@ -38,7 +38,10 @@ var DefaultMaxRunDuration = 6 * time.Hour
 //
 // A run is registered by [Backend.SendMessage] before the goroutine that
 // executes it is scheduled, so a cancel arriving in that window still
-// finds it, and is released by [Backend.runAgent] on return.
+// finds it, and is released by [Backend.runAgent] on return. A prompt
+// dispatched into a busy session is queued rather than run at once, and
+// runAgent stays on the stack until that prompt's own turn has ended, so
+// the handle covers the wait as well as the turn.
 type runHandle struct {
 	// runID is the caller's correlator (proto.AgentMessage.RunID). It
 	// may be empty: callers that never wait for a terminal event do not
@@ -90,9 +93,11 @@ func (w *Workspace) newRun(msg proto.AgentMessage, maxDuration time.Duration) *r
 	return h
 }
 
-// end releases the handle once its run has returned: it stops the
-// ceiling timer, cancels the run context so nothing derived from it
-// leaks, and deregisters the handle.
+// end releases the handle once its run has returned — which, for a
+// prompt that had to queue behind a busy session, is after that
+// prompt's own turn, not after it was queued. It stops the ceiling
+// timer, cancels the run context so nothing derived from it leaks, and
+// deregisters the handle.
 func (w *Workspace) end(h *runHandle) {
 	w.runsMu.Lock()
 	delete(w.runs, h)

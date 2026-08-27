@@ -74,6 +74,16 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // end() stops the duration timer, cancels the run context and
 // deregisters the handle.
 //
+// Because that ownership ends when this function returns, it must not
+// return before the run has actually run. A prompt dispatched into a
+// busy session is queued and only runs later, so the run's lifetime
+// travels with it (agent.WithRunLifetime below) and RunAccepted returns
+// only once the queued prompt's own turn has ended. The handle
+// therefore stays registered and its ceiling timer stays armed while
+// the prompt waits, CancelRun still reaches it, and the turn it finally
+// gets runs under this context instead of inheriting the cancellation
+// of the unrelated turn that dequeued it.
+//
 // On a non-cancel error it surfaces the failure to observers via a
 // notify.TypeAgentError notification (lossy, best-effort). That alone is
 // not a reliable terminal signal: the agent-event fan-in uses lossy
@@ -117,6 +127,10 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	}
 	ctx = agent.WithRequestedModels(ctx, msg.LargeModel, msg.SmallModel)
 	ctx = agent.WithRunCompleteMarker(ctx)
+	// Attached last, so the lifetime's context carries every other
+	// per-run value: a queued prompt's turn runs under that context, not
+	// under the context of the turn that dequeued it.
+	ctx = agent.WithRunLifetime(ctx)
 
 	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
 	if err == nil || errors.Is(err, context.Canceled) {

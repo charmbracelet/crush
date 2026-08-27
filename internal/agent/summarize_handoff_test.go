@@ -256,7 +256,7 @@ func TestHandOffQueue_ReservesAcceptForTheDequeuedPrompt(t *testing.T) {
 		Prompt:    "queued",
 	})
 
-	handoff := sa.handOffQueue(sess.ID, "", nil)
+	handoff := sa.handOffQueue(sess.ID, "", nil, false)
 	require.True(t, handoff.Started)
 	require.Equal(t, "queued", handoff.Next.Prompt)
 	require.NotNil(t, handoff.Next.Accepted,

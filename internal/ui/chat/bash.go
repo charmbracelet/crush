@@ -32,8 +32,9 @@ func NewBashToolMessageItem(
 	result *message.ToolResult,
 	canceled bool,
 	workingDir string,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	base := newBaseToolMessageItem(sty, toolCall, result, &BashToolRenderContext{workingDir: workingDir}, canceled)
+	base := newBaseToolMessageItem(sty, toolCall, result, &BashToolRenderContext{workingDir: workingDir}, canceled, reduceAnimations)
 	return &BashToolMessageItem{baseToolMessageItem: base}
 }
 
@@ -126,8 +127,9 @@ func NewJobOutputToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &JobOutputToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &JobOutputToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // JobOutputToolRenderContext renders job_output tool messages.
@@ -177,8 +179,9 @@ func NewJobKillToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &JobKillToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &JobKillToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // JobKillToolRenderContext renders job_kill tool messages.

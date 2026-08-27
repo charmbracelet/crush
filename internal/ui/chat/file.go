@@ -28,8 +28,9 @@ func NewViewToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ViewToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &ViewToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // ViewToolRenderContext renders view tool messages.
@@ -114,8 +115,9 @@ func NewWriteToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &WriteToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &WriteToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // WriteToolRenderContext renders write tool messages.
@@ -183,8 +185,9 @@ func NewEditToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &EditToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &EditToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // EditToolRenderContext renders edit tool messages.
@@ -251,8 +254,9 @@ func NewMultiEditToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &MultiEditToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &MultiEditToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // MultiEditToolRenderContext renders multi-edit tool messages.
@@ -325,8 +329,9 @@ func NewDownloadToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &DownloadToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &DownloadToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // DownloadToolRenderContext renders download tool messages.

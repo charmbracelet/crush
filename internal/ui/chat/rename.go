@@ -22,8 +22,9 @@ func NewRenameToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &RenameToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &RenameToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // RenameToolRenderContext renders rename tool messages.

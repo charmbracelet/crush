@@ -46,7 +46,13 @@ const (
 
 	// Default number of cycling chars.
 	defaultNumCyclingChars = 10
+
+	// Tick interval for static (reduced) animation mode.
+	staticTickInterval = 500 * time.Millisecond
 )
+
+// Ellipsis frames for the static animation.
+var staticEllipsisFrames = []string{"", ".", "..", "..."}
 
 // Default colors for gradient.
 var (
@@ -82,8 +88,8 @@ var animCacheMap = csync.NewMap[string, *animCache]()
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()
-	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v",
-		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor)
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%v-%v-%t-%v",
+		opts.Size, opts.Label, opts.LabelColor, opts.EllipsisColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.Static, opts.SuffixColor)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -100,13 +106,15 @@ type StepMsg struct {
 
 // Settings defines settings for the animation.
 type Settings struct {
-	ID          string
-	Size        int
-	Label       string
-	LabelColor  color.Color
-	GradColorA  color.Color
-	GradColorB  color.Color
-	CycleColors bool
+	ID            string
+	Static        bool
+	Size          int
+	Label         string
+	LabelColor    color.Color
+	EllipsisColor color.Color // Color for ellipsis dots; defaults to LabelColor if unset
+	GradColorA    color.Color
+	GradColorB    color.Color
+	CycleColors   bool
 
 	// NoScramble disables the scrambled rune animation. The cycling
 	// character region is removed entirely so only the label and its
@@ -128,22 +136,26 @@ const ()
 
 // Anim is a Bubble for an animated spinner.
 type Anim struct {
-	width            int
-	cyclingCharWidth int
-	label            *csync.Slice[string]
-	labelWidth       int
-	labelColor       color.Color
-	birthSteps       []int
-	initialFrames    [][]string // frames for the initial characters
-	initialized      atomic.Bool
-	cyclingFrames    [][]string           // frames for the cycling characters
-	step             atomic.Int64         // current main frame step (wraps)
-	framesSinceStart atomic.Int64         // total Animate ticks (does not wrap)
-	ellipsisStep     atomic.Int64         // current ellipsis frame step
-	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
-	id               string
-	suffix           func() string
-	suffixColor      color.Color
+	width                int
+	cyclingCharWidth     int
+	label                *csync.Slice[string]
+	labelWidth           int
+	labelColor           color.Color
+	ellipsisColor        color.Color
+	birthSteps           []int
+	initialFrames        [][]string // frames for the initial characters
+	initialized          atomic.Bool
+	cyclingFrames        [][]string           // frames for the cycling characters
+	step                 atomic.Int64         // current main frame step (wraps)
+	framesSinceStart     atomic.Int64         // total Animate ticks (does not wrap)
+	ellipsisStep         atomic.Int64         // current ellipsis frame step
+	ellipsisFrames       *csync.Slice[string] // ellipsis animation frames
+	id                   string
+	suffix               func() string
+	suffixColor          color.Color
+	static               bool // when true, don't animate
+	staticRendered       string
+	staticEllipsisFrames []string // pre-rendered ellipsis frames for static mode
 
 	// gen identifies the currently armed tick chain. Start() bumps it and
 	// stamps every emitted StepMsg with the new value; Animate() drops ticks
@@ -181,6 +193,19 @@ func New(opts Settings) *Anim {
 		a.cyclingCharWidth = opts.Size
 	}
 	a.labelColor = opts.LabelColor
+	if colorIsUnset(opts.EllipsisColor) {
+		a.ellipsisColor = opts.LabelColor
+	} else {
+		a.ellipsisColor = opts.EllipsisColor
+	}
+	a.static = opts.Static
+
+	// For static mode, render a static "Working..." label and return early.
+	if opts.Static {
+		a.initialized.Store(true)
+		a.renderStatic()
+		return a
+	}
 
 	// Store the suffix function if provided.
 	if opts.Suffix != nil {
@@ -345,6 +370,11 @@ func (a *Anim) SetLabel(newLabel string) {
 		a.width += a.labelWidth
 	}
 
+	if a.static {
+		a.renderStatic()
+		return
+	}
+
 	// Re-render the label
 	a.renderLabel(newLabel)
 }
@@ -402,6 +432,9 @@ func (a *Anim) Width() (w int) {
 // part) would run two chains concurrently and render a doubled animation.
 func (a *Anim) Start() tea.Cmd {
 	a.gen.Add(1)
+	if a.static {
+		return a.staticTick()
+	}
 	return a.Step()
 }
 
@@ -422,6 +455,14 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 		return nil
 	}
 
+	if a.static {
+		step := a.step.Add(1)
+		if int(step) >= len(staticEllipsisFrames) {
+			a.step.Store(0)
+		}
+		return a.staticTick()
+	}
+
 	step := a.step.Add(1)
 	if int(step) >= len(a.cyclingFrames) {
 		a.step.Store(0)
@@ -440,8 +481,29 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	return a.Step()
 }
 
+// renderStatic renders the static label and pre-renders ellipsis frames.
+func (a *Anim) renderStatic() {
+	labelStyle := lipgloss.NewStyle().Foreground(a.labelColor)
+	dotStyle := lipgloss.NewStyle().Foreground(a.ellipsisColor)
+	a.staticRendered = labelStyle.Render("Working")
+	a.staticEllipsisFrames = make([]string, len(staticEllipsisFrames))
+	for i, frame := range staticEllipsisFrames {
+		a.staticEllipsisFrames[i] = dotStyle.Render(frame)
+	}
+}
+
 // Render renders the current state of the animation.
 func (a *Anim) Render() string {
+	if a.static {
+		step := int(a.step.Load())
+		var b strings.Builder
+		b.WriteString(a.staticRendered)
+		if step < len(a.staticEllipsisFrames) {
+			b.WriteString(a.staticEllipsisFrames[step])
+		}
+		return b.String()
+	}
+
 	var b strings.Builder
 	step := int(a.step.Load())
 	frames := int(a.framesSinceStart.Load())
@@ -504,6 +566,14 @@ func (a *Anim) Step() tea.Cmd {
 	gen := a.gen.Load()
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
 		return StepMsg{ID: a.id, Gen: gen}
+	})
+}
+
+// staticTick returns a slower tick for static/reduced animation mode to
+// minimize bandwidth and re-renders.
+func (a *Anim) staticTick() tea.Cmd {
+	return tea.Tick(staticTickInterval, func(t time.Time) tea.Msg {
+		return StepMsg{ID: a.id}
 	})
 }
 

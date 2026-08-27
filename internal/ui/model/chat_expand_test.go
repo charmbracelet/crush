@@ -27,7 +27,7 @@ func TestChatToggleExpandedSelectedItem_AssistantMessage(t *testing.T) {
 			message.ReasoningContent{Thinking: "thinking about it"},
 		},
 	}
-	item := chat.NewAssistantMessageItem(u.com.Styles, msg)
+	item := chat.NewAssistantMessageItem(u.com.Styles, msg, false)
 
 	// The keyboard expand path uses the generic Expandable interface;
 	// verifying satisfaction at runtime guards the contract.

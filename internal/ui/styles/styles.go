@@ -222,6 +222,7 @@ type Styles struct {
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
 	WorkingTimerColor    color.Color // Elapsed timer suffix color
+	WorkingEllipsisColor color.Color // Muted color for static ellipsis dots
 
 	// Section Title
 	Section struct {

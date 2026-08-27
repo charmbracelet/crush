@@ -27,8 +27,9 @@ func NewDockerMCPToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &DockerMCPToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &DockerMCPToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // DockerMCPToolRenderContext renders Docker MCP tool messages.

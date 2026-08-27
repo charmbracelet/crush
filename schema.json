@@ -576,6 +576,10 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "tool_search": {
+          "$ref": "#/$defs/ToolSearchOptions",
+          "description": "Deferred (on-demand) loading of MCP tools to reduce context usage"
         }
       },
       "additionalProperties": false,
@@ -893,6 +897,22 @@
           "examples": [
             100
           ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ToolSearchOptions": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable deferred tool loading via a tool_search meta-tool",
+          "default": false
+        },
+        "threshold": {
+          "type": "integer",
+          "description": "Only defer MCP tools when the total number of MCP tools exceeds this threshold",
+          "default": 20
         }
       },
       "additionalProperties": false,

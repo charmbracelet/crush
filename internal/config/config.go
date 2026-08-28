@@ -363,6 +363,14 @@ type Options struct {
 	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	// AutoSummarizeRatio is the share of a context window of up to 200k
+	// tokens that is kept free before the session is summarized. Zero keeps
+	// the default of 0.2.
+	AutoSummarizeRatio float64 `json:"auto_summarize_ratio,omitempty" jsonschema:"description=Share of a context window of up to 200k tokens kept free before the session is summarized (default 0.2),minimum=0,exclusiveMaximum=1,example=0.3"`
+	// AutoSummarizeBuffer is the number of tokens kept free in a context
+	// window above 200k tokens before the session is summarized. Zero keeps
+	// the default of 20000.
+	AutoSummarizeBuffer int64 `json:"auto_summarize_buffer,omitempty" jsonschema:"description=Tokens kept free in a context window above 200k tokens before the session is summarized (default 20000),minimum=0,example=40000"`
 	// DataDirectory is where Crush keeps per-project state such as
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used

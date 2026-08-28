@@ -921,6 +921,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		if m.completionsOpen && m.state == uiChat && m.focus == uiFocusEditor {
+			if lines := int(msg.DeltaY); lines != 0 {
+				m.completions.ScrollBy(lines)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// Otherwise handle mouse wheel for chat. Use the coalesced delta
 		// directly as the line count. Terminals like Ghostty send DeltaY=3
 		// per physical wheel tick (matching their native scrollback), while

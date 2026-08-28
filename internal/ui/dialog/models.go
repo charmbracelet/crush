@@ -109,7 +109,6 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.help = help
 	m.list = NewModelsList(t)
 	m.list.Focus()
-	m.list.SetSelected(0)
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
@@ -490,10 +489,22 @@ func (m *Models) setProviderItems() error {
 
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
-	m.list.SetSelectedItem(selectedItemID)
+	m.list.Focus()
 	if selectedItemID != "" {
+		m.list.SetSelectedItem(selectedItemID)
+		// Ensure the current model is actually highlighted. If the provider
+		// list was stale or the model wasn't found, fall back to the first
+		// selectable model so the dialog never opens without a highlight.
+		if sel := m.list.SelectedItem(); sel == nil {
+			m.list.SelectFirst()
+		} else if mi, ok := sel.(*ModelItem); !ok || mi.ID() != selectedItemID {
+			m.list.SelectFirst()
+		}
 		m.list.ScrollToSelected()
 	} else {
+		// No current model (e.g., onboarding): highlight the first model
+		// instead of leaving the heading selected, so Enter is useful.
+		m.list.SelectFirst()
 		m.list.ScrollToTop()
 	}
 

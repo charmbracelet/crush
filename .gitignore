@@ -54,3 +54,6 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
+
+# Local notes (never ship on a PR)
+BUILDLOG.md

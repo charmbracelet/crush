@@ -487,11 +487,21 @@ func literalArgs(words []*syntax.Word) ([]string, bool) {
 // value is not knowable here, and `ls $(rm -rf /)` must never be treated
 // as an `ls`. Glob characters are left alone — they are expanded by the
 // shell against the filesystem and cannot introduce a new command.
+//
+// A literal containing a backslash is also rejected. syntax.Lit.Value keeps
+// unquoted escape sequences verbatim, so the text here is not the argv the
+// shell will pass: `--ext\-diff` reads as the denied flag `--ext-diff` only
+// after the shell strips the backslash, which would let a protected flag
+// slip past denyFlags. Failing closed on any backslash is cheaper than
+// re-implementing the shell's escape rules.
 func literalWord(word *syntax.Word) (string, bool) {
 	var sb strings.Builder
 	for _, part := range word.Parts {
 		switch p := part.(type) {
 		case *syntax.Lit:
+			if strings.Contains(p.Value, `\`) {
+				return "", false
+			}
 			sb.WriteString(p.Value)
 		case *syntax.SglQuoted:
 			// $'…' applies escape sequences, so Value is not the final
@@ -507,6 +517,11 @@ func literalWord(word *syntax.Word) (string, bool) {
 			for _, inner := range p.Parts {
 				lit, ok := inner.(*syntax.Lit)
 				if !ok {
+					return "", false
+				}
+				// Double-quoted literals keep backslash escapes verbatim
+				// too; reject them for the same reason as bare literals.
+				if strings.Contains(lit.Value, `\`) {
 					return "", false
 				}
 				sb.WriteString(lit.Value)

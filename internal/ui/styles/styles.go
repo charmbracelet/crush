@@ -132,6 +132,10 @@ type Styles struct {
 		PromptNormalFocused lipgloss.Style
 		PromptNormalBlurred lipgloss.Style
 
+		// Build mode prompt label ("build").
+		PromptBuildIconFocused lipgloss.Style
+		PromptBuildIconBlurred lipgloss.Style
+
 		// YOLO mode prompt (" ! " icon + ":::" dots).
 		PromptYoloIconFocused lipgloss.Style
 		PromptYoloIconBlurred lipgloss.Style
@@ -143,6 +147,12 @@ type Styles struct {
 		PromptBangIconBlurred lipgloss.Style
 		PromptBangDotsFocused lipgloss.Style
 		PromptBangDotsBlurred lipgloss.Style
+
+		// Plan mode prompt (" plan " icon + ":::" dots).
+		PromptPlanIconFocused lipgloss.Style
+		PromptPlanIconBlurred lipgloss.Style
+		PromptPlanDotsFocused lipgloss.Style
+		PromptPlanDotsBlurred lipgloss.Style
 
 		// Question mode prompt (" ? " icon + ":::" dots).
 		PromptQuestionIconFocused lipgloss.Style

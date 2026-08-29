@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,13 @@ import (
 // pre-approved by a PreToolUse hook. The value is the tool call ID so an
 // approval can't be reused across calls that happen to share a context.
 type hookApprovalKey struct{}
+
+// ErrPlanModeBlocksWrite is returned by Request when plan mode is active.
+// Tools that mutate state are rejected outright during planning; the
+// message guides the model back to read-only investigation.
+var ErrPlanModeBlocksWrite = errors.New(
+	"tool blocked by plan mode: not a read-only tool. Pivot to read-only tools (view, glob, grep, ls, web_fetch, etc.) to gather information, then present your plan.",
+)
 
 // WithHookApproval returns a context that marks the given tool call ID as
 // pre-approved by a hook. When the permission service sees a matching
@@ -81,6 +89,12 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	// SetPlanMode toggles plan mode. While plan mode is active, Request
+	// rejects state-modifying tool invocations (anything not classified as
+	// read-only) with an explanatory error instead of prompting the user.
+	SetPlanMode(planMode bool)
+	// PlanMode reports whether plan mode is active.
+	PlanMode() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -102,6 +116,7 @@ type permissionService struct {
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
+	planMode              atomic.Bool
 	allowedTools          []string
 
 	// used to make sure we only process one request at a time
@@ -181,6 +196,16 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
 	if s.skip.Load() {
 		return true, nil
+	}
+
+	// Plan mode is a privilege reduction: state-modifying tools are
+	// rejected outright (with guidance instead of a prompt) so the model
+	// pivots to read-only investigation. Read-only tools never reach
+	// Request in the first place because their handlers skip it, so any
+	// request arriving while plan mode is active is by definition a
+	// write-class invocation.
+	if s.planMode.Load() {
+		return false, ErrPlanModeBlocksWrite
 	}
 
 	// Check if the tool/action combination is in the allowlist
@@ -293,6 +318,14 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
+}
+
+func (s *permissionService) SetPlanMode(planMode bool) {
+	s.planMode.Store(planMode)
+}
+
+func (s *permissionService) PlanMode() bool {
+	return s.planMode.Load()
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {

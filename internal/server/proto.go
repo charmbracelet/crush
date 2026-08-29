@@ -845,6 +845,35 @@ func (c *controllerV1) handlePostWorkspaceAgentUpdate(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentPlanMode toggles plan mode for the workspace's
+// coder agent.
+//
+//	@Summary		Set agent plan mode
+//	@Tags			agent
+//	@Accept			json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			request	body	proto.AgentPlanModeRequest	true	"Plan mode request"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/plan-mode [post]
+func (c *controllerV1) handlePostWorkspaceAgentPlanMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.AgentPlanModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode plan mode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SetPlanMode(id, req.PlanMode); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceAgentSession returns a specific agent session.
 //
 //	@Summary		Get agent session

@@ -75,6 +75,7 @@ type busyStateMsg struct {
 	ready     bool
 	agentBusy bool
 	yolo      bool
+	planMode  bool
 	// model is the coordinator's selected model, fetched by the same probe
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
@@ -124,6 +125,7 @@ func (m *UI) currentSessionID() string {
 func (m *UI) invalidateBusyCaches() {
 	m.agentBusyCache.invalidate()
 	m.yoloCache.invalidate()
+	m.planModeCache.invalidate()
 	m.busyFetchGen++
 }
 
@@ -152,6 +154,7 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 			st.ready = true
 			st.agentBusy = ws.AgentIsBusy()
 			st.model = ws.AgentModel()
+			st.planMode = ws.AgentPlanMode()
 		}
 		st.yolo = ws.PermissionSkipRequests()
 		return st
@@ -184,15 +187,17 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 	prevBusy := m.isAgentBusy()
 	prevYolo := m.yoloModeCached()
+	prevPlan := m.planModeCached()
 	m.agentBusyCache.set(msg.agentBusy)
 	m.yoloCache.set(msg.yolo)
+	m.planModeCache.set(msg.planMode)
 	m.agentReady = msg.ready
 	m.agentModel = msg.model
-	if prevYolo != msg.yolo {
-		// A remote/async toggle changed yolo mode: update the editor
-		// prompt function so the prompt icon/style tracks the new mode.
-		// The cache is written above and the placeholder is refreshed by
-		// the Update tail.
+	if prevYolo != msg.yolo || prevPlan != msg.planMode {
+		// A remote/async toggle changed yolo or plan mode: update the
+		// editor prompt function so the prompt icon/style tracks the new
+		// mode. The cache is written above and the placeholder is
+		// refreshed by the Update tail.
 		m.setEditorPrompt(msg.yolo)
 	}
 
@@ -322,4 +327,27 @@ func (m *UI) toggleYoloMode() bool {
 // otherwise.
 func (m *UI) yoloModeCached() bool {
 	return m.yoloCache.val
+}
+
+// togglePlanMode flips plan mode on the agent and writes the new value
+// through the plan cache and editor prompt. Shared by the Shift+Tab
+// keybinding and the commands-dialog action so both stay write-through.
+// Returns the new mode.
+func (m *UI) togglePlanMode() bool {
+	planMode := !m.planModeCached()
+	if err := m.com.Workspace.AgentSetPlanMode(planMode); err != nil {
+		return m.planModeCached()
+	}
+	m.planModeCache.set(planMode)
+	// Supersede any in-flight busy probe (same generation bump rationale
+	// as toggleYoloMode).
+	m.busyFetchGen++
+	m.setEditorPrompt(m.yoloModeCached())
+	return planMode
+}
+
+// planModeCached reports the memoized plan-mode state. Toggles write through
+// the cache; the Update-tail backstop keeps it bounded-stale otherwise.
+func (m *UI) planModeCached() bool {
+	return m.planModeCache.val
 }

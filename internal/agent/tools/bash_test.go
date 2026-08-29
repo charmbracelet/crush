@@ -39,6 +39,12 @@ func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockBashPermissionService) SetPlanMode(planMode bool) {}
+
+func (m *mockBashPermissionService) PlanMode() bool {
+	return false
+}
+
 func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
@@ -107,6 +113,12 @@ func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
 func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *recordingPermissionService) SkipRequests() bool {
+	return false
+}
+
+func (m *recordingPermissionService) SetPlanMode(planMode bool) {}
+
+func (m *recordingPermissionService) PlanMode() bool {
 	return false
 }
 

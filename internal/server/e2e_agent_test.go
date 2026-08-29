@@ -221,6 +221,8 @@ func (c *scriptedCoordinator) Summarize(context.Context, string) error       { r
 func (c *scriptedCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (c *scriptedCoordinator) UpdateModels(context.Context) error            { return nil }
 func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string) {}
+func (c *scriptedCoordinator) SetPlanMode(bool)                              {}
+func (c *scriptedCoordinator) PlanMode() bool                                { return false }
 
 // agentE2EHarness extends the SSE harness with a scripted coordinator
 // wired into the workspace's embedded app.App, so POST /agent drives a

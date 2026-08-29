@@ -242,6 +242,21 @@ func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedMo
 	return w.app.GetDefaultSmallModel(providerID)
 }
 
+func (w *AppWorkspace) AgentSetPlanMode(planMode bool) error {
+	if w.app.AgentCoordinator == nil {
+		return errors.New("agent coordinator not initialized")
+	}
+	w.app.AgentCoordinator.SetPlanMode(planMode)
+	return nil
+}
+
+func (w *AppWorkspace) AgentPlanMode() bool {
+	if w.app.AgentCoordinator == nil {
+		return false
+	}
+	return w.app.AgentCoordinator.PlanMode()
+}
+
 // -- Permissions --
 
 func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {

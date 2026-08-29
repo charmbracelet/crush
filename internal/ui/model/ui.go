@@ -352,6 +352,7 @@ type UI struct {
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
 	agentBusyCache    ttlCache
 	yoloCache         ttlCache
+	planModeCache     ttlCache
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
 	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
@@ -489,6 +490,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	if com.Workspace.AgentIsReady() {
 		ui.agentReady = true
 		ui.agentModel = com.Workspace.AgentModel()
+		ui.planModeCache.set(com.Workspace.AgentPlanMode())
 	}
 	ui.setEditorPrompt(yolo)
 	ui.randomizePlaceholders()
@@ -1425,7 +1427,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if !m.bangMode && m.yoloModeCached() {
+		if !m.bangMode && m.planModeCached() {
+			m.textarea.Placeholder = "Plan mode: read-only investigation"
+		} else if !m.bangMode && m.yoloModeCached() {
 			m.textarea.Placeholder = "Yolo mode!"
 		}
 	}
@@ -1921,6 +1925,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
 		m.toggleYoloMode()
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionTogglePlanMode:
+		planMode := m.togglePlanMode()
+		status := "build"
+		if planMode {
+			status = "plan"
+		}
+		cmds = append(cmds, util.ReportInfo("Mode: "+status))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
@@ -2481,6 +2493,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				status = "enabled"
 			}
 			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
+			return true
+		case key.Matches(msg, m.keyMap.TogglePlan):
+			planMode := m.togglePlanMode()
+			status := "build"
+			if planMode {
+				status = "plan"
+			}
+			cmds = append(cmds, util.ReportInfo("Mode: "+status))
 			return true
 		}
 		return false
@@ -3855,6 +3875,10 @@ func (m *UI) setEditorPrompt(yolo bool) {
 		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
 		return
 	}
+	if m.planModeCached() {
+		m.textarea.SetPromptFunc(4, m.planPromptFunc)
+		return
+	}
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
@@ -3862,15 +3886,15 @@ func (m *UI) setEditorPrompt(yolo bool) {
 	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 }
 
-// normalPromptFunc returns the normal editor prompt style ("  > " on first
-// line, "::: " on subsequent lines).
+// normalPromptFunc returns the normal (build mode) editor prompt style with
+// a "build" mode label and the "::: " continuation dots.
 func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
-			return "  > "
+			return t.Editor.PromptBuildIconFocused.Render()
 		}
-		return "::: "
+		return t.Editor.PromptBuildIconBlurred.Render()
 	}
 	if info.Focused {
 		return t.Editor.PromptNormalFocused.Render()
@@ -3893,6 +3917,22 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.Editor.PromptYoloDotsFocused.Render()
 	}
 	return t.Editor.PromptYoloDotsBlurred.Render()
+}
+
+// planPromptFunc returns the plan mode editor prompt style with a "plan"
+// label and the "::: " continuation dots.
+func (m *UI) planPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptPlanIconFocused.Render()
+		}
+		return t.Editor.PromptPlanIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.Editor.PromptPlanDotsFocused.Render()
+	}
+	return t.Editor.PromptPlanDotsBlurred.Render()
 }
 
 // bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
@@ -4606,6 +4646,11 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 
 	form := dialog.NewQuestionForm(m.com.Styles, batch)
 	form.OnAnswer = func(responses []question.Answer) {
+		// Plan approval: when the user picks "execute", exit plan mode so
+		// the model can start implementing immediately after approval.
+		if agenttools.IsPlanApprovalBatch(batch) {
+			m.handlePlanApproval(responses)
+		}
 		m.com.Workspace.QuestionAnswer(responses)
 	}
 	form.OnCancel = func() {
@@ -4627,6 +4672,28 @@ func (m *UI) handleQuestionNotification(_ question.Notification) {
 		m.activeInline = nil
 		m.textarea.Focus()
 		m.updateLayoutAndSize()
+	}
+}
+
+// handlePlanApproval processes the user's decision on a presented plan.
+// Choosing "execute" exits plan mode (so the model can start implementing
+// right after approval); the other options keep plan mode active.
+func (m *UI) handlePlanApproval(responses []question.Answer) {
+	option := agenttools.PlanApprovalCancel
+	if len(responses) > 0 {
+		if len(responses[0].SelectedIDs) > 0 {
+			option = agenttools.PlanApprovalOption(responses[0].SelectedIDs[0])
+		} else if responses[0].FillInText != "" {
+			option = agenttools.PlanApprovalOption(strings.TrimSpace(strings.ToLower(responses[0].FillInText)))
+		}
+	}
+	if option == agenttools.PlanApprovalExecute && m.planModeCached() {
+		if err := m.com.Workspace.AgentSetPlanMode(false); err != nil {
+			return
+		}
+		m.planModeCache.set(false)
+		m.busyFetchGen++
+		m.setEditorPrompt(m.yoloModeCached())
 	}
 }
 

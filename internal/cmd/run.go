@@ -64,6 +64,7 @@ crush run --continue "Follow up on your last response"
 		var (
 			quiet, _      = cmd.Flags().GetBool("quiet")
 			verbose, _    = cmd.Flags().GetBool("verbose")
+			planMode, _   = cmd.Flags().GetBool("plan")
 			largeModel, _ = cmd.Flags().GetString("model")
 			smallModel, _ = cmd.Flags().GetString("small-model")
 			sessionID, _  = cmd.Flags().GetString("session")
@@ -125,7 +126,7 @@ crush run --continue "Follow up on your last response"
 				slog.SetDefault(slog.New(log.New(os.Stderr)))
 			}
 
-			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
+			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast, planMode)
 		}
 
 		ws, cleanup, err := setupLocalWorkspace(cmd)
@@ -154,6 +155,13 @@ crush run --continue "Follow up on your last response"
 			sessionID = sess.ID
 		}
 
+		if planMode {
+			if err := appWs.AgentSetPlanMode(true); err != nil {
+				return fmt.Errorf("failed to enter plan mode: %w", err)
+			}
+			defer appWs.AgentSetPlanMode(false)
+		}
+
 		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
 	},
 }
@@ -161,6 +169,7 @@ crush run --continue "Follow up on your last response"
 func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
 	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
+	runCmd.Flags().Bool("plan", false, "Run in plan mode: investigate read-only and present a plan instead of executing")
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
 	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
@@ -178,6 +187,7 @@ func runNonInteractive(
 	hideSpinner bool,
 	continueSessionID string,
 	useLast bool,
+	planMode bool,
 ) error {
 	slog.Info("Running in non-interactive mode")
 
@@ -261,6 +271,12 @@ func runNonInteractive(
 	// loop would exit on whichever RunComplete arrived first for
 	// the same session and drop the queued prompt's output.
 	runID := uuid.New().String()
+	if planMode {
+		if err := c.SetPlanMode(ctx, ws.ID, true); err != nil {
+			return fmt.Errorf("failed to enter plan mode: %w", err)
+		}
+		defer c.SetPlanMode(ctx, ws.ID, false)
+	}
 	if err := c.SendMessage(ctx, ws.ID, sess.ID, runID, prompt); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}

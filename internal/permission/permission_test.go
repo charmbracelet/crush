@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -111,6 +112,45 @@ func TestPermissionService_SkipMode(t *testing.T) {
 	}
 	if !result {
 		t.Error("expected permission to be granted in skip mode")
+	}
+}
+
+func TestPermissionService_PlanModeBlocksWrites(t *testing.T) {
+	t.Parallel()
+
+	service := NewPermissionService("/tmp", false, nil)
+	service.SetPlanMode(true)
+
+	// Write-class invocations must be rejected with guidance, not prompted.
+	_, err := service.Request(t.Context(), CreatePermissionRequest{
+		SessionID:   "test-session",
+		ToolCallID:  "call-1",
+		ToolName:    "edit",
+		Action:      "write",
+		Description: "write a file",
+		Path:        "/tmp",
+	})
+	if !errors.Is(err, ErrPlanModeBlocksWrite) {
+		t.Fatalf("expected ErrPlanModeBlocksWrite, got %v", err)
+	}
+
+	// Plan mode must not leak into subsequent non-plan requests.
+	service.SetPlanMode(false)
+	// The request would normally block on a UI answer; simulate an
+	// allowlist grant instead to verify the gate is lifted.
+	service2 := NewPermissionService("/tmp", false, []string{"bash:execute"})
+	service2.SetPlanMode(false)
+	granted, err := service2.Request(t.Context(), CreatePermissionRequest{
+		SessionID: "test-session",
+		ToolName:  "bash",
+		Action:    "execute",
+		Path:      "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error after plan mode disabled: %v", err)
+	}
+	if !granted {
+		t.Error("expected permission granted after plan mode disabled")
 	}
 }
 

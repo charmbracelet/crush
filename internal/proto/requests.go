@@ -107,6 +107,12 @@ type AgentInitRequest struct {
 	Interactive bool `json:"interactive"`
 }
 
+// AgentPlanModeRequest represents a request to toggle plan mode for the
+// coder agent.
+type AgentPlanModeRequest struct {
+	PlanMode bool `json:"plan_mode"`
+}
+
 // LSPStartRequest represents a request to start an LSP for a path.
 type LSPStartRequest struct {
 	Path string `json:"path"`

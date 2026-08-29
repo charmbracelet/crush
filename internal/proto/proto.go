@@ -120,6 +120,8 @@ type AgentInfo struct {
 	IsReady  bool                 `json:"is_ready"`
 	Model    catwalk.Model        `json:"model"`
 	ModelCfg config.SelectedModel `json:"model_cfg"`
+	// PlanMode reports whether plan mode is active for the coder agent.
+	PlanMode bool `json:"plan_mode,omitempty"`
 }
 
 // IsZero checks if the AgentInfo is zero-valued.

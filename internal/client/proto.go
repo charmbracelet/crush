@@ -483,6 +483,19 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 	return nil
 }
 
+// SetPlanMode toggles plan mode for the workspace's coder agent.
+func (c *Client) SetPlanMode(ctx context.Context, id string, planMode bool) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/plan-mode", id), nil, jsonBody(proto.AgentPlanModeRequest{PlanMode: planMode}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set plan mode: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set plan mode: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // SendMessage sends a message to the agent for a workspace.
 //
 // When runID is non-empty it is echoed back on the resulting

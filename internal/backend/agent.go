@@ -136,9 +136,23 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 			ModelCfg: m.ModelCfg,
 			IsBusy:   ws.AgentCoordinator.IsBusy(),
 			IsReady:  true,
+			PlanMode: ws.AgentCoordinator.PlanMode(),
 		}
 	}
 	return agentInfo, nil
+}
+
+// SetPlanMode toggles plan mode for the workspace's coder agent.
+func (b *Backend) SetPlanMode(workspaceID string, planMode bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if ws.AgentCoordinator == nil {
+		return ErrAgentNotInitialized
+	}
+	ws.AgentCoordinator.SetPlanMode(planMode)
+	return nil
 }
 
 // InitAgent initializes the coder agent for the workspace.

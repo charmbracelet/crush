@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -109,6 +110,12 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
+	// SetPlanMode toggles plan mode for the coder agent. While active, the
+	// tool palette is reduced to read-only tools plus present_plan, and the
+	// system prompt carries plan-mode guidance.
+	SetPlanMode(planMode bool)
+	// PlanMode reports whether plan mode is active.
+	PlanMode() bool
 }
 
 type coordinator struct {
@@ -126,6 +133,11 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	// planMode gates the read-only tool palette and plan-mode prompt
+	// injection. Atomic so the TUI can flip it while a turn is streaming;
+	// the next PrepareStep picks up the new palette.
+	planMode atomic.Bool
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -656,7 +668,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	initCtx := context.WithoutCancel(ctx)
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := c.buildSystemPrompt(initCtx, large.Model.Provider(), large.Model.Model())
 		if err != nil {
 			return err
 		}
@@ -733,6 +745,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// Question tool is interactive-only and not available to sub-agents.
 	if !isSubAgent && c.interactive {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
+		allTools = append(allTools, tools.NewPresentPlanTool(c.questions))
 	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
@@ -792,6 +805,21 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 
+	// Plan mode reduces the palette to read-only tools plus the plan
+	// lifecycle tool. Filtering here (instead of only in permission
+	// checks) means the model never even sees write tools during
+	// planning. present_plan is always added separately so the model can
+	// hand off its plan for approval.
+	if c.planMode.Load() {
+		var planTools []fantasy.AgentTool
+		for _, tool := range filteredTools {
+			if isPlanModeTool(tool.Info().Name) {
+				planTools = append(planTools, tool)
+			}
+		}
+		filteredTools = planTools
+	}
+
 	// Wrap tools with hook interception for the top-level agent only.
 	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
 	// without hook interception to avoid firing the user's hook N times
@@ -800,6 +828,38 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
 
 	return filteredTools, nil
+}
+
+// isPlanModeTool reports whether a tool is allowed while plan mode is
+// active: strictly read-only tools plus the plan submission tool.
+func isPlanModeTool(name string) bool {
+	switch name {
+	case tools.PresentPlanToolName:
+		return true
+	case tools.ViewToolName,
+		tools.GlobToolName,
+		tools.GrepToolName,
+		tools.LSToolName,
+		tools.FetchToolName,
+		tools.AgenticFetchToolName,
+		tools.SourcegraphToolName,
+		tools.TodosToolName,
+		tools.QuestionToolName,
+		tools.WebFetchToolName,
+		tools.WebSearchToolName,
+		tools.CrushInfoToolName,
+		tools.CrushLogsToolName,
+		tools.ReadMCPResourceToolName,
+		tools.ListMCPResourcesToolName,
+		tools.DiagnosticsToolName,
+		tools.ReferencesToolName,
+		tools.SymbolsToolName,
+		tools.DefinitionToolName,
+		tools.CallHierarchyToolName:
+		return true
+	default:
+		return false
+	}
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
@@ -1223,7 +1283,33 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return err
 	}
 	c.currentAgent.SetTools(tools)
+
+	// Refresh the system prompt so plan-mode guidance tracks the current
+	// mode (buildAgent only injects the reminder at construction time).
+	model := c.currentAgent.Model()
+	systemPrompt, err := c.buildSystemPrompt(ctx, model.Model.Provider(), model.ModelCfg.Model)
+	if err != nil {
+		return err
+	}
+	c.currentAgent.SetSystemPrompt(systemPrompt)
 	return nil
+}
+
+// buildSystemPrompt renders the coder system prompt, appending the
+// plan-mode reminder when plan mode is active.
+func (c *coordinator) buildSystemPrompt(ctx context.Context, provider, model string) (string, error) {
+	systemPrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	if err != nil {
+		return "", err
+	}
+	rendered, err := systemPrompt.Build(ctx, provider, model, c.cfg)
+	if err != nil {
+		return "", err
+	}
+	if c.planMode.Load() {
+		rendered += "\n\n" + PlanModeSystemReminder
+	}
+	return rendered, nil
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {
@@ -1255,6 +1341,30 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 		return
 	}
 	c.currentAgent.GenerateTitle(ctx, sessionID, prompt)
+}
+
+// SetPlanMode toggles plan mode and hot-swaps the coder agent's palette:
+// the tool list and system prompt are rebuilt under the new mode. The
+// running turn keeps the palette it captured at PrepareStep; the next
+// step (or turn) picks up the new mode.
+func (c *coordinator) SetPlanMode(planMode bool) {
+	if c.planMode.Swap(planMode) == planMode {
+		return
+	}
+	c.permissions.SetPlanMode(planMode)
+	if c.currentAgent == nil {
+		return
+	}
+	// Rebuild tools and system prompt under the new mode. UpdateModels
+	// rebuilds tools from the current planMode state.
+	if err := c.UpdateModels(context.Background()); err != nil {
+		slog.Error("Failed to rebuild agent for plan mode change", "plan_mode", planMode, "error", err)
+	}
+}
+
+// PlanMode reports whether plan mode is active.
+func (c *coordinator) PlanMode() bool {
+	return c.planMode.Load()
 }
 
 // refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.

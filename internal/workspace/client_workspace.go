@@ -336,6 +336,18 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.Selecte
 	return *model
 }
 
+func (w *ClientWorkspace) AgentSetPlanMode(planMode bool) error {
+	return w.client.SetPlanMode(context.Background(), w.workspaceID(), planMode)
+}
+
+func (w *ClientWorkspace) AgentPlanMode() bool {
+	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+	if err != nil {
+		return false
+	}
+	return info.PlanMode
+}
+
 // -- Permissions --
 
 func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {

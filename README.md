@@ -533,6 +533,39 @@ permissions deny bash sourcegraph
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).
 
+### Build and Plan Modes
+
+Crush has two agent modes: **build** and **plan**.
+
+**Build mode** is the default. The agent has full access to its toolset —
+reading, writing, running commands — and asks for permission before
+state-changing tool calls, just like usual.
+
+**Plan mode** is a privilege reduction for investigation-first workflows. It
+restricts the agent to strictly read-only tools (view, grep, glob, ls, fetch,
+sourcegraph, todos, question, LSP queries, MCP resource reads, etc.) plus the
+`present_plan` tool. Write-class tools (bash, edit, write, download, and
+friends) are hidden from the model entirely, and any write attempt that still
+reaches the permission layer is rejected outright instead of prompting.
+
+While in plan mode, the agent investigates your codebase read-only and, when
+ready, calls `present_plan` to hand you a markdown plan for approval. You can
+then:
+
+- **Execute** — approve the plan and exit plan mode so the agent starts
+  implementing right away
+- **Continue planning** — stay in plan mode and keep refining the plan
+- **Cancel** — dismiss the plan without executing
+
+Toggle plan mode in the TUI with <kbd>shift+tab</kbd> (or via the commands
+palette, <kbd>ctrl+p</kbd>). The editor prompt shows a `plan` label while plan
+mode is active and a `build` label otherwise. You can also run a single
+non-interactive planning session with:
+
+```bash
+crush run --plan "Investigate the codebase and propose a refactor plan"
+```
+
 ### You only live once
 
 You can also skip all permission prompts completely by running Crush with the

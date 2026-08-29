@@ -158,6 +158,11 @@ type Workspace interface {
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel
+	// AgentSetPlanMode toggles plan mode for the coder agent.
+	AgentSetPlanMode(planMode bool) error
+	// AgentPlanMode reports whether plan mode is active for the coder
+	// agent.
+	AgentPlanMode() bool
 
 	// Permissions
 	//

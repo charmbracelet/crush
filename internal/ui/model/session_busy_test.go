@@ -10,16 +10,16 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/asx8678/ultra/internal/agent/notify"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/lsp"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/pubsub"
+	"github.com/asx8678/ultra/internal/session"
+	"github.com/asx8678/ultra/internal/ui/attachments"
+	"github.com/asx8678/ultra/internal/ui/common"
+	"github.com/asx8678/ultra/internal/ui/dialog"
+	"github.com/asx8678/ultra/internal/workspace"
 )
 
 // countingWorkspace is a workspace.Workspace stub that counts every probe

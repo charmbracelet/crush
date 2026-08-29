@@ -17,7 +17,7 @@ import (
 func createTestLogFile(t *testing.T, entries []map[string]any) string {
 	t.Helper()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "crush.log")
+	logFile := filepath.Join(tempDir, "ultra.log")
 
 	file, err := os.Create(logFile)
 	require.NoError(t, err)
@@ -48,14 +48,14 @@ func makeLogEntry(level, msg, source string, line int, extra map[string]any) map
 	return entry
 }
 
-func TestNewCrushLogsTool(t *testing.T) {
+func TestNewUltraLogsTool(t *testing.T) {
 	t.Parallel()
-	tool := NewCrushLogsTool("/tmp/test.log")
+	tool := NewUltraLogsTool("/tmp/test.log")
 	require.NotNil(t, tool)
-	require.Equal(t, CrushLogsToolName, tool.Info().Name)
+	require.Equal(t, UltraLogsToolName, tool.Info().Name)
 }
 
-func TestCrushLogs_HappyPath(t *testing.T) {
+func TestUltraLogs_HappyPath(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("INFO", "Application started", "app.go", 42, map[string]any{"version": "1.0.0"}),
@@ -65,7 +65,7 @@ func TestCrushLogs_HappyPath(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 3})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 3)
@@ -83,7 +83,7 @@ func TestCrushLogs_HappyPath(t *testing.T) {
 	require.Contains(t, lines[2], "db.go:55")
 }
 
-func TestCrushLogs_DefaultLines(t *testing.T) {
+func TestUltraLogs_DefaultLines(t *testing.T) {
 	t.Parallel()
 	// Create 100 log entries.
 	var entries []map[string]any
@@ -94,7 +94,7 @@ func TestCrushLogs_DefaultLines(t *testing.T) {
 	logFile := createTestLogFile(t, entries)
 
 	// Call with Lines: 0 should default to 50.
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 0})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 0})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 50)
@@ -104,7 +104,7 @@ func TestCrushLogs_DefaultLines(t *testing.T) {
 	require.Contains(t, lines[49], "Entry 99")
 }
 
-func TestCrushLogs_MaxCap(t *testing.T) {
+func TestUltraLogs_MaxCap(t *testing.T) {
 	t.Parallel()
 	// Create 200 log entries.
 	var entries []map[string]any
@@ -115,33 +115,33 @@ func TestCrushLogs_MaxCap(t *testing.T) {
 	logFile := createTestLogFile(t, entries)
 
 	// Request 200 lines, but should only get 100 (max cap).
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 200})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 200})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 100)
 }
 
-func TestCrushLogs_MissingFile(t *testing.T) {
+func TestUltraLogs_MissingFile(t *testing.T) {
 	t.Parallel()
-	result := runCrushLogs("/nonexistent/path/crush.log", CrushLogsParams{Lines: 50})
+	result := runUltraLogs("/nonexistent/path/ultra.log", UltraLogsParams{Lines: 50})
 	require.Contains(t, result, "No log file found")
 }
 
-func TestCrushLogs_EmptyFile(t *testing.T) {
+func TestUltraLogs_EmptyFile(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "crush.log")
+	logFile := filepath.Join(tempDir, "ultra.log")
 	_, err := os.Create(logFile)
 	require.NoError(t, err)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 50})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 50})
 	require.Contains(t, result, "Log file is empty")
 }
 
-func TestCrushLogs_MalformedLines(t *testing.T) {
+func TestUltraLogs_MalformedLines(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "crush.log")
+	logFile := filepath.Join(tempDir, "ultra.log")
 
 	file, err := os.Create(logFile)
 	require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestCrushLogs_MalformedLines(t *testing.T) {
 
 	file.Close()
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 10})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 	// Only 2 valid lines should be returned.
@@ -168,7 +168,7 @@ func TestCrushLogs_MalformedLines(t *testing.T) {
 	require.Contains(t, lines[1], "Another valid entry")
 }
 
-func TestCrushLogs_ExtraFieldsSorted(t *testing.T) {
+func TestUltraLogs_ExtraFieldsSorted(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("INFO", "Test message", "app.go", 1, map[string]any{
@@ -180,7 +180,7 @@ func TestCrushLogs_ExtraFieldsSorted(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 1})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 1})
 
 	// Fields should be sorted alphabetically.
 	idxA := strings.Index(result, "a_field=first")
@@ -191,7 +191,7 @@ func TestCrushLogs_ExtraFieldsSorted(t *testing.T) {
 	require.True(t, idxM < idxZ, "m_field should come before z_field")
 }
 
-func TestCrushLogs_NonStringValues(t *testing.T) {
+func TestUltraLogs_NonStringValues(t *testing.T) {
 	t.Parallel()
 	entry := map[string]any{
 		"time":   time.Now().Format(time.RFC3339),
@@ -208,7 +208,7 @@ func TestCrushLogs_NonStringValues(t *testing.T) {
 
 	logFile := createTestLogFile(t, []map[string]any{entry})
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 1})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 1})
 
 	// Numbers should be bare (not quoted).
 	require.Contains(t, result, "count=42")
@@ -225,7 +225,7 @@ func TestCrushLogs_NonStringValues(t *testing.T) {
 	require.Contains(t, result, `arr="[`)
 }
 
-func TestCrushLogs_Redaction(t *testing.T) {
+func TestUltraLogs_Redaction(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("INFO", "API call", "api.go", 10, map[string]any{
@@ -245,7 +245,7 @@ func TestCrushLogs_Redaction(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 1})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 1})
 
 	// All sensitive fields should be redacted.
 	require.Contains(t, result, "authorization=[REDACTED]")
@@ -266,7 +266,7 @@ func TestCrushLogs_Redaction(t *testing.T) {
 	require.NotContains(t, result, "mytoken")
 }
 
-func TestCrushLogs_ReservedFields(t *testing.T) {
+func TestUltraLogs_ReservedFields(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		{
@@ -284,7 +284,7 @@ func TestCrushLogs_ReservedFields(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 1})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 1})
 
 	// Reserved fields (case-insensitive) should not appear in extra fields.
 	require.NotContains(t, result, "Time=")
@@ -298,10 +298,10 @@ func TestCrushLogs_ReservedFields(t *testing.T) {
 	require.Contains(t, result, `extra="should appear"`)
 }
 
-func TestCrushLogs_OversizedLines(t *testing.T) {
+func TestUltraLogs_OversizedLines(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "crush.log")
+	logFile := filepath.Join(tempDir, "ultra.log")
 
 	file, err := os.Create(logFile)
 	require.NoError(t, err)
@@ -330,7 +330,7 @@ func TestCrushLogs_OversizedLines(t *testing.T) {
 
 	file.Close()
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 10})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 
@@ -340,10 +340,10 @@ func TestCrushLogs_OversizedLines(t *testing.T) {
 	require.Contains(t, lines[1], "Second valid entry")
 }
 
-func TestCrushLogs_PartialTrailingLine(t *testing.T) {
+func TestUltraLogs_PartialTrailingLine(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "crush.log")
+	logFile := filepath.Join(tempDir, "ultra.log")
 
 	file, err := os.Create(logFile)
 	require.NoError(t, err)
@@ -359,7 +359,7 @@ func TestCrushLogs_PartialTrailingLine(t *testing.T) {
 	file.WriteString(`{"time": "2024-01-15T10:00:00Z", "level": "INFO", "msg": "Truncated`)
 	file.Close()
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 10})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 
@@ -370,7 +370,7 @@ func TestCrushLogs_PartialTrailingLine(t *testing.T) {
 	}
 }
 
-func TestCrushLogs_ValueQuoting(t *testing.T) {
+func TestUltraLogs_ValueQuoting(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("INFO", "Test", "app.go", 1, map[string]any{
@@ -386,7 +386,7 @@ func TestCrushLogs_ValueQuoting(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 1})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 1})
 
 	// Empty strings should be quoted.
 	require.Contains(t, result, `empty=""`)
@@ -410,7 +410,7 @@ func TestCrushLogs_ValueQuoting(t *testing.T) {
 	require.Contains(t, result, "normal=simplevalue")
 }
 
-func TestCrushLogs_ChronologicalOrder(t *testing.T) {
+func TestUltraLogs_ChronologicalOrder(t *testing.T) {
 	t.Parallel()
 	// Create entries with different timestamps.
 	baseTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
@@ -437,7 +437,7 @@ func TestCrushLogs_ChronologicalOrder(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 3})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 
@@ -448,7 +448,7 @@ func TestCrushLogs_ChronologicalOrder(t *testing.T) {
 	require.Contains(t, lines[2], "Third")
 }
 
-func TestCrushLogs_TimeOnlyFormat(t *testing.T) {
+func TestUltraLogs_TimeOnlyFormat(t *testing.T) {
 	t.Parallel()
 	entry := map[string]any{
 		"time":   "2024-01-15T15:04:05Z",
@@ -459,13 +459,13 @@ func TestCrushLogs_TimeOnlyFormat(t *testing.T) {
 
 	logFile := createTestLogFile(t, []map[string]any{entry})
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 1})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 1})
 
 	// Should show time-only format.
 	require.True(t, strings.HasPrefix(result, "15:04:05"), "Expected time-only format, got: %s", result)
 }
 
-func TestCrushLogs_LevelVariations(t *testing.T) {
+func TestUltraLogs_LevelVariations(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("DEBUG", "Debug message", "app.go", 1, nil),
@@ -477,7 +477,7 @@ func TestCrushLogs_LevelVariations(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 5})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 5})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 5)
@@ -490,7 +490,7 @@ func TestCrushLogs_LevelVariations(t *testing.T) {
 	require.Contains(t, lines[4], "ERROR")
 }
 
-func TestCrushLogs_SourceVariations(t *testing.T) {
+func TestUltraLogs_SourceVariations(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		// Source as object with file and line.
@@ -517,7 +517,7 @@ func TestCrushLogs_SourceVariations(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runCrushLogs(logFile, CrushLogsParams{Lines: 3})
+	result := runUltraLogs(logFile, UltraLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 3)

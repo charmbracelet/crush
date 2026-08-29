@@ -11,10 +11,10 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/asx8678/ultra/internal/session"
+	"github.com/asx8678/ultra/internal/ui/common"
+	"github.com/asx8678/ultra/internal/ui/list"
+	"github.com/asx8678/ultra/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 

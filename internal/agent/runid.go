@@ -13,7 +13,7 @@ type runIDContextKey struct{}
 
 // WithRunID returns ctx tagged with a per-request RunID. It is the
 // boundary helper for callers that need their SendMessage→Run
-// terminal event to be uniquely correlatable (e.g. `crush run`
+// terminal event to be uniquely correlatable (e.g. `ultra run`
 // against a session that may be busy). Empty runIDs are stored
 // as-is; downstream code treats an empty RunID as "caller did not
 // supply one" and falls back to SessionID-only correlation.

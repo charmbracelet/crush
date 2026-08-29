@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/env"
+	"github.com/asx8678/ultra/internal/oauth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -43,7 +43,7 @@ func TestMCPSession_CancelOnClose(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "crush-test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "ultra-test"}, nil)
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	require.NoError(t, err)
 
@@ -408,7 +408,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 // TestCreateSession_ResolutionFailureUpdatesState pins the user-visible
 // half of the regression fix: when any of command/args/env/headers/url
 // fails to resolve, createSession must publish StateError to the state
-// map so crush_info and the TUI's MCP status card can render a real
+// map so ultra_info and the TUI's MCP status card can render a real
 // error instead of the MCP silently sitting in "starting" or being
 // spawned with an empty credential.
 //

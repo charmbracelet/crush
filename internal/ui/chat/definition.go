@@ -3,9 +3,9 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/asx8678/ultra/internal/agent/tools"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/ui/styles"
 )
 
 // DefinitionToolMessageItem is a message item that represents a definition tool call.

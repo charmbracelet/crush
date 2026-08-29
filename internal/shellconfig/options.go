@@ -19,16 +19,11 @@ import (
 // "option reset <list-key>" wipes a list back to empty, dropping values set
 // earlier in the script or via source. Values added after the reset are kept.
 //
-// Some config fields are phrased negatively (disable_metrics). Those are
-// exposed positively — the user sets "metrics false" and it is stored as
-// "disable_metrics true".
-//
 // Examples:
 //
-//	option data-directory .crush
+//	option data-directory .ultra
 //	option context-path .cursorrules
 //	option reset skill-path
-//	option metrics false
 //	option debug true
 //	option auto-lsp false
 //
@@ -107,6 +102,17 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return nil
 	}
 
+	// Metrics was removed with external telemetry. Accept the legacy option
+	// as a validated no-op so existing configuration files still load.
+	if key == "metrics" {
+		if val != "" {
+			if _, err := parseBool(val); err != nil {
+				return usage(stderr, fmt.Sprintf("option: metrics expects true/false, got %q", val))
+			}
+		}
+		return nil
+	}
+
 	spec, ok := optionSpecs[key]
 	if !ok {
 		return usage(stderr, fmt.Sprintf("option: unknown key %q", key))
@@ -123,7 +129,6 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 
 	case optBool:
 		// If no value, default to true. Inverted keys store the negation,
-		// so a positive key like "metrics" maps onto "disable_metrics".
 		bv := true
 		if val != "" {
 			parsed, err := parseBool(val)
@@ -160,9 +165,8 @@ const (
 
 // optionSpec describes one user-facing option key: the JSON field it writes,
 // its value type, and (for booleans) whether the stored value is the inverse
-// of what the user typed. Several config fields are phrased negatively
-// (disable_metrics) but exposed positively (metrics), so "metrics false"
-// stores "disable_metrics true".
+// of what the user typed. Some fields are exposed positively while stored
+// as their negation.
 type optionSpec struct {
 	jsonKey  string
 	kind     optionKind
@@ -185,7 +189,6 @@ var optionSpecs = map[string]optionSpec{
 	"progress":  {jsonKey: "progress", kind: optBool},
 
 	// Boolean fields exposed positively but stored as their negation.
-	"metrics":              {jsonKey: "disable_metrics", kind: optBool, inverted: true},
 	"auto-summarize":       {jsonKey: "disable_auto_summarize", kind: optBool, inverted: true},
 	"provider-auto-update": {jsonKey: "disable_provider_auto_update", kind: optBool, inverted: true},
 	"default-providers":    {jsonKey: "disable_default_providers", kind: optBool, inverted: true},

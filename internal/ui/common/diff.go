@@ -1,8 +1,8 @@
 package common
 
 import (
-	"github.com/charmbracelet/crush/internal/ui/diffview"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/asx8678/ultra/internal/ui/diffview"
+	"github.com/asx8678/ultra/internal/ui/styles"
 )
 
 // DiffFormatter returns a diff formatter with the given styles that can be

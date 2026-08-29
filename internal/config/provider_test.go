@@ -79,8 +79,8 @@ func TestProviders_Integration_WithMockClients(t *testing.T) {
 		},
 	}
 
-	catwalkPath := tmpDir + "/crush/providers.json"
-	hyperPath := tmpDir + "/crush/hyper.json"
+	catwalkPath := tmpDir + "/ultra/providers.json"
+	hyperPath := tmpDir + "/ultra/hyper.json"
 
 	testCatwalkSyncer.Init(mockCatwalkClient, catwalkPath, true)
 	testHyperSyncer.Init(mockHyperClient, hyperPath, true)
@@ -104,10 +104,10 @@ func TestProviders_Integration_WithCachedData(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", tmpDir)
 
 	// Create cache files.
-	catwalkPath := tmpDir + "/crush/providers.json"
-	hyperPath := tmpDir + "/crush/hyper.json"
+	catwalkPath := tmpDir + "/ultra/providers.json"
+	hyperPath := tmpDir + "/ultra/hyper.json"
 
-	require.NoError(t, os.MkdirAll(tmpDir+"/crush", 0o755))
+	require.NoError(t, os.MkdirAll(tmpDir+"/ultra", 0o755))
 
 	// Write Catwalk cache.
 	catwalkProviders := []catwalk.Provider{
@@ -174,8 +174,8 @@ func TestProviders_Integration_CatwalkFailsHyperSucceeds(t *testing.T) {
 		},
 	}
 
-	catwalkPath := tmpDir + "/crush/providers.json"
-	hyperPath := tmpDir + "/crush/hyper.json"
+	catwalkPath := tmpDir + "/ultra/providers.json"
+	hyperPath := tmpDir + "/ultra/hyper.json"
 
 	testCatwalkSyncer.Init(mockCatwalkClient, catwalkPath, true)
 	testHyperSyncer.Init(mockHyperClient, hyperPath, true)
@@ -204,8 +204,8 @@ func TestProviders_Integration_BothFail(t *testing.T) {
 		provider: catwalk.Provider{}, // Empty provider.
 	}
 
-	catwalkPath := tmpDir + "/crush/providers.json"
-	hyperPath := tmpDir + "/crush/hyper.json"
+	catwalkPath := tmpDir + "/ultra/providers.json"
+	hyperPath := tmpDir + "/ultra/hyper.json"
 
 	testCatwalkSyncer.Init(mockCatwalkClient, catwalkPath, true)
 	testHyperSyncer.Init(mockHyperClient, hyperPath, true)
@@ -281,7 +281,7 @@ func TestCachePathFor(t *testing.T) {
 		{
 			name:        "with XDG_DATA_HOME",
 			xdgDataHome: "/custom/data",
-			expected:    "/custom/data/crush/providers.json",
+			expected:    "/custom/data/ultra/providers.json",
 		},
 		{
 			name:        "without XDG_DATA_HOME",
@@ -302,7 +302,7 @@ func TestCachePathFor(t *testing.T) {
 			if tt.expected != "" {
 				require.Equal(t, tt.expected, filepath.ToSlash(result))
 			} else {
-				require.Contains(t, result, "crush")
+				require.Contains(t, result, "ultra")
 				require.Contains(t, result, "providers.json")
 			}
 		})
@@ -400,7 +400,7 @@ func TestProviders_HonorsDisableDefaultProviders(t *testing.T) {
 }
 
 // TestCacheStore_ReplacesFileInsteadOfRewritingIt guards the property that
-// several Crush instances depend on: the provider cache is swapped into place
+// several Ultra instances depend on: the provider cache is swapped into place
 // as a finished file, never truncated and refilled underneath a reader that is
 // already reading it. A reader that loses that race cannot parse the catalog
 // and silently falls back to the bundled copy.

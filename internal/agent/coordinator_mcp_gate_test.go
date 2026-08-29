@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/asx8678/ultra/internal/agent/prompt"
+	"github.com/asx8678/ultra/internal/agent/tools/mcp"
+	"github.com/asx8678/ultra/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +22,7 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 
 	env := testEnv(t)
 
-	crushJSON := `{
+	ultraJSON := `{
   "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
   "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
     "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
@@ -30,7 +30,7 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
   "models": {"large": {"provider": "mock", "model": "mock-model"},
              "small": {"provider": "mock", "model": "mock-model"}}
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "crush.json"), []byte(crushJSON), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "ultra.json"), []byte(ultraJSON), 0o644))
 
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 // message of a session. Tools from late servers simply miss that run's palette
 // and show up on the next one.
 //
-// Non-interactive runs (`crush run`, both local and client/server) get a single
+// Non-interactive runs (`ultra run`, both local and client/server) get a single
 // shot at the palette, so they still wait for initialization to settle.
 func TestRunWaitsForMCPOnlyWhenNonInteractive(t *testing.T) {
 	t.Run("non-interactive waits", func(t *testing.T) {

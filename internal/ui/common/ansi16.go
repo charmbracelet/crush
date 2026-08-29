@@ -10,7 +10,7 @@ import (
 
 // RemapANSI16 replaces basic ANSI 16-color SGR codes with 24-bit
 // truecolor from palette. Programs emit \x1b[31m etc. and trust the
-// terminal to pick the color; inside Crush's TUI those defaults are
+// terminal to pick the color; inside Ultra's TUI those defaults are
 // often illegible on our dark background. Rewriting them to explicit
 // RGB keeps output readable regardless of terminal configuration.
 //
@@ -114,7 +114,7 @@ func remapSGR(params ansi.Params, palette [16]color.Color, buf *strings.Builder)
 // erase regions of the screen, or change terminal modes. These sequences
 // are emitted by programs like git push, cargo build, and npm install to
 // animate progress bars and status lines. When captured as raw text and
-// replayed inside Crush's TUI viewport they corrupt the render state.
+// replayed inside Ultra's TUI viewport they corrupt the render state.
 //
 // Preserved: SGR (color/style) sequences, OSC hyperlinks, printable text.
 // Stripped: CSI cursor movement (A-H, f), erase (J, K), scroll (S, T),

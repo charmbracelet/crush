@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const osc99QueryID = "crush-osc99-query"
+const osc99QueryID = "ultra-osc99-query"
 
 // DetectOSC99Support parses an OSC response sequence and returns true if it
 // indicates OSC 99 notification support. This function should be called from
@@ -108,10 +108,10 @@ func (b *OSCBackend) sendOSC99(n Notification) tea.Cmd {
 
 	var sb strings.Builder
 	b.notifySeq++
-	id := fmt.Sprintf("crush-%d", b.notifySeq)
+	id := fmt.Sprintf("ultra-%d", b.notifySeq)
 
-	appName := "Crush"
-	notificationType := "crush-notification"
+	appName := "Ultra"
+	notificationType := "ultra-notification"
 
 	sb.WriteString(ansi.DesktopNotification(n.Title, "i="+id, "d=0", "p=title", "a="+appName, "t="+notificationType))
 	if n.Message != "" {

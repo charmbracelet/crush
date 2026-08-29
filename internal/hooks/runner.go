@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/shell"
 )
 
 // abandonGrace is how long runOne waits after ctx cancellation for the
@@ -155,7 +155,7 @@ func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
 
 // runOne executes a single hook command and returns its result.
 //
-// Execution goes through Crush's embedded POSIX shell (shell.Run) so the
+// Execution goes through Ultra's embedded POSIX shell (shell.Run) so the
 // same interpreter, builtins, and coreutils are visible to hooks as to
 // the bash tool. BlockFuncs are intentionally omitted: hooks are
 // user-authored config that carry the same trust as a shell alias.

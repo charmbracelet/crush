@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/asx8678/ultra/internal/app"
+	"github.com/asx8678/ultra/internal/db"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/proto"
+	"github.com/asx8678/ultra/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )

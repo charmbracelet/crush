@@ -5,11 +5,13 @@ import (
 	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 // BuiltinPrefix is the path prefix for builtin skill files. It is used by
 // the View tool to distinguish embedded files from disk files.
-const BuiltinPrefix = "crush://skills/"
+const BuiltinPrefix = "ultra://skills/"
 
 //go:embed builtin/*
 var builtinFS embed.FS
@@ -54,9 +56,9 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 			return nil
 		}
 
-		// Set paths using the crush prefix. Strip the leading "builtin/"
+		// Set paths using the ultra prefix. Strip the leading "builtin/"
 		// so the path is relative to the embedded root
-		// (e.g., "crush://skills/crush-config/SKILL.md").
+		// (e.g., "ultra://skills/ultra-config/SKILL.md").
 		relPath, _ := filepath.Rel("builtin", path)
 		relPath = filepath.ToSlash(relPath)
 		skill.SkillFilePath = BuiltinPrefix + relPath
@@ -75,5 +77,18 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 		return nil
 	})
 
+	// Keep Ultra-specific guidance ahead of generic builtins. This preserves
+	// stable prompt ordering when branded skill directories are renamed.
+	slices.SortStableFunc(discovered, func(a, b *Skill) int {
+		aUltra := strings.HasPrefix(a.Name, "ultra-")
+		bUltra := strings.HasPrefix(b.Name, "ultra-")
+		if aUltra != bUltra {
+			if aUltra {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
 	return discovered, states
 }

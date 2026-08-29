@@ -11,18 +11,18 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/skills"
+	mcptools "github.com/asx8678/ultra/internal/agent/tools/mcp"
+	"github.com/asx8678/ultra/internal/commands"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/history"
+	"github.com/asx8678/ultra/internal/lsp"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/oauth"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/proto"
+	"github.com/asx8678/ultra/internal/question"
+	"github.com/asx8678/ultra/internal/session"
+	"github.com/asx8678/ultra/internal/skills"
 )
 
 // Reasons the coder agent may be unavailable, returned by
@@ -35,7 +35,7 @@ var (
 	// ErrServerUnreachable means the client could not reach the server
 	// to determine the agent's status (server down, or the workspace was
 	// torn down out from under the client).
-	ErrServerUnreachable = errors.New("lost connection to the crush server")
+	ErrServerUnreachable = errors.New("lost connection to the ultra server")
 	// ErrWorkspaceGone means the server is reachable but no longer knows
 	// this client's workspace: it was torn down, or the server was
 	// replaced underneath the client. The subscription loop re-registers

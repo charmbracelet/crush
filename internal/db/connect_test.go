@@ -3,12 +3,24 @@ package db
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/lock"
+	"github.com/asx8678/ultra/internal/lock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDatabasePathLegacyFallback(t *testing.T) {
+	dataDir := t.TempDir()
+	legacyPath := filepath.Join(dataDir, "crush.db")
+	require.NoError(t, os.WriteFile(legacyPath, nil, 0o600))
+	require.Equal(t, legacyPath, databasePath(dataDir))
+
+	ultraPath := filepath.Join(dataDir, "ultra.db")
+	require.NoError(t, os.WriteFile(ultraPath, nil, 0o600))
+	require.Equal(t, ultraPath, databasePath(dataDir))
+}
 
 func TestConnect_SharesConnectionForSameDataDir(t *testing.T) {
 	t.Cleanup(ResetPool)
@@ -56,7 +68,7 @@ func TestRelease_NoopForUnknownDataDir(t *testing.T) {
 	require.NoError(t, Release("/nonexistent/path"), "releasing unknown data dir should not error")
 }
 
-// TestConnect_FailsWhenDataDirLocked simulates a second crush process by
+// TestConnect_FailsWhenDataDirLocked simulates a second ultra process by
 // taking the data-dir lock directly via the OS primitive on a separate
 // file descriptor and then asserting that Connect surfaces a clean
 // ErrDataDirLocked instead of opening the database under contention.
@@ -162,7 +174,7 @@ func TestConnect_SkipLockEnvBypassesAcquisition(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(release)
 
-	t.Setenv("CRUSH_SKIP_DATADIR_LOCK", "1")
+	t.Setenv("ULTRA_SKIP_DATADIR_LOCK", "1")
 
 	conn, err := Connect(context.Background(), dataDir, WithDataDirLock(true))
 	require.NoError(t, err, "skip-lock env should bypass contention")

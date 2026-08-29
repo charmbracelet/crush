@@ -1,5 +1,5 @@
 // Package clientserverrace_test is a regression test for the
-// CRUSH_CLIENT_SERVER=1 socket-init race documented in
+// ULTRA_CLIENT_SERVER=1 socket-init race documented in
 // docs/notes/2026-05-11-client-server-socket-init-race.md (item F5).
 //
 // It lives in its own directory so it can build even if other test
@@ -27,7 +27,7 @@ import (
 // ensureServer when it gives up waiting for the server socket /
 // readiness probe (internal/cmd/root.go). Seeing this in any client's
 // output means the race fired.
-const readinessErrSubstr = "failed to initialize crush server"
+const readinessErrSubstr = "failed to initialize ultra server"
 
 // numClients is intentionally larger than the typical CPU count to
 // ensure the spawn lock + readiness probe are exercised under
@@ -55,18 +55,18 @@ func TestClientServerSpawnRace(t *testing.T) {
 	}
 
 	repoRoot := repoRootFromTest(t)
-	bin := buildCrushBinary(t, repoRoot)
+	bin := buildUltraBinary(t, repoRoot)
 
 	// Use /tmp directly so the unix socket path stays under the
 	// 104-char sockaddr_un limit on darwin. t.TempDir() can return a
 	// path inside /var/folders/... that is too long.
-	runDir, err := os.MkdirTemp("/tmp", "crush-race-")
+	runDir, err := os.MkdirTemp("/tmp", "ultra-race-")
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(runDir) })
 
-	socketPath := filepath.Join(runDir, "crush.sock")
+	socketPath := filepath.Join(runDir, "ultra.sock")
 	host := "unix://" + socketPath
 
 	// Fresh, isolated XDG/HOME so we don't touch the user's real
@@ -84,14 +84,14 @@ func TestClientServerSpawnRace(t *testing.T) {
 
 	env := append(
 		os.Environ(),
-		"CRUSH_CLIENT_SERVER=1",
+		"ULTRA_CLIENT_SERVER=1",
 		"XDG_CACHE_HOME="+cacheHome,
 		"XDG_DATA_HOME="+dataHome,
 		"XDG_CONFIG_HOME="+configHome,
 		"HOME="+homeDir,
 		// Belt-and-suspenders: if anything tries to talk to a real
 		// provider, fail loudly rather than make a network call.
-		"CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1",
+		"ULTRA_DISABLE_PROVIDER_AUTO_UPDATE=1",
 	)
 
 	// Make sure no server is up before we start.
@@ -164,7 +164,7 @@ func TestClientServerSpawnRace(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
 			defer cancel()
 
-			// `crush run` exercises connectToServer (which is where
+			// `ultra run` exercises connectToServer (which is where
 			// the readiness race lives). On a fresh sandbox the
 			// command may legitimately keep running past the race
 			// (e.g. waiting on event subscriptions); the context
@@ -244,7 +244,7 @@ func pingHealth(socketPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"http://crush.local/v1/health", nil)
+		"http://ultra.local/v1/health", nil)
 	if err != nil {
 		return err
 	}
@@ -281,19 +281,19 @@ func repoRootFromTest(t *testing.T) string {
 	}
 }
 
-// buildCrushBinary builds the crush binary once at the start of the
+// buildUltraBinary builds the ultra binary once at the start of the
 // test and returns the absolute path. Subsequent t.Cleanup removes
 // the built artefact.
-func buildCrushBinary(t *testing.T, repoRoot string) string {
+func buildUltraBinary(t *testing.T, repoRoot string) string {
 	t.Helper()
 
-	binDir, err := os.MkdirTemp("", "crush-race-bin-")
+	binDir, err := os.MkdirTemp("", "ultra-race-bin-")
 	if err != nil {
 		t.Fatalf("mkdtemp bin: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(binDir) })
 
-	binPath := filepath.Join(binDir, "crush")
+	binPath := filepath.Join(binDir, "ultra")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -306,12 +306,12 @@ func buildCrushBinary(t *testing.T, repoRoot string) string {
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("go build crush: %v\n%s", err, out)
+		t.Fatalf("go build ultra: %v\n%s", err, out)
 	}
 	return binPath
 }
 
-// shutdownServer best-effort terminates any crush server bound to
+// shutdownServer best-effort terminates any ultra server bound to
 // socketPath by POSTing to /v1/control. We don't import the project's
 // own client package to keep this test free of internal API churn.
 func shutdownServer(t *testing.T, socketPath string) {
@@ -334,7 +334,7 @@ func shutdownServer(t *testing.T, socketPath string) {
 
 	body := strings.NewReader(`{"command":"shutdown"}`)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"http://crush.local/v1/control", body)
+		"http://ultra.local/v1/control", body)
 	if err != nil {
 		t.Logf("shutdown: build request: %v", err)
 		return

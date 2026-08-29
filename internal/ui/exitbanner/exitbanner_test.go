@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/session"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
@@ -40,20 +40,20 @@ func TestRender(t *testing.T) {
 			name:   "compact with a session prints only the resume lines",
 			banner: config.ExitBannerCompact,
 			sess:   testSession(),
-			want:   []string{"Session", "Fix the flaky test", "Continue", "crush -s "},
+			want:   []string{"Session", "Fix the flaky test", "Continue", "ultra -s "},
 			// No logo, and no padding around the two lines.
-			notWant: []string{"Thanks for using Crush!"},
+			notWant: []string{"Thanks for using Ultra!"},
 		},
 		{
 			name:   "default with a session prints the logo and the resume lines",
 			banner: config.ExitBannerDefault,
 			sess:   testSession(),
-			want:   []string{"Thanks for using Crush!", "Session", "Fix the flaky test", "Continue"},
+			want:   []string{"Thanks for using Ultra!", "Session", "Fix the flaky test", "Continue"},
 		},
 		{
 			name:   "default without a session still prints the logo",
 			banner: config.ExitBannerDefault,
-			want:   []string{"Thanks for using Crush!"},
+			want:   []string{"Thanks for using Ultra!"},
 			// The separator between logo and resume lines must not be left
 			// dangling when there is no session.
 			notWant: []string{"Continue"},
@@ -62,12 +62,12 @@ func TestRender(t *testing.T) {
 			name:   "unrecognized values fall back to the full banner",
 			banner: config.ExitBanner("wat"),
 			sess:   testSession(),
-			want:   []string{"Thanks for using Crush!", "Continue"},
+			want:   []string{"Thanks for using Ultra!", "Continue"},
 		},
 		{
 			name: "zero value falls back to the full banner",
 			sess: testSession(),
-			want: []string{"Thanks for using Crush!", "Continue"},
+			want: []string{"Thanks for using Ultra!", "Continue"},
 		},
 	}
 

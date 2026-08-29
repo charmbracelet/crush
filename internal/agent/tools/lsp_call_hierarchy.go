@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/asx8678/ultra/internal/lsp"
 )
 
 type CallHierarchyParams struct {

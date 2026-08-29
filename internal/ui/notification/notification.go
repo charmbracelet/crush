@@ -1,7 +1,6 @@
-// Package notification provides desktop notification support for the UI.
+// Package notification provides terminal notification support for the UI.
 //
 // This package supports multiple notification backends:
-//   - NativeBackend: Uses the native OS notification system (macOS, Windows, Linux)
 //   - OSCBackend: Uses OSC escape sequences with automatic protocol detection.
 //     Prefers OSC 99 (modern standard with rich notifications) if supported,
 //     falling back to OSC 777 (urxvt extension, widely supported). Used for SSH sessions.
@@ -11,9 +10,9 @@
 //     notifications are disabled or no suitable backend is available.
 //
 // Backend selection is based on terminal capabilities, environment, and user config:
-//   - Users can explicitly set notifications in crush.json (auto/native/osc/bell/disabled)
+//   - Users can select auto/native/osc/bell/disabled; legacy native settings fall back to OSC.
 //   - Auto mode: SSH sessions use OSC backend (auto-detects OSC 99 vs 777)
-//   - Auto mode: Local sessions use native OS notifications
+//   - Auto mode uses terminal-native OSC notifications when available.
 //   - If focus events are not supported in local sessions, notifications are disabled (NoopBackend)
 package notification
 

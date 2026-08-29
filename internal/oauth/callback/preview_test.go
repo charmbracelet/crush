@@ -7,12 +7,12 @@ import (
 )
 
 // TestWritePreview is a developer aid, not an assertion: set
-// CRUSH_CALLBACK_PREVIEW to a directory and it writes each page state
+// ULTRA_CALLBACK_PREVIEW to a directory and it writes each page state
 // there so the result can be opened in a browser and eyeballed.
 func TestWritePreview(t *testing.T) {
-	dir := os.Getenv("CRUSH_CALLBACK_PREVIEW")
+	dir := os.Getenv("ULTRA_CALLBACK_PREVIEW")
 	if dir == "" {
-		t.Skip("set CRUSH_CALLBACK_PREVIEW=<dir> to render preview pages")
+		t.Skip("set ULTRA_CALLBACK_PREVIEW=<dir> to render preview pages")
 	}
 	cases := map[string]Result{
 		"ok":     {Subject: "linear"},

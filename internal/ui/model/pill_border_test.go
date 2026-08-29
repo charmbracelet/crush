@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/asx8678/ultra/internal/session"
 )
 
 // roundedBorderRunes are chars that only appear when a pill has a visible

@@ -12,11 +12,11 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/filepathext"
+	"github.com/asx8678/ultra/internal/home"
+	"github.com/asx8678/ultra/internal/shell"
+	"github.com/asx8678/ultra/internal/skills"
 )
 
 // Prompt represents a template-based prompt generator.

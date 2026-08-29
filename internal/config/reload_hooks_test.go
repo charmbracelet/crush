@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/hooks"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,7 +29,7 @@ func TestReloadFromDisk_CompilesHookMatchers(t *testing.T) {
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
-	configPath := filepath.Join(workDir, "crush.json")
+	configPath := filepath.Join(workDir, "ultra.json")
 	cfgJSON := `{
         "hooks": {
             "PreToolUse": [
@@ -82,7 +82,7 @@ func TestSetConfigField_AutoReload_PreservesHookMatcherFiltering(t *testing.T) {
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
-	configPath := filepath.Join(workDir, "crush.json")
+	configPath := filepath.Join(workDir, "ultra.json")
 	cfgJSON := `{
         "hooks": {
             "PreToolUse": [

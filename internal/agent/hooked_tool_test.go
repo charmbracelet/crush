@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/hooks"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/hooks"
+	"github.com/asx8678/ultra/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 

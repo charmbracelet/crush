@@ -1,4 +1,4 @@
-Get Crush's current runtime state: active model, provider, LSP/MCP status, skills, hooks, permissions, and disabled tools. No parameters needed.
+Get Ultra's current runtime state: active model, provider, LSP/MCP status, skills, hooks, permissions, and disabled tools. No parameters needed.
 
 <usage>
 - Shows active model and provider, LSP/MCP server status, skills,
@@ -15,5 +15,5 @@ Get Crush's current runtime state: active model, provider, LSP/MCP status, skill
   loaded this session
 - Check [hooks] to see which hook events are configured and whether the
   hook runner is active
-- Pair with the crush-config skill to fix configuration issues
+- Pair with the ultra-config skill to fix configuration issues
 </tips>

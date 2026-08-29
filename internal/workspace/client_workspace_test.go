@@ -13,14 +13,13 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/asx8678/ultra/internal/client"
+	"github.com/asx8678/ultra/internal/commands"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/proto"
+	"github.com/asx8678/ultra/internal/pubsub"
+	"github.com/asx8678/ultra/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -217,31 +216,6 @@ func TestNewClientWorkspace_SeedsSkillsCache(t *testing.T) {
 	got := skills.GetLatestStates()
 	require.Len(t, got, 1)
 	require.Equal(t, "seeded", got[0].Name)
-}
-
-// TestTranslateEvent_UpdateAvailable verifies that an incoming
-// proto.UpdateAvailable event is converted back into the
-// app.UpdateAvailableMsg that the TUI expects, so client/server mode
-// shows the same update notification as local mode.
-func TestTranslateEvent_UpdateAvailable(t *testing.T) {
-	t.Parallel()
-
-	w := NewClientWorkspace(nil, proto.Workspace{})
-	ev := pubsub.Event[proto.UpdateAvailable]{
-		Type: pubsub.UpdatedEvent,
-		Payload: proto.UpdateAvailable{
-			CurrentVersion: "1.0.0",
-			LatestVersion:  "1.1.0",
-			IsDevelopment:  true,
-		},
-	}
-
-	out := w.translateEvent(ev)
-	got, ok := out.(app.UpdateAvailableMsg)
-	require.True(t, ok, "expected app.UpdateAvailableMsg, got %T", out)
-	require.Equal(t, "1.0.0", got.CurrentVersion)
-	require.Equal(t, "1.1.0", got.LatestVersion)
-	require.True(t, got.IsDevelopment)
 }
 
 func TestClientWorkspaceListMCPPrompts(t *testing.T) {
@@ -803,7 +777,7 @@ func TestClientWorkspace_ShutdownFallsBackForLegacyServer(t *testing.T) {
 
 // TestClientWorkspace_AgentReadyErr_WorkspaceGone checks the status the
 // UI is given while recovery runs. A 404 from a live server used to print
-// "lost connection to the crush server: ... status code 404", which is
+// "lost connection to the ultra server: ... status code 404", which is
 // both wrong and unactionable.
 func TestClientWorkspace_AgentReadyErr_WorkspaceGone(t *testing.T) {
 	t.Parallel()

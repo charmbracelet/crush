@@ -10,7 +10,7 @@ import (
 
 func loadScript(t *testing.T, script string) map[string]any {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "crushrc")
+	path := filepath.Join(t.TempDir(), "ultrarc")
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
 	var result map[string]any
@@ -66,7 +66,7 @@ model add anthropic/claude-x --price-input 3 --price-output 15 --price-cache-cre
 func TestModelAddRejectsLegacyPricingFlags(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "crushrc")
+	path := filepath.Join(t.TempDir(), "ultrarc")
 	_, err := LoadShellConfig(t.Context(), path, []byte(`provider add openai --api-key k
 model add openai/gpt-x --cost-per-1m-in 1`))
 	require.Error(t, err)
@@ -76,7 +76,7 @@ model add openai/gpt-x --cost-per-1m-in 1`))
 func TestModelSelectRejectsInvalidTopP(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "crushrc")
+	path := filepath.Join(t.TempDir(), "ultrarc")
 	_, err := LoadShellConfig(t.Context(), path, []byte(`model large openai/gpt-x --top-p 1.5`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "between 0 and 1")
@@ -85,7 +85,7 @@ func TestModelSelectRejectsInvalidTopP(t *testing.T) {
 func TestModelSelectRejectsNonObjectProviderOptions(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "crushrc")
+	path := filepath.Join(t.TempDir(), "ultrarc")
 	_, err := LoadShellConfig(t.Context(), path, []byte(`model large openai/gpt-x --provider-options '[]'`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "expects a JSON object")
@@ -94,7 +94,7 @@ func TestModelSelectRejectsNonObjectProviderOptions(t *testing.T) {
 func TestModelAddUnknownProvider(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "crushrc")
+	path := filepath.Join(t.TempDir(), "ultrarc")
 	_, err := LoadShellConfig(t.Context(), path, []byte(`model add openai/gpt-5.6-sol --name "x"`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not exist")
@@ -103,7 +103,7 @@ func TestModelAddUnknownProvider(t *testing.T) {
 func TestModelAddNoSlash(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "crushrc")
+	path := filepath.Join(t.TempDir(), "ultrarc")
 	_, err := LoadShellConfig(t.Context(), path, []byte(`provider add openai --api-key k
 model add gpt-5.6-sol --name "x"`))
 	require.Error(t, err)

@@ -74,7 +74,7 @@ func TestDefaultHost_XDGRuntimeDir(t *testing.T) {
 	// to /tmp; only assert containment when it did not. Recompose the
 	// path under dir (rather than checking the returned path length,
 	// which is short again after a /tmp fallback) to decide whether a
-	// fallback happened. The socket is named crush-<uid>.sock.
+	// fallback happened. The socket is named ultra-<uid>.sock.
 	composed := filepath.Join(dir, filepath.Base(path))
 	if len(composed) <= maxUnixSocketPathLen {
 		require.True(t, strings.HasPrefix(path, dir),
@@ -82,8 +82,8 @@ func TestDefaultHost_XDGRuntimeDir(t *testing.T) {
 	}
 	require.True(t, strings.HasSuffix(path, ".sock"),
 		"socket path %q should end in .sock", path)
-	require.Contains(t, filepath.Base(path), "crush",
-		"socket filename should contain 'crush'")
+	require.Contains(t, filepath.Base(path), "ultra",
+		"socket filename should contain 'ultra'")
 }
 
 func TestDefaultHost_FallbackTemp(t *testing.T) {
@@ -97,8 +97,8 @@ func TestDefaultHost_FallbackTemp(t *testing.T) {
 	require.NotEmpty(t, path, "fallback socket path must be non-empty")
 	require.True(t, strings.HasSuffix(path, ".sock"),
 		"socket path %q should end in .sock", path)
-	require.Contains(t, filepath.Base(path), "crush",
-		"socket filename should contain 'crush'")
+	require.Contains(t, filepath.Base(path), "ultra",
+		"socket filename should contain 'ultra'")
 }
 
 // staleSocketPath creates a deterministic stale unix socket file on

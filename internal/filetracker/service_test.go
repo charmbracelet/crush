@@ -6,7 +6,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/db"
+	"github.com/asx8678/ultra/internal/db"
 	"github.com/stretchr/testify/require"
 )
 

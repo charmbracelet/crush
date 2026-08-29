@@ -5,25 +5,25 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/asx8678/ultra/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
-// loadCrushSh writes a crush.sh into an isolated project and loads it through
+// loadUltraSh writes a ultra.sh into an isolated project and loads it through
 // the real config pipeline (discovery -> shell execution -> merge -> typed
 // Config). Asserting on the resulting *config.Config is a black-box test of
 // what a shell config command actually produces, and it stays valid across
 // internal changes to how config is assembled.
-func loadCrushSh(t *testing.T, script string) *config.ConfigStore {
+func loadUltraSh(t *testing.T, script string) *config.ConfigStore {
 	t.Helper()
-	store, err := loadCrushShErr(t, script)
+	store, err := loadUltraShErr(t, script)
 	require.NoError(t, err)
 	return store
 }
 
-// loadCrushShErr is loadCrushSh without asserting success, for cases that are
+// loadUltraShErr is loadUltraSh without asserting success, for cases that are
 // expected to fail at load time.
-func loadCrushShErr(t *testing.T, script string) (*config.ConfigStore, error) {
+func loadUltraShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	t.Helper()
 	// Isolate from the developer's real global config so only the script
 	// under test contributes. No t.Parallel(): these tests set env vars.
@@ -31,25 +31,25 @@ func loadCrushShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	t.Setenv("HOME", isolated)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
-	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
-	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "crush"))
+	t.Setenv("ULTRA_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "ultra"))
+	t.Setenv("ULTRA_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "ultra"))
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crushrc"), []byte(script), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "ultrarc"), []byte(script), 0o644))
 
 	return config.Load(workDir, dataDir, false)
 }
 
 func TestShellConfigPermissionsAllow(t *testing.T) {
-	store := loadCrushSh(t, `permissions allow bash view`)
+	store := loadUltraSh(t, `permissions allow bash view`)
 
 	require.NotNil(t, store.Config().Permissions)
 	require.ElementsMatch(t, []string{"bash", "view"}, store.Config().Permissions.AllowedTools)
 }
 
 func TestShellConfigPermissionsAccumulateAndDedup(t *testing.T) {
-	store := loadCrushSh(t, `permissions allow bash
+	store := loadUltraSh(t, `permissions allow bash
 permissions allow view
 permissions allow bash`)
 
@@ -57,20 +57,20 @@ permissions allow bash`)
 }
 
 func TestShellConfigPermissionsLegacyFlagFails(t *testing.T) {
-	_, err := loadCrushShErr(t, `permissions --allow bash`)
+	_, err := loadUltraShErr(t, `permissions --allow bash`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown subcommand")
 }
 
 func TestShellConfigPermissionsAllowRequiresTool(t *testing.T) {
-	_, err := loadCrushShErr(t, `permissions allow`)
+	_, err := loadUltraShErr(t, `permissions allow`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "usage: permissions allow")
 }
 
 // deny hides tools from the agent by writing options.disabled_tools.
 func TestShellConfigPermissionsDeny(t *testing.T) {
-	store := loadCrushSh(t, `permissions deny bash sourcegraph
+	store := loadUltraSh(t, `permissions deny bash sourcegraph
 permissions deny bash`)
 
 	require.Equal(t, []string{"bash", "sourcegraph"}, store.Config().Options.DisabledTools)
@@ -80,7 +80,7 @@ permissions deny bash`)
 // disabled_tools which removes it from the agent entirely, regardless of
 // its presence in the allow-list.
 func TestShellConfigPermissionsDenyWinsOverAllow(t *testing.T) {
-	store := loadCrushSh(t, `permissions allow bash view
+	store := loadUltraSh(t, `permissions allow bash view
 permissions deny bash`)
 
 	require.ElementsMatch(t, []string{"bash", "view"}, store.Config().Permissions.AllowedTools)

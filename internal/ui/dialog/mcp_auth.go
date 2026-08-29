@@ -10,8 +10,8 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/ui/common"
+	mcptools "github.com/asx8678/ultra/internal/agent/tools/mcp"
+	"github.com/asx8678/ultra/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/pkg/browser"
 )

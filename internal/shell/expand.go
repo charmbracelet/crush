@@ -21,7 +21,7 @@ const maxInnerStderrBytes = 512
 
 // NoUnset controls whether ExpandValue treats unset variables as an
 // error. Default false matches bash: $UNSET expands to "". Store true
-// to re-enable strict mode globally. Not exposed in crush.json; this is
+// to re-enable strict mode globally. Not exposed in ultra.json; this is
 // an internal escape hatch in case the lenient default turns out to be
 // the wrong call.
 //
@@ -79,7 +79,7 @@ func ExpandValue(ctx context.Context, value string, env []string) (string, error
 	// Build a minimal Shell value purely to reuse its handler chain
 	// (builtins, block funcs, optional Go coreutils) inside $(...).
 	// We deliberately skip NewShell so the passed-in env is used
-	// verbatim, with no CRUSH/AGENT/AI_AGENT injection: callers of
+	// verbatim, with no ULTRA/AGENT/AI_AGENT injection: callers of
 	// ExpandValue control the env, and nounset must treat any name
 	// not in env as unset.
 	//

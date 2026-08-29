@@ -17,40 +17,29 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/agent"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/clipboard"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/filetracker"
-	"github.com/charmbracelet/crush/internal/format"
-	"github.com/charmbracelet/crush/internal/herdr"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/ui/anim"
-	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/update"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/asx8678/ultra/internal/agent"
+	"github.com/asx8678/ultra/internal/agent/notify"
+	"github.com/asx8678/ultra/internal/agent/tools/mcp"
+	"github.com/asx8678/ultra/internal/clipboard"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/db"
+	"github.com/asx8678/ultra/internal/filetracker"
+	"github.com/asx8678/ultra/internal/format"
+	"github.com/asx8678/ultra/internal/history"
+	"github.com/asx8678/ultra/internal/log"
+	"github.com/asx8678/ultra/internal/lsp"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/pubsub"
+	"github.com/asx8678/ultra/internal/question"
+	"github.com/asx8678/ultra/internal/session"
+	"github.com/asx8678/ultra/internal/shell"
+	"github.com/asx8678/ultra/internal/skills"
+	"github.com/asx8678/ultra/internal/ui/anim"
+	"github.com/asx8678/ultra/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 )
-
-// UpdateAvailableMsg is sent when a new version is available.
-type UpdateAvailableMsg struct {
-	CurrentVersion string
-	LatestVersion  string
-	IsDevelopment  bool
-}
 
 type App struct {
 	Sessions    session.Service
@@ -80,14 +69,10 @@ type App struct {
 	// runCompletions is the authoritative per-run completion signal,
 	// emitted once per top-level agent turn after all message
 	// updates have been flushed. Bridged into app.events so SSE
-	// subscribers (notably `crush run` in client/server mode) can
+	// subscribers (notably `ultra run` in client/server mode) can
 	// drive their exit on a deterministic, payload-bearing event
 	// instead of guessing from message finish parts.
 	runCompletions *pubsub.Broker[notify.RunComplete]
-
-	// herdrClient reports agent state to herdr when running inside
-	// a herdr-managed pane. Nil when not in a herdr environment.
-	herdrClient *herdr.Client
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -135,23 +120,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		slog.Warn("Clipboard initialization failed", "error", err)
 	}
 
-	// Check for updates in the background.
-	go app.checkForUpdates(ctx)
-
 	// Arm initialization synchronously before launching it so WaitForInit
 	// blocks for the in-flight init instead of racing the goroutine and
 	// returning before any MCP tools register.
 	mcp.ArmInit()
 	go mcp.Initialize(ctx, app.Permissions, store)
-
-	// Start herdr integration when running inside a herdr pane.
-	app.herdrClient = herdr.Init()
-	herdr.BridgeLocal(ctx, app.herdrClient, herdr.BridgeSources{
-		PermRequests:      app.Permissions,
-		PermNotifications: app.Permissions,
-		RunCompletions:    app.runCompletions,
-		Messages:          app.Messages,
-	})
 
 	// Release the shared database connection on shutdown. The pool
 	// closes the underlying *sql.DB when the last reference is released.
@@ -220,15 +193,6 @@ func (app *App) AgentNotifications() *pubsub.Broker[notify.Notification] {
 // coordinator could publish one of its own.
 func (app *App) RunCompletions() *pubsub.Broker[notify.RunComplete] {
 	return app.runCompletions
-}
-
-// ReportCurrentSession tells herdr which session the user is now
-// viewing so it can persist a resumable reference for the pane. Safe
-// to call when not running inside a herdr pane; the underlying client
-// is nil-safe. Call this whenever the active session changes (load,
-// new, or select).
-func (app *App) ReportCurrentSession(sessionID string) {
-	app.herdrClient.SetSessionID(sessionID)
 }
 
 // resolveSession resolves which session to use for a non-interactive run
@@ -350,9 +314,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// Automatically approve all permission requests for this non-interactive
 	// session.
 	app.Permissions.AutoApproveSession(sess.ID)
-
-	// Report session identity to herdr.
-	app.ReportCurrentSession(sess.ID)
 
 	type response struct {
 		result *fantasy.AgentResult
@@ -641,7 +602,7 @@ func setupSubscriber[T any](
 // app.events broker using PublishMustDeliver instead of Publish. Use
 // this for terminal events that subscribers cannot tolerate losing —
 // notably RunComplete, which is the authoritative end-of-run signal
-// for `crush run`. A lossy fan-in here can drop the only terminal
+// for `ultra run`. A lossy fan-in here can drop the only terminal
 // event and hang non-interactive clients waiting on it.
 func setupSubscriberMustDeliver[T any](
 	ctx context.Context,
@@ -766,18 +727,10 @@ func (app *App) Shutdown() {
 	// Now run remaining cleanup tasks in parallel.
 	var wg sync.WaitGroup
 
-	// Send exit event
-	wg.Go(func() {
-		event.AppExited()
-	})
-
 	// Kill all background shells.
 	wg.Go(func() {
 		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
 	})
-
-	// Close herdr client to stop its background writer.
-	app.herdrClient.Close()
 
 	// Shutdown all LSP clients.
 	wg.Go(func() {
@@ -795,20 +748,4 @@ func (app *App) Shutdown() {
 		}
 	}
 	wg.Wait()
-}
-
-// checkForUpdates checks for available updates.
-func (app *App) checkForUpdates(ctx context.Context) {
-	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	info, err := update.Check(checkCtx, version.Version, update.Default)
-	if err != nil || !info.Available() {
-		return
-	}
-	app.events.Publish(pubsub.UpdatedEvent, UpdateAvailableMsg{
-		CurrentVersion: info.Current,
-		LatestVersion:  info.Latest,
-		IsDevelopment:  info.IsDevelopment(),
-	})
 }

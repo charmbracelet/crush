@@ -1,8 +1,8 @@
-Read Crush's internal application logs (default {{ .DefaultLines }} entries, max {{ .MaxLines }}); useful for diagnosing provider errors, tool failures, LSP/MCP issues.
+Read Ultra's internal application logs (default {{ .DefaultLines }} entries, max {{ .MaxLines }}); useful for diagnosing provider errors, tool failures, LSP/MCP issues.
 
 <usage>
-- Returns recent log entries from Crush's internal log file
-- Use to diagnose issues with Crush itself (provider errors, tool failures,
+- Returns recent log entries from Ultra's internal log file
+- Use to diagnose issues with Ultra itself (provider errors, tool failures,
   LSP problems, MCP connection issues)
 - Entries shown in compact format: TIME LEVEL SOURCE MESSAGE key=value...
 </usage>

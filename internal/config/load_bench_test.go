@@ -103,19 +103,19 @@ func BenchmarkLoadFromConfigPaths_Empty(b *testing.B) {
 	}
 }
 
-// BenchmarkLoadFromConfigPaths_ShellConfig measures the crushrc execution
+// BenchmarkLoadFromConfigPaths_ShellConfig measures the ultrarc execution
 // path (shell interpreter + config builtins + JSON marshal), which now sits on
 // the startup and reload critical path alongside JSON parsing. Keeps a
 // regression in shell config loading from going unnoticed.
 func BenchmarkLoadFromConfigPaths_ShellConfig(b *testing.B) {
 	tmpDir := b.TempDir()
-	rcPath := filepath.Join(tmpDir, "crushrc")
+	rcPath := filepath.Join(tmpDir, "ultrarc")
 
 	rcContent := []byte(`provider add openai --api-key "$OPENAI_API_KEY" --base-url "https://api.openai.com/v1"
 provider add anthropic --api-key "$ANTHROPIC_API_KEY"
 model large openai/gpt-4o --think
 permissions allow bash view
-option data-directory .crush
+option data-directory .ultra
 option metrics false`)
 
 	if err := os.WriteFile(rcPath, rcContent, 0o644); err != nil {

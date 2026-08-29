@@ -15,10 +15,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/fsext"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/shell"
 )
 
 type BashParams struct {

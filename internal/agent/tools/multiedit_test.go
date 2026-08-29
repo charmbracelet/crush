@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/asx8678/ultra/internal/history"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 

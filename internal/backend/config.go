@@ -5,14 +5,14 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/charmbracelet/crush/internal/agent"
-	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/asx8678/ultra/internal/agent"
+	mcptools "github.com/asx8678/ultra/internal/agent/tools/mcp"
+	"github.com/asx8678/ultra/internal/commands"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/oauth"
+	"github.com/asx8678/ultra/internal/proto"
+	"github.com/asx8678/ultra/internal/pubsub"
+	"github.com/asx8678/ultra/internal/skills"
 )
 
 // publishConfigChanged publishes a ConfigChanged event on the workspace's

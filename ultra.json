@@ -1,5 +1,5 @@
 {
-  "$schema": "https://charm.land/crush.json",
+  "$schema": "https://raw.githubusercontent.com/asx8678/ultra/main/schema.json",
   "lsp": {
     "gopls": {
       "options": {

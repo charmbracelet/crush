@@ -34,17 +34,17 @@ const (
 	ShellTypePowerShell
 )
 
-// CrushEnvMarkers returns a fresh slice of the environment variables that
-// Crush unconditionally sets on every shell it spawns — both the interactive
+// UltraEnvMarkers returns a fresh slice of the environment variables that
+// Ultra unconditionally sets on every shell it spawns — both the interactive
 // bash tool's [Shell] and the hook runner's [Run] calls. Tools that want to
 // detect "am I being invoked by an AI agent?" can check any of these.
 // Keeping them in one place guarantees the two shell surfaces cannot drift.
 // A fresh slice is returned on every call so callers may append freely.
-func CrushEnvMarkers() []string {
+func UltraEnvMarkers() []string {
 	return []string{
-		"CRUSH=1",
-		"AGENT=crush",
-		"AI_AGENT=crush",
+		"ULTRA=1",
+		"AGENT=ultra",
+		"AI_AGENT=ultra",
 	}
 }
 
@@ -94,13 +94,8 @@ func NewShell(opts *Options) *Shell {
 		env = os.Environ()
 	}
 
-	// Strip herdr pane-ownership vars so subprocesses (including test
-	// binaries and nested crush instances) can't attach to or release
-	// the parent pane's agent authority.
-	env = withoutHerdrEnv(env)
-
-	// Allow tools to detect execution by Crush.
-	env = append(env, CrushEnvMarkers()...)
+	// Allow tools to detect execution by Ultra.
+	env = append(env, UltraEnvMarkers()...)
 
 	logger := opts.Logger
 	if logger == nil {

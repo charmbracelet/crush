@@ -6,18 +6,18 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/backend"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/asx8678/ultra/internal/agent/notify"
+	"github.com/asx8678/ultra/internal/agent/tools/mcp"
+	"github.com/asx8678/ultra/internal/app"
+	"github.com/asx8678/ultra/internal/backend"
+	"github.com/asx8678/ultra/internal/history"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/proto"
+	"github.com/asx8678/ultra/internal/pubsub"
+	"github.com/asx8678/ultra/internal/question"
+	"github.com/asx8678/ultra/internal/session"
+	"github.com/asx8678/ultra/internal/skills"
 )
 
 // wrapEvent converts a raw tea.Msg (a pubsub.Event[T] from the app
@@ -149,15 +149,6 @@ func wrapEvent(ev any) *pubsub.Payload {
 		})
 	case pubsub.Event[proto.ConfigChanged]:
 		return envelope(pubsub.PayloadTypeConfigChanged, e)
-	case app.UpdateAvailableMsg:
-		return envelope(pubsub.PayloadTypeUpdateAvailable, pubsub.Event[proto.UpdateAvailable]{
-			Type: pubsub.UpdatedEvent,
-			Payload: proto.UpdateAvailable{
-				CurrentVersion: e.CurrentVersion,
-				LatestVersion:  e.LatestVersion,
-				IsDevelopment:  e.IsDevelopment,
-			},
-		})
 	case pubsub.Event[skills.Event]:
 		return envelope(pubsub.PayloadTypeSkillsEvent, pubsub.Event[proto.SkillsEvent]{
 			Type:    e.Type,

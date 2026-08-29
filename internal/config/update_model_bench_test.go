@@ -13,10 +13,10 @@ import (
 // every selection.
 func BenchmarkUpdatePreferredModel(b *testing.B) {
 	dir := b.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
-	b.Setenv("CRUSH_GLOBAL_CONFIG", dir)
-	b.Setenv("CRUSH_GLOBAL_DATA", dir)
+	b.Setenv("ULTRA_GLOBAL_CONFIG", dir)
+	b.Setenv("ULTRA_GLOBAL_DATA", dir)
 	resetProviderState()
 	b.Cleanup(resetProviderState)
 
@@ -75,10 +75,10 @@ func BenchmarkUpdatePreferredModel(b *testing.B) {
 // BenchmarkUpdatePreferredModel.
 func BenchmarkReloadFromDisk(b *testing.B) {
 	dir := b.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
-	b.Setenv("CRUSH_GLOBAL_CONFIG", dir)
-	b.Setenv("CRUSH_GLOBAL_DATA", dir)
+	b.Setenv("ULTRA_GLOBAL_CONFIG", dir)
+	b.Setenv("ULTRA_GLOBAL_DATA", dir)
 	resetProviderState()
 	b.Cleanup(resetProviderState)
 

@@ -11,25 +11,23 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/herdr"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/asx8678/ultra/internal/agent/notify"
+	"github.com/asx8678/ultra/internal/agent/tools/mcp"
+	"github.com/asx8678/ultra/internal/client"
+	"github.com/asx8678/ultra/internal/commands"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/history"
+	"github.com/asx8678/ultra/internal/log"
+	"github.com/asx8678/ultra/internal/lsp"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/oauth"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/proto"
+	"github.com/asx8678/ultra/internal/pubsub"
+	"github.com/asx8678/ultra/internal/question"
+	"github.com/asx8678/ultra/internal/session"
+	"github.com/asx8678/ultra/internal/skills"
+	"github.com/asx8678/ultra/internal/version"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
 )
@@ -62,10 +60,6 @@ type ClientWorkspace struct {
 	// minted.
 	subStarted atomic.Bool
 	subDone    chan struct{}
-
-	// herdrClient reports agent state to herdr when running inside
-	// a herdr-managed pane. Nil when not in a herdr environment.
-	herdrClient *herdr.Client
 }
 
 // SSE reconnect backoff bounds for the workspace event stream. Declared
@@ -92,13 +86,12 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	subCtx, subCancel := context.WithCancel(context.Background())
 	return &ClientWorkspace{
-		client:      c,
-		ws:          ws,
-		skills:      mgr,
-		subCtx:      subCtx,
-		subCancel:   subCancel,
-		subDone:     make(chan struct{}),
-		herdrClient: herdr.Init(),
+		client:    c,
+		ws:        ws,
+		skills:    mgr,
+		subCtx:    subCtx,
+		subCancel: subCancel,
+		subDone:   make(chan struct{}),
 	}
 }
 
@@ -190,7 +183,6 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 // are propagated to the caller; the TUI logs and ignores them since
 // the presence record is a hint, not correctness-critical state.
 func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
-	w.herdrClient.SetSessionID(sessionID)
 	w.mu.Lock()
 	w.lastSession = sessionID
 	w.mu.Unlock()
@@ -999,11 +991,6 @@ func (w *ClientWorkspace) sleepOrDone(d time.Duration) bool {
 // are translated into domain types and forwarded to send.
 func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 	for ev := range evc {
-		// Forward events to herdr if running inside a herdr pane.
-		if hev := herdr.Translate(ev); hev != nil {
-			w.herdrClient.HandleEvent(hev)
-		}
-
 		if _, ok := ev.(pubsub.Event[proto.ConfigChanged]); ok {
 			w.refreshWorkspace()
 			continue
@@ -1030,7 +1017,6 @@ func (w *ClientWorkspace) Shutdown() {
 		w.subCancel()
 	}
 	w.awaitSubscription()
-	w.herdrClient.Close()
 
 	// Retiring the client releases every claim it holds, on every workspace,
 	// and blocks any further create from this client ID. That is what makes
@@ -1198,12 +1184,6 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		return pubsub.Event[skills.Event]{
 			Type:    e.Type,
 			Payload: skills.Event{States: states},
-		}
-	case pubsub.Event[proto.UpdateAvailable]:
-		return app.UpdateAvailableMsg{
-			CurrentVersion: e.Payload.CurrentVersion,
-			LatestVersion:  e.Payload.LatestVersion,
-			IsDevelopment:  e.Payload.IsDevelopment,
 		}
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))

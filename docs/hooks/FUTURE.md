@@ -24,7 +24,7 @@ puts there is concatenated into what the model sees. That's fine for short notes
 - Large files can push the turn past the context window.
 
 `context_files` is the lazy alternative: the hook returns **paths**, not
-contents. Crush tells the agent the files exist and are relevant, and the agent
+contents. Ultra tells the agent the files exist and are relevant, and the agent
 decides whether to open them with its existing `view` tool.
 
 ### Proposed shape
@@ -39,12 +39,12 @@ Additive envelope field. Accepts a list of strings:
 }
 ```
 
-Paths are resolved relative to `CRUSH_CWD`. Non-existent paths are dropped with
+Paths are resolved relative to `ULTRA_CWD`. Non-existent paths are dropped with
 a debug log (don't fail the hook over a missing file).
 
 ### How the agent sees it
 
-Crush appends a short note to the turn's context along the lines of:
+Ultra appends a short note to the turn's context along the lines of:
 
 ```
 ## Referenced files
@@ -70,7 +70,7 @@ envelopes keep working unchanged. No version bump required.
 
 ### Open questions
 
-- Should `context_files` paths be constrained to `CRUSH_PROJECT_DIR`? Probably
+- Should `context_files` paths be constrained to `ULTRA_PROJECT_DIR`? Probably
   yes, to avoid hooks smuggling in arbitrary filesystem reads.
 - Do we want a per-file line range (`"README.md:1-40"`) or keep it dead simple
   (whole-file references only)? Start simple; add ranges only if asked for.
@@ -156,7 +156,7 @@ unaffected.
 
 ### Motivation
 
-Today Crush supports exactly one hook event, `PreToolUse`. That's enough to gate
+Today Ultra supports exactly one hook event, `PreToolUse`. That's enough to gate
 and rewrite tool calls but nothing else. The next-most-useful event is
 `UserPromptSubmit`: fires after the user hits Enter but before the turn hits the
 LLM. Lets hooks inject context, rewrite prompts, or gate on content without the

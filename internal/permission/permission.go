@@ -8,8 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/asx8678/ultra/internal/csync"
+	"github.com/asx8678/ultra/internal/pubsub"
 	"github.com/google/uuid"
 )
 

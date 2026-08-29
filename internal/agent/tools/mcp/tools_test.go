@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/asx8678/ultra/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

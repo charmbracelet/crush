@@ -13,9 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/asx8678/ultra/internal/agent/hyper"
+	"github.com/asx8678/ultra/internal/oauth"
 )
 
 // DeviceAuthResponse contains the response from the device authorization endpoint.
@@ -49,7 +48,7 @@ func InitiateDeviceAuth(ctx context.Context) (*DeviceAuthResponse, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "crush")
+	req.Header.Set("User-Agent", "ultra")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -77,9 +76,9 @@ func InitiateDeviceAuth(ctx context.Context) (*DeviceAuthResponse, error) {
 
 func deviceName() string {
 	if hostname, err := os.Hostname(); err == nil && hostname != "" {
-		return "Crush (" + hostname + ")"
+		return "Ultra (" + hostname + ")"
 	}
-	return "Crush"
+	return "Ultra"
 }
 
 // PollForToken polls the /device/token endpoint until authorization is complete.
@@ -102,7 +101,6 @@ func PollForToken(ctx context.Context, deviceCode string, expiresIn int) (string
 				return "", err
 			}
 			if result.RefreshToken != "" {
-				event.Alias(result.UserID)
 				return result.RefreshToken, nil
 			}
 			switch result.Error {
@@ -124,7 +122,7 @@ func pollOnce(ctx context.Context, deviceCode string) (TokenResponse, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "crush")
+	req.Header.Set("User-Agent", "ultra")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -167,7 +165,7 @@ func ExchangeToken(ctx context.Context, refreshToken string) (*oauth.Token, erro
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "crush")
+	req.Header.Set("User-Agent", "ultra")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -224,7 +222,7 @@ func IntrospectToken(ctx context.Context, accessToken string) (*IntrospectTokenR
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "crush")
+	req.Header.Set("User-Agent", "ultra")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/asx8678/ultra/internal/oauth"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
@@ -754,7 +754,7 @@ func TestConnect_OneLoginOpensOneTab(t *testing.T) {
 		return redirect(u)
 	}
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "crush", Version: "test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "ultra", Version: "test"}, nil)
 	// The handshake itself fails by design; the tab count is the subject.
 	_, _ = client.Connect(t.Context(), &mcp.StreamableClientTransport{
 		Endpoint:     endpoint,

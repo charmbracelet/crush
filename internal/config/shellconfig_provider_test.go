@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/asx8678/ultra/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
 func TestShellConfigProviderAddAndModel(t *testing.T) {
-	store := loadCrushSh(t, `provider add myllm \
+	store := loadUltraSh(t, `provider add myllm \
   --type openai-compat \
   --base-url "http://localhost:1234/v1" \
   --api-key "sk-test" \
@@ -72,7 +72,7 @@ model large myllm/foo-1 --provider-options '{"timeout":30}'`)
 func TestShellConfigProviderRemove(t *testing.T) {
 	// Both providers get a model so they survive provider configuration
 	// (model-less providers are dropped); the only difference is the remove.
-	store := loadCrushSh(t, `provider add keepme --type openai-compat --base-url "http://localhost:1/v1" --api-key k
+	store := loadUltraSh(t, `provider add keepme --type openai-compat --base-url "http://localhost:1/v1" --api-key k
 model add keepme/m1 --name M1
 provider add dropme --type openai-compat --base-url "http://localhost:2/v1" --api-key k
 model add dropme/m2 --name M2

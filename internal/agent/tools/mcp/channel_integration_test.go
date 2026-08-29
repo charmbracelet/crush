@@ -71,7 +71,7 @@ func TestChannelEndToEnd(t *testing.T) {
 	defer serverSession.Close()
 
 	gate := newChannelGate()
-	client := mcp.NewClient(&mcp.Implementation{Name: "crush", Version: "test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "ultra", Version: "test"}, nil)
 	session, err := client.Connect(ctx, &channelTransport{inner: clientT, name: "chan", gate: gate}, nil)
 	if err != nil {
 		t.Fatalf("client connect: %v", err)

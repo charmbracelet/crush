@@ -14,7 +14,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/asx8678/ultra/internal/filepathext"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -175,14 +175,14 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	sb, err := parseShebang(probe)
 	if err != nil {
 		hc := interp.HandlerCtx(ctx)
-		fmt.Fprintf(hc.Stderr, "crush: %s: %s\n", scriptPath, err)
+		fmt.Fprintf(hc.Stderr, "ultra: %s: %s\n", scriptPath, err)
 		return interp.ExitStatus(126)
 	}
 
 	interpreter, err := resolveInterpreter(sb.interpreter)
 	if err != nil {
 		hc := interp.HandlerCtx(ctx)
-		fmt.Fprintf(hc.Stderr, "crush: %s: %s\n", scriptPath, err)
+		fmt.Fprintf(hc.Stderr, "ultra: %s: %s\n", scriptPath, err)
 		return interp.ExitStatus(127)
 	}
 
@@ -368,7 +368,7 @@ func parseEnvShebang(rest string) (*shebang, error) {
 
 // runShellSource parses path's contents as POSIX shell and runs it
 // in-process via a nested interp.Runner. It reuses the parent runner's cwd,
-// env, and stdio, and rebuilds the Crush handler stack so builtins and the
+// env, and stdio, and rebuilds the Ultra handler stack so builtins and the
 // dispatch handler itself remain available to anything the script invokes.
 // Positional parameters ($1, $2, …) come from args[1:].
 //

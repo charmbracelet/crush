@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/asx8678/ultra/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 

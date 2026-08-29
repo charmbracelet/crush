@@ -40,7 +40,7 @@ func swapInitGate(t *testing.T) chan struct{} {
 // TestWaitForInit_BlocksUntilInitCompletes pins the contract the
 // non-interactive path relies on: WaitForInit blocks while MCP initialization
 // is still in flight and returns once it completes. Non-interactive runs
-// (`crush run`) wait on it before reading the tool registry so slow-to-start
+// (`ultra run`) wait on it before reading the tool registry so slow-to-start
 // servers (e.g. stdio Python via uv) have registered their tools first.
 // Interactive runs deliberately do not gate on it (a slow server froze the
 // TUI's first prompt); they build the tool palette from whatever is registered

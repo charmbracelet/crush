@@ -27,7 +27,7 @@ type RunOptions struct {
 	Command string
 	// Cwd is the working directory for the execution. Required: callers
 	// must supply a non-empty value. Run does not silently fall back to
-	// the Crush process cwd — hooks and the bash tool have different
+	// the Ultra process cwd — hooks and the bash tool have different
 	// notions of "default" and each owns that decision.
 	Cwd string
 	// Env is the full environment visible to the command. The caller is
@@ -180,7 +180,7 @@ func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, erro
 }
 
 // newRunner constructs an [interp.Runner] configured with the standard
-// Crush handler stack. Shared by the stateless [Run] entrypoint and the
+// Ultra handler stack. Shared by the stateless [Run] entrypoint and the
 // stateful [Shell] so the two surfaces cannot drift.
 func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writer, blockFuncs []BlockFunc) (*interp.Runner, error) {
 	env = withNonInteractiveEnv(env)
@@ -194,14 +194,14 @@ func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writ
 }
 
 // execHandlerOption returns an interp.RunnerOption that installs the
-// standard Crush middleware chain (builtins, script dispatch, block list)
+// standard Ultra middleware chain (builtins, script dispatch, block list)
 // on top of a process-group-isolated base exec handler.
 //
 // We use interp.ExecHandler (singular) with a manually-built chain rather
 // than interp.ExecHandlers because the latter always appends
 // interp.DefaultExecHandler as the final handler, which lacks process group
 // isolation. Without isolation, shells like zsh that set up job control
-// when sourcing framework files can send SIGINT/SIGTERM to Crush's process
+// when sourcing framework files can send SIGINT/SIGTERM to Ultra's process
 // group and crash the parent.
 func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
 	base := processGroupExecHandler(defaultKillTimeout)
@@ -216,7 +216,7 @@ func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
 
 // nonInteractiveEnvVars are forced on every shell execution to prevent
 // commands from hanging on a nonexistent TTY. These are always applied
-// regardless of the caller's environment because Crush shells are never
+// regardless of the caller's environment because Ultra shells are never
 // interactive — preserving user preferences like EDITOR=nvim only causes
 // hangs, not useful behavior.
 var nonInteractiveEnvVars = []string{
@@ -254,36 +254,6 @@ func withNonInteractiveEnv(env []string) []string {
 	return append(result, nonInteractiveEnvVars...)
 }
 
-// herdrEnvVars are the environment variables herdr injects into panes
-// so agents can report state over its Unix socket API. Subprocesses
-// must not inherit these: a child process that calls herdr.Init()
-// would attach to the parent's pane and, on exit, release its agent
-// authority — making the status vanish. Stripping them here closes
-// that gap for every command the bash tool runs.
-var herdrEnvVars = []string{
-	"HERDR_ENV",
-	"HERDR_SOCKET_PATH",
-	"HERDR_PANE_ID",
-}
-
-// withoutHerdrEnv returns env with all HERDR_* variables removed.
-// The returned slice is a new allocation safe to use concurrently
-// with the input.
-func withoutHerdrEnv(env []string) []string {
-	strip := make(map[string]bool, len(herdrEnvVars))
-	for _, k := range herdrEnvVars {
-		strip[k] = true
-	}
-	result := make([]string, 0, len(env))
-	for _, e := range env {
-		if key, _, ok := strings.Cut(e, "="); ok && strip[key] {
-			continue
-		}
-		result = append(result, e)
-	}
-	return result
-}
-
 // execMiddleware wraps a base [interp.ExecHandlerFunc], composing like HTTP
 // middleware: each layer either handles a command itself or delegates to the
 // next handler in the chain.
@@ -291,7 +261,7 @@ type execMiddleware = func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc
 
 // standardHandlers returns the exec-handler middleware chain used by both
 // [Run] and [Shell]. Order matters:
-//  1. builtins first (so Crush's in-process jq wins over any PATH binary);
+//  1. builtins first (so Ultra's in-process jq wins over any PATH binary);
 //  2. script dispatch (shebang / binary / shell-source for path-prefixed
 //     argv[0], no-op for bare commands) — runs before the block list so
 //     that deny rules see the already-resolved argv of anything the
@@ -310,7 +280,7 @@ func standardHandlers(blockFuncs []BlockFunc) []execMiddleware {
 	return handlers
 }
 
-// builtinHandler returns middleware that dispatches recognized Crush
+// builtinHandler returns middleware that dispatches recognized Ultra
 // builtins to their in-process Go implementations. All builtins (jq plus the
 // config builtins registered by shellconfig) live in the builtins map; config
 // builtins are no-ops without a ConfigBuilder on the context.

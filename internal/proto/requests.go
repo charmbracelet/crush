@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/oauth"
 )
 
 // ConfigSetRequest represents a request to set a config field.

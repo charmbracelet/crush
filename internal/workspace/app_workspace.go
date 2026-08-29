@@ -8,21 +8,21 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/agent"
-	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/asx8678/ultra/internal/agent"
+	mcptools "github.com/asx8678/ultra/internal/agent/tools/mcp"
+	"github.com/asx8678/ultra/internal/app"
+	"github.com/asx8678/ultra/internal/commands"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/history"
+	"github.com/asx8678/ultra/internal/lsp"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/oauth"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/proto"
+	"github.com/asx8678/ultra/internal/question"
+	"github.com/asx8678/ultra/internal/session"
+	"github.com/asx8678/ultra/internal/shell"
+	"github.com/asx8678/ultra/internal/skills"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -72,14 +72,8 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 	return w.app.Sessions.ParseAgentToolSessionID(sessionID)
 }
 
-// SetCurrentSession reports the active session to herdr so the pane
-// can persist a resumable reference. Multi-client presence tracking
-// is irrelevant in single-client local mode, but herdr still needs
-// to know which session is live to support agent resume.
-func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
-	w.app.ReportCurrentSession(sessionID)
-	return nil
-}
+// SetCurrentSession is a no-op for an in-process workspace.
+func (w *AppWorkspace) SetCurrentSession(context.Context, string) error { return nil }
 
 // -- Messages --
 

@@ -43,7 +43,7 @@ func TestOllamaEnricher(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		// Base URL includes /v1 (as Crush configures it); the enricher
+		// Base URL includes /v1 (as Ultra configures it); the enricher
 		// strips it so /api/show resolves at the server root.
 		cfg := Config{ID: "test-ollama", BaseURL: srv.URL + "/v1"}
 		models := []catwalk.Model{

@@ -1,8 +1,8 @@
 package backend
 
 import (
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/question"
+	"github.com/asx8678/ultra/internal/proto"
+	"github.com/asx8678/ultra/internal/question"
 )
 
 // AnswerQuestion submits answers for a question. The returned bool

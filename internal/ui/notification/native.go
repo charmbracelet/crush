@@ -7,11 +7,9 @@ import (
 )
 
 // NativeBackend sends desktop notifications using the native OS notification
-// system. The actual delivery function is supplied per-platform via
-// defaultNotifyFunc; on illumos/solaris (where beeep's dbus dependency does
-// not build) it is a no-op. Selection logic avoids this backend there and
-// uses a terminal-based backend instead, so this is only a safety net. See
-// NativeSupported.
+// system. Ultra no longer ships a platform-specific implementation; this
+// injectable compatibility backend is retained for callers and tests while
+// runtime selection falls back to terminal-native notifications.
 type NativeBackend struct {
 	// icon is the notification icon data (PNG bytes).
 	icon []byte

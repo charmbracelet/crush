@@ -1,5 +1,5 @@
 // Package mcp provides functionality for managing Model Context Protocol (MCP)
-// clients within the Crush application.
+// clients within the Ultra application.
 package mcp
 
 import (
@@ -16,14 +16,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/oauth"
-	mcpoauth "github.com/charmbracelet/crush/internal/oauth/mcp"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/csync"
+	"github.com/asx8678/ultra/internal/home"
+	"github.com/asx8678/ultra/internal/oauth"
+	mcpoauth "github.com/asx8678/ultra/internal/oauth/mcp"
+	"github.com/asx8678/ultra/internal/permission"
+	"github.com/asx8678/ultra/internal/pubsub"
+	"github.com/asx8678/ultra/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
@@ -888,7 +888,7 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		// A session that has errored is dead to us: close it so the child
 		// process and its stdio pipes are released, and clear its registry
 		// entries so the agent stops advertising capabilities it can no
-		// longer call (without that, crush_info / the `/mcp` menu and the
+		// longer call (without that, ultra_info / the `/mcp` menu and the
 		// tool list handed to the LLM diverge). Crucially, close exactly the
 		// session that errored (the client argument): if the registry
 		// already holds a DIFFERENT session — a newer, healthy one another
@@ -996,9 +996,9 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	}
 	client := mcp.NewClient(
 		&mcp.Implementation{
-			Name:    "crush",
+			Name:    "ultra",
 			Version: version.Version,
-			Title:   "Crush",
+			Title:   "Ultra",
 		},
 		opts,
 	)
@@ -1038,7 +1038,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	}, nil
 }
 
-// transportWrapper is implemented by every transport decorator crush layers
+// transportWrapper is implemented by every transport decorator ultra layers
 // around a base transport, so diagnostics that need the innermost transport
 // can reach it without knowing which decorators are in play.
 type transportWrapper interface {

@@ -33,7 +33,7 @@ type AgentEvent struct {
 
 	// RunID echoes the caller-supplied AgentMessage.RunID for the run
 	// that produced this event. It lets observers (notably
-	// `crush run`) attribute an error event to a specific request
+	// `ultra run`) attribute an error event to a specific request
 	// instead of to any in-flight run on the session. Empty when no
 	// caller set one.
 	RunID string `json:"run_id,omitempty"`

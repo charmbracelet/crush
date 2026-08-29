@@ -9,9 +9,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/asx8678/ultra/internal/agent/notify"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,7 +73,7 @@ func (m *gatedStreamModel) StreamObject(ctx context.Context, call fantasy.Object
 // end-to-end proof of fix 2: a prompt carrying a RunID that is queued
 // behind a busy session must NOT be silently folded into the active turn.
 // It runs as its own turn via the recursive run path and publishes its
-// own terminal RunComplete, so a `crush run` caller blocking on that
+// own terminal RunComplete, so a `ultra run` caller blocking on that
 // RunID does not hang. The active turn keeps its own RunComplete too.
 func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.T) {
 	t.Parallel()

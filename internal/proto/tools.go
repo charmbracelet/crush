@@ -5,7 +5,7 @@ package proto
 // there is exactly one source of truth and so values survive a
 // round-trip across the client/server boundary as the same Go type
 // the UI asserts on.
-import "github.com/charmbracelet/crush/internal/agent/tools"
+import "github.com/asx8678/ultra/internal/agent/tools"
 
 // ToolResponseType represents the type of tool response.
 type ToolResponseType string

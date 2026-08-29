@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/charmbracelet/crush/internal/config/config",
+  "$id": "https://github.com/asx8678/ultra/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
     "Attribution": {
@@ -22,7 +22,7 @@
         },
         "generated_with": {
           "type": "boolean",
-          "description": "Add Generated with Crush line to commit messages and issues and PRs",
+          "description": "Add Generated with Ultra line to commit messages and issues and PRs",
           "default": true
         }
       },
@@ -297,7 +297,7 @@
         },
         "sessionless": {
           "type": "boolean",
-          "description": "Mark a sessionless MCP server (no Mcp-Session-Id) so Crush skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP)",
+          "description": "Mark a sessionless MCP server (no Mcp-Session-Id) so Ultra skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP)",
           "default": false
         },
         "headers": {
@@ -449,7 +449,7 @@
             "type": "string",
             "examples": [
               ".cursorrules",
-              "CRUSH.md"
+              "ULTRA.md"
             ]
           },
           "type": "array",
@@ -462,7 +462,7 @@
           "type": "array",
           "description": "Paths to files containing global context information for the AI",
           "default": [
-            "~/.config/crush/CRUSH.md",
+            "~/.config/ultra/ULTRA.md",
             "~/.config/AGENTS.md"
           ]
         },
@@ -470,7 +470,7 @@
           "items": {
             "type": "string",
             "examples": [
-              "~/.config/crush/skills",
+              "~/.config/ultra/skills",
               "./skills"
             ]
           },
@@ -499,9 +499,9 @@
         "data_directory": {
           "type": "string",
           "description": "Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.",
-          "default": ".crush",
+          "default": ".ultra",
           "examples": [
-            ".crush"
+            ".ultra"
           ]
         },
         "disabled_tools": {
@@ -529,18 +529,13 @@
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"
         },
-        "disable_metrics": {
-          "type": "boolean",
-          "description": "Disable sending metrics",
-          "default": false
-        },
         "initialize_as": {
           "type": "string",
           "description": "Name of the context file to create/update during project initialization",
           "default": "AGENTS.md",
           "examples": [
             "AGENTS.md",
-            "CRUSH.md",
+            "ULTRA.md",
             "CLAUDE.md",
             "docs/LLMs.md"
           ]
@@ -571,7 +566,7 @@
           "items": {
             "type": "string",
             "examples": [
-              "crush-config"
+              "ultra-config"
             ]
           },
           "type": "array",
@@ -823,7 +818,7 @@
             "compact",
             "none"
           ],
-          "description": "Exit banner style after quitting Crush",
+          "description": "Exit banner style after quitting Ultra",
           "default": "default"
         }
       },

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/asx8678/ultra/internal/home"
 	"github.com/stretchr/testify/require"
 )
 

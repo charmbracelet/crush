@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/log"
+	"github.com/asx8678/ultra/internal/log"
 )
 
 var getRg = sync.OnceValue(func() string {

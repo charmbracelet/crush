@@ -46,7 +46,7 @@ func TestMCPOAuthFlags(t *testing.T) {
 func TestMCPUnknownSubcommand(t *testing.T) {
 	t.Parallel()
 
-	path := t.TempDir() + "/crushrc"
+	path := t.TempDir() + "/ultrarc"
 	_, err := LoadShellConfig(t.Context(), path, []byte(`mcp github --command npx`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown subcommand")

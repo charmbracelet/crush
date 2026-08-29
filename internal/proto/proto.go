@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/lsp"
 )
 
 // Workspace represents a running app.App workspace with its associated
@@ -43,16 +43,6 @@ type ConfigChanged struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
-// UpdateAvailable is published when a newer Crush release is detected
-// on the server side. It mirrors app.UpdateAvailableMsg across the SSE
-// boundary so client/server mode TUI clients see the same notification
-// as local-mode clients.
-type UpdateAvailable struct {
-	CurrentVersion string `json:"current_version"`
-	LatestVersion  string `json:"latest_version"`
-	IsDevelopment  bool   `json:"is_development"`
-}
-
 // CurrentSession is the request body for the per-client
 // current-session endpoint. An empty SessionID clears the entry.
 type CurrentSession struct {
@@ -62,7 +52,7 @@ type CurrentSession struct {
 // RunComplete is the authoritative end-of-run signal for a session,
 // emitted exactly once per top-level agent turn after all message
 // updates for the turn have flushed. Clients that need a reliable
-// completion contract (notably `crush run` in client/server mode)
+// completion contract (notably `ultra run` in client/server mode)
 // should listen for this event filtered by RunID (preferred) — or
 // by SessionID when no RunID was supplied — and use Text and
 // MessageID to reconcile any output they have already streamed from
@@ -132,7 +122,7 @@ func (a AgentInfo) IsZero() bool {
 // RunID, when non-empty, is echoed back on the [RunComplete] event
 // emitted for the resulting turn. Callers that need to correlate a
 // specific SendMessage with its terminal event (notably
-// `crush run`, which may attach to a busy session whose currently
+// `ultra run`, which may attach to a busy session whose currently
 // running turn finishes first) should set it to a fresh unique
 // value before the request. Server-side propagation flows through
 // agent.WithRunID on the request context into the

@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/chat"
-	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/asx8678/ultra/internal/config"
+	"github.com/asx8678/ultra/internal/session"
+	"github.com/asx8678/ultra/internal/ui/chat"
+	"github.com/asx8678/ultra/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 

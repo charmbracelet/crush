@@ -25,7 +25,7 @@ func ThemeKeyForProvider(providerID string) string {
 func ThemeForProvider(providerID string) Styles {
 	switch ThemeKeyForProvider(providerID) {
 	case "hyper":
-		return HypercrushObsidiana()
+		return HyperultraObsidiana()
 	default:
 		return CharmtonePantera()
 	}
@@ -110,7 +110,7 @@ func CharmtonePantera() Styles {
 	return s
 }
 
-// HypercrushObsidiana returns the Hypercrush dark theme.
-func HypercrushObsidiana() Styles {
+// HyperultraObsidiana returns the Hyperultra dark theme.
+func HyperultraObsidiana() Styles {
 	return CharmtonePantera()
 }

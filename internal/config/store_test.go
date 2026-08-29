@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/asx8678/ultra/internal/csync"
+	"github.com/asx8678/ultra/internal/oauth"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -19,31 +19,31 @@ func TestConfigStore_ConfigPath_GlobalAlwaysWorks(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{
-		globalDataPath: "/some/global/crush.json",
+		globalDataPath: "/some/global/ultra.json",
 	}
 
 	path, err := store.configPath(ScopeGlobal)
 	require.NoError(t, err)
-	require.Equal(t, "/some/global/crush.json", path)
+	require.Equal(t, "/some/global/ultra.json", path)
 }
 
 func TestConfigStore_ConfigPath_WorkspaceReturnsPath(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{
-		workspacePath: "/some/workspace/.crush/crush.json",
+		workspacePath: "/some/workspace/.ultra/ultra.json",
 	}
 
 	path, err := store.configPath(ScopeWorkspace)
 	require.NoError(t, err)
-	require.Equal(t, "/some/workspace/.crush/crush.json", path)
+	require.Equal(t, "/some/workspace/.ultra/ultra.json", path)
 }
 
 func TestConfigStore_ConfigPath_WorkspaceErrorsWhenEmpty(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{
-		globalDataPath: "/some/global/crush.json",
+		globalDataPath: "/some/global/ultra.json",
 		workspacePath:  "",
 	}
 
@@ -70,7 +70,7 @@ func TestConfigStore_SetConfigField_GlobalScopeAlwaysWorks(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	globalPath := filepath.Join(dir, "crush.json")
+	globalPath := filepath.Join(dir, "ultra.json")
 	store := &ConfigStore{
 		config:         &Config{},
 		globalDataPath: globalPath,
@@ -140,7 +140,7 @@ func TestConfigStore_RuntimeOverrides_MutableViaPointer(t *testing.T) {
 
 func TestGlobalWorkspaceDir(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("CRUSH_GLOBAL_DATA", dir)
+	t.Setenv("ULTRA_GLOBAL_DATA", dir)
 
 	wsDir := GlobalWorkspaceDir()
 	globalData := GlobalConfigData()
@@ -161,7 +161,7 @@ func TestConfigStaleness_CleanImmediatelyAfterSnapshot(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create a config file
 	content := []byte(`{"options": {"debug": true}}`)
@@ -183,7 +183,7 @@ func TestConfigStaleness_DetectsFileContentChange(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
@@ -208,7 +208,7 @@ func TestConfigStaleness_DetectsFileDeletion(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": true}`), 0o600))
@@ -232,7 +232,7 @@ func TestConfigStaleness_DetectsNewFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Don't create file initially
 	store := &ConfigStore{
@@ -287,7 +287,7 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
@@ -321,12 +321,12 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 // so the new config values are used rather than stale pre-reload values.
 func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Isolate from the host's global config so only test-provided
 	// providers are visible.
-	t.Setenv("CRUSH_GLOBAL_CONFIG", dir)
-	t.Setenv("CRUSH_GLOBAL_DATA", dir)
+	t.Setenv("ULTRA_GLOBAL_CONFIG", dir)
+	t.Setenv("ULTRA_GLOBAL_DATA", dir)
 	resetProviderState()
 	t.Cleanup(resetProviderState)
 
@@ -391,7 +391,7 @@ func TestSetConfigField_AutoReloads(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create initial config file with debug = false
 	initialConfig := `{"options": {"debug": false}}`
@@ -426,7 +426,7 @@ func TestRemoveConfigField_AutoReloads(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create initial config file with a custom option
 	initialConfig := `{"options": {"debug": true, "custom_field": "value"}}`
@@ -458,7 +458,7 @@ func TestSetConfigField_AutoReloadSkipsWhenNoWorkingDir(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create a store without working directory (like some test setups)
 	store := &ConfigStore{
@@ -483,7 +483,7 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create initial config with a provider that will trigger config modification during reload
 	// (simulating the anthropic OAuth token removal case)
@@ -521,7 +521,7 @@ func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create initial config file.
 	initialConfig := `{"options": {"debug": false}}`
@@ -550,7 +550,7 @@ func TestLoadTokenFromDisk_ReturnsNewerToken(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create config file with a newer token on disk
 	configContent := `{
@@ -585,7 +585,7 @@ func TestLoadTokenFromDisk_ReturnsNilWhenSameToken(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create config file with the same token
 	configContent := `{
@@ -633,7 +633,7 @@ func TestLoadTokenFromDisk_ReturnsNilWhenProviderMissing(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create config file without the hyper provider
 	configContent := `{"providers": {"openai": {"api_key": "test-key"}}}`
@@ -653,7 +653,7 @@ func TestLoadTokenFromDisk_ReturnsNilWhenOAuthMissing(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create config file with provider but no OAuth token
 	configContent := `{"providers": {"hyper": {"api_key": "test-key"}}}`
@@ -673,7 +673,7 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 
 	// Create config file with a newer token on disk
 	configContent := `{
@@ -734,7 +734,7 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "crush.json")
+	configPath := filepath.Join(dir, "ultra.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
 	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 

@@ -5,26 +5,26 @@ import (
 	"os"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/asx8678/ultra/internal/db"
+	"github.com/asx8678/ultra/internal/message"
+	"github.com/asx8678/ultra/internal/ui/list"
+	"github.com/asx8678/ultra/internal/ui/styles"
 )
 
 // BenchmarkResizeSession reproduces the resize re-render path over a real
-// session's messages. Point CRUSH_BENCH_SESSION at a full session id and
-// CRUSH_BENCH_DATADIR at the crush data dir (defaults to ./.crush).
+// session's messages. Point ULTRA_BENCH_SESSION at a full session id and
+// ULTRA_BENCH_DATADIR at the ultra data dir (defaults to ./.ultra).
 //
-//	CRUSH_BENCH_SESSION=e6368d820207a406 go test ./internal/ui/chat/ \
+//	ULTRA_BENCH_SESSION=e6368d820207a406 go test ./internal/ui/chat/ \
 //	  -run x -bench BenchmarkResizeSession -benchtime 20x -cpuprofile /tmp/cpu.out
 func BenchmarkResizeSession(b *testing.B) {
-	sessionID := os.Getenv("CRUSH_BENCH_SESSION")
+	sessionID := os.Getenv("ULTRA_BENCH_SESSION")
 	if sessionID == "" {
-		b.Skip("set CRUSH_BENCH_SESSION to a full session id")
+		b.Skip("set ULTRA_BENCH_SESSION to a full session id")
 	}
-	dataDir := os.Getenv("CRUSH_BENCH_DATADIR")
+	dataDir := os.Getenv("ULTRA_BENCH_DATADIR")
 	if dataDir == "" {
-		dataDir = ".crush"
+		dataDir = ".ultra"
 	}
 
 	ctx := context.Background()

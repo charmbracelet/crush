@@ -46,7 +46,7 @@ func IsKnownCustomProvider(providerType string) bool {
 
 // RegisteredProviderTypes returns the provider type strings that have a
 // registered enricher, sorted for stable output. These are the custom,
-// locally-discovered providers (e.g. ollama, omlx) that Crush accepts as
+// locally-discovered providers (e.g. ollama, omlx) that Ultra accepts as
 // a `type` value even though they are not catwalk provider types. The
 // schema generator uses this so the published enum stays in sync with the
 // registry instead of drifting from a hand-maintained list.

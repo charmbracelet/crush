@@ -43,7 +43,7 @@ func TestLitellmEnricher(t *testing.T) {
 
 		cfg := Config{
 			ID: "test-litellm",
-			// Base URL includes /v1 (as Crush configures it); the
+			// Base URL includes /v1 (as Ultra configures it); the
 			// enricher strips it so /model/info resolves at the root.
 			BaseURL: srv.URL + "/v1",
 			APIKey:  "test-key",

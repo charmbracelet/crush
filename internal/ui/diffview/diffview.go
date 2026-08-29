@@ -9,9 +9,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/asx8678/ultra/internal/ansiext"
+	"github.com/asx8678/ultra/internal/ui/xchroma"
 	"github.com/aymanbagabas/go-udiff"
-	"github.com/charmbracelet/crush/internal/ansiext"
-	"github.com/charmbracelet/crush/internal/ui/xchroma"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/zeebo/xxh3"
 )

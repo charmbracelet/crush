@@ -1,6 +1,6 @@
 // Counts the tab down and then asks the browser to close it.
 //
-// Whether the browser obeys is out of our hands. A tab opened by Crush
+// Whether the browser obeys is out of our hands. A tab opened by Ultra
 // rather than by script may only close itself while its session history
 // holds a single entry, so a plain redirect chain can close but a consent
 // screen the user had to click through usually cannot. Treat closing as a

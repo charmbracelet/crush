@@ -61,7 +61,7 @@ type Permissions struct {
 	fullscreen   bool // true when dialog is fullscreen
 
 	permission     permission.PermissionRequest
-	selectedOption int // 0: Allow, 1: Allow for session, 2: Deny
+	selectedOption int // 0: Deny, 1: Allow once, 2: Allow for session
 
 	viewport      viewport.Model
 	viewportDirty bool // true when viewport content needs to be re-rendered
@@ -112,12 +112,12 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithHelp("tab", "next option"),
 		),
 		Select: key.NewBinding(
-			key.WithKeys("enter", "ctrl+y"),
+			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm"),
 		),
 		Allow: key.NewBinding(
 			key.WithKeys("a", "A", "ctrl+a"),
-			key.WithHelp("a", "allow"),
+			key.WithHelp("a", "allow once"),
 		),
 		AllowSession: key.NewBinding(
 			key.WithKeys("s", "S", "ctrl+s"),
@@ -304,11 +304,11 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 func (p *Permissions) selectCurrentOption() tea.Msg {
 	switch p.selectedOption {
 	case 0:
-		return p.respond(PermissionAllow)
-	case 1:
-		return p.respond(PermissionAllowForSession)
-	default:
 		return p.respond(PermissionDeny)
+	case 1:
+		return p.respond(PermissionAllow)
+	default:
+		return p.respond(PermissionAllowForSession)
 	}
 }
 
@@ -454,7 +454,8 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	// Tool info.
 	toolLine := p.renderToolName(contentWidth)
 
-	lines := []string{title, "", toolLine}
+	risk, impact := p.riskSummary()
+	lines := []string{title, "", p.renderKeyValue("Risk", risk, contentWidth), toolLine, p.renderKeyValue("Impact", impact, contentWidth)}
 
 	// Show generic Path only for tools that don't render their own file/path line.
 	switch p.permission.ToolName {
@@ -512,6 +513,25 @@ func (p *Permissions) renderKeyValue(key, value string, width int) string {
 	valueStr := valueStyle.Width(width - lipgloss.Width(keyStr) - 1).Render(" " + value)
 
 	return lipgloss.JoinHorizontal(lipgloss.Left, keyStr, valueStr)
+}
+
+func (p *Permissions) riskSummary() (string, string) {
+	name := p.permission.ToolName
+	switch name {
+	case tools.ViewToolName, tools.LSToolName:
+		return "READ ONLY", "Reads data from this workspace."
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ReplaceSymbolToolName, tools.DownloadToolName:
+		return "WRITES FILE", "May create or modify files in this workspace."
+	case tools.BashToolName:
+		return "EXECUTES COMMAND", "Runs a local process that may modify files or system state."
+	case tools.FetchToolName, tools.AgenticFetchToolName:
+		return "NETWORK ACCESS", "Connects to an external service and may share request data."
+	default:
+		if strings.HasPrefix(name, "mcp_") {
+			return "EXTERNAL TOOL", "Invokes an external MCP tool with the displayed parameters."
+		}
+		return "TOOL ACCESS", "Allows the agent to perform the displayed operation."
+	}
 }
 
 func (p *Permissions) renderToolName(width int) string {
@@ -762,9 +782,9 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 
 func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 	buttons := []common.ButtonOpts{
-		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
-		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
-		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2},
+		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 0},
+		{Text: "Allow once", UnderlineIndex: 0, Selected: p.selectedOption == 1},
+		{Text: "Allow for session", UnderlineIndex: 10, Selected: p.selectedOption == 2},
 	}
 
 	content := common.ButtonGroup(p.com.Styles, buttons, "  ")

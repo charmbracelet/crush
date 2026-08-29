@@ -63,6 +63,7 @@ func (h *header) drawHeader(
 	width int,
 	lspErrorCount int,
 	hyperCredits *int,
+	yolo bool,
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
@@ -92,6 +93,7 @@ func (h *header) drawHeader(
 		detailsOpen,
 		availDetailWidth,
 		hyperCredits,
+		yolo,
 	)
 
 	remainingWidth := width -
@@ -124,10 +126,15 @@ func renderHeaderDetails(
 	detailsOpen bool,
 	availWidth int,
 	hyperCredits *int,
+	yolo bool,
 ) string {
 	t := com.Styles
 
-	var parts []string
+	mode := "SAFE"
+	if yolo {
+		mode = "YOLO ON"
+	}
+	parts := []string{t.Header.Keystroke.Render(mode)}
 
 	if lspErrorCount > 0 {
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))

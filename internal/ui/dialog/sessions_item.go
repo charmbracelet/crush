@@ -107,7 +107,14 @@ func (s *SessionItem) Cursor() *tea.Cursor {
 
 // InfoText returns the secondary text shown on the right of the item.
 func (s *SessionItem) InfoText() string {
-	return humanize.Time(time.Unix(s.UpdatedAt, 0))
+	parts := []string{humanize.Time(time.Unix(s.UpdatedAt, 0))}
+	if s.MessageCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d msgs", s.MessageCount))
+	}
+	if s.Cost > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", s.Cost))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // SetHideInfo controls whether the timestamp info column is shown. The

@@ -139,7 +139,7 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	if m.activeInline != nil {
+	if m.activeInline != nil || (m.chat != nil && m.chat.Len() > 0 && !m.chat.Follow()) {
 		return nil
 	}
 	if m.height < pillsHeightReasonableTerminalHeight {

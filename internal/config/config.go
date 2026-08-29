@@ -271,8 +271,14 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	CompactMode            bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	CompactWidth           int    `json:"compact_width,omitempty" jsonschema:"description=Terminal width below which compact mode is enabled,default=120,minimum=40"`
+	CompactHeight          int    `json:"compact_height,omitempty" jsonschema:"description=Terminal height below which compact mode is enabled,default=30,minimum=10"`
+	CompactEditorMaxHeight int    `json:"compact_editor_max_height,omitempty" jsonschema:"description=Maximum prompt editor height in compact mode,default=6,minimum=3"`
+	ReducedMotion          bool   `json:"reduced_motion,omitempty" jsonschema:"description=Reduce nonessential TUI animation,default=false"`
+	ASCII                  bool   `json:"ascii,omitempty" jsonschema:"description=Prefer ASCII-compatible UI symbols,default=false"`
+	HighContrast           bool   `json:"high_contrast,omitempty" jsonschema:"description=Prefer high-contrast UI styling,default=false"`
+	DiffMode               string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
 	// Here we can add themes later or any TUI related options
 	//
 

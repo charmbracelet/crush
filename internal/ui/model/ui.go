@@ -1365,11 +1365,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			slog.Error("Error reported", "error", msg.Msg)
 		}
 		m.status.SetInfoMsg(msg)
-		ttl := msg.TTL
-		if ttl <= 0 {
-			ttl = DefaultStatusTTL
+		if msg.Type != util.InfoTypeError {
+			ttl := msg.TTL
+			if ttl <= 0 {
+				ttl = DefaultStatusTTL
+			}
+			cmds = append(cmds, clearInfoMsgCmd(ttl))
 		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case workspace.ConnectionEvent:
 		cmds = append(cmds, m.handleConnectionEvent(msg)...)
 	case util.ClearStatusMsg:
@@ -2933,6 +2935,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
+		m.yoloModeCached(),
 	)
 }
 
@@ -3434,11 +3437,23 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 
 // updateLayoutAndSize updates the layout and sizes of UI components.
 func (m *UI) updateLayoutAndSize() {
-	// Determine if we should be in compact mode
+	// Determine if we should be in compact mode.
+	compactWidth, compactHeight := compactModeWidthBreakpoint, compactModeHeightBreakpoint
+	if m.com != nil && m.com.Workspace != nil {
+		cfg := m.com.Config()
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			if cfg.Options.TUI.CompactWidth > 0 {
+				compactWidth = cfg.Options.TUI.CompactWidth
+			}
+			if cfg.Options.TUI.CompactHeight > 0 {
+				compactHeight = cfg.Options.TUI.CompactHeight
+			}
+		}
+	}
 	if m.state == uiChat {
 		if m.forceCompactMode {
 			m.isCompact = true
-		} else if m.width < compactModeWidthBreakpoint || m.height < compactModeHeightBreakpoint {
+		} else if m.width < compactWidth || m.height < compactHeight {
 			m.isCompact = true
 		} else {
 			m.isCompact = false
@@ -3549,6 +3564,15 @@ func (m *UI) updateSize() {
 
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.textarea.MaxHeight = TextareaMaxHeight
+	if m.isCompact {
+		m.textarea.MaxHeight = 6
+		if m.com != nil && m.com.Workspace != nil {
+			cfg := m.com.Config()
+			if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.CompactEditorMaxHeight >= 3 {
+				m.textarea.MaxHeight = cfg.Options.TUI.CompactEditorMaxHeight
+			}
+		}
+	}
 	m.textarea.SetWidth(m.layout.editor.Dx())
 	m.renderPills()
 
@@ -3703,7 +3727,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			uiLayout.header = headerRect
 			pillsHeight := m.pillsAreaHeight()
 			if pillsHeight > 0 {
-				pillsHeight = min(pillsHeight, mainRect.Dy())
+				pillsHeight = min(pillsHeight, max(1, mainRect.Dy()*3/10))
 				var chatRect, pillsRect image.Rectangle
 				layout.Vertical(
 					layout.Len(mainRect.Dy()-pillsHeight),
@@ -3743,7 +3767,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			uiLayout.sidebar = sideRect
 			pillsHeight := m.pillsAreaHeight()
 			if pillsHeight > 0 {
-				pillsHeight = min(pillsHeight, mainRect.Dy())
+				pillsHeight = min(pillsHeight, max(1, mainRect.Dy()*3/10))
 				var chatRect, pillsRect image.Rectangle
 				layout.Vertical(
 					layout.Len(mainRect.Dy()-pillsHeight),

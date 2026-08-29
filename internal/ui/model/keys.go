@@ -116,10 +116,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
 		),
-		ToggleYolo: key.NewBinding(
-			key.WithKeys("ctrl+y"),
-			key.WithHelp("ctrl+y", "toggle yolo"),
-		),
+		// YOLO mode is intentionally available only through the command palette.
+		ToggleYolo: key.NewBinding(key.WithDisabled()),
 	}
 
 	km.Editor.SendMessage = key.NewBinding(

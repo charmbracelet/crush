@@ -29,9 +29,9 @@ const (
 func (mt ModelType) String() string {
 	switch mt {
 	case ModelTypeLarge:
-		return "Large Task"
+		return "Main model"
 	case ModelTypeSmall:
-		return "Small Task"
+		return "Fast model"
 	default:
 		return "Unknown"
 	}

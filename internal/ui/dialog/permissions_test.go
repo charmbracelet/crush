@@ -78,12 +78,24 @@ func TestPermissions_EnterConfirmsSelection(t *testing.T) {
 	t.Parallel()
 
 	p := newTestPermissions(t)
-	p.selectedOption = 1 // Allow for session.
+	p.selectedOption = 2 // Allow for session.
 
 	action := p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	resp, ok := action.(ActionPermissionResponse)
 	require.True(t, ok)
 	require.Equal(t, PermissionAllowForSession, resp.Action)
+}
+
+func TestPermissions_DefaultEnterDenies(t *testing.T) {
+	t.Parallel()
+
+	p := newTestPermissions(t)
+	action := p.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	resp, ok := action.(ActionPermissionResponse)
+	require.True(t, ok)
+	require.Equal(t, PermissionDeny, resp.Action)
+
+	require.Nil(t, p.HandleMsg(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}))
 }
 
 // TestPermissions_EscapeDenies verifies that escape denies the request.

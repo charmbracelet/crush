@@ -1,6 +1,9 @@
 package dialog
 
 import (
+	"fmt"
+	"strings"
+
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/asx8678/ultra/internal/config"
@@ -128,10 +131,31 @@ func (m *ModelItem) ID() string {
 
 // Render implements ListItem.
 func (m *ModelItem) Render(width int) string {
-	var providerInfo string
-	if m.showProvider {
-		providerInfo = string(m.prov.Name)
+	info := []string{string(m.prov.Name)}
+	if m.model.ContextWindow > 0 {
+		context := fmt.Sprintf("%dK", m.model.ContextWindow/1000)
+		if m.model.ContextWindow < 1000 {
+			context = fmt.Sprintf("%d", m.model.ContextWindow)
+		}
+		info = append(info, context)
 	}
+	if m.model.CanReason {
+		info = append(info, "Reasoning")
+	}
+	if m.model.SupportsImages {
+		info = append(info, "Vision")
+	}
+	cost := (m.model.CostPer1MIn + m.model.CostPer1MOut) / 2
+	if cost > 0 {
+		costLabel := "$"
+		if cost >= 5 {
+			costLabel = "$$$"
+		} else if cost >= 1 {
+			costLabel = "$$"
+		}
+		info = append(info, costLabel)
+	}
+	providerInfo := strings.Join(info, " · ")
 	styles := ListItemStyles{
 		ItemBlurred:     m.t.Dialog.NormalItem,
 		ItemFocused:     m.t.Dialog.SelectedItem,

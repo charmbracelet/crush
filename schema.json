@@ -784,6 +784,39 @@
           "description": "Enable compact mode for the TUI interface",
           "default": false
         },
+        "compact_width": {
+          "type": "integer",
+          "minimum": 40,
+          "description": "Terminal width below which compact mode is enabled",
+          "default": 120
+        },
+        "compact_height": {
+          "type": "integer",
+          "minimum": 10,
+          "description": "Terminal height below which compact mode is enabled",
+          "default": 30
+        },
+        "compact_editor_max_height": {
+          "type": "integer",
+          "minimum": 3,
+          "description": "Maximum prompt editor height in compact mode",
+          "default": 6
+        },
+        "reduced_motion": {
+          "type": "boolean",
+          "description": "Reduce nonessential TUI animation",
+          "default": false
+        },
+        "ascii": {
+          "type": "boolean",
+          "description": "Prefer ASCII-compatible UI symbols",
+          "default": false
+        },
+        "high_contrast": {
+          "type": "boolean",
+          "description": "Prefer high-contrast UI styling",
+          "default": false
+        },
         "diff_mode": {
           "type": "string",
           "enum": [

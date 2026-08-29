@@ -135,6 +135,16 @@ func TestIsSafeReadOnly_Denied(t *testing.T) {
 		{"git external diff driver", "git diff --ext-diff"},
 		{"git diff writing output", "git diff --output=/tmp/x"},
 
+		// Backslash escapes must not smuggle a denied flag past the check:
+		// the shell strips the backslash before git sees the flag, so the
+		// literal text here is not the argv that runs.
+		{"git ext-diff with escaped flag", `git diff --ext\-diff`},
+		{"git output with escaped flag", `git diff --outpu\t=/tmp/x`},
+		{"git textconv with escaped flag", `git log --text\conv`},
+		{"date set with escaped flag", `date --se\t 2020-01-01`},
+		{"double-quoted escaped flag", `git diff "--ext\-diff"`},
+		{"escaped operand is not special-cased safe", `git diff head\er`},
+
 		// Commands that are simply not on the list.
 		{"rm", "rm -rf /tmp/pwned"},
 		{"curl", "curl https://example.com"},

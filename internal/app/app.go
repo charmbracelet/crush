@@ -492,6 +492,13 @@ func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) e
 	return nil
 }
 
+func (app *App) ReloadSkills(ctx context.Context) error {
+	if app.AgentCoordinator == nil {
+		return fmt.Errorf("agent configuration is missing")
+	}
+	return app.AgentCoordinator.ReloadSkills(ctx)
+}
+
 // overrideModelsForNonInteractive parses the model strings and temporarily
 // overrides the model configurations, then rebuilds the agent.
 // Format: "model-name" (searches all providers) or "provider/model-name".

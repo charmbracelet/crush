@@ -231,6 +231,13 @@ type Workspace interface {
 	MCPPendingAuth() []mcptools.PendingAuthServer
 	MCPAuthURL(name string) string
 
+	// MCPReconnect restarts a single MCP server by name. It reloads the
+	// config from disk so changes to crush.json (e.g., updated args or
+	// flags) are picked up, then re-resolves env vars (including
+	// OAuth/OIDC token refresh commands) and is the mechanism for
+	// refreshing expired credentials.
+	MCPReconnect(ctx context.Context, name string) error
+
 	// Events
 	Subscribe(program *tea.Program)
 	Shutdown()

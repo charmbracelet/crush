@@ -36,13 +36,13 @@ func extractAWSSSOURL(line string) string {
 // refreshAWSCredentials runs the provider's configured AWS SSO refresh
 // command (e.g. "aws sso login") on the machine that makes the Bedrock
 // calls, streaming the verification URL to the UI for display, then rebuilds
-// models so the AWS SDK re-reads the refreshed credentials. It returns nil to
-// signal that the failed request should be retried.
+// the caller's models so the AWS SDK re-reads the refreshed credentials. It
+// returns nil to signal that the failed request should be retried.
 //
 // The command runs here, in the coordinator, rather than in the UI dialog so
 // the refreshed credentials land where the model calls are made. This is
 // correct in both single-process and client/server deployments.
-func (c *coordinator) refreshAWSCredentials(ctx context.Context, providerCfg config.ProviderConfig) error {
+func (c *coordinator) refreshAWSCredentials(ctx context.Context, providerCfg config.ProviderConfig, refresh modelRefresher) error {
 	if c.notify == nil {
 		return errNoInteractiveAuth
 	}
@@ -79,11 +79,13 @@ func (c *coordinator) refreshAWSCredentials(ctx context.Context, providerCfg con
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	// Rebuild models so the AWS SDK credential chain re-reads the refreshed
-	// SSO cache on the next attempt.
-	if err := c.UpdateModels(runCtx); err != nil {
-		slog.Error("Failed to update models after AWS SSO refresh", "provider", providerCfg.ID, "error", err)
-		return err
+	// Rebuild the models so the AWS SDK credential chain re-reads the
+	// refreshed SSO cache on the next attempt.
+	if refresh != nil {
+		if err := refresh(runCtx); err != nil {
+			slog.Error("Failed to rebuild models after AWS SSO refresh", "provider", providerCfg.ID, "error", err)
+			return err
+		}
 	}
 	slog.Info("AWS SSO refresh complete, retrying request", "provider", providerCfg.ID)
 	return nil

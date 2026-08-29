@@ -182,6 +182,20 @@ definitions:
         description: |-
           OAuthToken is the persisted OAuth token for this server. It is
           managed internally and stored in the global data config.
+      sessionless:
+        description: |-
+          Sessionless marks a server that does not maintain an MCP session (it
+          never issues a Mcp-Session-Id). When true, Crush omits the
+          tools/prompts/resources list-changed handlers: the go-sdk opens a
+          SEP-2575 "subscriptions/listen" stream whenever any of those handlers
+          is set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)
+          answer that POST with 404 ("session not found"), which the SDK treats
+          as fatal. The cost is no live list-changed notifications from this
+          server.
+
+          When nil, Crush auto-detects a set of known sessionless servers (see
+          IsSessionless); set it explicitly to override that detection.
+        type: boolean
       timeout:
         type: integer
       type:
@@ -417,6 +431,8 @@ definitions:
         type: integer
       id:
         type: string
+      is_summary_message:
+        type: boolean
       model:
         type: string
       parts:
@@ -498,12 +514,22 @@ definitions:
         items:
           $ref: '#/definitions/proto.Attachment'
         type: array
+      auto_approve:
+        type: boolean
+      client_id:
+        type: string
+      large_model:
+        $ref: '#/definitions/config.SelectedModel'
+      non_interactive:
+        type: boolean
       prompt:
         type: string
       run_id:
         type: string
       session_id:
         type: string
+      small_model:
+        $ref: '#/definitions/config.SelectedModel'
     type: object
   proto.AgentSession:
     properties:
@@ -657,6 +683,14 @@ definitions:
       path:
         type: string
     type: object
+  proto.MCPAuthResponse:
+    properties:
+      auth_url:
+        description: |-
+          AuthURL is the OAuth authorization URL the user must visit, when
+          the flow is still in progress.
+        type: string
+    type: object
   proto.MCPClientInfo:
     properties:
       connected_at:
@@ -692,6 +726,13 @@ definitions:
   proto.MCPNameRequest:
     properties:
       name:
+        type: string
+    type: object
+  proto.MCPPendingAuthServer:
+    properties:
+      name:
+        type: string
+      url:
         type: string
     type: object
   proto.MCPPrompt:
@@ -1319,6 +1360,33 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Initialize agent
+      tags:
+      - agent
+  /workspaces/{id}/agent/runs/{rid}/cancel:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run ID
+        in: path
+        name: rid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Cancel agent run
       tags:
       - agent
   /workspaces/{id}/agent/sessions/{sid}:
@@ -2063,6 +2131,71 @@ paths:
       summary: Stop all LSP servers
       tags:
       - lsp
+  /workspaces/{id}/mcp/auth:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPNameRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.MCPAuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Authenticate an MCP server
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/auth-url:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP server name
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.MCPAuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get MCP OAuth authorization URL
+      tags:
+      - mcp
   /workspaces/{id}/mcp/docker/disable:
     post:
       parameters:
@@ -2143,6 +2276,34 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Get MCP prompt
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/pending-auth:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.MCPPendingAuthServer'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get MCP servers pending OAuth
       tags:
       - mcp
   /workspaces/{id}/mcp/prompts:

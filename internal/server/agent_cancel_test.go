@@ -225,3 +225,59 @@ func TestPostAgent_DetachesRequestContext(t *testing.T) {
 		return coord.ranCount.Load() == 1
 	}, 2*time.Second, 10*time.Millisecond)
 }
+
+// postAgentRun prompts with an explicit RunID so the run is addressable
+// by the run-cancel route.
+func postAgentRun(t *testing.T, c *controllerV1, wsID, sessionID, runID string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(proto.AgentMessage{SessionID: sessionID, RunID: runID, Prompt: "hi"})
+	require.NoError(t, err)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/workspaces/"+wsID+"/agent", bytes.NewReader(body))
+	req.SetPathValue("id", wsID)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c.handlePostWorkspaceAgent(rec, req)
+	return rec
+}
+
+func postRunCancel(t *testing.T, c *controllerV1, wsID, runID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		"/v1/workspaces/"+wsID+"/agent/runs/"+runID+"/cancel", nil)
+	req.SetPathValue("id", wsID)
+	req.SetPathValue("rid", runID)
+	rec := httptest.NewRecorder()
+	c.handlePostWorkspaceAgentRunCancel(rec, req)
+	return rec
+}
+
+// TestPostAgentRunCancel_EndsTheRun exercises the route a client uses to
+// end a run it owns: the dispatched run's context must be cancelled,
+// while cancelling a run the server has never heard of stays a success
+// so a client's cleanup can race normal completion.
+func TestPostAgentRunCancel_EndsTheRun(t *testing.T) {
+	t.Parallel()
+
+	coord := newRunCoordinator(func(ctx context.Context) error {
+		return ctx.Err()
+	})
+	c, wsID := buildAgentWorkspace(t, coord)
+
+	runID := uuid.New().String()
+	require.Equal(t, http.StatusAccepted, postAgentRun(t, c, wsID, "S1", runID).Code)
+
+	select {
+	case <-coord.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatched run was never entered")
+	}
+
+	require.Equal(t, http.StatusOK, postRunCancel(t, c, wsID, runID).Code)
+	require.Eventually(t, func() bool {
+		return coord.capturedCtx().Err() != nil
+	}, 2*time.Second, 10*time.Millisecond, "the cancel route must reach the dispatched run")
+
+	require.Equal(t, http.StatusOK, postRunCancel(t, c, wsID, uuid.New().String()).Code,
+		"cancelling an unknown run must succeed")
+	require.Equal(t, http.StatusNotFound, postRunCancel(t, c, "nope", runID).Code)
+}

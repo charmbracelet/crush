@@ -78,7 +78,14 @@ type Service interface {
 	// already been resolved or is unknown.
 	Deny(permission PermissionRequest) bool
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
+	// AutoApproveSession adds an auto-approval hold on a session, so
+	// every permission request in it is granted without prompting.
+	// Holds are counted: a session stays auto-approved until every
+	// holder has revoked.
 	AutoApproveSession(sessionID string)
+	// RevokeAutoApproveSession drops one auto-approval hold on a
+	// session. Revoking a session that has no hold is a no-op.
+	RevokeAutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
@@ -95,19 +102,19 @@ type PermissionKey struct {
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
-	notificationBroker    *pubsub.Broker[PermissionNotification]
-	workingDir            string
-	sessionPermissions    *csync.Map[PermissionKey, bool]
-	pendingRequests       *csync.Map[string, chan bool]
-	autoApproveSessions   map[string]bool
+	notificationBroker *pubsub.Broker[PermissionNotification]
+	workingDir         string
+	sessionPermissions *csync.Map[PermissionKey, bool]
+	pendingRequests    *csync.Map[string, chan bool]
+	// autoApproveSessions counts the outstanding auto-approval holds
+	// per session ID. It is a count rather than a flag so overlapping
+	// holders — two `crush run --continue` invocations resolve to the
+	// same session — cannot revoke each other's approval and hang the
+	// run that is still going.
+	autoApproveSessions   map[string]int
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
-
-	// used to make sure we only process one request at a time
-	requestMu       sync.Mutex
-	activeRequest   *PermissionRequest
-	activeRequestMu sync.Mutex
 }
 
 // resolve atomically removes the pending request entry for the given
@@ -124,8 +131,9 @@ type permissionService struct {
 // that lost to a Deny does not leak an auto-approve entry.
 //
 // All three public resolution methods (Grant, GrantPersistent, Deny)
-// route through this helper so multi-subscriber UIs can race safely:
-// the first caller wins, the rest become no-ops.
+// route through this helper, as does Request's own cancellation path,
+// so multi-subscriber UIs can race safely: the first caller wins, the
+// rest become no-ops.
 func (s *permissionService) resolve(permission PermissionRequest, granted, denied bool, onResolve func()) bool {
 	respCh, ok := s.pendingRequests.Take(permission.ID)
 	if !ok {
@@ -147,11 +155,6 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 	// so this send never blocks.
 	respCh <- granted
 
-	s.activeRequestMu.Lock()
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
-	s.activeRequestMu.Unlock()
 	return true
 }
 
@@ -201,16 +204,15 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
-
-	// tell the UI that a permission was requested
+	// Tell the UI a permission was requested. This happens before any
+	// of the checks below so that every request is visible the moment it
+	// is made, including one that ends up waiting on a human.
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: opts.ToolCallID,
 	})
 
 	s.autoApproveSessionsMu.RLock()
-	autoApprove := s.autoApproveSessions[opts.SessionID]
+	autoApprove := s.autoApproveSessions[opts.SessionID] > 0
 	s.autoApproveSessionsMu.RUnlock()
 
 	if autoApprove {
@@ -258,12 +260,17 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	s.activeRequestMu.Lock()
-	s.activeRequest = &permission
-	s.activeRequestMu.Unlock()
-
+	// Nothing is serialized from here on. Requests are registered by ID
+	// and answered by ID, so each one waits on its own channel: a
+	// request nobody answers blocks its own tool call and nothing else.
+	// This used to run under a workspace-wide mutex held across the
+	// human wait, which froze every other permission request in the
+	// workspace — including those of unrelated sessions — behind the
+	// unanswered one.
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
+	// Backstop only: both select arms below take the entry themselves,
+	// so this is a no-op unless a future exit path is added above them.
 	defer s.pendingRequests.Del(permission.ID)
 
 	// Publish the request
@@ -271,6 +278,14 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	select {
 	case <-ctx.Done():
+		// A cancelled run still owes its subscribers a terminal event.
+		// Without one, a client that queued this request keeps a dead
+		// entry — and possibly an open dialog — that nothing can
+		// resolve, so later live requests wait behind it and every
+		// answer to it is a no-op. resolve's Take is the single-winner
+		// rule: if a concurrent Grant or Deny already took the entry,
+		// this publishes nothing.
+		s.resolve(permission, false, true, nil)
 		return false, ctx.Err()
 	case granted := <-respCh:
 		return granted, nil
@@ -279,7 +294,17 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Lock()
-	s.autoApproveSessions[sessionID] = true
+	s.autoApproveSessions[sessionID]++
+	s.autoApproveSessionsMu.Unlock()
+}
+
+func (s *permissionService) RevokeAutoApproveSession(sessionID string) {
+	s.autoApproveSessionsMu.Lock()
+	if holds := s.autoApproveSessions[sessionID]; holds > 1 {
+		s.autoApproveSessions[sessionID] = holds - 1
+	} else {
+		delete(s.autoApproveSessions, sessionID)
+	}
 	s.autoApproveSessionsMu.Unlock()
 }
 
@@ -301,7 +326,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
 		workingDir:          workingDir,
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
-		autoApproveSessions: make(map[string]bool),
+		autoApproveSessions: make(map[string]int),
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}

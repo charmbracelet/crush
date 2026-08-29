@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -612,4 +613,222 @@ func TestPermissionService_ResolveIdempotency(t *testing.T) {
 			// good: no notification.
 		}
 	})
+}
+
+// TestPermissionService_AutoApproveRevoke pins the hold lifecycle a
+// non-interactive run depends on. The run takes a hold while it drives a
+// session and gives it back as it exits, so the service must prompt
+// again once the last holder is gone: the service can outlive the run
+// (another client keeps the workspace alive), and a stale hold would
+// silently grant every later request in that session. Holds are counted
+// so two overlapping runs on the same session cannot revoke each other's
+// approval.
+func TestPermissionService_AutoApproveRevoke(t *testing.T) {
+	t.Parallel()
+
+	// request never blocks for long: an auto-approved session answers
+	// immediately, and anything else is supposed to wait for a human
+	// who is not there, which the deadline reports.
+	request := func(t *testing.T, service Service, sessionID string) (bool, error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer cancel()
+		return service.Request(ctx, CreatePermissionRequest{
+			SessionID:   sessionID,
+			ToolCallID:  "call-" + sessionID,
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "test command",
+			Path:        "/tmp",
+		})
+	}
+
+	t.Run("revoked session waits for an answer again", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		service.AutoApproveSession("s1")
+		granted, err := request(t, service, "s1")
+		require.NoError(t, err)
+		assert.True(t, granted)
+
+		service.RevokeAutoApproveSession("s1")
+		granted, err = request(t, service, "s1")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.False(t, granted)
+	})
+
+	t.Run("overlapping holds survive one revoke", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		service.AutoApproveSession("s1")
+		service.AutoApproveSession("s1")
+
+		service.RevokeAutoApproveSession("s1")
+		granted, err := request(t, service, "s1")
+		require.NoError(t, err, "a second holder still wants this session approved")
+		assert.True(t, granted)
+
+		service.RevokeAutoApproveSession("s1")
+		granted, err = request(t, service, "s1")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.False(t, granted)
+	})
+
+	t.Run("revoke without a hold is a no-op", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		service.RevokeAutoApproveSession("s1")
+
+		// An unbalanced revoke must not go negative: a later hold has
+		// to take effect on its own.
+		service.AutoApproveSession("s1")
+		granted, err := request(t, service, "s1")
+		require.NoError(t, err)
+		assert.True(t, granted)
+	})
+}
+
+// TestPermissionService_ConcurrentRequestsAreIndependent pins the fix for
+// the workspace-wide freeze. Request used to hold one mutex from before
+// the "requested" notification until after the human answered, so a
+// single unanswered prompt stalled every other permission request in the
+// workspace — including those of unrelated sessions — and the waiting
+// requests were invisible: their notification had not been published
+// yet, so no dialog could ever appear for them.
+//
+// Both requests must now be published straight away and be answerable in
+// either order.
+func TestPermissionService_ConcurrentRequestsAreIndependent(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", false, nil)
+
+	requests := service.Subscribe(t.Context())
+
+	type verdict struct {
+		granted bool
+		err     error
+	}
+	results := make(map[string]chan verdict, 2)
+	for _, sessionID := range []string{"s1", "s2"} {
+		results[sessionID] = make(chan verdict, 1)
+		go func() {
+			granted, err := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:   sessionID,
+				ToolCallID:  "call-" + sessionID,
+				ToolName:    "bash",
+				Action:      "execute",
+				Description: "test command",
+				Path:        "/tmp",
+			})
+			results[sessionID] <- verdict{granted: granted, err: err}
+		}()
+	}
+
+	// Both requests must reach subscribers while both are still
+	// unanswered. Before the fix only the first was ever published.
+	published := make(map[string]PermissionRequest, 2)
+	for range 2 {
+		select {
+		case ev := <-requests:
+			published[ev.Payload.SessionID] = ev.Payload
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of 2 concurrent requests were published: %v", len(published), published)
+		}
+	}
+	require.Contains(t, published, "s1")
+	require.Contains(t, published, "s2")
+
+	// Answer the second one first: neither request depends on the other.
+	require.True(t, service.Deny(published["s2"]))
+	got := <-results["s2"]
+	require.NoError(t, got.err)
+	assert.False(t, got.granted)
+
+	require.True(t, service.Grant(published["s1"]))
+	got = <-results["s1"]
+	require.NoError(t, got.err)
+	assert.True(t, got.granted)
+}
+
+// TestPermissionService_CancellationPublishesTerminalNotification pins
+// the terminal event a cancelled request owes its subscribers. Request
+// used to return on ctx.Done() with no verdict, so a client that had
+// queued the request kept an entry — and possibly an open dialog — that
+// nothing could ever resolve: every later live request waited behind the
+// dead ones and every answer to them was a service no-op. With parallel
+// tool calls one cancelled run stranded a whole batch of them.
+func TestPermissionService_CancellationPublishesTerminalNotification(t *testing.T) {
+	t.Parallel()
+	service := NewPermissionService("/tmp", false, nil)
+
+	requests := service.Subscribe(t.Context())
+	notifications := service.SubscribeNotifications(t.Context())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	type verdict struct {
+		granted bool
+		err     error
+	}
+	done := make(chan verdict, 1)
+	go func() {
+		granted, err := service.Request(ctx, CreatePermissionRequest{
+			SessionID:   "s1",
+			ToolCallID:  "call-1",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "test command",
+			Path:        "/tmp",
+		})
+		done <- verdict{granted: granted, err: err}
+	}()
+
+	// Wait until the request is actually pending, so the cancellation
+	// lands on the human wait and not on one of the early returns.
+	var published PermissionRequest
+	select {
+	case ev := <-requests:
+		published = ev.Payload
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request was never published")
+	}
+
+	select {
+	case ev := <-notifications:
+		require.Equal(t, "call-1", ev.Payload.ToolCallID)
+		require.False(t, ev.Payload.Granted, "the initial notification carries no verdict")
+		require.False(t, ev.Payload.Denied, "the initial notification carries no verdict")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the initial notification was never published")
+	}
+
+	cancel()
+
+	got := <-done
+	require.ErrorIs(t, got.err, context.Canceled)
+	assert.False(t, got.granted)
+
+	select {
+	case ev := <-notifications:
+		assert.Equal(t, "call-1", ev.Payload.ToolCallID)
+		assert.True(t, ev.Payload.Denied, "cancellation must resolve the request")
+		assert.False(t, ev.Payload.Granted)
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation published no terminal notification")
+	}
+
+	// Single winner: the entry is gone, so a late answer from a client
+	// that still had the dialog up neither resolves the request nor
+	// publishes a second, contradicting verdict.
+	assert.False(t, service.Grant(published),
+		"a cancelled request must report itself already resolved")
+	select {
+	case ev := <-notifications:
+		t.Fatalf("a resolved request published a second verdict: %+v", ev.Payload)
+	case <-time.After(100 * time.Millisecond):
+	}
 }

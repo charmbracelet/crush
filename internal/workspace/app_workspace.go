@@ -49,11 +49,36 @@ func (w *AppWorkspace) CreateSession(ctx context.Context, title string) (session
 }
 
 func (w *AppWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {
-	return w.app.Sessions.Get(ctx, sessionID)
+	sess, err := w.app.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return session.Session{}, err
+	}
+	sess.Busy = w.sessionIsBusy(sessionID)
+	return sess, nil
 }
 
 func (w *AppWorkspace) ListSessions(ctx context.Context) ([]session.Session, error) {
-	return w.app.Sessions.List(ctx)
+	sessions, err := w.app.Sessions.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Stamp the runtime busy flag the session switcher renders. The
+	// client/server path gets it from the server, which computes it the
+	// same way on every session read.
+	for i := range sessions {
+		sessions[i].Busy = w.sessionIsBusy(sessions[i].ID)
+	}
+	return sessions, nil
+}
+
+// sessionIsBusy reports whether a run owns the session. It is false
+// before the coordinator exists, which is the only state in which no run
+// can be in flight.
+func (w *AppWorkspace) sessionIsBusy(sessionID string) bool {
+	if w.app.AgentCoordinator == nil {
+		return false
+	}
+	return w.app.AgentCoordinator.IsSessionBusy(sessionID)
 }
 
 func (w *AppWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
@@ -89,6 +114,16 @@ func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]me
 	// cold List would otherwise miss them at session-switch time.
 	if err := w.app.Messages.FlushAll(ctx); err != nil {
 		return nil, err
+	}
+	// A run that died with its process leaves assistant messages with no
+	// finish part and tool calls with no result, which the chat renders
+	// as a spinner forever. Repair that transcript before anyone reads
+	// it, but only while no run owns the session: the repair rewrites
+	// messages an in-flight turn is still streaming into.
+	if !w.sessionIsBusy(sessionID) {
+		if err := agent.RepairInterruptedSession(ctx, w.app.Messages, sessionID); err != nil {
+			return nil, err
+		}
 	}
 	return w.app.Messages.List(ctx, sessionID)
 }
@@ -232,10 +267,6 @@ func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 
 func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
-}
-
-func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
-	return w.app.InitCoderAgentNonInteractive(ctx)
 }
 
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {

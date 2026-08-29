@@ -218,6 +218,15 @@ type UI struct {
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
+	// pendingPermissions holds permission requests that arrived while a
+	// permissions dialog was already open, in arrival order. The
+	// permission service no longer serializes requests — one unanswered
+	// prompt must not freeze every other tool call in the workspace —
+	// so several can be pending at once while only one dialog fits on
+	// screen. The next one opens as soon as the current dialog goes
+	// away.
+	pendingPermissions []permission.PermissionRequest
+
 	// bangMode tracks whether the editor is in bang (!) shell mode.
 	bangMode     bool
 	bangWasEmpty bool // true when bang prompt became empty on last keystroke
@@ -975,7 +984,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[permission.PermissionNotification]:
-		m.handlePermissionNotification(msg.Payload)
+		if cmd := m.handlePermissionNotification(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
 		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -2076,7 +2087,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}))
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
-		m.dialog.CloseDialog(dialog.PermissionsID)
+		if cmd := m.closePermissionsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		switch msg.Action {
 		case dialog.PermissionAllow:
 			m.com.Workspace.PermissionGrant(msg.Permission)
@@ -4397,7 +4410,10 @@ func (m *UI) cancelAgent() tea.Cmd {
 	}
 
 	// Queued prompts pending: esc clears the queue. Decide from the cached
-	// count (event-driven) instead of a synchronous workspace probe.
+	// count (event-driven) instead of a synchronous workspace probe. This
+	// falls through to arming the cancel timer rather than returning, so
+	// esc esc stops the run whether or not a queue was in the way; before,
+	// the queue swallowed a press and the run kept going for a third.
 	if m.promptQueue > 0 {
 		m.com.Workspace.AgentClearQueue(m.session.ID)
 		m.promptQueue = 0
@@ -4407,7 +4423,6 @@ func (m *UI) cancelAgent() tea.Cmd {
 		// cannot land and repopulate the pill we just emptied.
 		m.invalidatePromptQueue()
 		m.updateLayoutAndSize()
-		return nil
 	}
 
 	// First escape press - set canceling state and start timer.
@@ -4580,10 +4595,16 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	return cmd
 }
 
-// openPermissionsDialog opens the permissions dialog for a permission request.
+// openPermissionsDialog shows a permission request, or queues it behind
+// the request already on screen. Only one permissions dialog fits, and
+// replacing the open one would leave its request with no way to be
+// answered: the tool call behind it would block until the run was
+// cancelled.
 func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
-	// Close any existing permissions dialog first.
-	m.dialog.CloseDialog(dialog.PermissionsID)
+	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
+		m.pendingPermissions = append(m.pendingPermissions, perm)
+		return nil
+	}
 
 	// Get diff mode from config.
 	var opts []dialog.PermissionsOption
@@ -4594,6 +4615,28 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	permDialog := dialog.NewPermissions(m.com, perm, opts...)
 	m.dialog.OpenDialogWithGrace(permDialog)
 	return nil
+}
+
+// closePermissionsDialog dismisses the open permissions dialog and shows
+// the next request that arrived while it was up.
+func (m *UI) closePermissionsDialog() tea.Cmd {
+	m.dialog.CloseDialog(dialog.PermissionsID)
+	if len(m.pendingPermissions) == 0 {
+		return nil
+	}
+	next := m.pendingPermissions[0]
+	m.pendingPermissions = m.pendingPermissions[1:]
+	return m.openPermissionsDialog(next)
+}
+
+// dropPendingPermission removes a queued request that was resolved
+// elsewhere — by another client, or by the run being cancelled — so its
+// dialog never opens.
+func (m *UI) dropPendingPermission(toolCallID string) {
+	m.pendingPermissions = slices.DeleteFunc(m.pendingPermissions,
+		func(p permission.PermissionRequest) bool {
+			return p.ToolCallID == toolCallID
+		})
 }
 
 // openBatchFormDialog activates a tabbed multi-question form in
@@ -4651,8 +4694,10 @@ func (m *UI) shouldCollapseQuestion(qf *dialog.QuestionForm) bool {
 	return m.focus != uiFocusEditor && m.height > 0 && qf.Height(m.editorContentWidth()) > m.height*2/5
 }
 
-// handlePermissionNotification updates tool items when permission state changes.
-func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
+// handlePermissionNotification updates tool items when permission state
+// changes. It returns a command when a resolution frees the permissions
+// dialog for the next queued request.
+func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) tea.Cmd {
 	if toolItem := m.chat.MessageItem(notification.ToolCallID); toolItem != nil {
 		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
 			if notification.Granted {
@@ -4667,13 +4712,21 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	// dismiss any open permissions dialog whose tool call ID matches. This
 	// covers the case where another client resolved the request remotely.
 	if !notification.Granted && !notification.Denied {
-		return
+		return nil
 	}
+	// An empty tool call ID identifies no request, so it must not be
+	// matched against a dialog or a queued request: it would dismiss
+	// whichever one happened to be missing an ID too.
+	if notification.ToolCallID == "" {
+		return nil
+	}
+	m.dropPendingPermission(notification.ToolCallID)
 	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
 		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
-			m.dialog.CloseDialog(dialog.PermissionsID)
+			return m.closePermissionsDialog()
 		}
 	}
+	return nil
 }
 
 // handleAgentNotification translates domain agent events into desktop

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -140,16 +139,19 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				break
 			}
 			if err != nil {
-				if ctx.Err() != nil {
-					return
+				// A read error other than a clean EOF is
+				// permanent: this bufio.Reader is bound to
+				// this response body, so the same read can
+				// never recover. Retrying it spun forever and
+				// kept the channel open, which hung every
+				// consumer that waits for the close —
+				// `crush run`'s stream loop and the TUI's
+				// resubscribe loop. Stop and let the deferred
+				// close(events) report the loss.
+				if ctx.Err() == nil {
+					slog.Error("Reading from events stream", "error", err)
 				}
-				slog.Error("Reading from events stream", "error", err)
-				select {
-				case <-time.After(time.Second * 2):
-				case <-ctx.Done():
-					return
-				}
-				continue
+				break
 			}
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
@@ -485,18 +487,19 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 
 // SendMessage sends a message to the agent for a workspace.
 //
-// When runID is non-empty it is echoed back on the resulting
-// proto.RunComplete event, giving the caller a unique correlator
-// for completion detection. Pass "" when the caller does not need
-// to distinguish its own turn's terminal event from any concurrent
-// turn on the same session (e.g. interactive TUI usage).
-func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, prompt string, attachments ...message.Attachment) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(proto.AgentMessage{
-		SessionID:   sessionID,
-		RunID:       runID,
-		Prompt:      prompt,
-		Attachments: proto.AttachmentsFromMessage(attachments),
-	}), http.Header{"Content-Type": []string{"application/json"}})
+// It takes the wire struct so every field the server understands is
+// reachable without another positional parameter: see proto.AgentMessage
+// for RunID (terminal-event correlation) and AutoApprove (a permission
+// hold for the turn the server is about to run).
+//
+// The caller's ClientID is always this client's, so it is stamped here
+// rather than asked for: it makes this process the owner of the run, and
+// the server ends the run when this client's claim on the workspace goes
+// away.
+func (c *Client) SendMessage(ctx context.Context, id string, msg proto.AgentMessage) error {
+	msg.ClientID = c.clientID
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(msg),
+		http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("failed to send message to agent: %w", err)
 	}
@@ -573,10 +576,11 @@ func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID
 	return nil
 }
 
-// InitiateAgentProcessing triggers agent initialization on the server.
-func (c *Client) InitiateAgentProcessing(ctx context.Context, id string, interactive bool) error {
-	body := jsonBody(proto.AgentInitRequest{Interactive: interactive})
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/init", id), nil, body, http.Header{"Content-Type": []string{"application/json"}})
+// InitiateAgentProcessing makes sure the workspace has an agent on the
+// server. It is idempotent: a workspace that already has a coordinator
+// keeps it, so reconnecting does not disturb runs in flight.
+func (c *Client) InitiateAgentProcessing(ctx context.Context, id string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/init", id), nil, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to initiate session agent processing: %w", err)
 	}
@@ -858,6 +862,27 @@ func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID st
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to cancel agent session: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// CancelAgentRun ends one dispatched agent run by its RunID, leaving the
+// session's other work alone. Use it instead of CancelAgentSession when
+// the caller owns a specific run — a `crush run` on its way out, say —
+// because a session can be shared with an attached TUI whose turn must
+// not be stopped too.
+//
+// Ending a run that already finished is not an error: the server has no
+// record of it and reports success, which is what makes this safe to
+// call unconditionally from a deferred cleanup racing normal completion.
+func (c *Client) CancelAgentRun(ctx context.Context, id string, runID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/runs/%s/cancel", id, runID), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to cancel agent run: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to cancel agent run: status code %d", rsp.StatusCode)
 	}
 	return nil
 }

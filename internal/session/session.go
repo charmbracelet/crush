@@ -60,6 +60,14 @@ type Session struct {
 	Todos            []Todo
 	CreatedAt        int64
 	UpdatedAt        int64
+
+	// Busy reports whether a run owns this session right now. It is
+	// runtime state, not persisted: the workspace layer stamps it from
+	// the agent coordinator when it lists or fetches sessions, and it is
+	// false everywhere else. The session switcher is the consumer — it
+	// is the one place the user looks to find out which session is
+	// working.
+	Busy bool
 }
 
 type Service interface {

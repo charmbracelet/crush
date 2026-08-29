@@ -128,12 +128,13 @@ type Backend struct {
 	retired map[string]struct{}
 	mu      sync.Mutex
 
-	cfg         *config.ConfigStore
-	ctx         context.Context
-	shutdownFn  ShutdownFunc
-	createGrace time.Duration
-	lingerDelay time.Duration
-	detachGrace time.Duration
+	cfg            *config.ConfigStore
+	ctx            context.Context
+	shutdownFn     ShutdownFunc
+	createGrace    time.Duration
+	lingerDelay    time.Duration
+	detachGrace    time.Duration
+	maxRunDuration time.Duration
 }
 
 // clientState tracks one client's claim on a workspace.
@@ -197,6 +198,17 @@ type Workspace struct {
 	closing bool
 	runWG   sync.WaitGroup
 
+	// runsMu guards runs. It is held only briefly, and never while a
+	// run's cancel func is called.
+	runsMu sync.Mutex
+	// runs holds the cancel handle of every dispatched agent run that
+	// has not yet returned, so a single run can be ended without
+	// ending the workspace or the rest of its session's work. Keyed by
+	// handle identity because a run's correlator is optional and its
+	// session may host several runs over time. Created lazily; see
+	// [Workspace.newRun].
+	runs map[*runHandle]struct{}
+
 	// clientsMu guards clients. It is held only briefly (no IO).
 	clientsMu sync.Mutex
 	// clients tracks each client's claim on this workspace. Refcount
@@ -259,15 +271,16 @@ func (w *Workspace) Shutdown() {
 // New creates a new [Backend].
 func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) *Backend {
 	return &Backend{
-		workspaces:  csync.NewMap[string, *Workspace](),
-		pathIndex:   make(map[string]string),
-		retired:     make(map[string]struct{}),
-		cfg:         cfg,
-		ctx:         ctx,
-		shutdownFn:  shutdownFn,
-		createGrace: DefaultCreateGrace,
-		lingerDelay: idleShutdownDelayFromEnv(),
-		detachGrace: durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
+		workspaces:     csync.NewMap[string, *Workspace](),
+		pathIndex:      make(map[string]string),
+		retired:        make(map[string]struct{}),
+		cfg:            cfg,
+		ctx:            ctx,
+		shutdownFn:     shutdownFn,
+		createGrace:    DefaultCreateGrace,
+		lingerDelay:    idleShutdownDelayFromEnv(),
+		detachGrace:    durationFromEnv("CRUSH_SERVER_DETACH_GRACE", DefaultDetachGrace),
+		maxRunDuration: durationFromEnv("CRUSH_SERVER_MAX_RUN_DURATION", DefaultMaxRunDuration),
 	}
 }
 
@@ -279,7 +292,7 @@ func idleShutdownDelayFromEnv() time.Duration {
 
 // durationFromEnv reads a whole number of seconds from the named
 // environment variable, falling back to def when it is unset or
-// unparseable. Zero is a meaningful value for both lifecycle windows it
+// unparseable. Zero is a meaningful value for every lifecycle window it
 // configures, so it is accepted.
 func durationFromEnv(name string, def time.Duration) time.Duration {
 	if v := os.Getenv(name); v != "" {
@@ -314,6 +327,14 @@ func (b *Backend) SetIdleShutdownDelay(d time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.lingerDelay = d
+}
+
+// SetMaxRunDuration overrides how long a dispatched agent run may live.
+// A value <= 0 removes the bound. Intended for tests.
+func (b *Backend) SetMaxRunDuration(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.maxRunDuration = d
 }
 
 // GetWorkspace retrieves a workspace by ID.
@@ -644,7 +665,7 @@ func (b *Backend) RetireClient(clientID string) error {
 		b.retired = make(map[string]struct{})
 	}
 	b.retired[clientID] = struct{}{}
-	var orphaned []*Workspace
+	var orphaned, deprived []*Workspace
 	for _, ws := range b.workspaces.Seq2() {
 		ws.clientsMu.Lock()
 		if cs, ok := ws.clients[clientID]; ok {
@@ -652,6 +673,7 @@ func (b *Backend) RetireClient(clientID string) error {
 				cs.holdTimer.Stop()
 			}
 			delete(ws.clients, clientID)
+			deprived = append(deprived, ws)
 			if len(ws.clients) == 0 {
 				orphaned = append(orphaned, ws)
 			}
@@ -660,6 +682,12 @@ func (b *Backend) RetireClient(clientID string) error {
 	}
 	b.mu.Unlock()
 
+	// The client's claim is gone, so nothing is waiting on the runs it
+	// asked for. Done outside b.mu: cancelling reaches into a run's
+	// context tree, which must not happen under a backend lock.
+	for _, ws := range deprived {
+		ws.cancelClientRuns(clientID, reasonClientGone)
+	}
 	for _, ws := range orphaned {
 		b.teardown(ws)
 	}
@@ -719,6 +747,10 @@ func (b *Backend) newHeldClient(ws *Workspace, clientID, sessionID string, grace
 // expireHold is the body of the grace timer. It runs in its own
 // goroutine and races against AttachClient/releaseHold; the timer
 // stays valid only while the entry's holdTimer still points at it.
+//
+// This is also the reaper for a client that asked for a run and never
+// came back: losing the claim ends the runs the client owned, whether or
+// not other clients keep the workspace alive.
 func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState) {
 	ws.clientsMu.Lock()
 	cs, ok := ws.clients[clientID]
@@ -730,6 +762,7 @@ func (b *Backend) expireHold(ws *Workspace, clientID string, timer *clientState)
 	delete(ws.clients, clientID)
 	teardown := len(ws.clients) == 0
 	ws.clientsMu.Unlock()
+	ws.cancelClientRuns(clientID, reasonClientGone)
 	if teardown {
 		b.teardown(ws)
 	}
@@ -746,17 +779,22 @@ func (b *Backend) releaseHoldLocked(ws *Workspace, clientID string) {
 		cs.holdTimer.Stop()
 		cs.holdTimer = nil
 	}
-	teardown := false
+	teardown, gone := false, false
 	if cs.streams == 0 {
 		delete(ws.clients, clientID)
+		gone = true
 		teardown = len(ws.clients) == 0
 	} else {
 		// The client gave up its claim while streams are still open, which
 		// is what a clean exit looks like. Remember it so the final detach
-		// skips the reconnect grace.
+		// skips the reconnect grace. The runs it owns keep going until
+		// that final detach: the client is still listening.
 		cs.released = true
 	}
 	ws.clientsMu.Unlock()
+	if gone {
+		ws.cancelClientRuns(clientID, reasonClientGone)
+	}
 	if teardown {
 		b.teardown(ws)
 	}
@@ -776,22 +814,28 @@ func (b *Backend) detachStream(ws *Workspace, clientID string) {
 	if cs.streams > 0 {
 		cs.streams--
 	}
-	teardown := false
+	teardown, gone := false, false
 	if cs.streams == 0 && cs.holdTimer == nil {
 		if grace > 0 && !cs.released {
 			// The stream dropped without the client releasing its claim, so
 			// treat it as an interruption rather than an exit: hold the
 			// workspace under a timer long enough for the client's
-			// reconnect to re-attach (AttachClient stops the timer).
+			// reconnect to re-attach (AttachClient stops the timer). The
+			// runs the client owns survive the same window, so a momentary
+			// drop does not throw away a turn in progress.
 			cs.holdTimer = time.AfterFunc(grace, func() {
 				b.expireHold(ws, clientID, cs)
 			})
 		} else {
 			delete(ws.clients, clientID)
+			gone = true
 			teardown = len(ws.clients) == 0
 		}
 	}
 	ws.clientsMu.Unlock()
+	if gone {
+		ws.cancelClientRuns(clientID, reasonClientGone)
+	}
 	if teardown {
 		b.teardown(ws)
 	}

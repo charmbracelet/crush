@@ -60,7 +60,11 @@ type App struct {
 	Questions   question.Service
 	FileTracker filetracker.Service
 
+	// AgentCoordinator is built once per workspace and never replaced.
+	// See InitCoderAgent. agentInitMu makes that check-and-set atomic
+	// against concurrent client attaches.
 	AgentCoordinator agent.Coordinator
+	agentInitMu      sync.Mutex
 
 	LSPManager *lsp.Manager
 
@@ -267,17 +271,25 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
 
-	// Re-initialize the coder agent without interactive-only tools.
-	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
-		return fmt.Errorf("failed to reinitialize agent for non-interactive mode: %w", err)
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// Mark the whole run non-interactive. Nobody here can answer an
+	// interactive tool, and the run gets a single shot at the tool
+	// palette, so the coordinator has to know before it dispatches.
+	// This used to be done by rebuilding the coordinator without
+	// interactive-only tools; the coordinator is now built once per
+	// workspace and the distinction belongs to the run.
+	ctx = agent.WithNonInteractive(ctx)
+
+	// The models this run asks for. They ride on the run's context
+	// rather than on workspace config, so they apply to this run only.
+	var largeSel, smallSel *config.SelectedModel
 	if largeModel != "" || smallModel != "" {
-		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
-			return fmt.Errorf("failed to override models: %w", err)
+		var err error
+		largeSel, smallSel, err = app.resolveModelsForNonInteractive(largeModel, smallModel)
+		if err != nil {
+			return fmt.Errorf("failed to resolve models: %w", err)
 		}
 	}
 
@@ -291,7 +303,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.ThemeForProvider(app.config.Config().Models[config.SelectedModelTypeLarge].Provider)
+		largeProvider := app.config.Config().Models[config.SelectedModelTypeLarge].Provider
+		if largeSel != nil {
+			largeProvider = largeSel.Provider
+		}
+		t := styles.ThemeForProvider(largeProvider)
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,
@@ -315,13 +331,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// MCP initialization to settle before reading MCP tools. The coordinator
 	// waits again for the same reason (it is the gate the client/server path
 	// goes through); doing it here too surfaces the failure before we create a
-	// session, and lets the UpdateModels below see every MCP tool.
+	// session, and lets the run's tool refresh see every MCP tool.
 	if err := mcp.WaitForInit(ctx); err != nil {
 		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
-
-	// force update of agent models before running so mcp tools are loaded
-	app.AgentCoordinator.UpdateModels(ctx)
 
 	defer stopSpinner()
 
@@ -336,17 +349,23 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		// model/provider from the last assistant message in the
 		// session, provided it is still available.
 		if largeModel == "" && smallModel == "" {
-			if err := app.restoreModelFromSession(ctx, sess.ID); err != nil {
+			large, small, err := app.restoreModelFromSession(ctx, sess.ID)
+			if err != nil {
 				slog.Warn("Failed to restore model from session", "error", err)
+			} else {
+				largeSel, smallSel = large, small
 			}
 		}
 	} else {
 		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
 
-	// Automatically approve all permission requests for this non-interactive
-	// session.
-	app.Permissions.AutoApproveSession(sess.ID)
+	// Non-interactive runs have nobody to answer permission prompts, so
+	// ask the run itself to grant them. The agent holds the approval for
+	// the turn and gives it back when the turn ends, so it cannot outlive
+	// the run — the same mechanism the client/server path uses.
+	ctx = agent.WithAutoApprove(ctx)
+	ctx = agent.WithRequestedModels(ctx, largeSel, smallSel)
 
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)
@@ -445,103 +464,105 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 }
 
 // restoreModelFromSession reads the last assistant message in the
-// session and, if it used a different provider/model than the current
-// config, overrides the preferred model in-memory (non-persistent)
-// provided the provider/model is still available. This ensures that
-// continuing a session uses the same model that produced the last
-// response.
-func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) error {
+// session and returns the model pair the continued run should use, so
+// continuing a session answers on the same model that produced the last
+// response. It returns nils when there is nothing to restore: no
+// assistant message, the same model as the workspace's, or a
+// provider/model that is no longer available.
+//
+// It writes nothing. The model belongs to the run, so restoring one
+// session's model must not change the model of anything else sharing the
+// workspace.
+func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) (large, small *config.SelectedModel, err error) {
 	lastMsg, err := app.Messages.GetLastAssistantMessage(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil
+			return nil, nil, nil
 		}
-		return fmt.Errorf("failed to get last assistant message: %w", err)
+		return nil, nil, fmt.Errorf("failed to get last assistant message: %w", err)
 	}
 	if lastMsg.Provider == "" || lastMsg.Model == "" {
-		return nil
+		return nil, nil, nil
 	}
 
 	cfg := app.config.Config()
 	currentLarge := cfg.Models[config.SelectedModelTypeLarge]
 	if currentLarge.Provider == lastMsg.Provider && currentLarge.Model == lastMsg.Model {
-		return nil
+		return nil, nil, nil
 	}
 
 	if !cfg.IsModelAvailable(lastMsg.Provider, lastMsg.Model) {
 		slog.Debug("Skipping model restoration: provider/model not available",
 			"provider", lastMsg.Provider,
 			"model", lastMsg.Model)
-		return nil
+		return nil, nil, nil
 	}
 
-	app.config.OverridePreferredModel(config.SelectedModelTypeLarge, config.SelectedModel{
+	large = &config.SelectedModel{
 		Provider: lastMsg.Provider,
 		Model:    lastMsg.Model,
-	})
+	}
 	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 		smallModel := app.GetDefaultSmallModel(lastMsg.Provider)
-		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallModel)
-	}
-	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
-		return fmt.Errorf("failed to update agent models: %w", err)
+		small = &smallModel
 	}
 	slog.Info("Restored model from session",
 		"provider", lastMsg.Provider,
 		"model", lastMsg.Model)
-	return nil
+	return large, small, nil
 }
 
-// overrideModelsForNonInteractive parses the model strings and temporarily
-// overrides the model configurations, then rebuilds the agent.
-// Format: "model-name" (searches all providers) or "provider/model-name".
-// Model matching is case-insensitive.
-// If largeModel is provided but smallModel is not, the small model defaults to
-// the provider's default small model.
-func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
+// resolveModelsForNonInteractive parses the model strings and returns the
+// pair the run must use. Format: "model-name" (searches all providers) or
+// "provider/model-name". Model matching is case-insensitive. If
+// largeModel is provided but smallModel is not, the small model defaults
+// to the provider's default small model.
+//
+// The pair rides on the run's context (agent.WithRequestedModels), not on
+// workspace config: a one-shot `crush run -m` must not change what the
+// rest of the workspace runs on.
+func (app *App) resolveModelsForNonInteractive(largeModel, smallModel string) (large, small *config.SelectedModel, err error) {
 	providers := app.config.Config().Providers.Copy()
 
 	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	var largeProviderID string
 
-	// Override large model.
 	if largeModel != "" {
 		found, err := validateMatches(largeMatches, largeModel, "large")
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		largeProviderID = found.provider
 		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		app.config.OverridePreferredModel(config.SelectedModelTypeLarge, config.SelectedModel{
+		large = &config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
-		})
+		}
 	}
 
-	// Override small model.
 	switch {
 	case smallModel != "":
 		found, err := validateMatches(smallMatches, smallModel, "small")
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, config.SelectedModel{
+		small = &config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
-		})
+		}
 
 	case largeModel != "":
 		// No small model specified, but large model was - use provider's default.
 		smallCfg := app.GetDefaultSmallModel(largeProviderID)
-		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, smallCfg)
+		small = &smallCfg
 	}
 
-	return app.AgentCoordinator.UpdateModels(ctx)
+	return large, small, nil
 }
 
 // GetDefaultSmallModel returns the default small model for the given
@@ -665,23 +686,33 @@ func setupSubscriberMustDeliver[T any](
 	})
 }
 
+// InitCoderAgent builds the coder agent coordinator for this workspace,
+// once. A workspace keeps the coordinator it already has.
+//
+// Everything that arbitrates a session lives on the coordinator
+// instance: Cancel, IsBusy/IsSessionBusy, the active-request map, the
+// per-session dispatch mutex and the prompt queue. Replacing it would
+// leave runs already in flight on the old instance, where cancel and
+// busy state can no longer reach them, and would let a new prompt start
+// a second concurrent turn on a session that is already streaming.
+// Every client attach and every client reconnect calls this, so it has
+// to be a no-op after the first success.
+//
+// Whether a run is interactive is a property of the run, not of the
+// coordinator: see agent.WithNonInteractive. One workspace serves an
+// attached TUI and headless `crush run` prompts at the same time.
 func (app *App) InitCoderAgent(ctx context.Context) error {
-	return app.initCoderAgent(ctx, true)
-}
+	app.agentInitMu.Lock()
+	defer app.agentInitMu.Unlock()
+	if app.AgentCoordinator != nil {
+		return nil
+	}
 
-// InitCoderAgentNonInteractive initializes the coder agent without
-// interactive-only tools (e.g. question).
-func (app *App) InitCoderAgentNonInteractive(ctx context.Context) error {
-	return app.initCoderAgent(ctx, false)
-}
-
-func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
-	var err error
-	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
+	coordinator, err := agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:      app.config,
 		Sessions:    app.Sessions,
 		Messages:    app.Messages,
@@ -693,12 +724,12 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Notify:      app.agentNotifications,
 		RunComplete: app.runCompletions,
 		Skills:      app.Skills,
-		Interactive: interactive,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+	app.AgentCoordinator = coordinator
 	return nil
 }
 

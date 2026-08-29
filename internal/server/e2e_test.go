@@ -630,3 +630,29 @@ func TestE2E_ShutdownCallbackFiresWhenLastClientLeaves(t *testing.T) {
 	r.Body.Close()
 	require.Equal(t, http.StatusNotFound, r.StatusCode)
 }
+
+// TestE2E_WorkspaceTeardownEndsSSEStream pins the server half of the
+// `crush run` outcome contract: when the workspace's event broker goes
+// away — which is what [app.App.Shutdown] does as the last claim drops
+// — the SSE handler must end the response instead of parking on a dead
+// channel. The client turns that end-of-stream into a closed event
+// channel, and that is the only way a non-interactive run learns its
+// stream died instead of waiting for a terminal event that can never
+// arrive.
+func TestE2E_WorkspaceTeardownEndsSSEStream(t *testing.T) {
+	t.Parallel()
+	h := newE2EHarness(t)
+
+	evc, kill := h.subscribeSSE(t, t.Context(), h.workspace.ID, uuid.New().String())
+	t.Cleanup(kill)
+	h.waitForAttached(t, 1)
+
+	h.app.ShutdownForTest()
+
+	select {
+	case ev, ok := <-evc:
+		require.False(t, ok, "SSE stream must end when the event broker is gone, got %v", ev)
+	case <-time.After(3 * time.Second):
+		require.Fail(t, "SSE stream stayed open after the workspace was torn down")
+	}
+}

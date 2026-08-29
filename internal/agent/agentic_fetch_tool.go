@@ -147,19 +147,24 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %s", err)
 			}
 
-			_, small, err := c.buildAgentModels(ctx, true)
+			// Fetch analysis never needs the large model, so this
+			// sub-agent runs the run's small model in both slots. The
+			// selection still comes from the run that asked for the
+			// fetch, not from the workspace's config.
+			selection, err := c.runSelection(ctx)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			selection.Large = selection.Small
+			models, err := c.buildRunModels(ctx, selection, true)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
 			}
+			small := models.Small()
 
 			systemPrompt, err := promptTemplate.Build(ctx, small.Model.Provider(), small.Model.Model(), c.cfg)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %s", err)
-			}
-
-			smallProviderCfg, ok := c.cfg.Config().Providers.Get(small.ModelCfg.Provider)
-			if !ok {
-				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
 
 			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
@@ -181,25 +186,30 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			agent := NewSessionAgent(SessionAgentOptions{
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)
 				SmallModel:           small,
-				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 				SystemPrompt:         systemPrompt,
 				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 				IsYolo:               c.permissions.SkipRequests(),
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,
+				Permissions:          c.permissions,
+				Ownership:            c.ownership,
 			})
 
 			return c.runSubAgent(ctx, subAgentParams{
 				Agent:          agent,
+				Models:         models,
 				SessionID:      validationResult.SessionID,
 				AgentMessageID: validationResult.AgentMessageID,
 				ToolCallID:     call.ID,
 				Prompt:         fullPrompt,
 				SessionTitle:   "Fetch Analysis",
-				SessionSetup: func(sessionID string) {
-					c.permissions.AutoApproveSession(sessionID)
-				},
+				// The fetch turn reads a scratch copy of a page in a
+				// temp dir, so it is always approved — the user already
+				// approved the `agentic_fetch` call itself. Binding the
+				// hold to the child turn is what gives it back: the
+				// previous session-setup hold was never revoked.
+				AutoApprove: true,
 			})
 		},
 	), nil

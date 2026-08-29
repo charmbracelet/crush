@@ -105,9 +105,16 @@ func (s *SessionItem) Cursor() *tea.Cursor {
 	return s.updateTitleInput.Cursor()
 }
 
-// InfoText returns the secondary text shown on the right of the item.
+// InfoText returns the secondary text shown on the right of the item. A
+// busy session is marked here rather than in the title because the
+// title carries the fuzzy-match highlight offsets, which any prefix
+// would shift.
 func (s *SessionItem) InfoText() string {
-	return humanize.Time(time.Unix(s.UpdatedAt, 0))
+	age := humanize.Time(time.Unix(s.UpdatedAt, 0))
+	if s.Busy {
+		return "busy · " + age
+	}
+	return age
 }
 
 // SetHideInfo controls whether the timestamp info column is shown. The

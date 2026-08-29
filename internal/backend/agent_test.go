@@ -2,6 +2,8 @@ package backend
 
 import (
 	"context"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,18 +19,24 @@ import (
 
 // blockingCoordinator is a minimal agent.Coordinator whose RunAccepted
 // blocks until release is closed. It records that RunAccepted was
-// entered so tests can observe the dispatched goroutine. Every other
-// method returns a zero value.
+// entered so tests can observe the dispatched goroutine, reports the
+// sessions it is running as busy, and records the cancels it receives.
+// Every other method returns a zero value.
 type blockingCoordinator struct {
 	entered  chan struct{}
 	release  chan struct{}
 	runCount atomic.Int32
+
+	mu       sync.Mutex
+	running  map[string]bool
+	canceled []string
 }
 
 func newBlockingCoordinator() *blockingCoordinator {
 	return &blockingCoordinator{
 		entered: make(chan struct{}, 1),
 		release: make(chan struct{}),
+		running: make(map[string]bool),
 	}
 }
 
@@ -38,6 +46,9 @@ func (c *blockingCoordinator) Run(ctx context.Context, sessionID, prompt string,
 
 func (c *blockingCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	c.runCount.Add(1)
+	c.mu.Lock()
+	c.running[sessionID] = true
+	c.mu.Unlock()
 	select {
 	case c.entered <- struct{}{}:
 	default:
@@ -47,17 +58,41 @@ func (c *blockingCoordinator) RunAccepted(ctx context.Context, accept *agent.Acc
 }
 
 func (c *blockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
-func (c *blockingCoordinator) Cancel(string)                                     {}
-func (c *blockingCoordinator) CancelAll()                                        {}
-func (c *blockingCoordinator) IsBusy() bool                                      { return false }
-func (c *blockingCoordinator) IsSessionBusy(string) bool                         { return false }
-func (c *blockingCoordinator) QueuedPrompts(string) int                          { return 0 }
-func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
-func (c *blockingCoordinator) ClearQueue(string)                                 {}
-func (c *blockingCoordinator) Summarize(context.Context, string) error           { return nil }
-func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
-func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
-func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
+
+func (c *blockingCoordinator) Cancel(sessionID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.canceled = append(c.canceled, sessionID)
+}
+
+// cancels returns the sessions Cancel was called for, in order.
+func (c *blockingCoordinator) cancels() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.canceled)
+}
+
+func (c *blockingCoordinator) CancelAll() {}
+
+func (c *blockingCoordinator) IsBusy() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.running) > 0
+}
+
+func (c *blockingCoordinator) IsSessionBusy(sessionID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.running[sessionID]
+}
+
+func (c *blockingCoordinator) QueuedPrompts(string) int                      { return 0 }
+func (c *blockingCoordinator) QueuedPromptsList(string) []string             { return nil }
+func (c *blockingCoordinator) ClearQueue(string)                             {}
+func (c *blockingCoordinator) Summarize(context.Context, string) error       { return nil }
+func (c *blockingCoordinator) Model() agent.Model                            { return agent.Model{} }
+func (c *blockingCoordinator) UpdateModels(context.Context) error            { return nil }
+func (c *blockingCoordinator) GenerateTitle(context.Context, string, string) {}
 
 // insertAgentWorkspace installs a synthetic workspace with the given
 // coordinator (or none) and a workspace run context, mirroring the
@@ -161,4 +196,53 @@ func TestSendMessage_SuccessIncrementsRunWG(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("runWG.Wait did not complete after the run returned")
 	}
+}
+
+// TestInitAgent_KeepsRunningWorkReachable pins the workspace side of the
+// runaway-session fix. POST /agent/init used to replace the workspace's
+// coordinator on every call, and every client attach and every client
+// reconnect calls it. Cancel, busy state, the active-request map and the
+// per-session dispatch guard all live on the coordinator instance, so a
+// replacement left in-flight runs unreachable: "I told it to stop and it
+// did not stop", plus a second concurrent turn on a session that was
+// already streaming.
+func TestInitAgent_KeepsRunningWorkReachable(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	coord := newBlockingCoordinator()
+	ws := insertAgentWorkspace(t, b, coord)
+
+	require.NoError(t, b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"}))
+	select {
+	case <-coord.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatched goroutine never entered RunAccepted")
+	}
+
+	// A second client attaches while S1 is streaming.
+	require.NoError(t, b.InitAgent(t.Context(), ws.ID))
+	require.Same(t, coord, ws.AgentCoordinator,
+		"attaching replaced the coordinator that owns the running turn")
+
+	// This is the read Backend.GetAgentSession serves to clients, minus
+	// the session lookup the synthetic workspace has no store for.
+	require.True(t, ws.AgentCoordinator.IsSessionBusy("S1"),
+		"the running turn must still be visible as busy")
+
+	require.NoError(t, b.CancelSession(ws.ID, "S1"))
+	require.Equal(t, []string{"S1"}, coord.cancels(),
+		"cancel must reach the coordinator that owns the running turn")
+
+	// The same instance keeps arbitrating dispatch, which is what makes a
+	// prompt for a busy session queue instead of starting a second turn.
+	require.NoError(t, b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "again"}))
+	select {
+	case <-coord.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the second prompt never reached the original coordinator")
+	}
+	require.Equal(t, int32(2), coord.runCount.Load())
+
+	close(coord.release)
+	ws.runWG.Wait()
 }

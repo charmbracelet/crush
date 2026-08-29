@@ -454,10 +454,11 @@ func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]
 	return nil
 }
 
-// OverridePreferredModel sets the preferred model for the given type in
-// memory only, without persisting. It is for per-run overrides (such as the
-// non-interactive --model flags) that must not be written to the user's
-// config file.
+// OverridePreferredModel sets the workspace's preferred model for the given
+// type in memory only, without persisting. A single run's model choice does
+// not come through here: it travels with the run (see
+// agent.WithRequestedModels), so it cannot change what anything else in the
+// workspace runs on.
 func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model SelectedModel) {
 	s.mutateInMemory(func(c *Config) {
 		if c.Models == nil {

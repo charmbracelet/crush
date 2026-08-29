@@ -141,11 +141,47 @@ func (a AgentInfo) IsZero() bool {
 // callers must fall back to SessionID-only filtering, which
 // remains correct only when no other turns are in flight for the
 // same session.
+//
+// AutoApprove asks the server to grant every permission request the
+// resulting turn makes, for the duration of that turn only. It is for
+// callers with nobody to answer a permission prompt (`crush run`). The
+// hold belongs to the run, so a client that exits early can neither
+// strand the turn on an unanswerable prompt nor leave the session
+// silently approved for whoever keeps the workspace alive.
+//
+// NonInteractive tells the server that nobody on this side can answer a
+// prompt from the turn (`crush run`). Interactive-only tools are
+// withheld from it, and it waits for MCP initialization to settle
+// because it gets a single shot at the tool palette. It is per message
+// because one workspace serves an attached TUI and headless prompts at
+// the same time.
+//
+// LargeModel and SmallModel, when set, are the models the resulting turn
+// must run on, overriding the workspace's configured pair for that turn
+// only. `crush run -m` sends them. The model is a property of the run
+// for the same reason NonInteractive is: one workspace serves several
+// clients, so a one-shot model choice must not change what anything else
+// runs on — and must not rewrite the project's saved model. A nil entry
+// keeps the workspace's model for that slot.
+//
+// ClientID names the client that asked for the run, so the server can
+// end a run whose requester is gone. The claim a client holds on the
+// workspace is the liveness signal: when it is removed — a clean exit, or
+// the detach grace expiring on a client that never reconnects — every run
+// it owns is cancelled, even while other clients keep the workspace
+// alive. `client.Client.SendMessage` fills it in from the per-process
+// client ID; an empty value means "unowned" and leaves the run bounded
+// only by the server's maximum run duration.
 type AgentMessage struct {
-	SessionID   string       `json:"session_id"`
-	RunID       string       `json:"run_id,omitempty"`
-	Prompt      string       `json:"prompt"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	SessionID      string                `json:"session_id"`
+	RunID          string                `json:"run_id,omitempty"`
+	ClientID       string                `json:"client_id,omitempty"`
+	Prompt         string                `json:"prompt"`
+	Attachments    []Attachment          `json:"attachments,omitempty"`
+	AutoApprove    bool                  `json:"auto_approve,omitempty"`
+	NonInteractive bool                  `json:"non_interactive,omitempty"`
+	LargeModel     *config.SelectedModel `json:"large_model,omitempty"`
+	SmallModel     *config.SelectedModel `json:"small_model,omitempty"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.

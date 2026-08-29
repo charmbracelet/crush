@@ -28,12 +28,15 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if !ok {
 		return nil, errors.New("task agent not configured")
 	}
-	prompt, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	promptTemplate, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, true)
+	// The sub-agent carries no system prompt of its own: one instance
+	// serves every parent run, and each delegated turn renders its own
+	// prompt below for the model it inherited.
+	agent, ready, err := c.buildAgent(ctx, nil, agentCfg, true)
 	if err != nil {
 		return nil, err
 	}
@@ -55,13 +58,39 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
+			// The delegated turn runs on the models of the run that
+			// asked for it, rebuilt with sub-agent provider settings.
+			models, err := c.subAgentModels(ctx)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+
+			// The prompt is rendered for the provider and model this
+			// turn will talk to, which is not necessarily the
+			// workspace's. It goes on the call rather than on the
+			// shared sub-agent instance, so concurrent parent runs
+			// cannot overwrite each other's.
+			large := models.Large()
+			systemPrompt, err := promptTemplate.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+
 			return c.runSubAgent(ctx, subAgentParams{
 				Agent:          agent,
+				Ready:          ready,
+				Models:         models,
+				SystemPrompt:   systemPrompt,
 				SessionID:      sessionID,
 				AgentMessageID: agentMessageID,
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
 				SessionTitle:   "New Agent Session",
+				// The delegated turn is part of this run, so it needs
+				// the same approval. Without it a `crush run` blocks
+				// forever on the child session's first permission
+				// request: nobody is there to answer it.
+				AutoApprove: AutoApproveFromContext(ctx),
 			})
 		},
 	), nil

@@ -17,7 +17,7 @@ import (
 // config: one openai-typed provider pointed at a closed port, with large and
 // small models selected so model resolution and the system-prompt build both
 // succeed without any network access.
-func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
+func newGateTestCoordinator(t *testing.T) *coordinator {
 	t.Helper()
 
 	env := testEnv(t)
@@ -44,17 +44,15 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 		history:     env.history,
 		filetracker: *env.filetracker,
 		agents:      make(map[string]SessionAgent),
-		interactive: interactive,
 	}
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 
-	agent, err := coord.buildAgent(context.Background(), p, agentCfg, false)
+	agent, ready, err := coord.buildAgent(context.Background(), p, agentCfg, false)
 	require.NoError(t, err)
-	coord.currentAgent = agent
-	coord.agents[config.AgentCoder] = agent
+	coord.setActiveAgent(config.AgentCoder, agent, ready)
 
 	return coord
 }
@@ -70,16 +68,19 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 //
 // Non-interactive runs (`crush run`, both local and client/server) get a single
 // shot at the palette, so they still wait for initialization to settle.
+//
+// The split is per run, not per coordinator: one workspace on the shared
+// server serves an attached TUI and headless prompts at the same time.
 func TestRunWaitsForMCPOnlyWhenNonInteractive(t *testing.T) {
 	t.Run("non-interactive waits", func(t *testing.T) {
-		coord := newGateTestCoordinator(t, false)
+		coord := newGateTestCoordinator(t)
 
 		// Arm the gate and never complete initialization, standing in for an
 		// MCP server that is still connecting.
 		mcp.ArmInit()
 		t.Cleanup(mcp.DisarmInit)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(WithNonInteractive(context.Background()), 200*time.Millisecond)
 		defer cancel()
 
 		_, err := coord.run(ctx, nil, "test-session", "hello")
@@ -88,7 +89,7 @@ func TestRunWaitsForMCPOnlyWhenNonInteractive(t *testing.T) {
 	})
 
 	t.Run("interactive does not wait", func(t *testing.T) {
-		coord := newGateTestCoordinator(t, true)
+		coord := newGateTestCoordinator(t)
 
 		mcp.ArmInit()
 		t.Cleanup(mcp.DisarmInit)

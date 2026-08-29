@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -122,17 +123,26 @@ type coordinator struct {
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
-	interactive bool
 
+	// agentMu guards currentAgent, currentReady and the agents map.
+	// Runs read the pair under it so a rebuild can never hand a run one
+	// build's agent together with another build's readiness.
+	agentMu      sync.RWMutex
 	currentAgent SessionAgent
+	currentReady *agentReadiness
 	agents       map[string]SessionAgent
+
+	// ownership is the per-session run bookkeeping every agent built
+	// here shares, so a child session running on the `agent` tool's
+	// sub-agent is visible to IsSessionBusy, reachable by Cancel, and
+	// cannot have a second concurrent turn started on it by a prompt
+	// dispatched on the coder agent.
+	ownership *sessionOwnership
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
-
-	readyWg errgroup.Group
 }
 
 // CoordinatorOptions holds the dependencies for NewCoordinator. Using a
@@ -150,7 +160,6 @@ type CoordinatorOptions struct {
 	Notify      pubsub.Publisher[notify.Notification]
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
-	Interactive bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -179,10 +188,10 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		notify:       opts.Notify,
 		runComplete:  opts.RunComplete,
 		agents:       make(map[string]SessionAgent),
+		ownership:    newSessionOwnership(),
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
-		interactive:  opts.Interactive,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -196,12 +205,11 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
+	agent, ready, err := c.buildAgent(ctx, prompt, agentCfg, false)
 	if err != nil {
 		return nil, err
 	}
-	c.currentAgent = agent
-	c.agents[config.AgentCoder] = agent
+	c.setActiveAgent(config.AgentCoder, agent, ready)
 	return c, nil
 }
 
@@ -221,9 +229,18 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 // dispatchMu; when nil (the in-process/local path) no accept tracking
 // applies.
 func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
-	if err := c.readyWg.Wait(); err != nil {
+	// Pin the agent for the whole run, together with its readiness: the
+	// run must not wait on one agent's setup and then send the prompt to
+	// another.
+	active, ready := c.activeAgentReadiness()
+	if err := ready.wait(ctx); err != nil {
 		return nil, err
 	}
+
+	// Whether this run is interactive is a property of the run, not of
+	// the coordinator: one workspace serves an attached TUI and headless
+	// `crush run` prompts at the same time. See WithNonInteractive.
+	nonInteractive := NonInteractiveFromContext(ctx)
 
 	// MCP servers connect asynchronously (see mcp.Initialize).
 	//
@@ -239,35 +256,51 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// do wait for initialization to settle. The wait is bounded by each
 	// server's own connect timeout, so a hung server cannot stall the run
 	// indefinitely.
-	if !c.interactive {
+	if nonInteractive {
 		if err := mcp.WaitForInit(ctx); err != nil {
 			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 		}
 	}
 
-	// refresh models before each run
-	if err := c.UpdateModels(ctx); err != nil {
-		return nil, fmt.Errorf("failed to update models: %w", err)
+	// Refresh the tool palette before each run so late-registered MCP
+	// servers and skills are visible. The models are deliberately not
+	// refreshed here: they belong to this run (see runModels), and
+	// re-pointing the shared agent's models per run is what let one run
+	// change another's model mid-turn.
+	if err := c.updateTools(ctx); err != nil {
+		return nil, fmt.Errorf("failed to update tools: %w", err)
 	}
 
-	model := c.currentAgent.Model()
+	selection, err := c.runSelection(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	providerCfg, ok := c.cfg.Config().Providers.Get(selection.Large.Provider)
+	if !ok {
+		return nil, errModelProviderNotConfigured
+	}
+
+	if err := c.refreshTokenIfExpired(ctx, providerCfg, nil); err != nil {
+		// NOTE(@andreynering): We don't return here because the event handling to ask the user to reauthenticate
+		// depends on the flow below. If refresh fails, proceed with the token we have.
+		slog.Error("Failed to refresh OAuth2 token. Proceeding with existing token.", "error", err)
+	}
+
+	// Build this run's own models, after the proactive token refresh so
+	// they carry the refreshed credentials.
+	models, err := c.buildRunModels(ctx, selection, false)
+	if err != nil {
+		return nil, err
+	}
+
+	model := models.Large()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
 	}
 
-	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
-	if !ok {
-		return nil, errModelProviderNotConfigured
-	}
-
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
-
-	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
-		// NOTE(@andreynering): We don't return here because the event handling to ask the user to reauthenticate
-		// depends on the flow below. If refresh fails, proceed with the token we have.
-		slog.Error("Failed to refresh OAuth2 token. Proceeding with existing token.", "error", err)
-	}
 
 	// Coalesce per-attempt RunComplete payloads so only the final
 	// outcome reaches subscribers. Without this, the first attempt's
@@ -293,10 +326,20 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// the coalesce closure publishes the final outcome under that
 	// same correlator.
 	runID := RunIDFromContext(ctx)
+	// Auto-approval is carried the same way and copied onto the call so
+	// the hold's lifetime is the turn's, owned by sessionAgent.Run.
+	autoApprove := AutoApproveFromContext(ctx)
+	// The dispatched run's own lifetime, when the dispatcher gave it one
+	// (backend.runAgent does; in-process callers do not). It is what
+	// keeps a prompt queued behind a busy session bound to the run that
+	// asked for it instead of to the turn that dequeues it.
+	lifetime := RunLifetimeFromContext(ctx)
 	run := func() (*fantasy.AgentResult, error) {
-		return c.currentAgent.Run(ctx, SessionAgentCall{
+		return active.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			RunID:            runID,
+			AutoApprove:      autoApprove,
+			NonInteractive:   nonInteractive,
 			Prompt:           prompt,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
@@ -308,7 +351,9 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			PresencePenalty:  presPenalty,
 			OnComplete:       onComplete,
 			Accepted:         accept,
-			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+			Models:           models,
+			Lifetime:         lifetime,
+			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg, c.runModelsRefresher(models)),
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
@@ -335,6 +380,85 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		MarkRunCompletePublished(ctx)
 	}
 	return result, originalErr
+}
+
+// runSelection reports the model pair the run in ctx must use.
+//
+// A sub-agent turn inherits the models of the run that spawned it; a
+// top-level run uses what the client asked for (proto.AgentMessage's
+// large_model/small_model, or agent.WithRequestedModels in-process),
+// slot by slot; anything unspecified falls back to the workspace's
+// configured pair.
+func (c *coordinator) runSelection(ctx context.Context) (modelSelection, error) {
+	if inherited := runModelsFromContext(ctx); inherited != nil {
+		return inherited.selection, nil
+	}
+	selection, err := c.configSelection()
+	if err != nil {
+		return modelSelection{}, err
+	}
+	large, small := RequestedModelsFromContext(ctx)
+	if large != nil {
+		selection.Large = *large
+	}
+	if small != nil {
+		selection.Small = *small
+	}
+	return selection, nil
+}
+
+// buildRunModels builds a run's own model pair from its selection.
+func (c *coordinator) buildRunModels(ctx context.Context, selection modelSelection, isSubAgent bool) (*runModels, error) {
+	large, small, err := c.buildModels(ctx, selection, isSubAgent)
+	if err != nil {
+		return nil, err
+	}
+	return newRunModels(selection, isSubAgent, large, small), nil
+}
+
+// subAgentModels builds the model pair for a sub-agent turn started from
+// the run in ctx. The pair is rebuilt rather than shared because a
+// sub-agent's provider client differs (Copilot tags its traffic), but
+// the selection is the spawning run's.
+func (c *coordinator) subAgentModels(ctx context.Context) (*runModels, error) {
+	selection, err := c.runSelection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.buildRunModels(ctx, selection, true)
+}
+
+// runModelsRefresher returns the modelRefresher that rebuilds one run's
+// models in place. Credentials are baked into a provider client, so a
+// refreshed token only reaches the wire through a rebuilt model, which
+// fantasy fetches per retry attempt via ModelProvider.
+func (c *coordinator) runModelsRefresher(models *runModels) modelRefresher {
+	if models == nil {
+		return nil
+	}
+	return func(ctx context.Context) error {
+		large, small, err := c.buildModels(ctx, models.selection, models.isSubAgent)
+		if err != nil {
+			return err
+		}
+		models.set(large, small)
+		return nil
+	}
+}
+
+// updateTools rebuilds the active agent's tool palette from the current
+// config, picking up MCP servers and skills that registered late.
+func (c *coordinator) updateTools(ctx context.Context) error {
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		return errCoderAgentNotConfigured
+	}
+	tools, err := c.buildTools(ctx, agentCfg, false)
+	if err != nil {
+		return err
+	}
+	c.activeAgent().SetTools(tools)
+	return nil
 }
 
 // effectiveReasoningEffort returns the reasoning effort to apply for provider calls.
@@ -621,17 +745,104 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+// agentReadiness is the completion state of one built agent's one-time
+// setup: the system prompt build and the initial tool list build. The
+// handle belongs to the agent, not to the coordinator, for two reasons.
+//
+// A run must only wait for the agent it is about to use. A single
+// long-lived errgroup shared by every build made that impossible: with
+// two runs in one workspace, one sat in Wait() while the other's
+// UpdateModels -> buildTools -> agentTool -> buildAgent added to the
+// same group, which is Add on a WaitGroup whose counter reached zero
+// with a waiter parked. Go panics there, and the panic killed the whole
+// shared server (every workspace, every session).
+//
+// An errgroup also keeps its first error forever, so one transient
+// build failure poisoned every later run in the process. A rebuild gets
+// a fresh handle, so a stale error cannot outlive the agent it belongs
+// to.
+//
+// Every setup function is started by newAgentReadiness before the
+// handle is published, so nothing is ever added to the group while a
+// waiter is parked.
+type agentReadiness struct {
+	done chan struct{}
+	err  error
+}
+
+func newAgentReadiness(setup ...func() error) *agentReadiness {
+	r := &agentReadiness{done: make(chan struct{})}
+	var g errgroup.Group
+	for _, fn := range setup {
+		g.Go(fn)
+	}
+	go func() {
+		r.err = g.Wait()
+		close(r.done)
+	}()
+	return r
+}
+
+// wait blocks until the agent's setup finishes and reports its error, or
+// returns early if ctx is canceled. A nil handle is ready: callers that
+// build an agent synchronously have nothing to wait for.
+func (r *agentReadiness) wait(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	select {
+	case <-r.done:
+		return r.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// activeAgent returns the agent that runs must use.
+func (c *coordinator) activeAgent() SessionAgent {
+	c.agentMu.RLock()
+	defer c.agentMu.RUnlock()
+	return c.currentAgent
+}
+
+// activeAgentReadiness returns the active agent together with its own
+// readiness handle. Both are read under one lock so the pair always
+// comes from the same build.
+func (c *coordinator) activeAgentReadiness() (SessionAgent, *agentReadiness) {
+	c.agentMu.RLock()
+	defer c.agentMu.RUnlock()
+	return c.currentAgent, c.currentReady
+}
+
+// setActiveAgent publishes a freshly built agent, its readiness handle
+// and its name.
+func (c *coordinator) setActiveAgent(name string, agent SessionAgent, ready *agentReadiness) {
+	c.agentMu.Lock()
+	defer c.agentMu.Unlock()
+	c.currentAgent = agent
+	c.currentReady = ready
+	c.agents[name] = agent
+}
+
+// buildAgent builds a session agent and returns it with the readiness
+// handle for its asynchronous setup. The agent must not run before that
+// handle reports ready: until then it has no tools.
+//
+// A nil prompt means the agent's turns bring their own
+// (SessionAgentCall.SystemPrompt) and none is rendered here. The `agent`
+// tool builds one per delegated turn, because a delegated turn runs on
+// the models it inherited from its parent run rather than on the
+// workspace's, and one shared sub-agent instance serves every parent
+// run.
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, *agentReadiness, error) {
 	large, small, err := c.buildAgentModels(ctx, isSubAgent)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
@@ -641,6 +852,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		Permissions:          c.permissions,
+		Ownership:            c.ownership,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -655,25 +868,28 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// values; the work is local and always completes.
 	initCtx := context.WithoutCancel(ctx)
 
-	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
-		if err != nil {
-			return err
-		}
-		result.SetSystemPrompt(systemPrompt)
-		return nil
-	})
+	setup := []func() error{
+		func() error {
+			tools, err := c.buildTools(initCtx, agent, isSubAgent)
+			if err != nil {
+				return err
+			}
+			result.SetTools(tools)
+			return nil
+		},
+	}
+	if prompt != nil {
+		setup = append(setup, func() error {
+			systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
+			if err != nil {
+				return err
+			}
+			result.SetSystemPrompt(systemPrompt)
+			return nil
+		})
+	}
 
-	c.readyWg.Go(func() error {
-		tools, err := c.buildTools(initCtx, agent, isSubAgent)
-		if err != nil {
-			return err
-		}
-		result.SetTools(tools)
-		return nil
-	})
-
-	return result, nil
+	return result, newAgentReadiness(setup...), nil
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
@@ -730,8 +946,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	// Question tool is interactive-only and not available to sub-agents.
-	if !isSubAgent && c.interactive {
+	// The question tool is never available to sub-agents. It is also
+	// withheld from non-interactive turns, but that is decided per turn
+	// in sessionAgent.turnTools, since one agent serves both kinds of
+	// caller.
+	if !isSubAgent {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
 	}
 
@@ -802,16 +1021,37 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	return filteredTools, nil
 }
 
+// configSelection reports the workspace's configured model pair. It is
+// the fallback for runs that did not ask for a specific model, and what
+// freshly built agents and the workspace-level Model() report use.
+func (c *coordinator) configSelection() (modelSelection, error) {
+	cfg := c.cfg.Config()
+	large, ok := cfg.Models[config.SelectedModelTypeLarge]
+	if !ok {
+		return modelSelection{}, errLargeModelNotSelected
+	}
+	small, ok := cfg.Models[config.SelectedModelTypeSmall]
+	if !ok {
+		return modelSelection{}, errSmallModelNotSelected
+	}
+	return modelSelection{Large: large, Small: small}, nil
+}
+
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
-	if !ok {
-		return Model{}, Model{}, errLargeModelNotSelected
+	selection, err := c.configSelection()
+	if err != nil {
+		return Model{}, Model{}, err
 	}
-	smallModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeSmall]
-	if !ok {
-		return Model{}, Model{}, errSmallModelNotSelected
-	}
+	return c.buildModels(ctx, selection, isSubAgent)
+}
+
+// buildModels builds the language models for one selection. isSubAgent
+// picks the sub-agent flavor of the large model's provider client; the
+// small model is always built as a sub-agent one.
+func (c *coordinator) buildModels(ctx context.Context, selection modelSelection, isSubAgent bool) (Model, Model, error) {
+	largeModelCfg := selection.Large
+	smallModelCfg := selection.Small
 
 	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
 	if !ok {
@@ -876,15 +1116,17 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	}
 
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
+			Model:              largeModel,
+			CatwalkCfg:         *largeCatwalkModel,
+			ModelCfg:           largeModelCfg,
+			FlatRate:           largeProviderCfg.FlatRate,
+			SystemPromptPrefix: largeProviderCfg.SystemPromptPrefix,
 		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
+			Model:              smallModel,
+			CatwalkCfg:         *smallCatwalkModel,
+			ModelCfg:           smallModelCfg,
+			FlatRate:           smallProviderCfg.FlatRate,
+			SystemPromptPrefix: smallProviderCfg.SystemPromptPrefix,
 		}, nil
 }
 
@@ -1178,92 +1420,104 @@ func isExactoSupported(modelID string) bool {
 // so a cancel arriving before the run registers in activeRequests is not
 // lost.
 func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
-	return c.currentAgent.BeginAccepted(sessionID)
+	return c.activeAgent().BeginAccepted(sessionID)
 }
 
 func (c *coordinator) Cancel(sessionID string) {
-	c.currentAgent.Cancel(sessionID)
+	c.activeAgent().Cancel(sessionID)
 }
 
 func (c *coordinator) CancelAll() {
-	c.currentAgent.CancelAll()
+	c.activeAgent().CancelAll()
 }
 
 func (c *coordinator) ClearQueue(sessionID string) {
-	c.currentAgent.ClearQueue(sessionID)
+	c.activeAgent().ClearQueue(sessionID)
 }
 
 func (c *coordinator) IsBusy() bool {
-	return c.currentAgent.IsBusy()
+	return c.activeAgent().IsBusy()
 }
 
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
-	return c.currentAgent.IsSessionBusy(sessionID)
+	return c.activeAgent().IsSessionBusy(sessionID)
 }
 
 func (c *coordinator) Model() Model {
-	return c.currentAgent.Model()
+	return c.activeAgent().Model()
 }
 
+// UpdateModels points the workspace's default model pair at the current
+// config. It is what a deliberate workspace-level model change (the
+// picker, UpdateAgent) applies; it does not affect runs already in
+// flight, which own their models.
 func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// build the models again so we make sure we get the latest config
 	large, small, err := c.buildAgentModels(ctx, false)
 	if err != nil {
 		return err
 	}
-	c.currentAgent.SetModels(large, small)
-
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
-	if !ok {
-		return errCoderAgentNotConfigured
-	}
-
-	tools, err := c.buildTools(ctx, agentCfg, false)
-	if err != nil {
-		return err
-	}
-	c.currentAgent.SetTools(tools)
-	return nil
+	c.activeAgent().SetModels(large, small)
+	return c.updateTools(ctx)
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {
-	return c.currentAgent.QueuedPrompts(sessionID)
+	return c.activeAgent().QueuedPrompts(sessionID)
 }
 
 func (c *coordinator) QueuedPromptsList(sessionID string) []string {
-	return c.currentAgent.QueuedPromptsList(sessionID)
+	return c.activeAgent().QueuedPromptsList(sessionID)
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+	active := c.activeAgent()
+	selection, err := c.runSelection(ctx)
+	if err != nil {
+		return err
+	}
+	providerCfg, ok := c.cfg.Config().Providers.Get(selection.Large.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
 	}
 
-	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
+	if err := c.refreshTokenIfExpired(ctx, providerCfg, nil); err != nil {
 		slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
+	}
+
+	models, err := c.buildRunModels(ctx, selection, false)
+	if err != nil {
+		return err
 	}
 
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
+	return active.Summarize(ctx, SummarizeCall{
+		SessionID:       sessionID,
+		ProviderOptions: getProviderOptions(models.Large(), providerCfg),
+		Models:          models,
+		OnAuthRefresh:   c.makeAuthRefreshCallback(providerCfg, c.runModelsRefresher(models)),
+	})
 }
 
 // GenerateTitle generates a session title using the current agent.
 func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt string) {
-	if c.currentAgent == nil {
+	active := c.activeAgent()
+	if active == nil {
 		return
 	}
-	c.currentAgent.GenerateTitle(ctx, sessionID, prompt)
+	active.GenerateTitle(ctx, sessionID, prompt)
 }
 
-// refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
-func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig) error {
+// refreshTokenIfExpired proactively refreshes the OAuth token if it has
+// expired. refresh rebuilds the caller's models afterwards so they carry
+// the new credentials; pass nil when the caller has not built its models
+// yet.
+func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig, refresh modelRefresher) error {
 	if providerCfg.OAuthToken == nil || !providerCfg.OAuthToken.IsExpired() {
 		return nil
 	}
 	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
-	return c.refreshOAuth2Token(ctx, providerCfg)
+	return c.refreshOAuth2Token(ctx, providerCfg, refresh)
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after an auth error
@@ -1271,11 +1525,11 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 // refresh token is revoked, and for Bedrock providers whose AWS SSO session
 // has expired, it triggers interactive re-authentication and blocks until the
 // user completes it (or the context is cancelled).
-func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig) error {
+func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig, refresh modelRefresher) error {
 	switch {
 	case providerCfg.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
-		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
+		if err := c.refreshOAuth2Token(ctx, providerCfg, refresh); err != nil {
 			// If the refresh token was revoked, trigger interactive
 			// re-auth and wait for the user to complete it.
 			var exchangeErr *oauth.TokenExchangeError
@@ -1285,16 +1539,16 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 					Type:       notify.TypeReAuthenticate,
 					ProviderID: providerCfg.ID,
 				})
-				return c.waitForInteractiveReauth(ctx, providerCfg.ID)
+				return c.waitForInteractiveReauth(ctx, providerCfg.ID, refresh)
 			}
 			return err
 		}
 		return nil
 	case providerCfg.AWSAuthRefresh != "":
-		return c.refreshAWSCredentials(ctx, providerCfg)
+		return c.refreshAWSCredentials(ctx, providerCfg, refresh)
 	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
-		return c.refreshApiKeyTemplate(ctx, providerCfg)
+		return c.refreshApiKeyTemplate(ctx, providerCfg, refresh)
 	default:
 		return nil
 	}
@@ -1308,9 +1562,9 @@ var errNoInteractiveAuth = errors.New("interactive authentication unavailable")
 
 // waitForInteractiveReauth blocks until interactive re-authentication for the
 // provider completes (signalled via SignalAuthComplete) or the context is
-// cancelled, then rebuilds models so the next attempt picks up fresh
-// credentials. Returns nil when the caller should retry.
-func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID string) error {
+// cancelled, then rebuilds the caller's models so the next attempt picks up
+// fresh credentials. Returns nil when the caller should retry.
+func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID string, refresh modelRefresher) error {
 	// Use a detached context with a generous timeout so the wait survives
 	// agent run cancellation. The user needs time to complete browser-based
 	// authentication.
@@ -1328,10 +1582,12 @@ func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID s
 			"provider", providerID, "ctx_err", ctx.Err())
 		return ctx.Err()
 	}
-	// Rebuild models so ModelProvider picks up the fresh credentials.
-	if updateErr := c.UpdateModels(waitCtx); updateErr != nil {
-		slog.Error("Failed to update models after re-authentication", "error", updateErr)
-		return updateErr
+	// Rebuild the models so ModelProvider picks up the fresh credentials.
+	if refresh != nil {
+		if refreshErr := refresh(waitCtx); refreshErr != nil {
+			slog.Error("Failed to rebuild models after re-authentication", "error", refreshErr)
+			return refreshErr
+		}
 	}
 	slog.Info("Models updated, returning nil to retry", "provider", providerID)
 	return nil
@@ -1344,31 +1600,33 @@ func isUnauthorized(err error) bool {
 }
 
 // makeAuthRefreshCallback returns an OnAuthRefresh callback for fantasy that
-// delegates to the coordinator's existing credential refresh logic. Returns
-// nil if no refresh mechanism is configured for the provider.
-func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
+// delegates to the coordinator's existing credential refresh logic. refresh
+// rebuilds the models of the call the callback belongs to, which is how the
+// refreshed credentials reach its retry attempt. Returns nil if no refresh
+// mechanism is configured for the provider.
+func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig, refresh modelRefresher) func(context.Context, *fantasy.ProviderError) error {
 	if providerCfg.OAuthToken == nil &&
 		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
 	return func(ctx context.Context, _ *fantasy.ProviderError) error {
-		return c.retryAfterUnauthorized(ctx, providerCfg)
+		return c.retryAfterUnauthorized(ctx, providerCfg, refresh)
 	}
 }
 
-func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
+func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig, refresh modelRefresher) error {
 	if err := c.cfg.RefreshOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID); err != nil {
 		slog.Error("Failed to refresh OAuth token after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
 	}
-	if err := c.UpdateModels(ctx); err != nil {
-		return err
+	if refresh == nil {
+		return nil
 	}
-	return nil
+	return refresh(ctx)
 }
 
-func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig) error {
+func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig, refresh modelRefresher) error {
 	newAPIKey, err := c.cfg.Resolve(providerCfg.APIKeyTemplate)
 	if err != nil {
 		slog.Error("Failed to re-resolve API key after 401 error", "provider", providerCfg.ID, "error", err)
@@ -1378,29 +1636,50 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	providerCfg.APIKey = newAPIKey
 	c.cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
 
-	if err := c.UpdateModels(ctx); err != nil {
-		return err
+	if refresh == nil {
+		return nil
 	}
-	return nil
+	return refresh(ctx)
 }
 
 // subAgentParams holds the parameters for running a sub-agent.
 type subAgentParams struct {
-	Agent          SessionAgent
+	Agent SessionAgent
+	// Ready is the readiness handle of an asynchronously built Agent.
+	// Leave it nil for agents whose prompt and tools are set at
+	// construction (agenticFetchTool builds one that way).
+	Ready *agentReadiness
+	// Models is the model pair this sub-agent turn runs on, inherited
+	// from the run that spawned it. Required: a sub-agent must not read
+	// the workspace's model, or a `crush run -m` delegation would
+	// silently run its sub-agents on a different model.
+	Models         *runModels
 	SessionID      string
 	AgentMessageID string
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
-	// SessionSetup is an optional callback invoked after session creation
-	// but before agent execution, for custom session configuration.
-	SessionSetup func(sessionID string)
+	// SystemPrompt, when non-empty, is the system prompt this delegated
+	// turn runs with instead of the Agent's own. The `agent` tool sets
+	// it: its sub-agent instance is shared by every parent run, while
+	// the prompt is rendered for the model this one turn inherited.
+	SystemPrompt string
+	// AutoApprove asks the child turn to grant its own permission
+	// requests. The child agent's Run takes the hold when the turn
+	// starts and gives it back when the turn ends, so a delegated turn
+	// of a `crush run` never blocks on a prompt nobody can answer and
+	// the child session is not left approved afterwards.
+	AutoApprove bool
 }
 
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
 // It creates a sub-session, runs the agent with the given prompt, and propagates
 // the cost to the parent session.
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+	if err := params.Ready.wait(ctx); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("sub-agent setup: %w", err)
+	}
+
 	// Create sub-session
 	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
@@ -1408,13 +1687,8 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
-	// Call session setup function if provided
-	if params.SessionSetup != nil {
-		params.SessionSetup(session.ID)
-	}
-
 	// Get model configuration
-	model := params.Agent.Model()
+	model := params.Models.Large()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
@@ -1430,6 +1704,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return params.Agent.Run(ctx, SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
+			SystemPrompt:     params.SystemPrompt,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  getProviderOptions(model, providerCfg),
 			Temperature:      model.ModelCfg.Temperature,
@@ -1437,8 +1712,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			TopK:             model.ModelCfg.TopK,
 			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
+			SubAgent:         true,
 			NonInteractive:   true,
-			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+			AutoApprove:      params.AutoApprove,
+			Models:           params.Models,
+			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg, c.runModelsRefresher(params.Models)),
 		})
 	}
 	result, err := run()

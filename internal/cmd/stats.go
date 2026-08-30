@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
@@ -636,19 +637,42 @@ func gatherStats(ctx context.Context, conn *sql.DB) (*Stats, error) {
 	}
 	stats.AvgResponseTimeMs = toFloat64(avgResp) * 1000
 
-	// Tool usage.
+	// Tool usage: legacy plain-JSON rows aggregate in SQL (json_each);
+	// compressed rows are decoded in Go and merged into the same counts.
 	toolUsage, err := queries.GetToolUsage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get tool usage: %w", err)
 	}
+	callCounts := make(map[string]int64)
 	for _, t := range toolUsage {
 		if name, ok := t.ToolName.(string); ok && name != "" {
-			stats.ToolUsage = append(stats.ToolUsage, ToolUsage{
-				ToolName:  name,
-				CallCount: t.CallCount,
-			})
+			callCounts[name] += t.CallCount
 		}
 	}
+	compressedParts, err := queries.GetCompressedParts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get compressed parts for tool usage: %w", err)
+	}
+	for _, stored := range compressedParts {
+		parts, err := message.DecodeStoredParts(stored)
+		if err != nil {
+			return nil, fmt.Errorf("decode parts for tool usage: %w", err)
+		}
+		for _, part := range parts {
+			if tc, ok := part.(message.ToolCall); ok && tc.Name != "" {
+				callCounts[tc.Name]++
+			}
+		}
+	}
+	for name, count := range callCounts {
+		stats.ToolUsage = append(stats.ToolUsage, ToolUsage{
+			ToolName:  name,
+			CallCount: count,
+		})
+	}
+	sort.Slice(stats.ToolUsage, func(i, j int) bool {
+		return stats.ToolUsage[i].CallCount > stats.ToolUsage[j].CallCount
+	})
 
 	// Hour/day heatmap.
 	heatmap, err := queries.GetHourDayHeatmap(ctx)

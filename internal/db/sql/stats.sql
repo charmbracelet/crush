@@ -73,14 +73,27 @@ WHERE role = 'assistant'
   AND finished_at > created_at;
 
 -- name: GetToolUsage :many
+-- Aggregates legacy plain-JSON rows. Compressed rows (zstd, see
+-- internal/message/parts_codec.go) cannot be parsed by json_each and
+-- are handled by GetCompressedParts in Go. The substr magic-number
+-- filter discriminates the two: stored JSON starts with '[' (TEXT),
+-- zstd frames start with 0x28B52FFD (BLOB); a TEXT value never
+-- compares equal to the BLOB constant in SQLite.
 SELECT
     json_extract(value, '$.data.name') as tool_name,
     COUNT(*) as call_count
 FROM messages, json_each(parts)
 WHERE json_extract(value, '$.type') = 'tool_call'
   AND json_extract(value, '$.data.name') IS NOT NULL
+  AND substr(parts, 1, 4) <> X'28B52FFD'
 GROUP BY tool_name
 ORDER BY call_count DESC;
+
+-- name: GetCompressedParts :many
+SELECT
+    parts
+FROM messages
+WHERE substr(parts, 1, 4) = X'28B52FFD';
 
 -- name: GetHourDayHeatmap :many
 SELECT

@@ -101,7 +101,7 @@ Commit message here.
 Assisted-by: Ultra:{{ .ModelID }}
 {{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
 
-Co-Authored-By: Ultra <ultra@charm.land>
+Co-Authored-By: Ultra <asx8678@users.noreply.github.com>
 {{ end }}
 EOF
 )"

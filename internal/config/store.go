@@ -194,7 +194,11 @@ func (s *ConfigStore) RefetchHyperProvider(ctx context.Context) error {
 		baseURL:    hyperp.BaseURL(),
 		resolveKey: func() string { return resolveHyperAPIKey(s.Config()) },
 	}
-	hyperSyncer.SetClient(freshClient)
+	if hyperSyncer.init.Load() {
+		hyperSyncer.SetClient(freshClient)
+	} else {
+		hyperSyncer.Init(freshClient, cachePathFor("hyper"), true)
+	}
 
 	hyperProvider, err := hyperSyncer.Refetch(ctx)
 	if err != nil {

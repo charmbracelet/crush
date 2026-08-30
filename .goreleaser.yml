@@ -1,45 +1,17 @@
-# yaml-language-server: $schema=https://goreleaser.com/static/schema-pro.json
-# vim: set ts=2 sw=2 tw=0 fo=jcroql
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
 
 project_name: ultra
 
-includes:
-  - from_url:
-      url: charmbracelet/meta/main/notarize.yaml
-
-metadata:
-  mod_timestamp: "{{ .CommitTimestamp }}"
-  license: "FSL-1.1-MIT"
-  homepage: "https://charm.sh/ultra"
-  description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
-  full_description: "A powerful terminal-based AI assistant for developers, providing intelligent coding assistance directly in your terminal."
-  maintainers:
-    - "kujtimiihoxha <kujtim@charm.sh>"
-    - "caarlos0 <carlos@charm.sh>" # for aur
-
-nightly:
-  publish_release: true
-  keep_single_release: true
-  version_template: "{{ incminor .Version }}-nightly"
-
-snapshot:
-  version_template: "0.0.0-{{ .Timestamp }}"
-
 before:
   hooks:
-    - go mod tidy
-    - rm -rf completions
-    - mkdir completions
-    - rm -rf manpages
-    - mkdir manpages
+    - go mod download
+    - rm -rf completions manpages
+    - mkdir -p completions manpages
     - sh -c 'go run . completion bash >./completions/ultra.bash'
     - sh -c 'go run . completion zsh >./completions/ultra.zsh'
     - sh -c 'go run . completion fish >./completions/ultra.fish'
     - sh -c 'go run . man | gzip -c >./manpages/ultra.1.gz'
-
-# gomod:
-#   proxy: true
 
 builds:
   - env:
@@ -52,7 +24,6 @@ builds:
       - freebsd
       - openbsd
       - netbsd
-      - android
     goarch:
       - amd64
       - arm64
@@ -61,12 +32,6 @@ builds:
     goarm:
       - "7"
     ignore:
-      - goos: android
-        goarch: amd64
-      - goos: android
-        goarch: arm
-      - goos: android
-        goarch: "386"
       - goos: windows
         goarch: arm
     ldflags:
@@ -94,161 +59,7 @@ archives:
         formats: [zip]
 
 checksum:
-  name_template: "checksums.txt"
-
-aur_sources:
-  - private_key: "{{ .Env.AUR_KEY }}"
-    disable: "{{ with .Prerelease }}true{{ end }}"
-    git_url: "ssh://aur@aur.archlinux.org/ultra.git"
-    commit_author:
-      name: "Charm"
-      email: "charmcli@users.noreply.github.com"
-    makedepends:
-      - go
-      - git
-    prepare: |-
-      go mod download
-    build: |-
-      mkdir completions
-      mkdir manpages
-      export CGO_CPPFLAGS="${CPPFLAGS}"
-      export CGO_CFLAGS="${CFLAGS}"
-      export CGO_CXXFLAGS="${CXXFLAGS}"
-      export CGO_LDFLAGS="${LDFLAGS}"
-      export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
-      go build -ldflags="-w -s -buildid='' -linkmode=external -X github.com/asx8678/ultra/internal/version.Version=v${pkgver}" .
-      ./ultra completion bash >./completions/ultra.bash
-      ./ultra completion zsh >./completions/ultra.zsh
-      ./ultra completion fish >./completions/ultra.fish
-      ./ultra man | gzip -c >./manpages/ultra.1.gz
-    package: |-
-      # bin
-      install -Dm755 "./ultra" "${pkgdir}/usr/bin/ultra"
-      # license
-      mkdir -p "${pkgdir}/usr/share/licenses/ultra/"
-      install -Dm644 ./LICENSE* "${pkgdir}/usr/share/licenses/ultra/"
-      # completions
-      mkdir -p "${pkgdir}/usr/share/bash-completion/completions/"
-      mkdir -p "${pkgdir}/usr/share/zsh/site-functions/"
-      mkdir -p "${pkgdir}/usr/share/fish/vendor_completions.d/"
-      install -Dm644 "./completions/ultra.bash" "${pkgdir}/usr/share/bash-completion/completions/ultra"
-      install -Dm644 "./completions/ultra.zsh" "${pkgdir}/usr/share/zsh/site-functions/_ultra"
-      install -Dm644 "./completions/ultra.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/ultra.fish"
-      # man pages
-      install -Dm644 "./manpages/ultra.1.gz" "${pkgdir}/usr/share/man/man1/ultra.1.gz"
-      # readme
-      mkdir -pv "${pkgdir}/usr/share/doc/ultra/"
-      install -Dm644 README* "${pkgdir}/usr/share/doc/ultra/"
-
-aurs:
-  - private_key: "{{ .Env.AUR_KEY }}"
-    disable: "{{ with .Prerelease }}true{{ end }}"
-    git_url: "ssh://aur@aur.archlinux.org/ultra-bin.git"
-    commit_author:
-      name: "Charm"
-      email: "charmcli@users.noreply.github.com"
-    provides:
-      - ultra
-    conflicts:
-      - ultra
-    package: |-
-      case "$CARCH" in
-        aarch64)
-          cd "${srcdir}/ultra_${pkgver}_Linux_arm64"
-          ;;
-        *)
-          cd "${srcdir}/ultra_${pkgver}_Linux_${CARCH}"
-          ;;
-      esac
-      # bin
-      install -Dm755 "./ultra" "${pkgdir}/usr/bin/ultra"
-      # license
-      mkdir -p "${pkgdir}/usr/share/licenses/ultra/"
-      install -Dm644 ./LICENSE* "${pkgdir}/usr/share/licenses/ultra/"
-      # completions
-      mkdir -p "${pkgdir}/usr/share/bash-completion/completions/"
-      mkdir -p "${pkgdir}/usr/share/zsh/site-functions/"
-      mkdir -p "${pkgdir}/usr/share/fish/vendor_completions.d/"
-      install -Dm644 "./completions/ultra.bash" "${pkgdir}/usr/share/bash-completion/completions/ultra"
-      install -Dm644 "./completions/ultra.zsh" "${pkgdir}/usr/share/zsh/site-functions/_ultra"
-      install -Dm644 "./completions/ultra.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/ultra.fish"
-      # man pages
-      install -Dm644 "./manpages/ultra.1.gz" "${pkgdir}/usr/share/man/man1/ultra.1.gz"
-      # readme
-      mkdir -pv "${pkgdir}/usr/share/doc/ultra/"
-      install -Dm644 README* "${pkgdir}/usr/share/doc/ultra/"
-
-furies:
-  - disable: "{{ if (or .Prerelease .IsNightly) }}true{{ end }}"
-    account: "{{ with .Env.FURY_TOKEN }}charmcli{{ else }}{{ end }}"
-    secret_name: FURY_TOKEN
-
-brews:
-  - repository:
-      owner: charmbracelet
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    skip_upload: "{{ with .Prerelease }}true{{ end }}"
-    commit_author:
-      name: "Charm"
-      email: "charmcli@users.noreply.github.com"
-    goarm: 7
-    extra_install: |-
-      bash_completion.install "completions/{{ .ProjectName }}.bash" => "{{ .ProjectName }}"
-      zsh_completion.install "completions/{{ .ProjectName }}.zsh" => "_{{ .ProjectName }}"
-      fish_completion.install "completions/{{ .ProjectName }}.fish"
-      man1.install "manpages/{{ .ProjectName }}.1.gz"
-
-scoops:
-  - repository:
-      owner: charmbracelet
-      name: scoop-bucket
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    skip_upload: "{{ with .Prerelease }}true{{ end }}"
-    commit_author:
-      name: "Charm"
-      email: "charmcli@users.noreply.github.com"
-
-npms:
-  - name: "@charmland/ultra"
-    repository: "git+https://github.com/asx8678/ultra.git"
-    bugs: https://github.com/asx8678/ultra/issues
-    access: public
-    disable: "{{ with .Prerelease }}true{{ end }}"
-
-nfpms:
-  - formats:
-      - apk
-      - deb
-      - rpm
-      - archlinux
-    file_name_template: "{{ .ConventionalFileName }}"
-    contents:
-      - src: ./completions/ultra.bash
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files/usr{{ end }}/etc/bash_completion.d/ultra'
-      - src: ./completions/ultra.fish
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/fish/vendor_completions.d/ultra.fish'
-      - src: ./completions/ultra.zsh
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/zsh/site-functions/_ultra'
-      - src: ./manpages/ultra.1.gz
-        dst: '{{ if eq .Format "termux.deb" }}/data/data/com.termux/files{{ end }}/usr/share/man/man1/ultra.1.gz'
-    rpm:
-      signature:
-        key_file: '{{ if ne (index .Env "GPG_KEY_PATH") "" }}{{ .Env.GPG_KEY_PATH }}{{ else }}{{ end }}'
-    deb:
-      signature:
-        key_file: '{{ if ne (index .Env "GPG_KEY_PATH") "" }}{{ .Env.GPG_KEY_PATH }}{{ else }}{{ end }}'
-
-signs:
-  - cmd: cosign
-    signature: "${artifact}.sigstore.json"
-    args:
-      - sign-blob
-      - "--bundle=${signature}"
-      - "${artifact}"
-      - "--yes"
-    artifacts: checksum
-    output: true
+  name_template: checksums.txt
 
 source:
   enabled: true
@@ -258,93 +69,15 @@ sboms:
   - id: source
     artifacts: source
 
-nix:
-  - repository:
-      owner: "charmbracelet"
-      name: nur
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    commit_author:
-      name: "Charm"
-      email: "charmcli@users.noreply.github.com"
-    license: fsl11Mit
-    formatter: nixfmt
-    skip_upload: "{{ with .Prerelease }}true{{ end }}"
-    extra_install: |-
-      installManPage ./manpages/ultra.1.gz
-      installShellCompletion ./completions/*
-
-winget:
-  - publisher: charmbracelet
-    copyright: Charmbracelet, Inc
-    publisher_url: https://charm.land
-    release_notes_url: "https://github.com/asx8678/ultra/releases/tag/{{.Tag}}"
-    license_url: https://github.com/asx8678/ultra/blob/main/LICENSE.md
-    skip_upload: "{{ with .Prerelease }}true{{ end }}"
-    commit_author:
-      name: "Charm"
-      email: "charmcli@users.noreply.github.com"
-    repository:
-      owner: "charmbracelet"
-      name: winget-pkgs
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-      branch: "ultra-{{.Version}}"
-      pull_request:
-        enabled: true
-        draft: false
-        check_boxes: true
-        base:
-          owner: microsoft
-          name: winget-pkgs
-          branch: master
-        body: |
-          /cc @andreynering
-
 changelog:
   sort: asc
-  disable: "{{ .IsNightly }}"
   use: github
   filters:
     exclude:
-      - "^(build|ci): "
-      - "^chore: auto-update generated files$"
-      - "^chore: docs$"
-      - "^chore: schema update$"
-      - "^chore: schema$"
-      - "^chore: typo$"
-      - "^chore: update schema$"
-      - "^chore: update$"
-      - "^chore\\(legal\\): "
-      - "^chore\\(deps\\): "
-      - "^docs: update$"
-      - "^test:"
-      - "^test\\("
-      - "^v\\d.*"
-      - "merge conflict"
-      - "merge conflict"
-      - Merge branch
-      - Merge pull request
-      - Merge remote-tracking branch
-      - go mod tidy
-      - "^wip "
-      - "^wip:"
-  groups:
-    - title: "Deps"
-      regexp: "^.*\\(deps\\)*:+.*$"
-      order: 300
-    - title: "New!"
-      regexp: "^.*feat[(\\w)]*:+.*$"
-      order: 100
-    - title: "Fixed"
-      regexp: "^.*fix[(\\w)]*:+.*$"
-      order: 200
-    - title: "Docs"
-      regexp: "^.*docs[(\\w)]*:+.*$"
-      order: 400
-    - title: "Other stuff"
-      order: 9999
+      - "^(build|ci|docs|test)(\\(.+\\))?:"
+      - "^chore(\\(deps\\))?:"
+      - "^v\\d"
+      - "^Merge "
 
 release:
   prerelease: auto
-  footer:
-    from_url:
-      url: https://raw.githubusercontent.com/charmbracelet/meta/main/footer.md

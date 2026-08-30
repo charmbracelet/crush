@@ -318,6 +318,7 @@ func TestCachePathFor(t *testing.T) {
 func TestProviders_KeepsCatalogWhenCachingFails(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
+	t.Setenv("HYPER_API_KEY", "configured")
 
 	// A file where a directory needs to be, so every cache write fails.
 	blocked := filepath.Join(tmpDir, "blocked")
@@ -353,8 +354,8 @@ func TestProviders_KeepsCatalogWhenCachingFails(t *testing.T) {
 	// The failure is reported, but as a warning alongside a usable catalog.
 	require.Error(t, err)
 	require.Len(t, providers, 2)
-	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[0].ID, "Hyper stays at the front")
-	require.Equal(t, catwalk.InferenceProvider("p1"), providers[1].ID)
+	require.Equal(t, catwalk.InferenceProvider("p1"), providers[0].ID)
+	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[1].ID, "Hyper follows the ordinary catalog order")
 }
 
 // TestProviders_FallsBackToEmbeddedHyper checks that Hyper is still in the
@@ -363,6 +364,7 @@ func TestProviders_KeepsCatalogWhenCachingFails(t *testing.T) {
 func TestProviders_FallsBackToEmbeddedHyper(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
+	t.Setenv("HYPER_API_KEY", "configured")
 
 	resetProviderState()
 	defer resetProviderState()
@@ -380,8 +382,8 @@ func TestProviders_FallsBackToEmbeddedHyper(t *testing.T) {
 	providers, err := Providers(&Config{Options: &Options{}})
 	require.NoError(t, err)
 	require.Len(t, providers, 2)
-	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[0].ID)
-	require.NotEmpty(t, providers[0].Models, "the embedded Hyper provider carries models")
+	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[1].ID)
+	require.NotEmpty(t, providers[1].Models, "the embedded Hyper provider carries models")
 }
 
 // TestProviders_HonorsDisableDefaultProviders makes sure the embedded Hyper
@@ -404,6 +406,33 @@ func TestProviders_HonorsDisableDefaultProviders(t *testing.T) {
 // as a finished file, never truncated and refilled underneath a reader that is
 // already reading it. A reader that loses that race cannot parse the catalog
 // and silently falls back to the bundled copy.
+
+func TestProviders_DefaultsToOfflineCatalogWithoutHyper(t *testing.T) {
+	t.Setenv("CATWALK_URL", "")
+	t.Setenv("HYPER_API_KEY", "")
+	resetProviderState()
+	defer resetProviderState()
+
+	providers, err := Providers(&Config{Options: &Options{}})
+	require.NoError(t, err)
+	require.NotEmpty(t, providers)
+	for _, provider := range providers {
+		require.NotEqual(t, catwalk.InferenceProvider("hyper"), provider.ID)
+	}
+}
+
+func TestProviders_ExplicitHyperIsOptionalAndOrderedNormally(t *testing.T) {
+	t.Setenv("CATWALK_URL", "")
+	t.Setenv("HYPER_API_KEY", "configured")
+	resetProviderState()
+	defer resetProviderState()
+
+	providers, err := Providers(&Config{Options: &Options{DisableProviderAutoUpdate: true}})
+	require.NoError(t, err)
+	require.NotEmpty(t, providers)
+	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[len(providers)-1].ID)
+}
+
 func TestCacheStore_ReplacesFileInsteadOfRewritingIt(t *testing.T) {
 	t.Parallel()
 

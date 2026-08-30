@@ -27,19 +27,17 @@ go install github.com/asx8678/ultra@latest
 
 ## Getting Started
 
-The quickest way to get started is to choose a [Hyper][hyper] model from model
-picker. Follow the steps to authenticate and you'll be good to go.
+Open the model picker with <kbd>ctrl+l</kbd>, choose a provider, and enter
+its API key. Ultra uses its embedded provider catalog by default and does not
+contact a remote catalog unless `CATWALK_URL` is explicitly configured.
 
-[Hyper], from Charm, is the official Ultra provider. It’s subscription-based,
-with a free tier, and optimized for Ultra. It’s privacy focused, with zero data
-retention (ZDR) is and designed to comply with GDPR. [More on Hyper][hyper].
-
-<p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
+[Hyper][hyper] remains available as an optional provider. Choosing or logging
+in to Hyper enables its provider-specific catalog refresh.
 
 ## API Keys
 
-You can also use Ultra with many other providers such as Anthopic, OpenAI,
-Gemini, OpenRouter and so on. Press <kbd>ctrl+l</kbd> to open the model picker,
+Ultra supports providers such as Anthropic, OpenAI, Gemini, OpenRouter,
+Hyper, and others. Press <kbd>ctrl+l</kbd> to open the model picker,
 choose the provider of your choice, and paste your API key.
 
 That said, you can also set environment variables for preferred providers:
@@ -522,7 +520,7 @@ option attribution-generated-with true
 - `trailer_style`: Controls the attribution trailer added to commit messages
   (default: `assisted-by`)
   - `assisted-by`: Adds `Assisted-by: Ultra:[ModelID]` as specified in [the convention](https://docs.kernel.org/process/coding-assistants.html#attribution)
-  - `co-authored-by`: Adds `Co-Authored-By: Ultra <ultra@charm.land>`
+  - `co-authored-by`: Adds `Co-Authored-By: Ultra <asx8678@users.noreply.github.com>`
   - `none`: No attribution trailer
 - `generated_with`: When true (default), adds `💘 Generated with Ultra` line to
   commit messages and PR descriptions

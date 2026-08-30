@@ -517,7 +517,7 @@
         },
         "disable_provider_auto_update": {
           "type": "boolean",
-          "description": "Disable providers auto-update",
+          "description": "Disable network provider updates even when an explicit catalog source or optional provider is configured",
           "default": false
         },
         "disable_default_providers": {

@@ -57,7 +57,7 @@ func cachePathFor(name string) string {
 // UpdateProviders updates the Catwalk providers list from a specified source.
 func UpdateProviders(pathOrURL string) error {
 	var providers []catwalk.Provider
-	pathOrURL = cmp.Or(pathOrURL, os.Getenv("CATWALK_URL"), defaultCatwalkURL)
+	pathOrURL = cmp.Or(pathOrURL, os.Getenv("CATWALK_URL"), "embedded")
 
 	switch {
 	case pathOrURL == "embedded":
@@ -171,7 +171,15 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup
 		providers := csync.NewSlice[catwalk.Provider]()
-		autoupdate := !cfg.Options.DisableProviderAutoUpdate
+		catwalkURL := os.Getenv("CATWALK_URL")
+		autoupdate := catwalkURL != "" && !cfg.Options.DisableProviderAutoUpdate
+		hyperConfigured := resolveHyperAPIKey(cfg) != ""
+		if cfg.Providers != nil {
+			if _, configured := cfg.Providers.Get("hyper"); configured {
+				hyperConfigured = true
+			}
+		}
+		hyperAutoupdate := hyperConfigured && !cfg.Options.DisableProviderAutoUpdate
 		customProvidersOnly := cfg.Options.DisableDefaultProviders
 
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -186,8 +194,8 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 			if customProvidersOnly {
 				return
 			}
-			catwalkURL := cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL)
-			client := catwalk.NewWithURL(catwalkURL)
+			clientURL := cmp.Or(catwalkURL, "embedded")
+			client := catwalk.NewWithURL(clientURL)
 			path := cachePathFor("providers")
 			catwalkSyncer.Init(client, path, autoupdate)
 
@@ -197,14 +205,14 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 			// providers at all over a transient disk or network problem.
 			items, err := catwalkSyncer.Get(ctx)
 			if err != nil {
-				catwalkURL := fmt.Sprintf("%s/v2/providers", cmp.Or(os.Getenv("CATWALK_URL"), defaultCatwalkURL))
-				catwalkErr = fmt.Errorf("Ultra was unable to fetch an updated list of providers from %s. Consider setting ULTRA_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded providers bundled at the time of this Ultra release. You can also update providers manually. For more info see ultra update-providers --help.\n\nCause: %w", catwalkURL, err) //nolint:staticcheck
+				sourceURL := fmt.Sprintf("%s/v2/providers", catwalkURL)
+				catwalkErr = fmt.Errorf("Ultra was unable to fetch an updated list of providers from %s. Unset CATWALK_URL to use the embedded providers. You can also update providers manually. For more info see ultra update-providers --help.\n\nCause: %w", sourceURL, err) //nolint:staticcheck
 			}
 			providers.Append(items...)
 		})
 
 		wg.Go(func() {
-			if customProvidersOnly {
+			if customProvidersOnly || !hyperConfigured {
 				return
 			}
 			path := cachePathFor("hyper")
@@ -217,7 +225,7 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 				baseURL:      hyper.BaseURL(),
 				resolveKey:   func() string { return resolveHyperAPIKey(cfgSnapshot) },
 				refreshToken: refresher,
-			}, path, autoupdate)
+			}, path, hyperAutoupdate)
 
 			// As above: keep whatever provider we were handed. The syncer
 			// already falls back to the cached or embedded copy, so an
@@ -234,10 +242,9 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 
 		wg.Wait()
 
+		providerList = slices.Collect(providers.Seq())
 		if hyperProvider.ID != "" {
-			providerList = append([]catwalk.Provider{hyperProvider}, slices.Collect(providers.Seq())...)
-		} else {
-			providerList = slices.Collect(providers.Seq())
+			providerList = append(providerList, hyperProvider)
 		}
 		providerErr = errors.Join(catwalkErr, hyperErr)
 	})
@@ -255,8 +262,8 @@ func UpdateProviderInList(provider catwalk.Provider) {
 			return
 		}
 	}
-	// Provider not found in list; prepend it.
-	providerList = append([]catwalk.Provider{provider}, providerList...)
+	// Provider not found in list; append it like any other optional provider.
+	providerList = append(providerList, provider)
 }
 
 type cache[T any] struct {

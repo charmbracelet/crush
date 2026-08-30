@@ -132,6 +132,9 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		got := lookupConfigs(project)
 		// Global config and global data path are always prepended,
 		// even when no project file exists.
+		require.Contains(t, got, legacyGlobalConfig())
+		require.Contains(t, got, legacyGlobalShellConfig())
+		require.Contains(t, got, legacyGlobalConfigData())
 		require.Contains(t, got, GlobalConfig())
 		require.Contains(t, got, GlobalConfigData())
 	})

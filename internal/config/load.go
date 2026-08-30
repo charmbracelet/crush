@@ -34,8 +34,6 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const defaultCatwalkURL = "https://catwalk.charm.land"
-
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -930,6 +928,9 @@ func lookupConfigs(cwd string) []string {
 	// skipped when loaded.
 	configPaths := []string{
 		systemConfigPath,
+		legacyGlobalConfig(),
+		legacyGlobalShellConfig(),
+		legacyGlobalConfigData(),
 		GlobalConfig(),
 		shellConfigSibling(GlobalConfig()),
 		GlobalConfigData(),
@@ -1191,6 +1192,28 @@ func migrateDisableNotifications() {
 			slog.Warn("Failed to write migrated config", "path", path, "error", err)
 		}
 	}
+}
+
+func legacyGlobalConfig() string {
+	return filepath.Join(home.Config(), "crush", "crush.json")
+}
+
+func legacyGlobalShellConfig() string {
+	return filepath.Join(filepath.Dir(legacyGlobalConfig()), "crushrc")
+}
+
+func legacyGlobalConfigData() string {
+	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
+		return filepath.Join(xdgDataHome, "crush", "crush.json")
+	}
+	if runtime.GOOS == "windows" {
+		localAppData := cmp.Or(
+			os.Getenv("LOCALAPPDATA"),
+			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
+		)
+		return filepath.Join(localAppData, "crush", "crush.json")
+	}
+	return filepath.Join(home.Dir(), ".local", "share", "crush", "crush.json")
 }
 
 // GlobalConfig returns the global configuration file path for the application.

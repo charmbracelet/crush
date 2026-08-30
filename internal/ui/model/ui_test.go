@@ -134,6 +134,13 @@ func (w *testWorkspace) AgentIsBusy() bool {
 	return w.agentBusy
 }
 
+func (w *testWorkspace) AgentReadyErr() error {
+	if !w.agentReady {
+		return workspace.ErrAgentNotInitialized
+	}
+	return nil
+}
+
 func (w *testWorkspace) AgentRun(_ context.Context, _ string, prompt string, _ ...message.Attachment) error {
 	w.runPrompts = append(w.runPrompts, prompt)
 	return nil
@@ -477,6 +484,9 @@ func TestToggleInputMode_BlockedWhileAgentBusy(t *testing.T) {
 	u, ws := newPlanUI(t, "sess-1")
 	ws.agentReady = true
 	ws.agentBusy = true
+	// isAgentBusy reads the memoized cache, so seed it with the same value
+	// the workspace stub reports.
+	u.agentBusyCache.set(true)
 
 	msg := u.toggleInputMode()()
 	require.Equal(t, uiInputModePlan, u.mode, "mode must not change while the agent is busy")

@@ -1758,7 +1758,6 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 			m.chat.Blur()
 		}
 		m.sidebarScrollbarVisible = false
-		m.chat.Blur()
 	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
 		if m.activeInline != nil {
 			m.focusActiveInline(uiFocusMain)

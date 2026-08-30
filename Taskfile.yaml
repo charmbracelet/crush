@@ -142,6 +142,30 @@ tasks:
     cmds:
       - go tool pprof -http :6061 'http://localhost:6060/debug/pprof/allocs'
 
+  bench:stream:
+    desc: Benchmark streaming deltas and durable message checkpoints
+    cmds:
+      - go test ./internal/message -run '^$' -bench 'Benchmark(StreamText|StreamReasoning|ToolArguments|MessageCheckpoint)' -benchmem {{.CLI_ARGS}}
+
+  build:nopgo:
+    desc: Build without profile-guided optimization for comparison
+    cmds:
+      - go build -pgo=off -trimpath -o ultra-nopgo .
+
+  pgo:merge:
+    desc: Merge representative profiles into the automatically consumed default.pgo
+    preconditions:
+      - sh: 'ls profiles/*.pprof >/dev/null 2>&1'
+        msg: Place representative CPU profiles in profiles/*.pprof first
+    cmds:
+      - go tool pprof -proto profiles/*.pprof > default.pgo
+      - echo 'Generated default.pgo; normal go build commands now enable PGO automatically'
+
+  profile:goroutineleak:
+    desc: Inspect Go 1.27's blocked-goroutine leak profile
+    cmds:
+      - go tool pprof -http :6061 http://localhost:6060/debug/pprof/goroutineleak
+
   schema:
     desc: Generate JSON schema for configuration
     cmds:

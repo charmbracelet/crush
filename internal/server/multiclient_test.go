@@ -10,8 +10,8 @@ import (
 
 	"github.com/asx8678/ultra/internal/backend"
 	"github.com/asx8678/ultra/internal/proto"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // installSyntheticWorkspace creates a synthetic [backend.Workspace]

@@ -10,7 +10,7 @@ import (
 
 	"github.com/asx8678/ultra/internal/db"
 	"github.com/asx8678/ultra/internal/pubsub"
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // defaultUpdateDebounce is the default debounce window for [Service.Update].
@@ -18,7 +18,10 @@ import (
 // single SQL write and a single pubsub event. Terminal updates
 // (finish/error/cancel/tool-call structural changes) bypass the
 // debounce and flush synchronously.
-const defaultUpdateDebounce = 33 * time.Millisecond
+const (
+	defaultUpdateDebounce      = 33 * time.Millisecond
+	defaultStreamWriteInterval = 250 * time.Millisecond
+)
 
 type CreateMessageParams struct {
 	Role             MessageRole
@@ -47,6 +50,9 @@ type Service interface {
 	pubsub.Subscriber[Message]
 	Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error)
 	Update(ctx context.Context, message Message) error
+	// UpdateStream publishes a responsive in-memory snapshot immediately while
+	// checkpointing the complete message to SQLite on a slower interval.
+	UpdateStream(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
@@ -103,8 +109,9 @@ type pendingState struct {
 
 type service struct {
 	*pubsub.Broker[Message]
-	q        db.Querier
-	debounce time.Duration
+	q              db.Querier
+	debounce       time.Duration
+	streamDebounce time.Duration
 
 	mu      sync.Mutex
 	pending map[string]*pendingState
@@ -122,12 +129,20 @@ func WithDebounce(d time.Duration) ServiceOption {
 	}
 }
 
+// WithStreamDebounce overrides durable checkpoint timing for stream updates.
+func WithStreamDebounce(d time.Duration) ServiceOption {
+	return func(s *service) {
+		s.streamDebounce = d
+	}
+}
+
 func NewService(q db.Querier, opts ...ServiceOption) Service {
 	s := &service{
-		Broker:   pubsub.NewBroker[Message](),
-		q:        q,
-		debounce: defaultUpdateDebounce,
-		pending:  make(map[string]*pendingState),
+		Broker:         pubsub.NewBroker[Message](),
+		q:              q,
+		debounce:       defaultUpdateDebounce,
+		streamDebounce: defaultStreamWriteInterval,
+		pending:        make(map[string]*pendingState),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -270,6 +285,34 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 		})
 	}
 	s.mu.Unlock()
+	return nil
+}
+
+// UpdateStream implements the responsive streaming path. The UI receives the
+// latest snapshot immediately; SQLite receives periodic full checkpoints.
+func (s *service) UpdateStream(ctx context.Context, msg Message) error {
+	cloned := msg.Clone()
+	if s.streamDebounce <= 0 {
+		return s.Update(ctx, cloned)
+	}
+
+	s.mu.Lock()
+	p, ok := s.pending[msg.ID]
+	if !ok {
+		p = &pendingState{}
+		s.pending[msg.ID] = p
+	}
+	p.latest = cloned
+	p.dirty = true
+	if p.timer == nil && !p.flushing {
+		id := msg.ID
+		p.timer = time.AfterFunc(s.streamDebounce, func() {
+			_ = s.flushOne(context.Background(), id, false)
+		})
+	}
+	s.mu.Unlock()
+
+	s.Publish(pubsub.UpdatedEvent, cloned)
 	return nil
 }
 

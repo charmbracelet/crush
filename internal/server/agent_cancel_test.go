@@ -17,8 +17,8 @@ import (
 	"github.com/asx8678/ultra/internal/backend"
 	"github.com/asx8678/ultra/internal/message"
 	"github.com/asx8678/ultra/internal/proto"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // runCoordinator is a configurable agent.Coordinator stub for the

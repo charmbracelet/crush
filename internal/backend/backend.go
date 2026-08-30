@@ -23,7 +23,7 @@ import (
 	"github.com/asx8678/ultra/internal/skills"
 	"github.com/asx8678/ultra/internal/ui/util"
 	"github.com/asx8678/ultra/internal/version"
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // Common errors returned by backend operations.

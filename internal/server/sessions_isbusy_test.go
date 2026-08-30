@@ -15,8 +15,8 @@ import (
 	"github.com/asx8678/ultra/internal/message"
 	"github.com/asx8678/ultra/internal/proto"
 	"github.com/asx8678/ultra/internal/session"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // stubCoordinator is a minimal agent.Coordinator that only reports

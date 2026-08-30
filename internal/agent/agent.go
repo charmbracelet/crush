@@ -732,6 +732,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// message of the turn is the value reachable through this
 	// pointer when the defer runs.
 	var currentAssistant *message.Message
+	var streamAccumulator *message.StreamAccumulator
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -753,6 +754,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// closed. A short timeout bounds the flush.
 		flushCtx, flushCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer flushCancel()
+		if streamAccumulator != nil && streamAccumulator.Checkpoint(time.Now()) && currentAssistant != nil {
+			if updateErr := a.messages.Update(flushCtx, *currentAssistant); updateErr != nil {
+				slog.Error("Failed to checkpoint buffered stream after run", "error", updateErr)
+			}
+		}
 		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
 		}
@@ -875,17 +881,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
+			streamAccumulator = message.NewStreamAccumulator(currentAssistant)
 			return callContext, prepared, err
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
-			currentAssistant.AppendReasoningContent(reasoning.Text)
+			streamAccumulator.AppendReasoning(reasoning.Text)
+			streamAccumulator.Checkpoint(time.Now())
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnReasoningDelta: func(id string, text string) error {
-			currentAssistant.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
+			streamAccumulator.AppendReasoning(text)
+			if !streamAccumulator.CheckpointIfDue(time.Now()) {
+				return nil
+			}
+			return a.messages.UpdateStream(genCtx, *currentAssistant)
 		},
 		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+			streamAccumulator.Checkpoint(time.Now())
 			// handle anthropic signature
 			if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
 				if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
@@ -909,14 +921,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// Strip leading newline from initial text content. This is is
 			// particularly important in non-interactive mode where leading
 			// newlines are very visible.
-			if len(currentAssistant.Parts) == 0 {
+			if len(currentAssistant.Parts) == 0 && streamAccumulator.Empty() {
 				text = strings.TrimPrefix(text, "\n")
 			}
 
-			currentAssistant.AppendContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
+			streamAccumulator.AppendText(text)
+			if !streamAccumulator.CheckpointIfDue(time.Now()) {
+				return nil
+			}
+			return a.messages.UpdateStream(genCtx, *currentAssistant)
 		},
 		OnToolInputStart: func(id string, toolName string) error {
+			streamAccumulator.Checkpoint(time.Now())
 			toolCall := message.ToolCall{
 				ID:               id,
 				Name:             toolName,
@@ -934,6 +950,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// concatenate with partial content from the failed attempt.
 			// On the final attempt (no more retries), any partial content
 			// stays in the message as useful context beneath the error.
+			streamAccumulator.Reset()
 			currentAssistant.ResetStreamedContent()
 			if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
 				slog.Error("Failed to reset message on retry", "error", updateErr)
@@ -948,6 +965,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return m.Model
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			streamAccumulator.Checkpoint(time.Now())
 			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
 			if wasSanitized {
 				sanitizedToolCalls[tc.ToolCallID] = true
@@ -981,6 +999,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return createMsgErr
 		},
 		OnStepFinish: func(stepResult fantasy.StepResult) error {
+			streamAccumulator.Checkpoint(time.Now())
 			for _, w := range stepResult.Warnings {
 				slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
 			}
@@ -1377,6 +1396,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	summaryAccumulator := message.NewStreamAccumulator(&summaryMessage)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -1395,10 +1415,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			return callContext, prepared, nil
 		},
 		OnReasoningDelta: func(id string, text string) error {
-			summaryMessage.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
+			summaryAccumulator.AppendReasoning(text)
+			if !summaryAccumulator.CheckpointIfDue(time.Now()) {
+				return nil
+			}
+			return a.messages.UpdateStream(genCtx, summaryMessage)
 		},
 		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+			summaryAccumulator.Checkpoint(time.Now())
 			// Handle anthropic signature.
 			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
 				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
@@ -1409,10 +1433,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnTextDelta: func(id, text string) error {
-			summaryMessage.AppendContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
+			summaryAccumulator.AppendText(text)
+			if !summaryAccumulator.CheckpointIfDue(time.Now()) {
+				return nil
+			}
+			return a.messages.UpdateStream(genCtx, summaryMessage)
 		},
 	})
+	summaryAccumulator.Checkpoint(time.Now())
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
 		if isCancelErr {

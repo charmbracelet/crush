@@ -14,8 +14,8 @@ import (
 	"github.com/asx8678/ultra/internal/proto"
 	"github.com/asx8678/ultra/internal/pubsub"
 	"github.com/asx8678/ultra/internal/skills"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // TestBackend_WorkspaceSkillsIsolation verifies that skill discovery

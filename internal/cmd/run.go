@@ -22,8 +22,8 @@ import (
 	"github.com/asx8678/ultra/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"uuid"
 )
 
 var runCmd = &cobra.Command{

@@ -8,7 +8,7 @@ import (
 
 	"github.com/asx8678/ultra/internal/db"
 	"github.com/asx8678/ultra/internal/pubsub"
-	"github.com/google/uuid"
+	"uuid"
 )
 
 const (

@@ -10,7 +10,7 @@ import (
 
 	"github.com/asx8678/ultra/internal/csync"
 	"github.com/asx8678/ultra/internal/pubsub"
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // hookApprovalKey is the unexported context key used to mark a tool call as

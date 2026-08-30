@@ -9,8 +9,8 @@ import (
 	"github.com/asx8678/ultra/internal/config"
 	"github.com/asx8678/ultra/internal/proto"
 	"github.com/asx8678/ultra/internal/pubsub"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // awaitConfigChanged drains events until a ConfigChanged is received

@@ -21,8 +21,8 @@ import (
 	"github.com/asx8678/ultra/internal/permission"
 	"github.com/asx8678/ultra/internal/proto"
 	"github.com/asx8678/ultra/internal/pubsub"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // e2eHarness wires a Server, its Backend (with a custom shutdownFn we

@@ -693,3 +693,36 @@ func TestUpdate_StructuralFlushUsesMustDeliver(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateStreamPublishesBeforeDurableCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t, WithStreamDebounce(time.Hour))
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sub := svc.Subscribe(subCtx)
+
+	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	<-sub // Created event.
+
+	msg.AppendContent("hello")
+	require.NoError(t, svc.UpdateStream(t.Context(), msg))
+
+	select {
+	case event := <-sub:
+		require.Equal(t, pubsub.UpdatedEvent, event.Type)
+		require.Equal(t, "hello", event.Payload.Content().Text)
+	case <-time.After(time.Second):
+		t.Fatal("stream update was not published immediately")
+	}
+
+	beforeFlush, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Empty(t, beforeFlush.Content().Text)
+
+	require.NoError(t, svc.Flush(t.Context(), msg.ID))
+	afterFlush, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, "hello", afterFlush.Content().Text)
+}

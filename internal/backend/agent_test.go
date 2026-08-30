@@ -11,8 +11,8 @@ import (
 	"github.com/asx8678/ultra/internal/app"
 	"github.com/asx8678/ultra/internal/message"
 	"github.com/asx8678/ultra/internal/proto"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // blockingCoordinator is a minimal agent.Coordinator whose RunAccepted

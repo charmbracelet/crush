@@ -70,7 +70,7 @@ builds:
       - goos: windows
         goarch: arm
     ldflags:
-      - -s -w -X github.com/charmbracelet/ultra/internal/version.Version={{.Version}}
+      - -s -w -X github.com/asx8678/ultra/internal/version.Version={{.Version}}
     flags:
       - -trimpath
 
@@ -116,7 +116,7 @@ aur_sources:
       export CGO_CXXFLAGS="${CXXFLAGS}"
       export CGO_LDFLAGS="${LDFLAGS}"
       export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
-      go build -ldflags="-w -s -buildid='' -linkmode=external -X github.com/charmbracelet/ultra/internal/version.Version=v${pkgver}" .
+      go build -ldflags="-w -s -buildid='' -linkmode=external -X github.com/asx8678/ultra/internal/version.Version=v${pkgver}" .
       ./ultra completion bash >./completions/ultra.bash
       ./ultra completion zsh >./completions/ultra.zsh
       ./ultra completion fish >./completions/ultra.fish
@@ -211,8 +211,8 @@ scoops:
 
 npms:
   - name: "@charmland/ultra"
-    repository: "git+https://github.com/charmbracelet/ultra.git"
-    bugs: https://github.com/charmbracelet/ultra/issues
+    repository: "git+https://github.com/asx8678/ultra.git"
+    bugs: https://github.com/asx8678/ultra/issues
     access: public
     disable: "{{ with .Prerelease }}true{{ end }}"
 
@@ -277,8 +277,8 @@ winget:
   - publisher: charmbracelet
     copyright: Charmbracelet, Inc
     publisher_url: https://charm.land
-    release_notes_url: "https://github.com/charmbracelet/ultra/releases/tag/{{.Tag}}"
-    license_url: https://github.com/charmbracelet/ultra/blob/main/LICENSE.md
+    release_notes_url: "https://github.com/asx8678/ultra/releases/tag/{{.Tag}}"
+    license_url: https://github.com/asx8678/ultra/blob/main/LICENSE.md
     skip_upload: "{{ with .Prerelease }}true{{ end }}"
     commit_author:
       name: "Charm"

@@ -9,8 +9,8 @@ import (
 	"github.com/asx8678/ultra/internal/message"
 	"github.com/asx8678/ultra/internal/proto"
 	"github.com/asx8678/ultra/internal/session"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 func TestRunShellCommand_SkipsPersistenceForMissingSession(t *testing.T) {

@@ -19,8 +19,8 @@ import (
 	"github.com/asx8678/ultra/internal/message"
 	"github.com/asx8678/ultra/internal/proto"
 	"github.com/asx8678/ultra/internal/pubsub"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // scriptedCoordinator is an agent.Coordinator stub that mimics the

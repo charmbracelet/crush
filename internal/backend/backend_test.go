@@ -16,8 +16,8 @@ import (
 
 	"github.com/asx8678/ultra/internal/csync"
 	"github.com/asx8678/ultra/internal/proto"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"uuid"
 )
 
 // newTestBackend returns a Backend whose teardown path skips any

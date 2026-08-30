@@ -16,7 +16,7 @@ import (
 	"github.com/asx8678/ultra/internal/config"
 	"github.com/asx8678/ultra/internal/proto"
 	"github.com/asx8678/ultra/internal/server"
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // DummyHost is used to satisfy the http.Client's requirement for a URL.

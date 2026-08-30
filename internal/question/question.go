@@ -14,7 +14,7 @@ import (
 	"sync"
 
 	"github.com/asx8678/ultra/internal/pubsub"
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // ErrCancelled is returned by Ask when the user cancels the question.

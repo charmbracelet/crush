@@ -570,10 +570,13 @@ func (a *Anim) Step() tea.Cmd {
 }
 
 // staticTick returns a slower tick for static/reduced animation mode to
-// minimize bandwidth and re-renders.
+// minimize bandwidth and re-renders. Like Step(), it stamps the current
+// generation into the StepMsg so the tick chain survives the generation
+// gate in Animate().
 func (a *Anim) staticTick() tea.Cmd {
+	gen := a.gen.Load()
 	return tea.Tick(staticTickInterval, func(t time.Time) tea.Msg {
-		return StepMsg{ID: a.id}
+		return StepMsg{ID: a.id, Gen: gen}
 	})
 }
 

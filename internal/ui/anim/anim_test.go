@@ -314,6 +314,46 @@ func TestStopThenStart(t *testing.T) {
 	require.NotNil(t, a.Animate(msg2))
 }
 
+// TestStaticTickCarriesGeneration verifies that the reduced/static
+// animation mode uses the generation gate correctly. Without this, the
+// first tick after Start() is dropped and the "Working" ellipsis never
+// animates.
+func TestStaticTickCarriesGeneration(t *testing.T) {
+	t.Parallel()
+
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	a := New(Settings{
+		ID:          "static",
+		Static:      true,
+		Size:        5,
+		LabelColor:  label,
+		CycleColors: true,
+	})
+
+	cmd := a.Start()
+	msg := cmd().(StepMsg)
+
+	// The tick must carry the current generation so Animate() accepts it.
+	require.Equal(t, a.id, msg.ID)
+	require.Equal(t, a.gen.Load(), msg.Gen, "static tick must carry the current generation")
+	require.NotEqual(t, int64(0), msg.Gen, "generation must have been bumped by Start()")
+
+	// The first animation step should advance the ellipsis frame and
+	// schedule the next tick.
+	next := a.Animate(msg)
+	require.NotNil(t, next, "matching static tick must schedule the next step")
+	require.Equal(t, int64(1), a.step.Load(), "first Animate must advance the ellipsis step")
+
+	// After one step the rendered output should show the first dot.
+	rendered := a.Render()
+	require.Contains(t, rendered, "Working")
+	require.Contains(t, rendered, ".")
+
+	// The next scheduled tick must carry the same generation.
+	nextMsg := next().(StepMsg)
+	require.Equal(t, msg.Gen, nextMsg.Gen, "chained static tick must carry the same generation")
+}
+
 // TestAnimateWithoutStart verifies that Animate works on a fresh Anim
 // whose generation is still zero, matching a zero-gen StepMsg.
 func TestAnimateWithoutStart(t *testing.T) {

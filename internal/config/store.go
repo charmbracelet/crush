@@ -14,6 +14,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/config/trust"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -99,6 +100,11 @@ type ConfigStore struct {
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
 
+	// Trust management for project-level configs.
+	trustStore            *trust.TrustStore
+	untrustedProjectPaths []string // project configs awaiting user trust
+	allProjectPaths       []string // all discovered project config paths
+
 	// configMu guards the config pointer field against concurrent
 	// readers (Config) and the writeMu-serialised swap (setConfig). It
 	// protects the pointer word only; the pointed-to Config is treated
@@ -154,6 +160,50 @@ func (s *ConfigStore) setConfig(cfg *Config) {
 // WorkingDir returns the current working directory.
 func (s *ConfigStore) WorkingDir() string {
 	return s.workingDir
+}
+
+// UntrustedProjectPaths returns project config paths that have not been
+// trusted by the user. The UI uses this to decide whether to show a
+// trust prompt.
+func (s *ConfigStore) UntrustedProjectPaths() []string {
+	return s.untrustedProjectPaths
+}
+
+// HasUntrustedProjectConfigs reports whether any project configs are
+// awaiting user trust.
+func (s *ConfigStore) HasUntrustedProjectConfigs() bool {
+	return len(s.untrustedProjectPaths) > 0
+}
+
+// AcceptProjectTrust marks all currently untrusted project configs as
+// trusted, loads them into the config, and persists the trust decisions.
+func (s *ConfigStore) AcceptProjectTrust() error {
+	if len(s.untrustedProjectPaths) == 0 {
+		return nil
+	}
+
+	for _, p := range s.untrustedProjectPaths {
+		if err := s.trustStore.Trust(p); err != nil {
+			return fmt.Errorf("trusting %s: %w", p, err)
+		}
+	}
+
+	if err := s.trustStore.Save(); err != nil {
+		return fmt.Errorf("saving trust store: %w", err)
+	}
+
+	s.untrustedProjectPaths = nil
+	return nil
+}
+
+// RejectProjectTrust removes trust entries for the untrusted project
+// configs so they remain excluded on future runs too.
+func (s *ConfigStore) RejectProjectTrust() {
+	for _, p := range s.untrustedProjectPaths {
+		s.trustStore.Untrust(p)
+	}
+	_ = s.trustStore.Save()
+	s.untrustedProjectPaths = nil
 }
 
 // Resolver returns the variable resolver.

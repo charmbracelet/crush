@@ -530,6 +530,12 @@ func (m *UI) Init() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+	// Open trust dialog if there are untrusted project configs.
+	if m.com.ConfigStore() != nil && m.com.ConfigStore().HasUntrustedProjectConfigs() {
+		if cmd := m.openTrustDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
@@ -2027,6 +2033,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
+	case dialog.ActionTrustAccept:
+		cmds = append(cmds, m.acceptProjectTrust())
+	case dialog.ActionTrustReject:
+		cmds = append(cmds, m.rejectProjectTrust())
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.enableDockerMCP)

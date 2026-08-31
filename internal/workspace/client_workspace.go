@@ -520,6 +520,10 @@ func (w *ClientWorkspace) Config() *config.Config {
 	return w.cached().Config
 }
 
+func (w *ClientWorkspace) ConfigStore() *config.ConfigStore {
+	return nil
+}
+
 func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
 }

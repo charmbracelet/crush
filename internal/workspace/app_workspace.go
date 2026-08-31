@@ -502,5 +502,10 @@ func (w *AppWorkspace) Store() *config.ConfigStore {
 	return w.store
 }
 
+// ConfigStore returns the underlying config store.
+func (w *AppWorkspace) ConfigStore() *config.ConfigStore {
+	return w.store
+}
+
 // Compile-time check that AppWorkspace implements Workspace.
 var _ Workspace = (*AppWorkspace)(nil)

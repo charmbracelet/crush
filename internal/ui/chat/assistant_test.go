@@ -140,3 +140,29 @@ func TestAssistantMessageItemHandleMouseClick(t *testing.T) {
 	require.False(t, item.HandleMouseClick(ansi.MouseRight, 0, 2))
 	require.Equal(t, thinkingCollapsed, item.thinkingViewMode)
 }
+
+// TestAssistantMessageItemReducedAnimationsStreamsContent verifies that
+// enabling reduce_animations does not disable the live rendering of
+// streamed LLM output. The spinner should reduce to a simpler "Working..."
+// ellipsis, but the assistant content must still appear as it arrives.
+func TestAssistantMessageItemReducedAnimationsStreamsContent(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	item := NewAssistantMessageItem(&sty, msg, true).(*AssistantMessageItem)
+
+	require.True(t, item.isSpinning(),
+		"message with no content must spin regardless of reduce_animations")
+
+	// Simulate a streaming content delta.
+	msg.AppendContent("hello world")
+	item.SetMessage(msg)
+
+	require.False(t, item.isSpinning(),
+		"message with streamed content must stop spinning")
+
+	rendered := ansi.Strip(item.RawRender(80))
+	require.Contains(t, rendered, "hello world",
+		"reduced-animations item must still render streamed content")
+}

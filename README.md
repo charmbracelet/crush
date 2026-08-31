@@ -704,9 +704,9 @@ Crush provides several options to customize the terminal UI:
 - `compact_mode`: Enable compact TUI layout (default: `false`)
 - `diff_mode`: Diff view style - `"unified"` or `"split"` (default: `"unified"`)
 - `transparent`: Enable transparent background (default: `false`)
-- `reduce_animations`: When true, animated spinners are replaced with a static
-  "Working..." label. Can also be enabled via the `CRUSH_REDUCE_ANIMATIONS`
-  environment variable.
+- `reduce_animations`: When true, animated spinners are replaced with a simpler
+  "Working..." ellipsis animation. Can also be enabled via the
+  `CRUSH_REDUCE_ANIMATIONS` environment variable.
 - `ssh_animation_mode`: Controls animation behavior over SSH connections:
   - `"ask"`: Prompt the user on first SSH session (default)
   - `"reduce"`: Automatically reduce animations over SSH

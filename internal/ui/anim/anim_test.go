@@ -161,3 +161,35 @@ func TestAdvanceIndependentInstances(t *testing.T) {
 	a2.Advance()
 	require.Equal(t, int64(1), a2.framesSinceStart.Load())
 }
+
+// TestStaticAdvanceTicksEllipsis verifies that a static (reduced) Anim
+// still animates its ellipsis under the shared clock: Advance reports no
+// change between steps and advances the ellipsis once per
+// staticFrameDivisor frames.
+func TestStaticAdvanceTicksEllipsis(t *testing.T) {
+	t.Parallel()
+
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	a := New(Settings{
+		ID:          "static",
+		Static:      true,
+		Size:        5,
+		LabelColor:  label,
+		CycleColors: true,
+	})
+
+	// Frames before the divisor boundary must not change the output.
+	for range staticFrameDivisor - 1 {
+		require.False(t, a.Advance(), "static advance must be a no-op between ellipsis steps")
+	}
+	require.Equal(t, int64(0), a.step.Load())
+
+	// The divisor-th frame advances the ellipsis.
+	require.True(t, a.Advance())
+	require.Equal(t, int64(1), a.step.Load())
+
+	// After one step the rendered output shows the first dot.
+	rendered := a.Render()
+	require.Contains(t, rendered, "Working")
+	require.Contains(t, rendered, ".")
+}

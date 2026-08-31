@@ -954,9 +954,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
 			return m, tea.Batch(
-				m.handleStateChanged(),
+				m.handleStateChanged(msg.Payload),
 				m.loadMCPrompts,
 			)
+		case mcp.EventToolRegistryChanged:
+			return m, m.updateAgentModelCmd(nil)
 		case mcp.EventPromptsListChanged:
 			return m, handleMCPPromptsEvent(m.com.Workspace, msg.Payload.Name)
 		case mcp.EventToolsListChanged:
@@ -5134,13 +5136,27 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	return tea.Sequence(cmds...)
 }
 
-func (m *UI) handleStateChanged() tea.Cmd {
-	return m.updateAgentModelCmd(func() tea.Msg {
-		m.com.Workspace.UpdateAgentModel(context.Background())
+func (m *UI) handleStateChanged(event mcp.Event) tea.Cmd {
+	previous := m.mcpStates[event.Name]
+	toolRegistryChanged := previous.Counts.Tools != event.Counts.Tools ||
+		(previous.State == mcp.StateConnected) != (event.State == mcp.StateConnected)
+
+	previous.Name = event.Name
+	previous.State = event.State
+	previous.Error = event.Error
+	previous.Counts = event.Counts
+	m.mcpStates[event.Name] = previous
+
+	refreshState := func() tea.Msg {
 		return mcpStateChangedMsg{
 			states: m.com.Workspace.MCPGetStates(),
 		}
-	})
+	}
+	if !toolRegistryChanged {
+		return refreshState
+	}
+
+	return m.updateAgentModelCmd(refreshState)
 }
 
 func handleMCPPromptsEvent(ws workspace.Workspace, name string) tea.Cmd {

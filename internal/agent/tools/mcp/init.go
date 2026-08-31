@@ -175,6 +175,7 @@ type EventType uint
 const (
 	EventStateChanged EventType = iota
 	EventToolsListChanged
+	EventToolRegistryChanged
 	EventPromptsListChanged
 	EventResourcesListChanged
 	// EventChannelMessage is published when a channel server pushes a

@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -130,11 +132,20 @@ func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 		return
 	}
 
-	toolCount := updateTools(cfg, name, tools)
+	toolCount, toolsChanged := updateTools(cfg, name, tools)
 
 	prev, _ := states.Get(name)
+	previousToolCount := prev.Counts.Tools
 	prev.Counts.Tools = toolCount
 	updateState(name, StateConnected, nil, session, prev.Counts)
+	if toolsChanged && previousToolCount == toolCount {
+		broker.Publish(pubsub.UpdatedEvent, Event{
+			Type:   EventToolRegistryChanged,
+			Name:   name,
+			State:  StateConnected,
+			Counts: prev.Counts,
+		})
+	}
 }
 
 // registerSessionTools lists the tools a live session exposes and writes them
@@ -148,7 +159,8 @@ func registerSessionTools(ctx context.Context, cfg *config.ConfigStore, name str
 	if err != nil {
 		return 0, err
 	}
-	return updateTools(cfg, name, tools), nil
+	toolCount, _ := updateTools(cfg, name, tools)
+	return toolCount, nil
 }
 
 func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
@@ -162,17 +174,19 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	return result.Tools, nil
 }
 
-func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
+func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) (int, bool) {
 	mcpCfg, ok := cfg.Config().MCP[name]
 	if ok {
 		tools = filterTools(mcpCfg, tools)
 	}
+	previous, hadPrevious := allTools.Get(name)
+	changed := !hadPrevious || !reflect.DeepEqual(previous, tools)
 	if len(tools) == 0 {
 		allTools.Del(name)
-		return 0
+		return 0, changed && len(previous) > 0
 	}
 	allTools.Set(name, tools)
-	return len(tools)
+	return len(tools), changed
 }
 
 // filterTools filters tools based on enabled_tools (allow list) and

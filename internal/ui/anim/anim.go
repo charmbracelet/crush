@@ -150,6 +150,7 @@ type Anim struct {
 	ellipsisStep         atomic.Int64         // current ellipsis frame step
 	ellipsisFrames       *csync.Slice[string] // ellipsis animation frames
 	id                   string
+	labelText            string // current label text; used by the static renderer
 	suffix               func() string
 	suffixColor          color.Color
 	static               bool // when true, don't animate
@@ -191,8 +192,12 @@ func New(opts Settings) *Anim {
 		a.ellipsisColor = opts.EllipsisColor
 	}
 	a.static = opts.Static
+	a.labelText = opts.Label
+	if a.static && a.labelText == "" {
+		a.labelText = "Working"
+	}
 
-	// For static mode, render a static "Working..." label and return early.
+	// For static mode, render the static label and return early.
 	if opts.Static {
 		a.initialized.Store(true)
 		a.renderStatic()
@@ -351,6 +356,7 @@ func New(opts Settings) *Anim {
 
 // SetLabel updates the label text and re-renders it.
 func (a *Anim) SetLabel(newLabel string) {
+	a.labelText = newLabel
 	a.labelWidth = lipgloss.Width(newLabel)
 
 	// Update total width. Skip the label gap when there are no cycling chars.
@@ -454,7 +460,7 @@ func (a *Anim) Advance() bool {
 func (a *Anim) renderStatic() {
 	labelStyle := lipgloss.NewStyle().Foreground(a.labelColor)
 	dotStyle := lipgloss.NewStyle().Foreground(a.ellipsisColor)
-	a.staticRendered = labelStyle.Render("Working")
+	a.staticRendered = labelStyle.Render(a.labelText)
 	a.staticEllipsisFrames = make([]string, len(staticEllipsisFrames))
 	for i, frame := range staticEllipsisFrames {
 		a.staticEllipsisFrames[i] = dotStyle.Render(frame)

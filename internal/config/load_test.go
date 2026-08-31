@@ -2535,6 +2535,50 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
 }
 
+func TestIsSSH(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want bool
+	}{
+		{
+			name: "SSH_TTY set",
+			env:  map[string]string{"SSH_TTY": "/dev/pts/0"},
+			want: true,
+		},
+		{
+			name: "SSH_CONNECTION set",
+			env:  map[string]string{"SSH_CONNECTION": "10.0.0.1 12345 10.0.0.2 22"},
+			want: true,
+		},
+		{
+			name: "SSH_CLIENT set",
+			env:  map[string]string{"SSH_CLIENT": "10.0.0.1 12345 22"},
+			want: true,
+		},
+		{
+			name: "no SSH env",
+			env:  map[string]string{},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			// Ensure other SSH variables are unset.
+			for _, k := range []string{"SSH_TTY", "SSH_CONNECTION", "SSH_CLIENT"} {
+				if _, ok := tt.env[k]; !ok {
+					t.Setenv(k, "")
+				}
+			}
+			assert.Equal(t, tt.want, isSSH())
+		})
+	}
+}
+
 // TestShouldReduceAnimations tests the ShouldReduceAnimations logic.
 func TestShouldReduceAnimations(t *testing.T) {
 	// Test explicit reduce_animations: true

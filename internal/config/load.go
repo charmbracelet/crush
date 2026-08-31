@@ -1454,7 +1454,9 @@ func (c *Config) ValidateHooks() error {
 }
 
 func isSSH() bool {
-	return os.Getenv("SSH_TTY") != ""
+	return os.Getenv("SSH_TTY") != "" ||
+		os.Getenv("SSH_CONNECTION") != "" ||
+		os.Getenv("SSH_CLIENT") != ""
 }
 
 // ShouldReduceAnimations returns whether animations should be reduced based on config.

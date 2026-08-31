@@ -714,7 +714,8 @@ Crush provides several options to customize the terminal UI:
 
 When Crush detects it is running over SSH and `ssh_animation_mode` is `"ask"`
 (the default), it will display a dialog asking whether to switch to simpler
-animations.
+animations. The choice you make in that dialog is saved to the global `crush.json`
+under `options.tui.ssh_animation_mode` and applies to future SSH sessions.
 
 ### Custom Providers
 

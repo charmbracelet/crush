@@ -84,15 +84,17 @@ func QueryCmd(env uv.Environ) tea.Cmd {
 	sb.WriteString(notification.OSC99QuerySequence())
 
 	// Queries that should only be sent to "smart" normal terminals.
-	shouldQueryFor := shouldQueryCapabilities(env)
-	if shouldQueryFor {
+	if shouldQueryCapabilities(env) {
 		sb.WriteString(ansi.RequestNameVersion)
 		sb.WriteString(ansi.WindowOp(14)) // Window size in pixels
-		kittyReq := ansi.KittyGraphics([]byte("AAAA"), "i=31", "s=1", "v=1", "a=q", "t=d", "f=24")
-		if _, isTmux := env.LookupEnv("TMUX"); isTmux {
-			kittyReq = ansi.TmuxPassthrough(kittyReq)
+		// Skip the Kitty graphics query under tmux. The reply is an APC
+		// sequence, and tmux's key parser has no APC branch, so unless the
+		// whole reply lands in a single read tmux forwards its printable
+		// bytes to the pane as ordinary keys and "Gi=31;OK" is typed into
+		// the editor.
+		if _, isTmux := env.LookupEnv("TMUX"); !isTmux {
+			sb.WriteString(ansi.KittyGraphics([]byte("AAAA"), "i=31", "s=1", "v=1", "a=q", "t=d", "f=24"))
 		}
-		sb.WriteString(kittyReq)
 	}
 
 	return tea.Raw(sb.String())

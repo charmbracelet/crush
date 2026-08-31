@@ -26,6 +26,19 @@ const (
 
 	ArrowRightIcon string = "→"
 
+	// CodespanPadding is the padding rendered around inline code spans in
+	// markdown. It displays identically to the blank padding it replaced,
+	// but selection copies recognize it and turn it back into the original
+	// backticks (see list.HighlightContent).
+	//
+	// It is a no-break space tagged with a variation selector: the pair is
+	// a single one-cell grapheme that renders as a blank and, being
+	// non-breaking, keeps word wrap from tearing a codespan between its
+	// padding and its text. The selector makes the sentinel distinct from
+	// a real no-break space in message text (pasted text, some LLM
+	// output), which a selection copy must preserve verbatim.
+	CodespanPadding string = "\u00a0\ufe0f"
+
 	ToolPending string = "●"
 	ToolSuccess string = "✓"
 	ToolError   string = "×"

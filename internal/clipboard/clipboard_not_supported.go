@@ -6,7 +6,9 @@ func initClipboard() error {
 	return ErrUnsupported
 }
 
-func writeText(string) {}
+func writeText(string) error {
+	return ErrUnsupported
+}
 
 func read(Format) ([]byte, error) {
 	return nil, ErrUnsupported

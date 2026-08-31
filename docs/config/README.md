@@ -559,8 +559,8 @@ option ui completions-max-items 200
 > `.cursor/skills`.
 
 > [!NOTE]
-> The command palette's "Disable Background Color" and "Disable Mouse
-> Support" toggles always write to the global config. If a project config
+> The command palette's "Disable Background Color" and "Disable Mouse" 
+> toggles always write to the global config. If a project config
 > also sets `transparent` or `mouse`, project settings win on the next
 > launch (see [Where config lives](#where-config-lives)), so the toggle can
 > look like it silently reverted.

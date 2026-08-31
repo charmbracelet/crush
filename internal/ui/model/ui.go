@@ -415,11 +415,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.KeyMap.CopySelection = key.NewBinding()
 	ta.Focus()
 
-	scrollbarMode := config.ScrollbarDefault
-	if cfg := com.Config(); cfg.Options.TUI != nil && cfg.Options.TUI.Scrollbar != "" {
-		scrollbarMode = cfg.Options.TUI.Scrollbar
-	}
-	ch := NewChat(com, scrollbarMode)
+	ch := NewChat(com, com.Config().Options.TUI.Scrollbar)
 
 	keyMap := DefaultKeyMap()
 
@@ -521,7 +517,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// disable indeterminate progress bar
 	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
 	// enable transparent mode
-	ui.isTransparent = opts.TUI.Transparent != nil && *opts.TUI.Transparent
+	ui.isTransparent = opts.TUI.IsTransparent()
 
 	return ui
 }
@@ -2025,7 +2021,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				return util.ReportError(errors.New("configuration not found"))()
 			}
 
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent
+			isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
 			newValue := !isTransparent
 			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
 				return util.ReportError(err)()

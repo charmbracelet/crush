@@ -315,8 +315,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	// MCP initialization to settle before reading MCP tools. The coordinator
 	// waits again for the same reason (it is the gate the client/server path
 	// goes through); doing it here too surfaces the failure before we create a
-	// session, and lets the UpdateModels below see every MCP tool.
-	if err := mcp.WaitForInit(ctx); err != nil {
+	// session, and lets the UpdateModels below see every MCP tool. The wait is
+	// bounded so a server wedged mid-handshake cannot stall the one-shot run
+	// for its full connect timeout; past the budget the run proceeds without
+	// the unfinished servers' tools.
+	if err := mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget); err != nil {
 		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 

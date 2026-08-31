@@ -314,6 +314,39 @@ func TestStopThenStart(t *testing.T) {
 	require.NotNil(t, a.Animate(msg2))
 }
 
+// TestStaticLabel verifies that the reduced mode uses the configured
+// label and that SetLabel updates it.
+func TestStaticLabel(t *testing.T) {
+	t.Parallel()
+
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	a := New(Settings{
+		Static:     true,
+		Label:      "Thinking",
+		LabelColor: label,
+	})
+	require.Contains(t, a.Render(), "Thinking")
+
+	a.SetLabel("Summarizing")
+	require.Contains(t, a.Render(), "Summarizing")
+
+	// Empty labels are rendered as empty.
+	a.SetLabel("")
+	rendered := a.Render()
+	require.NotContains(t, rendered, "Working")
+	require.NotContains(t, rendered, "Thinking")
+}
+
+// TestStaticDefaultsToWorking verifies that the reduced mode falls back
+// to a "Working" label when none is supplied.
+func TestStaticDefaultsToWorking(t *testing.T) {
+	t.Parallel()
+
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	a := New(Settings{Static: true, LabelColor: label})
+	require.Contains(t, a.Render(), "Working")
+}
+
 // TestStaticTickCarriesGeneration verifies that the reduced/static
 // animation mode uses the generation gate correctly. Without this, the
 // first tick after Start() is dropped and the "Working" ellipsis never

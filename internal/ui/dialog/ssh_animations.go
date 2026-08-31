@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -25,15 +26,19 @@ const (
 type SSHAnimations struct {
 	com            *common.Common
 	selectedOption int // 0: Yes, 1: No, 2: On all SSH, 3: Never
+	help           help.Model
 }
 
 var _ Dialog = (*SSHAnimations)(nil)
 
 // NewSSHAnimations creates a new SSH animations dialog.
 func NewSSHAnimations(com *common.Common) *SSHAnimations {
+	h := help.New()
+	h.Styles = com.Styles.DialogHelpStyles()
 	return &SSHAnimations{
 		com:            com,
 		selectedOption: 1, // Default to "No"
+		help:           h,
 	}
 }
 
@@ -108,7 +113,7 @@ func (s *SSHAnimations) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Render components to compute needed height.
 	header := s.renderHeader(contentWidth)
 	buttons := s.renderButtons(contentWidth)
-	helpView := s.renderHelp()
+	helpView := s.renderHelp(contentWidth)
 	body := s.renderBody(contentWidth)
 
 	parts := []string{header, "", body, "", buttons, "", helpView}
@@ -157,8 +162,8 @@ func (s *SSHAnimations) renderButtons(contentWidth int) string {
 		Render(content)
 }
 
-func (s *SSHAnimations) renderHelp() string {
-	return "←/→ or tab to navigate · enter to confirm · esc to dismiss"
+func (s *SSHAnimations) renderHelp(contentWidth int) string {
+	return shortHelpLine(&s.help, s.ShortHelp(), contentWidth)
 }
 
 type sshAnimationsKeyMap struct {
@@ -214,7 +219,7 @@ func (s *SSHAnimations) keyMap() sshAnimationsKeyMap {
 // ShortHelp implements [help.KeyMap].
 func (s *SSHAnimations) ShortHelp() []key.Binding {
 	km := s.keyMap()
-	return []key.Binding{km.Left, km.Right, km.Select, km.Close}
+	return []key.Binding{km.Left, km.Right, km.Tab, km.Select, km.Close}
 }
 
 // FullHelp implements [help.KeyMap].

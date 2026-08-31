@@ -88,7 +88,7 @@ func TestBashToolMessageItem_OutputDefaultsCollapsed(t *testing.T) {
 	}
 	result := &message.ToolResult{ToolCallID: "bash2", Content: strings.Join(lines, "\n")}
 
-	item := NewBashToolMessageItem(&sty, tc, result, false, "")
+	item := NewBashToolMessageItem(&sty, tc, result, false, "", false)
 	bash, ok := item.(*BashToolMessageItem)
 	require.True(t, ok, "NewBashToolMessageItem must return a *BashToolMessageItem")
 	require.False(t, bash.expandedContent, "bash items must default to collapsed")

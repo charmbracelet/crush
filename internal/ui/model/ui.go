@@ -588,19 +588,27 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 // function that should be called once during initialization or when capabilities
 // change.
 func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
+	// iTerm2 does not support OSC 99 or OSC 777; the legacy OSC 9 sequence is
+	// the only notification protocol it understands.
+	_, hasITermSession := caps.Env.LookupEnv("ITERM_SESSION_ID")
+	termProg, _ := caps.Env.LookupEnv("TERM_PROGRAM")
+	supportsOSC9 := hasITermSession ||
+		strings.Contains(strings.ToLower(termProg), "iterm") ||
+		strings.Contains(strings.ToLower(caps.TerminalVersion), "iterm2")
+
 	// Check for explicit user preference first.
 	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
 		switch cfg.Options.Notifications {
 		case "native":
 			if !notification.NativeSupported {
 				slog.Debug("Native notifications unavailable on this platform; using OSC backend", "osc99_supported", caps.OSC99Notifications)
-				return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+				return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications, supportsOSC9)
 			}
 			slog.Debug("Using native backend (user preference)")
 			return notification.NewNativeBackend(notification.Icon)
 		case "osc":
 			slog.Debug("Using OSC backend (user preference)", "osc99_supported", caps.OSC99Notifications)
-			return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+			return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications, supportsOSC9)
 		case "bell":
 			slog.Debug("Using bell backend (user preference)")
 			return notification.NewBellBackend()
@@ -620,7 +628,7 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 	// SSH sessions use terminal-based notifications (OSC 99 or 777).
 	if isSSH {
 		slog.Debug("Selected OSCBackend for SSH session", "osc99_supported", caps.OSC99Notifications)
-		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications, supportsOSC9)
 	}
 
 	// Local sessions: prefer OSC on macOS because the native backend (beeep)
@@ -629,7 +637,7 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 	// (illumos/solaris). OSC 99 provides a polished experience with icon support.
 	if runtime.GOOS == "darwin" || !notification.NativeSupported {
 		slog.Debug("Selected OSCBackend for local session", "osc99_supported", caps.OSC99Notifications, "native_supported", notification.NativeSupported)
-		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications, supportsOSC9)
 	}
 
 	// Non-macOS local sessions use native OS notifications if focus events are supported.

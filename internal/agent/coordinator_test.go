@@ -580,3 +580,21 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "enabled", thinking["type"])
 }
+
+func TestBuildGoogleVertexProviderMissingParams(t *testing.T) {
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	coord := &coordinator{cfg: cfg}
+
+	// google.WithVertex panics on empty values, so we have to catch this
+	// before handing it over.
+	_, err = coord.buildGoogleVertexProvider(nil, map[string]string{"project": "p"})
+	require.Error(t, err)
+
+	_, err = coord.buildGoogleVertexProvider(nil, nil)
+	require.Error(t, err)
+
+	_, err = coord.buildGoogleVertexProvider(nil, map[string]string{"project": "p", "location": "global"})
+	require.NoError(t, err)
+}

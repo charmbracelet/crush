@@ -319,11 +319,16 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		switch p.ID {
 		// Handle specific providers that require additional configuration
 		case catwalk.InferenceProviderVertexAI:
-			var (
-				project  = env.Get("VERTEXAI_PROJECT")
-				location = env.Get("VERTEXAI_LOCATION")
+			credProject, hasCredentials := googleCloudCredentials(env)
+			project := cmp.Or(
+				env.Get("VERTEXAI_PROJECT"),
+				env.Get("GOOGLE_CLOUD_PROJECT"),
+				env.Get("ANTHROPIC_VERTEX_PROJECT_ID"),
+				env.Get("GCLOUD_PROJECT"),
+				env.Get("CLOUDSDK_CORE_PROJECT"),
+				credProject,
 			)
-			if project == "" || location == "" {
+			if !hasCredentials || project == "" {
 				if configExists {
 					slog.Warn("Skipping Vertex AI provider due to missing credentials")
 					c.Providers.Del(string(p.ID))
@@ -331,7 +336,13 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				continue
 			}
 			prepared.ExtraParams["project"] = project
-			prepared.ExtraParams["location"] = location
+			prepared.ExtraParams["location"] = cmp.Or(
+				env.Get("VERTEXAI_LOCATION"),
+				env.Get("GOOGLE_CLOUD_LOCATION"),
+				env.Get("GOOGLE_CLOUD_REGION"),
+				env.Get("CLOUD_ML_REGION"),
+				defaultVertexLocation,
+			)
 		case catwalk.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {
@@ -1060,6 +1071,66 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return nil, err
 	}
 	return &config, nil
+}
+
+// defaultVertexLocation is used when no region is configured. The global
+// endpoint serves every model Vertex currently publishes for Gemini and
+// Claude, so it's the safest thing to assume.
+const defaultVertexLocation = "global"
+
+// googleCloudCredentials reports whether Application Default Credentials are
+// available for Vertex AI, along with the project they carry, if any. Like
+// hasAWSCredentials, this only decides whether to offer the provider at all;
+// the SDK does the real authentication, including token refresh.
+func googleCloudCredentials(env env.Env) (project string, ok bool) {
+	if path := env.Get("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
+		return credentialsFileProject(path), true
+	}
+
+	// A pre-minted access token: gcloud has already done the OAuth dance.
+	ok = env.Get("CLOUDSDK_AUTH_ACCESS_TOKEN") != ""
+
+	// File-based credential discovery requires filesystem stats, so do it
+	// last and skip it under test, matching hasAWSCredentials.
+	if testing.Testing() {
+		return "", ok
+	}
+	adc := filepath.Join(gcloudConfigDir(env), "application_default_credentials.json")
+	if _, err := os.Stat(adc); err != nil {
+		return "", ok
+	}
+	return credentialsFileProject(adc), true
+}
+
+// gcloudConfigDir returns the directory gcloud writes its configuration to.
+func gcloudConfigDir(env env.Env) string {
+	if dir := env.Get("CLOUDSDK_CONFIG"); dir != "" {
+		return dir
+	}
+	if runtime.GOOS == "windows" {
+		if appData := env.Get("APPDATA"); appData != "" {
+			return filepath.Join(appData, "gcloud")
+		}
+	}
+	return filepath.Join(home.Dir(), ".config", "gcloud")
+}
+
+// credentialsFileProject reads the project out of a Google credentials file:
+// the quota project for user credentials, the project ID for service
+// accounts. Returns an empty string if the file carries neither.
+func credentialsFileProject(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var creds struct {
+		QuotaProjectID string `json:"quota_project_id"`
+		ProjectID      string `json:"project_id"`
+	}
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return ""
+	}
+	return cmp.Or(creds.QuotaProjectID, creds.ProjectID)
 }
 
 func hasAWSCredentials(env env.Env) bool {

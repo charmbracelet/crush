@@ -611,8 +611,9 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 	cfg := &Config{}
 	cfg.setDefaults("/tmp", "")
 	env := env.NewFromMap(map[string]string{
-		"VERTEXAI_PROJECT":  "test-project",
-		"VERTEXAI_LOCATION": "us-central1",
+		"GOOGLE_APPLICATION_CREDENTIALS": "/tmp/creds.json",
+		"VERTEXAI_PROJECT":               "test-project",
+		"VERTEXAI_LOCATION":              "us-central1",
 	})
 	resolver := NewShellVariableResolver(env)
 	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
@@ -653,6 +654,64 @@ func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
 	require.Equal(t, cfg.Providers.Len(), 0)
 }
 
+func TestConfig_configureProvidersVertexAIGoogleCloudEnv(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderVertexAI,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "gemini-pro",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"GOOGLE_APPLICATION_CREDENTIALS": "/tmp/creds.json",
+		"GOOGLE_CLOUD_PROJECT":           "test-project",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	vertexProvider, ok := cfg.Providers.Get("vertexai")
+	require.True(t, ok, "VertexAI provider should be present")
+	require.Equal(t, "test-project", vertexProvider.ExtraParams["project"])
+	// No region configured: fall back to the global endpoint.
+	require.Equal(t, "global", vertexProvider.ExtraParams["location"])
+}
+
+func TestConfig_configureProvidersVertexAIClaudeCodeEnv(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderVertexAI,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "gemini-pro",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"CLOUDSDK_AUTH_ACCESS_TOKEN":  "ya29.token",
+		"ANTHROPIC_VERTEX_PROJECT_ID": "test-project",
+		"CLOUD_ML_REGION":             "us-east5",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	vertexProvider, ok := cfg.Providers.Get("vertexai")
+	require.True(t, ok, "VertexAI provider should be present")
+	require.Equal(t, "test-project", vertexProvider.ExtraParams["project"])
+	require.Equal(t, "us-east5", vertexProvider.ExtraParams["location"])
+}
+
 func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{
@@ -668,8 +727,8 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 	cfg := &Config{}
 	cfg.setDefaults("/tmp", "")
 	env := env.NewFromMap(map[string]string{
-		"GOOGLE_GENAI_USE_VERTEXAI": "true",
-		"GOOGLE_CLOUD_LOCATION":     "us-central1",
+		"GOOGLE_APPLICATION_CREDENTIALS": "/tmp/creds.json",
+		"GOOGLE_CLOUD_LOCATION":          "us-central1",
 	})
 	resolver := NewShellVariableResolver(env)
 	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)

@@ -1003,6 +1003,10 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return nil
 		}
 		return errors.New("not a valid bedrock api key")
+	case catwalk.TypeVertexAI:
+		// NOTE: Vertex authenticates with Application Default Credentials,
+		// so there is no API key to validate.
+		return errors.New("vertex ai uses application default credentials: run `gcloud auth application-default login` and set GOOGLE_CLOUD_PROJECT")
 	case catwalk.TypeVercel:
 		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
 		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys

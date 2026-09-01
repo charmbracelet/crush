@@ -1084,6 +1084,11 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 
 	project := options["project"]
 	location := options["location"]
+	if project == "" || location == "" {
+		// google.WithVertex panics on empty values, and a custom provider
+		// using this type has no way to set them.
+		return nil, errors.New("vertex ai requires a project and a location: set GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION")
+	}
 
 	opts = append(opts, google.WithVertex(project, location))
 

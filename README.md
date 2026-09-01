@@ -218,8 +218,10 @@ That said, you can also set environment variables for preferred providers:
 | `GROQ_API_KEY`              | Groq                                               |
 | `AVIAN_API_KEY`             | Avian                                              |
 | `OPENCODE_API_KEY`          | OpenCode Zen & Go                                  |
-| `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
-| `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
+| `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini, Claude)             |
+| `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini, Claude)             |
+| `GOOGLE_CLOUD_PROJECT`      | Google Cloud VertexAI (Gemini, Claude)             |
+| `GOOGLE_CLOUD_LOCATION`     | Google Cloud VertexAI (Gemini, Claude)             |
 | `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                            |
 | `AWS_SECRET_ACCESS_KEY`     | Amazon Bedrock (Claude)                            |
 | `AWS_REGION`                | Amazon Bedrock (Claude)                            |
@@ -780,11 +782,19 @@ credential error, Crush runs the command, then retries the request in place
 
 ### Vertex AI Platform
 
-Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
+Vertex AI authenticates with Google Application Default Credentials, so there
+is no API key to enter. Sign in first:
 
 ```bash
 $ gcloud auth application-default login
 ```
+
+Vertex AI then appears in the list of available providers as soon as Crush can
+work out your project. It takes the first of `VERTEXAI_PROJECT`,
+`GOOGLE_CLOUD_PROJECT`, `ANTHROPIC_VERTEX_PROJECT_ID`, `GCLOUD_PROJECT`,
+`CLOUDSDK_CORE_PROJECT`, or the project in your credentials file. The region
+comes from `VERTEXAI_LOCATION`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_CLOUD_REGION`,
+or `CLOUD_ML_REGION`, and falls back to `global`.
 
 To add specific models to the configuration, configure as such:
 

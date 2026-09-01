@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,6 +36,44 @@ type BashPermissionsParams struct {
 	WorkingDir          string `json:"working_dir"`
 	RunInBackground     bool   `json:"run_in_background"`
 	AutoBackgroundAfter int    `json:"auto_background_after"`
+}
+
+// permissionSubjectScope derives a stable grant scope from a shell command so
+// that an allow-for-session covers the invocation the user approved instead
+// of every command in the working directory. Each &&, ||, or ; separated
+// segment contributes its first two significant tokens (skipping flags, env
+// assignments, and redirections); pipeline stages are ignored because they
+// only consume the primary stage's streams. Subjects are sorted, deduped,
+// and joined with "+". The empty command yields "bash".
+func permissionSubjectScope(command string) string {
+	flat := strings.NewReplacer("&&", "\n", "||", "\n", ";", "\n").Replace(command)
+	var subjects []string
+	for _, seg := range strings.Split(flat, "\n") {
+		if idx := strings.Index(seg, "|"); idx >= 0 {
+			seg = seg[:idx]
+		}
+		var toks []string
+		for _, tok := range strings.Fields(seg) {
+			if strings.HasPrefix(tok, "-") || strings.ContainsAny(tok, "<>") {
+				continue
+			}
+			if eq := strings.IndexByte(tok, '='); eq > 0 && !strings.Contains(tok[:eq], "/") {
+				continue
+			}
+			toks = append(toks, filepath.Base(tok))
+			if len(toks) == 2 {
+				break
+			}
+		}
+		if len(toks) > 0 {
+			subjects = append(subjects, strings.Join(toks, " "))
+		}
+	}
+	if len(subjects) == 0 {
+		return "bash"
+	}
+	slices.Sort(subjects)
+	return strings.Join(slices.Compact(subjects), "+")
 }
 
 type BashResponseMetadata struct {
@@ -235,6 +274,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						Action:      "execute",
 						Description: fmt.Sprintf("Execute command: %s", params.Command),
 						Params:      BashPermissionsParams(params),
+						Subject:     permissionSubjectScope(params.Command),
 					},
 				)
 				if err != nil {

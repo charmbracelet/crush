@@ -472,6 +472,11 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		if params, ok := p.permission.Params.(tools.BashPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
 		}
+		// Make the remembered scope of "Allow for Session" explicit rather
+		// than letting it implicitly mean every command in the directory.
+		if p.permission.Subject != "" {
+			lines = append(lines, p.renderKeyValue("Session grant", p.permission.Subject, contentWidth))
+		}
 	case tools.DownloadToolName:
 		if params, ok := p.permission.Params.(tools.DownloadPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))

@@ -43,6 +43,11 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	// Subject narrows a grant to a specific invocation of a tool beyond
+	// Path. For bash it is the command's binary plus subcommand (e.g.
+	// "git commit") so an allow-for-session does not implicitly approve
+	// every command runnable in the working directory.
+	Subject string `json:"subject"`
 }
 
 type PermissionNotification struct {
@@ -60,6 +65,8 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	// Subject mirrors CreatePermissionRequest.Subject.
+	Subject string `json:"subject"`
 }
 
 type Service interface {
@@ -90,6 +97,9 @@ type PermissionKey struct {
 	ToolName  string
 	Action    string
 	Path      string
+	// Subject mirrors PermissionRequest.Subject. An empty Subject keeps the
+	// pre-existing behavior of covering every tool action at the path.
+	Subject string
 }
 
 type permissionService struct {
@@ -166,6 +176,7 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
 			ToolName:  permission.ToolName,
 			Action:    permission.Action,
 			Path:      permission.Path,
+			Subject:   permission.Subject,
 		}, true)
 	})
 }
@@ -243,6 +254,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+		Subject:     opts.Subject,
 	}
 
 	if _, ok := s.sessionPermissions.Get(PermissionKey{
@@ -250,6 +262,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		ToolName:  permission.ToolName,
 		Action:    permission.Action,
 		Path:      permission.Path,
+		Subject:   permission.Subject,
 	}); ok {
 		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,

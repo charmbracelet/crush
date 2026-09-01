@@ -2425,6 +2425,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
+		case key.Matches(msg, m.keyMap.Skills):
+			if cmd := m.openSkillsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
 		case key.Matches(msg, m.keyMap.Models):
 			if cmd := m.openModelsDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -4488,6 +4493,17 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 // openCommandsDialog opens the commands dialog.
 func (m *UI) openCommandsDialog() tea.Cmd {
+	return m.openCommandsDialogOn(dialog.SystemCommands)
+}
+
+// openSkillsDialog opens the commands dialog on the Skills tab — the menu
+// of every discovered skill, so invoking one needs no natural-language
+// incantation ("use Al-Biruni", "use superpowers").
+func (m *UI) openSkillsDialog() tea.Cmd {
+	return m.openCommandsDialogOn(dialog.SkillsCommands)
+}
+
+func (m *UI) openCommandsDialogOn(tab dialog.CommandType) tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.CommandsID) {
 		// Bring to front
 		m.dialog.BringToFront(dialog.CommandsID)
@@ -4502,9 +4518,17 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
+	skillCatalog := []skills.CatalogEntry{}
+	if entries, err := m.com.Workspace.ListSkills(context.Background()); err == nil {
+		skillCatalog = entries
+	}
+
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts, skillCatalog)
 	if err != nil {
 		return util.ReportError(err)
+	}
+	if tab == dialog.SkillsCommands {
+		commands.SelectSkillsTab()
 	}
 
 	m.dialog.OpenDialog(commands)

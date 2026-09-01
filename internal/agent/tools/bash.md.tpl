@@ -106,7 +106,7 @@ Co-Authored-By: Crush <crush@charm.land>
 EOF
 )"
 
-6. If pre-commit hook fails, retry ONCE. If fails again, hook preventing commit. If succeeds but files modified, MUST amend.
+6. If pre-commit hook fails, retry ONCE. If fails again, hook preventing commit. If the first attempt succeeds, generating a commit, but files modified, the next attempt MUST amend.
 
 7. Run git status to verify.
 

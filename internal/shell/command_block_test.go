@@ -297,6 +297,36 @@ func TestCommandsBlocker(t *testing.T) {
 			input:       []string{"CURL", "https://example.com"},
 			shouldBlock: false,
 		},
+		{
+			name:        "block absolute path to banned command",
+			banned:      []string{"curl"},
+			input:       []string{"/usr/bin/curl", "https://example.com"},
+			shouldBlock: true,
+		},
+		{
+			name:        "block relative path to banned command",
+			banned:      []string{"curl"},
+			input:       []string{"./curl", "https://example.com"},
+			shouldBlock: true,
+		},
+		{
+			name:        "block dot-dot path to banned command",
+			banned:      []string{"scp"},
+			input:       []string{"../../bin/scp", "file", "host:/tmp"},
+			shouldBlock: true,
+		},
+		{
+			name:        "path to non-banned command still allowed",
+			banned:      []string{"curl"},
+			input:       []string{"/usr/bin/echo", "hello"},
+			shouldBlock: false,
+		},
+		{
+			name:        "trailing slash still matches",
+			banned:      []string{"curl"},
+			input:       []string{"/usr/bin/curl/", "x"},
+			shouldBlock: true,
+		},
 	}
 
 	for _, tt := range tests {

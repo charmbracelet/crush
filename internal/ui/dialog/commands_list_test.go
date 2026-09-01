@@ -48,7 +48,7 @@ func TestCommandsList_GroupedLayout(t *testing.T) {
 	require.Equal(t, 3, l.Len())
 	requireVisibleTypes(t, l.VisibleItems(),
 		&CommandGroup{}, &CommandItem{}, &CommandItem{}, &list.SpacerItem{},
-		&CommandGroup{}, &CommandItem{}, &list.SpacerItem{},
+		&CommandGroup{}, &CommandItem{},
 	)
 }
 
@@ -111,20 +111,20 @@ func TestCommandsList_FilterKeepsHeadersForMatchedGroups(t *testing.T) {
 	// first group entirely.
 	l.SetFilter("quit")
 	visible := l.VisibleItems()
-	requireVisibleTypes(t, visible, &CommandGroup{}, &CommandItem{}, &list.SpacerItem{})
+	requireVisibleTypes(t, visible, &CommandGroup{}, &CommandItem{})
 	header := visible[0].(*CommandGroup)
 	require.Equal(t, "Application", header.Title)
 
 	// Typing a section name surfaces all of its commands.
 	l.SetFilter("session")
 	visible = l.VisibleItems()
-	requireVisibleTypes(t, visible, &CommandGroup{}, &CommandItem{}, &list.SpacerItem{})
+	requireVisibleTypes(t, visible, &CommandGroup{}, &CommandItem{})
 	header = visible[0].(*CommandGroup)
 	require.Equal(t, "Session", header.Title)
 
 	// Clearing the filter restores all groups.
 	l.SetFilter("")
-	require.Len(t, l.VisibleItems(), 6)
+	require.Len(t, l.VisibleItems(), 5)
 }
 
 func TestCommandsList_ScrollToSelectedKeepsHeaderVisible(t *testing.T) {
@@ -160,6 +160,28 @@ func TestCommandsList_ScrollToSelectedKeepsHeaderVisible(t *testing.T) {
 	l.ScrollToSelected()
 	startIdx, _ = l.VisibleItemIndices()
 	require.LessOrEqual(t, startIdx, 4)
+}
+
+func TestCommandsList_ScrollToLastReachesBottom(t *testing.T) {
+	t.Parallel()
+
+	l, sty := testCommandsList(t)
+	g1 := NewCommandGroup(sty, "Session",
+		NewCommandItem(sty, "new_session", "New Session", "", nil),
+		NewCommandItem(sty, "switch_session", "Sessions", "", nil),
+	)
+	g2 := NewCommandGroup(sty, "Application",
+		NewCommandItem(sty, "quit", "Quit", "", nil),
+		NewCommandItem(sty, "restart", "Restart", "", nil),
+	)
+	l.SetGroups(g1, g2)
+	l.SetSize(40, 3)
+
+	// Selecting the last item must reach the bottom-most scroll offset so
+	// the scrollbar thumb touches the bottom of the track.
+	l.SelectLast()
+	l.ScrollToSelected()
+	require.Equal(t, l.TotalHeight()-l.Height(), l.Offset())
 }
 
 func TestCommandsList_FlatModeHasNoHeaders(t *testing.T) {

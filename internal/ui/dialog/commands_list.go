@@ -197,13 +197,17 @@ func (f *CommandsList) VisibleItems() []list.Item {
 		items := []list.Item{}
 		for gi := range f.groups {
 			g := &f.groups[gi]
+			// Separate sections with a blank line. No trailing spacer: the
+			// last command item doubles as the content end so scrolling to
+			// it reaches the bottom-most scroll offset.
+			if len(items) > 0 {
+				items = append(items, list.NewSpacerItem(1))
+			}
 			items = append(items, g)
 			for _, item := range g.Items {
 				item.SetMatch(fuzzy.Match{})
 				items = append(items, item)
 			}
-			// Add a space separator after each section.
-			items = append(items, list.NewSpacerItem(1))
 		}
 		return items
 	}
@@ -235,6 +239,9 @@ func (f *CommandsList) VisibleItems() []list.Item {
 			continue
 		}
 
+		if len(items) > 0 {
+			items = append(items, list.NewSpacerItem(1))
+		}
 		items = append(items, g)
 		for _, match := range matches {
 			item := g.Items[match.Index]
@@ -250,8 +257,6 @@ func (f *CommandsList) VisibleItems() []list.Item {
 			item.SetMatch(match)
 			items = append(items, item)
 		}
-		// Add a space separator after each section.
-		items = append(items, list.NewSpacerItem(1))
 	}
 
 	return items

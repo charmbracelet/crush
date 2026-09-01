@@ -4,10 +4,11 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
 )
 
 func openDBReadOnly(dbPath string) (*sql.DB, error) {
@@ -25,11 +26,11 @@ func openDBReadOnly(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func openDB(dbPath string) (*sql.DB, error) {
+func openDB(dbPath, journalMode string) (*sql.DB, error) {
 	// Set pragmas for better performance via _pragma query params.
 	// Format: _pragma=name(value)
 	params := url.Values{}
-	for name, value := range pragmas {
+	for name, value := range pragmas(journalMode) {
 		params.Add("_pragma", fmt.Sprintf("%s(%s)", name, value))
 	}
 	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
@@ -43,4 +44,15 @@ func openDB(dbPath string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// isLockProtocolError reports whether err is a SQLite lock-protocol or
+// lock I/O error, the signature of a filesystem (NFS, SMB, FUSE) that
+// cannot support WAL's shared-memory locking.
+func isLockProtocolError(err error) bool {
+	if sqliteErr, ok := errors.AsType[*sqlite.Error](err); ok {
+		code := sqliteErr.Code()
+		return code == sqliteProtocol || code == sqliteIOErrLock
+	}
+	return false
 }

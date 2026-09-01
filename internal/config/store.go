@@ -1269,8 +1269,7 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		if resolveErr != nil {
 			setupErr = fmt.Errorf("failed to configure selected models during reload: %w", resolveErr)
 		} else {
-			cfg.Models[SelectedModelTypeLarge] = resolved.Large
-			cfg.Models[SelectedModelTypeSmall] = resolved.Small
+			applyResolvedModels(cfg, resolved)
 			s.SetupAgents()
 		}
 	}

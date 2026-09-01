@@ -4,6 +4,7 @@ package clipboard
 
 import (
 	"bytes"
+	"context"
 
 	"golang.design/x/clipboard"
 )
@@ -24,14 +25,15 @@ func writeText(text string) error {
 	if !ready() {
 		return ErrUnsupported
 	}
-	// A nil channel means the backend never took the clipboard; reading back
+	// A write error means the backend never took the clipboard; reading back
 	// catches the rest, where the write is accepted but the text is not served
 	// afterwards. Neither check subsumes the other: a failed write leaves an
 	// earlier identical copy in place, which reads back as a success.
-	if clipboard.Write(clipboard.FmtText, []byte(text)) == nil {
+	if _, err := clipboard.Write(context.Background(), clipboard.FmtText, []byte(text)); err != nil {
 		return ErrWriteFailed
 	}
-	if !bytes.Equal(clipboard.Read(clipboard.FmtText), []byte(text)) {
+	data, err := clipboard.Read(context.Background(), clipboard.FmtText)
+	if err != nil || !bytes.Equal(data, []byte(text)) {
 		return ErrWriteFailed
 	}
 	return nil
@@ -50,8 +52,8 @@ func read(f Format) ([]byte, error) {
 	default:
 		return nil, ErrEmpty
 	}
-	data := clipboard.Read(format)
-	if data == nil {
+	data, err := clipboard.Read(context.Background(), format)
+	if err != nil || data == nil {
 		return nil, ErrEmpty
 	}
 	return data, nil

@@ -72,9 +72,9 @@ func UpdateProviders(pathOrURL string) error {
 	return nil
 }
 
-// resolveHyperAPIKey returns the Hyper API key from the environment or
+// ResolveHyperAPIKey returns the Hyper API key from the environment or
 // the raw config value. The env var takes precedence.
-func resolveHyperAPIKey(cfg *Config) string {
+func ResolveHyperAPIKey(cfg *Config) string {
 	if key := os.Getenv("HYPER_API_KEY"); key != "" {
 		return key
 	}
@@ -104,7 +104,7 @@ func UpdateHyper(pathOrURL string) error {
 	case strings.HasPrefix(pathOrURL, "http://") || strings.HasPrefix(pathOrURL, "https://"):
 		client := realHyperClient{
 			baseURL:    pathOrURL,
-			resolveKey: func() string { return resolveHyperAPIKey(nil) },
+			resolveKey: func() string { return ResolveHyperAPIKey(nil) },
 		}
 		var err error
 		provider, err = client.Get(context.Background(), "")
@@ -198,7 +198,7 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 			}
 			hyperSyncer.Init(realHyperClient{
 				baseURL:      hyper.BaseURL(),
-				resolveKey:   func() string { return resolveHyperAPIKey(cfgSnapshot) },
+				resolveKey:   func() string { return ResolveHyperAPIKey(cfgSnapshot) },
 				refreshToken: refresher,
 			}, path, autoupdate)
 

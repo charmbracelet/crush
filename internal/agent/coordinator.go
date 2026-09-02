@@ -1008,6 +1008,15 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	largeModel = newRequestTimeoutModel(largeModel, requestTimeout)
 	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
 
+	// Hyper completions no longer report the hypercredit balance, so wrap
+	// the Hyper models to fetch it from /v1/credits on every request.
+	if largeModelCfg.Provider == hyper.Name {
+		largeModel = newHyperCreditsModel(largeModel, c.hyperAPIKey)
+	}
+	if smallModelCfg.Provider == hyper.Name {
+		smallModel = newHyperCreditsModel(smallModel, c.hyperAPIKey)
+	}
+
 	large := Model{
 		Model:      largeModel,
 		CatwalkCfg: *largeCatwalkModel,
@@ -1022,6 +1031,13 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	}
 
 	return large, small, nil
+}
+
+// hyperAPIKey resolves the Hyper API key from the live config, so an
+// OAuth token refreshed after the models were built is picked up by the
+// next credits fetch.
+func (c *coordinator) hyperAPIKey() string {
+	return config.ResolveHyperAPIKey(c.cfg.Config())
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {

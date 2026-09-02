@@ -1135,7 +1135,15 @@ func (m *Chat) HighlightContent() string {
 			} else {
 				rendered = item.Render(listWidth)
 			}
-			sb.WriteString(list.HighlightContent(
+			markdown := false
+			if mc, ok := item.(list.MarkdownCopyable); ok {
+				markdown = mc.CopyAsMarkdown()
+			}
+			extract := list.HighlightContent
+			if markdown {
+				extract = list.HighlightContentMarkdown
+			}
+			sb.WriteString(extract(
 				rendered,
 				uv.Rect(0, 0, listWidth, lipgloss.Height(rendered)),
 				startLine,

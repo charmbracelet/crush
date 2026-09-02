@@ -725,6 +725,18 @@ func (l *List) ScrollToSelected() {
 		return
 	}
 
+	// The list may not have been sized yet when the caller sets up its
+	// selection, e.g. a dialog constructor that runs before the first
+	// Draw. With no viewport height there is no visibility window to fit
+	// the selection into, so pin the selected item to the top of the
+	// viewport; the first render then shows it instead of computing a
+	// bogus offset that skips past it entirely.
+	if l.height <= 0 {
+		l.offsetIdx = l.selectedIdx
+		l.offsetLine = 0
+		return
+	}
+
 	startIdx, endIdx := l.VisibleItemIndices()
 	if l.selectedIdx < startIdx {
 		// Selected item is above the visible range

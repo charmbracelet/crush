@@ -130,6 +130,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			CursorLineNumber: base.Foreground(o.fgMostSubtle),
 			Placeholder:      base.Foreground(o.fgMostSubtle),
 			Prompt:           base.Foreground(o.accent),
+			Selection:        base.Foreground(o.onPrimary).Background(o.secondary),
 		},
 		Blurred: textarea.StyleState{
 			Base:             base,
@@ -139,6 +140,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			CursorLineNumber: base.Foreground(o.fgMoreSubtle),
 			Placeholder:      base.Foreground(o.fgMostSubtle),
 			Prompt:           base.Foreground(o.fgMoreSubtle),
+			Selection:        base.Foreground(o.onPrimary).Background(o.secondary),
 		},
 		Cursor: textarea.CursorStyle{
 			Color: o.secondary,
@@ -249,8 +251,18 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
+				// Pad inline code with a no-break-space sentinel instead of
+				// a plain space. It displays identically, but selection
+				// copies turn it back into the original backticks (see
+				// [CodespanPadding] and list.HighlightContent); a plain
+				// space is indistinguishable from real text, so copies lost
+				// the backticks ("this is  code "). The sentinel carries a
+				// variation selector so copies can tell it apart from a
+				// real no-break space in the message text, and being
+				// non-breaking it keeps word wrap from tearing a codespan
+				// between its padding and its text.
+				Prefix:          CodespanPadding,
+				Suffix:          CodespanPadding,
 				Color:           hex(o.destructive),
 				BackgroundColor: hex(o.bgLessVisible),
 			},
@@ -489,8 +501,8 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
+				Prefix:          CodespanPadding,
+				Suffix:          CodespanPadding,
 				Color:           plainFg,
 				BackgroundColor: plainBg,
 			},

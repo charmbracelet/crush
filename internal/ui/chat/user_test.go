@@ -11,7 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestUserItem(text string, createdAt int64) *UserMessageItem {
+// newTestChannelUserItem builds a UserMessageItem carrying text and a creation
+// timestamp, with a real attachments renderer, for the channel render tests.
+func newTestChannelUserItem(text string, createdAt int64) *UserMessageItem {
 	sty := styles.CharmtonePantera()
 	msg := &message.Message{
 		ID:        "test-id",
@@ -50,7 +52,7 @@ func TestRawRender_ChannelMessageBody(t *testing.T) {
 
 	text := `<channel source="signal" sender="+15551234567" sender_name="Alice" time="14:30">Hello from Signal!</channel>`
 
-	item := newTestUserItem(text, 0)
+	item := newTestChannelUserItem(text, 0)
 	out := ansi.Strip(item.RawRender(80))
 
 	// Body should be rendered as markdown, not raw XML.
@@ -72,7 +74,7 @@ func TestRawRender_ChannelMessageSourceOnlyBody(t *testing.T) {
 
 	text := `<channel source="signal">Just the source, no sender or time.</channel>`
 
-	item := newTestUserItem(text, 1752456000)
+	item := newTestChannelUserItem(text, 1752456000)
 	out := ansi.Strip(item.RawRender(80))
 
 	require.Contains(t, out, "Just the source")
@@ -88,7 +90,7 @@ func TestRawRender_ChannelMessageMalformed(t *testing.T) {
 
 	text := `<channel source="signal" sender="broken`
 
-	item := newTestUserItem(text, 0)
+	item := newTestChannelUserItem(text, 0)
 	out := ansi.Strip(item.RawRender(80))
 
 	require.NotEmpty(t, out)
@@ -102,7 +104,7 @@ func TestRawRender_NormalMessage(t *testing.T) {
 
 	text := `This is a normal user message.`
 
-	item := newTestUserItem(text, 0)
+	item := newTestChannelUserItem(text, 0)
 	out := ansi.Strip(item.RawRender(80))
 
 	require.Contains(t, out, "This is a normal user message.")
@@ -118,7 +120,7 @@ func TestRawRender_ChannelMessageEmptyBody(t *testing.T) {
 
 	text := `<channel source="signal" sender="+15551234567" sender_name="Bob" time="09:15"></channel>`
 
-	item := newTestUserItem(text, 0)
+	item := newTestChannelUserItem(text, 0)
 	out := ansi.Strip(item.RawRender(80))
 
 	require.NotContains(t, out, "<channel")
@@ -133,7 +135,7 @@ func TestRawRender_ChannelMessageSenderFallbackBody(t *testing.T) {
 
 	text := `<channel source="signal" sender="+15559876543">Fallback sender</channel>`
 
-	item := newTestUserItem(text, 0)
+	item := newTestChannelUserItem(text, 0)
 	out := ansi.Strip(item.RawRender(80))
 
 	require.Contains(t, out, "Fallback sender")

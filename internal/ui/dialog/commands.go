@@ -27,6 +27,12 @@ func (c CommandType) String() string { return []string{"System", "User", "MCP"}[
 
 const (
 	sidebarCompactModeBreakpoint = 120
+	// commandsSpareRows is the breathing room kept below the commands so the
+	// list does not end flush against the help line.
+	commandsSpareRows = 2
+	// commandsMaxHeight caps the palette at the standard dialog height plus
+	// its spare rows; longer command lists scroll.
+	commandsMaxHeight = defaultDialogHeight + commandsSpareRows
 )
 
 const (
@@ -69,6 +75,12 @@ type Commands struct {
 
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
+
+	// Items for every tab, kept so the dialog can measure the tallest one
+	// instead of only the tab on screen.
+	systemGroups []CommandGroup
+	userItems    []*CommandItem
+	mcpItems     []*CommandItem
 
 	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
@@ -289,7 +301,6 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
 	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),
@@ -299,6 +310,14 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
 	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
+
+	// Size to the tallest tab plus a couple of spare rows so the palette
+	// keeps one height as tabs and filters change, bounded by the dialog
+	// maximum and by what the screen has room for.
+	height := min(
+		fitDialogHeight(t, c.tallestTabHeight(innerWidth), commandsSpareRows, area.Dy()),
+		commandsMaxHeight,
+	)
 
 	listHeight, listTotalHeight, listWidth := sizeDialogList(t, c.list, innerWidth, height)
 
@@ -391,51 +410,77 @@ func (c *Commands) previousCommandType() CommandType {
 }
 
 // setCommandItems sets the command items based on the specified command type.
+// Every tab's items are built, not just the visible one, so the dialog can
+// size itself to the tallest tab and keep that height as tabs change.
 func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
 
+	c.systemGroups = c.defaultCommandGroups()
+	c.userItems = c.customCommandItems()
+	c.mcpItems = c.mcpPromptItems()
+
 	switch c.selected {
 	case SystemCommands:
-		c.list.SetGroups(c.defaultCommandGroups()...)
+		c.list.SetGroups(c.systemGroups...)
 	case UserCommands:
-		items := []*CommandItem{}
-		for _, cmd := range c.customCommands {
-			var action Action
-			if cmd.Skill != nil {
-				action = ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
-			} else {
-				action = ActionRunCustomCommand{
-					Content:   cmd.Content,
-					Arguments: cmd.Arguments,
-					Skill:     cmd.Skill,
-				}
-			}
-			item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
-			if cmd.Skill != nil {
-				item = item.WithDescription(cmd.Skill.Description)
-			}
-			items = append(items, item)
-		}
-		c.list.SetItems(items...)
+		c.list.SetItems(c.userItems...)
 	case MCPPrompts:
-		items := []*CommandItem{}
-		for _, cmd := range c.mcpPrompts {
-			action := ActionRunMCPPrompt{
-				Title:       cmd.Title,
-				Description: cmd.Description,
-				PromptID:    cmd.PromptID,
-				ClientID:    cmd.ClientID,
-				Arguments:   cmd.Arguments,
-			}
-			items = append(items, NewCommandItem(c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
-		}
-		c.list.SetItems(items...)
+		c.list.SetItems(c.mcpItems...)
 	}
 
 	c.list.SetFilter("")
 	c.list.ScrollToTop()
 	c.list.SetSelected(0)
 	c.input.SetValue("")
+}
+
+// customCommandItems returns the items for the user commands tab.
+func (c *Commands) customCommandItems() []*CommandItem {
+	items := []*CommandItem{}
+	for _, cmd := range c.customCommands {
+		var action Action
+		if cmd.Skill != nil {
+			action = ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
+		} else {
+			action = ActionRunCustomCommand{
+				Content:   cmd.Content,
+				Arguments: cmd.Arguments,
+				Skill:     cmd.Skill,
+			}
+		}
+		item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
+		if cmd.Skill != nil {
+			item = item.WithDescription(cmd.Skill.Description)
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// mcpPromptItems returns the items for the MCP prompts tab.
+func (c *Commands) mcpPromptItems() []*CommandItem {
+	items := []*CommandItem{}
+	for _, cmd := range c.mcpPrompts {
+		action := ActionRunMCPPrompt{
+			Title:       cmd.Title,
+			Description: cmd.Description,
+			PromptID:    cmd.PromptID,
+			ClientID:    cmd.ClientID,
+			Arguments:   cmd.Arguments,
+		}
+		items = append(items, NewCommandItem(c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
+	}
+	return items
+}
+
+// tallestTabHeight returns the content height of the tab with the most rows
+// at the given width, so switching tabs never resizes the dialog.
+func (c *Commands) tallestTabHeight(width int) int {
+	return max(
+		groupsContentHeight(width, c.systemGroups),
+		itemsContentHeight(width, c.userItems),
+		itemsContentHeight(width, c.mcpItems),
+	)
 }
 
 // defaultCommandGroups returns the default system commands grouped into

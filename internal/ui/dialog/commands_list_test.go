@@ -184,6 +184,39 @@ func TestCommandsList_ScrollToLastReachesBottom(t *testing.T) {
 	require.Equal(t, l.TotalHeight()-l.Height(), l.Offset())
 }
 
+func TestCommandsContentHeightIgnoresFilter(t *testing.T) {
+	t.Parallel()
+
+	l, sty := testCommandsList(t)
+	groups := []CommandGroup{
+		NewCommandGroup(sty, "Session",
+			NewCommandItem(sty, "new_session", "New Session", "", nil),
+			NewCommandItem(sty, "switch_session", "Sessions", "", nil),
+		),
+		NewCommandGroup(sty, "Application",
+			NewCommandItem(sty, "quit", "Quit", "", nil),
+		),
+	}
+	l.SetGroups(groups...)
+	l.SetSize(40, 3)
+
+	// Two headers, three items and one separator between the sections.
+	require.Equal(t, 6, groupsContentHeight(40, groups))
+	require.Equal(t, l.TotalHeight(), groupsContentHeight(40, groups))
+
+	// Filtering shrinks the list but not the height the dialog sizes to, so
+	// the palette keeps a steady height while typing.
+	l.SetFilter("quit")
+	require.Less(t, l.TotalHeight(), groupsContentHeight(40, groups))
+	require.Equal(t, 6, groupsContentHeight(40, groups))
+
+	// Descriptions make an item two rows tall.
+	require.Equal(t, 3, itemsContentHeight(40, []*CommandItem{
+		NewCommandItem(sty, "custom_a", "My Command", "", nil).WithDescription("does things"),
+		NewCommandItem(sty, "custom_b", "Other Command", "", nil),
+	}))
+}
+
 func TestCommandsList_FlatModeHasNoHeaders(t *testing.T) {
 	t.Parallel()
 

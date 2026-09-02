@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/sahilm/fuzzy"
@@ -43,6 +44,33 @@ func (f *CommandsList) Len() int {
 		n += len(g.Items)
 	}
 	return n
+}
+
+// groupsContentHeight returns the height the given sections occupy at width,
+// headers and the blank separators between sections included. Callers use it
+// to size a dialog to unfiltered content, so it ignores any active filter.
+func groupsContentHeight(width int, groups []CommandGroup) int {
+	height := 0
+	for gi := range groups {
+		g := &groups[gi]
+		// Sections after the first are preceded by a blank separator row.
+		if height > 0 {
+			height++
+		}
+		height += lipgloss.Height(g.Render(width))
+		height += itemsContentHeight(width, g.Items)
+	}
+	return height
+}
+
+// itemsContentHeight returns the height the given command items occupy at
+// width. Items carrying a description take more than a single row.
+func itemsContentHeight(width int, items []*CommandItem) int {
+	height := 0
+	for _, item := range items {
+		height += lipgloss.Height(item.Render(width))
+	}
+	return height
 }
 
 // SetGroups sets the command groups and updates the list items.

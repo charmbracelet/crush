@@ -36,6 +36,26 @@ type sizer interface {
 	SetSize(width, height int)
 }
 
+// dialogChromeHeight returns the vertical space a standard dialog spends on
+// everything but its list: the title, the filter input, the help line, and
+// the surrounding frames. Subtract it from a dialog height to get the list
+// viewport height, or add it to a content height to get the dialog height
+// that fits it.
+func dialogChromeHeight(t *styles.Styles) int {
+	return t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
+		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		t.Dialog.HelpView.GetVerticalFrameSize() +
+		t.Dialog.View.GetVerticalFrameSize()
+}
+
+// fitDialogHeight returns the dialog height that shows contentHeight rows of
+// list content plus spare blank rows, shrinking to whatever the screen has
+// room for. areaHeight is the full height available to the dialog.
+func fitDialogHeight(t *styles.Styles, contentHeight, spare, areaHeight int) int {
+	available := max(0, areaHeight-t.Dialog.View.GetVerticalBorderSize())
+	return min(dialogChromeHeight(t)+contentHeight+spare, available)
+}
+
 // sizeDialogList computes the list dimensions within a dialog and calls
 // l.SetSize. It accounts for the title, input, help, and view frame sizes
 // so callers don't have to repeat the arithmetic. The scrollbar column is
@@ -50,12 +70,7 @@ type sizer interface {
 //   - innerWidth: dialog content width (total minus View horizontal frame).
 //   - dialogHeight: total dialog content height (already clamped).
 func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (listHeight, listTotalHeight, listWidth int) {
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-
-	listHeight = max(0, dialogHeight-heightOffset)
+	listHeight = max(0, dialogHeight-dialogChromeHeight(t))
 	listTotalHeight = l.TotalHeight()
 
 	// Reserve one column for the scrollbar only when it will actually

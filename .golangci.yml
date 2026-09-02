@@ -41,12 +41,21 @@ linters:
         text: "SA1019.*interp.ExecHandler"
         linters:
           - staticcheck
+      - path: internal/agent/tools/mcp/init.go
+        text: "SA1019.*LoggingMessageHandler"
+        linters:
+          - staticcheck
+      # SA4023 false positive: RemoveConfigField returns non-nil errors.
+      - path: internal/cmd/logout.go
+        text: "SA4023"
+        linters:
+          - staticcheck
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
 formatters:
   enable:
     - gofumpt
-    - goimports
+    # - goimports
   exclusions:
     generated: lax

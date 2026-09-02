@@ -228,11 +228,14 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 					}
 				}
 			}
+			prevValue := c.input.Value()
 			c.input, cmd = c.input.Update(msg)
 			value := c.input.Value()
-			c.list.SetFilter(value)
-			c.list.ScrollToTop()
-			c.list.SetSelected(0)
+			if value != prevValue {
+				c.list.SetFilter(value)
+				c.list.ScrollToTop()
+				c.list.SetSelected(0)
+			}
 			return ActionCmd{cmd}
 		}
 	}
@@ -540,7 +543,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Add transparent background toggle.
 	transparentLabel := "Disable Background Color"
-	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {
+	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.IsTransparent() {
 		transparentLabel = "Enable Background Color"
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))

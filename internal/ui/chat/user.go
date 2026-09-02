@@ -156,7 +156,7 @@ func (m *UserMessageItem) renderChannelMessage(raw string, width int) string {
 		return ""
 	}
 
-	renderer := common.MarkdownRenderer(m.sty, width)
+	renderer := common.UserMarkdownRenderer(m.sty, width)
 	mu := common.LockMarkdownRenderer(renderer)
 	mu.Lock()
 	result, err := renderer.Render(body)
@@ -169,7 +169,7 @@ func (m *UserMessageItem) renderChannelMessage(raw string, width int) string {
 
 // fallbackRender renders text as plain markdown when XML parsing fails.
 func (m *UserMessageItem) fallbackRender(content string, width int) string {
-	renderer := common.MarkdownRenderer(m.sty, width)
+	renderer := common.UserMarkdownRenderer(m.sty, width)
 	mu := common.LockMarkdownRenderer(renderer)
 	mu.Lock()
 	result, err := renderer.Render(content)

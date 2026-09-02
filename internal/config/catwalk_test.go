@@ -49,23 +49,67 @@ func TestCatwalkSync_GetPanicIfNotInit(t *testing.T) {
 func TestCatwalkSync_GetWithAutoUpdateDisabled(t *testing.T) {
 	t.Parallel()
 
-	syncer := &catwalkSync{}
-	client := &mockCatwalkClient{
-		providers: []catwalk.Provider{{Name: "should-not-be-used"}},
-	}
-	path := t.TempDir() + "/providers.json"
+	t.Run("uses cached providers", func(t *testing.T) {
+		t.Parallel()
 
-	syncer.Init(client, path, false)
+		tmpDir := t.TempDir()
+		path := tmpDir + "/providers.json"
+		cachedProviders := []catwalk.Provider{
+			{Name: "Cached Provider", ID: "cached"},
+		}
+		data, err := json.Marshal(cachedProviders)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path, data, 0o644))
 
-	providers, err := syncer.Get(t.Context())
-	require.NoError(t, err)
-	require.NotEmpty(t, providers)
-	require.Equal(t, 0, client.callCount, "Client should not be called when autoupdate is disabled")
+		client := &mockCatwalkClient{
+			providers: []catwalk.Provider{{Name: "should-not-be-used"}},
+		}
+		syncer := &catwalkSync{}
+		syncer.Init(client, path, false)
 
-	// Should return embedded providers.
-	for _, p := range providers {
-		require.NotEqual(t, "should-not-be-used", p.Name)
-	}
+		providers, err := syncer.Get(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, cachedProviders, providers)
+		require.Equal(t, 0, client.callCount, "Client should not be called when autoupdate is disabled")
+	})
+
+	t.Run("falls back to embedded providers without a cache", func(t *testing.T) {
+		t.Parallel()
+
+		syncer := &catwalkSync{}
+		client := &mockCatwalkClient{
+			providers: []catwalk.Provider{{Name: "should-not-be-used"}},
+		}
+		path := t.TempDir() + "/providers.json"
+
+		syncer.Init(client, path, false)
+
+		providers, err := syncer.Get(t.Context())
+		require.NoError(t, err)
+		require.NotEmpty(t, providers)
+		require.Equal(t, 0, client.callCount, "Client should not be called when autoupdate is disabled")
+
+		// Should return embedded providers.
+		for _, p := range providers {
+			require.NotEqual(t, "should-not-be-used", p.Name)
+		}
+	})
+
+	t.Run("falls back to embedded providers for an invalid cache", func(t *testing.T) {
+		t.Parallel()
+
+		path := t.TempDir() + "/providers.json"
+		require.NoError(t, os.WriteFile(path, []byte("not json"), 0o644))
+
+		client := &mockCatwalkClient{}
+		syncer := &catwalkSync{}
+		syncer.Init(client, path, false)
+
+		providers, err := syncer.Get(t.Context())
+		require.NoError(t, err)
+		require.NotEmpty(t, providers)
+		require.Equal(t, 0, client.callCount, "Client should not be called when autoupdate is disabled")
+	})
 }
 
 func TestCatwalkSync_GetFreshProviders(t *testing.T) {

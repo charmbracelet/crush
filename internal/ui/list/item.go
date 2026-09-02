@@ -92,6 +92,18 @@ type Highlightable interface {
 	Highlight() (startLine, startCol, endLine, endCol int)
 }
 
+// MarkdownCopyable represents an item whose raw rendering is
+// terminal-rendered markdown (glamour), so a selection copy may map
+// bold/italic/strikethrough cell attributes back to the **, *, and ~~
+// markers they came from. Items that render program output or other
+// arbitrarily styled text must not implement it: there the attributes
+// carry no markdown meaning and reconstruction would corrupt the copy.
+type MarkdownCopyable interface {
+	// CopyAsMarkdown reports whether selection copies of this item should
+	// reconstruct inline markdown markers.
+	CopyAsMarkdown() bool
+}
+
 // MouseClickable represents an item that can handle mouse click events.
 type MouseClickable interface {
 	// HandleMouseClick processes a mouse click event at the given coordinates.

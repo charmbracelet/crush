@@ -25,6 +25,19 @@ type Highlighter func(x, y int, c *uv.Cell) *uv.Cell
 
 // HighlightContent returns the content with highlighted regions based on the specified parameters.
 func HighlightContent(content string, area image.Rectangle, startLine, startCol, endLine, endCol int) string {
+	return highlightContent(content, area, startLine, startCol, endLine, endCol, false)
+}
+
+// HighlightContentMarkdown is [HighlightContent] for content that is
+// terminal-rendered markdown (glamour): in addition to the raw text it
+// reconstructs the inline markers the renderer dropped, so the clipboard
+// holds valid markdown. Bold, italic, and strikethrough runs become **, *,
+// and ~~ again, the same way codespan padding becomes backticks.
+func HighlightContentMarkdown(content string, area image.Rectangle, startLine, startCol, endLine, endCol int) string {
+	return highlightContent(content, area, startLine, startCol, endLine, endCol, true)
+}
+
+func highlightContent(content string, area image.Rectangle, startLine, startCol, endLine, endCol int, markdown bool) string {
 	content = stringext.NormalizeSpace(content)
 
 	if startLine < 0 || startCol < 0 {
@@ -42,7 +55,7 @@ func HighlightContent(content string, area image.Rectangle, startLine, startCol,
 		endCol = width
 	}
 
-	rows := extractRows(buf, startLine, startCol, endLine, endCol, height)
+	rows := extractRows(buf, startLine, startCol, endLine, endCol, height, markdown)
 	return joinRows(rows, width) + "\n"
 }
 
@@ -54,10 +67,19 @@ func renderBuffer(content string, area image.Rectangle, width, height int) uv.Sc
 	return buf
 }
 
+// extractedRow holds one extracted screen row: text is the copy text with
+// any markdown markers restored, plain the same row without markers. The
+// wrap heuristics in joinRows measure plain because restored markers would
+// inflate the row width and skew the word-wrap threshold.
+type extractedRow struct {
+	text  string
+	plain string
+}
+
 // extractRows extracts the text of the selected region from the buffer,
-// one string per row, trimmed to the last cell holding content.
-func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, height int) []string {
-	rows := make([]string, 0, endLine-startLine+1)
+// one entry per row, trimmed to the last cell holding content.
+func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, height int, markdown bool) []extractedRow {
+	rows := make([]extractedRow, 0, endLine-startLine+1)
 	for y := startLine; y <= endLine && y < height; y++ {
 		if y >= buf.Height() {
 			break
@@ -73,7 +95,7 @@ func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, heig
 			colEnd = min(endCol, len(line))
 		}
 
-		rows = append(rows, extractRow(line, colStart, colEnd))
+		rows = append(rows, extractRow(line, colStart, colEnd, markdown))
 	}
 	return rows
 }
@@ -89,7 +111,13 @@ func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, heig
 // original source text, not the rendered blank padding. The sentinel is a
 // no-break space tagged with a variation selector, so a real no-break space
 // in the message text does not match it and is copied verbatim.
-func extractRow(line uv.Line, colStart, colEnd int) string {
+//
+// In markdown mode, runs of bold, italic, and strikethrough cells
+// additionally become **, *, and ~~ markers again (see cellEmphasis). A
+// space inside an open run is held back until the next non-space cell so a
+// trailing space lands outside the closing marker: "**bold **" is not valid
+// emphasis, while "**bold** " renders the same as the source.
+func extractRow(line uv.Line, colStart, colEnd int, markdown bool) extractedRow {
 	lastCellX := -1
 	for x := colStart; x < colEnd; x++ {
 		cell := line.At(x)
@@ -98,38 +126,160 @@ func extractRow(line uv.Line, colStart, colEnd int) string {
 		}
 	}
 
-	var row strings.Builder
+	heading := markdown && isHeadingRow(line)
+
+	var row, plain strings.Builder
+	var cur emphasis
+	held := 0
+	flushHeld := func() {
+		for range held {
+			row.WriteByte(' ')
+			plain.WriteByte(' ')
+		}
+		held = 0
+	}
 	for x := colStart; x <= lastCellX; x++ {
 		cell := line.At(x)
-		if cell != nil {
-			if cell.Content == styles.CodespanPadding {
-				row.WriteString("`")
-			} else {
-				row.WriteString(cell.Content)
+		if cell == nil || cell.Content == "" {
+			continue
+		}
+
+		content := cell.Content
+		if content == styles.CodespanPadding {
+			content = "`"
+		}
+
+		e := emphasis(0)
+		if markdown && !heading {
+			e = cellEmphasis(cell)
+		}
+
+		switch {
+		case cur != 0 && e == cur && content == " ":
+			held++
+		case e == cur:
+			flushHeld()
+			row.WriteString(content)
+			plain.WriteString(content)
+		default:
+			if lost := cur &^ e; lost != 0 {
+				row.WriteString(closeMarkers(lost))
 			}
+			flushHeld()
+			if gained := e &^ cur; gained != 0 {
+				row.WriteString(openMarkers(gained))
+			}
+			if content == " " && e != 0 {
+				held++
+			} else {
+				row.WriteString(content)
+				plain.WriteString(content)
+			}
+			cur = e
 		}
 	}
-	return row.String()
+	if cur != 0 {
+		row.WriteString(closeMarkers(cur))
+	}
+	flushHeld()
+
+	return extractedRow{text: row.String(), plain: plain.String()}
+}
+
+// emphasis is a bitmask of the inline markdown emphases a cell displays.
+type emphasis uint8
+
+const (
+	emphBold emphasis = 1 << iota
+	emphItalic
+	emphStrikethrough
+)
+
+// cellEmphasis maps a cell's display attributes back to the markdown
+// emphasis they were rendered from. Cells styled for reasons other than
+// markdown emphasis are excluded: hyperlinks (OSC8 link), cells with a
+// background (codespan pills, H1 headings), and underlined cells (link
+// URLs, images, syntax-highlighted class names in fenced code), none of
+// which come from *, **, or ~~ in the source.
+func cellEmphasis(cell *uv.Cell) emphasis {
+	if cell.Link.URL != "" || cell.Style.Bg != nil || cell.Style.Underline != uv.UnderlineNone {
+		return 0
+	}
+	var e emphasis
+	if cell.Style.Attrs&uv.AttrBold != 0 {
+		e |= emphBold
+	}
+	if cell.Style.Attrs&uv.AttrItalic != 0 {
+		e |= emphItalic
+	}
+	if cell.Style.Attrs&uv.AttrStrikethrough != 0 {
+		e |= emphStrikethrough
+	}
+	return e
+}
+
+// isHeadingRow reports whether the buffer row is a markdown heading. H2-H6
+// render their literal "## " prefix and title all in bold, so without the
+// check a copied heading would gain bogus ** markers around its title. H1
+// needs no check: it paints a background color, which cellEmphasis already
+// rejects.
+func isHeadingRow(line uv.Line) bool {
+	cell := line.At(0)
+	return cell != nil && strings.HasPrefix(cell.Content, "#")
+}
+
+// openMarkers returns the markdown markers opening the given emphasis
+// flags, bold outermost, so bold-italic text opens as ***.
+func openMarkers(e emphasis) string {
+	var s strings.Builder
+	if e&emphBold != 0 {
+		s.WriteString("**")
+	}
+	if e&emphItalic != 0 {
+		s.WriteString("*")
+	}
+	if e&emphStrikethrough != 0 {
+		s.WriteString("~~")
+	}
+	return s.String()
+}
+
+// closeMarkers returns the markdown markers closing the given emphasis
+// flags, unwinding openMarkers in reverse, so bold-italic text closes as
+// ***.
+func closeMarkers(e emphasis) string {
+	var s strings.Builder
+	if e&emphStrikethrough != 0 {
+		s.WriteString("~~")
+	}
+	if e&emphItalic != 0 {
+		s.WriteString("*")
+	}
+	if e&emphBold != 0 {
+		s.WriteString("**")
+	}
+	return s.String()
 }
 
 // joinRows stitches screen rows back into text, deciding per row boundary
 // whether it was a real newline or a word wrap. Blank rows are paragraph
 // breaks; otherwise isWordWrap decides.
-func joinRows(rows []string, width int) string {
+func joinRows(rows []extractedRow, width int) string {
 	var sb strings.Builder
 	for i, row := range rows {
-		text := strings.TrimRight(row, " ")
+		text := strings.TrimRight(row.text, " ")
+		plain := strings.TrimRight(row.plain, " ")
 		sb.WriteString(text)
 		if i == len(rows)-1 {
 			break
 		}
 
-		next := rows[i+1]
+		next := rows[i+1].plain
 		switch {
 		case strings.TrimSpace(next) == "":
 			// Blank row: paragraph break.
 			sb.WriteString("\n")
-		case isWordWrap(text, next, width):
+		case isWordWrap(plain, next, width):
 			sb.WriteString(" ")
 		default:
 			sb.WriteString("\n")

@@ -273,6 +273,13 @@ func (a *AssistantMessageItem) ID() string {
 	return a.message.ID
 }
 
+// CopyAsMarkdown implements [list.MarkdownCopyable]. The message body is
+// glamour-rendered markdown, so selection copies may reconstruct inline
+// emphasis markers from cell attributes.
+func (a *AssistantMessageItem) CopyAsMarkdown() bool {
+	return true
+}
+
 // RawRender implements [MessageItem].
 func (a *AssistantMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)

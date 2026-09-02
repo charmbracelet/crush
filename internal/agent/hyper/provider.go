@@ -41,6 +41,10 @@ const (
 	DisplayName = "Charm Hyper"
 	// defaultBaseURL is the default proxy URL.
 	defaultBaseURL = "https://hyper.charm.land"
+	// HypercreditsPerUSD is the number of hypercredits charged per dollar
+	// of usage. The UI uses it to tick the displayed balance down as cost
+	// accrues, between periodic balance fetches.
+	HypercreditsPerUSD = 20
 )
 
 // BaseURL returns the base URL, which is either $HYPER_URL or the default.

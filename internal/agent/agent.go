@@ -1027,8 +1027,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return getSessionErr
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
-			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
+			// Extract the balance before the session save publishes the
+			// usage update, so a UI reading the balance off that event
+			// never races the store with this write.
 			extractHyperCredits(stepResult.ProviderMetadata)
+			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -1884,7 +1887,8 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 }
 
 // extractHyperCredits reads usage.remaining.hypercredits from OpenAI
-// provider metadata and stores it for the next FetchCredits call.
+// provider metadata — present on every Hyper chat completion, streamed or
+// not — and stores the reported balance for the UI to display.
 func extractHyperCredits(metadata fantasy.ProviderMetadata) {
 	openaiMeta, ok := metadata[openai.Name]
 	if !ok {

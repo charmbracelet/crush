@@ -1858,7 +1858,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		cost = 0
 	}
 
-	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
+	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens + resp.TotalUsage.CacheReadTokens
 	completionTokens := resp.TotalUsage.OutputTokens
 
 	// Atomically update only title and usage fields to avoid overriding other
@@ -1940,7 +1940,7 @@ func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
 	if usage.OutputTokens != 0 {
 		session.CompletionTokens = usage.OutputTokens
 	}
-	if promptTokens := usage.InputTokens + usage.CacheReadTokens; promptTokens != 0 {
+	if promptTokens := usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens; promptTokens != 0 {
 		session.PromptTokens = promptTokens
 	}
 }

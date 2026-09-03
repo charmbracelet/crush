@@ -618,8 +618,8 @@ func setupSubscriber[T any](
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	broker *pubsub.Broker[tea.Msg],
 ) {
+	subCh := subscriber(ctx)
 	wg.Go(func() {
-		subCh := subscriber(ctx)
 		for {
 			select {
 			case event, ok := <-subCh:
@@ -650,8 +650,8 @@ func setupSubscriberMustDeliver[T any](
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	broker *pubsub.Broker[tea.Msg],
 ) {
+	subCh := subscriber(ctx)
 	wg.Go(func() {
-		subCh := subscriber(ctx)
 		for {
 			select {
 			case event, ok := <-subCh:

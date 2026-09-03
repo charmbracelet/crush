@@ -1018,11 +1018,22 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			}),
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
 			openaicompat.WithResponsesAPIFunc(isOpenCodeResponsesModel),
+		)
+
+	case hyper.Name:
+		// Hyper may route requests through a Prism model; capture the
+		// router headers so the UI can show which model answered.
+		opts = append(
+			opts,
+			openaicompat.WithLanguageModelOptions(
+				openai.WithLanguageModelHeaderFunc(hyper.HeaderFunc),
+			),
 		)
 	}
 	if httpClient == nil && c.cfg.Config().Options.Debug {

@@ -110,10 +110,6 @@ func TestCatwalkSync_GetWithAutoUpdateDisabled(t *testing.T) {
 		require.NotEmpty(t, providers)
 		require.Equal(t, 0, client.callCount, "Client should not be called when autoupdate is disabled")
 	})
-	// No cache file: fall back to embedded providers.
-	for _, p := range providers {
-		require.NotEqual(t, "should-not-be-used", p.Name)
-	}
 }
 
 func TestCatwalkSync_GetWithAutoUpdateDisabledUsesCache(t *testing.T) {

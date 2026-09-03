@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -81,6 +82,13 @@ func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, heig
 // colEnd, trimmed to the last cell holding any content (including explicit
 // spaces: renderers like glamour pad rows with real space cells, so content
 // usually reaches the full width).
+//
+// Codespan padding cells are converted back into backticks: markdown inline
+// code renders blank padding in place of its backticks
+// ([styles.CodespanPadding]), and a copy of a selection must reproduce the
+// original source text, not the rendered blank padding. The sentinel is a
+// no-break space tagged with a variation selector, so a real no-break space
+// in the message text does not match it and is copied verbatim.
 func extractRow(line uv.Line, colStart, colEnd int) string {
 	lastCellX := -1
 	for x := colStart; x < colEnd; x++ {
@@ -94,7 +102,11 @@ func extractRow(line uv.Line, colStart, colEnd int) string {
 	for x := colStart; x <= lastCellX; x++ {
 		cell := line.At(x)
 		if cell != nil {
-			row.WriteString(cell.Content)
+			if cell.Content == styles.CodespanPadding {
+				row.WriteString("`")
+			} else {
+				row.WriteString(cell.Content)
+			}
 		}
 	}
 	return row.String()

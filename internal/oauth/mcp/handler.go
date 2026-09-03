@@ -72,6 +72,12 @@ type Handler struct {
 	inner    auth.OAuthHandler
 	receiver *callbackReceiver
 
+	// metadata records what the authorization server advertised in its
+	// discovery metadata, as seen by metadataFixupRoundTripper. The
+	// callback uses it to validate an RFC 9207 iss parameter from servers
+	// that emit one without advertising support for it.
+	metadata *oauthMetadata
+
 	// openURL opens the authorization URL in the user's browser. It is
 	// a field so tests can simulate a headless environment or drive the
 	// callback directly.
@@ -120,6 +126,7 @@ func NewHandler(
 		serverName: serverName,
 		fixedPort:  callbackPort,
 	}
+	metadata := &oauthMetadata{}
 
 	// Resolve the redirect port without binding it. The listener is only
 	// opened when an authorization actually runs (see fetchAuthorizationCode),
@@ -159,6 +166,7 @@ func NewHandler(
 		openURL:        browser.OpenURL,
 		interactive:    interactive,
 		onTokenRefresh: onTokenRefresh,
+		metadata:       metadata,
 	}
 	receiver.handler = h
 
@@ -186,7 +194,7 @@ func NewHandler(
 		// validation. Also rewrite internal-cluster redirects back to the
 		// external hostname so the flow works outside the cluster.
 		// Based on Bruno Krugel's fix from PR #3396.
-		Client: newOAuthMetadataClient(http.DefaultTransport, serverURL),
+		Client: newOAuthMetadataClient(http.DefaultTransport, serverURL, metadata),
 		DynamicClientRegistrationConfig: &auth.DynamicClientRegistrationConfig{
 			Metadata: &oauthex.ClientRegistrationMetadata{
 				ClientName:   "Crush",
@@ -570,14 +578,45 @@ func (r *callbackReceiver) handleCallback(w http.ResponseWriter, req *http.Reque
 		if result.Failed() {
 			flight.settle(nil, fmt.Errorf("OAuth error: %s: %s", result.ErrorCode, result.ErrorDescription))
 		} else {
+			issuer := query.Get("iss")
+			if issuer != "" {
+				normalized, err := r.handler.validateUnadvertisedIssuer(issuer)
+				if err != nil {
+					flight.settle(nil, err)
+					return
+				}
+				issuer = normalized
+			}
 			flight.settle(&auth.AuthorizationResult{
 				Code:  query.Get("code"),
 				State: query.Get("state"),
 				// Required by servers that implement RFC 9207.
-				Iss: query.Get("iss"),
+				Iss: issuer,
 			}, nil)
 		}
 	}
+}
+
+// validateUnadvertisedIssuer handles an RFC 9207 iss parameter received from
+// an authorization server that does not advertise
+// authorization_response_iss_parameter_supported in its metadata. The go-sdk
+// rejects that combination unconditionally, but RFC 9207 §2.4 asks clients to
+// validate the iss they receive, not to reject a valid one for being
+// unadvertised. So when the captured metadata confirms the server does not
+// advertise iss support, the issuer is validated here and blanked out so the
+// SDK's stricter check passes. A mismatched issuer still fails the login. If
+// the metadata was not captured or the server does advertise iss, the value
+// is passed through untouched for the SDK to validate.
+func (h *Handler) validateUnadvertisedIssuer(iss string) (string, error) {
+	issuer, advertised, seen := h.metadata.snapshot()
+	if !seen || advertised {
+		return iss, nil
+	}
+	if iss != issuer {
+		return "", fmt.Errorf("authorization response issuer %q does not match expected issuer %q", iss, issuer)
+	}
+	slog.Debug("Validated unadvertised RFC 9207 issuer", "issuer", iss)
+	return "", nil
 }
 
 func (r *callbackReceiver) fetchAuthorizationCode(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
@@ -665,6 +704,36 @@ func (r *callbackReceiver) close() {
 	}
 }
 
+// oauthMetadata records what the authorization server advertised in its
+// discovery metadata. The metadataFixupRoundTripper fills it in as the
+// go-sdk performs discovery, and the callback later uses it to validate an
+// RFC 9207 iss parameter that the server emitted without advertising
+// support for it.
+type oauthMetadata struct {
+	mu   sync.Mutex
+	seen bool
+	// issuer is the authorization server's issuer, already normalized by
+	// metadataFixupRoundTripper so it matches what the SDK compares against.
+	issuer string
+	// issAdvertised reports whether the server advertised
+	// authorization_response_iss_parameter_supported.
+	issAdvertised bool
+}
+
+func (m *oauthMetadata) record(issuer string, issAdvertised bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seen = true
+	m.issuer = issuer
+	m.issAdvertised = issAdvertised
+}
+
+func (m *oauthMetadata) snapshot() (issuer string, issAdvertised, seen bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.issuer, m.issAdvertised, m.seen
+}
+
 // metadataFixupRoundTripper normalizes trailing-slash issuers in OAuth
 // metadata responses. Some servers return an issuer with a trailing slash
 // that doesn't match the URL the metadata was fetched from, causing the
@@ -672,10 +741,13 @@ func (r *callbackReceiver) close() {
 // fix from PR #3396.
 type metadataFixupRoundTripper struct {
 	base http.RoundTripper
+	// metadata, when non-nil, receives the issuer and RFC 9207
+	// advertisement from each authorization-server metadata response.
+	metadata *oauthMetadata
 }
 
-func newMetadataFixupRoundTripper(base http.RoundTripper) *metadataFixupRoundTripper {
-	return &metadataFixupRoundTripper{base: base}
+func newMetadataFixupRoundTripper(base http.RoundTripper, metadata *oauthMetadata) *metadataFixupRoundTripper {
+	return &metadataFixupRoundTripper{base: base, metadata: metadata}
 }
 
 func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -700,7 +772,16 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	}
 
 	issuer, ok := raw["issuer"].(string)
-	if !ok || !strings.HasSuffix(issuer, "/") {
+	if !ok {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
+	issAdvertised, _ := raw["authorization_response_iss_parameter_supported"].(bool)
+	if !strings.HasSuffix(issuer, "/") {
+		if rt.metadata != nil {
+			rt.metadata.record(issuer, issAdvertised)
+		}
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return resp, nil
 	}
@@ -710,6 +791,10 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	if err != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return resp, nil
+	}
+
+	if rt.metadata != nil {
+		rt.metadata.record(raw["issuer"].(string), issAdvertised)
 	}
 
 	slog.Debug("Normalized OAuth metadata issuer trailing slash", "url", req.URL.String())
@@ -733,14 +818,14 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 //     redirect back to the original MCP host. Token, registration, and
 //     authorize requests are left untouched, so a separately hosted
 //     identity provider keeps working.
-func newOAuthMetadataClient(base http.RoundTripper, serverURL string) *http.Client {
+func newOAuthMetadataClient(base http.RoundTripper, serverURL string, metadata *oauthMetadata) *http.Client {
 	var originalHost, originalScheme string
 	if u, err := url.Parse(serverURL); err == nil {
 		originalHost = u.Host
 		originalScheme = u.Scheme
 	}
 	return &http.Client{
-		Transport: newMetadataFixupRoundTripper(base),
+		Transport: newMetadataFixupRoundTripper(base, metadata),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			// Supplying CheckRedirect replaces net/http's default, so
 			// re-enforce its 10-redirect cap here.

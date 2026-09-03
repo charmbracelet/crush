@@ -55,6 +55,10 @@ const (
 	TodoPendingIcon    string = "•"
 	TodoInProgressIcon string = "→"
 
+	CronRecurringIcon string = "↻"
+	CronOneShotIcon   string = "⏱"
+	CronDeletedIcon   string = "✕"
+
 	ImageIcon  string = "■"
 	TextIcon   string = "≡"
 	SkillIcon  string = "▲"
@@ -400,6 +404,17 @@ type Styles struct {
 		TodoItem           lipgloss.Style // Default body text for todo list items
 		TodoJustStarted    lipgloss.Style // Text of the just-started todo in tool-call bodies
 
+		// Scheduled task (cron) styles
+		CronRecurringIcon lipgloss.Style // Recurring scheduled-task icon
+		CronOneShotIcon   lipgloss.Style // One-shot scheduled-task icon
+		CronDeletedIcon   lipgloss.Style // Cancelled scheduled-task icon
+		CronTaskID        lipgloss.Style // Scheduled-task ID
+		CronSchedule      lipgloss.Style // Cron expression
+		CronNextRun       lipgloss.Style // "next 14:30" column
+		CronPrompt        lipgloss.Style // The prompt the task fires
+		CronMeta          lipgloss.Style // "recurring · durable · 12 runs" detail line
+		CronError         lipgloss.Style // Last-error detail line
+
 		// MCP tools
 		MCPName     lipgloss.Style // The mcp name
 		MCPToolName lipgloss.Style // The mcp tool name
@@ -591,6 +606,7 @@ type Styles struct {
 		Base               lipgloss.Style // Base pill style with padding
 		Focused            lipgloss.Style // Pill with visible rounded border
 		QueueItemPrefix    lipgloss.Style // Prefix for queue list items
+		CronItemPrefix     lipgloss.Style // Prefix for scheduled-task list items
 		QueueItemText      lipgloss.Style // Queue list item body text
 		QueueLabel         lipgloss.Style // "N Queued" label text
 		QueueIconBase      lipgloss.Style // Base style for queue gradient triangles

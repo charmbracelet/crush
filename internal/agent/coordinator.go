@@ -82,9 +82,32 @@ var copilotResponsesModels = map[string]bool{
 	"grok-4.6":      true,
 }
 
-// OpenCode models that user Anthropic Messages API instead of Chat Completions.
-var opencodeMessagesModels = map[string]bool{
-	"qwen3.7-max": true,
+// OpenCode models that use the Anthropic Messages API instead of Chat
+// Completions. Which endpoint serves each model differs per provider, see
+// https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
+func isOpenCodeMessagesModel(providerID, modelID string) bool {
+	switch providerID {
+	case string(catwalk.InferenceProviderOpenCodeGo):
+		return strings.HasPrefix(modelID, "minimax-") ||
+			strings.HasPrefix(modelID, "qwen3.6-") ||
+			strings.HasPrefix(modelID, "qwen3.7-") ||
+			strings.HasPrefix(modelID, "qwen3.8-")
+	case string(catwalk.InferenceProviderOpenCodeZen):
+		return strings.HasPrefix(modelID, "claude-") ||
+			strings.HasPrefix(modelID, "qwen3.5-") ||
+			strings.HasPrefix(modelID, "qwen3.6-") ||
+			strings.HasPrefix(modelID, "qwen3.7-") ||
+			strings.HasPrefix(modelID, "qwen3.8-")
+	}
+	return false
+}
+
+// OpenCode models that use the OpenAI Responses API instead of Chat
+// Completions. See https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
+func isOpenCodeResponsesModel(modelID string) bool {
+	return strings.HasPrefix(modelID, "gpt-") ||
+		strings.HasPrefix(modelID, "grok-") ||
+		strings.HasPrefix(modelID, "muse-spark-")
 }
 
 type Coordinator interface {
@@ -988,6 +1011,12 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			}),
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+		opts = append(
+			opts,
+			openaicompat.WithUseResponsesAPI(),
+			openaicompat.WithResponsesAPIFunc(isOpenCodeResponsesModel),
+		)
 	}
 	if httpClient == nil && c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
@@ -1120,7 +1149,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
-		if opencodeMessagesModels[model.Model] {
+		if isOpenCodeMessagesModel(providerCfg.ID, model.Model) {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
 			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 		}

@@ -1728,7 +1728,6 @@ func hasUserTextMessage(msgs []message.Message) bool {
 }
 
 // GenerateTitle generates a session title based on the initial prompt.
-
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
 		return

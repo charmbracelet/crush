@@ -48,6 +48,7 @@ type Theme struct {
 		UpDown        key.Binding
 		EditTheme     key.Binding
 		Rename        key.Binding
+		Revert        key.Binding
 		ConfirmRename key.Binding
 		CancelRename  key.Binding
 		Close         key.Binding
@@ -83,14 +84,15 @@ func (s *themeSpacer) Render(width int) string { return strings.Repeat("\n", s.h
 // ThemeItem represents a single theme entry in the picker.
 type ThemeItem struct {
 	*list.Versioned
-	name      string
-	label     string
-	isCurrent bool
-	t         *styles.Styles
-	m         fuzzy.Match
-	cache     map[int]string
-	focused   bool
-	hideInfo  bool
+	name       string
+	label      string
+	isCurrent  bool
+	overridden bool
+	t          *styles.Styles
+	m          fuzzy.Match
+	cache      map[int]string
+	focused    bool
+	hideInfo   bool
 
 	mode        themesMode
 	renameInput textinput.Model
@@ -148,6 +150,10 @@ func NewTheme(com *common.Common) *Theme {
 	th.keyMap.Rename = key.NewBinding(
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r", "rename"),
+	)
+	th.keyMap.Revert = key.NewBinding(
+		key.WithKeys("ctrl+d"),
+		key.WithHelp("ctrl+d", "revert"),
 	)
 	th.keyMap.ConfirmRename = key.NewBinding(
 		key.WithKeys("enter"),
@@ -270,6 +276,16 @@ func (th *Theme) HandleMsg(msg tea.Msg) Action {
 				th.selectedIndex = th.list.Selected()
 				th.mode = themesModeRenaming
 				th.setThemeItems()
+			case key.Matches(msg, th.keyMap.Revert):
+				selectedItem := th.list.SelectedItem()
+				if selectedItem == nil {
+					break
+				}
+				themeItem, ok := selectedItem.(*ThemeItem)
+				if !ok || themeItem.name == newThemeItemName || !themeItem.overridden {
+					break
+				}
+				return ActionRevertOverriddenTheme{Name: themeItem.name}
 			case key.Matches(msg, th.keyMap.Previous):
 				th.list.Focus()
 				th.selectPrevTheme()
@@ -427,6 +443,14 @@ func (th *Theme) canEditSelected() bool {
 	return item != nil && item.name != newThemeItemName
 }
 
+// canRevertSelected reports whether the currently selected theme item is a
+// built-in whose colors have been overridden, so it can be reset to the
+// original built-in palette.
+func (th *Theme) canRevertSelected() bool {
+	item := th.selectedThemeItem()
+	return item != nil && item.name != newThemeItemName && item.overridden
+}
+
 func (th *Theme) ShortHelp() []key.Binding {
 	bindings := []key.Binding{
 		th.keyMap.UpDown,
@@ -438,6 +462,9 @@ func (th *Theme) ShortHelp() []key.Binding {
 		if th.canRenameSelected() {
 			bindings = append(bindings, th.keyMap.Rename)
 		}
+		if th.canRevertSelected() {
+			bindings = append(bindings, th.keyMap.Revert)
+		}
 	}
 	bindings = append(bindings, th.keyMap.Select, th.keyMap.Close)
 	return bindings
@@ -448,6 +475,9 @@ func (th *Theme) FullHelp() [][]key.Binding {
 		return [][]key.Binding{{th.keyMap.ConfirmRename, th.keyMap.CancelRename}}
 	}
 	row2 := []key.Binding{th.keyMap.Close}
+	if th.canRevertSelected() {
+		row2 = append([]key.Binding{th.keyMap.Revert}, row2...)
+	}
 	if th.canRenameSelected() {
 		row2 = append([]key.Binding{th.keyMap.Rename}, row2...)
 	}
@@ -539,12 +569,13 @@ func (th *Theme) newThemeItem(info styles.ThemeInfo, currentTheme string) *Theme
 		label += " (" + info.Source.String() + ")"
 	}
 	item := &ThemeItem{
-		Versioned: &list.Versioned{},
-		name:      info.Name,
-		label:     label,
-		isCurrent: info.Name == currentTheme,
-		t:         th.com.Styles,
-		mode:      th.mode,
+		Versioned:  &list.Versioned{},
+		name:       info.Name,
+		label:      label,
+		isCurrent:  info.Name == currentTheme,
+		overridden: info.Overridden,
+		t:          th.com.Styles,
+		mode:       th.mode,
 	}
 	if th.mode == themesModeRenaming && th.selectedIndex >= 0 {
 		filteredItems := th.list.FilteredItems()

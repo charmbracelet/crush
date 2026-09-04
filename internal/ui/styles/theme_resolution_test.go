@@ -1,6 +1,7 @@
 package styles
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -102,6 +103,37 @@ func TestListAllThemes_ShowsOverridden(t *testing.T) {
 		}
 	}
 	t.Fatal("gruvbox-dark not found in theme list")
+}
+
+func TestRevertOverriddenTheme_RestoresBuiltin(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	// Override a built-in with a custom primary color.
+	path := filepath.Join(dir, "gruvbox-dark.json")
+	tf := &ThemeFile{Base: "gruvbox-dark", Palette: Palette{Primary: "#ff0000"}}
+	require.NoError(t, SaveThemeFile(path, tf))
+
+	// The built-in now reports as overridden.
+	requireOverridden(t, "gruvbox-dark", true)
+
+	// Reverting removes the shadowing file; the built-in resolves clean and
+	// is no longer reported as overridden.
+	require.NoError(t, os.Remove(path))
+	requireOverridden(t, "gruvbox-dark", false)
+	_, err := LoadTheme("gruvbox-dark")
+	require.NoError(t, err)
+}
+
+func requireOverridden(t *testing.T, name string, want bool) {
+	t.Helper()
+	for _, info := range ListAllThemes() {
+		if info.Name == name {
+			require.Equal(t, want, info.Overridden)
+			return
+		}
+	}
+	t.Fatalf("theme %q not found", name)
 }
 
 func TestListAllThemes_IncludesUserOnlyThemes(t *testing.T) {

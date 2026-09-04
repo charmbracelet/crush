@@ -80,7 +80,13 @@ type (
 		Name string
 	}
 	ActionRevertThemePalette struct{}
-	ActionDeleteThemeFile    struct {
+	// ActionRevertOverriddenTheme resets a built-in theme back to its
+	// original palette by dropping any user overrides (theme file and
+	// config entry) layered on top of it.
+	ActionRevertOverriddenTheme struct {
+		Name string
+	}
+	ActionDeleteThemeFile struct {
 		Name string
 	}
 	ActionCreateTheme struct {

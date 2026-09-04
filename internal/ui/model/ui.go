@@ -207,6 +207,12 @@ type UI struct {
 	// resolves to the same theme.
 	themeKey string
 
+	// userThemeSelected records that the user explicitly chose a theme
+	// during this session. It guards against provider-driven theme swaps
+	// discarding that choice, even in client/server mode where the
+	// config round-trip may not reflect the selection immediately.
+	userThemeSelected bool
+
 	focus uiFocusState
 	state uiState
 
@@ -464,6 +470,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// first model selection can correctly skip a redundant theme swap.
 	if cfg := com.Config(); cfg != nil {
 		ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
+		ui.userThemeSelected = common.ThemeNameFromConfig(cfg) != ""
 	}
 
 	// Seed the yolo cache once at construction; afterwards it is kept
@@ -2008,6 +2015,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, util.ReportInfo("Theme switched to "+themeName))
+		m.userThemeSelected = true
 		m.dialog.CloseDialog(dialog.ThemeID)
 	case dialog.ActionPreviewTheme:
 		newStyles, err := styles.LoadTheme(msg.Theme)
@@ -2092,6 +2100,33 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportInfo("Theme "+msg.Name+" reset to builtin"))
 		}
 		m.dialog.CloseDialog(dialog.ThemeEditorID)
+	case dialog.ActionRevertOverriddenTheme:
+		// Drop any user override layered on top of the built-in: the
+		// shadowing theme file and the config palette entry.
+		if path, err := styles.FindThemeFile(msg.Name); err == nil {
+			if err := os.Remove(path); err != nil {
+				cmds = append(cmds, util.ReportError(fmt.Errorf("revert theme: %w", err)))
+				break
+			}
+		}
+		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			if _, ok := cfg.Options.TUI.Theme[msg.Name]; ok {
+				if err := m.com.Workspace.RemoveConfigField(config.ScopeGlobal, "options.tui.theme."+msg.Name); err != nil {
+					cmds = append(cmds, util.ReportError(err))
+					break
+				}
+			}
+		}
+		// If the reverted theme is the active one, re-apply the pristine
+		// built-in so the change is visible immediately.
+		if common.ThemeNameFromConfig(m.com.Config()) == msg.Name {
+			if newStyles, err := styles.LoadTheme(msg.Name); err == nil {
+				m.applyTheme(newStyles)
+			}
+		}
+		cmds = append(cmds, util.ReportInfo("Reverted "+msg.Name+" to its built-in colors"))
+		m.dialog.CloseDialog(dialog.ThemeID)
+		m.openThemeDialog()
 	case dialog.ActionCreateTheme:
 		base := msg.Base
 		if base == "" {
@@ -4228,7 +4263,11 @@ func themePaletteConfigValue(base string, palette styles.Palette) (map[string]an
 // A theme explicitly selected in the config always wins, so provider
 // changes never discard the user's choice.
 func (m *UI) applyThemeForProvider(providerID string) {
-	if common.ThemeNameFromConfig(m.com.Config()) != "" {
+	// A theme the user explicitly selected always wins over the
+	// per-provider default, so provider or session changes never discard
+	// their choice. The in-memory flag covers client/server mode, where
+	// the config round-trip may not surface the selection right away.
+	if m.userThemeSelected || common.ThemeNameFromConfig(m.com.Config()) != "" {
 		return
 	}
 	key := styles.ThemeKeyForProvider(providerID)

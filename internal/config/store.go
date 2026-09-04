@@ -468,6 +468,21 @@ func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model 
 	})
 }
 
+// SetMCPDisabledInMemory toggles the Disabled flag on a named MCP server in
+// the in-memory config via copy-on-write, without persisting to disk. This
+// allows session-scoped enable/disable of MCP servers regardless of their
+// persisted config state.
+func (s *ConfigStore) SetMCPDisabledInMemory(name string, disabled bool) {
+	s.mutateInMemory(func(c *Config) {
+		m, ok := c.MCP[name]
+		if !ok {
+			return
+		}
+		m.Disabled = disabled
+		c.MCP[name] = m
+	})
+}
+
 // pinPreferredModelLocked records a model choice made in this instance so
 // that a later config reload cannot replace it with a choice made
 // somewhere else. Several Crush instances share one global config file, so

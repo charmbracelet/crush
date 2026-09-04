@@ -31,6 +31,8 @@ import (
 //	option metrics false
 //	option debug true
 //	option auto-lsp false
+//	option request-timeout 300
+//	option request-timeout 0
 //
 // Boolean shortcuts: for boolean fields, omitting the value sets it to true.
 func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -139,6 +141,18 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		slog.Info("Option set in shell config", "key", key, "value", o[spec.jsonKey])
 		return nil
 
+	case optInt:
+		if val == "" {
+			return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
+		}
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option: %s expects a number of seconds, got %q", key, val))
+		}
+		o[spec.jsonKey] = n
+		slog.Info("Option set in shell config", "key", key, "value", n)
+		return nil
+
 	default: // optString
 		if val == "" {
 			return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
@@ -156,6 +170,7 @@ const (
 	optString optionKind = iota
 	optBool
 	optList
+	optInt
 )
 
 // optionSpec describes one user-facing option key: the JSON field it writes,
@@ -194,6 +209,9 @@ var optionSpecs = map[string]optionSpec{
 	"notifications":  {jsonKey: "notifications", kind: optString},
 	"data-directory": {jsonKey: "data_directory", kind: optString},
 	"initialize-as":  {jsonKey: "initialize_as", kind: optString},
+
+	// Integer fields, in seconds.
+	"request-timeout": {jsonKey: "request_timeout", kind: optInt},
 
 	// List fields. Keys are singular because each call appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},

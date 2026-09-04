@@ -32,6 +32,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
+	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
@@ -1725,6 +1726,32 @@ func hasUserTextMessage(msgs []message.Message) bool {
 }
 
 // GenerateTitle generates a session title based on the initial prompt.
+// titleProviderOptions forwards the model's configured provider_options
+// (e.g. disabling thinking for Qwen models via chat_template_kwargs) to
+// the title call, which otherwise never goes through getProviderOptions.
+// The options are keyed for openai-compat transports; other transports
+// ignore keys that are not theirs.
+func titleProviderOptions(m Model) fantasy.ProviderOptions {
+	if len(m.ModelCfg.ProviderOptions) == 0 {
+		return nil
+	}
+	merged := map[string]any{}
+	data, err := json.Marshal(m.ModelCfg.ProviderOptions)
+	if err == nil {
+		err = json.Unmarshal(data, &merged)
+	}
+	if err != nil {
+		slog.Error("Could not marshal title provider options", "err", err)
+		return nil
+	}
+	parsed, err := openaicompat.ParseOptions(merged)
+	if err != nil {
+		slog.Error("Could not parse title provider options", "err", err)
+		return nil
+	}
+	return fantasy.ProviderOptions{openaicompat.Name: parsed}
+}
+
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
 		return
@@ -1789,7 +1816,9 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
-		resp, err = agent.Stream(ctx, streamCall)
+		call := streamCall
+		call.ProviderOptions = titleProviderOptions(attempt.model)
+		resp, err = agent.Stream(ctx, call)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model
 			slog.Debug("Generated title with " + attempt.name + " model")

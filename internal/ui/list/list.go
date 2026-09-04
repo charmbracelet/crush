@@ -125,10 +125,14 @@ func (l *List) AtBottom() bool {
 		return true
 	}
 
-	// Calculate the height from offsetIdx to the end.
+	// Calculate the height from offsetIdx to the end. The comparison is
+	// against the visible height (totalHeight minus the lines of the first
+	// item that are scrolled out of view), otherwise a first item taller
+	// than the viewport reports "not at bottom" while it is in fact
+	// pinned there.
 	var totalHeight int
 	for idx := l.offsetIdx; idx < len(l.items); idx++ {
-		if totalHeight > l.height {
+		if totalHeight-l.offsetLine > l.height {
 			// No need to calculate further, we're already past the viewport height
 			return false
 		}

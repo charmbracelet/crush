@@ -81,9 +81,9 @@
     {
       "id": "gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B A4B",
-      "cost_per_1m_in": 0.12,
-      "cost_per_1m_out": 0.42,
-      "cost_per_1m_in_cached": 0.06,
+      "cost_per_1m_in": 0.106,
+      "cost_per_1m_out": 0.368,
+      "cost_per_1m_in_cached": 0.053,
       "cost_per_1m_out_cached": 0,
       "context_window": 256000,
       "default_max_tokens": 25600,
@@ -93,9 +93,9 @@
     {
       "id": "glm-5",
       "name": "GLM-5",
-      "cost_per_1m_in": 0.91,
-      "cost_per_1m_out": 2.934,
-      "cost_per_1m_in_cached": 0.455,
+      "cost_per_1m_in": 0.86,
+      "cost_per_1m_out": 2.784,
+      "cost_per_1m_in_cached": 0.43,
       "cost_per_1m_out_cached": 0,
       "context_window": 202752,
       "default_max_tokens": 20275,
@@ -105,9 +105,9 @@
     {
       "id": "glm-5.1",
       "name": "GLM-5.1",
-      "cost_per_1m_in": 1.332,
-      "cost_per_1m_out": 4.312,
-      "cost_per_1m_in_cached": 0.666,
+      "cost_per_1m_in": 1.262,
+      "cost_per_1m_out": 4.132,
+      "cost_per_1m_in_cached": 0.631,
       "cost_per_1m_out_cached": 0,
       "context_window": 202750,
       "default_max_tokens": 3276,
@@ -146,7 +146,7 @@
         "high",
         "max"
       ],
-      "default_reasoning_effort": "max",
+      "default_reasoning_effort": "high",
       "supports_attachments": false
     },
     {
@@ -164,15 +164,15 @@
         "high",
         "max"
       ],
-      "default_reasoning_effort": "max",
+      "default_reasoning_effort": "high",
       "supports_attachments": true
     },
     {
       "id": "gpt-oss-120b",
       "name": "gpt-oss-120b",
-      "cost_per_1m_in": 0.19,
-      "cost_per_1m_out": 0.63,
-      "cost_per_1m_in_cached": 0.095,
+      "cost_per_1m_in": 0.188,
+      "cost_per_1m_out": 0.7,
+      "cost_per_1m_in_cached": 0.094,
       "cost_per_1m_out_cached": 0,
       "context_window": 128072,
       "default_max_tokens": 13107,
@@ -192,9 +192,9 @@
     {
       "id": "kimi-k2.5",
       "name": "Kimi K2.5",
-      "cost_per_1m_in": 0.5504,
-      "cost_per_1m_out": 2.885,
-      "cost_per_1m_in_cached": 0.2752,
+      "cost_per_1m_in": 0.5144,
+      "cost_per_1m_out": 2.755,
+      "cost_per_1m_in_cached": 0.2572,
       "cost_per_1m_out_cached": 0,
       "context_window": 262144,
       "default_max_tokens": 26214,
@@ -230,6 +230,18 @@
       "default_max_tokens": 16000,
       "can_reason": true,
       "supports_attachments": true
+    },
+    {
+      "id": "kimi-k2-thinking",
+      "name": "Kimi K2 Thinking",
+      "cost_per_1m_in": 0.6,
+      "cost_per_1m_out": 2.5,
+      "cost_per_1m_in_cached": 0.3,
+      "cost_per_1m_out_cached": 0,
+      "context_window": 262144,
+      "default_max_tokens": 26214,
+      "can_reason": true,
+      "supports_attachments": false
     },
     {
       "id": "kimi-k3",
@@ -276,9 +288,9 @@
     {
       "id": "minimax-m2.7",
       "name": "MiniMax M2.7",
-      "cost_per_1m_in": 0.404,
-      "cost_per_1m_out": 1.496,
-      "cost_per_1m_in_cached": 0.202,
+      "cost_per_1m_in": 0.484,
+      "cost_per_1m_out": 1.852,
+      "cost_per_1m_in_cached": 0.242,
       "cost_per_1m_out_cached": 0,
       "context_window": 262100,
       "default_max_tokens": 6553,

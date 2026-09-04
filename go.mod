@@ -46,7 +46,7 @@ require (
 	github.com/jordanella/go-ansi-paintbrush v0.0.0-20240728195301-b7ad996ecf3d
 	github.com/lucasb-eyer/go-colorful v1.4.1
 	github.com/mattn/go-isatty v0.0.24
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.7.1-0.20260825092617-32404652e60b
 	github.com/ncruces/go-sqlite3 v0.35.3
 	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go/v3 v3.54.0

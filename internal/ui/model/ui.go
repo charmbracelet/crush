@@ -254,6 +254,11 @@ type UI struct {
 	// Editor components
 	textarea textarea.Model
 
+	// textareaMouseSelecting tracks whether a mouse selection gesture is
+	// currently in progress within the textarea (left button held after a
+	// click inside the textarea region).
+	textareaMouseSelecting bool
+
 	// Active inline editor replaces the textarea when non-nil.
 	activeInline dialog.InlineEditor
 	// inlineCursor stores the cursor from the last inline editor
@@ -404,13 +409,23 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.DynamicHeight = true
 	ta.MinHeight = TextareaMinHeight
 	ta.MaxHeight = TextareaMaxHeight
+	// Keep "ctrl+a" for line-start (the textarea default); bind select-all
+	// to "ctrl+shift+a" instead (line-start is also available via "home").
+	ta.KeyMap.LineStart = key.NewBinding(
+		key.WithKeys("home", "ctrl+a"),
+		key.WithHelp("home", "line start"),
+	)
+	ta.KeyMap.SelectAll = key.NewBinding(
+		key.WithKeys("ctrl+shift+a"),
+		key.WithHelp("ctrl+shift+a", "select all"),
+	)
+	// Copying is handled by crush's keymap (Editor.CopySelection) so it can
+	// use crush's clipboard backend and user feedback; disable the
+	// textarea's built-in copy binding.
+	ta.KeyMap.CopySelection = key.NewBinding()
 	ta.Focus()
 
-	scrollbarMode := config.ScrollbarDefault
-	if cfg := com.Config(); cfg.Options.TUI != nil && cfg.Options.TUI.Scrollbar != "" {
-		scrollbarMode = cfg.Options.TUI.Scrollbar
-	}
-	ch := NewChat(com, scrollbarMode)
+	ch := NewChat(com, com.Config().Options.TUI.Scrollbar)
 
 	keyMap := DefaultKeyMap()
 
@@ -513,7 +528,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// disable indeterminate progress bar
 	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
 	// enable transparent mode
-	ui.isTransparent = opts.TUI.Transparent != nil && *opts.TUI.Transparent
+	ui.isTransparent = opts.TUI.IsTransparent()
 
 	return ui
 }
@@ -1022,7 +1037,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
-			m.dialog.Update(msg)
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -1050,6 +1067,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
 			relX := msg.X - m.layout.editor.Min.X
 			if m.attachments.HandleClick(relX) {
+				return m, tea.Batch(cmds...)
+			}
+		}
+
+		// Forward clicks within the textarea region to the textarea so it
+		// can position the cursor and start a selection.
+		if m.activeInline == nil {
+			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
+				cmds = append(cmds, cmd)
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -1086,6 +1112,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					clickable.SetHover(msg.X, msg.Y)
 				}
 			}
+		}
+
+		// While a mouse selection is in progress in the textarea, forward
+		// motion events to it and skip chat drag handling.
+		if m.activeInline == nil && m.textareaMouseSelecting {
+			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
 		}
 
 		switch m.state {
@@ -1129,6 +1164,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+
+		// End any in-progress textarea mouse selection.
+		if m.textareaMouseSelecting {
+			m.textareaMouseSelecting = false
+			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
+				cmds = append(cmds, cmd)
+			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -1978,7 +2022,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				return util.ReportError(errors.New("configuration not found"))()
 			}
 
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent
+			isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
 			newValue := !isTransparent
 			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
 				return util.ReportError(err)()
@@ -2781,6 +2825,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				cmds = append(cmds, m.pasteImageFromClipboard)
+			case key.Matches(msg, m.keyMap.Editor.PasteText):
+				cmds = append(cmds, m.pasteTextFromClipboard)
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				prevHeight := m.textarea.Height()
@@ -2856,6 +2902,24 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+			case key.Matches(msg, m.keyMap.Editor.CopySelection):
+				if m.textarea.HasSelection() {
+					cmds = append(cmds, common.CopyToClipboardWithCallback(
+						m.textarea.SelectedText(),
+						"Selection copied to clipboard",
+						nil,
+					))
+					m.textarea.ClearSelection()
+				}
+			case key.Matches(msg, m.keyMap.Editor.CutSelection):
+				if m.textarea.HasSelection() {
+					cmds = append(cmds, common.CopyToClipboardWithCallback(
+						m.textarea.SelectedText(),
+						"Selection cut to clipboard",
+						nil,
+					))
+					m.textarea.DeleteSelection()
+				}
 			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 				cmd := m.handleHistoryUp(msg)
 				if cmd != nil {
@@ -3478,6 +3542,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.Newline,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
+				k.Editor.PasteText,
+				k.Editor.SelectAll,
+				k.Editor.CopySelection,
+				k.Editor.CutSelection,
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
@@ -3549,6 +3617,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.Newline,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
+				k.Editor.PasteText,
+				k.Editor.SelectAll,
+				k.Editor.CopySelection,
+				k.Editor.CutSelection,
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
@@ -3650,6 +3722,55 @@ func (m *UI) handleTextareaHeightChange(prevHeight int) tea.Cmd {
 // the textarea height changed as a result.
 func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
 	return m.updateTextareaWithPrevHeight(msg, m.textarea.Height())
+}
+
+// forwardMouseToTextarea forwards a mouse event to the textarea with
+// coordinates translated into the textarea's local space. It reports whether
+// the event landed within the textarea's rendered region and was forwarded.
+func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
+	mouse := msg.Mouse()
+
+	// The textarea is rendered inside layout.editor below the attachments
+	// row. renderEditorView always reserves the first row for attachments
+	// (an empty line when there are none), so the textarea always starts
+	// one row below the editor top.
+	const attachmentsRow = 1
+	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+attachmentsRow)
+
+	// The textarea occupies its own height starting at the origin.
+	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
+	if !image.Pt(mouse.X, mouse.Y).In(area) {
+		return false, nil
+	}
+
+	rel := tea.Mouse{
+		X:      mouse.X - origin.X,
+		Y:      mouse.Y - origin.Y,
+		Button: mouse.Button,
+		Mod:    mouse.Mod,
+	}
+
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		if rel.Button != uv.MouseLeft {
+			return false, nil
+		}
+		m.textareaMouseSelecting = true
+		m.textarea.BeginSelection(rel.X, rel.Y)
+		return true, nil
+	case tea.MouseMotionMsg:
+		if !m.textareaMouseSelecting {
+			return true, nil
+		}
+		m.textarea.ExtendSelection(rel.X, rel.Y)
+		return true, nil
+	case tea.MouseReleaseMsg:
+		m.textarea.EndSelection()
+		m.textareaMouseSelecting = false
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 // updateTextareaWithPrevHeight is for cases when the height of the layout may
@@ -5128,6 +5249,19 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 			Content:  content,
 		}
 	}
+}
+
+// pasteTextFromClipboard reads text from the system clipboard and returns a
+// tea.PasteMsg so it flows through the same paste logic as bracketed paste.
+func (m *UI) pasteTextFromClipboard() tea.Msg {
+	textData, err := clipboard.Read(clipboard.FormatText)
+	if err != nil || len(textData) == 0 {
+		return util.InfoMsg{
+			Type: util.InfoTypeError,
+			Msg:  "Clipboard is empty or does not contain text",
+		}
+	}
+	return tea.PasteMsg{Content: string(textData)}
 }
 
 // pasteImageFromClipboard reads image data from the system clipboard and

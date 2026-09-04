@@ -285,6 +285,9 @@ type channelTransport struct {
 }
 
 // Connect implements mcp.Transport.
+// unwrapTransport implements [transportWrapper].
+func (t *channelTransport) unwrapTransport() mcp.Transport { return t.inner }
+
 func (t *channelTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 	conn, err := t.inner.Connect(ctx)
 	if err != nil {

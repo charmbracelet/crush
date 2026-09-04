@@ -74,9 +74,13 @@ var (
 
 	// initStarted records whether Initialize has been armed. WaitForInit only
 	// blocks once initialization is expected; coordinators built outside app
-	// startup never arm it and so must not wait forever.
+	// startup never arm it and so must not wait forever. initArmedAt anchors
+	// WaitForInitBudget's deadline: the budget is measured from arming, not
+	// from each call, so sequential waiters share one deadline instead of
+	// stacking fresh budgets.
 	initMu      sync.Mutex
 	initStarted bool
+	initArmedAt time.Time
 
 	// renewMus serializes lazy session renewals per server so concurrent tool
 	// calls cannot race to rebuild the same session.
@@ -110,6 +114,7 @@ type suppressBrowserKey struct{}
 func ArmInit() {
 	initMu.Lock()
 	initStarted = true
+	initArmedAt = time.Now()
 	initMu.Unlock()
 }
 
@@ -333,6 +338,46 @@ func WaitForInit(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// InitWaitBudget bounds how long a message turn waits for MCP
+// initialization before proceeding without the servers that have not
+// finished. It is generously above a healthy stdio server's startup
+// (uv/npx take a few seconds) but far below the per-server handshake
+// timeouts (15s-120s): a server that wedges mid-handshake — e.g. one
+// that never answers the SEP-2575 server/discover probe — must not
+// make the whole app look dead while its timeout runs out.
+const InitWaitBudget = 10 * time.Second
+
+// WaitForInitBudget blocks like WaitForInit, but only until the budget —
+// measured from when initialization was armed, not from this call —
+// elapses. Anchoring the deadline at arming means the several sequential
+// waiters on a turn's path (readyWg's tool build, then the turn itself)
+// share one deadline instead of each stacking a fresh budget while a
+// server is wedged, and turns arriving after the deadline don't wait at
+// all. It returns nil both when initialization completed and when the
+// budget elapsed first — in the latter case the caller proceeds with
+// whatever servers have registered so far, and stragglers appear on a
+// later turn once they finish. The caller's own context ending is still
+// reported as an error.
+func WaitForInitBudget(ctx context.Context, budget time.Duration) error {
+	initMu.Lock()
+	started := initStarted
+	armedAt := initArmedAt
+	initMu.Unlock()
+	if !started {
+		return nil
+	}
+	waitCtx, cancel := context.WithDeadline(ctx, armedAt.Add(budget))
+	defer cancel()
+	if err := WaitForInit(waitCtx); err == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	slog.Warn("MCP initialization still pending after wait budget; continuing without unfinished servers", "budget", budget)
+	return nil
 }
 
 // InitializeSingle initializes a single MCP client by name.
@@ -696,8 +741,9 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 
 	state, _ := states.Get(name)
 	// StateError closes the dead session and clears its tools, prompts, and
-	// resources from the registry.
-	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), nil, state.Counts)
+	// resources from the registry. Report the failure against the exact
+	// session that failed the ping so only that session is torn down.
+	updateState(name, StateError, maybeTimeoutErr(pingErr, timeout), sess, state.Counts)
 
 	// Capture the generation so a reconcile teardown that lands mid-renewal
 	// invalidates this rebuild instead of letting it clobber the newer one.
@@ -839,23 +885,37 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		info.Config = config.MCPConfig{}
 		info.PendingConfig = nil
 	case StateError:
-		// A session that has errored is dead to us. Atomically remove it and
-		// close it so the child process and its stdio pipes are released — the
-		// bare map delete this used to do leaked both. Clearing the tool
-		// registry keeps the agent from advertising tools it can no longer
-		// call: without it, crush_info / the `/mcp` menu and the tool list
-		// handed to the LLM diverge, so a server still reads "connected, N
-		// tools" while every call fails with "tool not found".
-		if old, ok := sessions.Take(name); ok {
-			closeSession(name, old)
+		// A session that has errored is dead to us: close it so the child
+		// process and its stdio pipes are released, and clear its registry
+		// entries so the agent stops advertising capabilities it can no
+		// longer call (without that, crush_info / the `/mcp` menu and the
+		// tool list handed to the LLM diverge). Crucially, close exactly the
+		// session that errored (the client argument): if the registry
+		// already holds a DIFFERENT session — a newer, healthy one another
+		// path installed — leave it and its registrations alone. Closing
+		// "whatever is in the map" here let a stale error transition (e.g. a
+		// refresh that raced a renewal) tear down the healthy replacement.
+		switch {
+		case client != nil:
+			if cur, ok := sessions.Get(name); ok && cur == client {
+				sessions.Del(name)
+				allTools.Del(name)
+				allPrompts.Del(name)
+				allResources.Del(name)
+			}
+			closeSession(name, client)
+		default:
+			// No specific session errored (e.g. connect itself failed);
+			// anything still registered under this name is unusable.
+			if old, ok := sessions.Take(name); ok {
+				closeSession(name, old)
+			}
+			allTools.Del(name)
+			allPrompts.Del(name)
+			allResources.Del(name)
 		}
-		// Drop every registry entry for the dead server. Leaving prompts or
-		// resources behind lets a disconnected server keep advertising
-		// capabilities the agent can no longer fulfil, the same divergence the
-		// tool clear prevents.
-		allTools.Del(name)
-		allPrompts.Del(name)
-		allResources.Del(name)
+		// Never publish a dead session on the state.
+		info.Client = nil
 	}
 	states.Set(name, info)
 
@@ -901,36 +961,46 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	channelGate := newChannelGate()
 	transport = &channelTransport{inner: transport, name: name, gate: channelGate}
 
+	// When the server is marked Sessionless, the tools/prompts/resources
+	// list-changed handlers are omitted. The go-sdk opens a SEP-2575
+	// "subscriptions/listen" stream whenever any of those handlers is set
+	// (client.go), and sessionless streamable-HTTP servers such as GitHub MCP
+	// answer that POST with 404 ("session not found"), which the SDK treats
+	// as fatal and tears the connection down. Setting the flag lets those
+	// servers connect at the cost of live list-changed notifications.
+	opts := &mcp.ClientOptions{
+		LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
+			level := parseLevel(string(req.Params.Level))
+			slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
+		},
+	}
+	if !m.IsSessionless(resolver) {
+		opts.ToolListChangedHandler = func(context.Context, *mcp.ToolListChangedRequest) {
+			broker.Publish(pubsub.UpdatedEvent, Event{
+				Type: EventToolsListChanged,
+				Name: name,
+			})
+		}
+		opts.PromptListChangedHandler = func(context.Context, *mcp.PromptListChangedRequest) {
+			broker.Publish(pubsub.UpdatedEvent, Event{
+				Type: EventPromptsListChanged,
+				Name: name,
+			})
+		}
+		opts.ResourceListChangedHandler = func(context.Context, *mcp.ResourceListChangedRequest) {
+			broker.Publish(pubsub.UpdatedEvent, Event{
+				Type: EventResourcesListChanged,
+				Name: name,
+			})
+		}
+	}
 	client := mcp.NewClient(
 		&mcp.Implementation{
 			Name:    "crush",
 			Version: version.Version,
 			Title:   "Crush",
 		},
-		&mcp.ClientOptions{
-			ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
-					Type: EventToolsListChanged,
-					Name: name,
-				})
-			},
-			PromptListChangedHandler: func(context.Context, *mcp.PromptListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
-					Type: EventPromptsListChanged,
-					Name: name,
-				})
-			},
-			ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
-					Type: EventResourcesListChanged,
-					Name: name,
-				})
-			},
-			LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
-				level := parseLevel(string(req.Params.Level))
-				slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
-			},
-		},
+		opts,
 	)
 
 	session, err := client.Connect(mcpCtx, transport, nil)
@@ -968,6 +1038,25 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	}, nil
 }
 
+// transportWrapper is implemented by every transport decorator crush layers
+// around a base transport, so diagnostics that need the innermost transport
+// can reach it without knowing which decorators are in play.
+type transportWrapper interface {
+	unwrapTransport() mcp.Transport
+}
+
+// unwrapTransport peels every decorator off a transport and returns the
+// innermost one.
+func unwrapTransport(transport mcp.Transport) mcp.Transport {
+	for {
+		w, ok := transport.(transportWrapper)
+		if !ok {
+			return transport
+		}
+		transport = w.unwrapTransport()
+	}
+}
+
 // maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail
 // to parse, and the cli will then close it, causing the EOF error.
 // so, if we got an EOF err, and the transport is STDIO, we try to exec it
@@ -979,6 +1068,13 @@ func maybeStdioErr(err error, transport mcp.Transport) error {
 	if !errors.Is(err, io.EOF) {
 		return err
 	}
+	// The transport is wrapped in one or more decorators before Connect (the
+	// channel gate today); the stdio transport we're probing for is the
+	// innermost one. Unwrap all of them — without this the assertion below
+	// never matches and stdio startup failures report a bare EOF instead of
+	// the child's actual output. Every wrapper must implement
+	// unwrapTransport or it will hide this diagnostic again.
+	transport = unwrapTransport(transport)
 	ct, ok := transport.(*mcp.CommandTransport)
 	if !ok {
 		return err
@@ -1278,7 +1374,14 @@ func clearMCPData(name string) {
 func stdioCheck(old *exec.Cmd) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, old.Path, old.Args...)
+	// old.Args includes argv0 as the first element; exec.CommandContext
+	// prepends old.Path as argv0, so we must skip it to avoid duplication
+	// (e.g. "npx npx -y pkg" instead of "npx -y pkg").
+	args := old.Args
+	if len(args) > 0 {
+		args = args[1:]
+	}
+	cmd := exec.CommandContext(ctx, old.Path, args...)
 	cmd.Env = old.Env
 	out, err := cmd.CombinedOutput()
 	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {

@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -194,7 +195,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir, spillDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelID)),
@@ -270,7 +271,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 					}
 
-					stdout = formatOutput(stdout, stderr, execErr)
+					stdout = formatOutput(stdout, stderr, execErr, spillDir)
 
 					metadata := BashResponseMetadata{
 						StartTime:        startTime.UnixMilli(),
@@ -354,7 +355,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 				}
 
-				stdout = formatOutput(stdout, stderr, execErr)
+				stdout = formatOutput(stdout, stderr, execErr, spillDir)
 
 				metadata := BashResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
@@ -387,12 +388,12 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 }
 
 // formatOutput formats the output of a completed command with error handling
-func formatOutput(stdout, stderr string, execErr error) string {
+func formatOutput(stdout, stderr string, execErr error, spillDir string) string {
 	interrupted := shell.IsInterrupt(execErr)
 	exitCode := shell.ExitCode(execErr)
 
-	stdout = truncateOutput(stdout)
-	stderr = truncateOutput(stderr)
+	stdout = truncateOutput(stdout, spillDir)
+	stderr = truncateOutput(stderr, spillDir)
 
 	errorMessage := stderr
 	if errorMessage == "" && execErr != nil {
@@ -424,7 +425,10 @@ func formatOutput(stdout, stderr string, execErr error) string {
 	return stdout
 }
 
-func TruncateOutput(content string) string {
+// TruncateOutput keeps the head and tail of oversized tool output. The
+// dropped middle is written in full to a file under spillDir so the agent
+// can read it back rather than losing it for good.
+func TruncateOutput(content, spillDir string) string {
 	if ansi.StringWidth(content) <= MaxOutputLength {
 		return content
 	}
@@ -434,11 +438,17 @@ func TruncateOutput(content string) string {
 	end := ansi.TruncateLeft(content, ansi.StringWidth(content)-halfLength, "")
 
 	truncatedLinesCount := max(strings.Count(content, "\n")-strings.Count(start, "\n")-strings.Count(end, "\n"), 0)
-	return fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, truncatedLinesCount, end)
+	marker := fmt.Sprintf("... [%d lines truncated] ...", truncatedLinesCount)
+	if path, err := shell.SpillOutput(ansi.Strip(content), spillDir); err == nil {
+		marker = fmt.Sprintf("... [%d lines truncated, full output: %s] ...", truncatedLinesCount, path)
+	} else {
+		slog.Debug("Could not spill tool output", "dir", spillDir, "error", err)
+	}
+	return fmt.Sprintf("%s\n\n%s\n\n%s", start, marker, end)
 }
 
-func truncateOutput(content string) string {
-	return TruncateOutput(content)
+func truncateOutput(content, spillDir string) string {
+	return TruncateOutput(content, spillDir)
 }
 
 func normalizeWorkingDir(path string) string {

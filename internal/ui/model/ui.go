@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -176,6 +177,10 @@ type (
 	creditsUpdatedMsg struct {
 		credits *int
 	}
+
+	// hyperCreditsTickMsg is sent periodically to trigger a refresh of
+	// the remaining Hyper credits.
+	hyperCreditsTickMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -380,6 +385,17 @@ type UI struct {
 	// disabled, and no balance is rendered in either case.
 	hyperCredits *int
 
+	// hyperCreditsBase is the balance as of the last successful fetch.
+	// hyperCreditsCost is the current session's cost baseline: as the
+	// session accrues cost beyond it, the displayed balance ticks down
+	// from hyperCreditsBase until the next fetch resyncs both.
+	hyperCreditsBase int
+	hyperCreditsCost float64
+
+	// hyperCreditsTicking tracks whether the periodic balance refresh
+	// ticker is running, so it is never scheduled twice.
+	hyperCreditsTicking bool
+
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
 		messages []string
@@ -543,7 +559,7 @@ func (m *UI) Init() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	if m.com.IsHyper() {
-		cmds = append(cmds, m.fetchHyperCredits())
+		cmds = append(cmds, m.fetchHyperCredits(), m.startHyperCreditsTicker())
 	}
 	// Prime the memoized busy/permission state off-thread.
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
@@ -759,6 +775,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
+		// The estimate baseline is per session: only cost accrued in the
+		// viewed session ticks the displayed balance down.
+		m.hyperCreditsCost = msg.session.Cost
 		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
 		// Session switch: the memoized busy state and queued prompts
@@ -871,6 +890,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
 			prevPillsHeight := m.pillsAreaHeight()
+			m.updateHyperCreditsEstimate(msg.Payload.Cost)
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
@@ -1361,6 +1381,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case creditsUpdatedMsg:
 		m.hyperCredits = msg.credits
+		if msg.credits != nil {
+			m.hyperCreditsBase = *msg.credits
+		}
+		// Resync the estimate baseline: the fetched balance already
+		// reflects the cost accrued so far.
+		if m.session != nil {
+			m.hyperCreditsCost = m.session.Cost
+		}
+	case hyperCreditsTickMsg:
+		m.hyperCreditsTicking = false
+		if m.com.IsHyper() {
+			m.hyperCreditsTicking = true
+			cmds = append(cmds, m.fetchHyperCredits(), hyperCreditsTickCmd())
+		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2172,6 +2206,39 @@ func (m *UI) refreshHyperAndRetrySelect(msg dialog.ActionSelectModel) tea.Cmd {
 	}
 }
 
+// hyperCreditsRefreshInterval is how often the Hyper credit balance is
+// re-fetched from the API.
+const hyperCreditsRefreshInterval = 30 * time.Second
+
+// hyperCreditsTickCmd schedules the next periodic credit balance refresh.
+func hyperCreditsTickCmd() tea.Cmd {
+	return tea.Tick(hyperCreditsRefreshInterval, func(time.Time) tea.Msg {
+		return hyperCreditsTickMsg{}
+	})
+}
+
+// startHyperCreditsTicker begins the periodic credit balance refresh if it
+// is not already running.
+func (m *UI) startHyperCreditsTicker() tea.Cmd {
+	if m.hyperCreditsTicking || !m.com.IsHyper() {
+		return nil
+	}
+	m.hyperCreditsTicking = true
+	return hyperCreditsTickCmd()
+}
+
+// updateHyperCreditsEstimate ticks the displayed Hyper balance down as the
+// session accrues cost, giving real-time feedback between periodic balance
+// fetches. The next successful fetch resyncs the balance with the server.
+func (m *UI) updateHyperCreditsEstimate(cost float64) {
+	if m.hyperCredits == nil || cost <= m.hyperCreditsCost {
+		return
+	}
+	spent := (cost - m.hyperCreditsCost) * hyper.HypercreditsPerUSD
+	displayed := max(0, m.hyperCreditsBase-int(math.Round(spent)))
+	m.hyperCredits = &displayed
+}
+
 // fetchHyperCredits returns a command that asynchronously fetches the
 // remaining Hyper credits from the API.
 func (m *UI) fetchHyperCredits() tea.Cmd {
@@ -2379,7 +2446,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	} else if m.com.IsHyper() {
-		cmds = append(cmds, m.fetchHyperCredits())
+		cmds = append(cmds, m.fetchHyperCredits(), m.startHyperCreditsTicker())
 	}
 
 	return tea.Batch(cmds...)
@@ -4688,7 +4755,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
 		}))
 		if m.com.IsHyper() {
-			cmds = append(cmds, m.fetchHyperCredits())
+			cmds = append(cmds, m.fetchHyperCredits(), m.startHyperCreditsTicker())
 		}
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
@@ -4785,6 +4852,7 @@ func (m *UI) newSession() tea.Cmd {
 	}
 
 	m.session = nil
+	m.hyperCreditsCost = 0
 	m.sidebarOffset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil

@@ -84,6 +84,10 @@ type (
 		ID   string
 		Name string
 	}
+	// ActionApplyTheme is sent when a theme is selected from the theme dialog.
+	ActionApplyTheme struct {
+		Name string
+	}
 	// ActionRunMCPPrompt is a message to run a custom command.
 	ActionRunMCPPrompt struct {
 		Title       string

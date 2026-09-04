@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	_ "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/singleflight"
@@ -587,7 +588,11 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		}
 		setKeyOrToken = func() {
 			providerConfig.APIKey = v.AccessToken
-			providerConfig.OAuthToken = v
+			if providerConfig.OAuthToken != nil {
+				*providerConfig.OAuthToken = *v
+			} else {
+				providerConfig.OAuthToken = v
+			}
 			switch providerID {
 			case string(catwalk.InferenceProviderCopilot):
 				providerConfig.SetupGitHubCopilot()
@@ -864,6 +869,9 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken str
 	if s.exchangeToken != nil {
 		return s.exchangeToken(ctx, providerID, refreshToken)
 	}
+	if p := oauth.Get(providerID); p != nil {
+		return p.RefreshToken(ctx, refreshToken)
+	}
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
 		return copilot.RefreshToken(ctx, refreshToken)
@@ -904,7 +912,11 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 
 // applyToken updates the in-memory provider config with the given token.
 func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) error {
-	providerConfig.OAuthToken = token
+	if providerConfig.OAuthToken != nil {
+		*providerConfig.OAuthToken = *token
+	} else {
+		providerConfig.OAuthToken = token
+	}
 	providerConfig.APIKey = token.AccessToken
 	if providerID == string(catwalk.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()

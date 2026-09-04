@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -71,7 +72,120 @@ type OAuth struct {
 	cancelFunc      context.CancelFunc
 }
 
-var _ Dialog = (*OAuth)(nil)
+// NewOAuthGeneric creates an OAuth dialog from a registered oauth.Provider.
+func NewOAuthGeneric(
+	com *common.Common,
+	isOnboarding bool,
+	provider catwalk.Provider,
+	model config.SelectedModel,
+	modelType config.SelectedModelType,
+	p oauth.Provider,
+) (*OAuth, tea.Cmd) {
+	return newOAuth(com, isOnboarding, provider, model, modelType, &genericOAuthBridge{p: p})
+}
+
+// NewOAuthForProvider creates an OAuth dialog if the provider is registered in oauth.Registry.
+func NewOAuthForProvider(
+	com *common.Common,
+	isOnboarding bool,
+	provider catwalk.Provider,
+	model config.SelectedModel,
+	modelType config.SelectedModelType,
+) (*OAuth, tea.Cmd) {
+	p := oauth.Get(string(provider.ID))
+	if p == nil {
+		return nil, nil
+	}
+	return NewOAuthGeneric(com, isOnboarding, provider, model, modelType, p)
+}
+
+type genericOAuthBridge struct {
+	p          oauth.Provider
+	session    oauth.BrowserSession
+	cancelFunc context.CancelFunc
+}
+
+func (g *genericOAuthBridge) name() string {
+	return g.p.Name()
+}
+
+func (g *genericOAuthBridge) initiateAuth() tea.Msg {
+	ctx := context.Background()
+	switch prov := g.p.(type) {
+	case oauth.BrowserFlowProvider:
+		session, err := prov.StartBrowserFlow(ctx)
+		if err != nil {
+			return ActionOAuthErrored{Error: fmt.Errorf("failed to start browser auth: %w", err)}
+		}
+		g.session = session
+		return ActionInitiateOAuth{
+			VerificationURL: session.URL(),
+		}
+	case oauth.DeviceFlowProvider:
+		dc, err := prov.RequestDeviceCode(ctx)
+		if err != nil {
+			return ActionOAuthErrored{Error: fmt.Errorf("failed to request device code: %w", err)}
+		}
+		return ActionInitiateOAuth{
+			DeviceCode:      dc.DeviceCode,
+			UserCode:        dc.UserCode,
+			VerificationURL: dc.VerificationURI,
+			ExpiresIn:       dc.ExpiresIn,
+			Interval:        dc.Interval,
+		}
+	default:
+		return ActionOAuthErrored{Error: fmt.Errorf("provider %s does not support OAuth", g.p.Name())}
+	}
+}
+
+func (g *genericOAuthBridge) startPolling(deviceCode string, expiresIn int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		g.cancelFunc = cancel
+
+		switch prov := g.p.(type) {
+		case oauth.BrowserFlowProvider:
+			if g.session == nil {
+				return ActionOAuthErrored{Error: errors.New("browser session not initialized")}
+			}
+			tok, err := g.session.Wait(ctx)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil
+				}
+				return ActionOAuthErrored{Error: err}
+			}
+			return ActionCompleteOAuth{Token: tok}
+
+		case oauth.DeviceFlowProvider:
+			code := &oauth.DeviceCode{
+				DeviceCode: deviceCode,
+				ExpiresIn:  expiresIn,
+			}
+			tok, err := prov.PollForToken(ctx, code)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil
+				}
+				return ActionOAuthErrored{Error: err}
+			}
+			return ActionCompleteOAuth{Token: tok}
+
+		default:
+			return ActionOAuthErrored{Error: errors.New("unsupported flow")}
+		}
+	}
+}
+
+func (g *genericOAuthBridge) stopPolling() tea.Msg {
+	if g.cancelFunc != nil {
+		g.cancelFunc()
+	}
+	if g.session != nil {
+		g.session.Close()
+	}
+	return nil
+}
 
 // newOAuth creates a new device flow component.
 func newOAuth(
@@ -171,7 +285,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 				return nil
 
 			default:
-				return ActionClose{}
+				return ActionCloseOAuth{Cmd: m.oAuthProvider.stopPolling}
 			}
 		}
 
@@ -312,22 +426,28 @@ func (m *OAuth) innerDialogContent() string {
 		// Render each text segment with its own style. Wrapping the
 		// whole concatenation in a single style would lose the text
 		// color after enterKeyStyle's reset code.
-		instructionText := instructionStyle.Render("Press ") +
-			enterKeyStyle.Render("enter") +
-			instructionStyle.Render(" to copy the code below and open the browser.")
+		instructionText := instructionStyle.Render("Press ") + enterKeyStyle.Render("enter")
+		if m.userCode == "" {
+			instructionText += instructionStyle.Render(" to open the browser and authenticate.")
+		} else {
+			instructionText += instructionStyle.Render(" to copy the code below and open the browser.")
+		}
 		instructions := lipgloss.NewStyle().
 			Width(innerWidth).
 			Padding(0, 1).
 			Render(instructionText)
 
-		codeBox := lipgloss.NewStyle().
-			Width(innerWidth).
-			Height(7).
-			Align(lipgloss.Center, lipgloss.Center).
-			Background(t.Dialog.OAuth.UserCodeBg).
-			Render(
-				t.Dialog.OAuth.UserCode.Render(m.userCode),
-			)
+		var codeBox string
+		if m.userCode != "" {
+			codeBox = lipgloss.NewStyle().
+				Width(innerWidth).
+				Height(7).
+				Align(lipgloss.Center, lipgloss.Center).
+				Background(t.Dialog.OAuth.UserCodeBg).
+				Render(
+					t.Dialog.OAuth.UserCode.Render(m.userCode),
+				)
+		}
 
 		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
 		url := statusTextStyle.
@@ -335,25 +455,24 @@ func (m *OAuth) innerDialogContent() string {
 			Padding(0, 1).
 			Render("Browser not opening? Pay a visit to:\n" + link)
 
+		waitingMsg := "Verifying..."
+		if m.userCode == "" {
+			waitingMsg = "Waiting for browser authentication..."
+		}
 		waiting := statusTextStyle.
 			Width(innerWidth).
 			Padding(0, 1).
 			Render(
-				successStyle.Render(m.spinner.View()) + statusTextStyle.Render("Verifying..."),
+				successStyle.Render(m.spinner.View()) + statusTextStyle.Render(waitingMsg),
 			)
 
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			"",
-			instructions,
-			"",
-			codeBox,
-			"",
-			url,
-			"",
-			waiting,
-			"",
-		)
+		elements := []string{"", instructions, ""}
+		if codeBox != "" {
+			elements = append(elements, codeBox, "")
+		}
+		elements = append(elements, url, "", waiting, "")
+
+		return lipgloss.JoinVertical(lipgloss.Left, elements...)
 
 	case OAuthStateSuccess:
 		return successStyle.
@@ -405,6 +524,13 @@ func (m *OAuth) ShortHelp() []key.Binding {
 		return nil
 
 	default:
+		if m.userCode == "" {
+			return []key.Binding{
+				m.keyMap.CopyURL,
+				key.NewBinding(key.WithKeys("enter", "ctrl+y"), key.WithHelp("enter", "open")),
+				m.keyMap.Close,
+			}
+		}
 		return []key.Binding{
 			m.keyMap.Copy,
 			m.keyMap.CopyURL,
@@ -432,12 +558,20 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if m.State != OAuthStateDisplay {
 		return nil
 	}
+	if m.userCode == "" {
+		return func() tea.Msg {
+			if err := browser.OpenURL(m.verificationURL); err != nil {
+				return util.NewErrorMsg(fmt.Errorf("failed to open browser, open the displayed URL manually: %w", err))
+			}
+			return nil
+		}
+	}
 	return common.CopyToClipboardWithCallback(
 		m.userCode,
 		"Code copied and URL opened",
 		func() tea.Msg {
 			if err := browser.OpenURL(m.verificationURL); err != nil {
-				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
+				return util.NewErrorMsg(fmt.Errorf("failed to open browser, open the displayed URL manually: %w", err))
 			}
 			return nil
 		},

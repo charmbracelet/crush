@@ -150,6 +150,19 @@ type (
 	ActionOAuthErrored struct {
 		Error error
 	}
+
+	// ActionSelectAuthMethod is sent when the user chooses between OAuth and API Key.
+	ActionSelectAuthMethod struct {
+		Provider  catwalk.Provider
+		Model     config.SelectedModel
+		ModelType config.SelectedModelType
+		UseOAuth  bool
+	}
+
+	// ActionCloseOAuth is sent when an OAuth dialog is closed, allowing cleanup.
+	ActionCloseOAuth struct {
+		Cmd tea.Cmd
+	}
 )
 
 // ActionCmd represents an action that carries a [tea.Cmd] to be passed to the

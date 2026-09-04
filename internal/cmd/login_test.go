@@ -19,3 +19,17 @@ func TestLoginCmd_ForceFlag(t *testing.T) {
 	require.NotNil(t, flag)
 	require.Equal(t, "f", flag.Shorthand)
 }
+
+func TestLoginCmd_ValidArgs(t *testing.T) {
+	t.Parallel()
+
+	validPlatforms := map[string]bool{}
+	for _, p := range loginCmd.ValidArgs {
+		validPlatforms[p] = true
+	}
+	require.True(t, validPlatforms["hyper"])
+	require.True(t, validPlatforms["copilot"])
+	require.True(t, validPlatforms["openai"])
+	require.True(t, validPlatforms["chatgpt"])
+	require.True(t, validPlatforms["codex"])
+}

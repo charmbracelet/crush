@@ -721,6 +721,7 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 	// Verify the in-memory token was updated to the disk token
 	updatedConfig, ok := store.config.Providers.Get("hyper")
 	require.True(t, ok)
+	require.Same(t, oldToken, updatedConfig.OAuthToken)
 	require.Equal(t, "newer-access-token", updatedConfig.APIKey)
 	require.Equal(t, "newer-access-token", updatedConfig.OAuthToken.AccessToken)
 	require.Equal(t, "refresh-abc", updatedConfig.OAuthToken.RefreshToken)

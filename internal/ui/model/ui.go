@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -1881,6 +1882,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	switch msg := action.(type) {
 	// Generic dialog messages
+	case dialog.ActionCloseOAuth:
+		m.dialog.CloseFrontDialog()
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
+		if isOnboarding {
+			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case dialog.ActionClose:
 		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
 			break
@@ -2043,6 +2054,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionSelectAuthMethod:
+		m.dialog.CloseDialog(dialog.AuthMethodID)
+		if cmd := m.openAuthenticationDialogWithMethod(msg.Provider, msg.Model, msg.ModelType, msg.UseOAuth); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
@@ -2386,6 +2402,21 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 }
 
 func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
+	// If the provider supports both OAuth and API key, prompt the user to choose.
+	if oauth.HasAuthChoices(string(provider.ID)) {
+		m.dialog.OpenDialogWithGrace(dialog.NewAuthMethod(m.com, provider, model, modelType))
+		return nil
+	}
+
+	return m.openAuthenticationDialogWithMethod(provider, model, modelType, oauth.IsSupported(string(provider.ID)))
+}
+
+func (m *UI) openAuthenticationDialogWithMethod(
+	provider catwalk.Provider,
+	model config.SelectedModel,
+	modelType config.SelectedModelType,
+	useOAuth bool,
+) tea.Cmd {
 	var (
 		dlg dialog.Dialog
 		cmd tea.Cmd
@@ -2393,12 +2424,11 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		isOnboarding = m.state == uiOnboarding
 	)
 
-	switch provider.ID {
-	case "hyper":
-		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
-	case catwalk.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
-	default:
+	if useOAuth && oauth.IsSupported(string(provider.ID)) {
+		dlg, cmd = dialog.NewOAuthForProvider(m.com, isOnboarding, provider, model, modelType)
+	}
+
+	if dlg == nil {
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
 

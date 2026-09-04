@@ -910,16 +910,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
 
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+		Model:      largeModel,
+		CatwalkCfg: *largeCatwalkModel,
+		ModelCfg:   largeModelCfg,
+		FlatRate:   largeProviderCfg.FlatRate,
+	}, Model{
+		Model:      smallModel,
+		CatwalkCfg: *smallCatwalkModel,
+		ModelCfg:   smallModelCfg,
+		FlatRate:   smallProviderCfg.FlatRate,
+	}, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -954,12 +954,17 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, providerCfg config.ProviderConfig, isSubAgent bool) (fantasy.Provider, error) {
+	if providerCfg.OAuthToken != nil && apiKey == "" {
+		apiKey = "crush-oauth"
+	}
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
-	if c.cfg.Config().Options.Debug {
+	if p := oauth.Get(providerCfg.ID); p != nil && providerCfg.OAuthToken != nil {
+		opts = append(opts, openai.WithHTTPClient(p.WrapClient(nil, providerCfg.OAuthToken, isSubAgent, c.cfg.Config().Options.Debug)))
+	} else if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openai.WithHTTPClient(httpClient))
 	}
@@ -1164,7 +1169,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg, isSubAgent)
 	case anthropic.Name:
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 	case openrouter.Name:

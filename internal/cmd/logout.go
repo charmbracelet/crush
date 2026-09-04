@@ -10,6 +10,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/oauth"
+	_ "github.com/charmbracelet/crush/internal/oauth/copilot"
+	_ "github.com/charmbracelet/crush/internal/oauth/hyper"
+	_ "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 )
@@ -27,19 +31,25 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Crush from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: hyper, copilot.`,
+Available platforms are: hyper, copilot, openai.`,
 	Example: `
 # Sign out from Charm Hyper
 crush logout hyper
 
 # Sign out from GitHub Copilot
 crush logout copilot
+
+# Sign out from OpenAI
+crush logout openai
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
 		"copilot",
 		"github",
 		"github-copilot",
+		"openai",
+		"chatgpt",
+		"codex",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,22 +65,29 @@ crush logout copilot
 			defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
 		}
 
-		var provider string
+		var platform string
 		if len(args) == 0 {
-			provider, err = pickLoggedInProvider(c, ws.ID)
+			platform, err = pickLoggedInProvider(c, ws.ID)
 			if err != nil {
 				return err
 			}
-			if provider == "" {
+			if platform == "" {
 				return nil
 			}
 		} else {
-			provider = args[0]
+			platform = args[0]
+		}
+
+		targetID := normalizePlatform(platform)
+		p := oauth.Get(targetID)
+		displayName := targetID
+		if p != nil {
+			displayName = p.Name()
 		}
 
 		force, _ := cmd.Flags().GetBool("force")
 		if !force {
-			fmt.Print(logoutPromptStyle.Render(fmt.Sprintf("Are you sure you want to logout %s? (y/N) ", provider)))
+			fmt.Print(logoutPromptStyle.Render(fmt.Sprintf("Are you sure you want to logout %s? (y/N) ", displayName)))
 			var response string
 			_, err := fmt.Scanln(&response)
 			if err != nil || (response != "y" && response != "Y" && response != "yes" && response != "Yes" && response != "YES") {
@@ -79,42 +96,21 @@ crush logout copilot
 			}
 		}
 
-		switch provider {
-		case "hyper":
-			return logoutHyper(c, ws.ID)
-		case "copilot", "github", "github-copilot":
-			return logoutCopilot(c, ws.ID)
-		default:
-			return fmt.Errorf("unknown platform: %s", provider)
-		}
+		return logoutProvider(c, ws.ID, targetID, displayName)
 	},
 }
 
-func logoutHyper(c *client.Client, wsID string) error {
+func logoutProvider(c *client.Client, wsID, providerID, displayName string) error {
 	ctx := getLogoutContext()
 
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.api_key"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, fmt.Sprintf("providers.%s.api_key", providerID)),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, fmt.Sprintf("providers.%s.oauth", providerID)),
 	); err != nil {
 		return err
 	}
 
-	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of Hyper."))
-	return nil
-}
-
-func logoutCopilot(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
-
-	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.copilot.api_key"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.copilot.oauth"),
-	); err != nil {
-		return err
-	}
-
-	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of GitHub Copilot."))
+	fmt.Println(logoutHeaderStyle.Render(fmt.Sprintf("Successfully logged out of %s.", displayName)))
 	return nil
 }
 
@@ -131,17 +127,10 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 		name string
 	}
 
-	// Only OAuth-based providers support login/logout. Keep this list in sync
-	// with the switch in RunE and the login command.
-	oauthProviders := map[string]string{
-		"hyper":   "Hyper",
-		"copilot": "GitHub Copilot",
-	}
-
 	var loggedIn []loggedInProvider
-	for id, name := range oauthProviders {
-		if p, ok := cfg.Providers.Get(id); ok && p.OAuthToken != nil {
-			loggedIn = append(loggedIn, loggedInProvider{id: id, name: name})
+	for _, p := range oauth.All() {
+		if prov, ok := cfg.Providers.Get(p.ID()); ok && prov.OAuthToken != nil {
+			loggedIn = append(loggedIn, loggedInProvider{id: p.ID(), name: p.Name()})
 		}
 	}
 

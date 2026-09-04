@@ -26,11 +26,14 @@ type OAuthClient struct {
 
 // Token represents an OAuth2 token.
 type Token struct {
-	AccessToken  string       `json:"access_token"`
-	RefreshToken string       `json:"refresh_token,omitempty"`
-	ExpiresIn    int          `json:"expires_in"`
-	ExpiresAt    int64        `json:"expires_at"`
-	Client       *OAuthClient `json:"client,omitempty"`
+	AccessToken  string            `json:"access_token"`
+	RefreshToken string            `json:"refresh_token,omitempty"`
+	ExpiresIn    int               `json:"expires_in"`
+	ExpiresAt    int64             `json:"expires_at"`
+	AccountID    string            `json:"account_id,omitempty"`
+	IDToken      string            `json:"id_token,omitempty"`
+	Extra        map[string]string `json:"extra,omitempty"`
+	Client       *OAuthClient      `json:"client,omitempty"`
 }
 
 // SetExpiresAt calculates and sets the ExpiresAt field based on the

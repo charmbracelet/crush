@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
@@ -58,8 +59,46 @@ type (
 		Style string
 	}
 	ActionToggleTransparentBackground struct{}
-	ActionInitializeProject           struct{}
-	ActionSummarize                   struct {
+	ActionSwitchTheme                 struct {
+		Theme string
+	}
+	ActionPreviewTheme struct {
+		Theme string
+	}
+	ActionRevertThemePreview  struct{}
+	ActionPreviewThemePalette struct {
+		Base    string
+		Palette styles.Palette
+	}
+	ActionSaveThemePalette struct {
+		Name    string
+		Base    string
+		Palette styles.Palette
+	}
+	// ActionEditTheme opens the theme editor for a specific theme.
+	ActionEditTheme struct {
+		Name string
+	}
+	ActionRevertThemePalette struct{}
+	// ActionRevertOverriddenTheme resets a built-in theme back to its
+	// original palette by dropping any user overrides (theme file and
+	// config entry) layered on top of it.
+	ActionRevertOverriddenTheme struct {
+		Name string
+	}
+	ActionDeleteThemeFile struct {
+		Name string
+	}
+	ActionCreateTheme struct {
+		Name string
+		Base string
+	}
+	ActionRenameTheme struct {
+		OldName string
+		NewName string
+	}
+	ActionInitializeProject struct{}
+	ActionSummarize         struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

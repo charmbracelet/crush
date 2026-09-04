@@ -1,10 +1,98 @@
 package anim
 
 import (
+	"image/color"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestStaticEllipsisCycling(t *testing.T) {
+	a := New(Settings{
+		Static:      true,
+		Size:        15,
+		GradColorA:  color.RGBA{R: 0xff, G: 0, B: 0, A: 0xff},
+		GradColorB:  color.RGBA{R: 0, G: 0, B: 0xff, A: 0xff},
+		LabelColor:  color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff},
+		CycleColors: true,
+	})
+
+	// Capture renders for each step
+	renders := make([]string, len(staticEllipsisFrames))
+	for i := range staticEllipsisFrames {
+		a.step.Store(int64(i))
+		renders[i] = a.Render()
+	}
+
+	// Each render should contain "Working" and the appropriate dots
+	for i, r := range renders {
+		if !strings.Contains(r, "Working") {
+			t.Errorf("expected render to contain 'Working', got %q", r)
+		}
+		expectedDots := staticEllipsisFrames[i]
+		if expectedDots != "" && !strings.Contains(r, expectedDots) {
+			t.Errorf("step %d: expected render to contain %q, got %q", i, expectedDots, r)
+		}
+	}
+
+	// Verify cycle wraps correctly
+	a.step.Store(int64(len(staticEllipsisFrames)))
+	a.Animate(StepMsg{ID: a.id})
+	if int(a.step.Load()) != 0 {
+		t.Errorf("expected step to wrap to 0, got %d", a.step.Load())
+	}
+}
+
+func TestStaticStartsWithWorking(t *testing.T) {
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+
+	a := New(Settings{
+		Static:      true,
+		Size:        15,
+		GradColorA:  color.RGBA{R: 0xff, G: 0, B: 0, A: 0xff},
+		GradColorB:  color.RGBA{R: 0, G: 0, B: 0xff, A: 0xff},
+		LabelColor:  label,
+		CycleColors: true,
+	})
+
+	// At step 0, should show "Working" (no dots yet).
+	r := a.Render()
+	if !strings.Contains(r, "Working") {
+		t.Fatalf("expected render to contain 'Working', got %q", r)
+	}
+	if a.staticRendered == "" {
+		t.Fatal("expected staticRendered to be set")
+	}
+}
+
+func TestStaticEllipsisColor(t *testing.T) {
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	ellipsis := color.RGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+
+	a := New(Settings{
+		Static:        true,
+		Size:          15,
+		LabelColor:    label,
+		EllipsisColor: ellipsis,
+		CycleColors:   true,
+	})
+
+	if a.ellipsisColor != ellipsis {
+		t.Errorf("expected ellipsisColor to be set, got %v", a.ellipsisColor)
+	}
+
+	// When EllipsisColor is unset, it should default to LabelColor
+	b := New(Settings{
+		Static:      true,
+		Size:        15,
+		LabelColor:  label,
+		CycleColors: true,
+	})
+	if b.ellipsisColor != label {
+		t.Errorf("expected ellipsisColor to default to LabelColor, got %v", b.ellipsisColor)
+	}
+}
 
 // TestStartSupersedesPreviousChain verifies that calling Start() twice
 // does not result in two concurrent tick chains advancing the same Anim.
@@ -224,6 +312,79 @@ func TestStopThenStart(t *testing.T) {
 
 	// New tick must work.
 	require.NotNil(t, a.Animate(msg2))
+}
+
+// TestStaticLabel verifies that the reduced mode uses the configured
+// label and that SetLabel updates it.
+func TestStaticLabel(t *testing.T) {
+	t.Parallel()
+
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	a := New(Settings{
+		Static:     true,
+		Label:      "Thinking",
+		LabelColor: label,
+	})
+	require.Contains(t, a.Render(), "Thinking")
+
+	a.SetLabel("Summarizing")
+	require.Contains(t, a.Render(), "Summarizing")
+
+	// Empty labels are rendered as empty.
+	a.SetLabel("")
+	rendered := a.Render()
+	require.NotContains(t, rendered, "Working")
+	require.NotContains(t, rendered, "Thinking")
+}
+
+// TestStaticDefaultsToWorking verifies that the reduced mode falls back
+// to a "Working" label when none is supplied.
+func TestStaticDefaultsToWorking(t *testing.T) {
+	t.Parallel()
+
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	a := New(Settings{Static: true, LabelColor: label})
+	require.Contains(t, a.Render(), "Working")
+}
+
+// TestStaticTickCarriesGeneration verifies that the reduced/static
+// animation mode uses the generation gate correctly. Without this, the
+// first tick after Start() is dropped and the "Working" ellipsis never
+// animates.
+func TestStaticTickCarriesGeneration(t *testing.T) {
+	t.Parallel()
+
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	a := New(Settings{
+		ID:          "static",
+		Static:      true,
+		Size:        5,
+		LabelColor:  label,
+		CycleColors: true,
+	})
+
+	cmd := a.Start()
+	msg := cmd().(StepMsg)
+
+	// The tick must carry the current generation so Animate() accepts it.
+	require.Equal(t, a.id, msg.ID)
+	require.Equal(t, a.gen.Load(), msg.Gen, "static tick must carry the current generation")
+	require.NotEqual(t, int64(0), msg.Gen, "generation must have been bumped by Start()")
+
+	// The first animation step should advance the ellipsis frame and
+	// schedule the next tick.
+	next := a.Animate(msg)
+	require.NotNil(t, next, "matching static tick must schedule the next step")
+	require.Equal(t, int64(1), a.step.Load(), "first Animate must advance the ellipsis step")
+
+	// After one step the rendered output should show the first dot.
+	rendered := a.Render()
+	require.Contains(t, rendered, "Working")
+	require.Contains(t, rendered, ".")
+
+	// The next scheduled tick must carry the same generation.
+	nextMsg := next().(StepMsg)
+	require.Equal(t, msg.Gen, nextMsg.Gen, "chained static tick must carry the same generation")
 }
 
 // TestAnimateWithoutStart verifies that Animate works on a fresh Anim

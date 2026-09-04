@@ -21,8 +21,9 @@ func NewLSPRestartToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &LSPRestartToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &LSPRestartToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // LSPRestartToolRenderContext renders lsprestart tool messages.

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -134,6 +135,8 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
+	AgentMode(sessionID string) AgentMode
+	SetAgentMode(sessionID string, mode AgentMode)
 }
 
 type coordinator struct {
@@ -151,6 +154,8 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+	sessionModes map[string]AgentMode
+	modesMu      sync.RWMutex
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -204,6 +209,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		notify:       opts.Notify,
 		runComplete:  opts.RunComplete,
 		agents:       make(map[string]SessionAgent),
+		sessionModes: make(map[string]AgentMode),
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
@@ -320,6 +326,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// the coalesce closure publishes the final outcome under that
 	// same correlator.
 	runID := RunIDFromContext(ctx)
+	mode := c.AgentMode(sessionID)
 	run := func() (*fantasy.AgentResult, error) {
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
@@ -336,6 +343,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			OnComplete:       onComplete,
 			Accepted:         accept,
 			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+			Mode:             mode,
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
@@ -755,6 +763,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewSavePlanTool(c.cfg.WorkingDir()),
 	)
 
 	// Question tool is interactive-only and not available to sub-agents.
@@ -1280,6 +1289,51 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
 	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
+}
+
+func (c *coordinator) AgentMode(sessionID string) AgentMode {
+	c.modesMu.RLock()
+	if mode, ok := c.sessionModes[sessionID]; ok {
+		c.modesMu.RUnlock()
+		return mode
+	}
+	c.modesMu.RUnlock()
+	// Cache miss: read from the persisted session and remember it.
+	if c.sessions != nil {
+		sess, err := c.sessions.Get(context.Background(), sessionID)
+		if err == nil {
+			mode := AgentMode(sess.AgentMode)
+			if !mode.Valid() {
+				mode = AgentModeBuild
+			}
+			c.modesMu.Lock()
+			c.sessionModes[sessionID] = mode
+			c.modesMu.Unlock()
+			return mode
+		}
+	}
+	return AgentModeBuild
+}
+
+func (c *coordinator) SetAgentMode(sessionID string, mode AgentMode) {
+	if !mode.Valid() {
+		mode = AgentModeBuild
+	}
+	c.modesMu.Lock()
+	c.sessionModes[sessionID] = mode
+	c.modesMu.Unlock()
+	if c.sessions != nil {
+		// Use a fresh context: the caller (typically the UI) is
+		// short-lived and may have cancelled already. Errors are logged
+		// but never block the in-memory update — the cache is the
+		// source of truth within a process lifetime and the DB catches
+		// up asynchronously.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := c.sessions.SetAgentMode(ctx, sessionID, string(mode)); err != nil {
+			slog.Error("Failed to persist agent mode", "error", err, "session_id", sessionID, "mode", mode)
+		}
+	}
 }
 
 // GenerateTitle generates a session title using the current agent.

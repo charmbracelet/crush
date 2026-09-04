@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
@@ -158,6 +159,8 @@ type Workspace interface {
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel
+	AgentMode(sessionID string) agent.AgentMode
+	SetAgentMode(sessionID string, mode agent.AgentMode)
 
 	// Permissions
 	//

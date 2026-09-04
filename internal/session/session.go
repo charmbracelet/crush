@@ -58,6 +58,7 @@ type Session struct {
 	SummaryMessageID string
 	Cost             float64
 	Todos            []Todo
+	AgentMode        string
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -65,6 +66,7 @@ type Session struct {
 type Service interface {
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
+	CreateWithMode(ctx context.Context, title, mode string) (Session, error)
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
@@ -73,6 +75,7 @@ type Service interface {
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
+	SetAgentMode(ctx context.Context, id string, mode string) error
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
@@ -94,9 +97,19 @@ type service struct {
 }
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
+	return s.CreateWithMode(ctx, title, "build")
+}
+
+// CreateWithMode is like Create but allows the caller to specify the
+// initial agent mode. Pass an empty mode to fall back to "build".
+func (s *service) CreateWithMode(ctx context.Context, title, mode string) (Session, error) {
+	if mode == "" {
+		mode = "build"
+	}
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:    uuid.New().String(),
-		Title: title,
+		ID:        uuid.New().String(),
+		Title:     title,
+		AgentMode: mode,
 	})
 	if err != nil {
 		return Session{}, err
@@ -112,6 +125,7 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 		ID:              toolCallID,
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           title,
+		AgentMode:       "build",
 	})
 	if err != nil {
 		return Session{}, err
@@ -126,6 +140,7 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 		ID:              "title-" + parentSessionID,
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           "Generate a title",
+		AgentMode:       "build",
 	})
 	if err != nil {
 		return Session{}, err
@@ -249,6 +264,20 @@ func (s *service) Rename(ctx context.Context, id string, title string) error {
 	return nil
 }
 
+// SetAgentMode updates only the agent_mode column. The mode string is
+// stored verbatim; callers should normalize via agent.AgentMode first so
+// the value round-trips with AgentMode.Valid.
+func (s *service) SetAgentMode(ctx context.Context, id string, mode string) error {
+	if err := s.q.UpdateSessionAgentMode(ctx, db.UpdateSessionAgentModeParams{
+		ID:        id,
+		AgentMode: mode,
+	}); err != nil {
+		return err
+	}
+	s.publishSessionUpdate(ctx, id)
+	return nil
+}
+
 func (s *service) List(ctx context.Context) ([]Session, error) {
 	dbSessions, err := s.q.ListSessions(ctx)
 	if err != nil {
@@ -310,6 +339,7 @@ func (s *service) fromDBItem(item db.Session) Session {
 		SummaryMessageID: item.SummaryMessageID.String,
 		Cost:             item.Cost,
 		Todos:            todos,
+		AgentMode:        item.AgentMode,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}

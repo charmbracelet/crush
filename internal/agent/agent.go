@@ -50,6 +50,27 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
+// AgentMode is the operating mode of an agent turn: whether it should
+// run tools that mutate state (Build), run them with permission prompts
+// skipped (Yolo), or refuse to mutate state and just plan (Plan).
+type AgentMode string
+
+func (m AgentMode) Valid() bool {
+	switch m {
+	case AgentModeBuild, AgentModePlan, AgentModeYolo:
+		return true
+	}
+	return false
+}
+
+func ParseAgentMode(s string) (AgentMode, error) {
+	m := AgentMode(s)
+	if !m.Valid() {
+		return "", fmt.Errorf("invalid agent mode %q", s)
+	}
+	return m, nil
+}
+
 const (
 	DefaultSessionName = "Untitled Session"
 
@@ -57,6 +78,12 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+)
+
+const (
+	AgentModeBuild AgentMode = "build"
+	AgentModePlan  AgentMode = "plan"
+	AgentModeYolo  AgentMode = "yolo"
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -130,6 +157,10 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
+	// Mode is the AgentMode this call runs in. It is propagated into the
+	// per-tool context so the hookedTool plan guard can reject write tools
+	// when Mode == AgentModePlan. Defaults to AgentModeBuild.
+	Mode AgentMode
 }
 
 type SessionAgent interface {
@@ -641,6 +672,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	runCtx = WithMode(runCtx, call.Mode)
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(call.SessionID, ac)
@@ -675,6 +707,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if s := instructions.String(); s != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+	}
+
+	// Plan mode: append the plan-mode prompt block.
+	if call.Mode == AgentModePlan {
+		systemPrompt += "\n\n" + string(planPromptTmpl)
 	}
 
 	if len(agentTools) > 0 {
@@ -720,6 +757,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	ctx = WithMode(ctx, call.Mode)
 	// skipRunComplete is set just before the queued-recursion path so
 	// the outer Run doesn't publish a RunComplete that would race
 	// with — and be superseded by — the recursive call's own
@@ -874,6 +912,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+			callContext = WithMode(callContext, call.Mode)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},

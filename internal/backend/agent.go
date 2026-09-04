@@ -164,6 +164,42 @@ func (b *Backend) UpdateAgent(ctx context.Context, workspaceID string) error {
 	return ws.UpdateAgentModel(ctx)
 }
 
+// SetAgentMode sets the agent mode (plan/build/yolo) for a session
+// on a workspace. The mode is normalized through agent.AgentMode and
+// defaults to build if unrecognized. The persisted mode is returned
+// in the response so the client doesn't need to know about the
+// defaulting rules.
+func (b *Backend) SetAgentMode(workspaceID string, req proto.AgentModeRequest) (proto.AgentModeResponse, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return proto.AgentModeResponse{}, err
+	}
+	if ws.AgentCoordinator == nil {
+		return proto.AgentModeResponse{Mode: string(agent.AgentModeBuild)}, nil
+	}
+	mode := agent.AgentMode(req.Mode)
+	if !mode.Valid() {
+		mode = agent.AgentModeBuild
+	}
+	ws.AgentCoordinator.SetAgentMode(req.SessionID, mode)
+	return proto.AgentModeResponse{Mode: string(mode)}, nil
+}
+
+// GetAgentMode returns the effective agent mode for a session on a
+// workspace. Coordinator handles per-session lookup with a fallback
+// to the persisted session value and finally to build.
+func (b *Backend) GetAgentMode(workspaceID, sessionID string) (proto.AgentModeQuery, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return proto.AgentModeQuery{}, err
+	}
+	if ws.AgentCoordinator == nil {
+		return proto.AgentModeQuery{SessionID: sessionID, Mode: string(agent.AgentModeBuild)}, nil
+	}
+	mode := ws.AgentCoordinator.AgentMode(sessionID)
+	return proto.AgentModeQuery{SessionID: sessionID, Mode: string(mode)}, nil
+}
+
 // CancelSession cancels an ongoing agent operation for the given
 // session.
 func (b *Backend) CancelSession(workspaceID, sessionID string) error {

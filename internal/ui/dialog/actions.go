@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
+
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
@@ -46,13 +48,17 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession              struct{}
-	ActionToggleHelp              struct{}
-	ActionToggleCompactMode       struct{}
-	ActionToggleThinking          struct{}
-	ActionTogglePills             struct{}
-	ActionExternalEditor          struct{}
-	ActionToggleYoloMode          struct{}
+	ActionNewSession        struct{}
+	ActionToggleHelp        struct{}
+	ActionToggleCompactMode struct{}
+	ActionToggleThinking    struct{}
+	ActionTogglePills       struct{}
+	ActionExternalEditor    struct{}
+	ActionToggleYoloMode    struct{}
+	ActionCycleAgentMode    struct{}
+	ActionSetAgentMode      struct {
+		Mode agent.AgentMode
+	}
 	ActionToggleNotifications     struct{}
 	ActionSelectNotificationStyle struct {
 		Style string

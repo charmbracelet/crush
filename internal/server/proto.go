@@ -1057,6 +1057,65 @@ func (c *controllerV1) handlePostWorkspacePermissionsGrant(w http.ResponseWriter
 	jsonEncode(w, proto.PermissionGrantResponse{Resolved: resolved})
 }
 
+// handlePostWorkspaceAgentMode sets the agent mode (plan/build/yolo)
+// for a session on a workspace.
+//
+//	@Summary		Set agent mode
+//	@Tags			agent
+//	@Accept			json
+//	@Param			id		path	string				true	"Workspace ID"
+//	@Param			request	body	proto.AgentModeRequest	true	"Agent mode request"
+//	@Success		200	{object}	proto.AgentModeResponse
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent_mode [post]
+func (c *controllerV1) handlePostWorkspaceAgentMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.AgentModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	resp, err := c.backend.SetAgentMode(id, req)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, resp)
+}
+
+// handleGetWorkspaceAgentMode returns the effective agent mode for a
+// session on a workspace.
+//
+//	@Summary		Get agent mode
+//	@Tags			agent
+//	@Param			id			path	string	true	"Workspace ID"
+//	@Param			session_id	query	string	true	"Session ID"
+//	@Success		200	{object}	proto.AgentModeQuery
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent_mode [get]
+func (c *controllerV1) handleGetWorkspaceAgentMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		jsonError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+
+	resp, err := c.backend.GetAgentMode(id, sessionID)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, resp)
+}
+
 // handlePostWorkspaceQuestionsAnswer submits answers for a batch question.
 //
 //	@Summary		Answer question batch

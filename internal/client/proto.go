@@ -693,6 +693,45 @@ func (c *Client) GrantPermission(ctx context.Context, id string, req proto.Permi
 	return resp.Resolved, nil
 }
 
+// SetAgentMode sets the agent mode for a session on a workspace.
+// The server validates the mode and returns the canonical mode
+// string in effect after the call (so the client doesn't need to
+// know about defaulting rules).
+func (c *Client) SetAgentMode(ctx context.Context, id string, req proto.AgentModeRequest) (proto.AgentModeResponse, error) {
+	var resp proto.AgentModeResponse
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent_mode", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return resp, fmt.Errorf("failed to set agent mode: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return resp, fmt.Errorf("failed to set agent mode: status code %d", rsp.StatusCode)
+	}
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return resp, fmt.Errorf("failed to decode set agent mode response: %w", err)
+	}
+	return resp, nil
+}
+
+// GetAgentMode returns the effective agent mode for a session on a
+// workspace. The server falls back to the workspace default and then
+// to "build" if the session has no persisted mode.
+func (c *Client) GetAgentMode(ctx context.Context, id, sessionID string) (proto.AgentModeQuery, error) {
+	var resp proto.AgentModeQuery
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/agent_mode", id), url.Values{"session_id": {sessionID}}, nil)
+	if err != nil {
+		return resp, fmt.Errorf("failed to get agent mode: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return resp, fmt.Errorf("failed to get agent mode: status code %d", rsp.StatusCode)
+	}
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return resp, fmt.Errorf("failed to decode get agent mode response: %w", err)
+	}
+	return resp, nil
+}
+
 // AnswerQuestionBatch submits answers for a batch question on a
 // workspace. Returns true if this call resolved the pending
 // request, false if already resolved by another caller.

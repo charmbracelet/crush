@@ -378,6 +378,11 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	// DefaultAgentMode is the agent mode used for new sessions when no
+	// per-session override exists. Allowed values are "build" (default),
+	// "plan" (read-only), and "yolo" (auto-approve all permissions).
+	// Unknown values fall back to "build".
+	DefaultAgentMode string `json:"default_agent_mode,omitempty" jsonschema:"description=Default agent mode for new sessions,enum=build,enum=plan,enum=yolo,default=build"`
 }
 
 type MCPs map[string]MCPConfig

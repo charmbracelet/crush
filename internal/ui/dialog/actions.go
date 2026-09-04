@@ -62,6 +62,11 @@ type (
 	ActionSummarize                   struct {
 		SessionID string
 	}
+	// ActionSaveSummary is a message to save the current session summary
+	// to a markdown file in the data directory.
+	ActionSaveSummary struct {
+		SessionID string
+	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort
 	// has been selected.
 	ActionSelectReasoningEffort struct {

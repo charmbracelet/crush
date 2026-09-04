@@ -945,3 +945,35 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
 }
+
+// TestClientWorkspace_SetCurrentSessionSkipsTitleLookup pins that the
+// herdr session-title lookup only runs when a herdr client is
+// attached. The title has no other consumer, and SetCurrentSession
+// runs on every session switch and on every reconnect re-assert, so
+// for the majority of users — who are not inside a herdr pane — a
+// switch must cost exactly one presence call and nothing else.
+func TestClientWorkspace_SetCurrentSessionSkipsTitleLookup(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var calls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
+	require.Nil(t, ws.herdrClient, "herdr is inert under test")
+
+	require.NoError(t, ws.SetCurrentSession(t.Context(), "S1"))
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"POST /v1/workspaces/ws-1/current-session"}, calls)
+}

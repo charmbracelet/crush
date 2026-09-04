@@ -504,6 +504,9 @@ func (app *App) restoreModelFromSession(ctx context.Context, sessionID string) e
 func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
 	providers := app.config.Config().Providers.Copy()
 
+	largeModel, largeEffort := config.SplitModelEffort(largeModel)
+	smallModel, smallEffort := config.SplitModelEffort(smallModel)
+
 	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
 	if err != nil {
 		return err
@@ -518,10 +521,11 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 			return err
 		}
 		largeProviderID = found.provider
-		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID, "reasoning_effort", largeEffort)
 		app.config.OverridePreferredModel(config.SelectedModelTypeLarge, config.SelectedModel{
-			Provider: found.provider,
-			Model:    found.modelID,
+			Provider:        found.provider,
+			Model:           found.modelID,
+			ReasoningEffort: config.ResolveModelReasoningEffort(providers[found.provider], found.modelID, largeEffort),
 		})
 	}
 
@@ -532,10 +536,11 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 		if err != nil {
 			return err
 		}
-		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID, "reasoning_effort", smallEffort)
 		app.config.OverridePreferredModel(config.SelectedModelTypeSmall, config.SelectedModel{
-			Provider: found.provider,
-			Model:    found.modelID,
+			Provider:        found.provider,
+			Model:           found.modelID,
+			ReasoningEffort: config.ResolveModelReasoningEffort(providers[found.provider], found.modelID, smallEffort),
 		})
 
 	case largeModel != "":

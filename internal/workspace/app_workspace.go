@@ -45,7 +45,11 @@ func NewAppWorkspace(a *app.App, store *config.ConfigStore) *AppWorkspace {
 // -- Sessions --
 
 func (w *AppWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
-	return w.app.Sessions.Create(ctx, title)
+	mode := w.Config().Options.DefaultAgentMode
+	if mode == "" {
+		mode = "build"
+	}
+	return w.app.Sessions.CreateWithMode(ctx, title, mode)
 }
 
 func (w *AppWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {
@@ -240,6 +244,19 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	return w.app.GetDefaultSmallModel(providerID)
+}
+
+func (w *AppWorkspace) AgentMode(sessionID string) agent.AgentMode {
+	if w.app.AgentCoordinator == nil {
+		return agent.AgentModeBuild
+	}
+	return w.app.AgentCoordinator.AgentMode(sessionID)
+}
+
+func (w *AppWorkspace) SetAgentMode(sessionID string, mode agent.AgentMode) {
+	if w.app.AgentCoordinator != nil {
+		w.app.AgentCoordinator.SetAgentMode(sessionID, mode)
+	}
 }
 
 // -- Permissions --

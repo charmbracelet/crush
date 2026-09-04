@@ -18,23 +18,60 @@ import (
 type hookedTool struct {
 	inner  fantasy.AgentTool
 	runner *hooks.Runner
+	// blockedInPlan returns true if the wrapped tool should be rejected
+	// when the agent is running in plan mode. nil means "always allow".
+	blockedInPlan func() bool
 }
 
 func newHookedTool(inner fantasy.AgentTool, runner *hooks.Runner) *hookedTool {
 	return &hookedTool{inner: inner, runner: runner}
 }
 
+// newPlanBlockedHookedTool marks a tool as one that should be rejected in
+// plan mode. The plan mode prompt is a read-only prompt; tools that mutate
+// state (write, edit, bash, etc.) must be blocked so the agent cannot
+// accidentally execute them.
+func newPlanBlockedHookedTool(inner fantasy.AgentTool, runner *hooks.Runner) *hookedTool {
+	t := newHookedTool(inner, runner)
+	t.blockedInPlan = func() bool { return true }
+	return t
+}
+
+// isToolBlockedInPlan reports whether a tool name is in the write set
+// blocked by plan mode. It is the single source of truth for the plan
+// guard, used by the hookedTool wrapper and tests.
+func isToolBlockedInPlan(toolName string) bool {
+	switch toolName {
+	case "bash", "edit", "write", "multiedit",
+		"download",
+		"lsp_rename", "lsp_replace_symbol":
+		return true
+	}
+	return false
+}
+
 // wrapToolsWithHooks returns a tool slice with each entry wrapped in a
-// hookedTool. Returns the original slice unchanged when runner is nil or
-// when isSubAgent is true — sub-agents never fire hooks, the top-level
-// invocation of the sub-agent tool itself is wrapped on the caller's side.
+// hookedTool. Returns the original slice unchanged when isSubAgent is
+// true — sub-agents never fire hooks, the top-level invocation of the
+// sub-agent tool itself is wrapped on the caller's side.
+//
+// The plan-mode guard is applied even when runner is nil. The plan
+// prompt forbids state-mutating tools; that policy is a property of
+// plan mode itself, not of the hook system, so it must be enforced
+// regardless of whether the user has configured any PreToolUse hooks.
 func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, isSubAgent bool) []fantasy.AgentTool {
-	if runner == nil || isSubAgent {
+	if isSubAgent {
 		return tools
 	}
 	out := make([]fantasy.AgentTool, len(tools))
 	for i, tool := range tools {
-		out[i] = newHookedTool(tool, runner)
+		if isToolBlockedInPlan(tool.Info().Name) {
+			out[i] = newPlanBlockedHookedTool(tool, runner)
+		} else if runner != nil {
+			out[i] = newHookedTool(tool, runner)
+		} else {
+			out[i] = tool
+		}
 	}
 	return out
 }
@@ -52,6 +89,23 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 }
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	// Plan mode guard: tools flagged as state-mutating are rejected with
+	// a synthetic response so the model can read it and continue
+	// planning instead of receiving an opaque error.
+	if h.blockedInPlan != nil && h.blockedInPlan() && ModeFromContext(ctx) == AgentModePlan {
+		resp := fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"[plan mode] %s skipped - no side effects in plan mode. Switch to Build (Shift+Tab) to execute.",
+			call.Name,
+		))
+		return resp, nil
+	}
+
+	// When no hook runner is configured, the wrap is only here to enforce
+	// the plan guard above. Skip the hook step and delegate directly.
+	if h.runner == nil {
+		return h.inner.Run(ctx, call)
+	}
+
 	sessionID := tools.GetSessionFromContext(ctx)
 	result, err := h.runner.Run(ctx, hooks.EventPreToolUse, sessionID, call.Name, call.Input)
 	if err != nil {

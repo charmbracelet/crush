@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -52,6 +53,10 @@ type countingWorkspace struct {
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
+func (w *countingWorkspace) AgentMode(string) agent.AgentMode {
+	return agent.AgentModeBuild
+}
+func (w *countingWorkspace) SetAgentMode(string, agent.AgentMode) {}
 
 func (w *countingWorkspace) AgentReadyErr() error {
 	w.readyCalls++
@@ -128,7 +133,7 @@ func (w *countingWorkspace) resetCounters() {
 
 // newBusyUI builds a UI wired to the stub workspace with an active session
 // "s1", enough state for Update to run end to end.
-func newBusyUI(ws *countingWorkspace) *UI {
+func newBusyUI(ws workspace.Workspace) *UI {
 	com := common.DefaultCommon(ws)
 	return &UI{
 		com:         com,

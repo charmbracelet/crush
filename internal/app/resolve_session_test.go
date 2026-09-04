@@ -22,8 +22,12 @@ func (m *mockSessionService) Subscribe(context.Context) <-chan pubsub.Event[sess
 	return make(chan pubsub.Event[session.Session])
 }
 
-func (m *mockSessionService) Create(_ context.Context, title string) (session.Session, error) {
-	s := session.Session{ID: "new-session-id", Title: title}
+func (m *mockSessionService) Create(ctx context.Context, title string) (session.Session, error) {
+	return m.CreateWithMode(ctx, title, "build")
+}
+
+func (m *mockSessionService) CreateWithMode(_ context.Context, title, mode string) (session.Session, error) {
+	s := session.Session{ID: "new-session-id", Title: title, AgentMode: mode}
 	m.created = append(m.created, s)
 	return s, nil
 }
@@ -65,6 +69,10 @@ func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string
 }
 
 func (m *mockSessionService) Rename(context.Context, string, string) error {
+	return nil
+}
+
+func (m *mockSessionService) SetAgentMode(context.Context, string, string) error {
 	return nil
 }
 

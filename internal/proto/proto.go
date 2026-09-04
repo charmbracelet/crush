@@ -207,6 +207,29 @@ type PermissionGrantResponse struct {
 	Resolved bool `json:"resolved"`
 }
 
+// AgentModeRequest is the wire format for setting a session's agent
+// mode (plan, build, yolo). Sent from client to server via REST.
+type AgentModeRequest struct {
+	SessionID string `json:"session_id"`
+	Mode      string `json:"mode"`
+}
+
+// AgentModeResponse is the server's response to an agent mode change.
+// It echoes the resolved mode (after validation/defaulting) so the
+// client can keep its UI state in sync without a separate Get call.
+type AgentModeResponse struct {
+	Mode string `json:"mode"`
+}
+
+// AgentModeQuery is the wire format for the read endpoint
+// (GET /workspaces/{id}/agent_mode?session_id=...). It returns the
+// current effective mode for a session, falling back to the workspace
+// default and finally to "build".
+type AgentModeQuery struct {
+	SessionID string `json:"session_id"`
+	Mode      string `json:"mode"`
+}
+
 // QuestionRequest is the wire format for a batch question
 // sent from server to client over SSE.
 type QuestionRequest struct {

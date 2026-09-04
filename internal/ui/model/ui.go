@@ -27,6 +27,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
@@ -490,10 +491,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ui.agentReady = true
 		ui.agentModel = com.Workspace.AgentModel()
 	}
-	ui.setEditorPrompt(yolo)
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
+	ui.setEditorPrompt(yolo)
 
 	// Initialize compact mode from config
 	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
@@ -1922,6 +1923,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleYoloMode:
 		m.toggleYoloMode()
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionCycleAgentMode:
+		cmds = append(cmds, m.cycleAgentMode())
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSetAgentMode:
+		cmds = append(cmds, m.setAgentMode(msg.Mode))
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -2481,6 +2488,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				status = "enabled"
 			}
 			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
+			return true
+		case key.Matches(msg, m.keyMap.CycleMode):
+			cmds = append(cmds, m.cycleAgentMode())
 			return true
 		}
 		return false
@@ -3297,6 +3307,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.Models,
 			k.Sessions,
 			k.ToggleYolo,
+			k.CycleMode,
 		)
 		if hasSession {
 			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow)
@@ -3379,6 +3390,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Models,
 					k.Sessions,
 					k.ToggleYolo,
+					k.CycleMode,
 				},
 			)
 			editorBinds := []key.Binding{
@@ -3849,8 +3861,11 @@ func (m *UI) openEditor(value string) tea.Cmd {
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode or bang mode is enabled.
+// yolo mode, plan mode, or bang mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
+	if m == nil {
+		return
+	}
 	if m.bangMode {
 		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
 		return
@@ -3859,7 +3874,56 @@ func (m *UI) setEditorPrompt(yolo bool) {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
 	}
+	if m.planMode() {
+		m.textarea.SetPromptFunc(4, m.planPromptFunc)
+		return
+	}
 	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
+}
+
+// planMode reports whether the active session is in plan mode. Returns
+// false on any nil-receiver path or before a session has been
+// selected, so it is safe to call from the UI constructor before
+// m.session is wired up.
+func (m *UI) planMode() bool {
+	if m == nil || m.com == nil || m.com.Workspace == nil {
+		return false
+	}
+	if m.session == nil || m.session.ID == "" {
+		return false
+	}
+	return m.com.Workspace.AgentMode(m.session.ID) == agent.AgentModePlan
+}
+
+// agentMode returns the current session's agent mode, or build if the
+// workspace is missing a session yet. Synchronous, so callers that
+// need it on every render (e.g., the prompt style) should prefer to
+// track it through a cached field.
+func (m *UI) agentMode() agent.AgentMode {
+	if m.com == nil || m.com.Workspace == nil || m.session.ID == "" {
+		return agent.AgentModeBuild
+	}
+	mode := m.com.Workspace.AgentMode(m.session.ID)
+	if !mode.Valid() {
+		return agent.AgentModeBuild
+	}
+	return mode
+}
+
+// planPromptFunc returns the plan mode editor prompt style with
+// a " P " icon and primary-colored dots.
+func (m *UI) planPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptPlanIconFocused.Render()
+		}
+		return t.Editor.PromptPlanIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.Editor.PromptPlanDotsFocused.Render()
+	}
+	return t.Editor.PromptPlanDotsBlurred.Render()
 }
 
 // normalPromptFunc returns the normal editor prompt style ("  > " on first

@@ -61,6 +61,10 @@ func hyperBuilder(model string) builderFunc {
 	}
 }
 
+var modelPairs = []modelPair{
+	{"deepseek-v4", hyperBuilder("deepseek-v4-pro-0813"), hyperBuilder("deepseek-v4-flash-0731")},
+}
+
 func testEnv(t *testing.T) fakeEnv {
 	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
 	os.RemoveAll(workingDir)

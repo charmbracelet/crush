@@ -8,6 +8,7 @@ INSERT INTO sessions (
     completion_tokens,
     cost,
     summary_message_id,
+    agent_mode,
     updated_at,
     created_at
 ) VALUES (
@@ -19,6 +20,7 @@ INSERT INTO sessions (
     ?,
     ?,
     null,
+    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
 ) RETURNING *;
@@ -48,7 +50,8 @@ SET
     completion_tokens = ?,
     summary_message_id = ?,
     cost = ?,
-    todos = ?
+    todos = ?,
+    agent_mode = ?
 WHERE id = ?
 RETURNING *;
 
@@ -67,6 +70,12 @@ WHERE id = ?;
 UPDATE sessions
 SET
     title = ?
+WHERE id = ?;
+
+-- name: UpdateSessionAgentMode :exec
+UPDATE sessions
+SET
+    agent_mode = ?
 WHERE id = ?;
 
 -- name: DeleteSession :exec

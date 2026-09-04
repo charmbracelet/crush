@@ -29,10 +29,6 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-var modelPairs = []modelPair{
-	{"deepseek-v4", hyperBuilder("deepseek-v4-pro-0813"), hyperBuilder("deepseek-v4-flash-0731")},
-}
-
 func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
 	large, err := pair.largeModel(t, r)
 	require.NoError(t, err)

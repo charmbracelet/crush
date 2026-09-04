@@ -258,7 +258,14 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 		return sess, nil
 
 	default:
-		return app.Sessions.Create(ctx, agent.DefaultSessionName)
+		mode := ""
+		if app.config != nil {
+			mode = app.config.Config().Options.DefaultAgentMode
+		}
+		if mode == "" {
+			mode = "build"
+		}
+		return app.Sessions.CreateWithMode(ctx, agent.DefaultSessionName, mode)
 	}
 }
 

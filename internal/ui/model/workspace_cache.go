@@ -25,11 +25,14 @@ package model
 // Update, no model mutation inside commands).
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -315,6 +318,62 @@ func (m *UI) toggleYoloMode() bool {
 	m.busyFetchGen++
 	m.setEditorPrompt(yolo)
 	return yolo
+}
+
+// cycleAgentMode advances the session's agent mode one step through
+// the loop build -> yolo -> plan -> build and reports the new mode
+// back to the editor prompt so the icon switches immediately.
+func (m *UI) cycleAgentMode() tea.Cmd {
+	if m.com == nil || m.com.Workspace == nil || m.session == nil || m.session.ID == "" {
+		return util.ReportInfo("No active session")
+	}
+	cur := m.com.Workspace.AgentMode(m.session.ID)
+	if !cur.Valid() {
+		cur = agent.AgentModeBuild
+	}
+	var next agent.AgentMode
+	switch cur {
+	case agent.AgentModePlan:
+		next = agent.AgentModeBuild
+	case agent.AgentModeBuild:
+		next = agent.AgentModeYolo
+	default:
+		next = agent.AgentModePlan
+	}
+	m.applyAgentMode(next)
+	return util.ReportInfo(fmt.Sprintf("Switched to %s mode", next))
+}
+
+// setAgentMode explicitly sets the session to the requested mode
+// (plan/build/yolo). Used by the command-palette "Switch to Plan
+// Mode" / "Switch to Build Mode" / "Switch to Yolo Mode" entries so
+// users can pick a destination without cycling.
+func (m *UI) setAgentMode(mode agent.AgentMode) tea.Cmd {
+	if m.com == nil || m.com.Workspace == nil || m.session == nil || m.session.ID == "" {
+		return util.ReportInfo("No active session")
+	}
+	if !mode.Valid() {
+		mode = agent.AgentModeBuild
+	}
+	m.applyAgentMode(mode)
+	return util.ReportInfo(fmt.Sprintf("Switched to %s mode", mode))
+}
+
+// applyAgentMode writes the requested mode to the workspace and keeps
+// the related UI caches in sync: the yolo prompt icon needs the
+// permission-skip flag flipped on, and the editor prompt function
+// must be refreshed so the icon and dots swap immediately. Bumping
+// the busy generation supersedes any in-flight busy/yolo probe that
+// might still carry the previous yolo value.
+func (m *UI) applyAgentMode(mode agent.AgentMode) {
+	m.com.Workspace.SetAgentMode(m.session.ID, mode)
+	wantYolo := mode == agent.AgentModeYolo
+	if m.com.Workspace.PermissionSkipRequests() != wantYolo {
+		m.com.Workspace.PermissionSetSkipRequests(wantYolo)
+	}
+	m.yoloCache.set(wantYolo)
+	m.busyFetchGen++
+	m.setEditorPrompt(wantYolo)
 }
 
 // yoloModeCached reports the memoized permission-skip ("yolo") mode. Toggles

@@ -48,6 +48,8 @@ func (c *errorCoordinator) Summarize(context.Context, string) error           { 
 func (c *errorCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *errorCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *errorCoordinator) GenerateTitle(context.Context, string, string)     {}
+func (c *errorCoordinator) AgentMode(string) agent.AgentMode                  { return agent.AgentModeBuild }
+func (c *errorCoordinator) SetAgentMode(string, agent.AgentMode)              {}
 
 // insertRunCompleteWorkspace installs a workspace backed by a real
 // app.App (so the runCompletions broker exists) with the given

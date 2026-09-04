@@ -49,6 +49,8 @@ func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOp
 	return nil
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
+func (m *mockSessionAgent) AgentMode(sessionID string) AgentMode          { return AgentModeBuild }
+func (m *mockSessionAgent) SetAgentMode(sessionID string, mode AgentMode) {}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {

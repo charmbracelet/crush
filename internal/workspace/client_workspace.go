@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
@@ -334,6 +335,28 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.Selecte
 		return config.SelectedModel{}
 	}
 	return *model
+}
+
+func (w *ClientWorkspace) AgentMode(sessionID string) agent.AgentMode {
+	resp, err := w.client.GetAgentMode(context.Background(), w.workspaceID(), sessionID)
+	if err != nil {
+		return agent.AgentModeBuild
+	}
+	mode := agent.AgentMode(resp.Mode)
+	if !mode.Valid() {
+		return agent.AgentModeBuild
+	}
+	return mode
+}
+
+func (w *ClientWorkspace) SetAgentMode(sessionID string, mode agent.AgentMode) {
+	if !mode.Valid() {
+		mode = agent.AgentModeBuild
+	}
+	_, _ = w.client.SetAgentMode(context.Background(), w.workspaceID(), proto.AgentModeRequest{
+		SessionID: sessionID,
+		Mode:      string(mode),
+	})
 }
 
 // -- Permissions --

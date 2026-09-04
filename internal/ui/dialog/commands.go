@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -537,6 +538,10 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	commands = append(
 		commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "ctrl+y", ActionToggleYoloMode{}),
+		NewCommandItem(c.com.Styles, "cycle_mode", "Cycle Agent Mode (Plan/Build/Yolo)", "shift+tab", ActionCycleAgentMode{}),
+		NewCommandItem(c.com.Styles, "plan_mode", "Switch to Plan Mode", "", ActionSetAgentMode{Mode: agent.AgentModePlan}),
+		NewCommandItem(c.com.Styles, "build_mode", "Switch to Build Mode", "", ActionSetAgentMode{Mode: agent.AgentModeBuild}),
+		NewCommandItem(c.com.Styles, "yolo_mode", "Switch to Yolo Mode", "", ActionSetAgentMode{Mode: agent.AgentModeYolo}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)

@@ -32,7 +32,6 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
-	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
@@ -168,6 +167,7 @@ type activeCancel struct {
 }
 
 type sessionAgent struct {
+	cfg                *config.ConfigStore
 	largeModel         *csync.Value[Model]
 	smallModel         *csync.Value[Model]
 	systemPromptPrefix *csync.Value[string]
@@ -224,6 +224,7 @@ type sessionAgent struct {
 }
 
 type SessionAgentOptions struct {
+	Config               *config.ConfigStore
 	LargeModel           Model
 	SmallModel           Model
 	SystemPromptPrefix   string
@@ -242,6 +243,7 @@ func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	return &sessionAgent{
+		cfg:                  opts.Config,
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -1726,31 +1728,6 @@ func hasUserTextMessage(msgs []message.Message) bool {
 }
 
 // GenerateTitle generates a session title based on the initial prompt.
-// titleProviderOptions forwards the model's configured provider_options
-// (e.g. disabling thinking for Qwen models via chat_template_kwargs) to
-// the title call, which otherwise never goes through getProviderOptions.
-// The options are keyed for openai-compat transports; other transports
-// ignore keys that are not theirs.
-func titleProviderOptions(m Model) fantasy.ProviderOptions {
-	if len(m.ModelCfg.ProviderOptions) == 0 {
-		return nil
-	}
-	merged := map[string]any{}
-	data, err := json.Marshal(m.ModelCfg.ProviderOptions)
-	if err == nil {
-		err = json.Unmarshal(data, &merged)
-	}
-	if err != nil {
-		slog.Error("Could not marshal title provider options", "err", err)
-		return nil
-	}
-	parsed, err := openaicompat.ParseOptions(merged)
-	if err != nil {
-		slog.Error("Could not parse title provider options", "err", err)
-		return nil
-	}
-	return fantasy.ProviderOptions{openaicompat.Name: parsed}
-}
 
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
@@ -1817,7 +1794,10 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
 		call := streamCall
-		call.ProviderOptions = titleProviderOptions(attempt.model)
+		if a.cfg != nil {
+			providerCfg, _ := a.cfg.Config().Providers.Get(attempt.model.ModelCfg.Provider)
+			call.ProviderOptions = getProviderOptions(attempt.model, providerCfg)
+		}
 		resp, err = agent.Stream(ctx, call)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model

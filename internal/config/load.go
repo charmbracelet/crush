@@ -640,6 +640,19 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
+
+	// A ratio of 1 or more would summarize on every step and negative values
+	// mean nothing, so fall back to the defaults instead of wedging a session.
+	if ratio := c.Options.AutoSummarizeRatio; ratio < 0 || ratio >= 1 {
+		if ratio != 0 {
+			slog.Warn("Ignoring out-of-range auto_summarize_ratio, expected a value above 0 and below 1", "ratio", ratio)
+		}
+		c.Options.AutoSummarizeRatio = 0
+	}
+	if buffer := c.Options.AutoSummarizeBuffer; buffer < 0 {
+		slog.Warn("Ignoring negative auto_summarize_buffer", "buffer", buffer)
+		c.Options.AutoSummarizeBuffer = 0
+	}
 }
 
 // powernapDefaults caches the powernap default LSP server catalog. The

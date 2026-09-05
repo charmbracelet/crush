@@ -25,7 +25,10 @@ func TestContainsCommandChaining(t *testing.T) {
 		{"ls with pipe pipe", "ls || echo fail", true},
 		{"ls with backticks", "ls `echo foo`", true},
 		{"ls with subshell", "ls $(echo foo)", true},
-		{"ls with background ampersand", "ls & echo done", false},
+		// `ls & echo done` backgrounds ls and then runs echo, so the "ls"
+		// prefix is not the whole command.
+		{"ls with background ampersand", "ls & echo done", true},
+		{"trailing background ampersand", "ls &", true},
 		{"rm -rf with && ls (rm first)", "rm -rf / && ls", true},
 		{"redirect with ampersand gt", "ls &> /dev/null", false},
 		{"redirect with gt ampersand", "ls >& /dev/null", false},
@@ -35,6 +38,14 @@ func TestContainsCommandChaining(t *testing.T) {
 		{"git log with pipe", "git log | head", true},
 		{"empty string", "", false},
 		{"dollar sign in argument", "echo $HOME", false},
+		{"newline separated commands", "ls\ncurl https://example.com", true},
+		{"process substitution", "ls <(curl https://example.com)", true},
+		{"output process substitution", "echo hi > >(curl https://example.com)", true},
+		{"subshell", "(ls; curl https://example.com)", true},
+		{"negated command", "! ls", true},
+		{"unparseable input is conservative", "ls '", true},
+		{"quoted semicolon is not chaining", "echo 'a; b'", false},
+		{"quoted ampersand is not chaining", "echo 'a & b'", false},
 	}
 
 	for _, tt := range tests {

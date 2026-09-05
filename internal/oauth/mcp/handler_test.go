@@ -697,6 +697,45 @@ func TestHandler_RejectsWrongIssuer(t *testing.T) {
 	require.ErrorContains(t, authorizeWith401(t, h, base, mcpURL), "issuer")
 }
 
+// TestHandler_UnadvertisedIssAccepted is the Sentry regression: a server may
+// emit the RFC 9207 iss parameter in the authorization response without
+// advertising authorization_response_iss_parameter_supported in its metadata.
+// RFC 9207 §2.4 asks clients to validate an iss they receive, not to reject a
+// valid one for being unadvertised, so the login must still succeed.
+func TestHandler_UnadvertisedIssAccepted(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientID:    "c",
+		accessToken: "a",
+	})
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	h.openURL = browserRedirectIss("code123", base)
+
+	require.NoError(t, authorizeWith401(t, h, base, mcpURL))
+	require.NotNil(t, h.Token())
+	require.Equal(t, "a", h.Token().AccessToken)
+}
+
+// TestHandler_RejectsUnadvertisedWrongIssuer confirms the unadvertised-iss
+// workaround still validates: a server that emits iss without advertising it
+// cannot use that to name a different authorization server.
+func TestHandler_RejectsUnadvertisedWrongIssuer(t *testing.T) {
+	base, mcpURL := newFakeAS(t, fakeASOpts{
+		clientID:    "c",
+		accessToken: "a",
+	})
+	h, err := NewHandler("test", mcpURL, nil, nil, func(*oauth.Token) {}, true, 0)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	h.openURL = browserRedirectIss("code123", "https://attacker.example.com")
+
+	err = authorizeWith401(t, h, base, mcpURL)
+	require.ErrorContains(t, err, "issuer")
+}
+
 // newFakeMCP starts a server that refuses requests until a bearer token is
 // present, pointing at the given authorization server. It returns the MCP
 // endpoint URL.

@@ -294,7 +294,9 @@ func Close(ctx context.Context) error {
 }
 
 // Initialize initializes MCP clients based on the provided configuration.
-func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
+// forceStart lists config-disabled servers with a repository-scoped enabled
+// override; they are started even though their config entry is disabled.
+func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore, forceStart ...string) {
 	ArmInit()
 	slog.Info("Initializing MCP clients")
 	start := time.Now()
@@ -303,9 +305,12 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.Config().MCP {
 		if m.Disabled {
-			updateState(name, StateDisabled, nil, nil, Counts{})
-			slog.Debug("Skipping disabled MCP", "name", name)
-			continue
+			if !slices.Contains(forceStart, name) {
+				updateState(name, StateDisabled, nil, nil, Counts{})
+				slog.Debug("Skipping disabled MCP", "name", name)
+				continue
+			}
+			slog.Info("Starting config-disabled MCP with repository enabled override", "name", name)
 		}
 
 		// Set initial starting state
@@ -391,6 +396,19 @@ func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore)
 		updateState(name, StateDisabled, nil, nil, Counts{})
 		slog.Debug("Skipping disabled MCP", "name", name)
 		return nil
+	}
+
+	return initClient(ctx, cfg, name, m, currentGen(name), cfg.Resolver())
+}
+
+// InitializeSingleForced starts the named MCP client even when its config
+// entry is disabled. Used by the repository-scoped "Toggle MCPs" override.
+// The startup counterpart is the forceStart argument of Initialize, which
+// replays the persisted enabled overrides. Config files are not touched.
+func InitializeSingleForced(ctx context.Context, name string, cfg *config.ConfigStore) error {
+	m, exists := cfg.Config().MCP[name]
+	if !exists {
+		return fmt.Errorf("mcp '%s' not found in configuration", name)
 	}
 
 	return initClient(ctx, cfg, name, m, currentGen(name), cfg.Resolver())

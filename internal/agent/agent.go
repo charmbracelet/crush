@@ -811,8 +811,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				prepared.Messages[i].ProviderOptions = nil
 			}
 
-			// Use latest tools (updated by SetTools when MCP tools change).
-			prepared.Tools = a.tools.Copy()
+			// Use latest tools (updated by SetTools when MCP tools change),
+			// minus MCP servers disabled for this repository.
+			prepared.Tools = a.filterDisabledMCPTools(callContext, a.tools.Copy())
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -1609,6 +1610,36 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	}
 
 	return history, files
+}
+
+// filterDisabledMCPTools removes tools from MCP servers disabled via the
+// "Toggle MCPs" dialog. The override set is repository-scoped and shared
+// by every session in the repository, including sub-agent sessions.
+// Connections are process-global and left untouched; only the tool list
+// changes.
+func (a *sessionAgent) filterDisabledMCPTools(ctx context.Context, toolList []fantasy.AgentTool) []fantasy.AgentTool {
+	disabledServers, err := a.sessions.MCPDisabledServers(ctx)
+	if err != nil {
+		slog.Error("Failed to list disabled MCP servers", "error", err)
+		return toolList
+	}
+	if len(disabledServers) == 0 {
+		return toolList
+	}
+	disabled := make(map[string]struct{}, len(disabledServers))
+	for _, name := range disabledServers {
+		disabled[name] = struct{}{}
+	}
+	filtered := make([]fantasy.AgentTool, 0, len(toolList))
+	for _, t := range toolList {
+		if mcpTool, ok := t.(*tools.Tool); ok {
+			if _, off := disabled[mcpTool.MCP()]; off {
+				continue
+			}
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
 }
 
 // filterFileParts removes fantasy.FilePart entries from a slice of message

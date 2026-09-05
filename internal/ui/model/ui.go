@@ -835,6 +835,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
+		if dia := m.dialog.Dialog(dialog.MCPTogglesID); dia != nil {
+			if toggles, ok := dia.(*dialog.MCPToggles); ok {
+				for name, info := range msg.states {
+					toggles.SetItemStatus(name, mcpStatusText(info))
+				}
+			}
+		}
 		// Auto-open the MCP auth dialog if any servers need authentication.
 		if cmd := m.openMCPAuthDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2031,6 +2038,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.disableDockerMCP)
+	case dialog.ActionToggleMCP:
+		cmds = append(cmds, m.applyMCPToggle(msg))
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -4435,6 +4444,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.MCPTogglesID:
+		if cmd := m.openMCPTogglesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.FilePickerID:

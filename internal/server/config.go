@@ -353,6 +353,112 @@ func (c *controllerV1) handlePostWorkspaceMCPDisableDocker(w http.ResponseWriter
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleGetWorkspaceMCPServersDisabled returns the MCP servers disabled
+// for the workspace's repository.
+//
+//	@Summary		List disabled MCP servers
+//	@Tags			mcp
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200	{array}	string
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/disabled [get]
+func (c *controllerV1) handleGetWorkspaceMCPServersDisabled(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	servers, err := c.backend.MCPServersDisabled(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, servers)
+}
+
+// handlePostWorkspaceMCPSetServerDisabled toggles a repository-scoped MCP
+// override.
+//
+//	@Summary		Toggle an MCP server for the repository
+//	@Tags			mcp
+//	@Accept			json
+//	@Param			id		path	string						true	"Workspace ID"
+//	@Param			request	body	proto.MCPSetServerDisabledRequest	true	"Toggle request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/disabled [post]
+func (c *controllerV1) handlePostWorkspaceMCPSetServerDisabled(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.MCPSetServerDisabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if req.Name == "" {
+		jsonError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := c.backend.SetMCPServerDisabled(r.Context(), id, req.Name, req.Disabled); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleGetWorkspaceMCPServersEnabled returns the MCP servers with a
+// repository-scoped enabled override for the workspace's repository.
+//
+//	@Summary		List enabled-override MCP servers
+//	@Tags			mcp
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200	{array}	string
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/enabled [get]
+func (c *controllerV1) handleGetWorkspaceMCPServersEnabled(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	servers, err := c.backend.MCPServersEnabled(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, servers)
+}
+
+// handlePostWorkspaceMCPStartServer starts a named MCP server even when
+// its config entry is disabled.
+//
+//	@Summary		Start an MCP server
+//	@Tags			mcp
+//	@Accept			json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			request	body	proto.MCPNameRequest	true	"MCP name request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/start [post]
+func (c *controllerV1) handlePostWorkspaceMCPStartServer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.MCPNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if req.Name == "" {
+		jsonError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := c.backend.StartMCPServer(r.Context(), id, req.Name); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handlePostWorkspaceMCPRefreshTools refreshes tools for a named MCP server.
 //
 //	@Summary		Refresh MCP tools

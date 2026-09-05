@@ -123,6 +123,13 @@ type MCPNameRequest struct {
 	Name string `json:"name"`
 }
 
+// MCPSetServerDisabledRequest toggles a repository-scoped MCP server
+// override for the workspace's Toggle MCPs dialog.
+type MCPSetServerDisabledRequest struct {
+	Name     string `json:"name"`
+	Disabled bool   `json:"disabled"`
+}
+
 // MCPPendingAuthServer describes an MCP server awaiting OAuth
 // authentication, returned to clients so they can prompt the user.
 type MCPPendingAuthServer struct {

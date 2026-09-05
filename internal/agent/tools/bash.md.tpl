@@ -106,7 +106,7 @@ Co-Authored-By: Crush <crush@charm.land>
 EOF
 )"
 
-6. If pre-commit hook fails, retry ONCE. If fails again, hook preventing commit. If the first attempt succeeds, generating a commit, but files modified, the next attempt MUST amend.
+6. If the pre-commit hook fails, retry ONCE with a new git commit (not --amend). If the retry fails, stop — the hook is preventing the commit. If a commit this attempt created succeeded but the hook modified files, git commit --amend that new commit only. Never --amend a commit that already existed before this attempt (record git rev-parse HEAD before the first commit; refuse to amend if HEAD is still that SHA).
 
 7. Run git status to verify.
 

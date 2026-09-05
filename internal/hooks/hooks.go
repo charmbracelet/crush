@@ -12,8 +12,99 @@ import (
 
 // Hook event name constants.
 const (
+	// EventPreToolUse fires before each tool execution. Hooks can
+	// allow, deny, halt, or rewrite the tool input.
 	EventPreToolUse = "PreToolUse"
+
+	// EventSessionStart fires when a new session is created.
+	// Carries the session ID for restore/resume support.
+	EventSessionStart = "SessionStart"
+
+	// EventTurnStart fires when the agent begins processing a user
+	// prompt. Marks the transition to working state.
+	EventTurnStart = "TurnStart"
+
+	// EventPermissionRequest fires when a permission prompt is shown
+	// to the user. Marks the transition to blocked state.
+	EventPermissionRequest = "PermissionRequest"
+
+	// EventPermissionResult fires after a permission decision is made
+	// (granted, denied, or cancelled). Marks the transition out of
+	// blocked state.
+	EventPermissionResult = "PermissionResult"
+
+	// EventTurnEnd fires when the agent finishes a turn and returns
+	// to idle state.
+	EventTurnEnd = "TurnEnd"
+
+	// EventInterrupt fires when the user cancels or interrupts an
+	// active turn (e.g. ctrl-c, escape).
+	EventInterrupt = "Interrupt"
+
+	// EventPostToolUse fires after a tool call succeeds. Carries
+	// tool name and input for observability. Cannot block.
+	EventPostToolUse = "PostToolUse"
+
+	// EventSessionEnd fires when a session ends (app shutdown or
+	// explicit session teardown). Carries session ID.
+	EventSessionEnd = "SessionEnd"
+
+	// EventStopFailure fires when a turn ends due to an API or
+	// provider error (not user cancellation). Carries session ID.
+	EventStopFailure = "StopFailure"
+
+	// EventPreCompact fires before context compaction begins.
+	// Can halt to prevent compaction.
+	EventPreCompact = "PreCompact"
+
+	// EventPostCompact fires after context compaction completes.
+	EventPostCompact = "PostCompact"
 )
+
+// AllEvents lists every supported hook event name. Used for config
+// validation and documentation.
+var AllEvents = []string{
+	EventPreToolUse,
+	EventPostToolUse,
+	EventSessionStart,
+	EventSessionEnd,
+	EventTurnStart,
+	EventPermissionRequest,
+	EventPermissionResult,
+	EventTurnEnd,
+	EventInterrupt,
+	EventStopFailure,
+	EventPreCompact,
+	EventPostCompact,
+}
+
+// eventNormMap maps lowercased-no-underscores event names to their
+// canonical form. Derived from AllEvents so adding a new event only
+// requires updating one list.
+var eventNormMap = func() map[string]string {
+	m := make(map[string]string, len(AllEvents))
+	for _, e := range AllEvents {
+		m[strings.ToLower(strings.ReplaceAll(e, "_", ""))] = e
+	}
+	return m
+}()
+
+// NormalizeEventName maps user-provided event names to their canonical
+// form. Matching is case-insensitive and accepts snake_case variants.
+// Returns the input unchanged if no match is found.
+func NormalizeEventName(name string) string {
+	if canonical, ok := eventNormMap[strings.ToLower(strings.ReplaceAll(name, "_", ""))]; ok {
+		return canonical
+	}
+	return name
+}
+
+// IsToolEvent reports whether the event is handled via the tool
+// execution path (Runner.Run with matcher filtering). Lifecycle events
+// return false.
+func IsToolEvent(event string) bool {
+	return event == EventPreToolUse || event == EventPostToolUse
+}
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the
 // current tool call; 49 sits in the no-man's-land between the
@@ -88,10 +179,13 @@ type AggregateResult struct {
 // aggregate merges multiple HookResults into a single AggregateResult.
 // Results are processed in config order (the order of the slice). Deny
 // wins over allow, allow wins over none. Halt is sticky. Reasons and
-// context concatenate in order. updated_input patches shallow-merge in
-// order against the original tool input; later patches override earlier
-// ones on colliding keys.
-func aggregate(results []HookResult, origToolInput string) AggregateResult {
+// context concatenate in order.
+//
+// When replace is true, updated_input uses last-writer-wins replacement
+// semantics (for PostToolUse output replacement). When false,
+// updated_input patches shallow-merge against origToolInput (for
+// PreToolUse input rewriting).
+func aggregate(results []HookResult, origToolInput string, replace bool) AggregateResult {
 	var (
 		decision Decision
 		halt     bool
@@ -126,16 +220,21 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 			contexts = append(contexts, r.Context)
 		}
 		if r.UpdatedInput != "" {
-			next, err := shallowMerge(merged, r.UpdatedInput)
-			if err != nil {
-				slog.Warn(
-					"Hook updated_input patch rejected; ignoring",
-					"error", err,
-					"patch", r.UpdatedInput,
-				)
-				continue
+			if replace {
+				// Last-writer-wins: no merge against base.
+				merged = r.UpdatedInput
+			} else {
+				next, err := shallowMerge(merged, r.UpdatedInput)
+				if err != nil {
+					slog.Warn(
+						"Hook updated_input patch rejected; ignoring",
+						"error", err,
+						"patch", r.UpdatedInput,
+					)
+					continue
+				}
+				merged = next
 			}
-			merged = next
 			anyPatch = true
 		}
 	}

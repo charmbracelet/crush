@@ -1,14 +1,18 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
 // mcpInfo renders the MCP status section showing active MCP clients and their
@@ -107,4 +111,102 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, renderedMcps...)
+}
+
+// openMCPTogglesDialog opens the repository-scoped MCP toggles dialog.
+func (m *UI) openMCPTogglesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MCPTogglesID) {
+		m.dialog.BringToFront(dialog.MCPTogglesID)
+		return nil
+	}
+	items, err := m.mcpToggleItems()
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(dialog.NewMCPToggles(m.com, items))
+	return nil
+}
+
+// mcpToggleItems builds the dialog items from the configured servers, the
+// live connection states, and the repository's disabled overrides.
+func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
+	disabledServers, err := m.com.Workspace.MCPServersDisabled(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	disabled := make(map[string]struct{}, len(disabledServers))
+	for _, name := range disabledServers {
+		disabled[name] = struct{}{}
+	}
+	// A repository-scoped enabled override turns a config-disabled server
+	// back on for this repository; it is force-started at startup.
+	enabledServers, err := m.com.Workspace.MCPServersEnabled(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	enabled := make(map[string]struct{}, len(enabledServers))
+	for _, name := range enabledServers {
+		enabled[name] = struct{}{}
+	}
+	items := make([]dialog.MCPToggleItem, 0, len(m.com.Config().MCP))
+	for _, configured := range m.com.Config().MCP.Sorted() {
+		_, enabledOverride := enabled[configured.Name]
+		item := dialog.MCPToggleItem{
+			Name:           configured.Name,
+			ConfigDisabled: configured.MCP.Disabled && !enabledOverride,
+			Status:         mcpStatusText(m.mcpStates[configured.Name]),
+		}
+		if _, off := disabled[configured.Name]; off {
+			item.Disabled = true
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// applyMCPToggle persists a repository-scoped MCP toggle. Enabling a
+// config-disabled server also starts it now and records an enabled
+// override, so it stays enabled across restarts. The dialog keeps its own
+// optimistic state; failures surface as an error toast.
+func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
+	name := msg.Name
+	disable := msg.Disabled
+	return func() tea.Msg {
+		if !disable {
+			if configured, ok := m.com.Config().MCP[name]; ok && configured.Disabled {
+				if err := m.com.Workspace.MCPStartServer(context.TODO(), name); err != nil {
+					return util.NewErrorMsg(err)
+				}
+			}
+		}
+		if err := m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disable); err != nil {
+			return util.NewErrorMsg(err)
+		}
+		status := "enabled"
+		if disable {
+			status = "disabled"
+		}
+		return util.NewInfoMsg(fmt.Sprintf("MCP %q %s for this repository", name, status))
+	}
+}
+
+// mcpStatusText renders a connection state as plain dialog text.
+func mcpStatusText(info mcp.ClientInfo) string {
+	switch info.State {
+	case mcp.StateStarting:
+		return "starting..."
+	case mcp.StateConnected:
+		return "connected"
+	case mcp.StateError:
+		if info.Error != nil {
+			return fmt.Sprintf("error: %s", info.Error.Error())
+		}
+		return "error"
+	case mcp.StateNeedsAuth:
+		return "needs authentication"
+	case mcp.StateDisabled:
+		return "disabled"
+	default:
+		return "offline"
+	}
 }

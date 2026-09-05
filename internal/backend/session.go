@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 
+	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
@@ -99,6 +100,50 @@ func (b *Backend) SaveSession(ctx context.Context, workspaceID string, sess sess
 	}
 
 	return ws.Sessions.Save(ctx, sess)
+}
+
+// MCPServersDisabled returns the MCP servers disabled for the given
+// workspace's repository.
+func (b *Backend) MCPServersDisabled(ctx context.Context, workspaceID string) ([]string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ws.Sessions.MCPDisabledServers(ctx)
+}
+
+// MCPServersEnabled returns the MCP servers with a repository-scoped
+// enabled override (config-disabled servers the user enabled here).
+func (b *Backend) MCPServersEnabled(ctx context.Context, workspaceID string) ([]string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ws.Sessions.MCPServersEnabled(ctx)
+}
+
+// SetMCPServerDisabled toggles a repository-scoped MCP override for the
+// given workspace.
+func (b *Backend) SetMCPServerDisabled(ctx context.Context, workspaceID, name string, disabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.Sessions.SetMCPServerDisabled(ctx, name, disabled)
+}
+
+// StartMCPServer starts the named MCP server for the given workspace even
+// when its config entry is disabled. Runtime-only.
+func (b *Backend) StartMCPServer(ctx context.Context, workspaceID, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return mcptools.InitializeSingleForced(ctx, name, ws.Cfg)
 }
 
 // DeleteSession deletes a session from the given workspace.

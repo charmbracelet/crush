@@ -595,5 +595,45 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			PathParam("id", "Workspace ID").
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceMCPDisableDocker),
+
+		apigen.Get("/v1/workspaces/{id}/mcp/disabled").
+			Summary("List disabled MCP servers").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Responds([]string{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceMCPServersDisabled),
+
+		apigen.Post("/v1/workspaces/{id}/mcp/disabled").
+			Summary("Toggle an MCP server for the repository").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.MCPSetServerDisabledRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceMCPSetServerDisabled),
+
+		apigen.Get("/v1/workspaces/{id}/mcp/enabled").
+			Summary("List enabled-override MCP servers").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Responds([]string{}).
+			Fails(404, 500).
+			Handle(c.handleGetWorkspaceMCPServersEnabled),
+
+		apigen.Post("/v1/workspaces/{id}/mcp/config-disabled").
+			Summary("Toggle an MCP server in the config").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.MCPSetServerDisabledRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceMCPSetServerConfigDisabled),
+
+		apigen.Post("/v1/workspaces/{id}/mcp/start").
+			Summary("Start an MCP server").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.MCPNameRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceMCPStartServer),
 	}
 }

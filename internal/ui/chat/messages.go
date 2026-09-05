@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
@@ -264,6 +263,19 @@ func AssistantInfoID(messageID string) string {
 	return fmt.Sprintf("%s:assistant-info", messageID)
 }
 
+// ShouldShowAssistantInfo reports whether an assistant message should
+// render its info footer. The turn that ends the prompt always gets one;
+// intermediate turns only get one when a Prism-routed model name is
+// available, since that is the only case where the footer adds
+// per-turn information.
+func ShouldShowAssistantInfo(msg *message.Message) bool {
+	finishData := msg.FinishPart()
+	if finishData == nil {
+		return false
+	}
+	return finishData.Reason == message.FinishReasonEndTurn || msg.PrismModelName != ""
+}
+
 // AssistantInfoItem renders model info and response time after assistant completes.
 type AssistantInfoItem struct {
 	*list.Versioned
@@ -336,27 +348,74 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	if finishData == nil {
 		return ""
 	}
-	finishTime := time.Unix(finishData.Time, 0)
-	duration := finishTime.Sub(a.lastUserMessageTime)
-	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(fmt.Sprintf("in %s", duration))
+	// The final turn of a prompt keeps the full footer (duration and
+	// separator line); intermediate turns render a compact header.
+	isFinalTurn := finishData.Reason == message.FinishReasonEndTurn
+
 	icon := a.sty.Messages.AssistantInfoIcon.Render(styles.ModelIcon)
-	model := a.cfg.GetModel(a.message.Provider, a.message.Model)
-	if model == nil {
-		model = &catwalk.Model{Name: "Unknown Model"}
+	mainModelName := "Unknown Model"
+	if model := a.cfg.GetModel(a.message.Provider, a.message.Model); model != nil {
+		mainModelName = model.Name
 	}
-	modelFormatted := a.sty.Messages.AssistantInfoModel.Render(model.Name)
+	modelFormatted := a.sty.Messages.AssistantInfoModel.Render(mainModelName)
+	// A Prism-routed turn shows the model that actually served the
+	// request, with the arrow and any savings suffix subdued.
+	if a.message.PrismModelName != "" {
+		routedModel := a.sty.Messages.AssistantInfoModel.Render(a.message.PrismModelName)
+		arrow := a.sty.Messages.AssistantInfoProvider.Render("→")
+		modelFormatted = fmt.Sprintf("%s %s %s", modelFormatted, arrow, routedModel)
+	}
+	savings := prismSavingsSuffix(a.sty, a.message)
+	if !isFinalTurn {
+		if savings != "" {
+			return fmt.Sprintf("%s %s %s", icon, modelFormatted, savings)
+		}
+		return fmt.Sprintf("%s %s", icon, modelFormatted)
+	}
 	providerName := a.message.Provider
 	if providerConfig, ok := a.cfg.Providers.Get(a.message.Provider); ok {
 		providerName = providerConfig.Name
 	}
 	provider := a.sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
+	duration := time.Unix(finishData.Time, 0).Sub(a.lastUserMessageTime)
+	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(fmt.Sprintf("in %s", duration))
 	assistant := fmt.Sprintf("%s %s %s %s", icon, modelFormatted, provider, infoMsg)
+	if savings != "" {
+		assistant = fmt.Sprintf("%s %s", assistant, savings)
+	}
 	return common.Section(a.sty, assistant, width)
 }
 
 // cappedMessageWidth returns the maximum width for message content for readability.
 func cappedMessageWidth(availableWidth int) int {
 	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
+}
+
+// prismSavingsSuffix returns the styled Prism savings suffix for the
+// message, or an empty string when none was reported. The hypercredit
+// symbol carries the sidebar's hypercredit color; the rest is subdued
+// like the provider. Hypercredits are preferred over dollars when both
+// are present, matching Hyper's either/or credit model.
+func prismSavingsSuffix(sty *styles.Styles, msg *message.Message) string {
+	switch {
+	case msg.PrismHypercreditSavings != nil:
+		icon := sty.Messages.SubduedHypercreditIcon.Render(styles.HypercreditIcon)
+		rest := sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf(" %s Saved", formatHypercreditSavings(*msg.PrismHypercreditSavings)))
+		return icon + rest
+	case msg.PrismDollarSavings != nil:
+		return sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf("• $%.2f Saved", *msg.PrismDollarSavings))
+	default:
+		return ""
+	}
+}
+
+// formatHypercreditSavings rounds hypercredits to whole numbers at 1 and
+// above, keeping a single decimal below that.
+func formatHypercreditSavings(v float64) string {
+	if v >= 1 {
+		return fmt.Sprintf("%.0f", v)
+	}
+	return fmt.Sprintf("%.1f", v)
 }
 
 // ExtractMessageItems extracts [MessageItem]s from a [message.Message]. It

@@ -78,11 +78,36 @@ var copilotResponsesModels = map[string]bool{
 	"gpt-5.6-luna":  true,
 	"gpt-5.6-terra": true,
 	"gpt-5.6-sol":   true,
+	"grok-4.5":      true,
+	"grok-4.6":      true,
 }
 
-// OpenCode models that user Anthropic Messages API instead of Chat Completions.
-var opencodeMessagesModels = map[string]bool{
-	"qwen3.7-max": true,
+// OpenCode models that use the Anthropic Messages API instead of Chat
+// Completions. Which endpoint serves each model differs per provider, see
+// https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
+func isOpenCodeMessagesModel(providerID, modelID string) bool {
+	switch providerID {
+	case string(catwalk.InferenceProviderOpenCodeGo):
+		return strings.HasPrefix(modelID, "minimax-") ||
+			strings.HasPrefix(modelID, "qwen3.6-") ||
+			strings.HasPrefix(modelID, "qwen3.7-") ||
+			strings.HasPrefix(modelID, "qwen3.8-")
+	case string(catwalk.InferenceProviderOpenCodeZen):
+		return strings.HasPrefix(modelID, "claude-") ||
+			strings.HasPrefix(modelID, "qwen3.5-") ||
+			strings.HasPrefix(modelID, "qwen3.6-") ||
+			strings.HasPrefix(modelID, "qwen3.7-") ||
+			strings.HasPrefix(modelID, "qwen3.8-")
+	}
+	return false
+}
+
+// OpenCode models that use the OpenAI Responses API instead of Chat
+// Completions. See https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
+func isOpenCodeResponsesModel(modelID string) bool {
+	return strings.HasPrefix(modelID, "gpt-") ||
+		strings.HasPrefix(modelID, "grok-") ||
+		strings.HasPrefix(modelID, "muse-spark-")
 }
 
 type Coordinator interface {
@@ -877,6 +902,13 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
+	// Bound each request with the configured timeout so unreachable or hung
+	// providers fail instead of blocking a session forever. The wrapper is
+	// applied per request, so retries get a fresh budget each attempt.
+	requestTimeout := c.cfg.Config().Options.GetRequestTimeout()
+	largeModel = newRequestTimeoutModel(largeModel, requestTimeout)
+	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
+
 	return Model{
 			Model:      largeModel,
 			CatwalkCfg: *largeCatwalkModel,
@@ -986,6 +1018,23 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			}),
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+
+	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+		opts = append(
+			opts,
+			openaicompat.WithUseResponsesAPI(),
+			openaicompat.WithResponsesAPIFunc(isOpenCodeResponsesModel),
+		)
+
+	case hyper.Name:
+		// Hyper may route requests through a Prism model; capture the
+		// router headers so the UI can show which model answered.
+		opts = append(
+			opts,
+			openaicompat.WithLanguageModelOptions(
+				openai.WithLanguageModelHeaderFunc(hyper.HeaderFunc),
+			),
+		)
 	}
 	if httpClient == nil && c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
@@ -1118,7 +1167,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
-		if opencodeMessagesModels[model.Model] {
+		if isOpenCodeMessagesModel(providerCfg.ID, model.Model) {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
 			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 		}

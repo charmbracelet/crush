@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/signal"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/clipboard"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	openaiauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
@@ -23,7 +25,7 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: hyper, copilot.`,
+Available platforms are: hyper, copilot, openai (ChatGPT/Codex OAuth).`,
 	Example: `
 # Authenticate with Charm Hyper
 crush login
@@ -39,6 +41,9 @@ crush login -f copilot
 		"copilot",
 		"github",
 		"github-copilot",
+		string(catwalk.InferenceProviderOpenAI),
+		"chatgpt",
+		"codex",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -58,10 +63,40 @@ crush login -f copilot
 			return loginHyper(ws, force)
 		case "copilot", "github", "github-copilot":
 			return loginCopilot(ws, force)
+		case string(catwalk.InferenceProviderOpenAI), "chatgpt", "codex":
+			return loginOpenAI(ws, force)
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
 	},
+}
+
+func loginOpenAI(ws workspace.Workspace, force bool) error {
+	ctx := getLoginContext()
+	if !force {
+		if pc, ok := ws.Config().Providers.Get(string(catwalk.InferenceProviderOpenAI)); ok && pc.OAuthToken != nil {
+			fmt.Println("You are already logged in to ChatGPT/Codex.")
+			return nil
+		}
+	}
+	d, err := openaiauth.RequestDeviceCode(ctx)
+	if err != nil {
+		return err
+	}
+	deviceURL := openaiauth.Issuer + "/codex/device"
+	fmt.Printf("Open %s and enter code %s.\n", deviceURL, d.UserCode)
+	if err := browser.OpenURL(deviceURL); err != nil {
+		fmt.Println("Could not open the URL; open it manually.")
+	}
+	t, err := openaiauth.PollDevice(ctx, d)
+	if err != nil {
+		return err
+	}
+	if err := ws.SetProviderAPIKey(config.ScopeGlobal, string(catwalk.InferenceProviderOpenAI), t); err != nil {
+		return err
+	}
+	fmt.Println("You're now authenticated with ChatGPT (Codex backend)!")
+	return nil
 }
 
 func init() {

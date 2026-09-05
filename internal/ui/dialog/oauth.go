@@ -171,7 +171,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 				return nil
 
 			default:
-				return ActionClose{}
+				return ActionCloseOAuth{Cmd: m.oAuthProvider.stopPolling}
 			}
 		}
 
@@ -312,22 +312,24 @@ func (m *OAuth) innerDialogContent() string {
 		// Render each text segment with its own style. Wrapping the
 		// whole concatenation in a single style would lose the text
 		// color after enterKeyStyle's reset code.
-		instructionText := instructionStyle.Render("Press ") +
-			enterKeyStyle.Render("enter") +
-			instructionStyle.Render(" to copy the code below and open the browser.")
+		instructionText := instructionStyle.Render("Press ") + enterKeyStyle.Render("enter")
+		if m.userCode == "" {
+			instructionText += instructionStyle.Render(" to open the browser and authenticate.")
+		} else {
+			instructionText += instructionStyle.Render(" to copy the code below and open the browser.")
+		}
 		instructions := lipgloss.NewStyle().
 			Width(innerWidth).
 			Padding(0, 1).
 			Render(instructionText)
 
-		codeBox := lipgloss.NewStyle().
-			Width(innerWidth).
-			Height(7).
-			Align(lipgloss.Center, lipgloss.Center).
-			Background(t.Dialog.OAuth.UserCodeBg).
-			Render(
-				t.Dialog.OAuth.UserCode.Render(m.userCode),
-			)
+		codeBox := ""
+		if m.userCode != "" {
+			codeBox = lipgloss.NewStyle().Width(innerWidth).Height(7).
+				Align(lipgloss.Center, lipgloss.Center).
+				Background(t.Dialog.OAuth.UserCodeBg).
+				Render(t.Dialog.OAuth.UserCode.Render(m.userCode))
+		}
 
 		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
 		url := statusTextStyle.
@@ -342,18 +344,12 @@ func (m *OAuth) innerDialogContent() string {
 				successStyle.Render(m.spinner.View()) + statusTextStyle.Render("Verifying..."),
 			)
 
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			"",
-			instructions,
-			"",
-			codeBox,
-			"",
-			url,
-			"",
-			waiting,
-			"",
-		)
+		elements := []string{"", instructions, ""}
+		if codeBox != "" {
+			elements = append(elements, codeBox, "")
+		}
+		elements = append(elements, url, "", waiting, "")
+		return lipgloss.JoinVertical(lipgloss.Left, elements...)
 
 	case OAuthStateSuccess:
 		return successStyle.

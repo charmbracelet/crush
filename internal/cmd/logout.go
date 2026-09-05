@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
@@ -27,7 +28,7 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Crush from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: hyper, copilot.`,
+Available platforms are: hyper, copilot, openai. For OpenAI, logout removes only ChatGPT/Codex OAuth credentials and preserves a configured API key.`,
 	Example: `
 # Sign out from Charm Hyper
 crush logout hyper
@@ -40,6 +41,9 @@ crush logout copilot
 		"copilot",
 		"github",
 		"github-copilot",
+		string(catwalk.InferenceProviderOpenAI),
+		"chatgpt",
+		"codex",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -84,10 +88,37 @@ crush logout copilot
 			return logoutHyper(c, ws.ID)
 		case "copilot", "github", "github-copilot":
 			return logoutCopilot(c, ws.ID)
+		case string(catwalk.InferenceProviderOpenAI), "chatgpt", "codex":
+			return logoutOpenAI(c, ws.ID)
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
 	},
+}
+
+func logoutOpenAI(c *client.Client, wsID string) error {
+	ctx := getLogoutContext()
+	cfg, err := c.GetConfig(ctx, wsID)
+	if err != nil {
+		return err
+	}
+	if err := c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, fmt.Sprintf("providers.%s.oauth", catwalk.InferenceProviderOpenAI)); err != nil {
+		return err
+	}
+	apiKeyPresent := false
+	if cfg.Providers != nil {
+		provider, ok := cfg.Providers.Get(string(catwalk.InferenceProviderOpenAI))
+		apiKeyPresent = ok && provider.APIKey != ""
+	}
+	fmt.Println(logoutHeaderStyle.Render(openAILogoutMessage(apiKeyPresent)))
+	return nil
+}
+
+func openAILogoutMessage(apiKeyPresent bool) string {
+	if apiKeyPresent {
+		return "Removed ChatGPT/Codex OAuth credentials. Your OpenAI API key was preserved."
+	}
+	return "Successfully logged out of ChatGPT/Codex."
 }
 
 func logoutHyper(c *client.Client, wsID string) error {
@@ -134,8 +165,9 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 	// Only OAuth-based providers support login/logout. Keep this list in sync
 	// with the switch in RunE and the login command.
 	oauthProviders := map[string]string{
-		"hyper":   "Hyper",
-		"copilot": "GitHub Copilot",
+		"hyper":                                 "Hyper",
+		"copilot":                               "GitHub Copilot",
+		string(catwalk.InferenceProviderOpenAI): "ChatGPT/Codex",
 	}
 
 	var loggedIn []loggedInProvider

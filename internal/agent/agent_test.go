@@ -24,6 +24,18 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 )
 
+func TestMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	var apiKeyModel Model
+	max := maxOutputTokens(apiKeyModel, 4096)
+	require.NotNil(t, max)
+	require.Equal(t, int64(4096), *max)
+
+	oauthModel := Model{OmitMaxOutputTokens: true}
+	require.Nil(t, maxOutputTokens(oauthModel, 4096))
+}
+
 func TestMain(m *testing.M) {
 	slog.SetLogLoggerLevel(slog.LevelError)
 	m.Run()

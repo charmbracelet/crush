@@ -23,6 +23,11 @@ import (
 // ActionClose is a message to close the current dialog.
 type ActionClose struct{}
 
+// ActionCloseOAuth stops an in-flight OAuth flow before closing its dialog.
+type ActionCloseOAuth struct {
+	Cmd tea.Cmd
+}
+
 // ActionQuit is a message to quit the application.
 type ActionQuit = tea.QuitMsg
 
@@ -42,6 +47,15 @@ type ActionSelectModel struct {
 	Model          config.SelectedModel
 	ModelType      config.SelectedModelType
 	ReAuthenticate bool
+}
+
+// ActionSelectAuthMethod is sent when the user chooses how to authenticate a
+// provider that supports more than one credential type.
+type ActionSelectAuthMethod struct {
+	Provider  catwalk.Provider
+	Model     config.SelectedModel
+	ModelType config.SelectedModelType
+	OAuth     bool
 }
 
 // Messages for commands

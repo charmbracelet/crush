@@ -1,5 +1,12 @@
 # Crush
 
+## ChatGPT OAuth
+
+`crush login openai` uses the ChatGPT Pro/Plus Codex subscription flow and
+routes requests to the ChatGPT Codex backend, not public OpenAI Platform
+OAuth. Manual OpenAI API keys remain supported and are preserved when OAuth
+credentials are added or removed.
+
 <p align="center">
     <a href="https://stuff.charm.sh/crush/charm-crush.png"><img width="450" alt="Charm Crush Logo" src="https://github.com/user-attachments/assets/cf8ca3ce-8b02-43f0-9d0f-5a331488da4b" /></a><br />
     <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>

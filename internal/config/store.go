@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	"github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/singleflight"
@@ -568,25 +569,40 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 
 	switch v := apiKey.(type) {
 	case string:
-		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
+		fields := map[string]any{fmt.Sprintf("providers.%s.api_key", providerID): v}
+		// Selecting an API key must disable a previously selected OAuth
+		// credential. Otherwise the OpenAI transport would continue using the
+		// OAuth token while the user believes API-key authentication is active.
+		if providerID == string(catwalk.InferenceProviderOpenAI) {
+			fields[fmt.Sprintf("providers.%s.oauth", providerID)] = nil
+		}
+		if err := s.SetConfigFields(scope, fields); err != nil {
 			return fmt.Errorf("failed to save api key to config file: %w", err)
 		}
-		setKeyOrToken = func() { providerConfig.APIKey = v }
+		setKeyOrToken = func() {
+			providerConfig.APIKey = v
+			if providerID == string(catwalk.InferenceProviderOpenAI) {
+				providerConfig.OAuthToken = nil
+			}
+		}
 	case *oauth.Token:
 		// Hold the refresh lock across the write so a peer's in-flight
 		// token exchange cannot land on top of a credential the user just
 		// obtained interactively — which would silently invalidate the
 		// login they only just completed.
 		if err := s.withRefreshLock(providerID, func() error {
-			return s.SetConfigFields(scope, map[string]any{
-				fmt.Sprintf("providers.%s.api_key", providerID): v.AccessToken,
-				fmt.Sprintf("providers.%s.oauth", providerID):   v,
-			})
+			fields := map[string]any{fmt.Sprintf("providers.%s.oauth", providerID): v}
+			if providerID != string(catwalk.InferenceProviderOpenAI) {
+				fields[fmt.Sprintf("providers.%s.api_key", providerID)] = v.AccessToken
+			}
+			return s.SetConfigFields(scope, fields)
 		}); err != nil {
 			return err
 		}
 		setKeyOrToken = func() {
-			providerConfig.APIKey = v.AccessToken
+			if providerID != string(catwalk.InferenceProviderOpenAI) || providerConfig.APIKey == "" {
+				providerConfig.APIKey = v.AccessToken
+			}
 			providerConfig.OAuthToken = v
 			switch providerID {
 			case string(catwalk.InferenceProviderCopilot):
@@ -717,6 +733,7 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	// Disk still holds our token (or no newer peer token exists) and we hold
 	// the lock, so we are the sole exchanger. Perform the exchange.
 	refreshedToken, refreshErr := s.exchange(ctx, providerID, entryToken.RefreshToken)
+	mergeSource := entryToken
 	if refreshErr != nil {
 		// The exchange may have failed because a peer rotated the refresh
 		// token in a window we did not cover. Re-check disk: adopt a usable
@@ -727,22 +744,25 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 				return s.applyToken(providerConfig, diskToken, providerID)
 			}
 			slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
+			mergeSource = diskToken
 			refreshedToken, refreshErr = s.exchange(ctx, providerID, diskToken.RefreshToken)
 		}
 	}
 	if refreshErr != nil {
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
+	mergeRefreshedToken(mergeSource, refreshedToken)
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	if err := s.applyToken(providerConfig, refreshedToken, providerID); err != nil {
 		return err
 	}
 
-	if err := s.SetConfigFields(scope, map[string]any{
-		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
-		fmt.Sprintf("providers.%s.oauth", providerID):   refreshedToken,
-	}); err != nil {
+	fields := map[string]any{fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken, fmt.Sprintf("providers.%s.oauth", providerID): refreshedToken}
+	if providerID == string(catwalk.InferenceProviderOpenAI) {
+		delete(fields, fmt.Sprintf("providers.%s.api_key", providerID))
+	}
+	if err := s.SetConfigFields(scope, fields); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 	return nil
@@ -869,6 +889,8 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken str
 		return copilot.RefreshToken(ctx, refreshToken)
 	case hyperp.Name:
 		return hyper.ExchangeToken(ctx, refreshToken)
+	case string(catwalk.InferenceProviderOpenAI):
+		return openai.RefreshToken(ctx, refreshToken)
 	default:
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
@@ -905,12 +927,37 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 // applyToken updates the in-memory provider config with the given token.
 func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) error {
 	providerConfig.OAuthToken = token
-	providerConfig.APIKey = token.AccessToken
+	if providerID != string(catwalk.InferenceProviderOpenAI) || providerConfig.APIKey == "" {
+		providerConfig.APIKey = token.AccessToken
+	}
 	if providerID == string(catwalk.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}
 	s.Config().Providers.Set(providerID, providerConfig)
 	return nil
+}
+
+// mergeRefreshedToken preserves provider metadata that refresh responses may
+// omit, including the refresh token and ChatGPT account metadata.
+func mergeRefreshedToken(previous, refreshed *oauth.Token) {
+	if previous == nil || refreshed == nil {
+		return
+	}
+	if refreshed.RefreshToken == "" {
+		refreshed.RefreshToken = previous.RefreshToken
+	}
+	if refreshed.AccountID == "" {
+		refreshed.AccountID = previous.AccountID
+	}
+	if refreshed.Residency == "" {
+		refreshed.Residency = previous.Residency
+	}
+	if refreshed.IDToken == "" {
+		refreshed.IDToken = previous.IDToken
+	}
+	if refreshed.Client == nil {
+		refreshed.Client = previous.Client
+	}
 }
 
 // loadTokenFromDisk reads the OAuth token for the given provider from the

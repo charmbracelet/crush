@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,6 +23,15 @@ type mockSessionAgent struct {
 	model     Model
 	runFunc   func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error)
 	cancelled []string
+}
+
+func TestIsOpenAICodexOAuth(t *testing.T) {
+	t.Parallel()
+
+	token := &oauth.Token{AccessToken: "oauth-token"}
+	require.True(t, isOpenAICodexOAuth(string(catwalk.InferenceProviderOpenAI), token))
+	require.False(t, isOpenAICodexOAuth("custom-openai", token))
+	require.False(t, isOpenAICodexOAuth(string(catwalk.InferenceProviderOpenAI), nil))
 }
 
 func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {

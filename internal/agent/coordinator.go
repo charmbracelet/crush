@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	openaiauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -286,6 +287,9 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return nil, errModelProviderNotConfigured
+	}
+	if model.OmitMaxOutputTokens {
+		maxTokens = 0
 	}
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
@@ -910,15 +914,17 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
 
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
+			Model:               largeModel,
+			CatwalkCfg:          *largeCatwalkModel,
+			ModelCfg:            largeModelCfg,
+			FlatRate:            largeProviderCfg.FlatRate,
+			OmitMaxOutputTokens: isOpenAICodexOAuth(largeProviderCfg.ID, largeProviderCfg.OAuthToken),
 		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
+			Model:               smallModel,
+			CatwalkCfg:          *smallCatwalkModel,
+			ModelCfg:            smallModelCfg,
+			FlatRate:            smallProviderCfg.FlatRate,
+			OmitMaxOutputTokens: isOpenAICodexOAuth(smallProviderCfg.ID, smallProviderCfg.OAuthToken),
 		}, nil
 }
 
@@ -954,7 +960,10 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, providerID string, token *oauth.Token) (fantasy.Provider, error) {
+	if token != nil && apiKey == "" {
+		apiKey = "crush-chatgpt-oauth"
+	}
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
@@ -963,6 +972,13 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openai.WithHTTPClient(httpClient))
 	}
+	if isOpenAICodexOAuth(providerID, token) {
+		transport := openaiauth.Transport{Token: token, Originator: "crush"}
+		if c.cfg.Config().Options.Debug {
+			transport.Base = log.NewHTTPClient().Transport
+		}
+		opts = append(opts, openai.WithHTTPClient(&http.Client{Transport: transport}))
+	}
 	if len(headers) > 0 {
 		opts = append(opts, openai.WithHeaders(headers))
 	}
@@ -970,6 +986,10 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
 	return openai.New(opts...)
+}
+
+func isOpenAICodexOAuth(providerID string, token *oauth.Token) bool {
+	return providerID == string(catwalk.InferenceProviderOpenAI) && token != nil
 }
 
 func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
@@ -1175,7 +1195,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.OAuthToken)
 	case anthropic.Name:
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 	case openrouter.Name:
@@ -1474,6 +1494,9 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
+	}
+	if model.OmitMaxOutputTokens {
+		maxTokens = 0
 	}
 
 	// Run the agent

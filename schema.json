@@ -908,6 +908,28 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "ToolWebSearch": {
+      "properties": {
+        "search_engine": {
+          "type": "string",
+          "enum": [
+            "exa",
+            "duckduckgo"
+          ],
+          "description": "Default search engine for web_search",
+          "default": "exa"
+        },
+        "exa_api_key": {
+          "type": "string",
+          "description": "Optional Exa API key or environment variable reference",
+          "examples": [
+            "$EXA_API_KEY"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Tools": {
       "properties": {
         "ls": {
@@ -918,6 +940,10 @@
         },
         "glob": {
           "$ref": "#/$defs/ToolGlob"
+        },
+        "web_search": {
+          "$ref": "#/$defs/ToolWebSearch",
+          "description": "Web search tool configuration"
         }
       },
       "additionalProperties": false,

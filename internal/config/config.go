@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -663,10 +665,70 @@ type Agent struct {
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
 
+type SearchEngine string
+
+const (
+	SearchEngineExa        SearchEngine = "exa"
+	SearchEngineDuckDuckGo SearchEngine = "duckduckgo"
+)
+
+var invalidSearchEngineWarnings sync.Map
+
+func (s SearchEngine) String() string {
+	return string(s)
+}
+
+func (s SearchEngine) Valid() bool {
+	switch s {
+	case SearchEngineExa, SearchEngineDuckDuckGo:
+		return true
+	default:
+		return false
+	}
+}
+
 type Tools struct {
-	Ls   ToolLs   `json:"ls,omitzero"`
-	Grep ToolGrep `json:"grep,omitzero"`
-	Glob ToolGlob `json:"glob,omitzero"`
+	Ls        ToolLs        `json:"ls,omitzero"`
+	Grep      ToolGrep      `json:"grep,omitzero"`
+	Glob      ToolGlob      `json:"glob,omitzero"`
+	WebSearch ToolWebSearch `json:"web_search,omitzero" jsonschema:"description=Web search tool configuration"`
+}
+
+func (Tools) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Required = slices.DeleteFunc(schema.Required, func(required string) bool {
+		return required == "web_search"
+	})
+}
+
+type ToolWebSearch struct {
+	SearchEngine SearchEngine `json:"search_engine,omitempty" jsonschema:"description=Default search engine for web_search,enum=exa,enum=duckduckgo,default=exa"`
+	ExaAPIKey    string       `json:"exa_api_key,omitempty" jsonschema:"description=Optional Exa API key or environment variable reference,example=$EXA_API_KEY"`
+}
+
+func (t ToolWebSearch) Engine() SearchEngine {
+	if t.SearchEngine.Valid() {
+		return t.SearchEngine
+	}
+	if t.SearchEngine != "" {
+		if _, loaded := invalidSearchEngineWarnings.LoadOrStore(t.SearchEngine, struct{}{}); !loaded {
+			slog.Warn("Invalid configured web search engine; defaulting to Exa", "engine", t.SearchEngine)
+		}
+	}
+	return SearchEngineExa
+}
+
+func (t ToolWebSearch) ResolvedExaAPIKey(resolver VariableResolver) string {
+	if t.ExaAPIKey == "" {
+		return ""
+	}
+	if resolver == nil {
+		return t.ExaAPIKey
+	}
+	resolved, err := resolver.ResolveValue(t.ExaAPIKey)
+	if err != nil {
+		return ""
+	}
+	return resolved
 }
 
 type ToolLs struct {

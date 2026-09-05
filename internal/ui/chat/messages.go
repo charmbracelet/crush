@@ -455,14 +455,22 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			if tr, ok := toolResults[tc.ID]; ok {
 				result = &tr
 			}
-			items = append(items, NewToolMessageItem(
+			item := NewToolMessageItem(
 				sty,
 				msg.ID,
 				tc,
 				result,
 				msg.FinishReason() == message.FinishReasonCanceled,
 				workingDir,
-			))
+			)
+			// History items have no trustworthy start time; clear the
+			// constructor timestamp so no misleading timer is shown.
+			if !tc.Finished {
+				if restorable, ok := item.(interface{ markRestored() }); ok {
+					restorable.markRestored()
+				}
+			}
+			items = append(items, item)
 		}
 		return items
 	}

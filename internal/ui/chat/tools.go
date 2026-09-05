@@ -98,6 +98,10 @@ type ToolRenderOpts struct {
 	Compact         bool
 	IsSpinning      bool
 	Status          ToolStatus
+	// StartedAt is when the tool call started rendering live. Zero for
+	// items restored from history, where the real start time is unknown,
+	// so no elapsed time is shown for them.
+	StartedAt time.Time
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -158,9 +162,20 @@ type baseToolMessageItem struct {
 	sty             *styles.Styles
 	anim            *anim.Anim
 	expandedContent bool
+	startedAt       time.Time
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
+
+// markRestored clears startedAt for items rebuilt from session history:
+// the real start time is unknown there, and a constructor timestamp would
+// restart the timer from zero and misreport the elapsed time.
+func (t *baseToolMessageItem) markRestored() {
+	if !t.startedAt.IsZero() {
+		t.startedAt = time.Time{}
+		t.Bump()
+	}
+}
 
 // newBaseToolMessageItem is the internal constructor for base tool message items.
 func newBaseToolMessageItem(
@@ -190,6 +205,7 @@ func newBaseToolMessageItem(
 		result:                   result,
 		status:                   status,
 		hasCappedWidth:           hasCappedWidth,
+		startedAt:                time.Now(),
 	}
 	t.anim = anim.New(anim.Settings{
 		ID:          toolCall.ID,
@@ -346,6 +362,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			Compact:         t.isCompact,
 			IsSpinning:      t.isSpinning(),
 			Status:          t.computeStatus(),
+			StartedAt:       t.startedAt,
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.
@@ -468,7 +485,9 @@ func (t *baseToolMessageItem) isSpinning() bool {
 			Status:   t.status,
 		})
 	}
-	return !t.toolCall.Finished && t.status != ToolStatusCanceled
+	// Keep animating while waiting for the tool result too, so the
+	// "Waiting for tool response for Xs" label keeps ticking.
+	return (!t.toolCall.Finished || t.result == nil) && t.status != ToolStatusCanceled
 }
 
 // SetSpinningFunc sets a custom function to determine if the tool should spin.
@@ -530,6 +549,20 @@ func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) 
 	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
 }
 
+// waitingForToolMessage builds the "Waiting for tool response..." label,
+// including how long the tool has been running and, when a turn is
+// active, the total elapsed turn time.
+func waitingForToolMessage(opts *ToolRenderOpts) string {
+	msg := "Waiting for tool response"
+	if !opts.StartedAt.IsZero() {
+		msg += fmt.Sprintf(" for %s", common.FormatDuration(time.Since(opts.StartedAt)))
+	}
+	if total := common.Elapsed(); total != "" {
+		msg += fmt.Sprintf(" (%s total)", total)
+	}
+	return msg + "..."
+}
+
 // toolEarlyStateContent handles error/cancelled/pending states before content rendering.
 // Returns the rendered output and true if early state was handled.
 func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) (string, bool) {
@@ -542,7 +575,7 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	case ToolStatusAwaitingPermission:
 		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
 	case ToolStatusRunning:
-		msg = sty.Tool.StateWaiting.Render("Waiting for tool response...")
+		msg = sty.Tool.StateWaiting.Render(waitingForToolMessage(opts))
 	default:
 		return "", false
 	}

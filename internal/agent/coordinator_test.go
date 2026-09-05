@@ -91,7 +91,7 @@ func agentResultWithText(text string) *fantasy.AgentResult {
 func TestCopilotResponsesModels(t *testing.T) {
 	t.Parallel()
 
-	for _, modelID := range []string{"grok-4.5", "grok-4.6"} {
+	for _, modelID := range []string{"gpt-6-astra", "grok-4.5", "grok-4.6"} {
 		assert.True(t, copilotResponsesModels[modelID], modelID)
 	}
 	assert.False(t, copilotResponsesModels["gpt-4.1"])

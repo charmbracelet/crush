@@ -13,6 +13,8 @@ import (
 
 // The standalone SSE stream is the hanging GET that a streamable-HTTP MCP
 // server uses to push server-initiated notifications. For channel-enabled
+// servers it is the stream that notifications/claude/channel doorbells ride.
+//
 // Interception note: channel notifications must be filtered below the go-sdk
 // connection layer for streamable-HTTP transports. The SDK only starts the
 // standalone SSE stream by type-asserting the connection returned from

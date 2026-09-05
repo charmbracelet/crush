@@ -797,7 +797,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
-		Headers:          sessionHeaders(call.SessionID),
+		Headers:          sessionHeaders(call.SessionID, largeModel.ModelCfg.Provider),
 		ProviderOptions:  call.ProviderOptions,
 		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,
@@ -1381,7 +1381,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
-		Headers:         sessionHeaders(sessionID),
+		Headers:         sessionHeaders(sessionID, largeModel.ModelCfg.Provider),
 		ProviderOptions: opts,
 		OnAuthRefresh:   onAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
@@ -1499,12 +1499,19 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 //
 // We use the session hash is used instead of the raw UUID so the header
 // value is deterministic and opaque.
-func sessionHeaders(sessionID string) map[string]string {
+//
+// OpenCode providers (Go and Zen) additionally require the session hash
+// in a dedicated header for their own session tracking.
+func sessionHeaders(sessionID, providerID string) map[string]string {
 	hash := session.HashID(sessionID)
-	return map[string]string{
+	headers := map[string]string{
 		"x-session-id":       hash,
 		"x-session-affinity": hash,
 	}
+	if providerID == string(catwalk.InferenceProviderOpenCodeGo) || providerID == string(catwalk.InferenceProviderOpenCodeZen) {
+		headers["x-opencode-session"] = hash
+	}
+	return headers
 }
 
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {
@@ -1757,8 +1764,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	}
 
 	streamCall := fantasy.AgentStreamCall{
-		Prompt:  fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
-		Headers: sessionHeaders(sessionID),
+		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages
 			if systemPromptPrefix != "" {
@@ -1789,6 +1795,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
+		streamCall.Headers = sessionHeaders(sessionID, attempt.model.ModelCfg.Provider)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model

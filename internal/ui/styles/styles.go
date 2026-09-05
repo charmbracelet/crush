@@ -331,6 +331,7 @@ type Styles struct {
 		AssistantInfoModel     lipgloss.Style
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
+		SubduedHypercreditIcon lipgloss.Style // Subdued ◆ for hypercredit figures within subdued text
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
 	}
 

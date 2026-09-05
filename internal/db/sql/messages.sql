@@ -29,6 +29,10 @@ RETURNING *;
 UPDATE messages
 SET
     parts = ?,
+    prism_model_id = ?,
+    prism_model_name = ?,
+    prism_hypercredit_savings = ?,
+    prism_dollar_savings = ?,
     finished_at = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?;

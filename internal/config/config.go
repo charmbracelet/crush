@@ -759,6 +759,14 @@ type Config struct {
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
 	Agents map[string]Agent `json:"-"`
+
+	// LargeFallback is true when models.large was set but did not resolve
+	// against the catalog. Interactive TUI still uses the default; crush
+	// run refuses to start unless -m / --model overrides.
+	LargeFallback bool `json:"large_fallback,omitempty" jsonschema:"-"`
+
+	// LargeConfigured is the models.large value before fallback.
+	LargeConfigured SelectedModel `json:"large_configured,omitempty" jsonschema:"-"`
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators

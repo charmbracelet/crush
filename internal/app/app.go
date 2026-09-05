@@ -281,6 +281,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
+	if cfg := app.config.Config(); cfg != nil {
+		m := cfg.Models[config.SelectedModelTypeLarge]
+		fmt.Fprintf(os.Stderr, "crush run: %s/%s\n", m.Provider, m.Model)
+	}
+
 	var (
 		spinner   *format.Spinner
 		stderrTTY bool

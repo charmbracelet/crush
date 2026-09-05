@@ -50,17 +50,14 @@ func (f *channelSSEFilter) RoundTrip(req *http.Request) (*http.Response, error) 
 	if err != nil {
 		return resp, err
 	}
-	standalone := req.Method == http.MethodGet &&
-		req.Header.Get("Accept") == "text/event-stream"
 	if resp.StatusCode != http.StatusOK ||
 		!isEventStreamContentType(resp.Header.Get("Content-Type")) {
 		return resp, nil
 	}
 	resp.Body = &channelSSEBody{
-		ctx:        req.Context(),
-		body:       resp.Body,
-		filter:     f,
-		standalone: standalone,
+		ctx:    req.Context(),
+		body:   resp.Body,
+		filter: f,
 	}
 	return resp, nil
 }
@@ -93,10 +90,9 @@ const maxUnboundedBuffer = 1 << 20
 // for the channel notification method; matching events are dispatched to the
 // gate and stripped, everything else passes through unchanged and in order.
 type channelSSEBody struct {
-	ctx        context.Context
-	body       io.ReadCloser
-	filter     *channelSSEFilter
-	standalone bool
+	ctx    context.Context
+	body   io.ReadCloser
+	filter *channelSSEFilter
 
 	out     bytes.Buffer // filtered bytes not yet consumed by the reader
 	buf     []byte       // raw bytes awaiting an event boundary
@@ -139,8 +135,6 @@ func (b *channelSSEBody) pump() error {
 	b.buf = nil
 	b.eof = true
 	b.readErr = err
-	if b.standalone {
-	}
 	return nil
 }
 
@@ -226,7 +220,5 @@ func eventData(event []byte) []byte {
 
 // Close implements io.Closer.
 func (b *channelSSEBody) Close() error {
-	if b.standalone {
-	}
 	return b.body.Close()
 }

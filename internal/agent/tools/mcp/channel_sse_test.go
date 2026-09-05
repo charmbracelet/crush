@@ -209,10 +209,9 @@ func TestEventFilterStripsDoorbellAndKeepsKeepalive(t *testing.T) {
 			": ping\n\n",
 	)))
 	b := &channelSSEBody{
-		ctx:        ctx,
-		body:       body,
-		filter:     &channelSSEFilter{name: "chan-filter", gate: gate},
-		standalone: true,
+		ctx:    ctx,
+		body:   body,
+		filter: &channelSSEFilter{name: "chan-filter", gate: gate},
 	}
 	out, err := io.ReadAll(b)
 	require.NoError(t, err)

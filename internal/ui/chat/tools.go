@@ -98,8 +98,9 @@ type ToolRenderOpts struct {
 	Compact         bool
 	IsSpinning      bool
 	Status          ToolStatus
-	// StartedAt is when the tool call started rendering. Zero for items
-	// restored from history.
+	// StartedAt is when the tool call started rendering live. Zero for
+	// items restored from history, where the real start time is unknown,
+	// so no elapsed time is shown for them.
 	StartedAt time.Time
 }
 
@@ -165,6 +166,16 @@ type baseToolMessageItem struct {
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
+
+// markRestored clears startedAt for items rebuilt from session history:
+// the real start time is unknown there, and a constructor timestamp would
+// restart the timer from zero and misreport the elapsed time.
+func (t *baseToolMessageItem) markRestored() {
+	if !t.startedAt.IsZero() {
+		t.startedAt = time.Time{}
+		t.Bump()
+	}
+}
 
 // newBaseToolMessageItem is the internal constructor for base tool message items.
 func newBaseToolMessageItem(
@@ -547,7 +558,7 @@ func waitingForToolMessage(opts *ToolRenderOpts) string {
 		msg += fmt.Sprintf(" for %s", common.FormatDuration(time.Since(opts.StartedAt)))
 	}
 	if total := common.Elapsed(); total != "" {
-		msg += fmt.Sprintf(" (total %s)", total)
+		msg += fmt.Sprintf(" (%s total)", total)
 	}
 	return msg + "..."
 }

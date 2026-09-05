@@ -167,6 +167,7 @@ type activeCancel struct {
 }
 
 type sessionAgent struct {
+	cfg                *config.ConfigStore
 	largeModel         *csync.Value[Model]
 	smallModel         *csync.Value[Model]
 	systemPromptPrefix *csync.Value[string]
@@ -223,6 +224,7 @@ type sessionAgent struct {
 }
 
 type SessionAgentOptions struct {
+	Config               *config.ConfigStore
 	LargeModel           Model
 	SmallModel           Model
 	SystemPromptPrefix   string
@@ -241,6 +243,7 @@ func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	return &sessionAgent{
+		cfg:                  opts.Config,
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -1796,7 +1799,12 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
-		resp, err = agent.Stream(ctx, streamCall)
+		call := streamCall
+		if a.cfg != nil {
+			providerCfg, _ := a.cfg.Config().Providers.Get(attempt.model.ModelCfg.Provider)
+			call.ProviderOptions = getProviderOptions(attempt.model, providerCfg)
+		}
+		resp, err = agent.Stream(ctx, call)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model
 			slog.Debug("Generated title with " + attempt.name + " model")

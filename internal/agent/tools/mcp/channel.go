@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -158,11 +159,13 @@ func hasChannelCapability(res *mcp.InitializeResult) bool {
 	return ok
 }
 
-// channelEnabled reports whether the given server name was opted in via the
-// --channels flag. A server present in MCP config is not a channel until it is
-// explicitly enabled, matching the "listed is not enabled" model. Entries may
-// be written as "server:<name>" or as a bare "<name>".
-func channelEnabled(enabled []string, name string) bool {
+// ChannelEnabled reports whether the given server name was opted in via the
+// --channels flag. A server present in MCP config is not a channel until it
+// is explicitly enabled, matching the "listed is not enabled" model. Entries
+// may be written as "server:<name>" or as a bare "<name>". Exported for the
+// server backend, which routes channel events per workspace and needs the
+// same opt-in semantics.
+func ChannelEnabled(enabled []string, name string) bool {
 	for _, e := range enabled {
 		e = strings.TrimSpace(e)
 		if e == name {
@@ -173,6 +176,16 @@ func channelEnabled(enabled []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// ChannelOptIn reports whether server `name` should be treated as a channel,
+// considering both enablement sources: persistently via crush.json
+// (m.ChannelEnabled) or per-launch via the --channels overrides list. Every
+// site that gates channel behaviour — session creation, session renewal, and
+// message routing — must use this so the two sources are always ORed together
+// and no site drifts out of sync.
+func ChannelOptIn(m config.MCPConfig, enabled []string, name string) bool {
+	return m.ChannelEnabled || ChannelEnabled(enabled, name)
 }
 
 // publishChannelMessage validates and renders a payload, then publishes it as
@@ -189,6 +202,7 @@ func publishChannelMessage(ctx context.Context, name string, raw json.RawMessage
 	broker.PublishMustDeliver(ctx, pubsub.CreatedEvent, Event{
 		Type:           EventChannelMessage,
 		Name:           name,
+		ChannelMeta:    p.Meta,
 		ChannelMessage: renderChannel(name, p),
 	})
 }

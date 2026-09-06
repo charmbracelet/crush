@@ -61,6 +61,35 @@ func TestProtoToMessageToolResult(t *testing.T) {
 	require.False(t, tr.IsError)
 }
 
+// TestProtoToMessagePrismModel ensures the Prism-routed model fields survive
+// the conversion from proto. Without them the client TUI cannot show which
+// model actually served each turn on Hyper's model router.
+func TestProtoToMessagePrismModel(t *testing.T) {
+	t.Parallel()
+
+	src := proto.Message{
+		ID:             "m1",
+		Role:           proto.Assistant,
+		Model:          "prism-model",
+		Provider:       "hyper",
+		PrismModelID:   "prism-42",
+		PrismModelName: "GLM 5.3",
+
+		PrismHypercreditSavings: protoPtrFloat(1.5),
+		PrismDollarSavings:      protoPtrFloat(0.002),
+	}
+
+	got := protoToMessage(src)
+	require.Equal(t, "prism-42", got.PrismModelID)
+	require.Equal(t, "GLM 5.3", got.PrismModelName)
+	require.NotNil(t, got.PrismHypercreditSavings)
+	require.Equal(t, 1.5, *got.PrismHypercreditSavings)
+	require.NotNil(t, got.PrismDollarSavings)
+	require.Equal(t, 0.002, *got.PrismDollarSavings)
+}
+
+func protoPtrFloat(v float64) *float64 { return &v }
+
 // TestClientWorkspace_PermissionGrantMapping verifies that
 // PermissionGrant on the ClientWorkspace serializes a one-time grant
 // (proto.PermissionAllow) and PermissionGrantPersistent serializes a

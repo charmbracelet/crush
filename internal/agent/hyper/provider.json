@@ -4,7 +4,7 @@
   "api_endpoint": "https://hyper.charm.land/api/v1/fantasy",
   "type": "hyper",
   "default_large_model_id": "qwen3.8-max",
-  "default_small_model_id": "qwen3.8-27b",
+  "default_small_model_id": "deepseek-v4-flash-0731",
   "models": [
     {
       "id": "deepseek-v4-flash",
@@ -30,7 +30,7 @@
       "cost_per_1m_out": 1.32,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.044,
-      "context_window": 1048576,
+      "context_window": 1000000,
       "default_max_tokens": 384000,
       "can_reason": true,
       "reasoning_levels": [
@@ -81,9 +81,9 @@
     {
       "id": "gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B A4B",
-      "cost_per_1m_in": 0.12,
-      "cost_per_1m_out": 0.42,
-      "cost_per_1m_in_cached": 0.06,
+      "cost_per_1m_in": 0.106,
+      "cost_per_1m_out": 0.368,
+      "cost_per_1m_in_cached": 0.053,
       "cost_per_1m_out_cached": 0,
       "context_window": 256000,
       "default_max_tokens": 25600,
@@ -93,9 +93,9 @@
     {
       "id": "glm-5",
       "name": "GLM-5",
-      "cost_per_1m_in": 0.92,
-      "cost_per_1m_out": 2.976,
-      "cost_per_1m_in_cached": 0.46,
+      "cost_per_1m_in": 0.86,
+      "cost_per_1m_out": 2.784,
+      "cost_per_1m_in_cached": 0.43,
       "cost_per_1m_out_cached": 0,
       "context_window": 202752,
       "default_max_tokens": 20275,
@@ -105,9 +105,9 @@
     {
       "id": "glm-5.1",
       "name": "GLM-5.1",
-      "cost_per_1m_in": 1.29,
-      "cost_per_1m_out": 4.22,
-      "cost_per_1m_in_cached": 0.645,
+      "cost_per_1m_in": 1.262,
+      "cost_per_1m_out": 4.132,
+      "cost_per_1m_in_cached": 0.631,
       "cost_per_1m_out_cached": 0,
       "context_window": 202750,
       "default_max_tokens": 3276,
@@ -121,11 +121,46 @@
       "cost_per_1m_out": 4.79072,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.152432,
-      "context_window": 1048576,
+      "context_window": 1000000,
       "default_max_tokens": 32768,
       "can_reason": true,
       "reasoning_levels": [
-        "none",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "high",
+      "supports_attachments": false
+    },
+    {
+      "id": "glm-5.3",
+      "name": "GLM 5.3",
+      "cost_per_1m_in": 1.52432,
+      "cost_per_1m_out": 4.79072,
+      "cost_per_1m_in_cached": 0,
+      "cost_per_1m_out_cached": 0.283088,
+      "context_window": 1048576,
+      "default_max_tokens": 262144,
+      "can_reason": true,
+      "reasoning_levels": [
+        "low",
+        "high",
+        "max"
+      ],
+      "default_reasoning_effort": "high",
+      "supports_attachments": false
+    },
+    {
+      "id": "glm-5.3-flash",
+      "name": "GLM 5.3 Flash",
+      "cost_per_1m_in": 0.16332,
+      "cost_per_1m_out": 0.5444,
+      "cost_per_1m_in_cached": 0,
+      "cost_per_1m_out_cached": 0.031575200000000005,
+      "context_window": 1048576,
+      "default_max_tokens": 131072,
+      "can_reason": true,
+      "reasoning_levels": [
+        "low",
         "high",
         "max"
       ],
@@ -135,9 +170,9 @@
     {
       "id": "gpt-oss-120b",
       "name": "gpt-oss-120b",
-      "cost_per_1m_in": 0.178,
-      "cost_per_1m_out": 0.68,
-      "cost_per_1m_in_cached": 0.089,
+      "cost_per_1m_in": 0.188,
+      "cost_per_1m_out": 0.7,
+      "cost_per_1m_in_cached": 0.094,
       "cost_per_1m_out_cached": 0,
       "context_window": 128072,
       "default_max_tokens": 13107,
@@ -157,9 +192,9 @@
     {
       "id": "kimi-k2.5",
       "name": "Kimi K2.5",
-      "cost_per_1m_in": 0.544,
-      "cost_per_1m_out": 2.76,
-      "cost_per_1m_in_cached": 0.272,
+      "cost_per_1m_in": 0.5144,
+      "cost_per_1m_out": 2.755,
+      "cost_per_1m_in_cached": 0.2572,
       "cost_per_1m_out_cached": 0,
       "context_window": 262144,
       "default_max_tokens": 26214,
@@ -197,6 +232,18 @@
       "supports_attachments": true
     },
     {
+      "id": "kimi-k2-thinking",
+      "name": "Kimi K2 Thinking",
+      "cost_per_1m_in": 0.6,
+      "cost_per_1m_out": 2.5,
+      "cost_per_1m_in_cached": 0.3,
+      "cost_per_1m_out_cached": 0,
+      "context_window": 262144,
+      "default_max_tokens": 26214,
+      "can_reason": true,
+      "supports_attachments": false
+    },
+    {
       "id": "kimi-k3",
       "name": "Kimi K3",
       "cost_per_1m_in": 3.2664,
@@ -217,9 +264,9 @@
     {
       "id": "llama-3.3-70b-instruct",
       "name": "Llama 3.3 70B Instruct",
-      "cost_per_1m_in": 0.638,
-      "cost_per_1m_out": 0.768,
-      "cost_per_1m_in_cached": 0.319,
+      "cost_per_1m_in": 0.6066,
+      "cost_per_1m_out": 1.0386,
+      "cost_per_1m_in_cached": 0.3033,
       "cost_per_1m_out_cached": 0,
       "context_window": 128000,
       "default_max_tokens": 12800,
@@ -241,9 +288,9 @@
     {
       "id": "minimax-m2.7",
       "name": "MiniMax M2.7",
-      "cost_per_1m_in": 0.424,
-      "cost_per_1m_out": 1.612,
-      "cost_per_1m_in_cached": 0.212,
+      "cost_per_1m_in": 0.484,
+      "cost_per_1m_out": 1.852,
+      "cost_per_1m_in_cached": 0.242,
       "cost_per_1m_out_cached": 0,
       "context_window": 262100,
       "default_max_tokens": 6553,
@@ -367,7 +414,7 @@
     {
       "id": "qwen3.8-flash",
       "name": "Qwen3.8-Flash",
-      "cost_per_1m_in": 0.16,
+      "cost_per_1m_in": 0.15,
       "cost_per_1m_out": 0.47,
       "cost_per_1m_in_cached": 0,
       "cost_per_1m_out_cached": 0.016,

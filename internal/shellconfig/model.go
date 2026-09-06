@@ -68,8 +68,8 @@ var modelAddFlags = []flagSpec{
 	{name: "--supports-images", jsonKey: "supports_attachments", kind: flagBool, op: opSet},
 	{name: "--price-input", jsonKey: "cost_per_1m_in", kind: flagFloat, op: opSet},
 	{name: "--price-output", jsonKey: "cost_per_1m_out", kind: flagFloat, op: opSet},
-	{name: "--price-cache-create", jsonKey: "cost_per_1m_out_cached", kind: flagFloat, op: opSet},
-	{name: "--price-cache-hit", jsonKey: "cost_per_1m_in_cached", kind: flagFloat, op: opSet},
+	{name: "--price-cache-create", jsonKey: "cost_per_1m_in_cached", kind: flagFloat, op: opSet},
+	{name: "--price-cache-hit", jsonKey: "cost_per_1m_out_cached", kind: flagFloat, op: opSet},
 	{name: "--reasoning-effort", jsonKey: "default_reasoning_effort", kind: flagString, op: opSet},
 }
 

@@ -22,6 +22,9 @@ var (
 	// ErrEmpty is returned when the clipboard holds no data for the
 	// requested format.
 	ErrEmpty = errors.New("clipboard is empty or holds an unsupported format")
+	// ErrWriteFailed is returned when the platform has a clipboard but the
+	// written text is not there afterwards.
+	ErrWriteFailed = errors.New("clipboard write did not land")
 )
 
 // Init initializes the clipboard subsystem. On unsupported platforms it
@@ -30,10 +33,12 @@ func Init() error {
 	return initClipboard()
 }
 
-// WriteText writes plain text to the system clipboard. On unsupported
-// platforms it is a no-op.
-func WriteText(text string) {
-	writeText(text)
+// WriteText writes plain text to the system clipboard and reads it back to
+// confirm the write landed. It returns ErrUnsupported on platforms without a
+// clipboard or when Init did not succeed, and ErrWriteFailed when the
+// clipboard does not hold the text afterwards.
+func WriteText(text string) error {
+	return writeText(text)
 }
 
 // Read returns the clipboard contents for the given format. It returns

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"os"
@@ -100,7 +101,8 @@ func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
 
 // CopyToClipboard copies the given text to the clipboard using both OSC 52
 // (terminal escape sequence) and native clipboard for maximum compatibility.
-// Returns a command that reports success to the user with the given message.
+// Returns a command that reports the outcome to the user, using the given
+// message on success.
 func CopyToClipboard(text, successMessage string) tea.Cmd {
 	return CopyToClipboardWithCallback(text, successMessage, nil)
 }
@@ -108,14 +110,22 @@ func CopyToClipboard(text, successMessage string) tea.Cmd {
 // CopyToClipboardWithCallback copies text to clipboard and executes a callback
 // before showing the success message.
 // This is useful when you need to perform additional actions like clearing UI state.
+//
+// The callback and the success message only run when the copy is believed to
+// have worked, so callers can safely use the callback to discard the copied
+// state (a selection, say) without losing it on a failed copy.
 func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) tea.Cmd {
 	return tea.Sequence(
 		tea.SetClipboard(text),
 		func() tea.Msg {
-			clipboard.WriteText(text)
-			return nil
+			// OSC 52 above is fire and forget: the terminal never answers, so a
+			// platform without a native clipboard (an SSH session, say) gets the
+			// benefit of the doubt. Only a native clipboard that accepted the
+			// write and then does not hold the text is a real failure.
+			if err := clipboard.WriteText(text); errors.Is(err, clipboard.ErrWriteFailed) {
+				return util.NewWarnMsg("Failed to copy to clipboard")
+			}
+			return tea.Sequence(callback, util.ReportInfo(successMessage))()
 		},
-		callback,
-		util.ReportInfo(successMessage),
 	)
 }

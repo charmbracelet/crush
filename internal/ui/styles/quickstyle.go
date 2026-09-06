@@ -251,8 +251,18 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
+				// Pad inline code with a no-break-space sentinel instead of
+				// a plain space. It displays identically, but selection
+				// copies turn it back into the original backticks (see
+				// [CodespanPadding] and list.HighlightContent); a plain
+				// space is indistinguishable from real text, so copies lost
+				// the backticks ("this is  code "). The sentinel carries a
+				// variation selector so copies can tell it apart from a
+				// real no-break space in the message text, and being
+				// non-breaking it keeps word wrap from tearing a codespan
+				// between its padding and its text.
+				Prefix:          CodespanPadding,
+				Suffix:          CodespanPadding,
 				Color:           hex(o.destructive),
 				BackgroundColor: hex(o.bgLessVisible),
 			},
@@ -491,8 +501,8 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
+				Prefix:          CodespanPadding,
+				Suffix:          CodespanPadding,
 				Color:           plainFg,
 				BackgroundColor: plainBg,
 			},
@@ -907,6 +917,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
+	s.Messages.SubduedHypercreditIcon = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
 
 	// Thinking section styles

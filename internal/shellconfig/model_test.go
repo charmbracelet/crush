@@ -59,8 +59,8 @@ model add anthropic/claude-x --price-input 3 --price-output 15 --price-cache-cre
 	model := result["providers"].(map[string]any)["anthropic"].(map[string]any)["models"].([]any)[0].(map[string]any)
 	require.Equal(t, 3.0, model["cost_per_1m_in"])
 	require.Equal(t, 15.0, model["cost_per_1m_out"])
-	require.Equal(t, 3.75, model["cost_per_1m_out_cached"])
-	require.Equal(t, 0.3, model["cost_per_1m_in_cached"])
+	require.Equal(t, 3.75, model["cost_per_1m_in_cached"])
+	require.Equal(t, 0.3, model["cost_per_1m_out_cached"])
 }
 
 func TestModelAddRejectsLegacyPricingFlags(t *testing.T) {

@@ -49,8 +49,8 @@ model large myllm/foo-1 --provider-options '{"timeout":30}'`)
 	model := p.Models[0]
 	require.Equal(t, 1.25, model.CostPer1MIn)
 	require.Equal(t, 5.0, model.CostPer1MOut)
-	require.Equal(t, 2.0, model.CostPer1MOutCached)
-	require.Equal(t, 0.25, model.CostPer1MInCached)
+	require.Equal(t, 2.0, model.CostPer1MInCached)
+	require.Equal(t, 0.25, model.CostPer1MOutCached)
 
 	large := cfg.Models[config.SelectedModelTypeLarge]
 	require.Equal(t, "myllm", large.Provider)

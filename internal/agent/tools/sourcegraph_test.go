@@ -81,6 +81,44 @@ func TestFormatSourcegraphResultsRespectsCount(t *testing.T) {
 	require.NotContains(t, got, "owner/repo/second.go")
 }
 
+func TestFormatSourcegraphResultsTruncatesHugeFileContent(t *testing.T) {
+	t.Parallel()
+
+	huge := strings.Repeat("x", MaxOutputLength+1)
+	result := map[string]any{
+		"data": map[string]any{
+			"search": map[string]any{
+				"results": map[string]any{
+					"matchCount":  float64(1),
+					"resultCount": float64(1),
+					"results": []any{
+						map[string]any{
+							"__typename": "FileMatch",
+							"repository": map[string]any{"name": "owner/repo"},
+							"file": map[string]any{
+								"path":    "huge.go",
+								"content": "match\n" + huge,
+							},
+							"lineMatches": []any{
+								map[string]any{
+									"lineNumber": float64(1),
+									"preview":    "match",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := formatSourcegraphResults(result, 1, 10)
+	require.NoError(t, err)
+	require.Contains(t, got, "lines truncated]")
+	require.LessOrEqual(t, len(got), MaxOutputLength+128)
+	require.NotContains(t, got, huge)
+}
+
 func TestFormatSourcegraphResultsErrorsAndNoResults(t *testing.T) {
 	t.Parallel()
 

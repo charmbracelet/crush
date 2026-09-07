@@ -73,6 +73,8 @@ var (
 	orphanThinkTagRegex = regexp.MustCompile(`</?think>`)
 )
 
+const maxModelRetries = 10
+
 type SessionAgentCall struct {
 	SessionID string
 	// RunID, when non-empty, is the caller-supplied correlator that
@@ -686,6 +688,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		largeModel.Model,
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
+		fantasy.WithMaxRetries(maxModelRetries),
 		fantasy.WithUserAgent(userAgent),
 	)
 
@@ -1371,6 +1374,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	agent := fantasy.NewAgent(
 		largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		fantasy.WithMaxRetries(maxModelRetries),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1759,6 +1763,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			m,
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
+			fantasy.WithMaxRetries(maxModelRetries),
 			fantasy.WithUserAgent(userAgent),
 		)
 	}

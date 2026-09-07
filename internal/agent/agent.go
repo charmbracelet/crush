@@ -1567,7 +1567,8 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			continue
 		}
 		// Assistant message without content or tool calls (cancelled before it returned anything).
-		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
+		// TrimSpace: whitespace-only Text is later stripped by ToAIMessage and llama.cpp 400s the session.
+		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && strings.TrimSpace(m.Content().Text) == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
 		if m.Role == message.Tool {

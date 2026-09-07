@@ -198,6 +198,10 @@ func newBaseToolMessageItem(
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
+		Suffix: func() string {
+			return common.Elapsed()
+		},
+		SuffixColor: sty.WorkingTimerColor,
 	})
 
 	return t
@@ -459,7 +463,12 @@ func (t *baseToolMessageItem) computeStatus() ToolStatus {
 	return t.status
 }
 
-// isSpinning returns true if the tool should show animation.
+// isSpinning returns true if the tool should show animation. A tool
+// spins from the moment its call starts streaming in until a result
+// (or cancellation) lands, so the whole in-flight window, including
+// the execution phase after the input finished streaming but before
+// the tool returned, gets live animated updates such as the turn
+// timer.
 func (t *baseToolMessageItem) isSpinning() bool {
 	if t.spinningFunc != nil {
 		return t.spinningFunc(SpinningState{
@@ -468,7 +477,7 @@ func (t *baseToolMessageItem) isSpinning() bool {
 			Status:   t.status,
 		})
 	}
-	return !t.toolCall.Finished && t.status != ToolStatusCanceled
+	return t.result == nil && t.status != ToolStatusCanceled
 }
 
 // SetSpinningFunc sets a custom function to determine if the tool should spin.
@@ -540,13 +549,24 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	case ToolStatusCanceled:
 		msg = sty.Tool.StateCancelled.Render("Canceled.")
 	case ToolStatusAwaitingPermission:
-		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
+		msg = sty.Tool.StateWaiting.Render("Requesting permission...") + toolTimerSuffix(sty)
 	case ToolStatusRunning:
-		msg = sty.Tool.StateWaiting.Render("Waiting for tool response...")
+		msg = sty.Tool.StateWaiting.Render("Waiting for tool response...") + toolTimerSuffix(sty)
 	default:
 		return "", false
 	}
 	return msg, true
+}
+
+// toolTimerSuffix renders the live turn timer shown next to tool calls
+// that are still in flight. Returns an empty string when no turn is
+// active, so renders of persisted sessions are unaffected.
+func toolTimerSuffix(sty *styles.Styles) string {
+	elapsed := common.Elapsed()
+	if elapsed == "" {
+		return ""
+	}
+	return " " + lipgloss.NewStyle().Foreground(sty.WorkingTimerColor).Render(elapsed)
 }
 
 // toolErrorContent formats an error message with an ERROR or WARN tag.

@@ -534,6 +534,68 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestSetOpenAiEffortIfNecessary(t *testing.T) {
+	t.Run("sets reasoning_effort when should set and not already present", func(t *testing.T) {
+		opts := map[string]any{}
+		setOpenAiEffortIfNecessary(opts, true, "high")
+		assert.Equal(t, "high", opts["reasoning_effort"])
+	})
+
+	t.Run("does not set reasoning_effort when shouldSetEffort is false", func(t *testing.T) {
+		opts := map[string]any{}
+		setOpenAiEffortIfNecessary(opts, false, "high")
+		_, ok := opts["reasoning_effort"]
+		assert.False(t, ok)
+	})
+
+	t.Run("does not overwrite an existing reasoning_effort", func(t *testing.T) {
+		opts := map[string]any{"reasoning_effort": "low"}
+		setOpenAiEffortIfNecessary(opts, true, "high")
+		assert.Equal(t, "low", opts["reasoning_effort"])
+	})
+}
+
+func TestGetProviderOptionsReasoningEffortKnownCustomProvider(t *testing.T) {
+	// litellm, ollama, and omlx are known custom providers that are
+	// openai-compat under the hood; they should get reasoning_effort
+	// injected the same way openai-compat providers do.
+	tests := []struct {
+		name         string
+		providerType catwalk.Type
+	}{
+		{"litellm honors reasoning_effort", catwalk.Type("litellm")},
+		{"llamacpp honors reasoning_effort", catwalk.Type("llamacpp")},
+		{"lmstudio honors reasoning_effort", catwalk.Type("lmstudio")},
+		{"ollama honors reasoning_effort", catwalk.Type("ollama")},
+		{"omlx honors reasoning_effort", catwalk.Type("omlx")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model := Model{
+				CatwalkCfg: catwalk.Model{
+					ID:              "some-model",
+					CanReason:       true,
+					ReasoningLevels: []string{"high"},
+				},
+				ModelCfg: config.SelectedModel{
+					Provider:        "test",
+					ReasoningEffort: "high",
+				},
+			}
+			providerCfg := config.ProviderConfig{ID: "test", Type: tc.providerType}
+
+			opts := getProviderOptions(model, providerCfg)
+
+			raw, ok := opts[openaicompat.Name]
+			require.True(t, ok, "options should be keyed under openaicompat.Name for type %q", tc.providerType)
+			parsed, ok := raw.(*openaicompat.ProviderOptions)
+			require.True(t, ok)
+			require.NotNil(t, parsed.ReasoningEffort)
+			assert.Equal(t, "high", string(*parsed.ReasoningEffort))
+		})
+	}
+}
+
 func TestIsUnauthorized(t *testing.T) {
 	t.Run("nil error", func(t *testing.T) {
 		assert.False(t, isUnauthorized(nil))

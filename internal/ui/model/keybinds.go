@@ -2,10 +2,16 @@ package model
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
 	"github.com/charmbracelet/crush/internal/keybinds"
+	"github.com/charmbracelet/crush/internal/ui/chat"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/completions"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 )
 
 // ApplyKeybinds overlays user overrides onto km, which must already hold
@@ -143,4 +149,31 @@ func bindingFor(km *KeyMap, action string) *key.Binding {
 	default:
 		return nil
 	}
+}
+
+// applyUserKeybinds overlays cfg keybinds onto the default keymap and
+// fans the result out to every consumer that reads bindings by value:
+// the completions popup, the dialog close key, the chat item copy and
+// scroll keys, and the textarea select-all binding. Call once, before
+// sub-components are constructed.
+func applyUserKeybinds(com *common.Common, km *KeyMap, ta *textarea.Model, comp *completions.Completions) {
+	overrides := com.Config().Keybinds
+	if len(overrides) == 0 {
+		return
+	}
+	for _, w := range ApplyKeybinds(km, overrides) {
+		slog.Warn(w)
+	}
+	if keys, ok := overrides["dialog.close"]; ok && len(keys) > 0 {
+		dialog.CloseKey.SetKeys(keys...)
+		dialog.CloseKey.SetHelp(keys[0], dialog.CloseKey.Help().Desc)
+	}
+	chat.ItemCopy.SetKeys(km.Chat.Copy.Keys()...)
+	chat.ItemScrollLeft.SetKeys(km.Chat.ScrollLeft.Keys()...)
+	chat.ItemScrollRight.SetKeys(km.Chat.ScrollRight.Keys()...)
+	ta.KeyMap.SelectAll.SetKeys(km.Editor.SelectAll.Keys()...)
+	ta.KeyMap.SelectAll.SetHelp(km.Editor.SelectAll.Help().Key, km.Editor.SelectAll.Help().Desc)
+	ckm := comp.KeyMap()
+	ckm.Apply(overrides)
+	comp.SetKeyMap(ckm)
 }

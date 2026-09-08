@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -240,6 +241,15 @@ type focusableMessageItem struct {
 	version *list.Versioned
 	focused bool
 }
+
+// Item copy/scroll bindings. Model sets them once from the applied
+// keymap at startup, like dialog.CloseKey; handlers match with
+// key.Matches like the rest of dispatch.
+var (
+	ItemCopy        = key.NewBinding(key.WithKeys("c", "y", "C", "Y"))
+	ItemScrollLeft  = key.NewBinding(key.WithKeys("shift+left", "H"))
+	ItemScrollRight = key.NewBinding(key.WithKeys("shift+right", "L"))
+)
 
 // newFocusableMessageItem returns a focusableMessageItem wired to the
 // shared version counter.

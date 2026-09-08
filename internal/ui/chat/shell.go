@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -163,18 +164,18 @@ func (s *ShellItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 }
 
 // HandleKeyEvent implements KeyEventHandler for copy and horizontal scrolling.
-func (s *ShellItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	switch k := key.String(); k {
-	case "c", "y":
+func (s *ShellItem) HandleKeyEvent(msg tea.KeyMsg) (bool, tea.Cmd) {
+	switch {
+	case key.Matches(msg, ItemCopy):
 		text := "$ " + s.command + "\n" + ansi.Strip(s.output.String())
 		return true, common.CopyToClipboard(text, "Shell output copied to clipboard")
-	case "shift+left", "H":
+	case key.Matches(msg, ItemScrollLeft):
 		if s.xOffset > 0 {
 			s.xOffset = max(0, s.xOffset-shellHScrollStep)
 			s.Bump()
 			return true, nil
 		}
-	case "shift+right", "L":
+	case key.Matches(msg, ItemScrollRight):
 		s.xOffset = min(s.xOffset+shellHScrollStep, max(s.maxLineWidth, s.xOffset))
 		s.Bump()
 		return true, nil

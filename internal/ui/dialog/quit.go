@@ -39,7 +39,7 @@ func NewQuit(com *common.Common) *Quit {
 		key.WithHelp("←/→", "switch options"),
 	)
 	q.keyMap.EnterSpace = key.NewBinding(
-		key.WithKeys("enter", " "),
+		key.WithKeys("enter", "space"),
 		key.WithHelp("enter/space", "confirm"),
 	)
 	q.keyMap.Yes = key.NewBinding(

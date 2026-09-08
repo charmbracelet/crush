@@ -32,7 +32,7 @@ func NewMultiChoice(sty *styles.Styles, req question.Question) *MultiChoice {
 	return &MultiChoice{
 		choiceList: cl,
 		selected:   make(map[int]bool),
-		keyToggle:  key.NewBinding(key.WithKeys(" ", "space"), key.WithHelp("space", "toggle")),
+		keyToggle:  key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
 		keyDone:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "done")),
 	}
 }

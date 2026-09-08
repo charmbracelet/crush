@@ -258,6 +258,11 @@ type UI struct {
 	// Draw call, used by the cursor positioning logic below.
 	inlineCursor *tea.Cursor
 
+	// readClipboardText reads text from the system clipboard. It is a
+	// field so tests can substitute a fake instead of touching the real
+	// clipboard.
+	readClipboardText func() ([]byte, error)
+
 	// Attachment list
 	attachments *attachments.Attachments
 
@@ -1030,6 +1035,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 			return m, tea.Batch(cmds...)
+		}
+
+		// An unmodified right-click is a paste request for the active
+		// editor, handled before the generic click routing below so it
+		// cannot activate buttons, remove attachments, change focus, or
+		// start a selection gesture. Right-clicks elsewhere fall through
+		// to the ordinary routing, which ignores non-left buttons.
+		if msg.Button == uv.MouseRight && msg.Mod == 0 {
+			if cmd := m.handleRightClickPaste(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
+			}
 		}
 
 		// Route clicks to inline editors that support mouse interaction.
@@ -4831,6 +4848,50 @@ func (m *UI) checkBangModeAfterPaste() {
 	m.setEditorPrompt(m.yoloModeCached())
 }
 
+// handleRightClickPaste treats an unmodified right mouse click as a
+// paste request when it lands on the text-editing surface: it focuses
+// the appropriate editor (the textarea, or the active inline editor if
+// it accepts paste events) and schedules the same clipboard-read command
+// used by the PasteText keybinding, so the resulting tea.PasteMsg flows
+// through the ordinary paste path.
+//
+// It returns nil for right-clicks anywhere else (chat, sidebar, the
+// attachment row, non-pasteable editors), leaving them to the ordinary
+// mouse routing, which ignores non-left buttons.
+func (m *UI) handleRightClickPaste(msg tea.MouseClickMsg) tea.Cmd {
+	if m.state != uiChat && m.state != uiLanding {
+		return nil
+	}
+
+	if m.activeInline != nil {
+		if _, ok := m.activeInline.(dialog.PasteableEditor); !ok || !image.Pt(msg.X, msg.Y).In(m.layout.editor) {
+			// No pasteable editor, or the click is outside the
+			// inline editor's rendered area.
+			return nil
+		}
+		m.focus = uiFocusEditor
+		m.activeInline.SetFocused(true)
+		m.sidebarScrollbarVisible = false
+		m.chat.Blur()
+		return m.pasteTextFromClipboard
+	}
+
+	// The textarea is rendered one row below the editor area's top;
+	// the first row holds the attachment chips (see forwardMouseToTextarea).
+	const attachmentsRow = 1
+	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+attachmentsRow)
+	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
+	if !image.Pt(msg.X, msg.Y).In(area) {
+		return nil
+	}
+
+	m.focus = uiFocusEditor
+	m.textarea.Focus()
+	m.sidebarScrollbarVisible = false
+	m.chat.Blur()
+	return m.pasteTextFromClipboard
+}
+
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Normalize \r\n before the textarea sanitizer sees it.
@@ -4953,7 +5014,11 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 // pasteTextFromClipboard reads text from the system clipboard and returns a
 // tea.PasteMsg so it flows through the same paste logic as bracketed paste.
 func (m *UI) pasteTextFromClipboard() tea.Msg {
-	textData, err := clipboard.Read(clipboard.FormatText)
+	read := m.readClipboardText
+	if read == nil {
+		read = func() ([]byte, error) { return clipboard.Read(clipboard.FormatText) }
+	}
+	textData, err := read()
 	if err != nil || len(textData) == 0 {
 		return util.InfoMsg{
 			Type: util.InfoTypeError,

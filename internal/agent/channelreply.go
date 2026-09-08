@@ -242,11 +242,13 @@ func (a *sessionAgent) sendChannelReply(ctx context.Context, call SessionAgentCa
 
 	// Use the explicit config when available, otherwise auto-discover.
 	reply := mcpCfg.ChannelReply
+	autoDiscovered := false
 	if reply == nil {
 		reply = discoverChannelReply(call.Channel)
 		if reply == nil {
 			return
 		}
+		autoDiscovered = true
 	}
 
 	if autoReplyDelivered(reply, call.Channel, completedTools) {
@@ -264,6 +266,17 @@ func (a *sessionAgent) sendChannelReply(ctx context.Context, call SessionAgentCa
 	tool, args, ok := resolveChannelReply(reply, call.channelMeta, text)
 	if !ok {
 		slog.Warn("Channel reply skipped: no reply route matches the push metadata", "channel", call.Channel)
+		return
+	}
+	// An explicit channel_reply config is itself the consent to use the
+	// tool for replies. An auto-discovered route, however, was not
+	// explicitly opted into — only proceed when permissions are globally
+	// skipped (--dangerously-skip-permissions), so a user who has
+	// declined the tool in a normal turn does not get a message sent on
+	// their behalf without consent.
+	if autoDiscovered && !a.isYolo {
+		slog.Info("Channel reply skipped: auto-discovered route requires --dangerously-skip-permissions or explicit channel_reply config",
+			"channel", call.Channel, "tool", tool)
 		return
 	}
 	input, err := json.Marshal(args)

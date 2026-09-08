@@ -102,8 +102,11 @@ func TestHandleChannelMessageExistingSession(t *testing.T) {
 	if ws.runCalls[0].channel != "s" {
 		t.Errorf("AgentRun channel = %q, want s", ws.runCalls[0].channel)
 	}
-	if len(ws.channels) != 1 || ws.channels[0] != "s" {
-		t.Errorf("session channels = %v, want [s]", ws.channels)
+	// The coordinator sets the channel binding during the turn
+	// (syncSessionChannel), so the TUI no longer calls
+	// SetSessionChannel itself.
+	if len(ws.channels) != 0 {
+		t.Errorf("TUI should not set session channel; got %v", ws.channels)
 	}
 	if ws.runCalls[0].sessionID != "sess-1" {
 		t.Errorf("AgentRun sessionID = %q, want sess-1", ws.runCalls[0].sessionID)

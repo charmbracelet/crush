@@ -4308,12 +4308,10 @@ func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
 		slog.Debug("Channel message dropped: no active session after ensureSession", "channel", ev.Name)
 		return loadCmd
 	}
-	updatedSession, err := m.com.Workspace.SetSessionChannel(context.Background(), m.session.ID, ev.Name)
-	if err != nil {
-		slog.Debug("Failed to set session channel", "error", err, "session", m.session.ID, "channel", ev.Name)
-		return loadCmd
-	}
-	m.session = &updatedSession
+	// The coordinator sets the channel binding during the turn
+	// (syncSessionChannel), so there is no need to write it here —
+	// doing so would race with the coordinator's own write and
+	// publish a duplicate session update.
 	sessionID := m.session.ID
 	channel := ev.Name
 	content := ev.ChannelMessage

@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/keybinds"
 	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
@@ -84,6 +85,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	if err := cfg.ValidateHooks(); err != nil {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
+
+	// Normalize keybinds after merge so typos warn once here instead
+	// of silently doing nothing in the UI.
+	cfg.ValidateKeybinds()
 
 	if !isInsideWorktree() {
 		const depth = 2
@@ -1413,6 +1418,33 @@ func normalizeHookEvent(name string) string {
 		return "PreToolUse"
 	default:
 		return name
+	}
+}
+
+// ValidateKeybinds normalizes key tokens and drops overrides for
+// unknown actions. Key matching itself is owned by the UI apply step;
+// this only warns up front so typos surface at load time rather than
+// as silent no-ops.
+func (c *Config) ValidateKeybinds() {
+	for action, keys := range c.Keybinds {
+		if !keybinds.Valid(action) {
+			slog.Warn("Unknown keybind action; skipping", "action", action)
+			delete(c.Keybinds, action)
+			continue
+		}
+		// Rebuild only when a token actually changes so clean configs
+		// keep their slices untouched.
+		changed := false
+		normalized := make([]string, len(keys))
+		for i, k := range keys {
+			normalized[i] = keybinds.NormalizeToken(k)
+			if normalized[i] != k {
+				changed = true
+			}
+		}
+		if changed {
+			c.Keybinds[action] = normalized
+		}
 	}
 }
 

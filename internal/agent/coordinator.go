@@ -1462,9 +1462,9 @@ type subAgentParams struct {
 }
 
 // callTopK returns topK for use on fantasy.Call.TopK, suppressing it for
-// known custom providers (litellm, ollama, omlx): getProviderOptions already
-// carries top_k for them via extra_body, and passing it here too makes
-// Fantasy emit a spurious "top_k unsupported" warning for every turn.
+// known custom providers: getProviderOptions already carries top_k for
+// them via extra_body, and passing it here too makes Fantasy emit a
+// spurious "top_k unsupported" warning for every turn.
 func callTopK(providerCfg config.ProviderConfig, topK *int64) *int64 {
 	if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
 		return nil

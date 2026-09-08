@@ -57,6 +57,30 @@ func TestModelRetryPolicyRetriesNetworkErrorsAndHonorsCancellation(t *testing.T)
 	require.Equal(t, 1, model.calls)
 }
 
+func TestModelRetryPolicyStreamUsesRetryPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		err      error
+		attempts int
+	}{
+		{name: "rate limit", err: providerRetryError(429), attempts: maxModelRetries + 1},
+		{name: "server error", err: providerRetryError(503), attempts: maxModelRetries + 1},
+		{name: "client error", err: providerRetryError(400), attempts: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			model := &retryPolicyModel{err: test.err}
+			agent := fantasy.NewAgent(model, fantasy.WithMaxRetries(maxModelRetries))
+
+			result, err := agent.Stream(t.Context(), fantasy.AgentStreamCall{Prompt: "test"})
+
+			require.Error(t, err)
+			require.Nil(t, result)
+			require.Equal(t, test.attempts, model.calls)
+		})
+	}
+}
+
 type retryPolicyModel struct {
 	calls int
 	err   error
@@ -75,8 +99,9 @@ func providerRetryError(status int) error {
 	}
 }
 
-func (*retryPolicyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
-	return nil, errors.New("not implemented")
+func (m *retryPolicyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+	m.calls++
+	return nil, m.err
 }
 
 func (*retryPolicyModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {

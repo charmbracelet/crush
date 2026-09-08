@@ -152,6 +152,27 @@ func TestLmstudioEnricher(t *testing.T) {
 		require.Equal(t, "User Name", result[0].Name)
 	})
 
+	t.Run("does not override user-set SupportsImages", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+				Models: []lmstudioModelEntry{
+					{Key: "m1", DisplayName: "API Name"},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		cfg := Config{ID: "test-lmstudio", BaseURL: srv.URL}
+		models := []catwalk.Model{{ID: "m1", Name: "m1", SupportsImages: true}}
+
+		e := &lmstudioEnricher{}
+		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.True(t, result[0].SupportsImages)
+	})
+
 	t.Run("populates SupportsImages from capabilities.vision", func(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

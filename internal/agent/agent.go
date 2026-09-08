@@ -1017,6 +1017,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
+			currentAssistant.PrismModelID, currentAssistant.PrismModelName = extractPrismModel(stepResult.ProviderMetadata)
+			currentAssistant.PrismHypercreditSavings, currentAssistant.PrismDollarSavings = extractPrismSavings(stepResult.ProviderMetadata)
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
 
@@ -1154,10 +1156,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
+		var requestTimedOutErr *requestTimeoutError
 		const defaultTitle = "Provider Error"
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+		} else if errors.As(err, &requestTimedOutErr) {
+			// Checked before the provider branches so a deadline our own
+			// request timeout imposed is never reported as a provider error.
+			currentAssistant.AddFinish(message.FinishReasonError, "Request timed out", requestTimedOutErr.userMessage())
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
 		} else if errors.As(err, &providerErr) {
@@ -1901,6 +1908,51 @@ func extractHyperCredits(metadata fantasy.ProviderMetadata) {
 	if pm.ExtraField("remaining", &remaining) && remaining.Hypercredits > 0 {
 		hyper.SetBalance(int(math.Round(remaining.Hypercredits)))
 	}
+}
+
+// extractPrismModel returns the ID and name of the model that actually
+// served the turn, as reported by the Hyper Prism model router headers,
+// or empty strings when the turn was not routed through a Prism model.
+func extractPrismModel(metadata fantasy.ProviderMetadata) (modelID, modelName string) {
+	openaiMeta, ok := metadata[openai.Name]
+	if !ok {
+		return "", ""
+	}
+	pm, ok := openaiMeta.(*openai.ProviderMetadata)
+	if !ok {
+		return "", ""
+	}
+	_ = pm.ExtraField(hyper.PrismModelIDField, &modelID)
+	_ = pm.ExtraField(hyper.PrismModelNameField, &modelName)
+	return modelID, modelName
+}
+
+// extractPrismSavings returns the hypercredit and dollar savings from
+// routing the turn through the Hyper Prism model router, as reported by
+// its savings trailers, or nil when not reported or malformed.
+func extractPrismSavings(metadata fantasy.ProviderMetadata) (hypercredits, dollars *float64) {
+	openaiMeta, ok := metadata[openai.Name]
+	if !ok {
+		return nil, nil
+	}
+	pm, ok := openaiMeta.(*openai.ProviderMetadata)
+	if !ok {
+		return nil, nil
+	}
+	return extraFieldFloat(pm, hyper.PrismHypercreditSavingsField), extraFieldFloat(pm, hyper.PrismDollarSavingsField)
+}
+
+func extraFieldFloat(pm *openai.ProviderMetadata, key string) *float64 {
+	var value string
+	if !pm.ExtraField(key, &value) {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		slog.Warn("Could not parse Prism savings", "key", key, "value", value, "error", err)
+		return nil
+	}
+	return &parsed
 }
 
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {

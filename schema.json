@@ -576,6 +576,16 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "request_timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity, so slow but active streams are never killed. 0 disables it, negative values are invalid.",
+          "default": 60,
+          "examples": [
+            120,
+            300,
+            0
+          ]
         }
       },
       "additionalProperties": false,

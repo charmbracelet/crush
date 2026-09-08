@@ -19,16 +19,20 @@ type File struct {
 }
 
 type Message struct {
-	ID               string         `json:"id"`
-	SessionID        string         `json:"session_id"`
-	Role             string         `json:"role"`
-	Parts            string         `json:"parts"`
-	Model            sql.NullString `json:"model"`
-	CreatedAt        int64          `json:"created_at"`
-	UpdatedAt        int64          `json:"updated_at"`
-	FinishedAt       sql.NullInt64  `json:"finished_at"`
-	Provider         sql.NullString `json:"provider"`
-	IsSummaryMessage int64          `json:"is_summary_message"`
+	ID                      string          `json:"id"`
+	SessionID               string          `json:"session_id"`
+	Role                    string          `json:"role"`
+	Parts                   string          `json:"parts"`
+	Model                   sql.NullString  `json:"model"`
+	CreatedAt               int64           `json:"created_at"`
+	UpdatedAt               int64           `json:"updated_at"`
+	FinishedAt              sql.NullInt64   `json:"finished_at"`
+	Provider                sql.NullString  `json:"provider"`
+	IsSummaryMessage        int64           `json:"is_summary_message"`
+	PrismModelID            sql.NullString  `json:"prism_model_id"`
+	PrismModelName          sql.NullString  `json:"prism_model_name"`
+	PrismHypercreditSavings sql.NullFloat64 `json:"prism_hypercredit_savings"`
+	PrismDollarSavings      sql.NullFloat64 `json:"prism_dollar_savings"`
 }
 
 type ReadFile struct {

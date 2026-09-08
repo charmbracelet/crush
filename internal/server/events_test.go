@@ -245,3 +245,32 @@ func TestMCPUnknownEventTypeNotMappedToStateChange(t *testing.T) {
 	require.Equal(t, proto.MCPEventType(""), pt,
 		"unknown MCP event types must map to empty proto type, not state_changed")
 }
+
+// TestMessageToProtoPrismModel ensures the Prism-routed model fields survive
+// the conversion to proto. Without them the client TUI cannot show which
+// model actually served each turn on Hyper's model router.
+func TestMessageToProtoPrismModel(t *testing.T) {
+	t.Parallel()
+
+	src := message.Message{
+		ID:             "m1",
+		Role:           message.Assistant,
+		Model:          "prism-model",
+		Provider:       "hyper",
+		PrismModelID:   "prism-42",
+		PrismModelName: "GLM 5.3",
+
+		PrismHypercreditSavings: ptrFloat(1.5),
+		PrismDollarSavings:      ptrFloat(0.002),
+	}
+
+	got := messageToProto(src)
+	require.Equal(t, "prism-42", got.PrismModelID)
+	require.Equal(t, "GLM 5.3", got.PrismModelName)
+	require.NotNil(t, got.PrismHypercreditSavings)
+	require.Equal(t, 1.5, *got.PrismHypercreditSavings)
+	require.NotNil(t, got.PrismDollarSavings)
+	require.Equal(t, 0.002, *got.PrismDollarSavings)
+}
+
+func ptrFloat(v float64) *float64 { return &v }

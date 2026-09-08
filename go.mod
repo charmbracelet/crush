@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/catwalk v0.52.19
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.42.1
+	charm.land/fantasy v0.43.0
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.0
@@ -75,7 +75,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.57.0
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
-	mvdan.cc/sh/v3 v3.14.0
+	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (

@@ -101,6 +101,16 @@ func (b *Backend) SaveSession(ctx context.Context, workspaceID string, sess sess
 	return ws.Sessions.Save(ctx, sess)
 }
 
+// SetSessionChannel sets the channel binding on a session via a targeted
+// UPDATE, avoiding the read-then-full-save race of SaveSession.
+func (b *Backend) SetSessionChannel(ctx context.Context, workspaceID, sessionID, channel string) (session.Session, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return session.Session{}, err
+	}
+	return ws.Sessions.SetChannel(ctx, sessionID, channel)
+}
+
 // DeleteSession deletes a session from the given workspace.
 func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID string) error {
 	ws, err := b.GetWorkspace(workspaceID)

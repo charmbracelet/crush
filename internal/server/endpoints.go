@@ -148,6 +148,19 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePutWorkspaceSession),
 
+		apigen.Patch("/v1/workspaces/{id}/sessions/{sid}/channel").
+			Summary("Set session channel").
+			Description("Sets or clears (empty channel) the session's channel binding "+
+				"with a targeted update, avoiding the read-then-full-save race of "+
+				"the PUT session endpoint.").
+			Tags("sessions").
+			PathParam("id", "Workspace ID").
+			PathParam("sid", "Session ID").
+			Accepts(proto.SessionChannelRequest{}).
+			Responds(proto.Session{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePatchWorkspaceSessionChannel),
+
 		apigen.Delete("/v1/workspaces/{id}/sessions/{sid}").
 			Summary("Delete session").
 			Tags("sessions").

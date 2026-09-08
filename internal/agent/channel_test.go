@@ -24,12 +24,20 @@ func TestFilterToolsForChannel(t *testing.T) {
 	plainTool := &fakeTool{name: "plain"}
 	states := map[string]mcp.ClientInfo{"signal": {Channel: true}}
 
+	// A local turn (no channel) keeps all tools, including channel server
+	// tools — a TUI user can still ask the agent to send via Signal.
 	local := filterToolsForChannel([]fantasy.AgentTool{channelTool, plainTool}, "", states)
-	require.Len(t, local, 1)
-	require.Equal(t, "plain", local[0].Info().Name)
+	require.Len(t, local, 2)
 
+	// A channel-originated turn only sees the originating channel's tools
+	// plus non-channel tools.
 	matching := filterToolsForChannel([]fantasy.AgentTool{channelTool, plainTool}, "signal", states)
 	require.Len(t, matching, 2)
+
+	// A different channel's turn does not see signal's tools.
+	other := filterToolsForChannel([]fantasy.AgentTool{channelTool, plainTool}, "switchboard", states)
+	require.Len(t, other, 1)
+	require.Equal(t, "plain", other[0].Info().Name)
 }
 
 type channelTestTool struct {

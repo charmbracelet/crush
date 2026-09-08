@@ -170,12 +170,11 @@ func (w *ClientWorkspace) SaveSession(ctx context.Context, sess session.Session)
 }
 
 func (w *ClientWorkspace) SetSessionChannel(ctx context.Context, sessionID, channel string) (session.Session, error) {
-	sess, err := w.GetSession(ctx, sessionID)
+	saved, err := w.client.SetSessionChannel(ctx, w.workspaceID(), sessionID, channel)
 	if err != nil {
 		return session.Session{}, err
 	}
-	sess.Channel = channel
-	return w.SaveSession(ctx, sess)
+	return protoToSession(*saved), nil
 }
 
 func (w *ClientWorkspace) DeleteSession(ctx context.Context, sessionID string) error {

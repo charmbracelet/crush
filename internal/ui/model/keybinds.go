@@ -177,3 +177,13 @@ func applyUserKeybinds(com *common.Common, km *KeyMap, ta *textarea.Model, comp 
 	ckm.Apply(overrides)
 	comp.SetKeyMap(ckm)
 }
+
+// firstKey returns the first key of a binding for help text, or the
+// empty string when unbound.
+func firstKey(b key.Binding) string {
+	keys := b.Keys()
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}

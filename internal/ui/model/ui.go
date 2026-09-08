@@ -1017,8 +1017,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
-			m.keyMap.Models.SetHelp("ctrl+m", "models")
-			m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+			// Prefer shift+enter only when the user kept the default;
+			// a remapped binding keeps its own help text.
+			if slices.Contains(m.keyMap.Editor.Newline.Keys(), "ctrl+j") {
+				m.keyMap.Models.SetHelp("ctrl+m", "models")
+				m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+			}
 		}
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
@@ -3167,7 +3171,7 @@ func (m *UI) ShortHelp() []key.Binding {
 	tab := k.Tab
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
-		commands.SetHelp("/ or ctrl+p", "commands")
+		commands.SetHelp(firstKey(k.Editor.Commands)+" or "+firstKey(k.Commands), "commands")
 	}
 
 	switch m.state {
@@ -3178,18 +3182,18 @@ func (m *UI) ShortHelp() []key.Binding {
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
-				cancelBinding.SetHelp("esc", "press again to cancel")
+				cancelBinding.SetHelp(firstKey(k.Chat.Cancel), "press again to cancel")
 			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
+				cancelBinding.SetHelp(firstKey(k.Chat.Cancel), "clear queue")
 			}
 			binds = append(binds, cancelBinding)
 		}
 
 		switch m.focus {
 		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
+			tab.SetHelp(firstKey(k.Tab), "focus chat")
 		default:
-			tab.SetHelp("tab", "focus editor")
+			tab.SetHelp(firstKey(k.Tab), "focus editor")
 		}
 
 		binds = append(
@@ -3255,12 +3259,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 	var binds [][]key.Binding
 	k := &m.keyMap
 	help := k.Help
-	help.SetHelp("ctrl+g", "less")
+	help.SetHelp(firstKey(k.Help), "less")
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
-		commands.SetHelp("/ or ctrl+p", "commands")
+		commands.SetHelp(firstKey(k.Editor.Commands)+" or "+firstKey(k.Commands), "commands")
 	}
 
 	switch m.state {
@@ -3274,9 +3278,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
-				cancelBinding.SetHelp("esc", "press again to cancel")
+				cancelBinding.SetHelp(firstKey(k.Chat.Cancel), "press again to cancel")
 			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
+				cancelBinding.SetHelp(firstKey(k.Chat.Cancel), "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
 		}
@@ -3285,9 +3289,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 		tab := k.Tab
 		switch m.focus {
 		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
+			tab.SetHelp(firstKey(k.Tab), "focus chat")
 		default:
-			tab.SetHelp("tab", "focus editor")
+			tab.SetHelp(firstKey(k.Tab), "focus editor")
 		}
 
 		mainBinds = append(

@@ -630,7 +630,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
 			// Set "top_k" under "extra_body", as it is not part of the OpenAI protocol
 			// and will be explicitly omitted by Fantasy downstream.
-			if topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK); topK != nil {
+			topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)
+			if topK != nil {
 				extraBody, hasExtraBody := mergedOptions["extra_body"].(map[string]any)
 				if !hasExtraBody {
 					extraBody = make(map[string]any)
@@ -644,6 +645,21 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			parsed, err := openaicompat.ParseOptions(mergedOptions)
 			if err == nil {
 				options[openaicompat.Name] = parsed
+			} else {
+				if topK != nil {
+					slog.Warn("Failed to parse provider_options, falling back to top_k only", "err", err)
+
+					fallbackMergeOptions := make(map[string]any)
+					fallbackMergeOptions["extra_body"] = make(map[string]any)
+					fallbackMergeOptions["extra_body"].(map[string]any)["top_k"] = topK
+					parsed, err := openaicompat.ParseOptions(fallbackMergeOptions)
+					if err == nil {
+						options[openaicompat.Name] = parsed
+					} else {
+						slog.Warn("Failed to parse fallback provider options, this should never happen", "err", err)
+					}
+
+				}
 			}
 		}
 	}

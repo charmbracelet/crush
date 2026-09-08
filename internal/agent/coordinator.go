@@ -626,7 +626,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 
 	default:
-		// Known custom providers are openai-compat under the hood.
+		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
+		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
 			// Set "top_k" under "extra_body", as it is not part of the OpenAI protocol
 			// and will be explicitly omitted by Fantasy downstream.
@@ -640,6 +641,11 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				if _, hasTopK := extraBody["top_k"]; !hasTopK {
 					extraBody["top_k"] = *topK
 				}
+			}
+
+			_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+			if !hasReasoningEffort && shouldSetEffort {
+				mergedOptions["reasoning_effort"] = reasoningEffort
 			}
 
 			parsed, err := openaicompat.ParseOptions(mergedOptions)
@@ -946,16 +952,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
 
 	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+		Model:      largeModel,
+		CatwalkCfg: *largeCatwalkModel,
+		ModelCfg:   largeModelCfg,
+		FlatRate:   largeProviderCfg.FlatRate,
+	}, Model{
+		Model:      smallModel,
+		CatwalkCfg: *smallCatwalkModel,
+		ModelCfg:   smallModelCfg,
+		FlatRate:   smallProviderCfg.FlatRate,
+	}, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -1239,8 +1245,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
 	default:
-		// Known custom providers (litellm, ollama, omlx) are
-		// openai-compat under the hood.
+		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
+		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
 			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
 		}

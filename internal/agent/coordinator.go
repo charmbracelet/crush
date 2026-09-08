@@ -626,8 +626,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 
 	default:
-		// Known custom providers (litellm, llamacpp, lmstudio, ollama, omlx) are
-		// openai-compat under the hood.
+		// Known custom providers are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
 			// Set "top_k" under "extra_body", as it is not part of the OpenAI protocol
 			// and will be explicitly omitted by Fantasy downstream.

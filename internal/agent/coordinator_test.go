@@ -592,7 +592,7 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 
 func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 	// "ollama" has a registered discover.Enricher, so it is treated as a
-	// known custom provider (litellm/ollama/omlx) speaking openai-compat.
+	// known custom provider speaking openai-compat.
 	knownCustomProviderCfg := config.ProviderConfig{ID: "ollama", Type: "ollama"}
 
 	t.Run("model top_k is injected into extra_body for known custom providers", func(t *testing.T) {

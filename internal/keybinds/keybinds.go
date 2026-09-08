@@ -88,12 +88,18 @@ func NormalizeToken(token string) string {
 	return token
 }
 
+// ValidShape reports whether the action has scope.name form with
+// both parts non-empty. Membership is a separate question for Valid.
+func ValidShape(action string) bool {
+	scope, name, ok := strings.Cut(action, ".")
+	return ok && scope != "" && name != ""
+}
+
 // Validate checks that the action is dotted and every key is non-empty.
 // Unknown actions are allowed through here; they warn and fall back
 // at apply time instead of failing the load.
 func Validate(action string, keys []string) error {
-	scope, name, ok := strings.Cut(action, ".")
-	if !ok || scope == "" || name == "" {
+	if !ValidShape(action) {
 		return fmt.Errorf("invalid action %q (expected scope.name)", action)
 	}
 	if len(keys) == 0 {

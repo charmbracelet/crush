@@ -48,3 +48,13 @@ func TestNormalizeToken(t *testing.T) {
 	require.Equal(t, "space", NormalizeToken("space"))
 	require.Equal(t, "ctrl+q", NormalizeToken("ctrl+q"))
 }
+
+func TestValidShape(t *testing.T) {
+	t.Parallel()
+	require.True(t, ValidShape("global.quit"))
+	require.True(t, ValidShape("bogus.action"))
+	require.False(t, ValidShape("quit"))
+	require.False(t, ValidShape(".quit"))
+	require.False(t, ValidShape("global."))
+	require.False(t, ValidShape(""))
+}

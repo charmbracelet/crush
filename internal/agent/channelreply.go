@@ -127,13 +127,11 @@ func channelReplyDelivered(reply *config.MCPChannelReply, channel string, comple
 // that preserves the current behaviour when the server has no obvious
 // send-capable tools.
 func discoverChannelReply(channel string) *config.MCPChannelReply {
-	for mcpName, tools := range mcp.Tools() {
-		if mcpName != channel {
-			continue
-		}
-		return discoverReplyFromTools(tools)
+	tools, ok := mcp.GetTools(channel)
+	if !ok {
+		return nil
 	}
-	return nil
+	return discoverReplyFromTools(tools)
 }
 
 // discoverReplyFromTools scans a slice of MCP tools and builds a reply

@@ -4305,6 +4305,7 @@ func (m *UI) handleChannelMessage(ev mcp.Event) tea.Cmd {
 		return nil
 	}
 	if !m.hasSession() {
+		slog.Debug("Channel message dropped: no active session after ensureSession", "channel", ev.Name)
 		return loadCmd
 	}
 	updatedSession, err := m.com.Workspace.SetSessionChannel(context.Background(), m.session.ID, ev.Name)

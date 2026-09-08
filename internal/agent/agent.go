@@ -139,7 +139,17 @@ type SessionAgentCall struct {
 	channelMeta map[string]string
 }
 
+// filterToolsForChannel scopes the tool list for a turn. A channel-originated
+// turn (channel != "") sees only the originating channel server's tools plus
+// all non-channel tools — the model's reach is restricted to the channel it
+// is replying through, so it cannot accidentally send via a different
+// messaging backend. A local turn (channel == "") keeps every tool,
+// including channel server tools, so a user in the TUI can still ask the
+// agent to send a message through Signal or any other enabled channel.
 func filterToolsForChannel(agentTools []fantasy.AgentTool, channel string, states map[string]mcp.ClientInfo) []fantasy.AgentTool {
+	if channel == "" {
+		return agentTools
+	}
 	filtered := make([]fantasy.AgentTool, 0, len(agentTools))
 	for _, agentTool := range agentTools {
 		mcpTool, ok := agentTool.(interface{ MCP() string })

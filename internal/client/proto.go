@@ -803,6 +803,25 @@ func (c *Client) SaveSession(ctx context.Context, id string, sess proto.Session)
 	return &saved, nil
 }
 
+// SetSessionChannel sets the channel binding on a session via a targeted
+// server-side UPDATE, avoiding the read-then-full-save race of SaveSession.
+func (c *Client) SetSessionChannel(ctx context.Context, id string, sessionID, channel string) (*proto.Session, error) {
+	body := map[string]string{"channel": channel}
+	rsp, err := c.patch(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/channel", id, sessionID), nil, jsonBody(body), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to set session channel: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to set session channel: status code %d", rsp.StatusCode)
+	}
+	var sess proto.Session
+	if err := json.NewDecoder(rsp.Body).Decode(&sess); err != nil {
+		return nil, fmt.Errorf("failed to decode session: %w", err)
+	}
+	return &sess, nil
+}
+
 // DeleteSession deletes a session from a workspace.
 func (c *Client) DeleteSession(ctx context.Context, id string, sessionID string) error {
 	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s", id, sessionID), nil, nil)

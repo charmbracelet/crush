@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/keybinds"
 	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
@@ -288,6 +289,10 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 	if err := cfg.ValidateHooks(); err != nil {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
+
+	// Normalize keybinds after merge so typos warn once here instead
+	// of silently doing nothing in the UI.
+	cfg.ValidateKeybinds()
 
 	if !isInsideWorktree() {
 		const depth = 2

@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/orcarouter"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -1880,6 +1881,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	switch msg := action.(type) {
 	// Generic dialog messages
 	case dialog.ActionClose:
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
 		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
 			break
 		}
@@ -2396,6 +2400,8 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+	case orcarouter.OAuthProviderID:
+		dlg, cmd = dialog.NewOAuthOrcaRouter(m.com, isOnboarding, provider, model, modelType)
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}

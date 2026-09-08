@@ -21,7 +21,9 @@ import (
 )
 
 // ActionClose is a message to close the current dialog.
-type ActionClose struct{}
+type ActionClose struct {
+	Cmd tea.Cmd
+}
 
 // ActionQuit is a message to quit the application.
 type ActionQuit = tea.QuitMsg
@@ -134,6 +136,7 @@ type (
 	// ActionInitiateOAuth is sent when the device auth is initiated
 	// successfully.
 	ActionInitiateOAuth struct {
+		AttemptID       uint64
 		DeviceCode      string
 		UserCode        string
 		ExpiresIn       int
@@ -143,12 +146,16 @@ type (
 
 	// ActionCompleteOAuth is sent when the device flow completes successfully.
 	ActionCompleteOAuth struct {
-		Token *oauth.Token
+		AttemptID uint64
+		Token     *oauth.Token
+		APIKey    string
+		Scope     string
 	}
 
 	// ActionOAuthErrored is sent when the device flow encounters an error.
 	ActionOAuthErrored struct {
-		Error error
+		AttemptID uint64
+		Error     error
 	}
 )
 

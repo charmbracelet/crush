@@ -47,7 +47,7 @@ func (m *OAuthHyper) initiateAuth() tea.Msg {
 	}
 
 	if err != nil {
-		return ActionOAuthErrored{fmt.Errorf("failed to initiate device auth: %w", err)}
+		return ActionOAuthErrored{Error: fmt.Errorf("failed to initiate device auth: %w", err)}
 	}
 
 	return ActionInitiateOAuth{
@@ -68,23 +68,23 @@ func (m *OAuthHyper) startPolling(deviceCode string, expiresIn int) tea.Cmd {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return ActionOAuthErrored{err}
+			return ActionOAuthErrored{Error: err}
 		}
 
 		token, err := hyper.ExchangeToken(ctx, refreshToken)
 		if err != nil {
-			return ActionOAuthErrored{fmt.Errorf("token exchange failed: %w", err)}
+			return ActionOAuthErrored{Error: fmt.Errorf("token exchange failed: %w", err)}
 		}
 
 		introspect, err := hyper.IntrospectToken(ctx, token.AccessToken)
 		if err != nil {
-			return ActionOAuthErrored{fmt.Errorf("token introspection failed: %w", err)}
+			return ActionOAuthErrored{Error: fmt.Errorf("token introspection failed: %w", err)}
 		}
 		if !introspect.Active {
-			return ActionOAuthErrored{fmt.Errorf("access token is not active")}
+			return ActionOAuthErrored{Error: fmt.Errorf("access token is not active")}
 		}
 
-		return ActionCompleteOAuth{token}
+		return ActionCompleteOAuth{Token: token}
 	}
 }
 

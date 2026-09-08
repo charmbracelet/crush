@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/orcarouter"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -1325,6 +1326,16 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 // user completes it (or the context is cancelled).
 func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig) error {
 	switch {
+	case providerCfg.ID == orcarouter.OAuthProviderID:
+		if c.notify == nil {
+			return errNoInteractiveAuth
+		}
+		slog.Info("OrcaRouter key was rejected, waiting for re-authentication", "provider", providerCfg.ID)
+		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			Type:       notify.TypeReAuthenticate,
+			ProviderID: providerCfg.ID,
+		})
+		return c.waitForInteractiveReauth(ctx, providerCfg.ID)
 	case providerCfg.OAuthToken != nil:
 		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
 		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
@@ -1400,6 +1411,7 @@ func isUnauthorized(err error) bool {
 // nil if no refresh mechanism is configured for the provider.
 func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
 	if providerCfg.OAuthToken == nil &&
+		providerCfg.ID != orcarouter.OAuthProviderID &&
 		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil

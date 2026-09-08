@@ -212,6 +212,7 @@ That said, you can also set environment variables for preferred providers:
 | `HF_TOKEN`                  | Hugging Face Inference                             |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
+| `ORCAROUTER_API_KEY`        | OrcaRouter (API key)                               |
 | `IONET_API_KEY`             | io.net                                             |
 | `ALIBABA_SINGAPORE_API_KEY` | Alibaba (Singapore)                                |
 | `ALIBABA_US_API_KEY`        | Alibaba (United States)                            |
@@ -231,6 +232,19 @@ That said, you can also set environment variables for preferred providers:
 | `MOONSHOT_API_KEY`          | Moonshot                                           |
 
 [hyper]: https://hyper.charm.land
+
+OrcaRouter appears as two explicit choices in the model picker:
+
+- **OrcaRouter - API** accepts an existing API key or reads
+  `ORCAROUTER_API_KEY`.
+- **OrcaRouter - Auth** signs in through the browser using OAuth 2.0 with
+  PKCE. Crush stores the issued API key in its existing global configuration
+  and reuses it until it is revoked.
+
+The public defaults use `https://www.orcarouter.ai` for authentication and
+`https://api.orcarouter.ai/v1` for inference. Self-hosted installations can
+set `ORCA_BASE_URL`, or override the two origins independently with
+`ORCA_AUTH_BASE_URL` and `ORCA_API_BASE_URL`.
 
 Also note that Crush can support nearly any provider, including
 [Local Models](#local-models). For more info see

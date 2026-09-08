@@ -147,8 +147,9 @@ func UpdateHyper(pathOrURL string) error {
 }
 
 var (
-	catwalkSyncer = &catwalkSync{}
-	hyperSyncer   = &hyperSync{}
+	catwalkSyncer    = &catwalkSync{}
+	hyperSyncer      = &hyperSync{}
+	orcaRouterSyncer = &orcaRouterSync{}
 )
 
 // Providers returns the list of providers, taking into account cached results
@@ -177,10 +178,11 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
-		// Each goroutine owns its own error so the two can report
+		// Each goroutine owns its own error so all three can report
 		// independently without racing on a shared slice.
-		var catwalkErr, hyperErr error
+		var catwalkErr, hyperErr, orcaRouterErr error
 		var hyperProvider catwalk.Provider
+		var orcaRouterProviders []catwalk.Provider
 
 		wg.Go(func() {
 			if customProvidersOnly {
@@ -232,14 +234,44 @@ func Providers(cfg *Config, opts ...HyperTokenRefresher) ([]catwalk.Provider, er
 			hyperProvider = item
 		})
 
+		wg.Go(func() {
+			if customProvidersOnly {
+				return
+			}
+			orcaRouterSyncer.Init(
+				realOrcaRouterClient{},
+				cachePathFor("orcarouter"),
+				autoupdate,
+			)
+			items, err := orcaRouterSyncer.Get(ctx)
+			if err != nil {
+				orcaRouterErr = fmt.Errorf("Crush was unable to fetch updated information from OrcaRouter: %w", err) //nolint:staticcheck
+			}
+			orcaRouterProviders = items
+		})
+
 		wg.Wait()
 
-		if hyperProvider.ID != "" {
-			providerList = append([]catwalk.Provider{hyperProvider}, slices.Collect(providers.Seq())...)
-		} else {
-			providerList = slices.Collect(providers.Seq())
+		providerList = make([]catwalk.Provider, 0, 1+len(orcaRouterProviders)+providers.Len())
+		seen := make(map[catwalk.InferenceProvider]struct{})
+		appendUnique := func(provider catwalk.Provider) {
+			if provider.ID == "" {
+				return
+			}
+			if _, ok := seen[provider.ID]; ok {
+				return
+			}
+			seen[provider.ID] = struct{}{}
+			providerList = append(providerList, provider)
 		}
-		providerErr = errors.Join(catwalkErr, hyperErr)
+		appendUnique(hyperProvider)
+		for _, provider := range orcaRouterProviders {
+			appendUnique(provider)
+		}
+		for _, provider := range slices.Collect(providers.Seq()) {
+			appendUnique(provider)
+		}
+		providerErr = errors.Join(catwalkErr, hyperErr, orcaRouterErr)
 	})
 	return providerList, providerErr
 }

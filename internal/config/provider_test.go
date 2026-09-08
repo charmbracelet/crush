@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -19,6 +20,16 @@ func resetProviderState() {
 	providerErr = nil
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer = &hyperSync{}
+	orcaRouterSyncer = &orcaRouterSync{}
+}
+
+type mockOrcaRouterClient struct {
+	providers []catwalk.Provider
+	err       error
+}
+
+func (m *mockOrcaRouterClient) GetProviders(context.Context) ([]catwalk.Provider, error) {
+	return m.providers, m.err
 }
 
 func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {
@@ -339,6 +350,12 @@ func TestProviders_KeepsCatalogWhenCachingFails(t *testing.T) {
 			Models: []catwalk.Model{{ID: "hyper-1", Name: "Hyper Model"}},
 		},
 	}, unwritable, true)
+	orcaRouterSyncer.Init(&mockOrcaRouterClient{
+		providers: []catwalk.Provider{
+			{Name: "OrcaRouter - API", ID: "orcarouter"},
+			{Name: "OrcaRouter - Auth", ID: "orcarouter-oauth"},
+		},
+	}, unwritable, true)
 
 	catwalkProviders, catwalkErr := catwalkSyncer.Get(t.Context())
 	require.Error(t, catwalkErr, "cache write should fail")
@@ -347,14 +364,19 @@ func TestProviders_KeepsCatalogWhenCachingFails(t *testing.T) {
 	hyperProvider, hyperErr := hyperSyncer.Get(t.Context())
 	require.Error(t, hyperErr, "cache write should fail")
 	require.Equal(t, "Hyper", hyperProvider.Name)
+	orcaProviders, orcaErr := orcaRouterSyncer.Get(t.Context())
+	require.Error(t, orcaErr, "cache write should fail")
+	require.Len(t, orcaProviders, 2)
 
 	providers, err := Providers(&Config{Options: &Options{}})
 
 	// The failure is reported, but as a warning alongside a usable catalog.
 	require.Error(t, err)
-	require.Len(t, providers, 2)
+	require.Len(t, providers, 4)
 	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[0].ID, "Hyper stays at the front")
-	require.Equal(t, catwalk.InferenceProvider("p1"), providers[1].ID)
+	require.Equal(t, catwalk.InferenceProvider("orcarouter"), providers[1].ID)
+	require.Equal(t, catwalk.InferenceProvider("orcarouter-oauth"), providers[2].ID)
+	require.Equal(t, catwalk.InferenceProvider("p1"), providers[3].ID)
 }
 
 // TestProviders_FallsBackToEmbeddedHyper checks that Hyper is still in the
@@ -373,15 +395,21 @@ func TestProviders_FallsBackToEmbeddedHyper(t *testing.T) {
 	hyperSyncer.Init(&mockHyperClient{
 		err: errors.New("network error"),
 	}, filepath.Join(tmpDir, "hyper.json"), true)
+	orcaRouterSyncer.Init(&mockOrcaRouterClient{
+		err: errors.New("network error"),
+	}, filepath.Join(tmpDir, "orcarouter.json"), true)
 
 	_, _ = catwalkSyncer.Get(t.Context())
 	_, _ = hyperSyncer.Get(t.Context())
+	_, _ = orcaRouterSyncer.Get(t.Context())
 
 	providers, err := Providers(&Config{Options: &Options{}})
 	require.NoError(t, err)
-	require.Len(t, providers, 2)
+	require.Len(t, providers, 4)
 	require.Equal(t, catwalk.InferenceProvider("hyper"), providers[0].ID)
 	require.NotEmpty(t, providers[0].Models, "the embedded Hyper provider carries models")
+	require.Equal(t, catwalk.InferenceProvider("orcarouter"), providers[1].ID)
+	require.NotEmpty(t, providers[1].Models, "the embedded OrcaRouter provider carries models")
 }
 
 // TestProviders_HonorsDisableDefaultProviders makes sure the embedded Hyper

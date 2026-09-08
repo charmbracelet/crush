@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -68,8 +69,13 @@ type OAuth struct {
 	expiresIn       int
 	interval        int
 	token           *oauth.Token
+	apiKey          string
+	grantedScope    string
+	attemptID       uint64
 	cancelFunc      context.CancelFunc
 }
+
+var oauthAttemptID atomic.Uint64
 
 var _ Dialog = (*OAuth)(nil)
 
@@ -91,6 +97,7 @@ func newOAuth(
 	m.model = model
 	m.modelType = modelType
 	m.oAuthProvider = oAuthProvider
+	m.attemptID = oauthAttemptID.Add(1)
 	m.width = 0 // Set dynamically in Draw().
 	m.State = OAuthStateInitializing
 
@@ -116,7 +123,29 @@ func newOAuth(
 	)
 	m.keyMap.Close = CloseKey
 
-	return &m, tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)
+	return &m, tea.Batch(m.spinner.Tick, m.wrapOAuthCmd(m.oAuthProvider.initiateAuth))
+}
+
+func (m *OAuth) wrapOAuthCmd(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg := cmd()
+		switch value := msg.(type) {
+		case ActionInitiateOAuth:
+			value.AttemptID = m.attemptID
+			return value
+		case ActionCompleteOAuth:
+			value.AttemptID = m.attemptID
+			return value
+		case ActionOAuthErrored:
+			value.AttemptID = m.attemptID
+			return value
+		default:
+			return msg
+		}
+	}
 }
 
 // ID implements Dialog.
@@ -171,20 +200,26 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 				return nil
 
 			default:
-				return ActionClose{}
+				return ActionClose{Cmd: m.oAuthProvider.stopPolling}
 			}
 		}
 
 	case ActionInitiateOAuth:
+		if msg.AttemptID != m.attemptID {
+			return nil
+		}
 		m.deviceCode = msg.DeviceCode
 		m.userCode = msg.UserCode
 		m.expiresIn = msg.ExpiresIn
 		m.verificationURL = msg.VerificationURL
 		m.interval = msg.Interval
 		m.State = OAuthStateDisplay
-		return ActionCmd{m.oAuthProvider.startPolling(msg.DeviceCode, msg.ExpiresIn)}
+		return ActionCmd{m.wrapOAuthCmd(m.oAuthProvider.startPolling(msg.DeviceCode, msg.ExpiresIn))}
 
 	case ActionCompleteOAuth:
+		if msg.AttemptID != m.attemptID {
+			return nil
+		}
 		// The device flow finished and we have a token. Immediately
 		// persist it and fetch models in the background (this triggers a
 		// config reload that can take a few seconds), showing a spinner.
@@ -193,6 +228,8 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		// work behind a keypress.
 		m.State = OAuthStateSaving
 		m.token = msg.Token
+		m.apiKey = msg.APIKey
+		m.grantedScope = msg.Scope
 		return ActionCmd{tea.Batch(
 			m.oAuthProvider.stopPolling,
 			m.spinner.Tick,
@@ -200,6 +237,9 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		)}
 
 	case ActionOAuthErrored:
+		if msg.AttemptID != m.attemptID {
+			return nil
+		}
 		m.State = OAuthStateError
 		cmd := tea.Batch(m.oAuthProvider.stopPolling, util.ReportError(msg.Error))
 		return ActionCmd{cmd}
@@ -209,6 +249,8 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		// screen; the actual model selection happens when the user
 		// acknowledges it (fast, since the work is already done).
 		m.State = OAuthStateSuccess
+		m.apiKey = ""
+		m.token = nil
 		return nil
 
 	case oauthSaveErrMsg:
@@ -309,6 +351,26 @@ func (m *OAuth) innerDialogContent() string {
 			)
 
 	case OAuthStateDisplay:
+		if m.userCode == "" {
+			instructionText := instructionStyle.Render("Press ") +
+				enterKeyStyle.Render("enter") +
+				instructionStyle.Render(" to open the browser and authorize Crush.")
+			instructions := lipgloss.NewStyle().
+				Width(innerWidth).
+				Padding(0, 1).
+				Render(instructionText)
+			link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
+			url := statusTextStyle.
+				Width(innerWidth).
+				Padding(0, 1).
+				Render("Browser not opening? Copy this URL:\n" + link)
+			waiting := statusTextStyle.
+				Width(innerWidth).
+				Padding(0, 1).
+				Render(successStyle.Render(m.spinner.View()) + statusTextStyle.Render("Waiting for authorization..."))
+			return lipgloss.JoinVertical(lipgloss.Left, "", instructions, "", url, "", waiting, "")
+		}
+
 		// Render each text segment with its own style. Wrapping the
 		// whole concatenation in a single style would lose the text
 		// color after enterKeyStyle's reset code.
@@ -356,10 +418,14 @@ func (m *OAuth) innerDialogContent() string {
 		)
 
 	case OAuthStateSuccess:
+		message := "Authentication successful!"
+		if m.grantedScope != "" {
+			message = fmt.Sprintf("Authentication successful (scope: %s)!", m.grantedScope)
+		}
 		return successStyle.
 			Width(innerWidth).
 			Padding(1).
-			Render("Authentication successful!")
+			Render(message)
 
 	case OAuthStateSaving:
 		return lipgloss.NewStyle().
@@ -405,17 +471,16 @@ func (m *OAuth) ShortHelp() []key.Binding {
 		return nil
 
 	default:
-		return []key.Binding{
-			m.keyMap.Copy,
-			m.keyMap.CopyURL,
-			m.keyMap.Submit,
-			m.keyMap.Close,
+		result := []key.Binding{m.keyMap.CopyURL, m.keyMap.Submit, m.keyMap.Close}
+		if m.userCode != "" {
+			result = append([]key.Binding{m.keyMap.Copy}, result...)
 		}
+		return result
 	}
 }
 
 func (m *OAuth) copyCode() tea.Cmd {
-	if m.State != OAuthStateDisplay {
+	if m.State != OAuthStateDisplay || m.userCode == "" {
 		return nil
 	}
 	return common.CopyToClipboard(m.userCode, "Code copied to clipboard")
@@ -432,12 +497,20 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if m.State != OAuthStateDisplay {
 		return nil
 	}
+	if m.userCode == "" {
+		return func() tea.Msg {
+			if err := browser.OpenURL(m.verificationURL); err != nil {
+				return ActionOAuthErrored{AttemptID: m.attemptID, Error: fmt.Errorf("failed to open browser: %w", err)}
+			}
+			return nil
+		}
+	}
 	return common.CopyToClipboardWithCallback(
 		m.userCode,
 		"Code copied and URL opened",
 		func() tea.Msg {
 			if err := browser.OpenURL(m.verificationURL); err != nil {
-				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
+				return ActionOAuthErrored{AttemptID: m.attemptID, Error: fmt.Errorf("failed to open browser: %w", err)}
 			}
 			return nil
 		},
@@ -454,9 +527,17 @@ func (m *OAuth) saveCredential() tea.Cmd {
 		com      = m.com
 		provider = m.provider
 		token    = m.token
+		apiKey   = m.apiKey
 	)
 	return func() tea.Msg {
-		if err := com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(provider.ID), token); err != nil {
+		credential := any(token)
+		if apiKey != "" {
+			credential = apiKey
+		}
+		if credential == nil {
+			return oauthSaveErrMsg{err: fmt.Errorf("authentication returned no credential")}
+		}
+		if err := com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(provider.ID), credential); err != nil {
 			return oauthSaveErrMsg{err: fmt.Errorf("failed to save API key: %w", err)}
 		}
 		return oauthSaveDoneMsg{}

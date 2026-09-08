@@ -112,7 +112,14 @@ crush models gpt5`,
 		for id := range entries {
 			providerIDs = append(providerIDs, id)
 		}
-		sort.Strings(providerIDs)
+		// Sort configured providers first, alphabetical within each tier.
+		sort.SliceStable(providerIDs, func(i, j int) bool {
+			ei, ej := entries[providerIDs[i]], entries[providerIDs[j]]
+			if ei.configured != ej.configured {
+				return ei.configured
+			}
+			return providerIDs[i] < providerIDs[j]
+		})
 
 		if len(providerIDs) == 0 && len(args) == 0 {
 			return fmt.Errorf("no providers found")

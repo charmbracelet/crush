@@ -61,6 +61,11 @@ const (
 	AgentTask  string = "task"
 )
 
+// MinRecommendedContextWindow is the context window size, in tokens, below
+// which Crush warns that a model may be too small to function well. It is
+// also the auto-summarization threshold used by the agent.
+const MinRecommendedContextWindow = 200_000
+
 type SelectedModel struct {
 	// The model id as used by the provider API.
 	// Required.
@@ -386,6 +391,7 @@ type Options struct {
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	DisableSystemWarnings     bool         `json:"disable_system_warnings,omitempty" jsonschema:"description=Disable Crush system advisories such as small-context-model and super yolo warnings,default=false"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not

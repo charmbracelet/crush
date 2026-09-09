@@ -140,6 +140,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			promptOpts := []prompt.Option{
 				prompt.WithWorkingDir(tmpDir),
+				prompt.WithSkills(c.activeSkills),
 			}
 
 			promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), promptOpts...)

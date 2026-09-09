@@ -687,6 +687,33 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 	})
 }
 
+func TestGetProviderOptionsMalformedFallback(t *testing.T) {
+	model := Model{
+		CatwalkCfg: catwalk.Model{ID: "llama3"},
+		ModelCfg: config.SelectedModel{
+			Provider:        "ollama",
+			TopK:            ptr(int64(40)),
+			ProviderOptions: map[string]any{"user": 5.0},
+		},
+	}
+	providerCfg := config.ProviderConfig{ID: "test", Type: "ollama"}
+
+	opts := getProviderOptions(model, providerCfg)
+
+	raw, ok := opts[openaicompat.Name]
+	require.True(t, ok, "malformed provider_options should still fall back to top_k")
+	parsed, ok := raw.(*openaicompat.ProviderOptions)
+	require.True(t, ok)
+
+	// The malformed fields are dropped; only the injected top_k survives.
+	assert.Nil(t, parsed.User)
+	assert.Nil(t, parsed.ReasoningEffort)
+	require.Len(t, parsed.ExtraBody, 1)
+	topK, ok := parsed.ExtraBody["top_k"].(int64)
+	require.True(t, ok)
+	assert.Equal(t, int64(40), topK)
+}
+
 func TestCallTopK(t *testing.T) {
 	knownCustomProviderCfg := config.ProviderConfig{ID: "ollama", Type: "ollama"}
 

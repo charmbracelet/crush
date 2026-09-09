@@ -3989,6 +3989,10 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
 
 	fileCmd := func() tea.Msg {
+		if !m.currentModelSupportsImages() && common.IsImagePath(path) {
+			return util.NewWarnMsg("The current model does not support image attachments")
+		}
+
 		absPath, _ := filepath.Abs(path)
 
 		if m.hasSession() {
@@ -4064,6 +4068,10 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 		}
 		if mimeType == "" {
 			mimeType = "text/plain"
+		}
+
+		if !m.currentModelSupportsImages() && strings.HasPrefix(mimeType, "image/") {
+			return util.NewWarnMsg("The current model does not support image attachments")
 		}
 
 		return message.Attachment{
@@ -4609,6 +4617,9 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 
 // openFilesDialog opens the file picker dialog.
 func (m *UI) openFilesDialog() tea.Cmd {
+	if !m.currentModelSupportsImages() {
+		return util.ReportWarn("The current model does not support image attachments")
+	}
 	if m.dialog.ContainsDialog(dialog.FilePickerID) {
 		// Bring to front
 		m.dialog.BringToFront(dialog.FilePickerID)
@@ -4919,16 +4930,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				return false
 			}
-
-			lowerPath := strings.ToLower(path)
-			isValid := false
-			for _, ext := range common.AllowedImageTypes {
-				if strings.HasSuffix(lowerPath, ext) {
-					isValid = true
-					break
-				}
-			}
-			if !isValid {
+			if !common.IsImagePath(path) {
 				return false
 			}
 		}
@@ -4939,6 +4941,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		cmd := m.updateTextareaWithPrevHeight(msg, prevHeight)
 		m.checkBangModeAfterPaste()
 		return cmd
+	}
+	if !m.currentModelSupportsImages() {
+		return util.ReportWarn("The current model does not support image attachments")
 	}
 
 	var cmds []tea.Cmd
@@ -5012,6 +5017,9 @@ func (m *UI) pasteTextFromClipboard() tea.Msg {
 // creates an attachment. If no image data is found, it falls back to
 // interpreting clipboard text as a file path.
 func (m *UI) pasteImageFromClipboard() tea.Msg {
+	if !m.currentModelSupportsImages() {
+		return util.NewWarnMsg("The current model does not support image attachments")
+	}
 	imageData, err := clipboard.Read(clipboard.FormatImage)
 	if int64(len(imageData)) > common.MaxAttachmentSize {
 		return util.InfoMsg{
@@ -5040,15 +5048,7 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		return nil // Clipboard does not contain an image or valid file path
 	}
 
-	lowerPath := strings.ToLower(path)
-	isAllowed := false
-	for _, ext := range common.AllowedImageTypes {
-		if strings.HasSuffix(lowerPath, ext) {
-			isAllowed = true
-			break
-		}
-	}
-	if !isAllowed {
+	if !common.IsImagePath(path) {
 		return util.NewInfoMsg("File type is not a supported image format")
 	}
 

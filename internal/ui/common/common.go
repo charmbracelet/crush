@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/clipboard"
@@ -20,6 +22,15 @@ const MaxAttachmentSize = int64(5 * 1024 * 1024)
 
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
+
+// IsImagePath reports whether the given path has one of the allowed image
+// file extensions.
+func IsImagePath(path string) bool {
+	lowerPath := strings.ToLower(path)
+	return slices.ContainsFunc(AllowedImageTypes, func(ext string) bool {
+		return strings.HasSuffix(lowerPath, ext)
+	})
+}
 
 // Common defines common UI options and configurations.
 type Common struct {

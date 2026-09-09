@@ -853,6 +853,20 @@ func (c *Config) LargeModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
+// ResolvedLargeLine is the default-verbosity model pin for headless crush run.
+// Missing or zero-value large selection prints "crush run: model unresolved"
+// rather than "crush run: /".
+func (c *Config) ResolvedLargeLine() string {
+	if c == nil {
+		return "crush run: model unresolved"
+	}
+	m, ok := c.Models[SelectedModelTypeLarge]
+	if !ok || m.Provider == "" || m.Model == "" {
+		return "crush run: model unresolved"
+	}
+	return fmt.Sprintf("crush run: %s/%s", m.Provider, m.Model)
+}
+
 func (c *Config) SmallModel() *catwalk.Model {
 	model, ok := c.Models[SelectedModelTypeSmall]
 	if !ok {

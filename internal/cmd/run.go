@@ -197,7 +197,9 @@ func runNonInteractive(
 			return fmt.Errorf("failed to override models: %w", err)
 		}
 		cfg, err := c.GetConfig(ctx, ws.ID)
-		if err == nil {
+		if err != nil {
+			slog.Debug("failed to refresh config after model override", "error", err)
+		} else {
 			ws.Config = cfg
 		}
 	}
@@ -506,12 +508,10 @@ func refuseUnresolvedLarge(cliLarge string, cfg *config.Config) error {
 }
 
 // resolvedLargeLine is the default-verbosity model pin for headless runs.
+// Shared implementation lives on config.Config so app.RunNonInteractive can
+// use the same printer without importing cmd.
 func resolvedLargeLine(cfg *config.Config) string {
-	if cfg == nil {
-		return "crush run: unknown/unknown"
-	}
-	m := cfg.Models[config.SelectedModelTypeLarge]
-	return fmt.Sprintf("crush run: %s/%s", m.Provider, m.Model)
+	return cfg.ResolvedLargeLine()
 }
 
 // overrideModels resolves model strings and updates the workspace

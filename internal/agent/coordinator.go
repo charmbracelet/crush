@@ -647,7 +647,11 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				options[openaicompat.Name] = parsed
 			} else {
 				if topK != nil {
-					slog.Warn("Failed to parse provider_options, falling back to top_k only", "err", err)
+					slog.Warn(
+						"Failed to parse provider_options, falling back to top_k only",
+						"provider", providerCfg.ID,
+						"error", err,
+					)
 
 					fallbackMergeOptions := make(map[string]any)
 					fallbackMergeOptions["extra_body"] = make(map[string]any)
@@ -656,7 +660,11 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					if err == nil {
 						options[openaicompat.Name] = parsed
 					} else {
-						slog.Warn("Failed to parse fallback provider options, this should never happen", "err", err)
+						slog.Warn(
+							"Failed to parse fallback provider options, this should never happen",
+							"provider", providerCfg.ID,
+							"error", err,
+						)
 					}
 
 				}

@@ -329,9 +329,17 @@ type UI struct {
 	// forceCompactMode tracks whether compact mode is forced by user toggle
 	forceCompactMode bool
 
+	// forceReduceAnimations tracks whether animations are reduced (either by
+	// user toggle or from SSH dialog preference)
+	forceReduceAnimations bool
+
 	// isCompact tracks whether we're currently in compact layout mode (either
 	// by user toggle or auto-switch based on window size)
 	isCompact bool
+
+	// sshAnimationsDialogShown tracks whether we've shown the SSH animations
+	// dialog in this session to avoid showing it multiple times
+	sshAnimationsDialogShown bool
 
 	// detailsOpen tracks whether the details panel is open (in compact mode)
 	detailsOpen bool
@@ -537,6 +545,14 @@ func (m *UI) Init() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+
+	// Check if we should show SSH animations dialog
+	if m.com.Config().ShouldPromptForSSHAnimations() && !m.sshAnimationsDialogShown {
+		if cmd := m.openSSHAnimationsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
@@ -558,6 +574,14 @@ func (m *UI) Init() tea.Cmd {
 	}
 	cmds = append(cmds, m.checkPendingMCPAuth())
 	return tea.Batch(cmds...)
+}
+
+// openSSHAnimationsDialog opens the SSH animations preference dialog.
+func (m *UI) openSSHAnimationsDialog() tea.Cmd {
+	m.sshAnimationsDialogShown = true
+	dialog := dialog.NewSSHAnimations(m.com)
+	m.dialog.OpenDialog(dialog)
+	return nil
 }
 
 // loadInitialSession loads the initial session if one was specified on startup.
@@ -1462,25 +1486,26 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 
 	// Add messages to chat with linked tool results
+	reduceAnimations := m.shouldReduceAnimations()
 	items := make([]chat.MessageItem, 0, len(msgs)*2)
 	for _, msg := range msgPtrs {
 		switch msg.Role {
 		case message.User:
 			m.lastUserMessageTime = msg.CreatedAt
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir(), reduceAnimations)...)
 		case message.Assistant:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir(), reduceAnimations)...)
 			if chat.ShouldShowAssistantInfo(msg) {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir())...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Workspace.WorkingDir(), reduceAnimations)...)
 		}
 	}
 
 	// Load nested tool calls for agent/agentic_fetch tools.
-	m.loadNestedToolCalls(items)
+	m.loadNestedToolCalls(items, reduceAnimations)
 
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
@@ -1543,7 +1568,7 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 }
 
 // loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
-func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
+func (m *UI) loadNestedToolCalls(items []chat.MessageItem, reduceAnimations bool) {
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)
 		if !ok {
@@ -1576,7 +1601,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		// Extract nested tool items.
 		var nestedTools []chat.ToolMessageItem
 		for _, nestedMsg := range nestedMsgPtrs {
-			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.com.Workspace.WorkingDir())
+			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.com.Workspace.WorkingDir(), reduceAnimations)
 			for _, nestedItem := range nestedItems {
 				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
 					// Mark nested tools as simple (compact) rendering.
@@ -1593,7 +1618,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		for i, nt := range nestedTools {
 			nestedMessageItems[i] = nt
 		}
-		m.loadNestedToolCalls(nestedMessageItems)
+		m.loadNestedToolCalls(nestedMessageItems, reduceAnimations)
 
 		// Set nested tools on the parent.
 		nestedContainer.SetNestedTools(nestedTools)
@@ -1604,6 +1629,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
+	reduceAnimations := m.shouldReduceAnimations()
 
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
@@ -1626,7 +1652,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			return nil
 		}
 		m.lastUserMessageTime = msg.CreatedAt
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir(), reduceAnimations)
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1639,7 +1665,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case message.Assistant:
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir(), reduceAnimations)
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1749,6 +1775,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		m.chat.RemoveMessage(chat.AssistantInfoID(msg.ID))
 	}
 
+	reduceAnimations := m.shouldReduceAnimations()
 	var items []chat.MessageItem
 	for _, tc := range msg.ToolCalls() {
 		existingToolItem := m.chat.MessageItem(tc.ID)
@@ -1761,7 +1788,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if existingToolItem == nil {
-			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false, m.com.Workspace.WorkingDir()))
+			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false, m.com.Workspace.WorkingDir(), reduceAnimations))
 		}
 	}
 
@@ -1786,6 +1813,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 // handleChildSessionMessage handles messages from child sessions (agent tools).
 func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
 	var cmds []tea.Cmd
+	reduceAnimations := m.shouldReduceAnimations()
 
 	// Only process messages with tool calls or results.
 	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
@@ -1837,7 +1865,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 		}
 		if !found {
 			// Create a new nested tool item.
-			nestedItem := chat.NewToolMessageItem(m.com.Styles, event.Payload.ID, tc, nil, false, m.com.Workspace.WorkingDir())
+			nestedItem := chat.NewToolMessageItem(m.com.Styles, event.Payload.ID, tc, nil, false, m.com.Workspace.WorkingDir(), reduceAnimations)
 			if simplifiable, ok := nestedItem.(chat.Compactable); ok {
 				simplifiable.SetCompact(true)
 			}
@@ -2054,6 +2082,24 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Mouse support " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionReduceSSHAAnimations:
+		m.forceReduceAnimations = true
+		m.dialog.CloseDialog(dialog.SSHAnimationsID)
+	case dialog.ActionKeepSSHAAnimations:
+		m.forceReduceAnimations = false
+		m.dialog.CloseDialog(dialog.SSHAnimationsID)
+	case dialog.ActionPersistSSHAutoReduce:
+		m.forceReduceAnimations = true
+		if err := m.com.Workspace.SetSSHAnimationMode(config.ScopeGlobal, "reduce"); err != nil {
+			return util.ReportError(err)
+		}
+		m.dialog.CloseDialog(dialog.SSHAnimationsID)
+	case dialog.ActionPersistSSHNever:
+		m.forceReduceAnimations = false
+		if err := m.com.Workspace.SetSSHAnimationMode(config.ScopeGlobal, "never"); err != nil {
+			return util.ReportError(err)
+		}
+		m.dialog.CloseDialog(dialog.SSHAnimationsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
@@ -3486,6 +3532,18 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 	m.updateLayoutAndSize()
 
 	return nil
+}
+
+// shouldReduceAnimations returns whether animations should be reduced.
+// It considers both the config setting and runtime override from SSH dialog.
+func (m *UI) shouldReduceAnimations() bool {
+	if m.forceReduceAnimations {
+		return true
+	}
+	if m.com == nil || m.com.Config() == nil {
+		return false
+	}
+	return m.com.Config().ShouldReduceAnimations()
 }
 
 // updateLayoutAndSize updates the layout and sizes of UI components.

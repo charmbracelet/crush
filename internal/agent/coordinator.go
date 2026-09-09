@@ -653,9 +653,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 						"error", err,
 					)
 
-					fallbackMergeOptions := make(map[string]any)
-					fallbackMergeOptions["extra_body"] = make(map[string]any)
-					fallbackMergeOptions["extra_body"].(map[string]any)["top_k"] = *topK
+					fallbackMergeOptions := map[string]any{
+						"extra_body": map[string]any{"top_k": *topK},
+					}
 					parsed, err := openaicompat.ParseOptions(fallbackMergeOptions)
 					if err == nil {
 						options[openaicompat.Name] = parsed

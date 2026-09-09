@@ -10,8 +10,10 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/permission/testutil"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,8 +41,18 @@ func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
 }
 
+func (m *mockBashPermissionService) SetPermissionMode(mode permission.PermissionMode) {}
+
+func (m *mockBashPermissionService) PermissionMode() permission.PermissionMode {
+	return permission.PermissionModeNormal
+}
+
 func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
+}
+
+func (m *mockBashPermissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
+	return make(<-chan pubsub.Event[permission.ModeChangedEvent])
 }
 
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
@@ -87,6 +99,7 @@ type recordingPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 	requestCount int
 	allow        bool
+	mode         permission.PermissionMode
 }
 
 func (m *recordingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
@@ -114,58 +127,118 @@ func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context)
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
+func (m *recordingPermissionService) SetPermissionMode(mode permission.PermissionMode) { m.mode = mode }
+
+func (m *recordingPermissionService) PermissionMode() permission.PermissionMode { return m.mode }
+
+func (m *recordingPermissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
+	return make(<-chan pubsub.Event[permission.ModeChangedEvent])
+}
+
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
-	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	permissions := &testutil.MockPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model")
+	return NewBashTool(permissions, workingDir, attribution, "test-model", nil)
 }
 
-func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.AgentTool, *recordingPermissionService) {
-	perms := &recordingPermissionService{
-		Broker: pubsub.NewBroker[permission.PermissionRequest](),
-		allow:  allow,
+func TestIsDangerousCommand(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   string
+		dangerous bool
+	}{
+		{
+			name:      "simple banned command - curl",
+			command:   "curl https://example.com",
+			dangerous: true,
+		},
+		{
+			name:      "simple banned command - sudo",
+			command:   "sudo apt-get update",
+			dangerous: true,
+		},
+		{
+			name:      "npm global install with --global",
+			command:   "npm install --global typescript",
+			dangerous: true,
+		},
+		{
+			name:      "npm global install with -g",
+			command:   "npm install -g typescript",
+			dangerous: true,
+		},
+		{
+			name:      "npm local install",
+			command:   "npm install typescript",
+			dangerous: false,
+		},
+		{
+			name:      "go test with -exec",
+			command:   "go test -exec ./malicious ./...",
+			dangerous: true,
+		},
+		{
+			name:      "go test without -exec",
+			command:   "go test ./...",
+			dangerous: false,
+		},
+		{
+			name:      "safe command - ls",
+			command:   "ls -la",
+			dangerous: false,
+		},
+		{
+			name:      "safe command - echo",
+			command:   "echo hello",
+			dangerous: false,
+		},
+		{
+			name:      "safe command - git",
+			command:   "git status",
+			dangerous: false,
+		},
+		{
+			name:      "pip install with --user",
+			command:   "pip install --user requests",
+			dangerous: true,
+		},
+		{
+			name:      "pip install without --user",
+			command:   "pip install requests",
+			dangerous: false,
+		},
+		{
+			name:      "brew install",
+			command:   "brew install wget",
+			dangerous: true,
+		},
+		{
+			// Quoting the command name must not evade detection.
+			name:      "quoted dangerous command name",
+			command:   `"brew" install wget`,
+			dangerous: true,
+		},
+		{
+			// Quoted arguments must still be seen by argument blockers.
+			name:      "quoted dangerous argument",
+			command:   `go test "-exec" ./malicious ./...`,
+			dangerous: true,
+		},
+		{
+			// Command substitution can't be resolved without executing, so
+			// it is treated conservatively as dangerous.
+			name:      "command substitution is conservative",
+			command:   "$(echo brew) install wget",
+			dangerous: true,
+		},
 	}
-	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(perms, workingDir, attribution, "test-model"), perms
-}
 
-func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
-	workingDir := t.TempDir()
-	tool, perms := newBashToolWithRecordingPerms(workingDir, true)
-	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
-
-	// ls && echo should trigger permission check.
-	resp := runBashTool(t, tool, ctx, BashParams{
-		Description: "chained ls",
-		Command:     "ls && echo done",
-	})
-
-	require.False(t, resp.IsError)
-	require.Equal(t, 1, perms.requestCount, "chained command should trigger permission request")
-
-	// Plain ls should NOT trigger permission check.
-	perms.requestCount = 0
-	resp = runBashTool(t, tool, ctx, BashParams{
-		Description: "plain ls",
-		Command:     "ls -la",
-	})
-
-	require.False(t, resp.IsError)
-	require.Equal(t, 0, perms.requestCount, "plain ls should not trigger permission request")
-}
-
-func TestBashTool_ChainedCommandsDenied(t *testing.T) {
-	workingDir := t.TempDir()
-	tool, perms := newBashToolWithRecordingPerms(workingDir, false)
-	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
-
-	resp := runBashTool(t, tool, ctx, BashParams{
-		Description: "chained ls denied",
-		Command:     "ls && rm -rf /",
-	})
-
-	require.Equal(t, 1, perms.requestCount)
-	require.Contains(t, resp.Content, "User denied permission")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := shell.IsCommandBlocked(tt.command, blockFuncs(defaultBlockedCommands))
+			assert.Equal(t, tt.dangerous, result, "command: %s", tt.command)
+		})
+	}
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
@@ -210,4 +283,133 @@ func TestTruncateOutputEmoji(t *testing.T) {
 	out := TruncateOutput(content)
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
 	require.Contains(t, out, "lines truncated")
+}
+
+func TestResolveBlockedCommands(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config uses the defaults", func(t *testing.T) {
+		t.Parallel()
+		require.ElementsMatch(t, defaultBlockedCommands, resolveBlockedCommands(nil))
+	})
+
+	t.Run("blocked_commands adds to the defaults", func(t *testing.T) {
+		t.Parallel()
+		got := resolveBlockedCommands(&config.Permissions{
+			BlockedCommands: []string{"kubectl", "terraform"},
+		})
+		require.Contains(t, got, "kubectl")
+		require.Contains(t, got, "terraform")
+		require.Contains(t, got, "curl", "defaults must still apply")
+	})
+
+	t.Run("allowed_commands removes defaults", func(t *testing.T) {
+		t.Parallel()
+		got := resolveBlockedCommands(&config.Permissions{
+			AllowedCommands: []string{"curl", "wget"},
+		})
+		require.NotContains(t, got, "curl")
+		require.NotContains(t, got, "wget")
+		require.Contains(t, got, "sudo", "unrelated defaults must stay")
+	})
+
+	t.Run("allowed_commands wins over blocked_commands", func(t *testing.T) {
+		t.Parallel()
+		got := resolveBlockedCommands(&config.Permissions{
+			BlockedCommands: []string{"kubectl"},
+			AllowedCommands: []string{"kubectl"},
+		})
+		require.NotContains(t, got, "kubectl")
+	})
+
+	t.Run("built-in order is preserved and duplicates collapsed", func(t *testing.T) {
+		t.Parallel()
+		got := resolveBlockedCommands(&config.Permissions{
+			BlockedCommands: []string{"curl", "kubectl", "kubectl"},
+		})
+		// The list is embedded verbatim in the tool description, so the
+		// defaults must keep their hand-grouped order and additions go last.
+		require.Equal(t, defaultBlockedCommands, got[:len(defaultBlockedCommands)])
+		require.Equal(t, []string{"kubectl"}, got[len(defaultBlockedCommands):],
+			"additions append once; a duplicate of a default is dropped")
+	})
+
+	t.Run("unblocking a command stops it reading as dangerous", func(t *testing.T) {
+		t.Parallel()
+		blocked := resolveBlockedCommands(&config.Permissions{AllowedCommands: []string{"curl"}})
+		require.False(t, shell.IsCommandBlocked("curl https://example.com", blockFuncs(blocked)))
+		require.True(t, shell.IsCommandBlocked("sudo rm -rf /", blockFuncs(blocked)))
+	})
+}
+
+// TestBashTool_ApprovedDangerousCommandRuns pins the rule that the permission
+// layer is the only gate. A dangerous command that was approved must reach the
+// shell, and it must do so without the tool consulting the permission mode:
+// the mode here stays Normal in every case, and approval alone decides.
+func TestBashTool_ApprovedDangerousCommandRuns(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	// `ifconfig` is on the default dangerous list, so it is prompted for.
+	// Approving it must not then be overridden by the exec-time block list.
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "approved dangerous command",
+		Command:     "ifconfig --help",
+	})
+
+	require.Equal(t, 1, perms.requestCount, "a dangerous command must be prompted for")
+	require.NotContains(t, resp.Content, "not allowed for security reasons",
+		"an approved command must not be re-blocked at exec time")
+}
+
+// TestBashTool_DeniedDangerousCommandDoesNotRun is the other half: denial at
+// the permission layer stops the command, no block list required.
+func TestBashTool_DeniedDangerousCommandDoesNotRun(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  false,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "denied dangerous command",
+		Command:     "ifconfig --help",
+	})
+
+	require.Equal(t, 1, perms.requestCount)
+	require.True(t, resp.IsError)
+}
+
+// TestBashTool_SafeReadOnlyPathStillEnforcesBlockList pins the one branch that
+// never asks: a safe-prefix command skips the permission request entirely, so
+// the block list stays on there as a backstop.
+func TestBashTool_SafeReadOnlyPathStillEnforcesBlockList(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "safe command",
+		Command:     "pwd",
+	})
+
+	require.Zero(t, perms.requestCount, "safe read-only commands must not prompt")
+	require.False(t, resp.IsError)
 }

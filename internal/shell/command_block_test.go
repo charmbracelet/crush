@@ -240,6 +240,42 @@ func TestArgumentsBlocker(t *testing.T) {
 			input:       []string{"go", "test", "-exec", "bash -c 'echo hello'"},
 			shouldBlock: true,
 		},
+		// Command name with a leading path must still match.
+		{
+			name:        "block path-qualified command",
+			cmd:         "pacman",
+			args:        nil,
+			flags:       []string{"-S"},
+			input:       []string{"/usr/bin/pacman", "-S", "package"},
+			shouldBlock: true,
+		},
+		// A short flag inside a cluster must still match.
+		{
+			name:        "block clustered short flag",
+			cmd:         "pacman",
+			args:        nil,
+			flags:       []string{"-S"},
+			input:       []string{"pacman", "-Syu", "package"},
+			shouldBlock: true,
+		},
+		// A single-dash long flag must not be split into short flags.
+		{
+			name:        "go test exec is not split",
+			cmd:         "go",
+			args:        []string{"test"},
+			flags:       []string{"-exec"},
+			input:       []string{"go", "test", "-exec", "./mal"},
+			shouldBlock: true,
+		},
+		// Args after "--" are positional, not flags.
+		{
+			name:        "double dash ends flags",
+			cmd:         "pacman",
+			args:        nil,
+			flags:       []string{"-S"},
+			input:       []string{"pacman", "--", "-S"},
+			shouldBlock: false,
+		},
 		{
 			name:        "go test exec",
 			cmd:         "go",
@@ -350,7 +386,7 @@ func TestSplitArgsFlags(t *testing.T) {
 			name:      "flag with equals sign",
 			input:     []string{"-exec=bash", "package"},
 			wantArgs:  []string{"package"},
-			wantFlags: []string{"-exec"},
+			wantFlags: []string{"-exec", "-e", "-x", "-e", "-c"},
 		},
 		{
 			name:      "long flag with equals sign",
@@ -362,7 +398,25 @@ func TestSplitArgsFlags(t *testing.T) {
 			name:      "flag with complex value",
 			input:     []string{`-exec="bash -c 'echo hello'"`, "test"},
 			wantArgs:  []string{"test"},
-			wantFlags: []string{"-exec"},
+			wantFlags: []string{"-exec", "-e", "-x", "-e", "-c"},
+		},
+		{
+			name:      "clustered short flags expand",
+			input:     []string{"-Syu", "package"},
+			wantArgs:  []string{"package"},
+			wantFlags: []string{"-Syu", "-S", "-y", "-u"},
+		},
+		{
+			name:      "double dash ends flag parsing",
+			input:     []string{"-g", "--", "-f", "file"},
+			wantArgs:  []string{"-f", "file"},
+			wantFlags: []string{"-g"},
+		},
+		{
+			name:      "bare dash is a positional arg",
+			input:     []string{"-"},
+			wantArgs:  []string{"-"},
+			wantFlags: []string{},
 		},
 	}
 
@@ -371,6 +425,103 @@ func TestSplitArgsFlags(t *testing.T) {
 			args, flags := splitArgsFlags(tt.input)
 			require.Equal(t, tt.wantArgs, args, "args mismatch")
 			require.Equal(t, tt.wantFlags, flags, "flags mismatch")
+		})
+	}
+}
+
+func TestIsCommandBlocked(t *testing.T) {
+	t.Parallel()
+
+	blockedCurl := CommandsBlocker([]string{"curl"})
+
+	tests := []struct {
+		name     string
+		command  string
+		funcs    []BlockFunc
+		expected bool
+	}{
+		{
+			name:     "plain blocked command",
+			command:  "curl https://example.com",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "plain allowed command",
+			command:  "ls -la",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: false,
+		},
+		{
+			name:     "unparseable input is dangerous",
+			command:  "echo 'unterminated",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "command substitution is dangerous",
+			command:  "echo $(curl https://example.com)",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			// Regression: expand.Config.ProcSubst is called by mvdan.cc/sh
+			// without a nil guard, so process substitution used to panic
+			// here instead of failing closed. Crash of 2026-07-30.
+			name:     "process substitution is dangerous, not a panic",
+			command:  `diff -r /tmp/a /tmp/b <(true) 2>/dev/null`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			// Output process substitution hangs off a Redirect node rather
+			// than a CallExpr argument; the walker expands redirect words
+			// too, so it fails closed like the argument form.
+			name:     "output process substitution is dangerous",
+			command:  `echo hi > >(cat)`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "input process substitution via redirect is dangerous",
+			command:  `cat < <(echo hello)`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "blocked command hidden in redirect proc subst is caught",
+			command:  `echo data > >(curl https://example.com)`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "plain redirect is fine",
+			command:  `echo hi > /tmp/out.txt`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: false,
+		},
+		{
+			name:     "redirect with variable filename is fine",
+			command:  `echo hi > "$OUT"`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: false,
+		},
+		{
+			// The exact shape of the command that crashed in production:
+			// proc subst combined with a command substitution and a loop.
+			name: "full crash repro command",
+			command: `cd /somewhere && echo "=== verify ===" && diff -r /tmp/a/docs /tmp/a/internal <(true) 2>/dev/null; for f in $(cd /tmp/a && find . -type f | sed 's|^\./||'); do
+  if ! diff -q "/tmp/a/$f" "$f" >/dev/null 2>&1; then echo "DIFFERS: $f"; fi
+done; echo "=== done ==="`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.expected, IsCommandBlocked(tc.command, tc.funcs))
 		})
 	}
 }

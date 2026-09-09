@@ -73,8 +73,6 @@ var (
 	orphanThinkTagRegex = regexp.MustCompile(`</?think>`)
 )
 
-const maxModelRetries = 10
-
 type SessionAgentCall struct {
 	SessionID string
 	// RunID, when non-empty, is the caller-supplied correlator that
@@ -179,6 +177,7 @@ type sessionAgent struct {
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
+	maxRetries           *int
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -231,6 +230,7 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	MaxRetries           *int
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -251,6 +251,7 @@ func NewSessionAgent(
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		maxRetries:           opts.MaxRetries,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
@@ -261,6 +262,14 @@ func NewSessionAgent(
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
 	}
+}
+
+func (a *sessionAgent) retryOption() fantasy.AgentOption {
+	maxRetries := fantasy.DefaultRetryOptions().MaxRetries
+	if a.maxRetries != nil {
+		maxRetries = *a.maxRetries
+	}
+	return fantasy.WithMaxRetries(maxRetries)
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
@@ -688,7 +697,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		largeModel.Model,
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
-		fantasy.WithMaxRetries(maxModelRetries),
+		a.retryOption(),
 		fantasy.WithUserAgent(userAgent),
 	)
 
@@ -1374,7 +1383,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	agent := fantasy.NewAgent(
 		largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
-		fantasy.WithMaxRetries(maxModelRetries),
+		a.retryOption(),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1763,7 +1772,8 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			m,
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
-			fantasy.WithMaxRetries(maxModelRetries),
+			// Title generation is best-effort and must not extend detached work.
+			fantasy.WithMaxRetries(0),
 			fantasy.WithUserAgent(userAgent),
 		)
 	}

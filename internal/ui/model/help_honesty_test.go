@@ -20,13 +20,13 @@ func TestHelpHonesty_ShortHelpShowsRemappedKeys(t *testing.T) {
 	u.keyMap = DefaultKeyMap()
 
 	warnings := ApplyKeybinds(&u.keyMap, map[string][]string{
-		"global.tab": {"ctrl+t"},
+		"global.tab": {"f5"},
 	})
 	require.Empty(t, warnings)
 
 	for _, b := range u.ShortHelp() {
 		if b.Help().Desc == "focus chat" {
-			require.Equal(t, "ctrl+t", b.Help().Key)
+			require.Equal(t, "f5", b.Help().Key)
 			return
 		}
 	}

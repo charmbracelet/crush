@@ -21,7 +21,6 @@ updates:
       - dependency-name: github.com/charmbracelet/lipgloss/v2
         versions:
           - v2.0.0-beta1
-      - dependency-name: mvdan.cc/sh/moreinterp
 
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -325,6 +325,15 @@ When running non-trivial bash commands (especially those that modify the system)
 - Avoid interactive commands - use non-interactive versions (e.g., `npm init -y` not `npm init`)
 - Combine related commands to save time (e.g., `git status && git diff HEAD && git log -n 3`)
 </bash_commands>
+{{if .Scheduling}}
+<scheduling>
+**Prefer the CronCreate / CronList / CronDelete tools over bash timers, sleep loops, and wait commands.** Cron tasks are durable, inspectable, and survive session restarts; a `bash sleep` or backgrounded polling loop is none of those things and dies with the session.
+
+- **Use a single recurring task instead of many one-shots.** If something needs to run every 5 minutes for the next hour, create one recurring task (`"*/5 * * * *"`, `recurring: true`) — not 12 separate one-shots. Five one-shots where one recurring task would do is a defect: it clutters the task list, each one is a separate tool call, and there is nothing to cancel when the work is done.
+- **One-shots are for genuine one-offs**: "remind me in 10 minutes", "check the build at 2:30pm today". If the work repeats, use a recurring schedule.
+- **Call `date` first** to get the actual current time before computing cron fields — the `<env>` start time goes stale.
+</scheduling>
+{{end -}}
 </tool_usage>
 
 <proactiveness>
@@ -373,6 +382,7 @@ Working directory: {{.WorkingDir}}
 Is directory a git repo: {{if .IsGitRepo}}yes{{else}}no{{end}}
 Platform: {{.Platform}}
 Today's date: {{.Date}}
+Current time: {{.Time}}
 {{if .GitStatus}}
 
 Git status (snapshot at conversation start - may be outdated):

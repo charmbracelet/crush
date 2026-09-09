@@ -57,6 +57,7 @@ type Commands struct {
 	hasSession bool
 	hasTodos   bool
 	hasQueue   bool
+	hasCron    bool
 	selected   CommandType
 
 	spinner spinner.Model
@@ -78,7 +79,7 @@ type Commands struct {
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue, hasCron bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -86,6 +87,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		hasSession:     hasSession,
 		hasTodos:       hasTodos,
 		hasQueue:       hasQueue,
+		hasCron:        hasCron,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
@@ -517,16 +519,20 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "Disable Docker MCP Catalog", "", ActionDisableDockerMCP{}))
 	}
 
-	if c.hasTodos || c.hasQueue {
-		var label string
-		switch {
-		case c.hasTodos && c.hasQueue:
-			label = "Toggle To-Dos/Queue"
-		case c.hasQueue:
-			label = "Toggle Queue"
-		default:
-			label = "Toggle To-Dos"
+	// ctrl+t expands every section that has content, so the label names all of
+	// them rather than just the first.
+	if c.hasTodos || c.hasQueue || c.hasCron {
+		var sections []string
+		if c.hasTodos {
+			sections = append(sections, "To-Dos")
 		}
+		if c.hasQueue {
+			sections = append(sections, "Queue")
+		}
+		if c.hasCron {
+			sections = append(sections, "Scheduled")
+		}
+		label := "Toggle " + strings.Join(sections, "/")
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
 	}
 

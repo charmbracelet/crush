@@ -1,0 +1,1 @@
+Cancel a scheduled task by ID, mimicking the CronDelete tool in Claude Code and Codex. Takes the task ID returned by CronCreate or shown by CronList. Deletion stops all future fires. Only tasks belonging to the current session can be deleted.

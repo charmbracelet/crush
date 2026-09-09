@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -44,9 +45,10 @@ func (s *stubCoordinator) IsBusy() bool  { return false }
 func (s *stubCoordinator) IsSessionBusy(id string) bool {
 	return s.busy[id]
 }
-func (s *stubCoordinator) QueuedPrompts(string) int          { return 0 }
-func (s *stubCoordinator) QueuedPromptsList(string) []string { return nil }
-func (s *stubCoordinator) ClearQueue(string)                 {}
+func (s *stubCoordinator) QueuedPrompts(string) int              { return 0 }
+func (s *stubCoordinator) QueuedPromptsList(string) []string     { return nil }
+func (s *stubCoordinator) ClearQueue(string)                     {}
+func (s *stubCoordinator) ListCronTasks(string) []scheduler.Task { return nil }
 func (s *stubCoordinator) Summarize(context.Context, string) error {
 	return nil
 }

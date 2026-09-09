@@ -1,0 +1,1 @@
+List all scheduled tasks in the current session, mimicking the CronList tool in Claude Code and Codex. Takes no parameters. Returns each task's ID, cron schedule, prompt, recurrence, durability, run count, and next fire time. Use CronDelete with an ID to cancel a task.

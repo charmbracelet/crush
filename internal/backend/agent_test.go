@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/scheduler"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -54,6 +55,7 @@ func (c *blockingCoordinator) IsSessionBusy(string) bool                        
 func (c *blockingCoordinator) QueuedPrompts(string) int                          { return 0 }
 func (c *blockingCoordinator) QueuedPromptsList(string) []string                 { return nil }
 func (c *blockingCoordinator) ClearQueue(string)                                 {}
+func (c *blockingCoordinator) ListCronTasks(string) []scheduler.Task             { return nil }
 func (c *blockingCoordinator) Summarize(context.Context, string) error           { return nil }
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }

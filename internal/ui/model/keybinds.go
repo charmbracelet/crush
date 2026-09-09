@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
@@ -16,13 +17,19 @@ import (
 
 // ApplyKeybinds overlays user overrides onto km, which must already hold
 // defaults from DefaultKeyMap. Unknown actions are skipped with a
-// warning; the default stands.
+// warning; the default stands. Overrides that collide with another
+// action in an overlapping dispatch domain warn as well.
 func ApplyKeybinds(km *KeyMap, overrides map[string][]string) []string {
 	var warnings []string
 	for action, keys := range overrides {
 		b := bindingFor(km, action)
 		if b == nil {
-			warnings = append(warnings, fmt.Sprintf("unknown keybind action %q; keeping default", action))
+			// completions.* and dialog.close are registry actions
+			// too, consumed outside this keymap; they are not
+			// unknown.
+			if scope, _, _ := strings.Cut(action, "."); scope != "completions" && scope != "dialog" {
+				warnings = append(warnings, fmt.Sprintf("unknown keybind action %q; keeping default", action))
+			}
 			continue
 		}
 		if len(keys) == 0 {
@@ -35,10 +42,63 @@ func ApplyKeybinds(km *KeyMap, overrides map[string][]string) []string {
 		b.SetKeys(normalized...)
 		b.SetHelp(normalized[0], b.Help().Desc)
 	}
-	// Sort so repeated runs warn in the same order; map iteration
-	// alone would shuffle them.
+	// Conflicts and unknown actions, sorted so repeated runs warn in
+	// the same order; map iteration alone would shuffle them.
+	warnings = append(warnings, conflictWarnings(km, overrides)...)
 	slices.Sort(warnings)
 	return warnings
+}
+
+// conflictWarnings reports overridden actions whose new keys collide
+// with another action in an overlapping dispatch domain. Global keys
+// run inside every focus branch, so they overlap everything; editor,
+// chat, and initialize keys only see their own scope. Dialog and
+// completions keys are modal when active and never collide.
+func conflictWarnings(km *KeyMap, overrides map[string][]string) []string {
+	seen := make(map[string]bool)
+	var warnings []string
+	for action := range overrides {
+		scope, _, _ := strings.Cut(action, ".")
+		if scope == "dialog" || scope == "completions" {
+			continue
+		}
+		b := bindingFor(km, action)
+		if b == nil {
+			continue
+		}
+		for _, other := range keybinds.Actions() {
+			if other == action || !overlaps(scope, other) {
+				continue
+			}
+			ob := bindingFor(km, other)
+			if ob == nil {
+				continue
+			}
+			for _, k := range b.Keys() {
+				if !slices.Contains(ob.Keys(), k) {
+					continue
+				}
+				pair := action + "|" + other
+				reverse := other + "|" + action
+				if seen[pair] || seen[reverse] {
+					continue
+				}
+				seen[pair] = true
+				warnings = append(warnings, fmt.Sprintf("keybind %q and %q both bind %q; first match wins", action, other, k))
+			}
+		}
+	}
+	return warnings
+}
+
+// overlaps reports whether a key on scope can shadow or be shadowed by
+// a key on the other action's scope.
+func overlaps(scope, other string) bool {
+	otherScope, _, _ := strings.Cut(other, ".")
+	if otherScope == "dialog" || otherScope == "completions" {
+		return false
+	}
+	return scope == "global" || otherScope == "global" || scope == otherScope
 }
 
 // bindingFor returns the binding for a registry action, or nil when
@@ -155,13 +215,16 @@ func bindingFor(km *KeyMap, action string) *key.Binding {
 // fans the result out to every consumer that reads bindings by value:
 // the completions popup, the dialog close key, the chat item copy and
 // scroll keys, and the textarea select-all binding. Call once, before
-// sub-components are constructed.
-func applyUserKeybinds(com *common.Common, km *KeyMap, ta *textarea.Model, comp *completions.Completions) {
+// sub-components are constructed. Returns the warnings so the caller
+// can surface them in the UI; slog alone lands in the log file, which
+// TUI users never read.
+func applyUserKeybinds(com *common.Common, km *KeyMap, ta *textarea.Model, comp *completions.Completions) []string {
 	overrides := com.Config().Keybinds
 	if len(overrides) == 0 {
-		return
+		return nil
 	}
-	for _, w := range ApplyKeybinds(km, overrides) {
+	warnings := ApplyKeybinds(km, overrides)
+	for _, w := range warnings {
 		slog.Warn(w)
 	}
 	if keys, ok := overrides["dialog.close"]; ok && len(keys) > 0 {
@@ -176,6 +239,7 @@ func applyUserKeybinds(com *common.Common, km *KeyMap, ta *textarea.Model, comp 
 	ckm := comp.KeyMap()
 	ckm.Apply(overrides)
 	comp.SetKeyMap(ckm)
+	return warnings
 }
 
 // firstKey returns the first key of a binding for help text, or the

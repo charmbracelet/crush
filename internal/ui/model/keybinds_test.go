@@ -80,3 +80,60 @@ func TestApplyKeybinds_WarningsSorted(t *testing.T) {
 	require.Len(t, warnings, 2)
 	require.Less(t, warnings[0], warnings[1])
 }
+
+func TestApplyKeybinds_ConflictSameDomainWarns(t *testing.T) {
+	t.Parallel()
+	km := DefaultKeyMap()
+	warnings := ApplyKeybinds(&km, map[string][]string{
+		"chat.copy": {"j"},
+	})
+
+	require.Len(t, warnings, 1)
+	require.Contains(t, warnings[0], `"chat.copy"`)
+	require.Contains(t, warnings[0], `"chat.down"`)
+	require.Contains(t, warnings[0], `"j"`)
+}
+
+func TestApplyKeybinds_GlobalOverlapsEverything(t *testing.T) {
+	t.Parallel()
+	km := DefaultKeyMap()
+	warnings := ApplyKeybinds(&km, map[string][]string{
+		"editor.send_message": {"ctrl+p"},
+	})
+
+	require.Len(t, warnings, 1)
+	require.Contains(t, warnings[0], `"global.commands"`)
+}
+
+func TestApplyKeybinds_CrossFocusDomainSilent(t *testing.T) {
+	t.Parallel()
+	km := DefaultKeyMap()
+	// ctrl+n is chat.new_session's key; editor is a separate focus.
+	warnings := ApplyKeybinds(&km, map[string][]string{
+		"editor.send_message": {"ctrl+n"},
+	})
+
+	require.Empty(t, warnings)
+}
+
+func TestApplyKeybinds_ModalScopesSilent(t *testing.T) {
+	t.Parallel()
+	km := DefaultKeyMap()
+	// Dialog and completions keys are modal; overlapping globals and
+	// editor keys is expected there.
+	warnings := ApplyKeybinds(&km, map[string][]string{
+		"dialog.close":       {"esc"},
+		"completions.cancel": {"esc"},
+		"completions.up":     {"ctrl+p"},
+	})
+
+	require.Empty(t, warnings)
+}
+
+func TestApplyKeybinds_NoConflictWithoutOverrides(t *testing.T) {
+	t.Parallel()
+	km := DefaultKeyMap()
+	// Defaults share keys across scopes by design; only user
+	// overrides are checked.
+	require.Empty(t, ApplyKeybinds(&km, nil))
+}

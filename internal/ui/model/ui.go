@@ -386,6 +386,12 @@ type UI struct {
 		index    int
 		draft    string
 	}
+
+	// keybindWarnings holds config problems found while applying
+	// keybind overrides (unknown actions, same-domain collisions).
+	// Init reports them through the status bar because slog only
+	// reaches the log file.
+	keybindWarnings []string
 }
 
 // New creates a new instance of the [UI] model.
@@ -426,7 +432,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		com.Styles.Completions.Match,
 	)
 
-	applyUserKeybinds(com, &keyMap, &ta, comp)
+	keybindWarnings := applyUserKeybinds(com, &keyMap, &ta, comp)
 
 	todoSpinner := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
@@ -469,6 +475,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		initialSessionID:    initialSessionID,
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
+		keybindWarnings:     keybindWarnings,
 	}
 
 	status := NewStatus(com, ui)
@@ -527,6 +534,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
+	// Surface keybind config problems where the user is looking:
+	// slog alone only reaches the log file.
+	for _, w := range m.keybindWarnings {
+		cmds = append(cmds, util.ReportWarn(w))
+	}
 	if m.state == uiOnboarding {
 		if cmd := m.openModelsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)

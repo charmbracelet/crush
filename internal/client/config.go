@@ -252,6 +252,24 @@ func (c *Client) ReadSkill(ctx context.Context, id, skillID string) (*proto.Read
 	return &result, nil
 }
 
+// ReloadModelDiscovery triggers model re-discovery on the server and returns
+// the number of newly discovered models.
+func (c *Client) ReloadModelDiscovery(ctx context.Context, id string) (int, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/reload-discovery", id), nil, nil, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to reload model discovery: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("failed to reload model discovery: status code %d", rsp.StatusCode)
+	}
+	var result proto.ReloadModelDiscoveryResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("failed to decode reload discovery response: %w", err)
+	}
+	return result.Added, nil
+}
+
 // MCPResourceContents holds the contents of an MCP resource.
 type MCPResourceContents struct {
 	URI      string `json:"uri"`

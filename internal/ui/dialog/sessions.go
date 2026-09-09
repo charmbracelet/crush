@@ -466,7 +466,7 @@ func (s *Session) confirmRenameSession() Action {
 	}
 
 	newTitle := strings.TrimSpace(sessionItem.InputValue())
-	if newTitle == "" || newTitle == sessionItem.Session.Title {
+	if newTitle == "" || newTitle == sessionItem.Title {
 		return nil
 	}
 	session := sessionItem.Session

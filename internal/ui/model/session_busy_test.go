@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -37,17 +38,19 @@ type countingWorkspace struct {
 	lspStates map[string]workspace.LSPClientInfo
 	lspDiags  map[string]lsp.DiagnosticCounts
 
-	readyCalls      int
-	agentBusyCalls  int
-	queuedCalls     int
-	queueListCalls  int
-	permCalls       int
-	permSetCalls    int
-	clearQueueCalls int
-	cancelCalls     int
-	modelCalls      int
-	lspStateCalls   int
-	lspDiagCalls    int
+	readyCalls       int
+	agentBusyCalls   int
+	queuedCalls      int
+	queueListCalls   int
+	permCalls        int
+	permSetCalls     int
+	clearQueueCalls  int
+	cancelCalls      int
+	modelCalls       int
+	modelUpdateCalls int
+	mcpStateCalls    int
+	lspStateCalls    int
+	lspDiagCalls     int
 }
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
@@ -84,6 +87,16 @@ func (w *countingWorkspace) AgentCancel(string)     { w.cancelCalls++ }
 func (w *countingWorkspace) AgentModel() workspace.AgentModel {
 	w.modelCalls++
 	return w.model
+}
+
+func (w *countingWorkspace) UpdateAgentModel(context.Context) error {
+	w.modelUpdateCalls++
+	return nil
+}
+
+func (w *countingWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
+	w.mcpStateCalls++
+	return nil
 }
 
 func (w *countingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
@@ -123,7 +136,8 @@ func (w *countingWorkspace) resetCounters() {
 	w.readyCalls, w.agentBusyCalls = 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
-	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
+	w.modelCalls, w.modelUpdateCalls, w.mcpStateCalls = 0, 0, 0
+	w.lspStateCalls, w.lspDiagCalls = 0, 0
 }
 
 // newBusyUI builds a UI wired to the stub workspace with an active session
@@ -143,6 +157,7 @@ func newBusyUI(ws *countingWorkspace) *UI {
 		keyMap:      DefaultKeyMap(),
 		dialog:      dialog.NewOverlay(),
 		attachments: attachments.New(nil, attachments.Keymap{}),
+		mcpStates:   make(map[string]mcp.ClientInfo),
 	}
 }
 
@@ -675,12 +690,7 @@ func TestAgentModelChangedRefreshesModel(t *testing.T) {
 		"the refreshed model must land in the cache")
 }
 
-// TestMCPStateChangedRefreshesModel pins the fourth UpdateAgentModel call
-// site: an MCP state change rebuilds the agent, which can change the
-// effective model, so the memoized ready/model state must be re-fetched
-// off-thread afterwards — the edge the updateAgentModelCmd helper exists to
-// make unforgettable.
-func TestMCPStateChangedRefreshesModel(t *testing.T) {
+func TestMCPStateChangedRefreshesModelWhenToolsChange(t *testing.T) {
 	pinTTLs(t)
 
 	ws := &countingWorkspace{
@@ -692,18 +702,41 @@ func TestMCPStateChangedRefreshesModel(t *testing.T) {
 	m.agentModel = workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "pre-mcp-model"}}
 	ws.resetCounters()
 
-	// handleStateChanged sequences the rebuild with agentModelChangedCmd;
-	// tea.Sequence's wrapper msg is unexported, so drive the two steps the
-	// way the runtime would: run the cmd (the stub records the call), then
-	// deliver the invalidation message.
-	_ = m.handleStateChanged()()
+	event := mcp.Event{
+		Name:   "server",
+		State:  mcp.StateConnected,
+		Counts: mcp.Counts{Tools: 1},
+	}
+	_ = m.handleStateChanged(event)()
 	_, cmd := m.Update(agentModelChangedMsg{})
-	require.True(t, m.busyFetchInFlight, "an MCP state change must schedule a ready/model refresh")
+	require.True(t, m.busyFetchInFlight, "an MCP tool change must schedule a ready/model refresh")
 	runCmds(m, cmd)
 
 	require.True(t, m.agentReady)
 	require.Equal(t, "post-mcp-model", m.agentModel.ModelCfg.Model,
-		"an MCP state change must refresh the memoized model")
+		"an MCP tool change must refresh the memoized model")
+}
+
+func TestMCPStateChangedDoesNotRebuildAgentWhenToolsAreUnchanged(t *testing.T) {
+	ws := &countingWorkspace{}
+	m := newBusyUI(ws)
+	m.mcpStates["server"] = mcp.ClientInfo{
+		Name:   "server",
+		State:  mcp.StateConnected,
+		Counts: mcp.Counts{Tools: 1},
+	}
+
+	event := mcp.Event{
+		Name:   "server",
+		State:  mcp.StateConnected,
+		Counts: mcp.Counts{Tools: 1, Prompts: 2},
+	}
+	msg := m.handleStateChanged(event)()
+
+	_, ok := msg.(mcpStateChangedMsg)
+	require.True(t, ok, "unchanged tools must only refresh cached MCP state")
+	require.Zero(t, ws.modelUpdateCalls, "unchanged tools must not rebuild the agent")
+	require.Equal(t, 1, ws.mcpStateCalls, "the MCP state cache must still refresh")
 }
 
 // TestLSPEventRefreshIsOffThreadAndDeduped pins the LSP side of the

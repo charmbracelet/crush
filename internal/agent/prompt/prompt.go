@@ -40,6 +40,7 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	NotebookEnabled    bool
 }
 
 type ContextFile struct {
@@ -206,14 +207,15 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
-		Provider:      provider,
-		Model:         model,
-		Config:        *cfg,
-		WorkingDir:    filepath.ToSlash(workingDir),
-		IsGitRepo:     isGit,
-		Platform:      platform,
-		Date:          p.now().Format("1/2/2006"),
-		AvailSkillXML: availSkillXML,
+		Provider:        provider,
+		Model:           model,
+		Config:          *cfg,
+		WorkingDir:      filepath.ToSlash(workingDir),
+		IsGitRepo:       isGit,
+		Platform:        platform,
+		Date:            p.now().Format("1/2/2006"),
+		AvailSkillXML:   availSkillXML,
+		NotebookEnabled: cfg.Options.NotebookIsEnabled(),
 	}
 	if isGit {
 		var err error

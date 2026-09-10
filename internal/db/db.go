@@ -30,6 +30,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createMessageStmt, err = db.PrepareContext(ctx, createMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateMessage: %w", err)
 	}
+	if q.createNotebookEntryStmt, err = db.PrepareContext(ctx, createNotebookEntry); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateNotebookEntry: %w", err)
+	}
+	if q.createNotebookTagStmt, err = db.PrepareContext(ctx, createNotebookTag); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateNotebookTag: %w", err)
+	}
 	if q.createSessionStmt, err = db.PrepareContext(ctx, createSession); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSession: %w", err)
 	}
@@ -38,6 +44,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteMessageStmt, err = db.PrepareContext(ctx, deleteMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteMessage: %w", err)
+	}
+	if q.deleteNotebookEntriesBySessionStmt, err = db.PrepareContext(ctx, deleteNotebookEntriesBySession); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteNotebookEntriesBySession: %w", err)
 	}
 	if q.deleteSessionStmt, err = db.PrepareContext(ctx, deleteSession); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSession: %w", err)
@@ -71,6 +80,27 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getMessageStmt, err = db.PrepareContext(ctx, getMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMessage: %w", err)
+	}
+	if q.getNotebookEntriesStmt, err = db.PrepareContext(ctx, getNotebookEntries); err != nil {
+		return nil, fmt.Errorf("error preparing query GetNotebookEntries: %w", err)
+	}
+	if q.getNotebookEntriesByEventTypeStmt, err = db.PrepareContext(ctx, getNotebookEntriesByEventType); err != nil {
+		return nil, fmt.Errorf("error preparing query GetNotebookEntriesByEventType: %w", err)
+	}
+	if q.getNotebookEntriesByTurnStmt, err = db.PrepareContext(ctx, getNotebookEntriesByTurn); err != nil {
+		return nil, fmt.Errorf("error preparing query GetNotebookEntriesByTurn: %w", err)
+	}
+	if q.getNotebookEntryCountStmt, err = db.PrepareContext(ctx, getNotebookEntryCount); err != nil {
+		return nil, fmt.Errorf("error preparing query GetNotebookEntryCount: %w", err)
+	}
+	if q.getNotebookTagsByEntryStmt, err = db.PrepareContext(ctx, getNotebookTagsByEntry); err != nil {
+		return nil, fmt.Errorf("error preparing query GetNotebookTagsByEntry: %w", err)
+	}
+	if q.getNotebookTokenCountStmt, err = db.PrepareContext(ctx, getNotebookTokenCount); err != nil {
+		return nil, fmt.Errorf("error preparing query GetNotebookTokenCount: %w", err)
+	}
+	if q.getOldestNotebookEntriesStmt, err = db.PrepareContext(ctx, getOldestNotebookEntries); err != nil {
+		return nil, fmt.Errorf("error preparing query GetOldestNotebookEntries: %w", err)
 	}
 	if q.getRecentActivityStmt, err = db.PrepareContext(ctx, getRecentActivity); err != nil {
 		return nil, fmt.Errorf("error preparing query GetRecentActivity: %w", err)
@@ -129,8 +159,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
 	}
+	if q.searchNotebookByTagStmt, err = db.PrepareContext(ctx, searchNotebookByTag); err != nil {
+		return nil, fmt.Errorf("error preparing query SearchNotebookByTag: %w", err)
+	}
+	if q.searchNotebookByTextStmt, err = db.PrepareContext(ctx, searchNotebookByText); err != nil {
+		return nil, fmt.Errorf("error preparing query SearchNotebookByText: %w", err)
+	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
+	}
+	if q.updateNotebookCompressionStmt, err = db.PrepareContext(ctx, updateNotebookCompression); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateNotebookCompression: %w", err)
 	}
 	if q.updateSessionStmt, err = db.PrepareContext(ctx, updateSession); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSession: %w", err)
@@ -153,6 +192,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing createMessageStmt: %w", cerr)
 		}
 	}
+	if q.createNotebookEntryStmt != nil {
+		if cerr := q.createNotebookEntryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createNotebookEntryStmt: %w", cerr)
+		}
+	}
+	if q.createNotebookTagStmt != nil {
+		if cerr := q.createNotebookTagStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createNotebookTagStmt: %w", cerr)
+		}
+	}
 	if q.createSessionStmt != nil {
 		if cerr := q.createSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createSessionStmt: %w", cerr)
@@ -166,6 +215,11 @@ func (q *Queries) Close() error {
 	if q.deleteMessageStmt != nil {
 		if cerr := q.deleteMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteMessageStmt: %w", cerr)
+		}
+	}
+	if q.deleteNotebookEntriesBySessionStmt != nil {
+		if cerr := q.deleteNotebookEntriesBySessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteNotebookEntriesBySessionStmt: %w", cerr)
 		}
 	}
 	if q.deleteSessionStmt != nil {
@@ -221,6 +275,41 @@ func (q *Queries) Close() error {
 	if q.getMessageStmt != nil {
 		if cerr := q.getMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getMessageStmt: %w", cerr)
+		}
+	}
+	if q.getNotebookEntriesStmt != nil {
+		if cerr := q.getNotebookEntriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getNotebookEntriesStmt: %w", cerr)
+		}
+	}
+	if q.getNotebookEntriesByEventTypeStmt != nil {
+		if cerr := q.getNotebookEntriesByEventTypeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getNotebookEntriesByEventTypeStmt: %w", cerr)
+		}
+	}
+	if q.getNotebookEntriesByTurnStmt != nil {
+		if cerr := q.getNotebookEntriesByTurnStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getNotebookEntriesByTurnStmt: %w", cerr)
+		}
+	}
+	if q.getNotebookEntryCountStmt != nil {
+		if cerr := q.getNotebookEntryCountStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getNotebookEntryCountStmt: %w", cerr)
+		}
+	}
+	if q.getNotebookTagsByEntryStmt != nil {
+		if cerr := q.getNotebookTagsByEntryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getNotebookTagsByEntryStmt: %w", cerr)
+		}
+	}
+	if q.getNotebookTokenCountStmt != nil {
+		if cerr := q.getNotebookTokenCountStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getNotebookTokenCountStmt: %w", cerr)
+		}
+	}
+	if q.getOldestNotebookEntriesStmt != nil {
+		if cerr := q.getOldestNotebookEntriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getOldestNotebookEntriesStmt: %w", cerr)
 		}
 	}
 	if q.getRecentActivityStmt != nil {
@@ -318,9 +407,24 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
 		}
 	}
+	if q.searchNotebookByTagStmt != nil {
+		if cerr := q.searchNotebookByTagStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing searchNotebookByTagStmt: %w", cerr)
+		}
+	}
+	if q.searchNotebookByTextStmt != nil {
+		if cerr := q.searchNotebookByTextStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing searchNotebookByTextStmt: %w", cerr)
+		}
+	}
 	if q.updateMessageStmt != nil {
 		if cerr := q.updateMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateMessageStmt: %w", cerr)
+		}
+	}
+	if q.updateNotebookCompressionStmt != nil {
+		if cerr := q.updateNotebookCompressionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateNotebookCompressionStmt: %w", cerr)
 		}
 	}
 	if q.updateSessionStmt != nil {
@@ -374,9 +478,12 @@ type Queries struct {
 	tx                                   *sql.Tx
 	createFileStmt                       *sql.Stmt
 	createMessageStmt                    *sql.Stmt
+	createNotebookEntryStmt              *sql.Stmt
+	createNotebookTagStmt                *sql.Stmt
 	createSessionStmt                    *sql.Stmt
 	deleteFileStmt                       *sql.Stmt
 	deleteMessageStmt                    *sql.Stmt
+	deleteNotebookEntriesBySessionStmt   *sql.Stmt
 	deleteSessionStmt                    *sql.Stmt
 	deleteSessionFilesStmt               *sql.Stmt
 	deleteSessionMessagesStmt            *sql.Stmt
@@ -388,6 +495,13 @@ type Queries struct {
 	getLastAssistantMessageBySessionStmt *sql.Stmt
 	getLastSessionStmt                   *sql.Stmt
 	getMessageStmt                       *sql.Stmt
+	getNotebookEntriesStmt               *sql.Stmt
+	getNotebookEntriesByEventTypeStmt    *sql.Stmt
+	getNotebookEntriesByTurnStmt         *sql.Stmt
+	getNotebookEntryCountStmt            *sql.Stmt
+	getNotebookTagsByEntryStmt           *sql.Stmt
+	getNotebookTokenCountStmt            *sql.Stmt
+	getOldestNotebookEntriesStmt         *sql.Stmt
 	getRecentActivityStmt                *sql.Stmt
 	getSessionByIDStmt                   *sql.Stmt
 	getToolUsageStmt                     *sql.Stmt
@@ -407,7 +521,10 @@ type Queries struct {
 	listUserMessagesBySessionStmt        *sql.Stmt
 	recordFileReadStmt                   *sql.Stmt
 	renameSessionStmt                    *sql.Stmt
+	searchNotebookByTagStmt              *sql.Stmt
+	searchNotebookByTextStmt             *sql.Stmt
 	updateMessageStmt                    *sql.Stmt
+	updateNotebookCompressionStmt        *sql.Stmt
 	updateSessionStmt                    *sql.Stmt
 	updateSessionTitleAndUsageStmt       *sql.Stmt
 }
@@ -418,9 +535,12 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		tx:                                   tx,
 		createFileStmt:                       q.createFileStmt,
 		createMessageStmt:                    q.createMessageStmt,
+		createNotebookEntryStmt:              q.createNotebookEntryStmt,
+		createNotebookTagStmt:                q.createNotebookTagStmt,
 		createSessionStmt:                    q.createSessionStmt,
 		deleteFileStmt:                       q.deleteFileStmt,
 		deleteMessageStmt:                    q.deleteMessageStmt,
+		deleteNotebookEntriesBySessionStmt:   q.deleteNotebookEntriesBySessionStmt,
 		deleteSessionStmt:                    q.deleteSessionStmt,
 		deleteSessionFilesStmt:               q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:            q.deleteSessionMessagesStmt,
@@ -432,6 +552,13 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getLastAssistantMessageBySessionStmt: q.getLastAssistantMessageBySessionStmt,
 		getLastSessionStmt:                   q.getLastSessionStmt,
 		getMessageStmt:                       q.getMessageStmt,
+		getNotebookEntriesStmt:               q.getNotebookEntriesStmt,
+		getNotebookEntriesByEventTypeStmt:    q.getNotebookEntriesByEventTypeStmt,
+		getNotebookEntriesByTurnStmt:         q.getNotebookEntriesByTurnStmt,
+		getNotebookEntryCountStmt:            q.getNotebookEntryCountStmt,
+		getNotebookTagsByEntryStmt:           q.getNotebookTagsByEntryStmt,
+		getNotebookTokenCountStmt:            q.getNotebookTokenCountStmt,
+		getOldestNotebookEntriesStmt:         q.getOldestNotebookEntriesStmt,
 		getRecentActivityStmt:                q.getRecentActivityStmt,
 		getSessionByIDStmt:                   q.getSessionByIDStmt,
 		getToolUsageStmt:                     q.getToolUsageStmt,
@@ -451,7 +578,10 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listUserMessagesBySessionStmt:        q.listUserMessagesBySessionStmt,
 		recordFileReadStmt:                   q.recordFileReadStmt,
 		renameSessionStmt:                    q.renameSessionStmt,
+		searchNotebookByTagStmt:              q.searchNotebookByTagStmt,
+		searchNotebookByTextStmt:             q.searchNotebookByTextStmt,
 		updateMessageStmt:                    q.updateMessageStmt,
+		updateNotebookCompressionStmt:        q.updateNotebookCompressionStmt,
 		updateSessionStmt:                    q.updateSessionStmt,
 		updateSessionTitleAndUsageStmt:       q.updateSessionTitleAndUsageStmt,
 	}

@@ -374,12 +374,20 @@ type Options struct {
 	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
-	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
-	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
-	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
-	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
-	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	// Notebook configuration for per-event context summarization.
+	NotebookEnabled        *bool    `json:"notebook_enabled,omitempty" jsonschema:"description=Enable per-event context notebook for reducing token usage,default=true"`
+	NotebookRawTokenBudget int      `json:"notebook_raw_token_budget,omitempty" jsonschema:"description=Token budget for raw recent turns in notebook mode,default=25000"`
+	NotebookMaxTokens      int64    `json:"notebook_max_tokens,omitempty" jsonschema:"description=Maximum total tokens for notebook entries before compaction,default=100000"`
+	NotebookMaxEntryTokens int64    `json:"notebook_max_entry_tokens,omitempty" jsonschema:"description=Maximum tokens per notebook entry,default=1000"`
+	NotebookSyncMem0       *bool    `json:"notebook_sync_mem0,omitempty" jsonschema:"description=Sync notebook entries to mem0 for cross-session search,default=false"`
+	NotebookMemoryServer   string   `json:"notebook_memory_server,omitempty" jsonschema:"description=Name of the MCP server to use for mem0 cross-session memory sync and search,default=mem0"`
+	NotebookAutoInject     *bool    `json:"notebook_auto_inject,omitempty" jsonschema:"description=Auto-inject full notebook entries for files mentioned in the user message,default=false"`
+	InitializeAs           string   `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AutoLSP                *bool    `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+	Progress               *bool    `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+	Notifications          string   `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
+	DisabledSkills         []string `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	RequestTimeout         *int    `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -648,7 +656,7 @@ type Agent struct {
 	// This is the id of the system prompt used by the agent
 	Disabled bool `json:"disabled,omitempty"`
 
-	Model SelectedModelType `json:"model" jsonschema:"required,description=The model type to use for this agent,enum=large,enum=small,default=large"`
+	Model SelectedModelType `json:"model" jsonschema:"required,description=The model type (large/small) or a custom key from the models config to use for this agent,default=large"`
 
 	// The available tools for the agent
 	//  if this is nil, all tools are available
@@ -759,7 +767,7 @@ type Config struct {
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
-	Agents map[string]Agent `json:"-"`
+	Agents map[string]Agent `json:"agents,omitempty"`
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators
@@ -910,6 +918,8 @@ func allToolNames() []string {
 		"write",
 		"list_mcp_resources",
 		"read_mcp_resource",
+		"recall",
+		"notebook_search",
 	}
 }
 
@@ -962,6 +972,38 @@ func (c *Config) SetupAgents() {
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},
+	}
+
+	// Overlay user-defined agents from crush.json on top of the defaults so
+	// custom model and tool configuration survives SetupAgents.
+	for id, userAgent := range c.Agents {
+		merged, ok := agents[id]
+		if !ok {
+			agents[id] = userAgent
+			continue
+		}
+		if userAgent.Name != "" {
+			merged.Name = userAgent.Name
+		}
+		if userAgent.Description != "" {
+			merged.Description = userAgent.Description
+		}
+		if userAgent.Model != "" {
+			merged.Model = userAgent.Model
+		}
+		if userAgent.AllowedTools != nil {
+			merged.AllowedTools = userAgent.AllowedTools
+		}
+		if len(userAgent.ContextPaths) > 0 {
+			merged.ContextPaths = userAgent.ContextPaths
+		}
+		if userAgent.AllowedMCP != nil {
+			merged.AllowedMCP = userAgent.AllowedMCP
+		}
+		if userAgent.Disabled {
+			merged.Disabled = true
+		}
+		agents[id] = merged
 	}
 	c.Agents = agents
 }
@@ -1099,4 +1141,46 @@ func ptrValOr[T any](t *T, el T) T {
 		return el
 	}
 	return *t
+}
+
+// ptr returns a pointer to the given value. Useful for setting *bool
+// and *int fields with defaults.
+func ptr[T any](v T) *T {
+	return &v
+}
+
+// NotebookIsEnabled returns the resolved notebook-enabled setting,
+// defaulting to true when not explicitly set.
+func (o *Options) NotebookIsEnabled() bool {
+	if o.NotebookEnabled == nil {
+		return true
+	}
+	return *o.NotebookEnabled
+}
+
+// NotebookSyncMem0Enabled returns the resolved mem0 sync setting,
+// defaulting to false when not explicitly set.
+func (o *Options) NotebookSyncMem0Enabled() bool {
+	if o.NotebookSyncMem0 == nil {
+		return false
+	}
+	return *o.NotebookSyncMem0
+}
+
+// NotebookAutoInjectEnabled returns the resolved auto-inject setting,
+// defaulting to false when not explicitly set.
+func (o *Options) NotebookAutoInjectEnabled() bool {
+	if o.NotebookAutoInject == nil {
+		return false
+	}
+	return *o.NotebookAutoInject
+}
+
+// NotebookMemoryServerName returns the resolved memory server name,
+// defaulting to "mem0" when not explicitly set.
+func (o *Options) NotebookMemoryServerName() string {
+	if o.NotebookMemoryServer == "" {
+		return "mem0"
+	}
+	return o.NotebookMemoryServer
 }

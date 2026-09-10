@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/notebook"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -59,6 +60,14 @@ type App struct {
 	Permissions permission.Service
 	Questions   question.Service
 	FileTracker filetracker.Service
+
+	// Notebook provides per-event context summarization. Nil when
+	// notebook is disabled in config.
+	Notebook notebook.Service
+
+	// notebookModelResolver is set by the coordinator when models are
+	// available, so the notebook generator can obtain the small model.
+	notebookModelResolver *func() fantasy.LanguageModel
 
 	AgentCoordinator agent.Coordinator
 
@@ -126,6 +135,23 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 	}
+
+	// Initialize notebook service. Enabled by default; the model
+	// resolver is wired later by the coordinator when models are
+	// available. Until then, the generator falls back to simple
+	// entries without an LLM call.
+	notebookOpts := notebook.Options{
+		MaxEntryTokens:    cfg.Options.NotebookMaxEntryTokens,
+		MaxNotebookTokens: cfg.Options.NotebookMaxTokens,
+	}
+	var notebookModelResolver func() fantasy.LanguageModel
+	app.Notebook = notebook.NewService(q, notebook.NewLLMGenerator(func() fantasy.LanguageModel {
+		if notebookModelResolver != nil {
+			return notebookModelResolver()
+		}
+		return nil
+	}), notebookOpts)
+	app.notebookModelResolver = &notebookModelResolver
 
 	app.setupEvents()
 
@@ -685,18 +711,20 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
-		Config:      app.config,
-		Sessions:    app.Sessions,
-		Messages:    app.Messages,
-		Permissions: app.Permissions,
-		Questions:   app.Questions,
-		History:     app.History,
-		FileTracker: app.FileTracker,
-		LSPManager:  app.LSPManager,
-		Notify:      app.agentNotifications,
-		RunComplete: app.runCompletions,
-		Skills:      app.Skills,
-		Interactive: interactive,
+		Config:                app.config,
+		Sessions:              app.Sessions,
+		Messages:              app.Messages,
+		Permissions:           app.Permissions,
+		Questions:             app.Questions,
+		History:               app.History,
+		FileTracker:           app.FileTracker,
+		LSPManager:            app.LSPManager,
+		Notify:                app.agentNotifications,
+		RunComplete:           app.runCompletions,
+		Skills:                app.Skills,
+		Interactive:           interactive,
+		Notebook:              app.Notebook,
+		NotebookModelResolver: app.notebookModelResolver,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

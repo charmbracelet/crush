@@ -547,6 +547,18 @@ func (c *Config) NormalizeOptions() {
 	if c.Options.TUI.ExitBanner == "" {
 		c.Options.TUI.ExitBanner = ExitBannerDefault
 	}
+	// Notebook is enabled by default. Users can opt out by setting
+	// notebook_enabled: false in their config.
+	if c.Options.NotebookEnabled == nil {
+		c.Options.NotebookEnabled = ptr(true)
+	}
+	// mem0 sync and auto-inject default to false (opt-in).
+	if c.Options.NotebookSyncMem0 == nil {
+		c.Options.NotebookSyncMem0 = ptr(false)
+	}
+	if c.Options.NotebookAutoInject == nil {
+		c.Options.NotebookAutoInject = ptr(false)
+	}
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

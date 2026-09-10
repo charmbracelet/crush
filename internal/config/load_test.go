@@ -832,7 +832,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource", "recall", "notebook_search"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -858,7 +858,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource", "recall", "notebook_search"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -2533,4 +2533,29 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.NotNil(t, loadedConfig.Env)
 	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
+}
+
+func TestNotebookOptions_Defaults(t *testing.T) {
+	// When notebook options are unset, NormalizeOptions should
+	// resolve them to their defaults.
+	c := &Config{}
+	c.NormalizeOptions()
+	require.True(t, c.Options.NotebookIsEnabled(), "notebook should default to enabled")
+	require.False(t, c.Options.NotebookSyncMem0Enabled(), "mem0 sync should default to false")
+	require.False(t, c.Options.NotebookAutoInjectEnabled(), "auto-inject should default to false")
+	require.Equal(t, "mem0", c.Options.NotebookMemoryServerName(), "memory server should default to mem0")
+}
+
+func TestNotebookOptions_ExplicitDisable(t *testing.T) {
+	// Explicit false should be respected.
+	c := &Config{Options: &Options{}}
+	c.Options.NotebookEnabled = ptr(false)
+	c.Options.NotebookSyncMem0 = ptr(true)
+	c.Options.NotebookAutoInject = ptr(true)
+	c.Options.NotebookMemoryServer = "custom-mem0"
+	c.NormalizeOptions()
+	require.False(t, c.Options.NotebookIsEnabled(), "notebook should be disabled")
+	require.True(t, c.Options.NotebookSyncMem0Enabled(), "mem0 sync should be enabled")
+	require.True(t, c.Options.NotebookAutoInjectEnabled(), "auto-inject should be enabled")
+	require.Equal(t, "custom-mem0", c.Options.NotebookMemoryServerName(), "memory server should be custom")
 }

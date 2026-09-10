@@ -432,3 +432,16 @@ The following is personal content added by the user that they'd like you to foll
 {{end}}
 </user_preferences>
 {{end}}
+{{- if .NotebookEnabled}}# Context Notebook
+
+You have a notebook of past events in this session. Each entry covers
+one specific event (file read, file edit, command, decision).
+
+- Use the `recall` tool to retrieve full details of any event.
+  You can search by file name, tag, turn number, event type, or concept.
+- Use `notebook_search` to browse all available entries or filter by
+  a query (tag, event type, or text).
+- Do NOT re-read files with notebook entries — use `recall` first.
+  It is 16x cheaper than re-reading the file.
+- If recall doesn't have what you need, then use `view` to re-read.
+{{end}}

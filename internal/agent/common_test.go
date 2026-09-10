@@ -154,6 +154,11 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	cfg.Config().Options.ContextPaths = nil
 	cfg.Config().Options.GlobalContextPaths = nil
 	cfg.Config().LSP = nil
+	// Disable notebook for golden tests — the notebook block would
+	// otherwise be injected into the system prompt and break cassette
+	// matching.
+	notebookOff := false
+	cfg.Config().Options.NotebookEnabled = &notebookOff
 
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {

@@ -11,9 +11,12 @@ import (
 type Querier interface {
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
+	CreateNotebookEntry(ctx context.Context, arg CreateNotebookEntryParams) (NotebookEntry, error)
+	CreateNotebookTag(ctx context.Context, arg CreateNotebookTagParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
+	DeleteNotebookEntriesBySession(ctx context.Context, sessionID string) error
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
@@ -25,6 +28,13 @@ type Querier interface {
 	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error)
 	GetLastSession(ctx context.Context) (Session, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
+	GetNotebookEntries(ctx context.Context, sessionID string) ([]NotebookEntry, error)
+	GetNotebookEntriesByEventType(ctx context.Context, arg GetNotebookEntriesByEventTypeParams) ([]NotebookEntry, error)
+	GetNotebookEntriesByTurn(ctx context.Context, arg GetNotebookEntriesByTurnParams) ([]NotebookEntry, error)
+	GetNotebookEntryCount(ctx context.Context, sessionID string) (int64, error)
+	GetNotebookTagsByEntry(ctx context.Context, entryID string) ([]string, error)
+	GetNotebookTokenCount(ctx context.Context, sessionID string) (int64, error)
+	GetOldestNotebookEntries(ctx context.Context, arg GetOldestNotebookEntriesParams) ([]NotebookEntry, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error)
@@ -44,7 +54,10 @@ type Querier interface {
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	SearchNotebookByTag(ctx context.Context, arg SearchNotebookByTagParams) ([]NotebookEntry, error)
+	SearchNotebookByText(ctx context.Context, arg SearchNotebookByTextParams) ([]NotebookEntry, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
+	UpdateNotebookCompression(ctx context.Context, arg UpdateNotebookCompressionParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
 }

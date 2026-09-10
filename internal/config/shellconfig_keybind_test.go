@@ -1,8 +1,11 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,6 +51,33 @@ keybind reset`)
 func TestShellConfigKeybindRejectsWhitespaceKey(t *testing.T) {
 	_, err := loadCrushShErr(t, `keybind set chat.expand " "`)
 	require.Error(t, err)
+}
+
+// Project keybinds override the global config per action; actions the
+// project does not mention keep the global keys. Unset cannot reach
+// across files: it only drops overrides made earlier in the same script.
+func TestShellConfigKeybindsProjectBeatGlobal(t *testing.T) {
+	isolated := t.TempDir()
+	t.Setenv("HOME", isolated)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
+	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "crush"))
+
+	globalDir := filepath.Join(isolated, ".config", "crush")
+	require.NoError(t, os.MkdirAll(globalDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "crushrc"),
+		[]byte("keybind set global.quit ctrl+g\nkeybind set global.help ctrl+h\n"), 0o644))
+
+	workDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crushrc"),
+		[]byte("keybind set global.quit ctrl+q\nkeybind unset global.help\n"), 0o644))
+
+	store, err := config.Load(workDir, t.TempDir(), false)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"ctrl+q"}, store.Config().Keybinds["global.quit"], "project keybind lost to global")
+	require.Equal(t, []string{"ctrl+h"}, store.Config().Keybinds["global.help"], "global keybind lost to an unrelated unset")
 }
 
 func TestShellConfigKeybindRejectsBadShape(t *testing.T) {

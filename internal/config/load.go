@@ -1056,7 +1056,11 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return &Config{}, nil
 	}
 
-	data, err := jsons.Merge(configs)
+	// Keybinds ride outside the generic merge: it concatenates arrays,
+	// but an override must replace an action's keys, not extend them.
+	keybinds, stripped := extractKeybinds(configs)
+
+	data, err := jsons.Merge(stripped)
 	if err != nil {
 		return nil, err
 	}
@@ -1064,7 +1068,43 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
+	config.Keybinds = keybinds
 	return &config, nil
+}
+
+// extractKeybinds returns the per-action keybind overrides merged with
+// later configs winning, alongside the input blobs with the keybinds
+// section removed. Keybind values are key lists, and the generic merge
+// concatenates lists where an override must replace: merging here keeps
+// a global binding from leaking into a project override of the same
+// action. Callers pass the stripped blobs to jsons.Merge unchanged.
+func extractKeybinds(configs [][]byte) (map[string][]string, [][]byte) {
+	merged := map[string][]string{}
+	stripped := make([][]byte, len(configs))
+	for i, data := range configs {
+		var section struct {
+			Keybinds map[string][]string `json:"keybinds"`
+		}
+		if json.Unmarshal(data, &section) != nil || len(section.Keybinds) == 0 {
+			stripped[i] = data
+			continue
+		}
+		for action, keys := range section.Keybinds {
+			merged[action] = keys
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(data, &obj); err != nil {
+			stripped[i] = data
+			continue
+		}
+		delete(obj, "keybinds")
+		if replaced, err := json.Marshal(obj); err == nil {
+			stripped[i] = replaced
+		} else {
+			stripped[i] = data
+		}
+	}
+	return merged, stripped
 }
 
 func hasAWSCredentials(env env.Env) bool {

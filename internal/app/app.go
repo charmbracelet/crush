@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -59,6 +60,7 @@ type App struct {
 	Permissions permission.Service
 	Questions   question.Service
 	FileTracker filetracker.Service
+	Pinentry    *pinentry.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -113,6 +115,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
+		Pinentry:    pinentry.DefaultService(),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
 
@@ -128,6 +131,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	app.setupEvents()
+
+	// Start the pinentry watcher so terminal-based GPG passphrase prompts
+	// (pinentry-curses/pinentry-tty) get exclusive terminal access while a
+	// shell command runs. It only polls while commands are executing, and
+	// stops with the events pipeline.
+	app.Pinentry.Start(app.eventsCtx)
 
 	// Initialize clipboard support. This is best-effort; if it fails
 	// (e.g., headless environment), clipboard operations will return nil.
@@ -596,6 +605,10 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
+	// Pinentry transitions are rare and drive the terminal handover, so
+	// they must not be dropped: a lost release/restore would leave the
+	// terminal in the wrong state.
+	app.subscribeMustDeliver(ctx, "pinentry", app.Pinentry.Subscribe)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
 	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
 	app.subscribe(ctx, "lsp", SubscribeLSPEvents)

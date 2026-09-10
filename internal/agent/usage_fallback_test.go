@@ -215,6 +215,25 @@ func TestUpdateSessionUsageSkipsEstimatedCost(t *testing.T) {
 	require.True(t, currentSession.EstimatedUsage)
 }
 
+func TestUpdateSessionUsageCountsEveryPromptBucket(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	currentSession := &session.Session{ID: "session-id"}
+	model := Model{CatwalkCfg: catwalk.Model{CostPer1MIn: 10, CostPer1MOut: 20}}
+	usage := fantasy.Usage{
+		InputTokens:         50,
+		CacheCreationTokens: 30000,
+		CacheReadTokens:     1200,
+		OutputTokens:        400,
+	}
+
+	agent.updateSessionUsage(model, currentSession, usage, nil, false)
+
+	require.Equal(t, int64(31250), currentSession.PromptTokens)
+	require.Equal(t, int64(400), currentSession.CompletionTokens)
+}
+
 func TestUpdateSessionUsageKeepsCountersForZeroUsage(t *testing.T) {
 	t.Parallel()
 

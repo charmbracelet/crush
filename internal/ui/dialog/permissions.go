@@ -453,11 +453,13 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 
 	lines := []string{title}
 
-	// Add warning for dangerous commands.
-	if p.permission.Dangerous {
+	// Add warning for dangerous commands, naming what tripped the check so
+	// the user can judge it rather than just be alarmed by it.
+	if p.permission.Danger != "" {
 		warning := lipgloss.NewStyle().
 			Foreground(t.Status.WarnIndicator.GetBackground()).
-			Render("⚠ Potentially dangerous command")
+			Width(contentWidth).
+			Render("⚠ Potentially dangerous: " + p.permission.Danger)
 		lines = append(lines, "", warning)
 	}
 

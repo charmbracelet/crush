@@ -103,6 +103,13 @@ var defaultBlockedCommands = []string{
 	"su",
 	"sudo",
 
+	// Indirect execution: these run a command name the static check can't
+	// see, so whatever they wrap would never be flagged on its own.
+	"env",
+	"eval",
+	"nohup",
+	"xargs",
+
 	// Package managers
 	"apk",
 	"apt",
@@ -266,8 +273,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			// Check whether the command is dangerous so we can surface a
 			// warning in the permission dialog.
+			dangerReason := ""
 			if !isSafeReadOnly {
-				isDangerous := shell.IsCommandBlocked(params.Command, blockFuncs(blocked))
+				dangerReason = shell.BlockedCommandReason(params.Command, blockFuncs(blocked))
 
 				approved, err := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
@@ -278,7 +286,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						Action:      "execute",
 						Description: fmt.Sprintf("Execute command: %s", params.Command),
 						Params:      BashPermissionsParams(params),
-						Dangerous:   isDangerous,
+						Danger:      dangerReason,
 					},
 				)
 				if err != nil {
@@ -289,17 +297,18 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 			}
 
-			// The permission layer is the gate. Anything that reaches here
-			// was approved, explicitly or by the active permission mode, so
-			// re-blocking it at exec time would just override the answer the
-			// user already gave.
+			// Re-blocking a command the user was warned about and approved
+			// anyway would just override the answer they already gave, so
+			// those run unguarded. Everything else keeps the block list on at
+			// exec time, because the static check cannot see what indirection
+			// resolves to: `CMD=curl; $CMD ...` reaches here unflagged, and in
+			// yolo mode unflagged means auto-approved. The block handler is
+			// the only thing that sees the real command name.
 			//
-			// The safe-read-only path is the one branch that never asks, so
-			// it is the only one that still enforces the block list, as a
-			// backstop against a dangerous command smuggled past the
-			// safe-prefix match.
+			// Sysadmin mode is the deliberate exception: it asks for nothing
+			// and blocks nothing.
 			var blocksToUse []shell.BlockFunc
-			if isSafeReadOnly {
+			if dangerReason == "" && permissions.PermissionMode() != permission.PermissionModeSysadmin {
 				blocksToUse = blockFuncs(blocked)
 			}
 			return executeBashCommand(ctx, params, execWorkingDir, blocksToUse)

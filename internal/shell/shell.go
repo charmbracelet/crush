@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -240,11 +241,23 @@ func ArgumentsBlocker(cmd string, args []string, flags []string) BlockFunc {
 }
 
 // normalizeCommand reduces a command word to a bare command name for matching:
-// it strips any directory prefix and a trailing ".exe" so "/usr/bin/rm" and
-// "rm.exe" both normalize to "rm".
+// it strips any directory prefix and a Windows executable extension, so
+// "/usr/bin/rm", "rm.exe" and "RM.EXE" all normalize to "rm".
+//
+// Windows resolves command names case-insensitively, so on Windows the whole
+// name is lowercased. Elsewhere only the extension is folded: a name carrying
+// one is a Windows-style invocation wherever it is typed.
 func normalizeCommand(cmd string) string {
 	cmd = filepath.Base(filepath.FromSlash(cmd))
-	return strings.TrimSuffix(cmd, ".exe")
+	if runtime.GOOS == "windows" {
+		cmd = strings.ToLower(cmd)
+	}
+	for _, ext := range []string{".exe", ".bat", ".cmd"} {
+		if len(cmd) > len(ext) && strings.EqualFold(cmd[len(cmd)-len(ext):], ext) {
+			return strings.ToLower(cmd[:len(cmd)-len(ext)])
+		}
+	}
+	return cmd
 }
 
 // splitArgsFlags separates positional arguments from flags. It understands the
@@ -281,21 +294,31 @@ func splitArgsFlags(parts []string) (args []string, flags []string) {
 }
 
 // IsCommandBlocked reports whether a command string would likely be blocked
-// by the given block functions.
+// by the given block functions. See [BlockedCommandReason] for the details.
+func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
+	return BlockedCommandReason(command, blockFuncs) != ""
+}
+
+// BlockedCommandReason returns a short human-readable reason why a command
+// string would likely be blocked by the given block functions, or an empty
+// string if it looks safe.
 //
 // It is a static check used to warn about dangerous commands before they run
 // and to gate auto-approval. Each command in the script is expanded to fields
 // the way the shell would (quotes are removed, word parts joined, globbing
 // disabled), but nothing is executed: a command substitution or any other
 // expansion that would require running a command is treated as dangerous
-// rather than resolved. Unparseable input is likewise treated as dangerous.
-// This fails safe, but it cannot see the results of runtime expansion, so it
-// is a conservative approximation of the authoritative blockHandler check.
-func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
+// rather than resolved. A command name that is itself built from an expansion
+// ("$CMD example.com") is dangerous for the same reason: what it resolves to
+// is unknowable until it runs. Unparseable input is likewise treated as
+// dangerous. This fails safe, but it cannot see the results of runtime
+// expansion, so it is a conservative approximation of the authoritative
+// blockHandler check.
+func BlockedCommandReason(command string, blockFuncs []BlockFunc) string {
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		// If we can't parse it, consider it potentially dangerous.
-		return true
+		return "it could not be parsed"
 	}
 
 	// Empty environment, nil CmdSubst, and erroring ProcSubst: variables
@@ -311,23 +334,27 @@ func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
 		},
 	}
 
-	blocked := false
+	reason := ""
 	syntax.Walk(file, func(node syntax.Node) bool {
 		switch node := node.(type) {
 		case *syntax.CallExpr:
 			if len(node.Args) == 0 {
 				return true
 			}
+			if isDynamicWord(node.Args[0]) {
+				reason = "its command name is only known at runtime"
+				return false
+			}
 			args, err := expand.Fields(cfg, node.Args...)
 			if err != nil {
 				// A substitution or expansion we can't resolve without running
 				// something. Be conservative and treat it as dangerous.
-				blocked = true
+				reason = "it runs another command to build its arguments"
 				return false
 			}
 			for _, blockFunc := range blockFuncs {
 				if blockFunc(args) {
-					blocked = true
+					reason = "it uses " + normalizeCommand(args[0])
 					return false
 				}
 			}
@@ -341,14 +368,30 @@ func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
 				return true
 			}
 			if _, err := expand.Fields(cfg, node.Word); err != nil {
-				blocked = true
+				reason = "it redirects through another command"
 				return false
 			}
 		}
 		return true
 	})
 
-	return blocked
+	return reason
+}
+
+// isDynamicWord reports whether a word's value depends on runtime state, i.e.
+// whether it contains a parameter expansion, a command or process
+// substitution, or an arithmetic expansion.
+func isDynamicWord(word *syntax.Word) bool {
+	dynamic := false
+	syntax.Walk(word, func(node syntax.Node) bool {
+		switch node.(type) {
+		case *syntax.ParamExp, *syntax.CmdSubst, *syntax.ProcSubst, *syntax.ArithmExp:
+			dynamic = true
+			return false
+		}
+		return true
+	})
+	return dynamic
 }
 
 // newInterp creates a new interpreter with the current shell state. A nil

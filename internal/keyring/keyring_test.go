@@ -74,6 +74,20 @@ func TestAvailableProbesBackend(t *testing.T) {
 	require.False(t, Available())
 }
 
+func TestVerifyDetectsFallback(t *testing.T) {
+	MockInit()
+	ResetAvailableCache()
+
+	require.NoError(t, Set("testprovider", "secret-value"))
+	require.True(t, Verify("testprovider", "secret-value"))
+	require.False(t, Verify("testprovider", "other-value"))
+	require.False(t, Verify("missingprovider", "secret-value"))
+
+	MockInitWithError(errors.New("dbus connection refused"))
+	require.False(t, Verify("testprovider", "secret-value"),
+		"an unreachable backend must never verify as stored")
+}
+
 func TestUnavailableErrorsAreClassified(t *testing.T) {
 	require.True(t, IsUnavailable(ErrUnavailable))
 	require.True(t, IsUnavailable(zkeyring.ErrUnsupportedPlatform))

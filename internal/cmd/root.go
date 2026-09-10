@@ -269,6 +269,11 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	return setupLocalWorkspace(cmd)
 }
 
+// sysadminModeWarning is printed to stderr whenever -yy puts a session in
+// sysadmin mode. Both the local and client paths print it, so it lives here
+// rather than being spelled out twice.
+const sysadminModeWarning = "Warning: sysadmin mode is active. All commands, including potentially dangerous ones, will be auto-approved without prompting."
+
 // setupLocalWorkspace creates an in-process app.App and wraps it in an
 // AppWorkspace.
 func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
@@ -292,7 +297,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	store.Overrides().EnabledChannels = channels
 	if yoloCount > 1 {
 		store.Overrides().PermissionMode = permission.PermissionModeSysadmin
-		fmt.Fprintln(os.Stderr, "Warning: sysadmin mode is active. All commands, including potentially dangerous ones, will be auto-approved without prompting.")
+		fmt.Fprintln(os.Stderr, sysadminModeWarning)
 	} else if yoloCount == 1 {
 		store.Overrides().PermissionMode = permission.PermissionModeYolo
 	}
@@ -422,7 +427,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	wsPermMode := proto.WorkspacePermissionModeNormal
 	if yoloCount > 1 {
 		wsPermMode = proto.WorkspacePermissionModeSysadmin
-		fmt.Fprintln(os.Stderr, "Warning: sysadmin mode is active. All commands, including potentially dangerous ones, will be auto-approved without prompting.")
+		fmt.Fprintln(os.Stderr, sysadminModeWarning)
 	} else if yoloCount == 1 {
 		wsPermMode = proto.WorkspacePermissionModeYolo
 	}

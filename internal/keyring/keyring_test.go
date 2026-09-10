@@ -10,6 +10,18 @@ import (
 	zkeyring "github.com/zalando/go-keyring"
 )
 
+func TestKeyringDisabledUnderTestWithoutMock(t *testing.T) {
+	mockActive = false
+	t.Cleanup(func() { mockActive = false })
+	ResetAvailableCache()
+
+	require.False(t, Available(), "test binaries must not touch the real keychain")
+
+	_, err := Get("testprovider")
+	require.ErrorIs(t, err, ErrUnavailable)
+	require.ErrorIs(t, Set("testprovider", "secret"), ErrUnavailable)
+}
+
 func TestRefAndParseRef(t *testing.T) {
 	require.Equal(t, "keychain://openai", Ref("openai"))
 

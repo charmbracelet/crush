@@ -132,6 +132,10 @@ func newOAuth(
 		key.WithHelp("tab", "enter code"),
 	)
 	m.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select": &m.keyMap.Submit,
+		"copy":   &m.keyMap.Copy,
+	})
 
 	if m.oAuthProvider.supportsCodeEntry() {
 		m.codeInput = textinput.New()

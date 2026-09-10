@@ -85,6 +85,11 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 		key.WithHelp("↑/shift+tab", "previous"),
 	)
 	a.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":   &a.keyMap.Confirm,
+		"next":     &a.keyMap.Next,
+		"previous": &a.keyMap.Previous,
+	})
 
 	// Create input fields for each argument.
 	a.inputs = make([]textinput.Model, len(arguments))

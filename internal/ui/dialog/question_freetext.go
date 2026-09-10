@@ -54,8 +54,8 @@ func NewFreeText(sty *styles.Styles, req question.Question) *FreeText {
 		Styles:     sty,
 		Request:    req,
 		editor:     ta,
-		keyEnter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "submit")),
-		keyNewline: key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
+		keyEnter:   QuestionSubmit,
+		keyNewline: QuestionNewline,
 		keyClose:   CloseKey,
 	}
 }

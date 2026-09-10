@@ -108,6 +108,11 @@ func NewNotifications(com *common.Common) *Notifications {
 		key.WithHelp("↑/↓", "choose"),
 	)
 	n.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":   &n.keyMap.Select,
+		"next":     &n.keyMap.Next,
+		"previous": &n.keyMap.Previous,
+	})
 
 	n.setItems()
 	return n
@@ -214,22 +219,16 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (n *Notifications) ShortHelp() []key.Binding {
-	return []key.Binding{
-		n.keyMap.UpDown,
-		n.keyMap.Select,
-		n.keyMap.Close,
-	}
+	h := navHelp(n.keyMap.Next, n.keyMap.Previous)
+	h = append(h, n.keyMap.Select, n.keyMap.Close)
+	return h
 }
 
 // FullHelp implements [help.KeyMap].
 func (n *Notifications) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
-	slice := []key.Binding{
-		n.keyMap.Select,
-		n.keyMap.Next,
-		n.keyMap.Previous,
-		n.keyMap.Close,
-	}
+	slice := append([]key.Binding{n.keyMap.Select}, navHelp(n.keyMap.Next, n.keyMap.Previous)...)
+	slice = append(slice, n.keyMap.Close)
 	for i := 0; i < len(slice); i += 4 {
 		end := min(i+4, len(slice))
 		m = append(m, slice[i:end])

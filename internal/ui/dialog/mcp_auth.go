@@ -86,6 +86,11 @@ func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authUR
 		key.WithHelp("s", "skip"),
 	)
 	m.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":        &m.keyMap.Submit,
+		"copy":          &m.keyMap.Copy,
+		"mcp_auth.skip": &m.keyMap.Skip,
+	})
 
 	return m, m.spinner.Tick
 }

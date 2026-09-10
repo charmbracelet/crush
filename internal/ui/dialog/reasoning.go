@@ -96,6 +96,11 @@ func NewReasoning(com *common.Common) (*Reasoning, error) {
 		key.WithHelp("↑/↓", "choose"),
 	)
 	r.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":   &r.keyMap.Select,
+		"next":     &r.keyMap.Next,
+		"previous": &r.keyMap.Previous,
+	})
 
 	if err := r.setReasoningItems(); err != nil {
 		return nil, err
@@ -211,22 +216,16 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (r *Reasoning) ShortHelp() []key.Binding {
-	return []key.Binding{
-		r.keyMap.UpDown,
-		r.keyMap.Select,
-		r.keyMap.Close,
-	}
+	h := navHelp(r.keyMap.Next, r.keyMap.Previous)
+	h = append(h, r.keyMap.Select, r.keyMap.Close)
+	return h
 }
 
 // FullHelp implements [help.KeyMap].
 func (r *Reasoning) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
-	slice := []key.Binding{
-		r.keyMap.Select,
-		r.keyMap.Next,
-		r.keyMap.Previous,
-		r.keyMap.Close,
-	}
+	slice := append([]key.Binding{r.keyMap.Select}, navHelp(r.keyMap.Next, r.keyMap.Previous)...)
+	slice = append(slice, r.keyMap.Close)
 	for i := 0; i < len(slice); i += 4 {
 		end := min(i+4, len(slice))
 		m = append(m, slice[i:end])

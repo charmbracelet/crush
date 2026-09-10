@@ -79,6 +79,9 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	if params.RunInBackground {
 		toolParams = append(toolParams, "background", "true")
 	}
+	if params.Interactive {
+		toolParams = append(toolParams, "interactive", "true")
+	}
 
 	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts, toolParams...)
 	if opts.Compact {

@@ -300,6 +300,14 @@ func IsInterrupt(err error) bool {
 		errors.Is(err, context.DeadlineExceeded)
 }
 
+// IsExitStatus reports whether err is a plain command exit status (as
+// opposed to an execution-level failure such as a parse error or a
+// block-list rejection).
+func IsExitStatus(err error) bool {
+	_, ok := interp.IsExitStatus(err)
+	return ok
+}
+
 // ExitCode extracts the exit code from an error
 func ExitCode(err error) int {
 	if err == nil {

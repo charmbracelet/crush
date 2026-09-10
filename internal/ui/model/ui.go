@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/interactive"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -1314,6 +1315,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.MoveToEnd()
 		m.syncBangModeFromTextarea()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+	case interactiveRequestMsg:
+		// Hand the user's terminal to an interactive command (password
+		// prompt or TUI). tea.Exec releases the terminal while the
+		// command runs and restores + repaints the UI afterwards.
+		cmd := newInteractiveCommand(msg.req, msg.done)
+		cmds = append(cmds, tea.Exec(cmd, func(err error) tea.Msg {
+			// Only reached when the terminal could not be released or
+			// restored: unblock the tool goroutine with a failure so
+			// it does not wait for a result that will never come.
+			if err != nil {
+				cmd.deliver(interactive.Result{
+					Output:   "Failed to hand the terminal to the command: " + err.Error(),
+					ExitCode: 1,
+				})
+			}
+			return nil
+		}))
 	case shellStreamMsg:
 		if item := m.chat.MessageItem(msg.PendingID); item != nil {
 			if shellItem, ok := item.(*chat.ShellItem); ok {

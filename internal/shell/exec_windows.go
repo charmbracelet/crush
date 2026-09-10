@@ -21,3 +21,9 @@ func isolateProcess(_ *exec.Cmd) {}
 func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 	return interp.DefaultExecHandler(killTimeout)
 }
+
+// interactiveExecHandler is identical to processGroupExecHandler on
+// Windows: there is no session/controlling-terminal isolation to undo.
+func interactiveExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
+	return interp.DefaultExecHandler(killTimeout)
+}

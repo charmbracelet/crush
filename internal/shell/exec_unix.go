@@ -83,6 +83,52 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 	}
 }
 
+// interactiveExecHandler mirrors [processGroupExecHandler] but keeps the
+// child in Crush's session and process group, attached to the same
+// controlling terminal. This lets interactive programs (pinentry-curses,
+// ssh, editors) reach the user's terminal directly; the caller must have
+// already released the TUI's hold on it. Because the child shares
+// Crush's process group, cancellation signals target the child PID only;
+// a negative-PID kill would signal Crush itself.
+func interactiveExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
+	return func(ctx context.Context, args []string) error {
+		hc := interp.HandlerCtx(ctx)
+		path, err := interp.LookPathDir(hc.Dir, hc.Env, args[0])
+		if err != nil {
+			fmt.Fprintln(hc.Stderr, err)
+			return interp.ExitStatus(127)
+		}
+
+		cmd := exec.Cmd{
+			Path:   path,
+			Args:   args,
+			Env:    execEnvList(hc.Env),
+			Dir:    hc.Dir,
+			Stdin:  hc.Stdin,
+			Stdout: hc.Stdout,
+			Stderr: hc.Stderr,
+		}
+
+		err = cmd.Start()
+		if err == nil {
+			stopf := context.AfterFunc(ctx, func() {
+				if killTimeout <= 0 {
+					_ = cmd.Process.Kill()
+					return
+				}
+				_ = cmd.Process.Signal(syscall.SIGINT)
+				time.Sleep(killTimeout)
+				_ = cmd.Process.Kill()
+			})
+			defer stopf()
+
+			err = cmd.Wait()
+		}
+
+		return exitStatusFromError(ctx, hc.Stderr, err)
+	}
+}
+
 // exitStatusFromError translates an exec error into an interp exit status,
 // matching the conventions of interp.DefaultExecHandler. Extracted so the
 // platform-specific exec handler stays focused on isolation mechanics.

@@ -26,6 +26,18 @@ Common shell builtins and core utils available on Windows.
 {{- end }}
 </usage_notes>
 
+<interactive_execution>
+- Set interactive=true for commands that need the USER to interact with them directly. Crush hands the user's terminal to the command (its UI pauses), the user interacts, and Crush resumes afterwards.
+- ALWAYS use interactive=true for commands that may prompt for a password or passphrase, even when the prompt is not guaranteed to happen:
+  * gpg signing (git commit -S, git tag -s, gpg --sign) when the key may not be cached
+  * git push/pull/fetch over ssh or https
+  * sudo-style password prompts
+- Use interactive=true for commands that open their own TUI (pinentry, editors, `git commit` without -m, full-screen tools).
+- The user sees the command's output live in the terminal; the tool result contains a captured copy (TUI output may be noisy or empty).
+- Never combine interactive with run_in_background.
+- If a command fails with errors about /dev/tty, pinentry, "not a terminal", or a missing TTY, retry it with interactive=true. Non-interactive shells deliberately cannot reach the user's terminal, so prompts fail fast instead of hanging.
+</interactive_execution>
+
 <background_execution>
 - Set run_in_background=true to run commands in a separate background shell
 - Returns a shell ID for managing the background process

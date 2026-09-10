@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/interactive"
 	"github.com/charmbracelet/crush/internal/lock"
 	crushlog "github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/projects"
@@ -138,6 +139,12 @@ crush --continue
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(inputFilter.Filter),
 		)
+
+		// Let bash-tool commands that need direct user interaction
+		// (password prompts, TUIs like pinentry-curses) hand the terminal
+		// over: the UI pauses while they run and repaints afterwards.
+		interactive.SetHandler(ui.NewInteractiveHandler(program))
+
 		go ws.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
@@ -145,6 +152,7 @@ crush --continue
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
 		}
+		interactive.SetHandler(nil)
 		var banner config.ExitBanner
 		if cfg := com.Config(); cfg != nil {
 			banner = cfg.Options.TUI.ExitBanner

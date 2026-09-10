@@ -217,7 +217,7 @@ func execHandlerOption(blockFuncs []BlockFunc) interp.RunnerOption {
 // nonInteractiveEnvVars are forced on every shell execution to prevent
 // commands from hanging on a nonexistent TTY. These are always applied
 // regardless of the caller's environment because Crush shells are never
-// interactive — preserving user preferences like EDITOR=nvim only causes
+// interactive; preserving user preferences like EDITOR=nvim only causes
 // hangs, not useful behavior.
 var nonInteractiveEnvVars = []string{
 	"TERM=xterm-256color",
@@ -230,19 +230,34 @@ var nonInteractiveEnvVars = []string{
 	"PAGER=cat",
 }
 
-// withNonInteractiveEnv returns env with nonInteractiveEnvVars forced in,
-// replacing any existing values for those keys. The returned slice is a
-// new allocation safe to use concurrently with the input.
+// scrubbedEnvVars are removed (not overridden) from non-interactive
+// executions. GPG_TTY tells gpg which terminal to draw pinentry on: a
+// non-interactive child runs detached from the controlling terminal, so
+// a daemon-spawned pinentry would scribble over Crush's TUI and hang
+// forever waiting for input that never arrives. Removing the variable
+// makes gpg fail fast instead; interactive runs ([RunInteractive]) keep
+// it so the prompt appears once the terminal has been handed over.
+var scrubbedEnvVars = []string{
+	"GPG_TTY",
+}
+
+// withNonInteractiveEnv returns env with nonInteractiveEnvVars forced in
+// and scrubbedEnvVars removed, replacing any existing values for those
+// keys. The returned slice is a new allocation safe to use concurrently
+// with the input.
 func withNonInteractiveEnv(env []string) []string {
-	// Build a set of override keys for fast lookup.
-	overrideKeys := make(map[string]bool, len(nonInteractiveEnvVars))
+	// Build a set of override and scrub keys for fast lookup.
+	overrideKeys := make(map[string]bool, len(nonInteractiveEnvVars)+len(scrubbedEnvVars))
 	for _, kv := range nonInteractiveEnvVars {
 		if key, _, ok := strings.Cut(kv, "="); ok {
 			overrideKeys[key] = true
 		}
 	}
+	for _, key := range scrubbedEnvVars {
+		overrideKeys[key] = true
+	}
 
-	// Copy env, filtering out any keys we will override.
+	// Copy env, filtering out any keys we override or scrub.
 	result := make([]string, 0, len(env)+len(nonInteractiveEnvVars))
 	for _, e := range env {
 		if key, _, ok := strings.Cut(e, "="); ok && overrideKeys[key] {

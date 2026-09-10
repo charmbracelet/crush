@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/interactive"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -27,6 +29,7 @@ type BashParams struct {
 	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
 	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait before automatically moving the command to a background job (default: 60)"`
+	Interactive         bool   `json:"interactive,omitempty" description:"Set to true (boolean) for commands that need the user's terminal: password or passphrase prompts (gpg signing, git push/pull over ssh) or interactive TUIs (pinentry, editors). Crush hands the terminal to the command so the user can interact with it directly, then resumes. Output shown to the user live is returned as a captured copy."`
 }
 
 type BashPermissionsParams struct {
@@ -35,6 +38,7 @@ type BashPermissionsParams struct {
 	WorkingDir          string `json:"working_dir"`
 	RunInBackground     bool   `json:"run_in_background"`
 	AutoBackgroundAfter int    `json:"auto_background_after"`
+	Interactive         bool   `json:"interactive"`
 }
 
 type BashResponseMetadata struct {
@@ -44,6 +48,7 @@ type BashResponseMetadata struct {
 	Description      string `json:"description"`
 	WorkingDirectory string `json:"working_directory"`
 	Background       bool   `json:"background,omitempty"`
+	Interactive      bool   `json:"interactive,omitempty"`
 	ShellID          string `json:"shell_id,omitempty"`
 }
 
@@ -194,6 +199,12 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
+// BlockedCommandFuncs returns a copy of the deny-list matchers the bash
+// tool enforces on every execution path, including interactive runs.
+func BlockedCommandFuncs() []shell.BlockFunc {
+	return blockFuncs()
+}
+
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
@@ -201,6 +212,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
+			}
+
+			if params.Interactive && params.RunInBackground {
+				return fantasy.NewTextErrorResponse("run_in_background and interactive cannot be combined: an interactive command needs the user's terminal now"), nil
 			}
 
 			// Determine working directory
@@ -244,6 +259,13 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					return NewPermissionDeniedResponse(), nil
 				}
 			}
+			// Interactive execution: hand the user's terminal to the command
+			// (password prompts, TUIs). The TUI pauses until the command exits,
+			// then resumes and repaints.
+			if params.Interactive {
+				startTime := time.Now()
+				return runInteractiveCommand(ctx, params, execWorkingDir, startTime)
+			}
 
 			// If explicitly requested as background, start immediately with detached context
 			if params.RunInBackground {
@@ -271,6 +293,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					}
 
 					stdout = formatOutput(stdout, stderr, execErr)
+					if exitCode != 0 && !interrupted {
+						stdout += interactiveFailureHint(stdout)
+					}
 
 					metadata := BashResponseMetadata{
 						StartTime:        startTime.UnixMilli(),
@@ -355,6 +380,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 
 				stdout = formatOutput(stdout, stderr, execErr)
+				if exitCode != 0 && !interrupted {
+					stdout += interactiveFailureHint(stdout)
+				}
 
 				metadata := BashResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
@@ -381,6 +409,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				ShellID:          bgShell.ID,
 			}
 			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+			if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
+				response += "\n\nThe command has produced no output so far. If it is silently waiting for a password or passphrase prompt (gpg signing, git push/pull over ssh), it can never receive one in the background: use job_kill to terminate it, then retry with the \"interactive\" parameter set to true so the user can respond directly."
+			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
 	)
@@ -446,4 +477,78 @@ func normalizeWorkingDir(path string) string {
 		path = strings.ReplaceAll(path, fsext.WindowsWorkingDirDrive(), "")
 	}
 	return filepath.ToSlash(path)
+}
+
+// runInteractiveCommand hands the user's terminal to the command so the
+// user can interact with it directly (password prompts, TUIs). It blocks
+// until the command exits; the TUI pauses for the whole run and repaints
+// afterwards. The captured output is what the command printed to the
+// terminal, cleaned of escape sequences.
+func runInteractiveCommand(ctx context.Context, params BashParams, execWorkingDir string, startTime time.Time) (fantasy.ToolResponse, error) {
+	res, err := interactive.Run(ctx, interactive.Request{
+		Command:     params.Command,
+		WorkingDir:  execWorkingDir,
+		Description: params.Description,
+	})
+	if err != nil {
+		if errors.Is(err, interactive.ErrNoHandler) {
+			return fantasy.NewTextErrorResponse(
+				"interactive execution is unavailable: no terminal UI is attached to this session. Re-run the command without the interactive parameter instead.",
+			), nil
+		}
+		return fantasy.ToolResponse{}, err
+	}
+
+	output := strings.TrimSpace(res.Output)
+	metadata := BashResponseMetadata{
+		StartTime:        startTime.UnixMilli(),
+		EndTime:          time.Now().UnixMilli(),
+		Output:           output,
+		Description:      params.Description,
+		WorkingDirectory: execWorkingDir,
+		Interactive:      true,
+	}
+
+	var text strings.Builder
+	if output != "" {
+		text.WriteString(output)
+		if res.ExitCode != 0 {
+			fmt.Fprintf(&text, "\n\nExit code %d", res.ExitCode)
+		}
+	} else if res.ExitCode != 0 {
+		fmt.Fprintf(&text, "Exit code %d", res.ExitCode)
+	} else {
+		text.WriteString(BashNoOutput)
+	}
+	fmt.Fprintf(&text, "\n\nThe command ran interactively in the user's terminal; the user saw the full output live, the text above is a captured copy (TUI output may be noisy or missing).")
+	fmt.Fprintf(&text, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(execWorkingDir))
+
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text.String()), metadata), nil
+}
+
+// interactiveFailureSignatures match error output from programs that
+// failed because they could not reach a controlling terminal. When a
+// (non-interactive) run fails with one of these, the model is advised
+// to retry with the interactive parameter so the user can respond to
+// the prompt directly.
+var interactiveFailureSignatures = []string{
+	"/dev/tty",
+	"not a terminal",
+	"no tty",
+	"inappropriate ioctl for device",
+	"read_passphrase",
+	"pinentry",
+}
+
+// interactiveFailureHint returns a suggestion appended to a failed
+// command's output when the failure looks like a missing terminal, or
+// an empty string otherwise.
+func interactiveFailureHint(output string) string {
+	lower := strings.ToLower(output)
+	for _, signature := range interactiveFailureSignatures {
+		if strings.Contains(lower, signature) {
+			return "\n\nThis command appears to need an interactive terminal (a password/passphrase prompt or TUI). Retry it with the \"interactive\" parameter set to true so the user can respond directly."
+		}
+	}
+	return ""
 }

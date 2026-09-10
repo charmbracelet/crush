@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/interactive"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -210,4 +211,121 @@ func TestTruncateOutputEmoji(t *testing.T) {
 	out := TruncateOutput(content)
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
 	require.Contains(t, out, "lines truncated")
+}
+
+// SetHandlerForTest registers an interactive handler for the duration
+// of a single test. Tests cannot run in parallel while using it: the
+// handler is process-global state.
+func SetHandlerForTest(t *testing.T, handler interactive.Handler) {
+	t.Helper()
+	interactive.SetHandler(handler)
+	t.Cleanup(func() { interactive.SetHandler(nil) })
+}
+
+func TestBashTool_InteractiveRequiresHandler(t *testing.T) {
+	SetHandlerForTest(t, nil)
+
+	workingDir := t.TempDir()
+	tool, perms := newBashToolWithRecordingPerms(workingDir, true)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "interactive echo",
+		Command:     "git push",
+		Interactive: true,
+	})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "interactive execution is unavailable")
+	require.Equal(t, 1, perms.requestCount, "interactive commands must ask for permission")
+}
+
+func TestBashTool_InteractiveRunsViaHandler(t *testing.T) {
+	handler := func(ctx context.Context, req interactive.Request) (interactive.Result, error) {
+		require.Equal(t, "git push", req.Command)
+		require.Equal(t, "push commits", req.Description)
+		return interactive.Result{Output: "pushed", ExitCode: 0}, nil
+	}
+	SetHandlerForTest(t, handler)
+
+	workingDir := t.TempDir()
+	tool, perms := newBashToolWithRecordingPerms(workingDir, true)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "push commits",
+		Command:     "git push",
+		Interactive: true,
+	})
+
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "pushed")
+	require.Contains(t, resp.Content, "ran interactively")
+	require.Contains(t, resp.Content, "<cwd>"+normalizeWorkingDir(workingDir))
+
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.True(t, meta.Interactive)
+	require.False(t, meta.Background)
+	require.Equal(t, "pushed", meta.Output)
+	require.Equal(t, 1, perms.requestCount, "interactive commands must ask for permission")
+}
+
+func TestBashTool_InteractiveReportsExitCode(t *testing.T) {
+	SetHandlerForTest(t, func(ctx context.Context, req interactive.Request) (interactive.Result, error) {
+		return interactive.Result{Output: "boom", ExitCode: 128}, nil
+	})
+
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "failing interactive",
+		Command:     "git push",
+		Interactive: true,
+	})
+
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "boom")
+	require.Contains(t, resp.Content, "Exit code 128")
+}
+
+func TestBashTool_InteractiveRejectsBackgroundCombination(t *testing.T) {
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description:     "invalid combo",
+		Command:         "git push",
+		Interactive:     true,
+		RunInBackground: true,
+	})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "cannot be combined")
+}
+
+func TestInteractiveFailureHint(t *testing.T) {
+	t.Parallel()
+
+	require.Empty(t, interactiveFailureHint("everything went fine"))
+
+	for _, output := range []string{
+		"ssh_askpass: read_passphrase: can't open /dev/tty",
+		"gpg: pinentry error",
+		"fatal: cannot run interactively: not a terminal",
+	} {
+		require.Contains(t, interactiveFailureHint(output), "interactive", "hint expected for %q", output)
+	}
+}
+
+func TestInteractiveFailureHint_OnlyOnFailedCommands(t *testing.T) {
+	t.Parallel()
+
+	// The hint is only appended by callers when the command failed; the
+	// signature list must stay specific enough to avoid noise on the
+	// happy path.
+	require.Empty(t, interactiveFailureHint("pushed to origin/main"))
 }

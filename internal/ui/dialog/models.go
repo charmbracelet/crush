@@ -454,6 +454,19 @@ func (m *Models) setProviderItems() error {
 		groups = append(groups, group)
 	}
 
+	// Show configured providers first, keeping the original order within
+	// each tier.
+	slices.SortStableFunc(groups, func(a, b ModelGroup) int {
+		switch {
+		case a.configured == b.configured:
+			return 0
+		case b.configured:
+			return 1
+		default:
+			return -1
+		}
+	})
+
 	if len(recentItems) > 0 {
 		recentGroup := NewModelGroup(t, "Recently used", false)
 

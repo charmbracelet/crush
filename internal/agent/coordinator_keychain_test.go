@@ -112,6 +112,11 @@ func newKeychainTestCoordinator(t *testing.T, secret string) (*coordinator, *con
 	coord.currentAgent = agent
 	coord.agents[config.AgentCoder] = agent
 
+	// buildAgent resolves the keychain secret on background readiness
+	// goroutines. The mock keyring backend is unsynchronized, so those
+	// reads must finish before the tests mutate the mock store.
+	require.NoError(t, coord.readyWg.Wait())
+
 	return coord, cfg
 }
 

@@ -4,11 +4,13 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/keyring"
 	"github.com/charmbracelet/crush/internal/logout"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
@@ -123,6 +125,7 @@ func logoutHyper(c *client.Client, wsID string) error {
 	); err != nil {
 		return err
 	}
+	deleteKeyringSecret("hyper")
 
 	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["hyper"])
 	return nil
@@ -137,6 +140,7 @@ func logoutCopilot(c *client.Client, wsID string) error {
 	); err != nil {
 		return err
 	}
+	deleteKeyringSecret("copilot")
 
 	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["copilot"])
 	return nil
@@ -156,9 +160,22 @@ func logoutOpenAI(c *client.Client, wsID string) error {
 	); err != nil {
 		return err
 	}
+	deleteKeyringSecret("openai")
 
 	fmt.Printf("Successfully logged out of %s.\n", providerDisplayNames["openai"])
 	return nil
+}
+
+// deleteKeyringSecret removes the provider's system keyring entry after
+// a successful logout. Best effort: logout must succeed even when the
+// keyring is unreachable. A missing entry is not an error.
+func deleteKeyringSecret(providerID string) {
+	if !keyring.Available() {
+		return
+	}
+	if err := keyring.Delete(providerID); err != nil {
+		slog.Warn("Failed to remove API key from system keyring", "provider", providerID, "error", err)
+	}
 }
 
 // pickLoggedInProvider returns the provider to log out of and whether the

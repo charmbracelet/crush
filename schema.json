@@ -792,6 +792,22 @@
         "provider"
       ]
     },
+    "StatusLineConfig": {
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command that receives the session JSON payload on stdin and prints the status line to stdout",
+          "examples": [
+            "~/bin/statusline.sh"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "command"
+      ]
+    },
     "TUIOptions": {
       "properties": {
         "compact_mode": {
@@ -840,6 +856,10 @@
           ],
           "description": "Exit banner style after quitting Crush",
           "default": "default"
+        },
+        "status_line": {
+          "$ref": "#/$defs/StatusLineConfig",
+          "description": "Custom status line rendered at the bottom of the TUI"
         }
       },
       "additionalProperties": false,

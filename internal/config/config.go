@@ -275,11 +275,27 @@ type TUIOptions struct {
 	// Here we can add themes later or any TUI related options
 	//
 
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
-	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
-	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
-	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	Completions Completions       `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool             `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Scrollbar   string            `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	Mouse       *bool             `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
+	ExitBanner  ExitBanner        `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	StatusLine  *StatusLineConfig `json:"status_line,omitempty" jsonschema:"description=Custom status line rendered at the bottom of the TUI"`
+}
+
+// StatusLineConfig configures a user-provided status line rendered at the
+// bottom of the TUI. The command runs periodically with a JSON payload
+// describing the current session on stdin, and its first output line is
+// displayed below the help bar.
+type StatusLineConfig struct {
+	Command string `json:"command" jsonschema:"description=Shell command that receives the session JSON payload on stdin and prints the status line to stdout,example=~/bin/statusline.sh"`
+}
+
+// StatusLineEnabled reports whether a custom status line is configured. The
+// nil receiver and an empty command both mean disabled, so callers can ask
+// without unwrapping either.
+func (t *TUIOptions) StatusLineEnabled() bool {
+	return t != nil && t.StatusLine != nil && t.StatusLine.Command != ""
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The

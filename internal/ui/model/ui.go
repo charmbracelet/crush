@@ -219,6 +219,8 @@ type UI struct {
 
 	dialog *dialog.Overlay
 	status *Status
+	// statusLine renders the user-configured status line, if any.
+	statusLine *StatusLine
 
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
@@ -475,6 +477,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 
 	status := NewStatus(com, ui)
+	if cfg := com.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI.StatusLineEnabled() {
+		ui.statusLine = NewStatusLine(com)
+	}
 
 	// Seed the active theme key from the large model provider so the
 	// first model selection can correctly skip a redundant theme swap.
@@ -557,6 +562,9 @@ func (m *UI) Init() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	cmds = append(cmds, m.checkPendingMCPAuth())
+	if m.statusLine != nil {
+		cmds = append(cmds, statusLineTick())
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -1394,6 +1402,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleConnectionEvent(msg)...)
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
+	case statusLineTickMsg:
+		cmds = append(cmds, m.statusLineRefresh())
+	case statusLineOutputMsg:
+		if m.statusLine != nil {
+			m.statusLine.SetContent(msg.content)
+		}
 	case completions.CompletionItemsLoadedMsg:
 		if m.completionsOpen {
 			m.completions.SetItems(msg.Files, msg.Resources)
@@ -3078,6 +3092,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Add status and help layer
 	m.status.SetHideHelp(isOnboarding)
 	m.status.Draw(scr, layout.status)
+	if m.statusLine != nil {
+		m.statusLine.Draw(scr, layout.statusLine)
+	}
 
 	// Draw completions popup if open
 	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
@@ -3602,6 +3619,9 @@ func (m *UI) updateTextareaWithPrevHeight(msg tea.Msg, prevHeight int) tea.Cmd {
 func (m *UI) updateSize() {
 	// Set status width
 	m.status.SetWidth(m.layout.status.Dx())
+	if m.statusLine != nil {
+		m.statusLine.SetWidth(m.layout.statusLine.Dx())
+	}
 
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.textarea.MaxHeight = TextareaMaxHeight
@@ -3675,6 +3695,18 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	uiLayout := uiLayout{
 		area:   area,
 		status: helpRect,
+	}
+
+	// When a custom status line is configured it gets its own row at the
+	// very bottom of the screen, below the help bar.
+	if m.statusLine != nil && helpRect.Dy() > 1 {
+		var statusLineRect image.Rectangle
+		layout.Vertical(
+			layout.Len(helpRect.Dy()-1),
+			layout.Len(1),
+		).Split(helpRect).Assign(&helpRect, &statusLineRect)
+		uiLayout.status = helpRect
+		uiLayout.statusLine = statusLineRect
 	}
 
 	// Handle different app states
@@ -3844,6 +3876,9 @@ type uiLayout struct {
 
 	// status is the area for the status view.
 	status uv.Rectangle
+
+	// statusLine is the area for the custom status line, when configured.
+	statusLine uv.Rectangle
 
 	// session details is the area for the session details overlay in compact mode.
 	sessionDetails uv.Rectangle

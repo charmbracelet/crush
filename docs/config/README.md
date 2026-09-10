@@ -555,8 +555,26 @@ option ui transparent true
 option ui mouse false
 option ui scrollbar always
 option ui exit-banner compact
+option ui status-line '~/bin/statusline.sh'
 option ui completions-max-depth 4
 option ui completions-max-items 200
+```
+
+The status line command re-runs about once a second with a JSON payload on
+stdin describing the current session, and its first line of stdout is
+rendered at the very bottom of the TUI (empty output hides the line):
+
+```json
+{
+  "session_id": "0b2d1b3e-…",
+  "title": "Fix login flow",
+  "cwd": "~/dev/app",
+  "model": { "id": "claude-sonnet-5", "display_name": "Claude Sonnet 5", "provider": "anthropic" },
+  "workspace": { "current_dir": "~/dev/app", "project_dir": "~/dev/app" },
+  "context": { "used_tokens": 21043, "context_window": 200000, "percentage": 10.5 },
+  "cost": { "total_cost_usd": 0.12 },
+  "version": "v0.93.1"
+}
 ```
 
 > [!IMPORTANT]

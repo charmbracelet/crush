@@ -120,7 +120,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}, store.WorkingDir(), store.WorkingDir())
 
 	permSvc := permission.NewPermissionService(store.WorkingDir(), allowedTools, permissionHooks{hookRunner})
-	if store.Overrides().PermissionMode != 0 {
+	if store.Overrides().PermissionMode != permission.PermissionModeNormal {
 		permSvc.SetPermissionMode(store.Overrides().PermissionMode)
 	}
 

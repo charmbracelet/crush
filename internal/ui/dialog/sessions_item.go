@@ -50,8 +50,13 @@ type SessionItem struct {
 	m                fuzzy.Match
 	cache            map[int]string
 	updateTitleInput textinput.Model
-	focused          bool
-	hideInfo         bool
+	// promoteOnSpace reports whether the current title is still shown only
+	// as a ghost placeholder. While set, a leading space keeps the title by
+	// promoting it to an editable value; typing any other character simply
+	// replaces the ghost with the typed text.
+	promoteOnSpace bool
+	focused        bool
+	hideInfo       bool
 }
 
 // Finished implements list.Item. Session items are render-stable
@@ -92,6 +97,20 @@ func (s *SessionItem) InputValue() string {
 
 // HandleInput forwards input message to the update title input
 func (s *SessionItem) HandleInput(msg tea.Msg) tea.Cmd {
+	keyMsg, ok := msg.(tea.KeyPressMsg)
+	if s.promoteOnSpace {
+		s.promoteOnSpace = false
+		// A leading space keeps the ghost title by promoting it to an
+		// editable value without inserting the space. Anything else simply
+		// types over the ghost title, which is still empty at this point.
+		if ok && keyMsg.Text == " " && s.Title != "" {
+			s.updateTitleInput.SetValue(s.Title)
+			if s.Versioned != nil {
+				s.Bump()
+			}
+			return nil
+		}
+	}
 	var cmd tea.Cmd
 	s.updateTitleInput, cmd = s.updateTitleInput.Update(msg)
 	if s.Versioned != nil {
@@ -147,7 +166,7 @@ func (s *SessionItem) Render(width int) string {
 			const cursorPadding = 1
 			inputWidth := max(0, width-styles.ItemFocused.GetHorizontalFrameSize()-cursorPadding)
 			s.updateTitleInput.SetWidth(inputWidth)
-			s.updateTitleInput.Placeholder = ansi.Truncate(s.Title, width, "…")
+			s.updateTitleInput.Placeholder = ansi.Truncate(s.Title, inputWidth, "…")
 			return styles.ItemFocused.Render(s.updateTitleInput.View())
 		}
 	}
@@ -264,6 +283,10 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 			inputStyle := t.TextInput
 			inputStyle.Focused.Placeholder = t.Dialog.Sessions.RenamingPlaceholder
 			item.updateTitleInput.SetStyles(inputStyle)
+			// The current title starts out as a ghost placeholder. Typing
+			// any character replaces it; a leading space keeps it by
+			// promoting it to an editable value (see HandleInput).
+			item.promoteOnSpace = true
 			item.updateTitleInput.Focus()
 		}
 		items[i] = item

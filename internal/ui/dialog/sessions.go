@@ -56,6 +56,7 @@ type Session struct {
 		Rename        key.Binding
 		ConfirmRename key.Binding
 		CancelRename  key.Binding
+		KeepTitle     key.Binding
 		ConfirmDelete key.Binding
 		CancelDelete  key.Binding
 		Close         key.Binding
@@ -127,6 +128,10 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s.keyMap.CancelRename = key.NewBinding(
 		key.WithKeys("esc"),
 		key.WithHelp("esc", "cancel"),
+	)
+	s.keyMap.KeepTitle = key.NewBinding(
+		key.WithKeys("space"),
+		key.WithHelp("space", "keep current title"),
 	)
 	s.keyMap.ConfirmDelete = key.NewBinding(
 		key.WithKeys("y", "enter"),
@@ -459,7 +464,7 @@ func (s *Session) confirmRenameSession() Action {
 	}
 
 	newTitle := strings.TrimSpace(sessionItem.InputValue())
-	if newTitle == "" {
+	if newTitle == "" || newTitle == sessionItem.Title {
 		return nil
 	}
 	session := sessionItem.Session
@@ -510,8 +515,9 @@ func (s *Session) ShortHelp() []key.Binding {
 		}
 	case sessionsModeUpdating:
 		return []key.Binding{
-			s.keyMap.ConfirmRename,
 			s.keyMap.CancelRename,
+			s.keyMap.KeepTitle,
+			s.keyMap.ConfirmRename,
 		}
 	default:
 		return []key.Binding{
@@ -543,8 +549,9 @@ func (s *Session) FullHelp() [][]key.Binding {
 		}
 	case sessionsModeUpdating:
 		slice = []key.Binding{
-			s.keyMap.ConfirmRename,
 			s.keyMap.CancelRename,
+			s.keyMap.KeepTitle,
+			s.keyMap.ConfirmRename,
 		}
 	}
 	for i := 0; i < len(slice); i += 4 {

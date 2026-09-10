@@ -139,6 +139,16 @@ func Delete(providerID string) error {
 	return nil
 }
 
+// Verify reports whether the keyring currently holds exactly secret
+// under providerID. It reports false when no usable keyring exists,
+// the entry is missing, or the stored value differs. Callers use it
+// to confirm that a secret actually landed in the keychain instead of
+// silently falling back to plaintext storage.
+func Verify(providerID, secret string) bool {
+	stored, err := Get(providerID)
+	return err == nil && stored == secret
+}
+
 // IsUnavailable reports whether the error means "no usable keyring on
 // this system", as opposed to a per-entry failure such as a missing
 // secret.

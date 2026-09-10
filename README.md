@@ -988,6 +988,8 @@ We’d love to hear your thoughts on this project. Need help? We gotchu. You can
 
 [FSL-1.1-MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE.md)
 
+Until the MIT future grant takes effect, Competing Use is disallowed — see the Competing Use clause in [`LICENSE.md`](LICENSE.md).
+
 ---
 
 Part of [Charm](https://charm.land).

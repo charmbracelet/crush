@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -100,10 +102,12 @@ type recordingPermissionService struct {
 	requestCount int
 	allow        bool
 	mode         permission.PermissionMode
+	lastDanger   string
 }
 
 func (m *recordingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
 	m.requestCount++
+	m.lastDanger = req.Danger
 	return m.allow, nil
 }
 
@@ -342,10 +346,9 @@ func TestResolveBlockedCommands(t *testing.T) {
 	})
 }
 
-// TestBashTool_ApprovedDangerousCommandRuns pins the rule that the permission
-// layer is the only gate. A dangerous command that was approved must reach the
-// shell, and it must do so without the tool consulting the permission mode:
-// the mode here stays Normal in every case, and approval alone decides.
+// TestBashTool_ApprovedDangerousCommandRuns pins the rule that a command the
+// user was warned about and approved anyway reaches the shell unguarded:
+// re-blocking it would override the answer they just gave.
 func TestBashTool_ApprovedDangerousCommandRuns(t *testing.T) {
 	workingDir := t.TempDir()
 	perms := &recordingPermissionService{
@@ -365,8 +368,59 @@ func TestBashTool_ApprovedDangerousCommandRuns(t *testing.T) {
 	})
 
 	require.Equal(t, 1, perms.requestCount, "a dangerous command must be prompted for")
+	require.Equal(t, "it uses ifconfig", perms.lastDanger,
+		"the prompt must name what tripped the check")
 	require.NotContains(t, resp.Content, "not allowed for security reasons",
 		"an approved command must not be re-blocked at exec time")
+}
+
+// TestBashTool_UnflaggedCommandKeepsBlockList is the other side of that rule.
+// The static check expands commands with globbing off, so a glob hides the
+// dangerous name from it and yolo mode auto-approves the call unseen. The block
+// list stays on at exec time, where the glob has resolved and the real command
+// name is finally visible.
+func TestBashTool_UnflaggedCommandKeepsBlockList(t *testing.T) {
+	workingDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\n"), 0o755))
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeYolo,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "indirect dangerous command",
+		Command:     "ifconf?g --help",
+	})
+
+	require.Empty(t, perms.lastDanger, "the static check cannot see through a glob")
+	require.Contains(t, resp.Content, "not allowed for security reasons")
+}
+
+// TestBashTool_SysadminModeSkipsBlockList pins sysadmin mode as the deliberate
+// exception: it asks for nothing and blocks nothing.
+func TestBashTool_SysadminModeSkipsBlockList(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeSysadmin,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, attribution, "test-model", nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "indirect dangerous command",
+		Command:     "ifconf?g --help",
+	})
+
+	require.NotContains(t, resp.Content, "not allowed for security reasons")
 }
 
 // TestBashTool_DeniedDangerousCommandDoesNotRun is the other half: denial at

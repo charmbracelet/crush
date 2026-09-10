@@ -85,6 +85,15 @@ type KeyMap struct {
 	Tab        key.Binding
 	ToggleYolo key.Binding
 	ShiftTab   key.Binding
+
+	// Also exposed as commands-panel actions.
+	Summarize         key.Binding
+	ToggleThinking    key.Binding
+	ToggleCompact     key.Binding
+	ToggleTransparent key.Binding
+	InitializeProject key.Binding
+	Reasoning         key.Binding
+	Notifications     key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -124,6 +133,34 @@ func DefaultKeyMap() KeyMap {
 		ShiftTab: key.NewBinding(
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "mode"),
+		),
+		Summarize: key.NewBinding(
+			key.WithKeys("ctrl+."),
+			key.WithHelp("ctrl+.", "summarize session"),
+		),
+		ToggleThinking: key.NewBinding(
+			key.WithKeys("ctrl+,"),
+			key.WithHelp("ctrl+,", "toggle thinking"),
+		),
+		ToggleCompact: key.NewBinding(
+			key.WithKeys("ctrl+;"),
+			key.WithHelp("ctrl+;", "toggle compact"),
+		),
+		ToggleTransparent: key.NewBinding(
+			key.WithKeys("ctrl+'"),
+			key.WithHelp("ctrl+'", "toggle background"),
+		),
+		InitializeProject: key.NewBinding(
+			key.WithKeys("ctrl+9"),
+			key.WithHelp("ctrl+9", "initialize project"),
+		),
+		Reasoning: key.NewBinding(
+			key.WithKeys("ctrl+8"),
+			key.WithHelp("ctrl+8", "reasoning effort"),
+		),
+		Notifications: key.NewBinding(
+			key.WithKeys("ctrl+7"),
+			key.WithHelp("ctrl+7", "notifications"),
 		),
 	}
 

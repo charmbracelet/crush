@@ -141,6 +141,11 @@ func charmtoneOverrides(s Styles) Styles {
 	s.Markdown.Link.Color = hex(charmtone.Zinc)
 	s.Markdown.Image.Color = hex(charmtone.Cheeky)
 
+	// The ◆ hypercredit symbol inside subdued text (e.g. savings
+	// suffixes) uses Mochi so it stays visible against its surroundings.
+	s.Messages.SubduedHypercreditIcon = s.Messages.SubduedHypercreditIcon.
+		Foreground(charmtone.Violet)
+
 	return s
 }
 

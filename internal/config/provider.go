@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -19,7 +18,6 @@ import (
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/x/etag"
 )
 
@@ -33,25 +31,10 @@ var (
 	providerErr  error
 )
 
-// file to cache provider data
+// file to cache provider data. It resolves through GlobalConfigData so the
+// catalog follows CRUSH_GLOBAL_DATA like the rest of the data directory.
 func cachePathFor(name string) string {
-	xdgDataHome := os.Getenv("XDG_DATA_HOME")
-	if xdgDataHome != "" {
-		return filepath.Join(xdgDataHome, appName, name+".json")
-	}
-
-	// return the path to the main data directory
-	// for windows, it should be in `%LOCALAPPDATA%/crush/`
-	// for linux and macOS, it should be in `$HOME/.local/share/crush/`
-	if runtime.GOOS == "windows" {
-		localAppData := os.Getenv("LOCALAPPDATA")
-		if localAppData == "" {
-			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
-		}
-		return filepath.Join(localAppData, appName, name+".json")
-	}
-
-	return filepath.Join(home.Dir(), ".local", "share", appName, name+".json")
+	return filepath.Join(filepath.Dir(GlobalConfigData()), name+".json")
 }
 
 // UpdateProviders updates the Catwalk providers list from a specified source.

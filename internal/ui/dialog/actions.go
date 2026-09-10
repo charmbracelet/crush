@@ -59,6 +59,7 @@ type (
 		Style string
 	}
 	ActionToggleTransparentBackground struct{}
+	ActionToggleMouseSupport          struct{}
 	ActionSwitchTheme                 struct {
 		Theme string
 	}
@@ -75,18 +76,11 @@ type (
 		Base    string
 		Palette styles.Palette
 	}
-	// ActionEditTheme opens the theme editor for a specific theme.
 	ActionEditTheme struct {
 		Name string
 	}
 	ActionRevertThemePalette struct{}
-	// ActionRevertOverriddenTheme resets a built-in theme back to its
-	// original palette by dropping any user overrides (theme file and
-	// config entry) layered on top of it.
 	ActionRevertOverriddenTheme struct {
-		Name string
-	}
-	ActionDeleteThemeFile struct {
 		Name string
 	}
 	ActionCreateTheme struct {

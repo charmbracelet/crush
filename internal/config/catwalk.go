@@ -43,6 +43,12 @@ func (s *catwalkSync) Get(ctx context.Context) ([]catwalk.Provider, error) {
 	// sees the same outcome, not just the one that won the once.
 	s.once.Do(func() {
 		if !s.autoupdate {
+			cached, _, cachedErr := s.cache.Get()
+			if len(cached) > 0 && cachedErr == nil {
+				slog.Info("Using cached Catwalk providers (auto-update disabled)")
+				s.result = cached
+				return
+			}
 			slog.Info("Using embedded Catwalk providers")
 			s.result = embedded.GetAll()
 			return

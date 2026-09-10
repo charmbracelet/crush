@@ -598,19 +598,19 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
-	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "question-batches", app.Questions.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "question-notifications", app.Questions.SubscribeNotifications, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+	app.subscribe(ctx, "sessions", app.Sessions.Subscribe)
+	app.subscribe(ctx, "messages", app.Messages.Subscribe)
+	app.subscribeMustDeliver(ctx, "permissions", app.Permissions.Subscribe)
+	app.subscribeMustDeliver(ctx, "permissions-notifications", app.Permissions.SubscribeNotifications)
+	app.subscribeMustDeliver(ctx, "question-batches", app.Questions.Subscribe)
+	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
+	app.subscribe(ctx, "history", app.History.Subscribe)
+	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
+	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
+	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
+	app.subscribe(ctx, "lsp", SubscribeLSPEvents)
 	if app.Skills != nil {
-		setupSubscriber(ctx, app.serviceEventsWG, "skills", app.Skills.SubscribeEvents, app.events)
+		app.subscribe(ctx, "skills", app.Skills.SubscribeEvents)
 	}
 	cleanupFunc := func(context.Context) error {
 		cancel()
@@ -621,14 +621,17 @@ func (app *App) setupEvents() {
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
 
-func setupSubscriber[T any](
+// subscribe fans a service's event stream into the shared app.events
+// broker on app.serviceEventsWG, re-publishing each upstream event as a
+// tea.Msg. The goroutine exits when ctx is cancelled or the upstream
+// channel closes. It is a generic method (Go 1.27) so it can live in the
+// App namespace while still inferring the upstream event type T.
+func (app *App) subscribe[T any](
 	ctx context.Context,
-	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
-	broker *pubsub.Broker[tea.Msg],
 ) {
-	wg.Go(func() {
+	app.serviceEventsWG.Go(func() {
 		subCh := subscriber(ctx)
 		for {
 			select {
@@ -637,7 +640,7 @@ func setupSubscriber[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				broker.Publish(pubsub.UpdatedEvent, tea.Msg(event))
+				app.events.Publish(pubsub.UpdatedEvent, tea.Msg(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return
@@ -646,21 +649,19 @@ func setupSubscriber[T any](
 	})
 }
 
-// setupSubscriberMustDeliver is the bounded-blocking fan-in variant of
-// setupSubscriber: it re-publishes upstream events onto the shared
+// subscribeMustDeliver is the bounded-blocking fan-in variant of
+// [App.subscribe]: it re-publishes upstream events onto the shared
 // app.events broker using PublishMustDeliver instead of Publish. Use
 // this for terminal events that subscribers cannot tolerate losing —
 // notably RunComplete, which is the authoritative end-of-run signal
 // for `crush run`. A lossy fan-in here can drop the only terminal
 // event and hang non-interactive clients waiting on it.
-func setupSubscriberMustDeliver[T any](
+func (app *App) subscribeMustDeliver[T any](
 	ctx context.Context,
-	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
-	broker *pubsub.Broker[tea.Msg],
 ) {
-	wg.Go(func() {
+	app.serviceEventsWG.Go(func() {
 		subCh := subscriber(ctx)
 		for {
 			select {
@@ -669,7 +670,7 @@ func setupSubscriberMustDeliver[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				broker.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
+				app.events.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return

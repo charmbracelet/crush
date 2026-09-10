@@ -23,6 +23,7 @@ type ModelType int
 const (
 	ModelTypeLarge ModelType = iota
 	ModelTypeSmall
+	ModelTypeSummary
 )
 
 // String returns the string representation of the [ModelType].
@@ -32,6 +33,8 @@ func (mt ModelType) String() string {
 		return "Large Task"
 	case ModelTypeSmall:
 		return "Small Task"
+	case ModelTypeSummary:
+		return "Summary"
 	default:
 		return "Unknown"
 	}
@@ -44,6 +47,8 @@ func (mt ModelType) Config() config.SelectedModelType {
 		return config.SelectedModelTypeLarge
 	case ModelTypeSmall:
 		return config.SelectedModelTypeSmall
+	case ModelTypeSummary:
+		return config.SelectedModelTypeSummary
 	default:
 		return ""
 	}
@@ -56,6 +61,8 @@ func (mt ModelType) Placeholder() string {
 		return largeModelInputPlaceholder
 	case ModelTypeSmall:
 		return smallModelInputPlaceholder
+	case ModelTypeSummary:
+		return summaryModelInputPlaceholder
 	default:
 		return ""
 	}
@@ -65,10 +72,16 @@ const (
 	onboardingModelInputPlaceholder = "Find your fave"
 	largeModelInputPlaceholder      = "Choose a model for large, complex tasks"
 	smallModelInputPlaceholder      = "Choose a model for small, simple tasks"
+	summaryModelInputPlaceholder    = "Choose a model for notebook summary generation"
 )
 
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
+
+// SummaryModelsID is the identifier for the summary model selection
+// dialog. It is distinct from ModelsID so the dialog overlay can
+// track it independently.
+const SummaryModelsID = "summary-models"
 
 const defaultModelsDialogMaxWidth = 73
 
@@ -77,8 +90,10 @@ type Models struct {
 	com          *common.Common
 	isOnboarding bool
 
-	modelType ModelType
-	providers []catwalk.Provider
+	modelType   ModelType
+	providers   []catwalk.Provider
+	id          string // dialog ID, defaults to ModelsID
+	summaryMode bool   // when true, dialog selects summary model
 
 	keyMap struct {
 		Tab      key.Binding
@@ -96,12 +111,24 @@ type Models struct {
 
 var _ Dialog = (*Models)(nil)
 
-// NewModels creates a new Models dialog.
-func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
+// newModelsInternal is the shared constructor for NewModels and
+// NewSummaryModels. It sets the dialog ID, model type, onboarding
+// state, and summary mode before calling setProviderItems() exactly
+// once, avoiding spurious recent-model mutations.
+func newModelsInternal(
+	com *common.Common,
+	id string,
+	modelType ModelType,
+	isOnboarding bool,
+	summaryMode bool,
+) (*Models, error) {
 	t := com.Styles
 	m := &Models{}
 	m.com = com
 	m.isOnboarding = isOnboarding
+	m.id = id
+	m.modelType = modelType
+	m.summaryMode = summaryMode
 
 	help := help.New()
 	help.Styles = t.DialogHelpStyles()
@@ -113,7 +140,11 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = onboardingModelInputPlaceholder
+	if isOnboarding {
+		m.input.Placeholder = onboardingModelInputPlaceholder
+	} else {
+		m.input.Placeholder = modelType.Placeholder()
+	}
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 
@@ -161,9 +192,21 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	return m, nil
 }
 
+// NewModels creates a new Models dialog.
+func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
+	return newModelsInternal(com, ModelsID, ModelTypeLarge, isOnboarding, false)
+}
+
+// NewSummaryModels creates a model selection dialog for the summary
+// model. It's like NewModels but without the large/small toggle —
+// just a flat list of all available models.
+func NewSummaryModels(com *common.Common) (*Models, error) {
+	return newModelsInternal(com, SummaryModelsID, ModelTypeSummary, false, true)
+}
+
 // ID implements Dialog.
 func (m *Models) ID() string {
-	return ModelsID
+	return m.id
 }
 
 // HandleMsg implements Dialog.
@@ -209,7 +252,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
-			if m.isOnboarding {
+			if m.isOnboarding || m.summaryMode {
 				break
 			}
 			if m.modelType == ModelTypeLarge {
@@ -273,8 +316,14 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)
 
 	rc := NewRenderContext(t, width)
-	rc.Title = "Switch Model"
-	rc.TitleInfo = m.modelTypeRadioView()
+	if m.summaryMode {
+		rc.Title = "Switch Summary Model"
+	} else {
+		rc.Title = "Switch Model"
+	}
+	if !m.isOnboarding && !m.summaryMode {
+		rc.TitleInfo = m.modelTypeRadioView()
+	}
 
 	if m.isOnboarding {
 		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
@@ -316,9 +365,11 @@ func (m *Models) ShortHelp() []key.Binding {
 	}
 	h := []key.Binding{
 		m.keyMap.UpDown,
-		m.keyMap.Tab,
-		m.keyMap.Select,
 	}
+	if !m.summaryMode {
+		h = append(h, m.keyMap.Tab)
+	}
+	h = append(h, m.keyMap.Select)
 	if m.isSelectedConfigured() {
 		h = append(h, m.keyMap.Edit)
 	}

@@ -845,6 +845,25 @@ func (c *controllerV1) handlePostWorkspaceAgentUpdate(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentUpdateSummary updates the summary model for a workspace.
+//
+//	@Summary		Update summary model
+//	@Description	Triggers a summary model update for the workspace
+//	@Tags			agent
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/update-summary [post]
+func (c *controllerV1) handlePostWorkspaceAgentUpdateSummary(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := c.backend.UpdateSummaryModel(r.Context(), id); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceAgentSession returns a specific agent session.
 //
 //	@Summary		Get agent session

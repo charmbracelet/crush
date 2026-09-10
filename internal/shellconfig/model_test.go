@@ -192,3 +192,14 @@ provider rm anthropic`)
 	require.Len(t, models, 1)
 	require.Equal(t, "b", models[0].(map[string]any)["id"])
 }
+
+func TestModelSummary(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `model summary openai/gpt-4o`)
+
+	models := result["models"].(map[string]any)
+	summary := models["summary"].(map[string]any)
+	require.Equal(t, "openai", summary["provider"])
+	require.Equal(t, "gpt-4o", summary["model"])
+}

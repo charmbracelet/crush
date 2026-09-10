@@ -52,8 +52,9 @@ func (s SelectedModelType) String() string {
 }
 
 const (
-	SelectedModelTypeLarge SelectedModelType = "large"
-	SelectedModelTypeSmall SelectedModelType = "small"
+	SelectedModelTypeLarge   SelectedModelType = "large"
+	SelectedModelTypeSmall   SelectedModelType = "small"
+	SelectedModelTypeSummary SelectedModelType = "summary"
 )
 
 const (
@@ -387,7 +388,7 @@ type Options struct {
 	Progress               *bool    `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications          string   `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills         []string `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
-	RequestTimeout         *int    `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	RequestTimeout         *int     `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -743,7 +744,7 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
 
-	// We currently only support large/small as values here.
+	// Supported model slots: large, small, summary.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 
 	// Recently used models stored in the data directory config.

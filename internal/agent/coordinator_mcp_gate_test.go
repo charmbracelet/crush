@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,14 +38,15 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 	cfg.SetupAgents()
 
 	coord := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
-		agents:      make(map[string]SessionAgent),
-		interactive: interactive,
+		cfg:          cfg,
+		sessions:     env.sessions,
+		messages:     env.messages,
+		permissions:  env.permissions,
+		history:      env.history,
+		filetracker:  *env.filetracker,
+		agents:       make(map[string]SessionAgent),
+		interactive:  interactive,
+		summaryModel: csync.NewValue(Model{}),
 	}
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))

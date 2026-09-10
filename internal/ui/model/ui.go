@@ -2348,6 +2348,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	if !isConfigured() || msg.ReAuthenticate {
 		m.dialog.CloseDialog(dialog.ModelsID)
+		m.dialog.CloseDialog(dialog.SummaryModelsID)
 		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2363,36 +2364,58 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			// the already-active theme, which avoids a full markdown
 			// re-render of the transcript on every selection.
 			m.applyThemeForProvider(providerID)
-		}
-		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-			// Ensure small model is set is unset.
-			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-				cmds = append(cmds, util.ReportError(err))
+			if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+				// Ensure small model is set is unset.
+				smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
+				if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+					cmds = append(cmds, util.ReportError(err))
+				}
 			}
 		}
+		// Summary selection: no theme switch, no auto-set-small.
 	}
 
-	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)
-		}
+	if msg.ModelType == config.SelectedModelTypeSummary {
+		// Summary model uses a dedicated activation path so the UI
+		// can report whether it resolved successfully.
+		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
+			if err := m.com.Workspace.UpdateSummaryModel(context.TODO()); err != nil {
+				return util.NewWarnMsg(fmt.Sprintf(
+					"Summary model saved but could not be activated: %s. "+
+						"The notebook will continue using the previous model.",
+					err))
+			}
+			var (
+				modelName = msg.Model.Model
+			)
+			if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
+				modelName = catwalkModel.Name
+			}
+			return util.NewInfoMsg(fmt.Sprintf("Summary model changed to %s", modelName))
+		}))
+	} else {
+		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
+			if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+				return util.ReportError(err)
+			}
 
-		var (
-			modelType = stringext.Capitalize(string(msg.ModelType))
-			modelName = msg.Model.Model
-		)
-		if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
-			modelName = catwalkModel.Name
-		}
-		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
+			var (
+				modelType = stringext.Capitalize(string(msg.ModelType))
+				modelName = msg.Model.Model
+			)
+			if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
+				modelName = catwalkModel.Name
+			}
+			modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
 
-		return util.NewInfoMsg(modelMsg)
-	}))
+			return util.NewInfoMsg(modelMsg)
+		}))
+	}
 
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
 	m.dialog.CloseDialog(dialog.OAuthID)
 	m.dialog.CloseDialog(dialog.ModelsID)
+	m.dialog.CloseDialog(dialog.SummaryModelsID)
 
 	if isOnboarding {
 		m.setState(uiLanding, uiFocusEditor)
@@ -4478,6 +4501,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openModelsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SummaryModelsID:
+		if cmd := m.openSummaryModelsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.CommandsID:
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4534,6 +4561,22 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(modelsDialog)
 
+	return nil
+}
+
+// openSummaryModelsDialog opens the summary model selection dialog.
+func (m *UI) openSummaryModelsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SummaryModelsID) {
+		m.dialog.BringToFront(dialog.SummaryModelsID)
+		return nil
+	}
+
+	modelsDialog, err := dialog.NewSummaryModels(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(modelsDialog)
 	return nil
 }
 

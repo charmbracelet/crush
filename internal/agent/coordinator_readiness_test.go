@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,12 +56,13 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	cfg.SetupAgents()
 
 	coord := &coordinator{
-		cfg:         cfg,
-		sessions:    env.sessions,
-		messages:    env.messages,
-		permissions: env.permissions,
-		history:     env.history,
-		filetracker: *env.filetracker,
+		cfg:          cfg,
+		sessions:     env.sessions,
+		messages:     env.messages,
+		permissions:  env.permissions,
+		history:      env.history,
+		filetracker:  *env.filetracker,
+		summaryModel: csync.NewValue(Model{}),
 	}
 
 	// Arm the MCP init gate. We never complete init; the readiness goroutines

@@ -59,6 +59,11 @@ func (c *CommandItem) WithDescription(desc string) *CommandItem {
 	return c
 }
 
+// Description returns the item's description, if any.
+func (c *CommandItem) Description() string {
+	return c.description
+}
+
 // Filter implements ListItem.
 func (c *CommandItem) Filter() string {
 	base := c.title

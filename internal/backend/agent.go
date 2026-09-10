@@ -164,6 +164,16 @@ func (b *Backend) UpdateAgent(ctx context.Context, workspaceID string) error {
 	return ws.UpdateAgentModel(ctx)
 }
 
+// UpdateSummaryModel reloads the summary model configuration.
+func (b *Backend) UpdateSummaryModel(ctx context.Context, workspaceID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.UpdateSummaryModel(ctx)
+}
+
 // CancelSession cancels an ongoing agent operation for the given
 // session.
 func (b *Backend) CancelSession(workspaceID, sessionID string) error {

@@ -23,18 +23,19 @@ import (
 //	    [--frequency-penalty F] [--presence-penalty F]
 //	    [--provider-options JSON]
 //	model small [<provider>/<id>] [...]
+//	model summary [<provider>/<id>] [...]
 //
 // "add" registers a model on an existing provider (the provider must have
-// been declared with `provider add` first). "remove" removes it. "large" and
-// "small" set the selected model for that slot, or print the current
-// selection as <provider>/<id> when given no argument.
+// been declared with `provider add` first). "remove" removes it. "large",
+// "small", and "summary" set the selected model for that slot, or print the
+// current selection as <provider>/<id> when given no argument.
 func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: model add|remove <provider>/<id> | model large|small [<provider>/<id>]")
+		return usage(stderr, "usage: model add|remove <provider>/<id> | model large|small|summary [<provider>/<id>]")
 	}
 
 	switch args[1] {
@@ -42,10 +43,10 @@ func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		return modelAdd(b, args, stderr)
 	case "remove", "rm":
 		return modelRemove(b, args, stderr)
-	case "large", "small":
+	case "large", "small", "summary":
 		return modelSelect(b, args, stdout, stderr)
 	default:
-		return usage(stderr, fmt.Sprintf("model: unknown subcommand %q (expected add, remove, large, or small)", args[1]))
+		return usage(stderr, fmt.Sprintf("model: unknown subcommand %q (expected add, remove, large, small, or summary)", args[1]))
 	}
 }
 

@@ -230,6 +230,10 @@ func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.app.UpdateAgentModel(ctx)
 }
 
+func (w *AppWorkspace) UpdateSummaryModel(ctx context.Context) error {
+	return w.app.UpdateSummaryModel(ctx)
+}
+
 func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.app.InitCoderAgent(ctx)
 }

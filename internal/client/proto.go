@@ -483,6 +483,19 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateSummaryModel triggers a summary model update on the server.
+func (c *Client) UpdateSummaryModel(ctx context.Context, id string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/update-summary", id), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to update summary model: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to update summary model: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // SendMessage sends a message to the agent for a workspace.
 //
 // When runID is non-empty it is echoed back on the resulting

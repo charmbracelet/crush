@@ -473,6 +473,16 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
+// UpdateSummaryModel resolves and applies the configured summary
+// model. Returns an error if the summary slot is configured but
+// invalid, so the UI can warn the user after an explicit selection.
+func (app *App) UpdateSummaryModel(ctx context.Context) error {
+	if app.AgentCoordinator == nil {
+		return fmt.Errorf("agent configuration is missing")
+	}
+	return app.AgentCoordinator.UpdateSummaryModel(ctx)
+}
+
 // restoreModelFromSession reads the last assistant message in the
 // session and, if it used a different provider/model than the current
 // config, overrides the preferred model in-memory (non-persistent)

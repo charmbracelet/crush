@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/agent/tools/notebooktools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
@@ -61,6 +62,7 @@ import (
 var (
 	errCoderAgentNotConfigured         = errors.New("coder agent not configured")
 	errModelProviderNotConfigured      = errors.New("model provider not configured")
+	errModelNotFoundInProvider         = errors.New("model not found in provider config")
 	errLargeModelNotSelected           = errors.New("large model not selected")
 	errSmallModelNotSelected           = errors.New("small model not selected")
 	errLargeModelProviderNotConfigured = errors.New("large model provider not configured")
@@ -137,6 +139,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	UpdateSummaryModel(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
 }
 
@@ -162,6 +165,14 @@ type coordinator struct {
 	// (e.g., sub-agents) try to set it simultaneously.
 	notebookModelResolver *func() fantasy.LanguageModel
 	notebookResolverOnce  sync.Once
+	// summaryModel holds the live summary model used by the
+	// notebook generator. Updated by UpdateModels and
+	// UpdateSummaryModel.
+	summaryModel *csync.Value[Model]
+	// summaryFailure tracks the last logged summary resolution
+	// failure so identical errors are logged only once.
+	summaryFailure *summaryFailureState
+	summaryErrMu   sync.Mutex
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -172,6 +183,14 @@ type coordinator struct {
 	skillTracker *skills.Tracker
 
 	readyWg errgroup.Group
+}
+
+// summaryFailureState records the last logged summary model resolution
+// failure so identical errors are not repeated on every UpdateModels call.
+type summaryFailureState struct {
+	provider string
+	model    string
+	message  string
 }
 
 // CoordinatorOptions holds the dependencies for NewCoordinator. Using a
@@ -231,6 +250,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:           opts.Interactive,
 		notebook:              opts.Notebook,
 		notebookModelResolver: opts.NotebookModelResolver,
+		summaryModel:          csync.NewValue(Model{}),
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -735,16 +755,35 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		NotebookAutoInject:   c.cfg.Config().Options.NotebookAutoInjectEnabled(),
 	})
 
+	// Initialize the summary model before installing the resolver.
+	// Only the top-level agent build (not sub-agents) sets this —
+	// sub-agent builds share the same coordinator and must not
+	// overwrite the notebook model.
+	if !isSubAgent {
+		summary := small // fallback to small when slot absent
+		if sel, ok := c.cfg.Config().Models[config.SelectedModelTypeSummary]; ok {
+			if m, err := c.buildSelectedModel(ctx, sel, true); err == nil {
+				summary = m
+			} else {
+				slog.Warn("Failed to resolve configured summary model, using small",
+					"provider", sel.Provider,
+					"model", sel.Model,
+					"error", err)
+			}
+		}
+		c.summaryModel.Set(summary)
+	}
+
 	// Wire the notebook model resolver once so the generator can
-	// obtain the small model lazily. Using sync.Once avoids races
+	// obtain the summary model lazily. Using sync.Once avoids races
 	// when concurrent buildAgent calls (e.g., sub-agents) try to
-	// set the same shared resolver. The small model is config-driven
+	// set the same shared resolver. The summary model is config-driven
 	// and identical across all agent builds.
 	if c.notebookModelResolver != nil {
 		c.notebookResolverOnce.Do(func() {
-			smallModelRef := small
+			summaryModel := c.summaryModel
 			*c.notebookModelResolver = func() fantasy.LanguageModel {
-				return smallModelRef.Model
+				return summaryModel.Get().Model
 			}
 		})
 	}
@@ -921,6 +960,64 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	return filteredTools, nil
 }
 
+// buildSelectedModel resolves a single model from a SelectedModel
+// config entry. It validates the model exists in the provider
+// catalog, applies provider-specific transformations (e.g.
+// OpenRouter :exacto), wraps with the request timeout, and returns
+// the fully constructed Model. Shared between buildAgentModels
+// (large/small) and the summary model resolver.
+func (c *coordinator) buildSelectedModel(
+	ctx context.Context,
+	sel config.SelectedModel,
+	isSubAgent bool,
+) (Model, error) {
+	cfg := c.cfg.Config()
+
+	providerCfg, ok := cfg.Providers.Get(sel.Provider)
+	if !ok {
+		return Model{}, errModelProviderNotConfigured
+	}
+
+	provider, err := c.buildProvider(providerCfg, sel, isSubAgent)
+	if err != nil {
+		return Model{}, err
+	}
+
+	// Find the catwalk model in the provider catalog.
+	var catwalkModel *catwalk.Model
+	for _, m := range providerCfg.Models {
+		if m.ID == sel.Model {
+			catwalkModel = &m
+			break
+		}
+	}
+	if catwalkModel == nil {
+		return Model{}, errModelNotFoundInProvider
+	}
+
+	// Apply provider-specific model-ID transformations.
+	modelID := sel.Model
+	if sel.Provider == openrouter.Name && isExactoSupported(modelID) {
+		modelID += ":exacto"
+	}
+
+	model, err := provider.LanguageModel(ctx, modelID)
+	if err != nil {
+		return Model{}, err
+	}
+
+	// Wrap with the configured request timeout.
+	requestTimeout := cfg.Options.GetRequestTimeout()
+	model = newRequestTimeoutModel(model, requestTimeout)
+
+	return Model{
+		Model:      model,
+		CatwalkCfg: *catwalkModel,
+		ModelCfg:   sel,
+		FlatRate:   providerCfg.FlatRate,
+	}, nil
+}
+
 func (c *coordinator) buildAgentModels(ctx context.Context, agent config.Agent, isSubAgent bool) (Model, Model, error) {
 	// An agent can pin its own model via Agent.Model: either a built-in
 	// selection (large/small) or a custom key from the models config.
@@ -937,86 +1034,29 @@ func (c *coordinator) buildAgentModels(ctx context.Context, agent config.Agent, 
 		return Model{}, Model{}, errSmallModelNotSelected
 	}
 
-	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errLargeModelProviderNotConfigured
-	}
-
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
+	large, err := c.buildSelectedModel(ctx, largeModelCfg, isSubAgent)
 	if err != nil {
-		return Model{}, Model{}, err
-	}
-
-	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errSmallModelProviderNotConfigured
-	}
-
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
+		// Translate generic helper errors back to large sentinels.
+		if errors.Is(err, errModelProviderNotConfigured) {
+			return Model{}, Model{}, errLargeModelProviderNotConfigured
 		}
-	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
+		if errors.Is(err, errModelNotFoundInProvider) {
+			return Model{}, Model{}, errLargeModelNotFound
 		}
-	}
-
-	if largeCatwalkModel == nil {
-		return Model{}, Model{}, errLargeModelNotFound
-	}
-
-	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errSmallModelNotFound
-	}
-
-	largeModelID := largeModelCfg.Model
-	smallModelID := smallModelCfg.Model
-
-	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
-		largeModelID += ":exacto"
-	}
-
-	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
-		smallModelID += ":exacto"
-	}
-
-	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
-	if err != nil {
 		return Model{}, Model{}, err
 	}
-	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
+	small, err := c.buildSelectedModel(ctx, smallModelCfg, true)
 	if err != nil {
+		if errors.Is(err, errModelProviderNotConfigured) {
+			return Model{}, Model{}, errSmallModelProviderNotConfigured
+		}
+		if errors.Is(err, errModelNotFoundInProvider) {
+			return Model{}, Model{}, errSmallModelNotFound
+		}
 		return Model{}, Model{}, err
 	}
 
-	// Bound each request with the configured timeout so unreachable or hung
-	// providers fail instead of blocking a session forever. The wrapper is
-	// applied per request, so retries get a fresh budget each attempt.
-	requestTimeout := c.cfg.Config().Options.GetRequestTimeout()
-	largeModel = newRequestTimeoutModel(largeModel, requestTimeout)
-	smallModel = newRequestTimeoutModel(smallModel, requestTimeout)
-
-	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+	return large, small, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -1366,11 +1406,91 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	}
 	c.currentAgent.SetModels(large, small)
 
+	// Resolve summary model. Failures are logged but never block
+	// the primary agent — the summary model is auxiliary.
+	cfg := c.cfg.Config()
+	if sel, ok := cfg.Models[config.SelectedModelTypeSummary]; ok {
+		summary, err := c.buildSelectedModel(ctx, sel, true)
+		if err != nil {
+			c.logSummaryFailureOnce(sel, err)
+		} else {
+			c.summaryModel.Set(summary)
+			c.clearSummaryFailure()
+		}
+	} else {
+		// Summary slot absent — fall back to small (existing behavior).
+		c.summaryModel.Set(small)
+		c.clearSummaryFailure()
+	}
+
 	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}
 	c.currentAgent.SetTools(tools)
+	return nil
+}
+
+// logSummaryFailureOnce logs a summary model resolution failure only
+// when the failure state changes, to avoid repeating the same error
+// before every agent run.
+func (c *coordinator) logSummaryFailureOnce(sel config.SelectedModel, err error) {
+	c.summaryErrMu.Lock()
+	defer c.summaryErrMu.Unlock()
+	current := &summaryFailureState{
+		provider: sel.Provider,
+		model:    sel.Model,
+		message:  err.Error(),
+	}
+	if c.summaryFailure != nil &&
+		c.summaryFailure.provider == current.provider &&
+		c.summaryFailure.model == current.model &&
+		c.summaryFailure.message == current.message {
+		return
+	}
+	c.summaryFailure = current
+	slog.Error("Failed to resolve summary model, keeping previous",
+		"provider", sel.Provider,
+		"model", sel.Model,
+		"error", err)
+}
+
+// clearSummaryFailure clears the summary failure state on recovery.
+func (c *coordinator) clearSummaryFailure() {
+	c.summaryErrMu.Lock()
+	defer c.summaryErrMu.Unlock()
+	c.summaryFailure = nil
+}
+
+// UpdateSummaryModel resolves and applies the configured summary
+// model. Unlike UpdateModels, it returns an error if the summary
+// model is configured but invalid, so the UI can warn the user
+// after an explicit selection. If the summary slot is absent, it
+// falls back to the configured small model and returns nil.
+func (c *coordinator) UpdateSummaryModel(ctx context.Context) error {
+	cfg := c.cfg.Config()
+	if sel, ok := cfg.Models[config.SelectedModelTypeSummary]; ok {
+		summary, err := c.buildSelectedModel(ctx, sel, true)
+		if err != nil {
+			return fmt.Errorf("summary model %s/%s: %w", sel.Provider, sel.Model, err)
+		}
+		c.summaryModel.Set(summary)
+		c.clearSummaryFailure()
+		return nil
+	}
+	// Slot absent — fall back to the configured small model only.
+	if smallCfg, ok := cfg.Models[config.SelectedModelTypeSmall]; ok {
+		small, err := c.buildSelectedModel(ctx, smallCfg, true)
+		if err != nil {
+			// Small model also invalid — preserve the current live
+			// summary model rather than failing. Return nil since
+			// the summary slot is absent (no user error to report).
+			return nil
+		}
+		c.summaryModel.Set(small)
+		c.clearSummaryFailure()
+	}
+	// If small slot is also absent, preserve the current value.
 	return nil
 }
 

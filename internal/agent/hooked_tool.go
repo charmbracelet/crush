@@ -39,6 +39,13 @@ func wrapToolsWithHooks(tools []fantasy.AgentTool, runner *hooks.Runner, isSubAg
 	return out
 }
 
+// Unwrap returns the wrapped tool. It exists so callers that need the
+// concrete tool type (e.g. MCP tools for partitioning or telemetry) can
+// reach through the hook decorator.
+func (h *hookedTool) Unwrap() fantasy.AgentTool {
+	return h.inner
+}
+
 func (h *hookedTool) Info() fantasy.ToolInfo {
 	return h.inner.Info()
 }

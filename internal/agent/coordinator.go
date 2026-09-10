@@ -801,11 +801,11 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	initCtx := context.WithoutCancel(ctx)
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		built, err := prompt.Build(initCtx, large.Model.Provider(), large.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
-		result.SetSystemPrompt(systemPrompt)
+		result.SetSystemPrompt(built)
 		return nil
 	})
 
@@ -946,9 +946,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 		}
 	}
-	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
-		return strings.Compare(a.Info().Name, b.Info().Name)
-	})
+	filteredTools = partitionToolsForCacheStability(filteredTools)
 
 	// Wrap tools with hook interception for the top-level agent only.
 	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
@@ -958,6 +956,30 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
 
 	return filteredTools, nil
+}
+
+// partitionToolsForCacheStability returns the tool list in a
+// two-partition order: core built-ins first (alphabetical), then MCP
+// tools (alphabetical). If an MCP server connects or changes its tool
+// set, only the MCP partition shifts position — the stable built-in
+// prefix keeps prompt-cache reuse intact.
+func partitionToolsForCacheStability(all []fantasy.AgentTool) []fantasy.AgentTool {
+	var builtinTools, mcpTools []fantasy.AgentTool
+	for _, tool := range all {
+		if _, ok := tool.(*tools.Tool); ok {
+			mcpTools = append(mcpTools, tool)
+		} else {
+			builtinTools = append(builtinTools, tool)
+		}
+	}
+	sortByName := func(list []fantasy.AgentTool) {
+		slices.SortFunc(list, func(a, b fantasy.AgentTool) int {
+			return strings.Compare(a.Info().Name, b.Info().Name)
+		})
+	}
+	sortByName(builtinTools)
+	sortByName(mcpTools)
+	return append(builtinTools, mcpTools...)
 }
 
 // buildSelectedModel resolves a single model from a SelectedModel
@@ -1084,10 +1106,11 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, anthropic.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, anthropic.WithHTTPClient(instrumentedHTTPClient(httpClient)))
 	return anthropic.New(opts...)
 }
 
@@ -1096,10 +1119,11 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, openai.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, openai.WithHTTPClient(instrumentedHTTPClient(httpClient)))
 	if len(headers) > 0 {
 		opts = append(opts, openai.WithHeaders(headers))
 	}
@@ -1113,10 +1137,11 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, openrouter.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, openrouter.WithHTTPClient(instrumentedHTTPClient(httpClient)))
 	if len(headers) > 0 {
 		opts = append(opts, openrouter.WithHeaders(headers))
 	}
@@ -1127,10 +1152,11 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	opts := []vercel.Option{
 		vercel.WithAPIKey(apiKey),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, vercel.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, vercel.WithHTTPClient(instrumentedHTTPClient(httpClient)))
 	if len(headers) > 0 {
 		opts = append(opts, vercel.WithHeaders(headers))
 	}
@@ -1176,9 +1202,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	if httpClient == nil && c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}
-	if httpClient != nil {
-		opts = append(opts, openaicompat.WithHTTPClient(httpClient))
-	}
+	opts = append(opts, openaicompat.WithHTTPClient(instrumentedHTTPClient(httpClient)))
 
 	if len(headers) > 0 {
 		opts = append(opts, openaicompat.WithHeaders(headers))
@@ -1197,10 +1221,11 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, azure.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, azure.WithHTTPClient(instrumentedHTTPClient(httpClient)))
 	if options == nil {
 		options = make(map[string]string)
 	}
@@ -1217,8 +1242,9 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, bedrock.WithHTTPClient(httpClient))
+		// Bedrock's default HTTP client is managed by the AWS SDK;
+		// transport metrics are only available when we inject one.
+		opts = append(opts, bedrock.WithHTTPClient(instrumentedHTTPClient(log.NewHTTPClient())))
 	}
 	if len(headers) > 0 {
 		opts = append(opts, bedrock.WithHeaders(headers))
@@ -1249,8 +1275,7 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 		google.WithGeminiAPIKey(apiKey),
 	}
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, google.WithHTTPClient(httpClient))
+		opts = append(opts, google.WithHTTPClient(instrumentedHTTPClient(log.NewHTTPClient())))
 	}
 	if len(headers) > 0 {
 		opts = append(opts, google.WithHeaders(headers))
@@ -1261,8 +1286,9 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) (fantasy.Provider, error) {
 	opts := []google.Option{}
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, google.WithHTTPClient(httpClient))
+		// Vertex builds its own authenticated transport; instrument
+		// only when we already inject a client.
+		opts = append(opts, google.WithHTTPClient(instrumentedHTTPClient(log.NewHTTPClient())))
 	}
 	if len(headers) > 0 {
 		opts = append(opts, google.WithHeaders(headers))

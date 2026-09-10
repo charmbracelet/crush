@@ -80,31 +80,40 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 	return p, nil
 }
 
-func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
+func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (BuiltPrompt, error) {
 	t, err := template.New(p.name).Parse(p.template)
 	if err != nil {
-		return "", fmt.Errorf("parsing template: %w", err)
+		return BuiltPrompt{}, fmt.Errorf("parsing template: %w", err)
 	}
 	var sb strings.Builder
 	d, err := p.promptData(ctx, provider, model, store)
 	if err != nil {
-		return "", err
+		return BuiltPrompt{}, err
 	}
 	if err := t.Execute(&sb, d); err != nil {
-		return "", fmt.Errorf("executing template: %w", err)
+		return BuiltPrompt{}, fmt.Errorf("executing template: %w", err)
 	}
 
-	return sb.String(), nil
+	text := sb.String()
+	return BuiltPrompt{
+		Text:     text,
+		Sections: extractSections(text),
+	}, nil
 }
 
 func processFile(filePath string) *ContextFile {
-	content, err := os.ReadFile(filePath)
+	content, truncated, err := readBounded(filePath)
 	if err != nil {
 		return nil
 	}
+	if truncated {
+		slog.Warn("Context file exceeds read limit, truncating",
+			"path", filePath,
+			"limit_bytes", maxContextFileReadSize)
+	}
 	return &ContextFile{
 		Path:    filePath,
-		Content: string(content),
+		Content: content,
 	}
 }
 
@@ -116,6 +125,8 @@ func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 		return contexts
 	}
 	if info.IsDir() {
+		// WalkDir visits entries in lexical order, so directory-loaded
+		// context is already deterministic.
 		filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -149,16 +160,22 @@ func expandPath(path string, store *config.ConfigStore) string {
 	return path
 }
 
-// loadContextFiles loads and deduplicates context files from a list of paths.
-func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
-	files := map[string][]ContextFile{}
+// loadContextFiles loads and deduplicates context files from a list of
+// paths. The configured order is preserved for explicit paths — a user
+// who deliberately orders context files (general rules before specific
+// overrides) keeps that order — and directory walks already return
+// entries in lexical order, so the result is deterministic.
+func loadContextFiles(paths []string, store *config.ConfigStore) []ContextFile {
+	var files []ContextFile
+	seen := map[string]bool{}
 	for _, pth := range paths {
 		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+		if seen[pathKey] {
 			continue
 		}
-		files[pathKey] = processContextPath(expanded, store)
+		seen[pathKey] = true
+		files = append(files, processContextPath(expanded, store)...)
 	}
 	return files
 }
@@ -225,12 +242,8 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
-	for _, files := range contextFiles {
-		data.ContextFiles = append(data.ContextFiles, files...)
-	}
-	for _, files := range globalContextFiles {
-		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
-	}
+	data.ContextFiles = contextFiles
+	data.GlobalContextFiles = globalContextFiles
 	return data, nil
 }
 

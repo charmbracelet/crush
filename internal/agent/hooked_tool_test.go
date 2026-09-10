@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -44,6 +45,16 @@ func newRunner(t *testing.T, cmd string) *hooks.Runner {
 	}
 	require.NoError(t, cfg.ValidateHooks())
 	return hooks.NewRunner(cfg.Hooks[hooks.EventPreToolUse], t.TempDir(), t.TempDir())
+}
+
+func TestIsMCPTool(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, isMCPTool(&tools.Tool{}))
+	require.True(t, isMCPTool(newHookedTool(&tools.Tool{}, nil)),
+		"isMCPTool must see through the hook decorator")
+	require.False(t, isMCPTool(&fakeTool{name: "bash"}))
+	require.False(t, isMCPTool(newHookedTool(&fakeTool{name: "bash"}, nil)))
 }
 
 func TestHookedTool_AllowStampsHookApproval(t *testing.T) {

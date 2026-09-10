@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
@@ -138,7 +140,7 @@ type SessionAgent interface {
 	BeginAccepted(sessionID string) *AcceptedRun
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
-	SetSystemPrompt(systemPrompt string)
+	SetSystemPrompt(systemPrompt prompt.BuiltPrompt)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -174,6 +176,9 @@ type sessionAgent struct {
 	systemPrompt       *csync.Value[string]
 	tools              *csync.Slice[fantasy.AgentTool]
 
+	// promptSections holds the per-section measurements of the last
+	// built system prompt, used for request composition telemetry.
+	promptSections       *csync.Slice[prompt.PromptSection]
 	isSubAgent           bool
 	sessions             session.Service
 	messages             message.Service
@@ -285,6 +290,7 @@ func NewSessionAgent(
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
+		promptSections:       csync.NewSlice[prompt.PromptSection](),
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
@@ -708,26 +714,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
-	var instructions strings.Builder
+	mcpInstructions := collectMCPInstructions()
+	basePromptBytes := len(systemPrompt)
 
-	for _, server := range mcp.GetStates() {
-		if server.State != mcp.StateConnected {
-			continue
-		}
-		if s := server.Client.InitializeResult().Instructions; s != "" {
-			instructions.WriteString(s)
-			instructions.WriteString("\n\n")
-		}
-	}
-
-	if s := instructions.String(); s != "" {
-		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+	if mcpInstructions != "" {
+		systemPrompt += "\n\n<mcp-instructions>\n" + mcpInstructions + "\n</mcp-instructions>"
 	}
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
 		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
+
+	logPromptComposition(call.SessionID, basePromptBytes, mcpInstructions, agentTools, a.promptSections.Copy())
 
 	agent := fantasy.NewAgent(
 		largeModel.Model,
@@ -912,6 +911,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
+			logStepComposition(call.SessionID, prepared.Messages, prepared.Tools)
+
 			sessionLock.Lock()
 			stepMessages = cloneFantasyMessages(prepared.Messages)
 			sessionLock.Unlock()
@@ -1082,6 +1083,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return getSessionErr
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
+			logStepUsage(call.SessionID, usage, estimated)
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			extractHyperCredits(stepResult.ProviderMetadata)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
@@ -1604,6 +1606,31 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
 		},
 	}
+}
+
+// collectMCPInstructions concatenates the InitializeResult instructions
+// of every connected MCP server. Servers are sorted by name so the
+// output is deterministic regardless of connection order.
+func collectMCPInstructions() string {
+	states := mcp.GetStates()
+	names := make([]string, 0, len(states))
+	for name := range states {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var instructions strings.Builder
+	for _, name := range names {
+		server := states[name]
+		if server.State != mcp.StateConnected {
+			continue
+		}
+		if s := server.Client.InitializeResult().Instructions; s != "" {
+			instructions.WriteString(s)
+			instructions.WriteString("\n\n")
+		}
+	}
+	return instructions.String()
 }
 
 // sessionHeaders returns the HTTP headers we use for cache affinity on
@@ -2229,7 +2256,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		cost = 0
 	}
 
-	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
+	promptTokens := normalizedPromptTokens(resp.TotalUsage)
 	completionTokens := resp.TotalUsage.OutputTokens
 
 	// Atomically update only title and usage fields to avoid overriding other
@@ -2356,7 +2383,7 @@ func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
 	if usage.OutputTokens != 0 {
 		session.CompletionTokens = usage.OutputTokens
 	}
-	if promptTokens := usage.InputTokens + usage.CacheReadTokens; promptTokens != 0 {
+	if promptTokens := normalizedPromptTokens(usage); promptTokens != 0 {
 		session.PromptTokens = promptTokens
 	}
 }
@@ -2495,8 +2522,9 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 	a.tools.SetSlice(tools)
 }
 
-func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
-	a.systemPrompt.Set(systemPrompt)
+func (a *sessionAgent) SetSystemPrompt(systemPrompt prompt.BuiltPrompt) {
+	a.systemPrompt.Set(systemPrompt.Text)
+	a.promptSections.SetSlice(systemPrompt.Sections)
 }
 
 func (a *sessionAgent) Model() Model {

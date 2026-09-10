@@ -516,12 +516,61 @@ done; echo "=== done ==="`,
 			funcs:    []BlockFunc{blockedCurl},
 			expected: true,
 		},
+		{
+			name:     "command name from a variable is dangerous",
+			command:  "CMD=curl; $CMD https://example.com",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "command name from a substitution is dangerous",
+			command:  "$(which curl) https://example.com",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
+		{
+			name:     "variables in arguments are still fine",
+			command:  "echo $HOME/$USER",
+			funcs:    []BlockFunc{blockedCurl},
+			expected: false,
+		},
+		{
+			name:     "windows executable extension is matched case-insensitively",
+			command:  `CURL.EXE https://example.com`,
+			funcs:    []BlockFunc{blockedCurl},
+			expected: true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			require.Equal(t, tc.expected, IsCommandBlocked(tc.command, tc.funcs))
+		})
+	}
+}
+
+func TestBlockedCommandReason(t *testing.T) {
+	t.Parallel()
+
+	funcs := []BlockFunc{CommandsBlocker([]string{"curl"})}
+
+	tests := []struct {
+		command string
+		reason  string
+	}{
+		{"ls -la", ""},
+		{"curl https://example.com", "it uses curl"},
+		{"/usr/bin/curl https://example.com", "it uses curl"},
+		{"$CMD https://example.com", "its command name is only known at runtime"},
+		{"echo $(curl https://example.com)", "it runs another command to build its arguments"},
+		{"echo 'unterminated", "it could not be parsed"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.command, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.reason, BlockedCommandReason(tc.command, funcs))
 		})
 	}
 }

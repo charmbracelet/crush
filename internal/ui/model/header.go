@@ -70,6 +70,7 @@ func (h *header) drawHeader(
 	session *session.Session,
 	compact bool,
 	detailsOpen bool,
+	detailsKey string,
 	width int,
 	lspErrorCount int,
 	hyperCredits *int,
@@ -100,6 +101,7 @@ func (h *header) drawHeader(
 		session,
 		lspErrorCount,
 		detailsOpen,
+		detailsKey,
 		availDetailWidth,
 		hyperCredits,
 	)
@@ -132,6 +134,7 @@ func renderHeaderDetails(
 	session *session.Session,
 	lspErrorCount int,
 	detailsOpen bool,
+	detailsKey string,
 	availWidth int,
 	hyperCredits *int,
 ) string {
@@ -160,11 +163,10 @@ func renderHeaderDetails(
 		parts = append(parts, hc)
 	}
 
-	const keystroke = "ctrl+d"
 	if detailsOpen {
-		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" close"))
+		parts = append(parts, t.Header.Keystroke.Render(detailsKey)+t.Header.KeystrokeTip.Render(" close"))
 	} else {
-		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" open "))
+		parts = append(parts, t.Header.Keystroke.Render(detailsKey)+t.Header.KeystrokeTip.Render(" open "))
 	}
 
 	dot := t.Header.Separator.Render(" • ")

@@ -1972,13 +1972,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
-		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID)
-			if err != nil {
-				return util.ReportError(err)()
-			}
-			return nil
-		})
+		cmds = append(cmds, m.summarizeSession(msg.SessionID))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
@@ -2003,50 +1997,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			agentCfg, ok := cfg.Agents[config.AgentCoder]
-			if !ok {
-				return util.ReportError(errors.New("agent configuration not found"))()
-			}
-
-			currentModel := cfg.Models[agentCfg.Model]
-			currentModel.Think = !currentModel.Think
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-				return util.ReportError(err)()
-			}
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			status := "disabled"
-			if currentModel.Think {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Thinking mode " + status)
-		}))
+		cmds = append(cmds, m.toggleThinkingCmd())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
-		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
-			newValue := !isTransparent
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
-				return util.ReportError(err)()
-			}
-			m.isTransparent = newValue
-
-			status := "disabled"
-			if newValue {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Transparent background " + status)
-		})
+		cmds = append(cmds, m.toggleTransparentCmd())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleMouseSupport:
 		cfg := m.com.Config()
@@ -2529,6 +2483,41 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
 			return true
+		case key.Matches(msg, m.keyMap.Summarize):
+			if m.state == uiChat && m.hasSession() {
+				if m.isAgentBusy() {
+					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
+					return true
+				}
+				cmds = append(cmds, m.summarizeSession(m.session.ID))
+				return true
+			}
+		case key.Matches(msg, m.keyMap.ToggleThinking):
+			cmds = append(cmds, m.toggleThinkingCmd())
+			return true
+		case key.Matches(msg, m.keyMap.ToggleCompact):
+			cmds = append(cmds, m.toggleCompactMode())
+			return true
+		case key.Matches(msg, m.keyMap.ToggleTransparent):
+			cmds = append(cmds, m.toggleTransparentCmd())
+			return true
+		case key.Matches(msg, m.keyMap.InitializeProject):
+			if m.isAgentBusy() {
+				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
+				return true
+			}
+			cmds = append(cmds, m.initializeProject())
+			return true
+		case key.Matches(msg, m.keyMap.Reasoning):
+			if cmd := m.openReasoningDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
+		case key.Matches(msg, m.keyMap.Notifications):
+			if cmd := m.openNotificationsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
 		}
 		return false
 	}
@@ -2874,6 +2863,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
+			case key.Matches(msg, m.keyMap.Chat.ClearHighlight):
+				m.chat.ClearSelection()
 			case key.Matches(msg, m.keyMap.Chat.Up):
 				if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -2990,6 +2981,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.session,
 		m.isCompact,
 		m.detailsOpen,
+		firstKey(m.keyMap.Chat.Details),
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
@@ -3504,6 +3496,67 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 	m.updateLayoutAndSize()
 
 	return nil
+}
+
+// summarizeSession returns a command that summarizes the session.
+func (m *UI) summarizeSession(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.com.Workspace.AgentSummarize(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return nil
+	}
+}
+
+// toggleThinkingCmd flips thinking mode on the large model.
+func (m *UI) toggleThinkingCmd() tea.Cmd {
+	return m.updateAgentModelCmd(func() tea.Msg {
+		cfg := m.com.Config()
+		if cfg == nil {
+			return util.ReportError(errors.New("configuration not found"))()
+		}
+
+		agentCfg, ok := cfg.Agents[config.AgentCoder]
+		if !ok {
+			return util.ReportError(errors.New("agent configuration not found"))()
+		}
+
+		currentModel := cfg.Models[agentCfg.Model]
+		currentModel.Think = !currentModel.Think
+		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+			return util.ReportError(err)()
+		}
+		m.com.Workspace.UpdateAgentModel(context.TODO())
+		status := "disabled"
+		if currentModel.Think {
+			status = "enabled"
+		}
+		return util.NewInfoMsg("Thinking mode " + status)
+	})
+}
+
+// toggleTransparentCmd flips the transparent background setting.
+func (m *UI) toggleTransparentCmd() tea.Cmd {
+	return func() tea.Msg {
+		cfg := m.com.Config()
+		if cfg == nil {
+			return util.ReportError(errors.New("configuration not found"))()
+		}
+
+		isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
+		newValue := !isTransparent
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
+			return util.ReportError(err)()
+		}
+		m.isTransparent = newValue
+
+		status := "disabled"
+		if newValue {
+			status = "enabled"
+		}
+		return util.NewInfoMsg("Transparent background " + status)
+	}
 }
 
 // updateLayoutAndSize updates the layout and sizes of UI components.

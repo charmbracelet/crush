@@ -121,6 +121,7 @@ Available Commands:
   mcp           Manage MCP servers
   lsp           Manage language servers
   hook          Manage hooks
+  keybind       Remap terminal UI shortcuts
   permissions   Configure tool permissions
   option        Configure general Crush behavior
 ```
@@ -417,6 +418,160 @@ Flags:
       --name string              remove hooks with this name
 ```
 
+### keybinds
+
+Remap terminal UI shortcuts. Actions are addressed by a `scope.name` ID and
+take one or more key tokens. Tokens are `bubbles/key` names verbatim
+(`ctrl+q`, `shift+enter`, `alt+esc`, `space`, `pgdown`, `f5`); single runes
+are case-sensitive (`g` and `G` are different keys). The spacebar is spelled
+`space`.
+
+```text
+Usage:
+  keybind [command]
+
+Available Commands:
+  set       Replace the keys for an action
+  unset     Restore an action's default keys
+  disable   Unbind an action entirely
+  reset     Clear every keybind set in the script
+```
+
+```bash
+# Quit with ctrl+q instead of ctrl+c.
+keybind set global.quit ctrl+q
+
+# Send the message with ctrl+enter; enter inserts a newline.
+keybind set editor.send_message ctrl+enter
+keybind set editor.newline enter
+
+# Unbind copy from the chat list, and use vim keys everywhere.
+keybind unset chat.copy
+keybind set chat.down down j
+keybind set chat.up up k
+```
+
+Semantics:
+
+- Actions not mentioned in any config file keep their defaults. A project
+  `crushrc` overrides the global one per action.
+- `set` replaces the override; later `set` lines win. `unset` drops the
+  override so the default returns. `disable` empties the key list so the
+  action never fires.
+- Two remapped actions sharing a key in the same focus scope warn at startup;
+  the first match in dispatch order wins. The same key in different scopes
+  (editor vs chat) is legal and stays silent.
+- Unknown action IDs warn and fall back to the default instead of failing the
+  load.
+
+#### Action reference
+
+Every rebindable action and its default keys.
+
+| Action | Default keys |
+| --- | --- |
+| `global.quit` | `ctrl+c` |
+| `global.help` | `ctrl+g` |
+| `global.commands` | `ctrl+p` |
+| `global.models` | `ctrl+m` `ctrl+l` |
+| `global.suspend` | `ctrl+z` |
+| `global.sessions` | `ctrl+s` |
+| `global.tab` | `tab` |
+| `global.toggle_yolo` | `ctrl+y` |
+| `global.summarize` | `ctrl+.` |
+| `global.toggle_thinking` | `ctrl+,` |
+| `global.toggle_compact` | `ctrl+;` |
+| `global.toggle_transparent` | `ctrl+'` |
+| `global.initialize_project` | `ctrl+9` |
+| `global.reasoning` | `ctrl+8` |
+| `global.notifications` | `ctrl+7` |
+| `editor.send_message` | `enter` |
+| `editor.open_editor` | `ctrl+o` |
+| `editor.newline` | `shift+enter` `ctrl+j` |
+| `editor.add_image` | `ctrl+f` |
+| `editor.paste_image` | `ctrl+v` |
+| `editor.paste_text` | `ctrl+shift+v` |
+| `editor.commands` | `/` |
+| `editor.attachment_delete_mode` | `ctrl+r` |
+| `editor.escape` | `esc` `alt+esc` |
+| `editor.delete_all_attachments` | `r` |
+| `editor.history_prev` | `up` |
+| `editor.history_next` | `down` |
+| `editor.copy_selection` | `ctrl+shift+c` |
+| `editor.cut_selection` | `ctrl+shift+x` |
+| `chat.new_session` | `ctrl+n` |
+| `chat.cancel` | `esc` `alt+esc` |
+| `chat.details` | `ctrl+d` |
+| `chat.toggle_pills` | `ctrl+t` `ctrl+space` |
+| `chat.pill_left` | `left` |
+| `chat.pill_right` | `right` |
+| `chat.down` | `down` `ctrl+j` `j` |
+| `chat.up` | `up` `ctrl+k` `k` |
+| `chat.down_one_item` | `shift+down` `J` |
+| `chat.up_one_item` | `shift+up` `K` |
+| `chat.page_down` | `pgdown` `f` |
+| `chat.page_up` | `pgup` `b` |
+| `chat.half_page_down` | `d` |
+| `chat.half_page_up` | `u` |
+| `chat.home` | `g` `home` |
+| `chat.end` | `G` `end` |
+| `chat.end_follow` | `ctrl+end` |
+| `chat.copy` | `c` `y` `C` `Y` |
+| `chat.clear_highlight` | `esc` `alt+esc` |
+| `chat.expand` | `space` |
+| `chat.scroll_left` | `shift+left` `H` |
+| `chat.scroll_right` | `shift+right` `L` |
+| `chat.focus_sidebar` | `l` `right` |
+| `chat.focus_chat` | `h` `left` |
+| `initialize.yes` | `y` `Y` |
+| `initialize.no` | `n` `N` `esc` `alt+esc` |
+| `initialize.enter` | `enter` |
+| `initialize.switch` | `left` `right` `tab` |
+| `completions.down` | `down` |
+| `completions.up` | `up` |
+| `completions.select` | `enter` `tab` `ctrl+y` |
+| `completions.cancel` | `esc` `alt+esc` |
+| `completions.down_insert` | `ctrl+n` |
+| `completions.up_insert` | `ctrl+p` |
+| `dialog.close` | `esc` `alt+esc` |
+| `dialog.select` | `enter` |
+| `dialog.next` | `down` |
+| `dialog.previous` | `up` |
+| `dialog.tab` | `tab` |
+| `dialog.copy` | `c` |
+| `dialog.mcp_auth.skip` | `s` |
+| `dialog.sessions.delete` | `ctrl+x` |
+| `dialog.sessions.rename` | `ctrl+r` |
+| `dialog.sessions.confirm_rename` | `enter` |
+| `dialog.sessions.cancel_rename` | `esc` |
+| `dialog.sessions.confirm_delete` | `y` |
+| `dialog.sessions.cancel_delete` | `n` `esc` |
+| `dialog.models.edit` | `ctrl+e` |
+| `dialog.commands.shift_tab` | `shift+tab` |
+| `dialog.permissions.left` | `left` `h` |
+| `dialog.permissions.right` | `right` `l` |
+| `dialog.permissions.allow` | `a` `A` `ctrl+a` |
+| `dialog.permissions.allow_session` | `s` `S` `ctrl+s` |
+| `dialog.permissions.deny` | `d` `D` |
+| `dialog.permissions.toggle_diff` | `t` |
+| `dialog.permissions.toggle_fullscreen` | `f` |
+| `dialog.permissions.scroll_up` | `shift+up` `K` |
+| `dialog.permissions.scroll_down` | `shift+down` `J` |
+| `dialog.permissions.scroll_left` | `shift+left` `H` |
+| `dialog.permissions.scroll_right` | `shift+right` `L` |
+| `dialog.filepicker.forward` | `right` `l` |
+| `dialog.filepicker.backward` | `left` `h` |
+| `dialog.question.toggle` | `space` |
+| `dialog.question.yes` | `y` `Y` |
+| `dialog.question.no` | `n` `N` |
+| `dialog.question.prev_tab` | `[` `ctrl+left` |
+| `dialog.question.next_tab` | `]` `ctrl+right` |
+| `dialog.question.newline` | `shift+enter` `ctrl+j` |
+
+The shared `dialog.*` verbs cover every dialog with that gesture, so
+`keybind set dialog.next ctrl+n` moves the selection in all list dialogs at
+once.
+
 ### permissions
 
 Configure tool permissions. `allow` skips approval prompts; `deny` hides tools
@@ -604,6 +759,7 @@ to Bash-based config.
     "large": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
   },
   "permissions": { "allowed_tools": ["view", "ls", "grep"] },
+  "keybinds": { "global.quit": ["ctrl+q"] },
 }
 ```
 

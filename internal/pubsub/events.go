@@ -32,6 +32,8 @@ const (
 	PayloadTypeQuestionNotification   PayloadType = "question_batch_notification"
 	PayloadTypeHostTheme              PayloadType = "host_theme"
 	PayloadTypeClientSession          PayloadType = "client_session"
+	PayloadTypePinentryPromptRequest  PayloadType = "pinentry_prompt_request"
+	PayloadTypePinentryNotification   PayloadType = "pinentry_prompt_notification"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.

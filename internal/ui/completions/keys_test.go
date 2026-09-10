@@ -40,3 +40,14 @@ func TestCompletionsSetKeyMap(t *testing.T) {
 
 	require.Equal(t, []string{"ctrl+n"}, c.KeyMap().Down.Keys())
 }
+
+func TestKeyMapApply_EmptyDisables(t *testing.T) {
+	t.Parallel()
+	km := DefaultKeyMap()
+	km.Apply(map[string][]string{
+		"completions.select": {},
+	})
+
+	require.False(t, km.Select.Enabled())
+	require.True(t, km.Down.Enabled())
+}

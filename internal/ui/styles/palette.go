@@ -223,11 +223,10 @@ func IsValidColor(s string) bool {
 	return ok
 }
 
-// ParseColor resolves a color string to its hex representation. It
-// accepts hex codes, ANSI indices (0-255), and named charmtone colors.
-// Returns the original string unchanged for hex and ANSI values (which
-// lipgloss.Color handles natively), and the hex value for charmtone
-// names. Returns empty string for unrecognized input.
+// ParseColor normalizes a supported color for storage and display. It accepts
+// hex codes, ANSI indices (0-255), and named Charmtone colors. Colors matching
+// a Charmtone entry use its canonical name; other valid values are returned
+// unchanged. Unrecognized input returns an empty string.
 func ParseColor(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -319,10 +318,9 @@ func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
 	return quickStyle(palette.ToQuickStyleOpts(base)), nil
 }
 
-// colorToHex converts a color.Color to its display string. If the color
-// matches a CharmTone palette entry, the canonical name is returned
-// (e.g. "Charple"). Otherwise the "#rrggbb" hex string is returned.
-// Returns empty string for nil colors.
+// colorToHex returns a canonical display string for a color. If the color
+// matches a Charmtone palette entry, its name is returned; otherwise the
+// "#rrggbb" hex value is returned. Nil colors return an empty string.
 func colorToHex(c color.Color) string {
 	if c == nil {
 		return ""

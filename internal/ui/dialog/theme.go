@@ -195,8 +195,25 @@ func (th *Theme) isSelectableThemeItem(idx int) bool {
 	return ok
 }
 
+func hasThemeItem(items []list.Item) bool {
+	for _, item := range items {
+		if _, ok := item.(*ThemeItem); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSelectableTheme reports whether the filtered list contains a theme item.
+func (th *Theme) hasSelectableTheme() bool {
+	return hasThemeItem(th.list.FilteredItems())
+}
+
 // selectNextTheme skips section headers and spacers when moving down.
 func (th *Theme) selectNextTheme() {
+	if !th.hasSelectableTheme() {
+		return
+	}
 	for {
 		if th.list.IsSelectedLast() {
 			th.list.SelectFirst()
@@ -212,6 +229,9 @@ func (th *Theme) selectNextTheme() {
 
 // selectPrevTheme skips section headers and spacers when moving up.
 func (th *Theme) selectPrevTheme() {
+	if !th.hasSelectableTheme() {
+		return
+	}
 	for {
 		if th.list.IsSelectedFirst() {
 			th.list.SelectLast()

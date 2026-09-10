@@ -79,7 +79,7 @@ type (
 	ActionEditTheme struct {
 		Name string
 	}
-	ActionRevertThemePalette struct{}
+	ActionRevertThemePalette    struct{}
 	ActionRevertOverriddenTheme struct {
 		Name string
 	}

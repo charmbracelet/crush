@@ -17,6 +17,14 @@ func TestThemeConfig_UnmarshalObject(t *testing.T) {
 	require.JSONEq(t, `{"base":"charmtone","primary":"#ff0000"}`, string(theme.RawObject))
 }
 
+func TestThemeConfig_UnmarshalLegacyStringEscapesJSON(t *testing.T) {
+	t.Parallel()
+	var theme ThemeConfig
+	require.NoError(t, json.Unmarshal([]byte(`"quote\"and\\slash"`), &theme))
+	require.Equal(t, `quote"and\slash`, theme.Base)
+	require.JSONEq(t, `{"base":"quote\"and\\slash"}`, string(theme.RawObject))
+}
+
 func TestThemeConfig_UnmarshalNull(t *testing.T) {
 	t.Parallel()
 	var theme ThemeConfig
@@ -55,7 +63,6 @@ func TestTUIOptions_UnmarshalLegacyStringTheme(t *testing.T) {
 	var opts TUIOptions
 	require.NoError(t, json.Unmarshal([]byte(`{"theme":"gruvbox-dark"}`), &opts))
 	require.Equal(t, "gruvbox-dark", opts.ActiveTheme)
-	require.Contains(t, opts.Theme, "gruvbox-dark")
 }
 
 func TestTUIOptions_UnmarshalLegacyStringThemeKeepsActive(t *testing.T) {
@@ -67,11 +74,10 @@ func TestTUIOptions_UnmarshalLegacyStringThemeKeepsActive(t *testing.T) {
 	require.Equal(t, "charmtone", opts.ActiveTheme)
 }
 
-func TestTUIOptions_UnmarshalMapTheme(t *testing.T) {
+func TestTUIOptions_IgnoresLegacyInlineThemeMap(t *testing.T) {
 	t.Parallel()
 	var opts TUIOptions
 	require.NoError(t, json.Unmarshal(
 		[]byte(`{"active_theme":"my-theme","theme":{"my-theme":{"base":"charmtone"}}}`), &opts))
 	require.Equal(t, "my-theme", opts.ActiveTheme)
-	require.Equal(t, "charmtone", opts.Theme["my-theme"].Base)
 }

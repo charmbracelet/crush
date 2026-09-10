@@ -5,7 +5,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -292,16 +291,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.CharmtonePantera()
+		activeTheme := ""
 		if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-			activeTheme := cfg.Options.TUI.ActiveTheme
-			if activeTheme == "" {
-				activeTheme = "charmtone"
-			}
-			if themeCfg, ok := cfg.Options.TUI.Theme[activeTheme]; ok {
-				t = themeStyles(themeCfg, activeTheme)
-			}
+			activeTheme = cfg.Options.TUI.ActiveTheme
 		}
+		t := styles.ThemeFromConfig(activeTheme)
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,
@@ -677,31 +671,6 @@ func (app *App) subscribeMustDeliver[T any](
 			}
 		}
 	})
-}
-
-func themeStyles(theme config.ThemeConfig, themeName string) styles.Styles {
-	if !theme.IsObject() {
-		s, err := styles.LoadTheme(themeName)
-		if err != nil {
-			return styles.CharmtonePantera()
-		}
-		return s
-	}
-	var custom struct {
-		Base string `json:"base,omitempty"`
-		styles.Palette
-	}
-	if err := json.Unmarshal(theme.RawObject, &custom); err != nil {
-		return styles.CharmtonePantera()
-	}
-	if custom.Base == "" {
-		custom.Base = themeName
-	}
-	s, err := styles.LoadPaletteTheme(custom.Base, custom.Palette)
-	if err != nil {
-		return styles.CharmtonePantera()
-	}
-	return s
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {

@@ -99,22 +99,26 @@ func TestThemeFile_EmptyObjectIsValid(t *testing.T) {
 	require.Empty(t, tf.Primary)
 }
 
-func TestFindThemeFile_ProjectLocalWins(t *testing.T) {
+func TestFindThemeFile_RejectsUnsafeName(t *testing.T) {
 	t.Parallel()
-	// We can't easily override ThemeDirs in tests since it uses home.Config().
-	// Instead, test that FindThemeFile returns an error for nonexistent themes.
-	_, err := FindThemeFile("definitely-does-not-exist-" + t.Name())
+	_, err := FindThemeFile("../outside-dir")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not found")
+	require.Contains(t, err.Error(), "lowercase letters")
 }
 
-func TestListUserThemes_EmptyDirs(t *testing.T) {
-	t.Parallel()
-	// When no theme dirs exist, should return empty list without error.
-	names, err := ListUserThemes()
+func TestThemePath_UsesGlobalDirectory(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	path, err := ThemePath("my-theme")
 	require.NoError(t, err)
-	// May or may not be empty depending on user's system; just verify no error.
-	_ = names
+	require.Equal(t, filepath.Join(dir, "my-theme.json"), path)
+}
+
+func TestThemeDirs_HasOnlyGlobalUserDirectory(t *testing.T) {
+	dirs := ThemeDirs()
+	require.Len(t, dirs, 1)
+	require.NotEqual(t, filepath.Join(".crush", "themes"), dirs[0])
 }
 
 func TestListUserThemes_ReadsDirectory(t *testing.T) {
@@ -142,6 +146,18 @@ func TestListUserThemes_ReadsDirectory(t *testing.T) {
 		names = append(names, e.Name())
 	}
 	require.Equal(t, []string{"alpha.json", "beta.json"}, names)
+}
+
+func TestListUserThemes_IgnoresInvalidFilenames(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+	for _, name := range []string{"valid-theme.json", "BadTheme.json", "bad--theme.json"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(`{}`), 0o644))
+	}
+
+	names, err := ListUserThemes()
+	require.NoError(t, err)
+	require.Equal(t, []string{"valid-theme"}, names)
 }
 
 func TestThemeFile_AllPaletteFieldsRoundTrip(t *testing.T) {

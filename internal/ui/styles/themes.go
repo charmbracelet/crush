@@ -2,7 +2,6 @@ package styles
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -259,7 +258,7 @@ func LoadTheme(name string) (Styles, error) {
 	}
 	key := strings.ToLower(name)
 
-	// Check user theme files first (project-local, then global).
+	// Check global user theme files first.
 	if path, err := FindThemeFile(key); err == nil {
 		tf, err := LoadThemeFile(path)
 		if err != nil {
@@ -284,6 +283,16 @@ func LoadTheme(name string) (Styles, error) {
 	return s, nil
 }
 
+// ThemeFromConfig resolves the configured theme name, falling back to the
+// default Charmtone theme when the config value is empty or invalid.
+func ThemeFromConfig(name string) Styles {
+	s, err := LoadTheme(name)
+	if err != nil {
+		return CharmtonePantera()
+	}
+	return s
+}
+
 // ThemeSource indicates where a theme definition comes from.
 type ThemeSource int
 
@@ -292,32 +301,26 @@ const (
 	ThemeSourceBuiltin ThemeSource = iota
 	// ThemeSourceUser is a theme file in ~/.config/crush/themes/.
 	ThemeSourceUser
-	// ThemeSourceProject is a theme file in ./.crush/themes/.
-	ThemeSourceProject
 )
 
 // String returns a human-readable label for the theme source.
 func (s ThemeSource) String() string {
-	switch s {
-	case ThemeSourceUser:
+	if s == ThemeSourceUser {
 		return "user"
-	case ThemeSourceProject:
-		return "project"
-	default:
-		return "builtin"
 	}
+	return "builtin"
 }
 
 // ThemeInfo describes an available theme for listing purposes.
 type ThemeInfo struct {
 	Name       string
 	Source     ThemeSource
-	Overridden bool // true if a user/project file shadows a builtin
+	Overridden bool // true if a user file shadows a builtin
 }
 
-// ListAllThemes returns all available themes (built-in + user files),
-// sorted by name. Built-in themes that are shadowed by a user file are
-// marked as Overridden and appear with the user/project source instead.
+// ListAllThemes returns all available themes (built-in + global user files),
+// sorted by name. Built-in themes shadowed by a user file are marked as
+// Overridden.
 func ListAllThemes() []ThemeInfo {
 	userThemes, _ := ListUserThemes()
 	userSet := make(map[string]bool, len(userThemes))
@@ -349,17 +352,9 @@ func ListAllThemes() []ThemeInfo {
 		if _, isBuiltin := builtinThemes[name]; isBuiltin {
 			continue
 		}
-		source := ThemeSourceUser
-		// Check if it's project-local by looking at the first match.
-		if path, err := FindThemeFile(name); err == nil {
-			dirs := ThemeDirs()
-			if len(dirs) > 0 && filepath.Dir(path) == dirs[0] {
-				source = ThemeSourceProject
-			}
-		}
 		infos = append(infos, ThemeInfo{
 			Name:   name,
-			Source: source,
+			Source: ThemeSourceUser,
 		})
 	}
 

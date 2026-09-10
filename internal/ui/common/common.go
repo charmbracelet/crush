@@ -1,7 +1,6 @@
 package common
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -93,46 +92,14 @@ func ThemeNameFromConfig(cfg *config.Config) string {
 // LoadThemeStyles resolves a theme name to Styles, falling back to
 // CharmtonePantera on error or empty name.
 func LoadThemeStyles(name string) styles.Styles {
-	s, err := styles.LoadTheme(name)
-	if err != nil {
-		return styles.CharmtonePantera()
-	}
-	return s
+	return styles.ThemeFromConfig(name)
 }
 
 // ThemeStylesFromConfig resolves the configured theme to Styles. The
-// active_theme field selects which theme to use; the theme map provides
-// palette overrides.
+// active_theme field selects either a built-in theme or a global user theme
+// file.
 func ThemeStylesFromConfig(cfg *config.Config) styles.Styles {
-	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
-		return LoadThemeStyles("")
-	}
-	activeTheme := cfg.Options.TUI.ActiveTheme
-	if activeTheme == "" {
-		activeTheme = "charmtone"
-	}
-	theme, ok := cfg.Options.TUI.Theme[activeTheme]
-	if !ok {
-		return LoadThemeStyles(activeTheme)
-	}
-	if !theme.IsObject() {
-		return LoadThemeStyles(activeTheme)
-	}
-	var custom struct {
-		Base string `json:"base,omitempty"`
-		styles.Palette
-	}
-	if err := json.Unmarshal(theme.RawObject, &custom); err != nil {
-		return LoadThemeStyles(activeTheme)
-	}
-	if custom.Base == "" {
-		custom.Base = activeTheme
-	}
-	s, err := styles.LoadPaletteTheme(custom.Base, custom.Palette)
-	if err != nil {
-		return LoadThemeStyles(custom.Base)
-	}
-	return s
+	return LoadThemeStyles(ThemeNameFromConfig(cfg))
 }
 
 // IsHyper reports whether the currently selected large model is provided

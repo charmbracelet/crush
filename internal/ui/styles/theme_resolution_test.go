@@ -137,9 +137,8 @@ func requireOverridden(t *testing.T, name string, want bool) {
 }
 
 func TestListAllThemes_IncludesUserOnlyThemes(t *testing.T) {
-	projectDir := t.TempDir()
 	userDir := t.TempDir()
-	setTestThemeDirs(t, []string{projectDir, userDir})
+	setTestThemeDirs(t, []string{userDir})
 
 	tf := &ThemeFile{Base: "charmtone"}
 	require.NoError(t, SaveThemeFile(filepath.Join(userDir, "my-neon.json"), tf))
@@ -218,7 +217,6 @@ func TestThemeSource_String(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, "builtin", ThemeSourceBuiltin.String())
 	require.Equal(t, "user", ThemeSourceUser.String())
-	require.Equal(t, "project", ThemeSourceProject.String())
 }
 
 func TestIsBuiltinTheme(t *testing.T) {

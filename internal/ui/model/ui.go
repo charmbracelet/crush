@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -2050,16 +2049,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.applyTheme(newStyles)
 		m.preThemeStyles = nil
-		fields := map[string]any{
-			"options.tui.active_theme": themeName,
-		}
-		// Only custom themes need a persisted map entry; writing an empty
-		// object for a built-in would create a spurious override that shows
-		// up as a user theme.
-		if !styles.IsBuiltinTheme(themeName) {
-			fields["options.tui.theme."+themeName] = map[string]any{}
-		}
-		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, fields); err != nil {
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", themeName); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2108,25 +2098,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			themeName = msg.Base
 		}
 
-		// Save to user theme file.
-		dirs := styles.ThemeDirs()
-		if len(dirs) > 0 {
-			savePath := filepath.Join(dirs[len(dirs)-1], themeName+".json")
-			tf := &styles.ThemeFile{Base: msg.Base, Palette: msg.Palette}
-			if err := styles.SaveThemeFile(savePath, tf); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-				break
-			}
-		}
-
-		value, err := themePaletteConfigValue(msg.Base, msg.Palette)
+		savePath, err := styles.ThemePath(themeName)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
-			"options.tui.theme." + themeName: value,
-		}); err != nil {
+		tf := &styles.ThemeFile{Base: msg.Base, Palette: msg.Palette}
+		if err := styles.SaveThemeFile(savePath, tf); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2149,14 +2127,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				break
 			}
 		}
-		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-			if _, ok := cfg.Options.TUI.Theme[msg.Name]; ok {
-				if err := m.com.Workspace.RemoveConfigField(config.ScopeGlobal, "options.tui.theme."+msg.Name); err != nil {
-					cmds = append(cmds, util.ReportError(err))
-					break
-				}
-			}
-		}
 		// If the reverted theme is the active one, re-apply the pristine
 		// built-in so the change is visible immediately.
 		if common.ThemeNameFromConfig(m.com.Config()) == msg.Name {
@@ -2173,10 +2143,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			base = "charmtone"
 		}
 		name := msg.Name
-		if err := styles.ValidateThemeName(name); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
 		exported, err := styles.ExportResolvedPalette(base)
 		if err != nil {
 			// Fall back to charmtone when the base theme is no longer
@@ -2188,20 +2154,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				break
 			}
 		}
-		dirs := styles.ThemeDirs()
-		if len(dirs) == 0 {
-			cmds = append(cmds, util.ReportError(fmt.Errorf("no theme directory available")))
+		savePath, err := styles.ThemePath(name)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		savePath := filepath.Join(dirs[len(dirs)-1], name+".json")
 		exported.Base = base
 		if err := styles.SaveThemeFile(savePath, exported); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
-			"options.tui.active_theme": name,
-		}); err != nil {
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", name); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2217,37 +2180,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cfg := m.com.Config()
-		fields := map[string]any{}
-		// Move any stored palette overrides to the new name so the renamed
-		// theme keeps its configuration.
-		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-			if entry, ok := cfg.Options.TUI.Theme[oldName]; ok {
-				if len(entry.RawObject) > 0 {
-					var v any
-					if err := json.Unmarshal(entry.RawObject, &v); err == nil {
-						fields["options.tui.theme."+newName] = v
-					}
-				} else {
-					fields["options.tui.theme."+newName] = map[string]any{}
-				}
-			}
-			if cfg.Options.TUI.ActiveTheme == oldName {
-				fields["options.tui.active_theme"] = newName
-			}
-		}
-		if len(fields) > 0 {
-			if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, fields); err != nil {
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.ActiveTheme == oldName {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", newName); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 				break
-			}
-		}
-		// Drop the stale entry keyed by the old name.
-		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-			if _, ok := cfg.Options.TUI.Theme[oldName]; ok {
-				if err := m.com.Workspace.RemoveConfigField(config.ScopeGlobal, "options.tui.theme."+oldName); err != nil {
-					cmds = append(cmds, util.ReportError(err))
-					break
-				}
 			}
 		}
 		cmds = append(cmds, util.ReportInfo("Renamed theme "+oldName+" to "+newName))
@@ -4400,21 +4336,6 @@ func (m *UI) renderEditorView(width int) string {
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
-}
-
-func themePaletteConfigValue(base string, palette styles.Palette) (map[string]any, error) {
-	data, err := json.Marshal(palette)
-	if err != nil {
-		return nil, err
-	}
-	value := map[string]any{}
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, err
-	}
-	if base != "" {
-		value["base"] = base
-	}
-	return value, nil
 }
 
 // applyThemeForProvider swaps the active theme to the one associated with

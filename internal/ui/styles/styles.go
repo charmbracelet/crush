@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"log/slog"
 	"strings"
 
 	"charm.land/bubbles/v2/filepicker"
@@ -680,11 +681,13 @@ func (s *Styles) Clone() Styles {
 func cloneStyleConfig(src ansi.StyleConfig) ansi.StyleConfig {
 	data, err := json.Marshal(src)
 	if err != nil {
-		panic(fmt.Sprintf("styles: failed to marshal StyleConfig for clone: %v", err))
+		slog.Error("Failed to marshal markdown styles for theme preview", "error", err)
+		return src
 	}
 	var dst ansi.StyleConfig
 	if err := json.Unmarshal(data, &dst); err != nil {
-		panic(fmt.Sprintf("styles: failed to unmarshal StyleConfig for clone: %v", err))
+		slog.Error("Failed to unmarshal markdown styles for theme preview", "error", err)
+		return src
 	}
 	return dst
 }

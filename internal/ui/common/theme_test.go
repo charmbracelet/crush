@@ -1,7 +1,6 @@
 package common
 
 import (
-	"encoding/json"
 	"fmt"
 	"image/color"
 	"path/filepath"
@@ -16,52 +15,7 @@ func TestThemeStylesFromConfig_ActiveTheme(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{
 		Options: &config.Options{
-			TUI: &config.TUIOptions{
-				ActiveTheme: "gruvbox-dark",
-				Theme: map[string]config.ThemeConfig{
-					"gruvbox-dark": {},
-				},
-			},
-		},
-	}
-
-	s := ThemeStylesFromConfig(cfg)
-	require.Equal(t, "#fabd2f", testColorHex(s.WorkingGradFromColor))
-}
-
-func TestThemeStylesFromConfig_ObjectTheme(t *testing.T) {
-	t.Parallel()
-	cfg := &config.Config{
-		Options: &config.Options{
-			TUI: &config.TUIOptions{
-				ActiveTheme: "custom",
-				Theme: map[string]config.ThemeConfig{
-					"custom": {
-						Base:      "gruvbox-dark",
-						RawObject: json.RawMessage(`{"base":"gruvbox-dark","primary":"#ff0000"}`),
-					},
-				},
-			},
-		},
-	}
-
-	s := ThemeStylesFromConfig(cfg)
-	require.Equal(t, "#ff0000", testColorHex(s.WorkingGradFromColor))
-}
-
-func TestThemeStylesFromConfig_InvalidObjectFallsBackToBase(t *testing.T) {
-	t.Parallel()
-	cfg := &config.Config{
-		Options: &config.Options{
-			TUI: &config.TUIOptions{
-				ActiveTheme: "custom",
-				Theme: map[string]config.ThemeConfig{
-					"custom": {
-						Base:      "gruvbox-dark",
-						RawObject: json.RawMessage(`{"base":"gruvbox-dark","primary":"not-a-color"}`),
-					},
-				},
-			},
+			TUI: &config.TUIOptions{ActiveTheme: "gruvbox-dark"},
 		},
 	}
 
@@ -75,50 +29,12 @@ func testColorHex(c color.Color) string {
 }
 
 func TestThemeStylesFromConfig_UserFileFallback(t *testing.T) {
-	// When config references a theme with no inline override, it should
-	// fall through to LoadTheme which checks user files. We verify this
-	// by checking that a builtin theme still loads correctly (user files
-	// are checked first but absent here).
+	// Config resolution delegates to LoadTheme, which checks global user files
+	// before built-ins.
 	cfg := &config.Config{
 		Options: &config.Options{
 			TUI: &config.TUIOptions{
 				ActiveTheme: "gruvbox-dark",
-			},
-		},
-	}
-	s := ThemeStylesFromConfig(cfg)
-	require.Equal(t, "#fabd2f", testColorHex(s.WorkingGradFromColor))
-}
-
-func TestThemeStylesFromConfig_InlineOverridesTakePrecedence(t *testing.T) {
-	t.Parallel()
-	// Config inline overrides should take precedence over any user file.
-	cfg := &config.Config{
-		Options: &config.Options{
-			TUI: &config.TUIOptions{
-				ActiveTheme: "charmtone",
-				Theme: map[string]config.ThemeConfig{
-					"charmtone": {
-						RawObject: json.RawMessage(`{"primary":"#aabbcc"}`),
-					},
-				},
-			},
-		},
-	}
-	s := ThemeStylesFromConfig(cfg)
-	require.Equal(t, "#aabbcc", testColorHex(s.WorkingGradFromColor))
-}
-
-func TestThemeStylesFromConfig_EmptyObjectFallsThroughToLoadTheme(t *testing.T) {
-	t.Parallel()
-	// An empty object {} in the theme map should fall through to LoadTheme.
-	cfg := &config.Config{
-		Options: &config.Options{
-			TUI: &config.TUIOptions{
-				ActiveTheme: "gruvbox-dark",
-				Theme: map[string]config.ThemeConfig{
-					"gruvbox-dark": {},
-				},
 			},
 		},
 	}

@@ -271,11 +271,10 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool                   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string                 `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	ActiveTheme string                 `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone,example=charmtone,example=gruvbox-dark"`
-	Theme       map[string]ThemeConfig `json:"theme,omitempty" jsonschema:"description=Map of theme name to palette overrides. Built-in themes use empty objects; custom themes specify palette colors."`
-	Completions Completions            `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	ActiveTheme string      `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone,example=charmtone,example=gruvbox-dark"`
+	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
 	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
@@ -290,21 +289,11 @@ func (t *TUIOptions) IsTransparent() bool {
 }
 
 // UnmarshalJSON tolerates the legacy string form of the "theme" field.
-// Older Crush builds stored the selected theme as a plain string
-// (`"theme": "gruvbox-dark"`) instead of the current map of palette
-// overrides. When a string is encountered it is promoted to the active
-// theme name and registered in the theme map as an unmodified built-in,
-// so existing configs keep loading instead of failing outright.
+// Older Crush builds stored the selected theme as `"theme":
+// "gruvbox-dark"`. When that string is encountered it is promoted to the
+// active theme name so existing configs keep loading.
 func (t *TUIOptions) UnmarshalJSON(data []byte) error {
 	type tuiOptionsAlias TUIOptions
-	var alias tuiOptionsAlias
-	if err := json.Unmarshal(data, &alias); err == nil {
-		*t = TUIOptions(alias)
-		return nil
-	}
-
-	// The strict decode failed. The most common reason is a legacy string
-	// "theme" value, so retry with theme decoded loosely and migrated.
 	var loose struct {
 		tuiOptionsAlias
 		Theme json.RawMessage `json:"theme"`
@@ -313,34 +302,25 @@ func (t *TUIOptions) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*t = TUIOptions(loose.tuiOptionsAlias)
+	if len(loose.Theme) == 0 || string(loose.Theme) == "null" {
+		return nil
+	}
 
 	var legacyName string
 	if err := json.Unmarshal(loose.Theme, &legacyName); err != nil {
-		// Not a string either; surface the original object error.
-		var themeMap map[string]ThemeConfig
-		if err := json.Unmarshal(loose.Theme, &themeMap); err != nil {
-			return err
-		}
-		t.Theme = themeMap
-		return nil
+		// Legacy inline theme maps are ignored now that files are the only
+		// palette source, but they must remain loadable during migration.
+		var legacyThemes map[string]ThemeConfig
+		return json.Unmarshal(loose.Theme, &legacyThemes)
 	}
 	if legacyName != "" && t.ActiveTheme == "" {
 		t.ActiveTheme = legacyName
 	}
-	if t.Theme == nil {
-		t.Theme = map[string]ThemeConfig{}
-	}
-	if legacyName != "" {
-		if _, ok := t.Theme[legacyName]; !ok {
-			t.Theme[legacyName] = ThemeConfig{}
-		}
-	}
 	return nil
 }
 
-// ThemeConfig stores palette overrides for a single theme. Empty objects
-// use the built-in theme with no modifications. Objects with fields
-// override specific palette colors on top of the base theme (if specified).
+// ThemeConfig supports reading legacy inline theme definitions. New theme
+// changes are stored in global user theme files instead.
 type ThemeConfig struct {
 	Base      string          `json:"base,omitempty"`
 	RawObject json.RawMessage `json:"-"`
@@ -358,10 +338,14 @@ func (t *ThemeConfig) UnmarshalJSON(data []byte) error {
 	// Backward compatibility: accept string format
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
-		// Old format: "theme": "charmtone"
-		// Convert to new format: {"base": "charmtone"}
 		t.Base = str
-		t.RawObject = append(t.RawObject[:0], []byte(`{"base":"`+str+`"}`)...)
+		raw, err := json.Marshal(struct {
+			Base string `json:"base"`
+		}{Base: str})
+		if err != nil {
+			return err
+		}
+		t.RawObject = append(t.RawObject[:0], raw...)
 		return nil
 	}
 

@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -10,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -90,6 +88,9 @@ func (ed *ThemeEditor) HandleMsg(msg tea.Msg) Action {
 			return ActionRevertThemePalette{}
 		case key.Matches(msg, ed.keyMap.Save):
 			ed.applyInput()
+			if ed.invalid {
+				return nil
+			}
 			return ActionSaveThemePalette{Name: ed.name, Base: ed.base, Palette: ed.palette}
 		case key.Matches(msg, ed.keyMap.Previous):
 			ed.applyInput()
@@ -222,15 +223,6 @@ func (ed *ThemeEditor) loadTheme() {
 		}
 	}
 
-	theme, ok := cfg.Options.TUI.Theme[ed.name]
-	if !ok {
-		ed.loadBuiltin(ed.name)
-		return
-	}
-	if theme.IsObject() {
-		ed.loadObject(theme)
-		return
-	}
 	ed.loadBuiltin(ed.name)
 }
 
@@ -242,27 +234,6 @@ func (ed *ThemeEditor) loadBuiltin(name string) {
 	}
 	ed.base = name
 	ed.palette = p
-}
-
-func (ed *ThemeEditor) loadObject(theme config.ThemeConfig) {
-	var custom struct {
-		Base string `json:"base,omitempty"`
-		styles.Palette
-	}
-	if err := json.Unmarshal(theme.RawObject, &custom); err != nil {
-		ed.loadBuiltin(theme.Name())
-		return
-	}
-	ed.base = custom.Base
-	if ed.base == "" {
-		ed.base = "charmtone"
-	}
-	merged, err := styles.MergePalette(ed.base, custom.Palette)
-	if err != nil {
-		ed.loadBuiltin(ed.base)
-		return
-	}
-	ed.palette = merged
 }
 
 func (ed *ThemeEditor) selectedSlot() paletteSlot {

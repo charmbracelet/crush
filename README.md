@@ -352,15 +352,16 @@ Crush ships with built-in color themes.
 
 #### Switching Themes
 
-Open the command palette with `ctrl+p`, select **Switch Theme**, and browse
-the list. The UI previews each theme as you navigate, and pressing `enter`
+Open the command palette with `ctrl+p`, select **Themes**, and browse the
+list. The UI previews each theme as you navigate, and pressing `enter`
 confirms the selection. Press `esc` to cancel and revert.
 
 #### Editing Themes
 
-Open the command palette with `ctrl+p`, select **Edit Theme**, and edit the
-active theme palette. Changes preview live as you type. Press `enter` or
-`ctrl+s` to save, or `esc` to cancel and revert.
+Open **Themes**, highlight the theme to customize, and press `ctrl+e`.
+Changes preview live as you type. Press `enter` or `ctrl+s` to save, or `esc`
+to cancel and revert. User themes are stored globally in the Crush config
+directory under `themes/`.
 
 You can also select a theme directly in your config with `active_theme`:
 
@@ -375,27 +376,19 @@ You can also select a theme directly in your config with `active_theme`:
 }
 ```
 
-Or define a custom theme that overrides colors on top of a built-in one.
-Themes live under `theme` keyed by name, and `active_theme` selects which one
-to use:
+Custom theme palettes are stored as JSON files in the global theme directory.
+For example, `~/.config/crush/themes/my-theme.json`:
 
 ```json
 {
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "tui": {
-      "active_theme": "my-theme",
-      "theme": {
-        "my-theme": {
-          "base": "gruvbox-dark",
-          "primary": "#ff6b6b",
-          "bg_base": "#1a1a2e"
-        }
-      }
-    }
-  }
+  "base": "gruvbox-dark",
+  "primary": "#ff6b6b",
+  "bg_base": "#1a1a2e"
 }
 ```
+
+Select it by setting `active_theme` to `my-theme` or from the **Themes**
+dialog.
 
 #### Built-In Themes
 

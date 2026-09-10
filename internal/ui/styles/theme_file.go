@@ -89,62 +89,65 @@ func SaveThemeFile(path string, tf *ThemeFile) error {
 // themeDirsOverride allows tests to replace the default theme directories.
 var themeDirsOverride []string
 
-// ThemeDirs returns the theme search paths in priority order. The first
-// directory that contains a matching theme file wins.
-//
-//   - Project-local: ./.crush/themes/
-//   - User global: ~/.config/crush/themes/ (or platform equivalent)
+// ThemeDirs returns the user theme directory. Theme files are global so
+// launching Crush from different working directories always resolves the same
+// themes.
 func ThemeDirs() []string {
 	if themeDirsOverride != nil {
 		return themeDirsOverride
 	}
-
-	dirs := make([]string, 0, 2)
-
-	// Project-local themes.
-	dirs = append(dirs, filepath.Join(".crush", "themes"))
-
-	// User global themes.
 	if runtime.GOOS == "windows" {
 		localAppData := os.Getenv("LOCALAPPDATA")
 		if localAppData == "" {
 			localAppData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local")
 		}
-		dirs = append(dirs, filepath.Join(localAppData, "crush", "themes"))
-	} else {
-		dirs = append(dirs, filepath.Join(home.Config(), "crush", "themes"))
+		return []string{filepath.Join(localAppData, "crush", "themes")}
 	}
-
-	return dirs
+	return []string{filepath.Join(home.Config(), "crush", "themes")}
 }
 
-// FindThemeFile locates a theme file by name across all theme
-// directories. Returns the full path to the first match, or an error if
-// no file is found.
-func FindThemeFile(name string) (string, error) {
-	filename := strings.ToLower(name) + ".json"
-	for _, dir := range ThemeDirs() {
-		path := filepath.Join(dir, filename)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		}
+// ThemePath returns the path for a validated global user theme name.
+func ThemePath(name string) (string, error) {
+	name = strings.ToLower(name)
+	if err := validateThemeNameFormat(name); err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("theme file %q not found in %v", name, ThemeDirs())
+	return filepath.Join(ThemeDirs()[0], name+".json"), nil
+}
+
+// FindThemeFile locates a global theme file by name. Returns an error for an
+// invalid name or when no matching file exists.
+func FindThemeFile(name string) (string, error) {
+	path, err := ThemePath(name)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	return "", fmt.Errorf("theme file %q not found", strings.ToLower(name))
 }
 
 // validThemeName matches safe theme names: lowercase alphanumerics
 // separated by single hyphens or underscores.
 var validThemeName = regexp.MustCompile(`^[a-z0-9]+([-_][a-z0-9]+)*$`)
 
-// ValidateThemeName reports whether name is usable as a theme file name.
-// It rejects empty names, names with characters that are unsafe in file
-// paths, and names that collide with an existing theme.
-func ValidateThemeName(name string) error {
+func validateThemeNameFormat(name string) error {
 	if name == "" {
 		return errors.New("theme name cannot be empty")
 	}
 	if !validThemeName.MatchString(strings.ToLower(name)) {
 		return errors.New("use lowercase letters, numbers, hyphens, and underscores only")
+	}
+	return nil
+}
+
+// ValidateThemeName reports whether name is usable as a theme file name.
+// It rejects empty names, names with characters that are unsafe in file
+// paths, and names that collide with an existing theme.
+func ValidateThemeName(name string) error {
+	if err := validateThemeNameFormat(name); err != nil {
+		return err
 	}
 	if IsBuiltinTheme(name) {
 		return fmt.Errorf("%q is a built-in theme; edit it instead", name)
@@ -218,6 +221,10 @@ func ListUserThemes() ([]string, error) {
 			}
 			name := strings.TrimSuffix(e.Name(), ".json")
 			lower := strings.ToLower(name)
+			if name != lower || validateThemeNameFormat(lower) != nil {
+				slog.Warn("Ignoring invalid theme filename", "file", e.Name(), "directory", dir)
+				continue
+			}
 			if !seen[lower] {
 				seen[lower] = true
 				names = append(names, lower)

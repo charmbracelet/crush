@@ -494,6 +494,12 @@ type Styles struct {
 		SelectedItem lipgloss.Style
 		InputPrompt  lipgloss.Style
 
+		// PromptMessage is the friendly description of what an
+		// integrated credential prompt (GPG pinentry) is asking for.
+		PromptMessage lipgloss.Style
+		// PromptKey styles the labeled key rows shown under it.
+		PromptKey lipgloss.Style
+
 		List lipgloss.Style
 
 		Spinner lipgloss.Style

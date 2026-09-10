@@ -63,7 +63,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
-	Dangerous   bool   `json:"dangerous"`
+	Danger      string `json:"danger,omitempty"`
 }
 
 type PermissionNotification struct {
@@ -86,7 +86,7 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
-	Dangerous   bool   `json:"dangerous"`
+	Danger      string `json:"danger,omitempty"`
 }
 
 type Service interface {
@@ -219,7 +219,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 	// In yolo mode, auto-approve non-dangerous commands but still prompt for
 	// dangerous ones.
-	if mode == PermissionModeYolo && !opts.Dangerous {
+	if mode == PermissionModeYolo && opts.Danger == "" {
 		return true, nil
 	}
 
@@ -283,7 +283,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
-		Dangerous:   opts.Dangerous,
+		Danger:      opts.Danger,
 	}
 
 	if _, ok := s.sessionPermissions.Get(PermissionKey{

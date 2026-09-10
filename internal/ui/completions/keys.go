@@ -2,7 +2,6 @@ package completions
 
 import (
 	"charm.land/bubbles/v2/key"
-	"github.com/charmbracelet/crush/internal/keybinds"
 )
 
 // KeyMap defines the key bindings for the completions component.
@@ -56,19 +55,19 @@ func (k KeyMap) KeyBindings() []key.Binding {
 }
 
 // Apply overlays user overrides onto the key map. Unknown actions are
-// ignored; the defaults stand.
+// ignored; the defaults stand. An empty key list disables the binding.
 func (k *KeyMap) Apply(overrides map[string][]string) {
 	apply := func(action string, b *key.Binding) {
 		keys, ok := overrides[action]
-		if !ok || len(keys) == 0 {
+		if !ok {
 			return
 		}
-		normalized := make([]string, len(keys))
-		for i, key := range keys {
-			normalized[i] = keybinds.NormalizeToken(key)
+		if len(keys) == 0 {
+			b.SetEnabled(false)
+			return
 		}
-		b.SetKeys(normalized...)
-		b.SetHelp(normalized[0], b.Help().Desc)
+		b.SetKeys(keys...)
+		b.SetHelp(keys[0], b.Help().Desc)
 	}
 	apply("completions.down", &k.Down)
 	apply("completions.up", &k.Up)

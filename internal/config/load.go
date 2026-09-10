@@ -1421,29 +1421,14 @@ func normalizeHookEvent(name string) string {
 	}
 }
 
-// ValidateKeybinds normalizes key tokens and drops overrides for
-// unknown actions. Key matching itself is owned by the UI apply step;
-// this only warns up front so typos surface at load time rather than
-// as silent no-ops.
+// ValidateKeybinds drops overrides for unknown actions. Key matching
+// itself is owned by the UI apply step; this only warns up front so
+// typos surface at load time rather than as silent no-ops.
 func (c *Config) ValidateKeybinds() {
-	for action, keys := range c.Keybinds {
+	for action := range c.Keybinds {
 		if !keybinds.Valid(action) {
 			slog.Warn("Unknown keybind action; skipping", "action", action)
 			delete(c.Keybinds, action)
-			continue
-		}
-		// Rebuild only when a token actually changes so clean configs
-		// keep their slices untouched.
-		changed := false
-		normalized := make([]string, len(keys))
-		for i, k := range keys {
-			normalized[i] = keybinds.NormalizeToken(k)
-			if normalized[i] != k {
-				changed = true
-			}
-		}
-		if changed {
-			c.Keybinds[action] = normalized
 		}
 	}
 }

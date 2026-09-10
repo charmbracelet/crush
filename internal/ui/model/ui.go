@@ -1941,10 +1941,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionNewSession:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-			break
-		}
 		if cmd := m.newSession(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2670,10 +2666,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.hasSession() {
 					break
 				}
-				if m.isAgentBusy() {
-					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-					break
-				}
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -2844,10 +2836,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
-					break
-				}
-				if m.isAgentBusy() {
-					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
 				m.focus = uiFocusEditor
@@ -4838,6 +4826,12 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
+	// A run may still be active for the session being left. Backend runs are
+	// scoped per session, so that run keeps going in the background; only tear
+	// down the shared workspace LSP servers once nothing else is using them,
+	// and tell the user where the previous session went.
+	busy := m.isAgentBusy()
+
 	m.session = nil
 	m.sidebarOffset = 0
 	m.sessionFiles = nil
@@ -4856,14 +4850,19 @@ func (m *UI) newSession() tea.Cmd {
 	m.pillsView = ""
 	m.historyReset()
 	agenttools.ResetCache()
-	return tea.Batch(
-		func() tea.Msg {
-			m.com.Workspace.LSPStopAll(context.Background())
-			return nil
-		},
+	cmds := []tea.Cmd{
 		m.loadPromptHistory(),
 		m.reportCurrentSession(""),
-	)
+	}
+	if busy {
+		cmds = append(cmds, util.ReportInfo("Previous session is still working in the background. Press ctrl+s to switch back."))
+	} else {
+		cmds = append(cmds, func() tea.Msg {
+			m.com.Workspace.LSPStopAll(context.Background())
+			return nil
+		})
+	}
+	return tea.Batch(cmds...)
 }
 
 // checkBangModeAfterPaste engages bang mode when pasted text starts with

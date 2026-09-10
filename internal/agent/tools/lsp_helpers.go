@@ -90,17 +90,17 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 	return results, nil
 }
 
-// findLSPClient returns the first LSP client that handles the given file path.
+// findLSPClient returns the LSP client that best handles the given file path.
+//
+// Selection is by match score rather than iteration order: a catch-all server
+// (one with no configured FileTypes) matches every file, so first-match would
+// hand it files that a more specific server should own, and which server won
+// depended on map ordering.
 func findLSPClient(lspManager *lsp.Manager, filePath string) *lsp.Client {
 	if abs, err := filepath.Abs(filePath); err == nil {
 		filePath = abs
 	}
-	for c := range lspManager.Clients().Seq() {
-		if c.HandlesFile(filePath) {
-			return c
-		}
-	}
-	return nil
+	return lspManager.BestClientFor(filePath)
 }
 
 // collectAffectedFiles extracts all unique file paths from a WorkspaceEdit.

@@ -201,6 +201,11 @@ type UI struct {
 
 	isTransparent bool
 
+	// mouseEnabled controls whether Bubble Tea mouse reporting is active.
+	// When false, the terminal emulator (or tmux) handles text selection,
+	// copy/paste, right-click, and scrolling instead of Crush.
+	mouseEnabled bool
+
 	// themeKey identifies the currently applied theme so applyTheme can
 	// skip the expensive style rebuild when switching to a provider that
 	// resolves to the same theme.
@@ -527,6 +532,8 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
 	// enable transparent mode
 	ui.isTransparent = opts.TUI.IsTransparent()
+	// enable mouse support (default on)
+	ui.mouseEnabled = opts.TUI.Mouse == nil || *opts.TUI.Mouse
 
 	return ui
 }
@@ -2041,6 +2048,30 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Transparent background " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleMouseSupport:
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
+			break
+		}
+		// Flip the field on the main update path so it never races with
+		// View() reading m.mouseEnabled from a background command's
+		// goroutine; only the (possibly slow) config write is deferred.
+		mouseEnabled := cfg.Options == nil || cfg.Options.TUI.Mouse == nil || *cfg.Options.TUI.Mouse
+		newValue := !mouseEnabled
+		m.mouseEnabled = newValue
+		cmds = append(cmds, func() tea.Msg {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.mouse", newValue); err != nil {
+				return util.ReportError(err)()
+			}
+
+			status := "disabled"
+			if newValue {
+				status = "enabled"
+			}
+			return util.NewInfoMsg("Mouse support " + status)
+		})
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
@@ -3133,6 +3164,24 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return nil
 }
 
+// mouseMode determines the Bubble Tea mouse reporting mode to request for
+// the current frame. When mouse support is disabled via configuration, no
+// mouse mode is requested so the terminal emulator (or tmux) can handle
+// text selection, copy/paste, and scrolling natively. Inline editors need
+// motion events even without a button pressed (e.g. for hover/drag), so
+// they use MouseModeAllMotion; everything else only needs click/drag
+// tracking via MouseModeCellMotion.
+func mouseMode(enabled, inlineActive bool) tea.MouseMode {
+	switch {
+	case !enabled:
+		return tea.MouseModeNone
+	case inlineActive:
+		return tea.MouseModeAllMotion
+	default:
+		return tea.MouseModeCellMotion
+	}
+}
+
 // View renders the UI model's view.
 func (m *UI) View() tea.View {
 	var v tea.View
@@ -3140,11 +3189,7 @@ func (m *UI) View() tea.View {
 	if !m.isTransparent {
 		v.BackgroundColor = m.com.Styles.Background
 	}
-	if m.activeInline != nil {
-		v.MouseMode = tea.MouseModeAllMotion
-	} else {
-		v.MouseMode = tea.MouseModeCellMotion
-	}
+	v.MouseMode = mouseMode(m.mouseEnabled, m.activeInline != nil)
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = "crush " + home.Short(m.com.Workspace.WorkingDir())
 
@@ -3962,6 +4007,10 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
 
 	fileCmd := func() tea.Msg {
+		if !m.currentModelSupportsImages() && common.IsImagePath(path) {
+			return util.NewWarnMsg("The current model does not support image attachments")
+		}
+
 		absPath, _ := filepath.Abs(path)
 
 		if m.hasSession() {
@@ -4037,6 +4086,10 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 		}
 		if mimeType == "" {
 			mimeType = "text/plain"
+		}
+
+		if !m.currentModelSupportsImages() && strings.HasPrefix(mimeType, "image/") {
+			return util.NewWarnMsg("The current model does not support image attachments")
 		}
 
 		return message.Attachment{
@@ -4582,6 +4635,9 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 
 // openFilesDialog opens the file picker dialog.
 func (m *UI) openFilesDialog() tea.Cmd {
+	if !m.currentModelSupportsImages() {
+		return util.ReportWarn("The current model does not support image attachments")
+	}
 	if m.dialog.ContainsDialog(dialog.FilePickerID) {
 		// Bring to front
 		m.dialog.BringToFront(dialog.FilePickerID)
@@ -4892,16 +4948,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				return false
 			}
-
-			lowerPath := strings.ToLower(path)
-			isValid := false
-			for _, ext := range common.AllowedImageTypes {
-				if strings.HasSuffix(lowerPath, ext) {
-					isValid = true
-					break
-				}
-			}
-			if !isValid {
+			if !common.IsImagePath(path) {
 				return false
 			}
 		}
@@ -4912,6 +4959,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		cmd := m.updateTextareaWithPrevHeight(msg, prevHeight)
 		m.checkBangModeAfterPaste()
 		return cmd
+	}
+	if !m.currentModelSupportsImages() {
+		return util.ReportWarn("The current model does not support image attachments")
 	}
 
 	var cmds []tea.Cmd
@@ -4985,6 +5035,9 @@ func (m *UI) pasteTextFromClipboard() tea.Msg {
 // creates an attachment. If no image data is found, it falls back to
 // interpreting clipboard text as a file path.
 func (m *UI) pasteImageFromClipboard() tea.Msg {
+	if !m.currentModelSupportsImages() {
+		return util.NewWarnMsg("The current model does not support image attachments")
+	}
 	imageData, err := clipboard.Read(clipboard.FormatImage)
 	if int64(len(imageData)) > common.MaxAttachmentSize {
 		return util.InfoMsg{
@@ -5013,15 +5066,7 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		return nil // Clipboard does not contain an image or valid file path
 	}
 
-	lowerPath := strings.ToLower(path)
-	isAllowed := false
-	for _, ext := range common.AllowedImageTypes {
-		if strings.HasSuffix(lowerPath, ext) {
-			isAllowed = true
-			break
-		}
-	}
-	if !isAllowed {
+	if !common.IsImagePath(path) {
 		return util.NewInfoMsg("File type is not a supported image format")
 	}
 

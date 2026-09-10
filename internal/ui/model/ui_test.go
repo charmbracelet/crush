@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -71,6 +72,29 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 
 		ui := newTestUIWithConfig(t, cfg)
 		require.True(t, ui.currentModelSupportsImages())
+	})
+}
+
+func TestMouseMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns no mouse mode when disabled", func(t *testing.T) {
+		t.Parallel()
+
+		require.Equal(t, tea.MouseModeNone, mouseMode(false, false))
+		require.Equal(t, tea.MouseModeNone, mouseMode(false, true))
+	})
+
+	t.Run("returns cell motion when enabled and no inline editor is active", func(t *testing.T) {
+		t.Parallel()
+
+		require.Equal(t, tea.MouseModeCellMotion, mouseMode(true, false))
+	})
+
+	t.Run("returns all motion when enabled and an inline editor is active", func(t *testing.T) {
+		t.Parallel()
+
+		require.Equal(t, tea.MouseModeAllMotion, mouseMode(true, true))
 	})
 }
 

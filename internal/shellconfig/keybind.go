@@ -15,18 +15,20 @@ import (
 //
 //	keybind set <action> <keys...>
 //	keybind unset <action>
+//	keybind disable <action>
 //	keybind reset
 //
 // "set" replaces the override for the action; later sets win. "unset"
-// drops the override so the default returns. "reset" clears every
-// keybind set so far in the script.
+// drops the override so the default returns. "disable" keeps the
+// override but empties it so the action never fires. "reset" clears
+// every keybind set so far in the script.
 func handleKeybind(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: keybind set <action> <keys...> | keybind unset <action> | keybind reset")
+		return usage(stderr, "usage: keybind set <action> <keys...> | keybind unset <action> | keybind disable <action> | keybind reset")
 	}
 
 	switch args[1] {
@@ -34,10 +36,12 @@ func handleKeybind(ctx context.Context, args []string, stdin io.Reader, stdout, 
 		return keybindSet(b, args, stderr)
 	case "unset":
 		return keybindUnset(b, args, stderr)
+	case "disable":
+		return keybindDisable(b, args, stderr)
 	case "reset":
 		return keybindReset(b, args, stderr)
 	default:
-		return usage(stderr, fmt.Sprintf("keybind: unknown subcommand %q (expected set, unset or reset)", args[1]))
+		return usage(stderr, fmt.Sprintf("keybind: unknown subcommand %q (expected set, unset, disable or reset)", args[1]))
 	}
 }
 
@@ -49,9 +53,9 @@ func keybindSet(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	if err := keybinds.Validate(action, keys); err != nil {
 		return usage(stderr, err.Error())
 	}
-	normalized := make([]any, 0, len(keys))
-	for _, k := range keys {
-		normalized = append(normalized, keybinds.NormalizeToken(k))
+	normalized := make([]any, len(keys))
+	for i, k := range keys {
+		normalized[i] = k
 	}
 	b.section("keybinds")[action] = normalized
 	slog.Info("Keybind set in shell config", "action", action, "keys", keys)
@@ -70,6 +74,20 @@ func keybindUnset(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 	delete(b.section("keybinds"), action)
 	slog.Info("Keybind unset in shell config", "action", action)
+	return nil
+}
+
+func keybindDisable(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) != 3 {
+		return usage(stderr, "usage: keybind disable <action>")
+	}
+	action := args[2]
+	// Same shape check as unset: disable takes no keys either.
+	if !keybinds.ValidShape(action) {
+		return usage(stderr, fmt.Sprintf("invalid action %q (expected scope.name)", action))
+	}
+	b.section("keybinds")[action] = []any{}
+	slog.Info("Keybind disabled in shell config", "action", action)
 	return nil
 }
 

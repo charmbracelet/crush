@@ -44,11 +44,10 @@ keybind reset`)
 	require.Empty(t, store.Config().Keybinds)
 }
 
-// Space normalizes to its word form at load.
-func TestShellConfigKeybindNormalizesSpace(t *testing.T) {
-	store := loadCrushSh(t, `keybind set chat.expand " "`)
-
-	require.Equal(t, []string{"space"}, store.Config().Keybinds["chat.expand"])
+// A whitespace-only key is rejected as empty.
+func TestShellConfigKeybindRejectsWhitespaceKey(t *testing.T) {
+	_, err := loadCrushShErr(t, `keybind set chat.expand " "`)
+	require.Error(t, err)
 }
 
 func TestShellConfigKeybindRejectsBadShape(t *testing.T) {
@@ -79,4 +78,17 @@ keybind set global.quit ctrl+q`)
 	require.Equal(t, []string{"ctrl+q"}, store.Config().Keybinds["global.quit"])
 	require.NotContains(t, store.Config().Keybinds, "chat.tab")
 	require.NotContains(t, store.Config().Keybinds, "bogus.action")
+}
+
+func TestShellConfigKeybindDisable(t *testing.T) {
+	store := loadCrushSh(t, `keybind set global.quit ctrl+q
+keybind disable global.quit`)
+
+	require.Equal(t, []string{}, store.Config().Keybinds["global.quit"])
+}
+
+func TestShellConfigKeybindDisableRequiresAction(t *testing.T) {
+	_, err := loadCrushShErr(t, `keybind disable`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "usage: keybind disable")
 }

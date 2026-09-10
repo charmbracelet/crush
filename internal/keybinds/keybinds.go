@@ -18,6 +18,13 @@ var actions = []string{
 	"global.sessions",
 	"global.tab",
 	"global.toggle_yolo",
+	"global.summarize",
+	"global.toggle_thinking",
+	"global.toggle_compact",
+	"global.toggle_transparent",
+	"global.initialize_project",
+	"global.reasoning",
+	"global.notifications",
 	"editor.send_message",
 	"editor.open_editor",
 	"editor.newline",
@@ -67,6 +74,39 @@ var actions = []string{
 	"completions.down_insert",
 	"completions.up_insert",
 	"dialog.close",
+	"dialog.select",
+	"dialog.next",
+	"dialog.previous",
+	"dialog.tab",
+	"dialog.copy",
+	"dialog.mcp_auth.skip",
+	"dialog.sessions.delete",
+	"dialog.sessions.rename",
+	"dialog.sessions.confirm_rename",
+	"dialog.sessions.cancel_rename",
+	"dialog.sessions.confirm_delete",
+	"dialog.sessions.cancel_delete",
+	"dialog.models.edit",
+	"dialog.commands.shift_tab",
+	"dialog.permissions.left",
+	"dialog.permissions.right",
+	"dialog.permissions.allow",
+	"dialog.permissions.allow_session",
+	"dialog.permissions.deny",
+	"dialog.permissions.toggle_diff",
+	"dialog.permissions.toggle_fullscreen",
+	"dialog.permissions.scroll_up",
+	"dialog.permissions.scroll_down",
+	"dialog.permissions.scroll_left",
+	"dialog.permissions.scroll_right",
+	"dialog.filepicker.forward",
+	"dialog.filepicker.backward",
+	"dialog.question.toggle",
+	"dialog.question.yes",
+	"dialog.question.no",
+	"dialog.question.prev_tab",
+	"dialog.question.next_tab",
+	"dialog.question.newline",
 }
 
 // Actions returns the action IDs in registry order.
@@ -79,15 +119,6 @@ func Valid(action string) bool {
 	return slices.Contains(actions, action)
 }
 
-// NormalizeToken maps a literal space to "space" so both spellings
-// match the same key.
-func NormalizeToken(token string) string {
-	if token == " " {
-		return "space"
-	}
-	return token
-}
-
 // ValidShape reports whether the action has scope.name form with
 // both parts non-empty. Membership is a separate question for Valid.
 func ValidShape(action string) bool {
@@ -96,17 +127,15 @@ func ValidShape(action string) bool {
 }
 
 // Validate checks that the action is dotted and every key is non-empty.
-// Unknown actions are allowed through here; they warn and fall back
-// at apply time instead of failing the load.
+// An empty key list disables the action: the binding stays but never
+// matches. Unknown actions pass; they warn and fall back at apply time
+// instead of failing the load.
 func Validate(action string, keys []string) error {
 	if !ValidShape(action) {
 		return fmt.Errorf("invalid action %q (expected scope.name)", action)
 	}
-	if len(keys) == 0 {
-		return fmt.Errorf("action %q requires at least one key", action)
-	}
 	for _, k := range keys {
-		if strings.TrimSpace(NormalizeToken(k)) == "" {
+		if strings.TrimSpace(k) == "" {
 			return fmt.Errorf("action %q has an empty key", action)
 		}
 	}

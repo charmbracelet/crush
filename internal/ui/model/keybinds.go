@@ -33,14 +33,11 @@ func ApplyKeybinds(km *KeyMap, overrides map[string][]string) []string {
 			continue
 		}
 		if len(keys) == 0 {
+			b.SetEnabled(false)
 			continue
 		}
-		normalized := make([]string, len(keys))
-		for i, k := range keys {
-			normalized[i] = keybinds.NormalizeToken(k)
-		}
-		b.SetKeys(normalized...)
-		b.SetHelp(normalized[0], b.Help().Desc)
+		b.SetKeys(keys...)
+		b.SetHelp(keys[0], b.Help().Desc)
 	}
 	// Conflicts and unknown actions, sorted so repeated runs warn in
 	// the same order; map iteration alone would shuffle them.
@@ -122,6 +119,20 @@ func bindingFor(km *KeyMap, action string) *key.Binding {
 		return &km.Tab
 	case "global.toggle_yolo":
 		return &km.ToggleYolo
+	case "global.summarize":
+		return &km.Summarize
+	case "global.toggle_thinking":
+		return &km.ToggleThinking
+	case "global.toggle_compact":
+		return &km.ToggleCompact
+	case "global.toggle_transparent":
+		return &km.ToggleTransparent
+	case "global.initialize_project":
+		return &km.InitializeProject
+	case "global.reasoning":
+		return &km.Reasoning
+	case "global.notifications":
+		return &km.Notifications
 	case "editor.send_message":
 		return &km.Editor.SendMessage
 	case "editor.open_editor":
@@ -227,15 +238,58 @@ func applyUserKeybinds(com *common.Common, km *KeyMap, ta *textarea.Model, comp 
 	for _, w := range warnings {
 		slog.Warn(w)
 	}
-	if keys, ok := overrides["dialog.close"]; ok && len(keys) > 0 {
-		dialog.CloseKey.SetKeys(keys...)
-		dialog.CloseKey.SetHelp(keys[0], dialog.CloseKey.Help().Desc)
+	if keys, ok := overrides["dialog.close"]; ok {
+		if len(keys) == 0 {
+			dialog.CloseKey.SetEnabled(false)
+		} else {
+			dialog.CloseKey.SetKeys(keys...)
+			dialog.CloseKey.SetHelp(keys[0], dialog.CloseKey.Help().Desc)
+		}
 	}
-	chat.ItemCopy.SetKeys(km.Chat.Copy.Keys()...)
-	chat.ItemScrollLeft.SetKeys(km.Chat.ScrollLeft.Keys()...)
-	chat.ItemScrollRight.SetKeys(km.Chat.ScrollRight.Keys()...)
-	ta.KeyMap.SelectAll.SetKeys(km.Editor.SelectAll.Keys()...)
+	syncItem := func(dst *key.Binding, src key.Binding) {
+		if src.Enabled() {
+			dst.SetKeys(src.Keys()...)
+		} else {
+			dst.SetEnabled(false)
+		}
+	}
+	syncItem(&chat.ItemCopy, km.Chat.Copy)
+	syncItem(&chat.ItemScrollLeft, km.Chat.ScrollLeft)
+	syncItem(&chat.ItemScrollRight, km.Chat.ScrollRight)
+	syncItem(&ta.KeyMap.SelectAll, km.Editor.SelectAll)
 	ta.KeyMap.SelectAll.SetHelp(km.Editor.SelectAll.Help().Key, km.Editor.SelectAll.Help().Desc)
+	syncQuestion := func(dst *key.Binding, keys []string) {
+		if len(keys) == 0 {
+			dst.SetEnabled(false)
+			return
+		}
+		dst.SetKeys(keys...)
+		dst.SetHelp(keys[0], dst.Help().Desc)
+	}
+	if keys, ok := overrides["dialog.select"]; ok {
+		syncQuestion(&dialog.QuestionSelect, keys)
+		syncQuestion(&dialog.QuestionDone, keys)
+		syncQuestion(&dialog.QuestionConfirm, keys)
+		syncQuestion(&dialog.QuestionSubmit, keys)
+	}
+	if keys, ok := overrides["dialog.question.toggle"]; ok {
+		syncQuestion(&dialog.QuestionToggle, keys)
+	}
+	if keys, ok := overrides["dialog.question.yes"]; ok {
+		syncQuestion(&dialog.QuestionYes, keys)
+	}
+	if keys, ok := overrides["dialog.question.no"]; ok {
+		syncQuestion(&dialog.QuestionNo, keys)
+	}
+	if keys, ok := overrides["dialog.question.prev_tab"]; ok {
+		syncQuestion(&dialog.QuestionPrevTab, keys)
+	}
+	if keys, ok := overrides["dialog.question.next_tab"]; ok {
+		syncQuestion(&dialog.QuestionNextTab, keys)
+	}
+	if keys, ok := overrides["dialog.question.newline"]; ok {
+		syncQuestion(&dialog.QuestionNewline, keys)
+	}
 	ckm := comp.KeyMap()
 	ckm.Apply(overrides)
 	comp.SetKeyMap(ckm)

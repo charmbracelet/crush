@@ -62,8 +62,8 @@ func NewQuit(com *common.Common, runningSubAgents int) *Quit {
 		key.WithHelp("enter/space", "confirm"),
 	)
 	q.keyMap.Yes = key.NewBinding(
-		key.WithKeys("y", "Y", "ctrl+c"),
-		key.WithHelp("y/Y/ctrl+c", "yes"),
+		key.WithKeys("y", "Y"),
+		key.WithHelp("y/Y", "yes"),
 	)
 	q.keyMap.No = key.NewBinding(
 		key.WithKeys("n", "N"),
@@ -78,6 +78,22 @@ func NewQuit(com *common.Common, runningSubAgents int) *Quit {
 		key.WithKeys("ctrl+c"),
 		key.WithHelp("ctrl+c", "quit"),
 	)
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":       &q.keyMap.EnterSpace,
+		"tab":          &q.keyMap.Tab,
+		"question.yes": &q.keyMap.Yes,
+		"question.no":  &q.keyMap.No,
+	})
+	// Pressing the quit key again confirms quit, so it must match the
+	// key that opened this dialog.
+	if com.Workspace != nil {
+		if cfg := com.Config(); cfg != nil {
+			if keys, ok := cfg.Keybinds["global.quit"]; ok && len(keys) > 0 {
+				q.keyMap.Quit.SetKeys(keys...)
+				q.keyMap.Quit.SetHelp(keys[0], "quit")
+			}
+		}
+	}
 	return q
 }
 

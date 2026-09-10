@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -101,10 +103,13 @@ type recordingPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 	requestCount int
 	allow        bool
+	mode         permission.PermissionMode
+	lastDanger   string
 }
 
 func (m *recordingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
 	m.requestCount++
+	m.lastDanger = req.Danger
 	return m.allow, nil
 }
 
@@ -132,11 +137,9 @@ func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context)
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
-func (m *recordingPermissionService) SetPermissionMode(mode permission.PermissionMode) {}
+func (m *recordingPermissionService) SetPermissionMode(mode permission.PermissionMode) { m.mode = mode }
 
-func (m *recordingPermissionService) PermissionMode() permission.PermissionMode {
-	return permission.PermissionModeNormal
-}
+func (m *recordingPermissionService) PermissionMode() permission.PermissionMode { return m.mode }
 
 func (m *recordingPermissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
 	return make(<-chan pubsub.Event[permission.ModeChangedEvent])
@@ -395,4 +398,126 @@ func TestResolveBlockedCommands(t *testing.T) {
 		require.False(t, shell.IsCommandBlocked("curl https://example.com", blockFuncs(blocked)))
 		require.True(t, shell.IsCommandBlocked("sudo rm -rf /", blockFuncs(blocked)))
 	})
+}
+
+// TestBashTool_ApprovedDangerousCommandRuns pins the rule that a command the
+// user was warned about and approved anyway reaches the shell unguarded:
+// re-blocking it would override the answer they just gave.
+func TestBashTool_ApprovedDangerousCommandRuns(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	// `ifconfig` is on the default dangerous list, so it is prompted for.
+	// Approving it must not then be overridden by the exec-time block list.
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "approved dangerous command",
+		Command:     "ifconfig --help",
+	})
+
+	require.Equal(t, 1, perms.requestCount, "a dangerous command must be prompted for")
+	require.Equal(t, "it uses ifconfig", perms.lastDanger,
+		"the prompt must name what tripped the check")
+	require.NotContains(t, resp.Content, "not allowed for security reasons",
+		"an approved command must not be re-blocked at exec time")
+}
+
+// TestBashTool_UnflaggedCommandKeepsBlockList is the other side of that rule.
+// The static check expands commands with globbing off, so a glob hides the
+// dangerous name from it and yolo mode auto-approves the call unseen. The block
+// list stays on at exec time, where the glob has resolved and the real command
+// name is finally visible.
+func TestBashTool_UnflaggedCommandKeepsBlockList(t *testing.T) {
+	workingDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\n"), 0o755))
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeYolo,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "indirect dangerous command",
+		Command:     "ifconf?g --help",
+	})
+
+	require.Empty(t, perms.lastDanger, "the static check cannot see through a glob")
+	require.Contains(t, resp.Content, "not allowed for security reasons")
+}
+
+// TestBashTool_SysadminModeSkipsBlockList pins sysadmin mode as the deliberate
+// exception: it asks for nothing and blocks nothing.
+func TestBashTool_SysadminModeSkipsBlockList(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeSysadmin,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "indirect dangerous command",
+		Command:     "ifconf?g --help",
+	})
+
+	require.NotContains(t, resp.Content, "not allowed for security reasons")
+}
+
+// TestBashTool_DeniedDangerousCommandDoesNotRun is the other half: denial at
+// the permission layer stops the command, no block list required.
+func TestBashTool_DeniedDangerousCommandDoesNotRun(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  false,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "denied dangerous command",
+		Command:     "ifconfig --help",
+	})
+
+	require.Equal(t, 1, perms.requestCount)
+	require.True(t, resp.IsError)
+}
+
+// TestBashTool_SafeReadOnlyPathStillEnforcesBlockList pins the one branch that
+// never asks: a safe-prefix command skips the permission request entirely, so
+// the block list stays on there as a backstop.
+func TestBashTool_SafeReadOnlyPathStillEnforcesBlockList(t *testing.T) {
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		allow:  true,
+		mode:   permission.PermissionModeNormal,
+	}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	tool := NewBashTool(perms, workingDir, workingDir, attribution, "test-model", config.DefaultMaxBackgroundJobs, nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "safe command",
+		Command:     "pwd",
+	})
+
+	require.Zero(t, perms.requestCount, "safe read-only commands must not prompt")
+	require.False(t, resp.IsError)
 }

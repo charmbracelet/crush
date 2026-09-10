@@ -41,7 +41,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
-	Dangerous   bool   `json:"dangerous,omitempty"`
+	Danger      string `json:"danger,omitempty"`
 }
 
 // PermissionNotification represents a notification about a permission change.
@@ -63,7 +63,7 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
-	Dangerous   bool   `json:"dangerous,omitempty"`
+	Danger      string `json:"danger,omitempty"`
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface. This is needed

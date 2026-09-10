@@ -12,7 +12,7 @@ import (
 )
 
 func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit, encoding powernap.OffsetEncoding) error {
-	path, err := uri.Path()
+	path, err := PathFromURI(uri)
 	if err != nil {
 		return fmt.Errorf("invalid URI: %w", err)
 	}
@@ -170,7 +170,7 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 // applyDocumentChange applies a DocumentChange (create/rename/delete operations)
 func applyDocumentChange(change protocol.DocumentChange, encoding powernap.OffsetEncoding) error {
 	if change.CreateFile != nil {
-		path, err := change.CreateFile.URI.Path()
+		path, err := PathFromURI(change.CreateFile.URI)
 		if err != nil {
 			return fmt.Errorf("invalid URI: %w", err)
 		}
@@ -190,7 +190,7 @@ func applyDocumentChange(change protocol.DocumentChange, encoding powernap.Offse
 	}
 
 	if change.DeleteFile != nil {
-		path, err := change.DeleteFile.URI.Path()
+		path, err := PathFromURI(change.DeleteFile.URI)
 		if err != nil {
 			return fmt.Errorf("invalid URI: %w", err)
 		}
@@ -210,12 +210,12 @@ func applyDocumentChange(change protocol.DocumentChange, encoding powernap.Offse
 		var newPath, oldPath string
 		var err error
 
-		oldPath, err = change.RenameFile.OldURI.Path()
+		oldPath, err = PathFromURI(change.RenameFile.OldURI)
 		if err != nil {
 			return err
 		}
 
-		newPath, err = change.RenameFile.NewURI.Path()
+		newPath, err = PathFromURI(change.RenameFile.NewURI)
 		if err != nil {
 			return err
 		}

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +26,96 @@ import (
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	// Drop credentials inherited from the developer's shell. They resolve
+	// into provider configs on every load, so a real key silently replaces
+	// the value a test asserts on and the failure diff prints the key.
+	// Tests that need one set it themselves with t.Setenv.
+	for _, name := range inheritedCredentialEnvNames(os.Environ()) {
+		os.Unsetenv(name)
+	}
+
 	exitVal := m.Run()
 	os.Exit(exitVal)
+}
+
+// Provider configuration is resolved from the environment on every load,
+// so anything below can silently steer a test. The suffixes cover the
+// per-provider variables the provider registry declares, which are mostly
+// but not all named *_API_KEY: huggingface uses HF_TOKEN and scaleway uses
+// SCW_SECRET_KEY. The prefixes cover the credential chains load.go reads
+// directly for Bedrock, Azure and Vertex AI. CRUSH_ is here because
+// PushPopCrushEnv copies CRUSH_FOO over FOO on every load, so clearing
+// HYPER_API_KEY alone leaves CRUSH_HYPER_API_KEY to reinstate it.
+var (
+	credentialEnvSuffixes = []string{"_API_KEY", "_API_ENDPOINT", "_TOKEN", "_SECRET_KEY"}
+	credentialEnvPrefixes = []string{"CRUSH_", "AWS_", "AZURE_", "VERTEXAI_"}
+)
+
+// inheritedCredentialEnvNames returns the names in environ that a test
+// process must not inherit.
+func inheritedCredentialEnvNames(environ []string) []string {
+	var names []string
+	for _, ev := range environ {
+		name, _, ok := strings.Cut(ev, "=")
+		if !ok {
+			continue
+		}
+		suffixed := slices.ContainsFunc(credentialEnvSuffixes, func(s string) bool {
+			return strings.HasSuffix(name, s)
+		})
+		prefixed := slices.ContainsFunc(credentialEnvPrefixes, func(p string) bool {
+			return strings.HasPrefix(name, p)
+		})
+		if suffixed || prefixed {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func TestInheritedCredentialEnvNames(t *testing.T) {
+	t.Parallel()
+
+	names := inheritedCredentialEnvNames([]string{
+		"PATH=/usr/bin",
+		"HOME=/home/dev",
+		"TOKEN=not-suffixed",
+		"API_KEY_SUFFIXED_WRONG=x",
+		"MALFORMED",
+		"HYPER_API_KEY=live",
+		"VENICE_API_KEY=live",
+		"CRUSH_HYPER_API_KEY=live",
+		"CRUSH_GLOBAL_CONFIG=/home/dev/.config/crush",
+		"HF_TOKEN=live",
+		"SCW_SECRET_KEY=live",
+		"ANTHROPIC_API_ENDPOINT=https://proxy.example",
+		"AWS_PROFILE=work",
+		"AWS_BEARER_TOKEN_BEDROCK=live",
+		"AZURE_OPENAI_API_VERSION=2026-01-01",
+		"VERTEXAI_PROJECT=my-project",
+	})
+
+	require.ElementsMatch(t, []string{
+		"HYPER_API_KEY",
+		"VENICE_API_KEY",
+		"CRUSH_HYPER_API_KEY",
+		"CRUSH_GLOBAL_CONFIG",
+		"HF_TOKEN",
+		"SCW_SECRET_KEY",
+		"ANTHROPIC_API_ENDPOINT",
+		"AWS_PROFILE",
+		"AWS_BEARER_TOKEN_BEDROCK",
+		"AZURE_OPENAI_API_VERSION",
+		"VERTEXAI_PROJECT",
+	}, names)
+}
+
+// TestMainClearedInheritedCredentials is deliberately not parallel: it reads
+// process-wide state, and t.Setenv in other tests is confined to the
+// sequential pass.
+func TestMainClearedInheritedCredentials(t *testing.T) {
+	require.Empty(t, inheritedCredentialEnvNames(os.Environ()),
+		"TestMain must clear inherited credentials before any test runs")
 }
 
 func TestConfig_LoadFromBytes(t *testing.T) {

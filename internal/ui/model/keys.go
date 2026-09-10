@@ -287,7 +287,7 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("d", "half page down"),
 	)
 	km.Chat.PageDown = key.NewBinding(
-		key.WithKeys("pgdown", "space", "f"),
+		key.WithKeys("pgdown", "f"),
 		key.WithHelp("f/pgdn", "page down"),
 	)
 	km.Chat.PageUp = key.NewBinding(

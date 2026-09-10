@@ -163,7 +163,11 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			}
 
 			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
-			webSearchTool := tools.NewWebSearchTool(client)
+			webSearchConfig := c.cfg.Config().Tools.WebSearch
+			webSearchTool := tools.NewWebSearchTool(client, tools.WebSearchOptions{
+				DefaultEngine: webSearchConfig.Engine(),
+				ExaAPIKey:     webSearchConfig.ResolvedExaAPIKey(c.cfg.Resolver()),
+			})
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
 				webSearchTool,

@@ -45,3 +45,47 @@ func TestContainsCommandChaining(t *testing.T) {
 		})
 	}
 }
+
+func TestIsSafeReadOnlyCommand_GitQueries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		command string
+		safe    bool
+	}{
+		{command: "git status", safe: true},
+		{command: "git diff --stat", safe: true},
+		{command: "git log --oneline", safe: true},
+		{command: "git branch", safe: true},
+		{command: "git branch --show-current", safe: true},
+		{command: "git branch --list 'feature/*'", safe: true},
+		{command: "git branch -a", safe: true},
+		{command: "git branch new-branch", safe: false},
+		{command: "git branch -D old-branch", safe: false},
+		{command: "git branch -m old new", safe: false},
+		{command: "git branch --all -D old-branch", safe: false},
+		{command: "git branch --list $BRANCH_FLAGS", safe: false},
+		{command: "git tag", safe: true},
+		{command: "git tag --list 'v*'", safe: true},
+		{command: "git tag -l 'v*'", safe: true},
+		{command: "git tag v1.0.0", safe: false},
+		{command: "git tag -d v1.0.0", safe: false},
+		{command: "git tag --list --force v1.0.0", safe: false},
+		{command: "git remote", safe: true},
+		{command: "git remote -v", safe: true},
+		{command: "git remote show origin", safe: true},
+		{command: "git remote get-url origin", safe: true},
+		{command: "git remote add origin https://example.com/repo.git", safe: false},
+		{command: "git remote remove origin", safe: false},
+		{command: "git remote set-url origin https://example.com/repo.git", safe: false},
+		{command: "git remote rename origin upstream", safe: false},
+		{command: "git status && git branch new-branch", safe: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.safe, isSafeReadOnlyCommand(tt.command))
+		})
+	}
+}

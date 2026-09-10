@@ -52,6 +52,7 @@ func (s *stubCoordinator) Summarize(context.Context, string) error {
 }
 func (s *stubCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (s *stubCoordinator) UpdateModels(context.Context) error            { return nil }
+func (s *stubCoordinator) ReloadSkills(context.Context) error            { return nil }
 func (s *stubCoordinator) GenerateTitle(context.Context, string, string) {}
 
 // stubSessions is a minimal session.Service that returns a fixed list

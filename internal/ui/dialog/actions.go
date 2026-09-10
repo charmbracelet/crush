@@ -60,6 +60,7 @@ type (
 	ActionToggleTransparentBackground struct{}
 	ActionToggleMouseSupport          struct{}
 	ActionInitializeProject           struct{}
+	ActionReloadSkills                struct{}
 	ActionSummarize                   struct {
 		SessionID string
 	}

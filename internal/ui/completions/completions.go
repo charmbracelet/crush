@@ -295,6 +295,16 @@ func (c *Completions) HasItems() bool {
 	return len(c.filtered) > 0
 }
 
+// ScrollBy scrolls the completions list by the given number of lines.
+// The list renders in reverse order, so wheel deltas are inverted here to
+// match the visual scroll direction users expect.
+func (c *Completions) ScrollBy(lines int) {
+	if !c.open || lines == 0 || len(c.filtered) == 0 {
+		return
+	}
+	c.list.ScrollBy(-lines)
+}
+
 // Update handles key events for the completions.
 func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 	if !c.open {
@@ -308,6 +318,14 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 
 	case key.Matches(msg, c.keyMap.Down):
 		c.selectNext()
+		return nil, true
+
+	case key.Matches(msg, c.keyMap.PageUp):
+		c.list.ScrollBy(c.list.Height())
+		return nil, true
+
+	case key.Matches(msg, c.keyMap.PageDown):
+		c.list.ScrollBy(-c.list.Height())
 		return nil, true
 
 	case key.Matches(msg, c.keyMap.UpInsert):

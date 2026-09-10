@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	zkeyring "github.com/zalando/go-keyring"
@@ -147,18 +148,40 @@ func IsUnavailable(err error) bool {
 }
 
 // MockInit swaps the underlying backend for an in-memory store. Only
-// call from test files.
-func MockInit() { zkeyring.MockInit() }
+// call from test files; it also opts the test binary into keyring
+// calls, which are otherwise disabled under testing.Testing so tests
+// never touch the real OS keychain.
+func MockInit() {
+	mockActive = true
+	zkeyring.MockInit()
+}
 
 // MockInitWithError swaps the underlying backend for an in-memory store
 // that fails every operation with the given error. Only call from test
-// files.
-func MockInitWithError(err error) { zkeyring.MockInitWithError(err) }
+// files; it also opts the test binary into keyring calls.
+func MockInitWithError(err error) {
+	mockActive = true
+	zkeyring.MockInitWithError(err)
+}
+
+// mockActive records that the current test binary explicitly opted into
+// keyring calls via MockInit.
+var mockActive bool
 
 // call runs a keyring operation on its own goroutine so a wedged daemon
 // cannot block the caller past opTimeout. The result channel is
 // buffered so the abandoned goroutine cannot leak.
 func call(op func() (string, error)) (string, error) {
+	// Tests must never read or write the real OS keychain: it is shared
+	// state outside the test's control, may prompt or hang on CI
+	// runners, and would leak test secrets. Test binaries report every
+	// operation as unavailable unless they opted in via MockInit, which
+	// keeps production behavior identical while making all callers fall
+	// back to plaintext storage deterministically.
+	if !mockActive && testing.Testing() {
+		return "", fmt.Errorf("keyring disabled under test: %w", ErrUnavailable)
+	}
+
 	type result struct {
 		value string
 		err   error

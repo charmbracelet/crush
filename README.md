@@ -996,3 +996,7 @@ Part of [Charm](https://charm.land).
 
 <!--prettier-ignore-->
 Charm热爱开源 • Charm loves open source
+
+### File history
+
+Native [rewind and redo](FILE_HISTORY.md) use filesnap checkpoints to restore workspace files and conversation together from the TUI.

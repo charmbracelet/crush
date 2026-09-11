@@ -357,6 +357,8 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
+	FileHistory          *bool       `json:"file_history,omitempty" jsonschema:"description=Capture workspace file history before agent prompts,default=true"`
+	FilesnapBinary       string      `json:"filesnap_binary,omitempty" jsonschema:"description=Optional override for the automatically managed filesnap executable"`
 	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
 	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/crush/CRUSH.md,default=~/.config/AGENTS.md"`
 	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`

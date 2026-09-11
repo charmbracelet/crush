@@ -28,3 +28,9 @@ jobs:
       - run: git diff --exit-code
       - run: go build -race ./...
       - run: go test -race -failfast ./...
+      - name: Prepare bundled filesnap
+        run: go run ./internal/filehistory/cmd/bundle --platform host
+      - name: Test managed filesnap and conversation recovery
+        env:
+          FILESNAP_INTEGRATION_TESTS: "1"
+        run: go test -race -tags=filesnap_bundle ./internal/filehistory/... ./internal/agent

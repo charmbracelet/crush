@@ -444,6 +444,15 @@
     },
     "Options": {
       "properties": {
+        "file_history": {
+          "type": "boolean",
+          "description": "Capture workspace file history before agent prompts",
+          "default": true
+        },
+        "filesnap_binary": {
+          "type": "string",
+          "description": "Optional override for the automatically managed filesnap executable"
+        },
         "context_paths": {
           "items": {
             "type": "string",

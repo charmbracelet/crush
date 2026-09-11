@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/filehistory"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
@@ -691,7 +692,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	var history *filehistory.Store
+	historyOptions := c.cfg.Config().Options
+	captureHistory := filehistory.Supported() || historyOptions.FilesnapBinary != ""
+	if historyOptions.FileHistory != nil {
+		captureHistory = *historyOptions.FileHistory
+	}
+	if captureHistory && !isSubAgent {
+		history = filehistory.New(c.cfg.WorkingDir(), filepath.Join(filepath.Dir(config.GlobalConfigData()), "file-history"), c.cfg.Config().Options.FilesnapBinary)
+	}
 	result := NewSessionAgent(SessionAgentOptions{
+		FileHistory:          history,
 		LargeModel:           large,
 		SmallModel:           small,
 		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
@@ -860,6 +871,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// without hook interception to avoid firing the user's hook N times
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
+	for i, tool := range filteredTools {
+		filteredTools[i] = &fileHistoryTool{AgentTool: tool}
+	}
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
 
 	return filteredTools, nil

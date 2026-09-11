@@ -54,3 +54,6 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
+
+# Verified filesnap archives generated before standalone builds.
+/internal/filehistory/binary/assets/

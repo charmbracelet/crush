@@ -193,6 +193,8 @@ type optionSpec struct {
 // conditional logic (option attribution-...) are handled as special cases in
 // handleOption above and do not appear here.
 var optionSpecs = map[string]optionSpec{
+	"file-history":    {jsonKey: "file_history", kind: optBool},
+	"filesnap-binary": {jsonKey: "filesnap_binary", kind: optString},
 	// Boolean fields (stored as-is).
 	"debug":     {jsonKey: "debug", kind: optBool},
 	"debug-lsp": {jsonKey: "debug_lsp", kind: optBool},

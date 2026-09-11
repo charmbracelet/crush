@@ -65,6 +65,44 @@ func TestTruncateUTF8Prefix(t *testing.T) {
 	})
 }
 
+func TestTruncateToTokenLimitKeepEnds(t *testing.T) {
+	t.Parallel()
+
+	t.Run("under limit passthrough", func(t *testing.T) {
+		t.Parallel()
+		s := "hello world"
+		require.Equal(t, s, TruncateToTokenLimitKeepEnds(s, 100))
+	})
+
+	t.Run("keeps beginning and end", func(t *testing.T) {
+		t.Parallel()
+		s := "HEAD " + strings.Repeat("x", 10_000) + " TAIL"
+		got := TruncateToTokenLimitKeepEnds(s, 100)
+		require.Contains(t, got, "HEAD")
+		require.Contains(t, got, "TAIL")
+		require.Contains(t, got, "[...truncated...]")
+		require.True(t, utf8.ValidString(got))
+	})
+
+	t.Run("invalid UTF-8 normalized", func(t *testing.T) {
+		t.Parallel()
+		got := TruncateToTokenLimitKeepEnds(string([]byte{'a', 0xff, 'b'}), 100)
+		require.True(t, utf8.ValidString(got))
+	})
+
+	t.Run("tiny limit falls back to prefix", func(t *testing.T) {
+		t.Parallel()
+		got := TruncateToTokenLimitKeepEnds(strings.Repeat("x", 1_000), 3)
+		require.LessOrEqual(t, approxTokenCount(got), int64(3))
+		require.NotContains(t, got, "truncated")
+	})
+
+	t.Run("zero limit", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "", TruncateToTokenLimitKeepEnds("hello", 0))
+	})
+}
+
 func TestReadBounded(t *testing.T) {
 	t.Parallel()
 

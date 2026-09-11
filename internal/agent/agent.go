@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,7 +39,6 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
@@ -1606,31 +1604,6 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
 		},
 	}
-}
-
-// collectMCPInstructions concatenates the InitializeResult instructions
-// of every connected MCP server. Servers are sorted by name so the
-// output is deterministic regardless of connection order.
-func collectMCPInstructions() string {
-	states := mcp.GetStates()
-	names := make([]string, 0, len(states))
-	for name := range states {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-
-	var instructions strings.Builder
-	for _, name := range names {
-		server := states[name]
-		if server.State != mcp.StateConnected {
-			continue
-		}
-		if s := server.Client.InitializeResult().Instructions; s != "" {
-			instructions.WriteString(s)
-			instructions.WriteString("\n\n")
-		}
-	}
-	return instructions.String()
 }
 
 // sessionHeaders returns the HTTP headers we use for cache affinity on

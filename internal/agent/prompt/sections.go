@@ -168,6 +168,52 @@ func truncateUTF8Prefix(s string, maxBytes int) string {
 	return ""
 }
 
+// truncateUTF8Suffix normalizes invalid UTF-8 and keeps the last
+// maxBytes bytes, starting on a rune boundary.
+func truncateUTF8Suffix(s string, maxBytes int) string {
+	s = strings.ToValidUTF8(s, "")
+	if maxBytes >= len(s) {
+		return s
+	}
+	start := len(s) - maxBytes
+	for start < len(s) {
+		if utf8.RuneStart(s[start]) {
+			return s[start:]
+		}
+		start++
+	}
+	return ""
+}
+
+// truncationMarker separates the kept halves of a keep-ends
+// truncation. Its byte length is subtracted from the split budget so
+// the total output still respects the limit.
+const truncationMarker = "\n[...truncated...]\n"
+
+// TruncateToTokenLimitKeepEnds truncates s to approximately tokenLimit
+// estimated tokens, keeping the beginning and the end — appropriate for
+// instructional text where a prefix-only cut can drop the most
+// important rules. The marker's bytes are deducted from the split
+// budget, so the result stays within the limit rather than
+// overshooting by the marker's length.
+func TruncateToTokenLimitKeepEnds(s string, tokenLimit int) string {
+	s = strings.ToValidUTF8(s, "")
+	if approxTokenCount(s) <= int64(tokenLimit) {
+		return s
+	}
+	if tokenLimit <= 0 {
+		return ""
+	}
+	// When the marker alone would exceed the budget, fall back to a
+	// plain prefix so the limit still holds.
+	if tokenLimit*4 <= len(truncationMarker) {
+		return truncateUTF8Prefix(s, tokenLimit*4)
+	}
+	// ~4 bytes per token heuristic, minus the marker's own bytes.
+	half := (tokenLimit*4 - len(truncationMarker)) / 2
+	return truncateUTF8Prefix(s, half) + truncationMarker + truncateUTF8Suffix(s, half)
+}
+
 // maxContextFileReadSize is the hard process-protection limit for a
 // single context file. Files larger than this are truncated; the limit
 // is measured in bytes and guards against unbounded context files

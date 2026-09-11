@@ -1,6 +1,4 @@
 // Package acp provides ACP (Agent Client Protocol) server support for Crush.
-//
-// Crush acts as an ACP server over stdio using github.com/coder/acp-go-sdk.
 package acp
 
 import (
@@ -10,6 +8,7 @@ import (
 	"log/slog"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/charmbracelet/crush/internal/app"
 )
 
 // Server is the ACP server adapter for Crush.
@@ -30,75 +29,61 @@ type Agent interface {
 	SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
 }
 
-// stubAgent implements a no-op agent for testing.
-type stubAgent struct{}
-
-func (s *stubAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
-	return acp.InitializeResponse{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		AgentCapabilities: acp.AgentCapabilities{
-			LoadSession: false,
-		},
-	}, nil
-}
-func (s *stubAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	return acp.NewSessionResponse{SessionId: acp.SessionId("test-" + req.Cwd)}, nil
-}
-func (s *stubAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
-	return acp.ListSessionsResponse{}, nil
-}
-func (s *stubAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
-	return acp.CloseSessionResponse{}, nil
-}
-func (s *stubAgent) ResumeSession(_ context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
-	return acp.ResumeSessionResponse{}, nil
-}
-func (s *stubAgent) Cancel(_ context.Context, _ acp.CancelNotification) error { return nil }
-func (s *stubAgent) Prompt(_ context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
-}
-func (s *stubAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SetSessionModeResponse{}, nil
-}
-func (s *stubAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, nil
-}
-
-// stubAuthAgent wraps a stubAgent with auth methods required by acp.Agent.
-type stubAuthAgent struct {
-	stubAgent
-}
-
-// Authenticate is required by acp.Agent.
-func (s *stubAuthAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
-	return acp.AuthenticateResponse{}, errors.New("auth not supported")
-}
-
-// Logout is required by acp.Agent.
-func (s *stubAuthAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
-	return acp.LogoutResponse{}, errors.New("logout not supported")
-}
-
 // NewServer creates a new ACP server that connects to the given peer.
-func NewServer(agent Agent, stdin io.Reader, stdout io.Writer) *Server {
-	d := &dispatcher{agent}
+func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) *Server {
+	agent := newCrushAgent(a, log)
+	d := &dispatcher{agent: agent}
 	conn := acp.NewAgentSideConnection(d, stdout, stdin)
 	return &Server{conn: conn}
 }
 
-// dispatcher forwards SDK calls to our Agent interface.
+// dispatcher forwards SDK Agent method calls to our Agent interface.
 type dispatcher struct {
-	Agent
+	agent Agent
 }
 
-// Authenticate is required by acp.Agent; Crush does not support auth yet.
 func (d *dispatcher) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
 	return acp.AuthenticateResponse{}, errors.New("auth not supported")
 }
 
-// Logout is required by acp.Agent; Crush does not support auth yet.
 func (d *dispatcher) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
 	return acp.LogoutResponse{}, errors.New("logout not supported")
+}
+
+func (d *dispatcher) Initialize(ctx context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
+	return d.agent.Initialize(ctx, req)
+}
+
+func (d *dispatcher) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	return d.agent.NewSession(ctx, req)
+}
+
+func (d *dispatcher) ListSessions(ctx context.Context, req acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
+	return d.agent.ListSessions(ctx, req)
+}
+
+func (d *dispatcher) CloseSession(ctx context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+	return d.agent.CloseSession(ctx, req)
+}
+
+func (d *dispatcher) ResumeSession(ctx context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	return d.agent.ResumeSession(ctx, req)
+}
+
+func (d *dispatcher) Cancel(ctx context.Context, req acp.CancelNotification) error {
+	return d.agent.Cancel(ctx, req)
+}
+
+func (d *dispatcher) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
+	return d.agent.Prompt(ctx, req)
+}
+
+func (d *dispatcher) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	return d.agent.SetSessionMode(ctx, req)
+}
+
+func (d *dispatcher) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	return d.agent.SetSessionConfigOption(ctx, req)
 }
 
 // SetLogger configures structured logging on the connection.

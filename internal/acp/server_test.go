@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/charmbracelet/crush/internal/app"
 )
 
 func TestServerStartEndToEnd(t *testing.T) {
@@ -15,7 +17,12 @@ func TestServerStartEndToEnd(t *testing.T) {
 	defer r.Close()
 	defer w.Close()
 
-	srv := NewServer(&stubAuthAgent{}, r, w)
+	// Create a minimal app with stub services.
+	a := &app.App{
+		Sessions: &stubSessionService{},
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(a, log, r, w)
 
 	done := make(chan error, 1)
 	go func() {

@@ -569,7 +569,8 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	switch a.thinkingViewMode {
 	case thinkingCollapsed:
 		totalLines = renderedLines
-		if totalLines > maxCollapsedThinkingHeight {
+		// Avoid hiding a single line; showing it beats the hint.
+		if totalLines > maxCollapsedThinkingHeight+1 {
 			tail, hidden := tailLines(rendered, maxCollapsedThinkingHeight, totalLines)
 			hint := a.sty.Messages.ThinkingTruncationHint.Render(
 				fmt.Sprintf(assistantMessageTruncateFormat, hidden),
@@ -580,7 +581,7 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 		}
 	case thinkingTailWindow:
 		totalLines = renderedLines
-		if totalLines > maxExpandedThinkingTailLines {
+		if totalLines > maxExpandedThinkingTailLines+1 {
 			tail, hidden := tailLines(rendered, maxExpandedThinkingTailLines, totalLines)
 			hint := a.sty.Messages.ThinkingTruncationHint.Render(
 				fmt.Sprintf(assistantMessageTailWindowFormat, hidden),

@@ -101,3 +101,24 @@ func TestBashToolMessageItem_OutputDefaultsCollapsed(t *testing.T) {
 	require.True(t, bash.ToggleExpanded(), "first toggle should report expanded")
 	require.Contains(t, ansi.Strip(bash.RawRender(120)), "line20")
 }
+
+// TestToolOutputPlainContent_SingleHiddenLineShown verifies that
+// collapsing never hides just one line: content one line over the
+// collapsed limit is shown in full, while more over that truncates.
+func TestToolOutputPlainContent_SingleHiddenLineShown(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	var lines []string
+	for i := 1; i <= 11; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+	out := ansi.Strip(toolOutputPlainContent(&sty, strings.Join(lines, "\n"), 80, false))
+	require.Contains(t, out, "line11")
+	require.NotContains(t, out, "hidden")
+
+	lines = append(lines, "line12")
+	out = ansi.Strip(toolOutputPlainContent(&sty, strings.Join(lines, "\n"), 80, false))
+	require.NotContains(t, out, "line12")
+	require.Contains(t, out, "2 lines hidden")
+}

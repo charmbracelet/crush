@@ -264,7 +264,7 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel, reasoningEffort string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	// Re-initialize the coder agent without interactive-only tools.
@@ -278,6 +278,17 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	if largeModel != "" || smallModel != "" {
 		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
 			return fmt.Errorf("failed to override models: %w", err)
+		}
+	}
+
+	// The reasoning effort applies to the model that will actually run.
+	// On a continued session without an explicit model override, the
+	// model is resolved later from the session's last assistant message,
+	// so the override is applied after that restore instead.
+	deferredEffort := (continueSessionID != "" || useLast) && largeModel == "" && smallModel == ""
+	if reasoningEffort != "" && !deferredEffort {
+		if err := app.overrideReasoningEffort(ctx, reasoningEffort); err != nil {
+			return err
 		}
 	}
 
@@ -345,6 +356,12 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	} else {
 		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
+	}
+
+	if reasoningEffort != "" && deferredEffort {
+		if err := app.overrideReasoningEffort(ctx, reasoningEffort); err != nil {
+			return err
+		}
 	}
 
 	// Automatically approve all permission requests for this non-interactive
@@ -547,6 +564,28 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
+// overrideReasoningEffort validates the requested reasoning effort against
+// the large model in effect for this run (which may have been overridden by
+// --model or restored from a continued session) and applies it as an
+// in-memory override.
+func (app *App) overrideReasoningEffort(ctx context.Context, reasoningEffort string) error {
+	cfg := app.config.Config()
+	selected, ok := cfg.Models[config.SelectedModelTypeLarge]
+	if !ok {
+		return fmt.Errorf("no large model selected; set one with the --model flag or 'model large'")
+	}
+	if err := cfg.ValidateReasoningEffort(selected.Provider, selected.Model, reasoningEffort); err != nil {
+		return err
+	}
+	selected.ReasoningEffort = reasoningEffort
+	slog.Info("Overriding reasoning effort for non-interactive run",
+		"provider", selected.Provider,
+		"model", selected.Model,
+		"reasoning_effort", reasoningEffort)
+	app.config.OverridePreferredModel(config.SelectedModelTypeLarge, selected)
+	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
 // GetDefaultSmallModel returns the default small model for the given
 // provider. Falls back to the large model if no default is found.
 func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
@@ -588,20 +627,20 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
-	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "question-batches", app.Questions.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "question-notifications", app.Questions.SubscribeNotifications, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp-channels", app.subscribeScopedChannelEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+	app.subscribe(ctx, "sessions", app.Sessions.Subscribe)
+	app.subscribe(ctx, "messages", app.Messages.Subscribe)
+	app.subscribeMustDeliver(ctx, "permissions", app.Permissions.Subscribe)
+	app.subscribeMustDeliver(ctx, "permissions-notifications", app.Permissions.SubscribeNotifications)
+	app.subscribeMustDeliver(ctx, "question-batches", app.Questions.Subscribe)
+	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
+	app.subscribe(ctx, "history", app.History.Subscribe)
+	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
+	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
+	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
+	app.subscribe(ctx, "mcp-channels", app.subscribeScopedChannelEvents)
+	app.subscribe(ctx, "lsp", SubscribeLSPEvents)
 	if app.Skills != nil {
-		setupSubscriber(ctx, app.serviceEventsWG, "skills", app.Skills.SubscribeEvents, app.events)
+		app.subscribe(ctx, "skills", app.Skills.SubscribeEvents)
 	}
 	cleanupFunc := func(context.Context) error {
 		cancel()
@@ -642,14 +681,17 @@ func (app *App) subscribeScopedChannelEvents(ctx context.Context) <-chan pubsub.
 	return scoped
 }
 
-func setupSubscriber[T any](
+// subscribe fans a service's event stream into the shared app.events
+// broker on app.serviceEventsWG, re-publishing each upstream event as a
+// tea.Msg. The goroutine exits when ctx is cancelled or the upstream
+// channel closes. It is a generic method (Go 1.27) so it can live in the
+// App namespace while still inferring the upstream event type T.
+func (app *App) subscribe[T any](
 	ctx context.Context,
-	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
-	broker *pubsub.Broker[tea.Msg],
 ) {
-	wg.Go(func() {
+	app.serviceEventsWG.Go(func() {
 		subCh := subscriber(ctx)
 		for {
 			select {
@@ -658,7 +700,7 @@ func setupSubscriber[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				broker.Publish(pubsub.UpdatedEvent, tea.Msg(event))
+				app.events.Publish(pubsub.UpdatedEvent, tea.Msg(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return
@@ -667,21 +709,19 @@ func setupSubscriber[T any](
 	})
 }
 
-// setupSubscriberMustDeliver is the bounded-blocking fan-in variant of
-// setupSubscriber: it re-publishes upstream events onto the shared
+// subscribeMustDeliver is the bounded-blocking fan-in variant of
+// [App.subscribe]: it re-publishes upstream events onto the shared
 // app.events broker using PublishMustDeliver instead of Publish. Use
 // this for terminal events that subscribers cannot tolerate losing —
 // notably RunComplete, which is the authoritative end-of-run signal
 // for `crush run`. A lossy fan-in here can drop the only terminal
 // event and hang non-interactive clients waiting on it.
-func setupSubscriberMustDeliver[T any](
+func (app *App) subscribeMustDeliver[T any](
 	ctx context.Context,
-	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
-	broker *pubsub.Broker[tea.Msg],
 ) {
-	wg.Go(func() {
+	app.serviceEventsWG.Go(func() {
 		subCh := subscriber(ctx)
 		for {
 			select {
@@ -690,7 +730,7 @@ func setupSubscriberMustDeliver[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				broker.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
+				app.events.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return

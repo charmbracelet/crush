@@ -435,13 +435,32 @@ func (s *service) write(ctx context.Context, msg Message) error {
 		finishedAt.Valid = true
 	}
 	if err := s.q.UpdateMessage(ctx, db.UpdateMessageParams{
-		ID:         msg.ID,
-		Parts:      string(parts),
-		FinishedAt: finishedAt,
+		ID:                      msg.ID,
+		Parts:                   string(parts),
+		PrismModelID:            sql.NullString{String: msg.PrismModelID, Valid: msg.PrismModelID != ""},
+		PrismModelName:          sql.NullString{String: msg.PrismModelName, Valid: msg.PrismModelName != ""},
+		PrismHypercreditSavings: nullableFloat(msg.PrismHypercreditSavings),
+		PrismDollarSavings:      nullableFloat(msg.PrismDollarSavings),
+		FinishedAt:              finishedAt,
 	}); err != nil {
 		return err
 	}
 	return nil
+}
+
+func nullableFloat(v *float64) sql.NullFloat64 {
+	if v == nil {
+		return sql.NullFloat64{}
+	}
+	return sql.NullFloat64{Float64: *v, Valid: true}
+}
+
+func floatPtr(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	value := v.Float64
+	return &value
 }
 
 // shouldFlushNow returns true when next represents a structural
@@ -546,15 +565,19 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		return Message{}, err
 	}
 	return Message{
-		ID:               item.ID,
-		SessionID:        item.SessionID,
-		Role:             MessageRole(item.Role),
-		Parts:            parts,
-		Model:            item.Model.String,
-		Provider:         item.Provider.String,
-		CreatedAt:        item.CreatedAt,
-		UpdatedAt:        item.UpdatedAt,
-		IsSummaryMessage: item.IsSummaryMessage != 0,
+		ID:                      item.ID,
+		SessionID:               item.SessionID,
+		Role:                    MessageRole(item.Role),
+		Parts:                   parts,
+		Model:                   item.Model.String,
+		Provider:                item.Provider.String,
+		CreatedAt:               item.CreatedAt,
+		UpdatedAt:               item.UpdatedAt,
+		IsSummaryMessage:        item.IsSummaryMessage != 0,
+		PrismModelID:            item.PrismModelID.String,
+		PrismModelName:          item.PrismModelName.String,
+		PrismHypercreditSavings: floatPtr(item.PrismHypercreditSavings),
+		PrismDollarSavings:      floatPtr(item.PrismDollarSavings),
 	}, nil
 }
 

@@ -59,6 +59,9 @@ func runACP(cmd *cobra.Command, _ []string) error {
 		}
 	}()
 
+	// Start the event bridge to stream agent updates to the client.
+	srv.StartEventBridge(ctx)
+
 	if err := srv.Start(ctx); err != nil {
 		if err.Error() == "client disconnected" {
 			return nil

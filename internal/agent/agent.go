@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1798,7 +1799,11 @@ func (a *sessionAgent) buildNotebookMessage(oldMsgs []message.Message, rawMsgs [
 		slog.Error("Failed to get notebook entries", "error", err)
 		return notebookMessageResult{}
 	}
-	// Track which turns have entries, regardless of boundary.
+	// Track which turns have entries, regardless of boundary. This set
+	// marks coverage for the stale-turn fallback: a turn counts as
+	// covered when entries exist for it, even if the injection cap
+	// later evicts them — budget-evicted turns are pointed at by the
+	// breadcrumb below rather than extending the raw window.
 	turnsWithEntries := make(map[int64]bool)
 	var filtered []notebook.Entry
 	var maxTurn int64
@@ -1814,12 +1819,73 @@ func (a *sessionAgent) buildNotebookMessage(oldMsgs []message.Message, rawMsgs [
 	if len(filtered) == 0 {
 		return notebookMessageResult{maxTurn: maxTurn, turnsWithEntries: turnsWithEntries}
 	}
-	rendered := notebook.RenderEntries(filtered)
+
+	// Relevance-select entries instead of rendering all of them: the
+	// notebook retains the full record, and recall can fetch anything
+	// not injected here.
+	refs := notebookRelevanceRefs(ctx, a.sessions, sessionID, rawMsgs)
+	selected := selectNotebookEntries(filtered, refs, maxTurn)
+	if len(selected) == 0 {
+		return notebookMessageResult{maxTurn: maxTurn, turnsWithEntries: turnsWithEntries}
+	}
+	rendered := notebook.RenderEntries(selected)
 	if rendered == "" {
 		return notebookMessageResult{maxTurn: maxTurn, turnsWithEntries: turnsWithEntries}
 	}
+	// Turns whose every entry was budget-evicted have entries but
+	// nothing rendered. Emit a breadcrumb so the omission isn't
+	// silent — the raw window intentionally does not extend to them:
+	// evicted turns are the oldest, and extending to the oldest could
+	// dwarf the raw token budget.
+	selectedTurns := make(map[int64]bool, len(selected))
+	for _, e := range selected {
+		selectedTurns[e.TurnNumber] = true
+	}
+	var omitted []int64
+	for _, e := range filtered {
+		if !selectedTurns[e.TurnNumber] && !slices.Contains(omitted, e.TurnNumber) {
+			omitted = append(omitted, e.TurnNumber)
+		}
+	}
+	if len(omitted) > 0 {
+		slices.Sort(omitted)
+		rendered += fmt.Sprintf(
+			"\n\n[turns %s have notebook entries not injected here — recallable via recall/notebook_search]",
+			formatTurnRanges(omitted))
+	}
 	msg := fantasy.NewSystemMessage("<notebook>\n" + rendered + "</notebook>")
 	return notebookMessageResult{msg: &msg, maxTurn: maxTurn, turnsWithEntries: turnsWithEntries}
+}
+
+// notebookRelevanceRefs gathers "file:basename" refs from the latest
+// user message in the raw window and from the session's active
+// (pending/in-progress) todos. If the session lookup fails, the user
+// message alone is used.
+func notebookRelevanceRefs(ctx context.Context, sessions session.Service, sessionID string, rawMsgs []message.Message) []string {
+	var refs []string
+	seen := map[string]bool{}
+	add := func(text string) {
+		for _, ref := range extractExplicitFilePaths(text) {
+			if !seen[ref] {
+				seen[ref] = true
+				refs = append(refs, ref)
+			}
+		}
+	}
+	for i := len(rawMsgs) - 1; i >= 0; i-- {
+		if rawMsgs[i].Role == message.User {
+			add(rawMsgs[i].Content().Text)
+			break
+		}
+	}
+	if sess, err := sessions.Get(ctx, sessionID); err == nil {
+		for _, todo := range sess.Todos {
+			if todo.Status == session.TodoStatusPending || todo.Status == session.TodoStatusInProgress {
+				add(todo.Content)
+			}
+		}
+	}
+	return refs
 }
 
 // fullPathRegex matches file paths with at least one separator.

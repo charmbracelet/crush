@@ -637,6 +637,7 @@ func (app *App) setupEvents() {
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
 	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
+	app.subscribe(ctx, "mcp-channels", app.subscribeScopedChannelEvents)
 	app.subscribe(ctx, "lsp", SubscribeLSPEvents)
 	if app.Skills != nil {
 		app.subscribe(ctx, "skills", app.Skills.SubscribeEvents)
@@ -648,6 +649,36 @@ func (app *App) setupEvents() {
 		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
+}
+
+// subscribeScopedChannelEvents forwards channel message events for servers
+// this workspace both declares in its MCP config and opted in via --channels.
+// The MCP broker is process-global and channel events carry no workspace
+// identity, so this per-app scoping is what keeps another workspace's channel
+// messages out of this app's event stream (see mcp.SubscribeChannelEvents).
+// The scoped events feed the TUI's in-process injection and, in server mode,
+// the SSE stream to attached clients.
+func (app *App) subscribeScopedChannelEvents(ctx context.Context) <-chan pubsub.Event[mcp.Event] {
+	raw := mcp.SubscribeChannelEvents(ctx)
+	scoped := make(chan pubsub.Event[mcp.Event], 64)
+	go func() {
+		defer close(scoped)
+		for ev := range raw {
+			mcpCfg, declared := app.config.Config().MCP[ev.Payload.Name]
+			if !declared {
+				continue
+			}
+			if !mcp.ChannelOptIn(mcpCfg, app.config.Overrides().EnabledChannels, ev.Payload.Name) {
+				continue
+			}
+			select {
+			case scoped <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return scoped
 }
 
 // subscribe fans a service's event stream into the shared app.events

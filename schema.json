@@ -219,6 +219,63 @@
       },
       "type": "object"
     },
+    "MCPChannelReply": {
+      "properties": {
+        "user": {
+          "$ref": "#/$defs/MCPChannelReplyRoute",
+          "description": "Reply route for direct messages"
+        },
+        "group": {
+          "$ref": "#/$defs/MCPChannelReplyRoute",
+          "description": "Reply route for group messages"
+        },
+        "message_param": {
+          "type": "string",
+          "description": "Tool argument name that receives the reply text",
+          "default": "message"
+        },
+        "suppress_tools": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "send"
+            ]
+          },
+          "type": "array",
+          "description": "Additional tool names that suppress the automatic reply when the model already called one of them during the turn"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "MCPChannelReplyRoute": {
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "MCP tool name that sends the reply",
+          "examples": [
+            "send_message_to_user"
+          ]
+        },
+        "target_param": {
+          "type": "string",
+          "description": "Tool argument name that receives the reply target",
+          "examples": [
+            "user_id"
+          ]
+        },
+        "target_meta": {
+          "type": "string",
+          "description": "Channel meta attribute carrying the reply target; defaults to sender (user route) or group (group route)"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "tool",
+        "target_param"
+      ]
+    },
     "MCPConfig": {
       "properties": {
         "command": {
@@ -323,6 +380,15 @@
         "oauth_callback_port": {
           "type": "integer",
           "description": "Fixed localhost port for the OAuth callback"
+        },
+        "channel_enabled": {
+          "type": "boolean",
+          "description": "Enable this MCP server as a channel (equivalent to --channels)",
+          "default": false
+        },
+        "channel_reply": {
+          "$ref": "#/$defs/MCPChannelReply",
+          "description": "Automatically route replies for turns originating from this channel back through one of the server's tools"
         }
       },
       "additionalProperties": false,

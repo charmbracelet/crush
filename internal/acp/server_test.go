@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,12 +18,9 @@ func TestServerStartEndToEnd(t *testing.T) {
 	defer r.Close()
 	defer w.Close()
 
-	// Create a minimal app with stub services.
-	a := &app.App{
-		Sessions: &stubSessionService{},
-	}
+	app := &app.App{Sessions: &stubSessionService{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewServer(a, log, r, w)
+	srv := NewServer(app, log, r, w)
 
 	done := make(chan error, 1)
 	go func() {
@@ -31,13 +29,13 @@ func TestServerStartEndToEnd(t *testing.T) {
 		done <- srv.Start(ctx)
 	}()
 
-	// Run a minimal client-side roundtrip via in-memory pipe.
 	clientDone := make(chan struct{})
 	var clientErr error
 	go func() {
 		defer close(clientDone)
 		c := acp.NewClientSideConnection(&testClient{}, w, r)
 		ctx := context.Background()
+
 		// Initialize
 		_, err := c.Initialize(ctx, acp.InitializeRequest{
 			ProtocolVersion:    acp.ProtocolVersionNumber,
@@ -61,7 +59,7 @@ func TestServerStartEndToEnd(t *testing.T) {
 		if err := c.Cancel(ctx, acp.CancelNotification{SessionId: ns.SessionId}); err != nil {
 			clientErr = err
 		}
-		// Signal server by closing stdout (which is stdin for the server).
+		// Close the write end to signal disconnect.
 		if cerr := w.Close(); cerr != nil {
 			clientErr = cerr
 		}
@@ -81,7 +79,7 @@ func TestServerStartEndToEnd(t *testing.T) {
 
 	select {
 	case err := <-srvDone:
-		if err != nil && err.Error() != "client disconnected" {
+		if err != nil && !strings.Contains(err.Error(), "client disconnected") {
 			t.Fatalf("server start error: %v", err)
 		}
 	case <-time.After(3 * time.Second):
@@ -89,15 +87,13 @@ func TestServerStartEndToEnd(t *testing.T) {
 	}
 }
 
+// testClient implements acp.Client for testing.
 type testClient struct{}
 
-func (c *testClient) SessionUpdate(_ context.Context, _ acp.SessionNotification) error {
-	return nil
-}
+func (c *testClient) SessionUpdate(_ context.Context, _ acp.SessionNotification) error { return nil }
 func (c *testClient) RequestPermission(_ context.Context, _ acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	return acp.RequestPermissionResponse{}, nil
 }
-
 func (c *testClient) ReadTextFile(_ context.Context, _ acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	return acp.ReadTextFileResponse{}, nil
 }

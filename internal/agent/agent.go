@@ -1686,7 +1686,9 @@ func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fanta
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
-	msgs, err := a.messages.List(ctx, session.ID)
+	// Read only the tail a compacted session actually sends. The full
+	// transcript can be tens of megabytes on the single shared connection.
+	msgs, err := a.messages.ListFromSummary(ctx, session.ID, session.SummaryMessageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list messages: %w", err)
 	}

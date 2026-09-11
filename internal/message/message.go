@@ -49,6 +49,9 @@ type Service interface {
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
+	// ListFromSummary returns the messages at or after summaryMessageID,
+	// which is all a compacted session still sends.
+	ListFromSummary(ctx context.Context, sessionID, summaryMessageID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error)
@@ -510,6 +513,32 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	dbMessages, err := s.q.ListMessagesBySession(ctx, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
+func (s *service) ListFromSummary(ctx context.Context, sessionID, summaryMessageID string) ([]Message, error) {
+	if summaryMessageID == "" {
+		return s.List(ctx, sessionID)
+	}
+	dbMessages, err := s.q.ListMessagesBySessionFromSummary(ctx, db.ListMessagesBySessionFromSummaryParams{
+		SessionID: sessionID,
+		ID:        summaryMessageID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// No rows means the summary message is gone; fall back to the whole
+	// session rather than sending nothing.
+	if len(dbMessages) == 0 {
+		return s.List(ctx, sessionID)
 	}
 	messages := make([]Message, len(dbMessages))
 	for i, dbMessage := range dbMessages {

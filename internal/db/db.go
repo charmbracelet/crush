@@ -39,6 +39,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteMessageStmt, err = db.PrepareContext(ctx, deleteMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteMessage: %w", err)
 	}
+	if q.deleteMessagesAfterStmt, err = db.PrepareContext(ctx, deleteMessagesAfter); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteMessagesAfter: %w", err)
+	}
 	if q.deleteSessionStmt, err = db.PrepareContext(ctx, deleteSession); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSession: %w", err)
 	}
@@ -129,6 +132,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
 	}
+	if q.restoreMessageStmt, err = db.PrepareContext(ctx, restoreMessage); err != nil {
+		return nil, fmt.Errorf("error preparing query RestoreMessage: %w", err)
+	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
 	}
@@ -166,6 +172,11 @@ func (q *Queries) Close() error {
 	if q.deleteMessageStmt != nil {
 		if cerr := q.deleteMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteMessageStmt: %w", cerr)
+		}
+	}
+	if q.deleteMessagesAfterStmt != nil {
+		if cerr := q.deleteMessagesAfterStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteMessagesAfterStmt: %w", cerr)
 		}
 	}
 	if q.deleteSessionStmt != nil {
@@ -318,6 +329,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
 		}
 	}
+	if q.restoreMessageStmt != nil {
+		if cerr := q.restoreMessageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing restoreMessageStmt: %w", cerr)
+		}
+	}
 	if q.updateMessageStmt != nil {
 		if cerr := q.updateMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateMessageStmt: %w", cerr)
@@ -377,6 +393,7 @@ type Queries struct {
 	createSessionStmt                    *sql.Stmt
 	deleteFileStmt                       *sql.Stmt
 	deleteMessageStmt                    *sql.Stmt
+	deleteMessagesAfterStmt              *sql.Stmt
 	deleteSessionStmt                    *sql.Stmt
 	deleteSessionFilesStmt               *sql.Stmt
 	deleteSessionMessagesStmt            *sql.Stmt
@@ -407,6 +424,7 @@ type Queries struct {
 	listUserMessagesBySessionStmt        *sql.Stmt
 	recordFileReadStmt                   *sql.Stmt
 	renameSessionStmt                    *sql.Stmt
+	restoreMessageStmt                   *sql.Stmt
 	updateMessageStmt                    *sql.Stmt
 	updateSessionStmt                    *sql.Stmt
 	updateSessionTitleAndUsageStmt       *sql.Stmt
@@ -421,6 +439,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createSessionStmt:                    q.createSessionStmt,
 		deleteFileStmt:                       q.deleteFileStmt,
 		deleteMessageStmt:                    q.deleteMessageStmt,
+		deleteMessagesAfterStmt:              q.deleteMessagesAfterStmt,
 		deleteSessionStmt:                    q.deleteSessionStmt,
 		deleteSessionFilesStmt:               q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:            q.deleteSessionMessagesStmt,
@@ -451,6 +470,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listUserMessagesBySessionStmt:        q.listUserMessagesBySessionStmt,
 		recordFileReadStmt:                   q.recordFileReadStmt,
 		renameSessionStmt:                    q.renameSessionStmt,
+		restoreMessageStmt:                   q.restoreMessageStmt,
 		updateMessageStmt:                    q.updateMessageStmt,
 		updateSessionStmt:                    q.updateSessionStmt,
 		updateSessionTitleAndUsageStmt:       q.updateSessionTitleAndUsageStmt,

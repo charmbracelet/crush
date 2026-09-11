@@ -375,6 +375,12 @@ type UI struct {
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
 
+	// retryNotice tracks whether the status bar currently shows a
+	// provider-retry notice. It is set on TypeAgentRetrying and
+	// cleared on the next sign of progress (message, new turn,
+	// session switch) so a stale backoff note never lingers.
+	retryNotice bool
+
 	// mouse highlighting related state
 	lastClickTime time.Time
 	hoverX        int
@@ -764,6 +770,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
+		// A session switch leaves any retry notice behind: it
+		// belonged to the previous session's backoff.
+		m.clearRetryNotice()
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sidebarOffset = 0
@@ -931,6 +940,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
 		}
+		// Any message traffic on the current session means the turn
+		// moved past the backoff: drop a lingering retry notice.
+		m.clearRetryNotice()
 		// start the spinner if there is a new message
 		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
 			m.todoIsSpinning = true
@@ -4295,6 +4307,8 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	m.agentBusyCache.set(true)
 	m.busyFetchGen++
 	m.invalidatePromptQueue()
+	// A new turn supersedes any lingering retry notice.
+	m.clearRetryNotice()
 	cmds = append(cmds, func() tea.Msg {
 		// AgentRun is fire-and-forget: it returns once the prompt has
 		// been accepted (HTTP 202) or synchronously with a validation
@@ -4732,6 +4746,17 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 
 // handleAgentNotification translates domain agent events into desktop
 // notifications using the UI notification backend.
+// clearRetryNotice drops a lingering provider-retry status note, if
+// any. Callers are progress points (message traffic, new turn,
+// session switch) proving the backoff is over.
+func (m *UI) clearRetryNotice() {
+	if !m.retryNotice {
+		return
+	}
+	m.retryNotice = false
+	m.status.ClearInfoMsg()
+}
+
 func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
@@ -4746,7 +4771,27 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		}
 	case notify.TypeAgentError:
 		// Terminal edge like TypeAgentFinished; fall through to the
-		// busy/queue refresh below.
+		// busy/queue refresh below. The toast is the single
+		// user-visible signal for a failed turn (retries, if any,
+		// were status-bar only), so an away user learns the run
+		// actually failed instead of finding a silent error later.
+		cmds = append(cmds, m.sendNotification(notification.Notification{
+			Title:   "Agent run failed",
+			Message: n.Message,
+		}))
+	case notify.TypeAgentRetrying:
+		// Transient edge, not terminal: the run is still in flight
+		// through its backoff. Pin a persistent status-bar note and
+		// never touch the busy or queue caches, or ESC would observe
+		// a phantom idle turn. Deliberately no toast here: retries
+		// are routine and would spam the desktop; the single toast
+		// fires on terminal failure (TypeAgentError) instead.
+		m.retryNotice = true
+		m.status.SetInfoMsg(util.InfoMsg{
+			Type: util.InfoTypeWarn,
+			Msg:  "Retrying provider request: " + n.Message,
+		})
+		return nil
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

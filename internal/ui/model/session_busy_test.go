@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/workspace"
 )
 
@@ -777,4 +778,77 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
+}
+
+// TestAgentRetryingNotificationIsStatusOnly pins the retry visibility
+// contract: a TypeAgentRetrying notification must pin a status-bar
+// notice without disturbing the busy/queue caches. The turn is still
+// in flight through its backoff; invalidating caches here would let
+// ESC observe a phantom idle turn and misroute cancellation. No
+// toast fires per attempt: the single toast is reserved for terminal
+// failure (TypeAgentError).
+func TestAgentRetryingNotificationIsStatusOnly(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	ws.resetCounters()
+
+	m.handleAgentNotification(notify.Notification{
+		SessionID: "s1",
+		Type:      notify.TypeAgentRetrying,
+		Message:   "overloaded; retrying in 5s (attempt 1)",
+	})
+
+	require.True(t, m.isAgentBusy(),
+		"a retry notice must not clear the in-flight busy state")
+	require.False(t, m.busyFetchInFlight,
+		"a retry notice must not schedule a busy refresh")
+	require.False(t, m.promptQueueInFlight,
+		"a retry notice must not schedule a queue refresh")
+	require.Zero(t, ws.readyCalls,
+		"a retry notice must not probe the workspace at all")
+	require.True(t, m.retryNotice,
+		"a retry notice must pin the status-bar flag")
+	require.Contains(t, m.status.msg.Msg, "overloaded",
+		"a retry notice must surface the failure reason in the status bar")
+
+	// The next message on the session proves the backoff is over and
+	// must drop the notice.
+	_, cmd := m.Update(pubsub.Event[message.Message]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant},
+	})
+	runCmds(m, cmd)
+	require.False(t, m.retryNotice,
+		"message traffic must clear a lingering retry notice")
+	require.True(t, m.status.msg.IsEmpty(),
+		"clearing the retry notice must release the status bar")
+}
+
+// TestAgentErrorNotificationToastsTerminalFailure pins the toast
+// policy: per-attempt retry notices are status-bar only, but the
+// terminal failure gets one desktop toast so an away user learns the
+// run actually failed.
+func TestAgentErrorNotificationToastsTerminalFailure(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	// Pretend the window is unfocused with a working backend so the
+	// toast path (normally policy-gated) executes.
+	m.caps.ReportFocusEvents = true
+	m.notifyWindowFocused = false
+	m.notifyBackend = notification.NoopBackend{}
+
+	cmd := m.handleAgentNotification(notify.Notification{
+		SessionID: "s1",
+		Type:      notify.TypeAgentError,
+		Message:   "failed after 1 retry: overloaded",
+	})
+	require.NotNil(t, cmd, "a terminal failure must produce a toast command")
+	require.True(t, m.isAgentBusy(),
+		"the toast path must not disturb the busy cache either")
 }

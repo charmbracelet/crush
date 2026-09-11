@@ -53,6 +53,13 @@ func (m *UserMessageItem) Finished() bool {
 	return true
 }
 
+// CopyAsMarkdown implements [list.MarkdownCopyable]. User input renders
+// through the markdown renderer, so selection copies may reconstruct
+// inline emphasis markers from cell attributes.
+func (m *UserMessageItem) CopyAsMarkdown() bool {
+	return true
+}
+
 // RawRender implements [MessageItem].
 func (m *UserMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)

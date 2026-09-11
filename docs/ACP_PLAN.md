@@ -153,8 +153,8 @@ internal/acp/server.go   (Crush ACP Adapter)
 
 | Track / Phase | Checkpoint | Status |
 |---|---|---|
-| Server / 1 | SDK integration & transport setup | - [ ] |
-| Server / 2 | Server engine & session lifecycle | - [ ] |
+| Server / 1 | SDK integration & transport setup | - [x] |
+| Server / 2 | Server engine & session lifecycle | - [x] |
 | Server / 3 | Permissions & tool delegation | - [ ] |
 | Server / 4 | CLI integration (`--acp`) | - [ ] |
 | Server / 5 | Server tests & conformance | - [ ] |

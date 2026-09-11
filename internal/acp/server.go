@@ -9,11 +9,15 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 // Server is the ACP server adapter for Crush.
 type Server struct {
-	conn *acp.AgentSideConnection
+	conn         *acp.AgentSideConnection
+	permb        *permissionBridge
+	permService  permission.Service
+	eventBridge  *eventBridge
 }
 
 // Agent is the Crush-side interface the SDK calls into.
@@ -32,14 +36,38 @@ type Agent interface {
 // NewServer creates a new ACP server that connects to the given peer.
 func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) *Server {
 	agent := newCrushAgent(a, log)
-	d := &dispatcher{agent: agent}
+	d := &dispatcher{agent: agent, app: a}
 	conn := acp.NewAgentSideConnection(d, stdout, stdin)
-	return &Server{conn: conn}
+	
+	// Create permission bridge and wrap the real service.
+	permb := newPermissionBridge(conn, log)
+	permService := newACPPermissionService(a.Permissions, permb)
+	
+	// Create event bridge for streaming notifications.
+	eventBridge := newEventBridge(conn, a, log)
+	
+	return &Server{
+		conn:        conn,
+		permb:       permb,
+		permService: permService,
+		eventBridge: eventBridge,
+	}
+}
+
+// PermissionService returns the wrapped permission service for use by tools.
+func (s *Server) PermissionService() permission.Service {
+	return s.permService
+}
+
+// StartEventBridge starts the event bridge in a goroutine. Call this before Start.
+func (s *Server) StartEventBridge(ctx context.Context) {
+	go s.eventBridge.Start(ctx)
 }
 
 // dispatcher forwards SDK Agent method calls to our Agent interface.
 type dispatcher struct {
 	agent Agent
+	app   *app.App
 }
 
 func (d *dispatcher) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {

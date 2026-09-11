@@ -16,8 +16,18 @@ need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
-accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
+Crush supports 12 hook events: `PreToolUse`, `PostToolUse`, `SessionStart`,
+`SessionEnd`, `TurnStart`, `TurnEnd`, `StopFailure`, `Interrupt`,
+`PermissionRequest`, `PermissionResult`, `PreCompact`, `PostCompact`. Event
+names are case-insensitive and accept snake_case (`PreToolUse`, `pretooluse`,
+`pre_tool_use` all work). Tool events (`PreToolUse`, `PostToolUse`) support
+`matcher` to filter by tool name; lifecycle events run all configured hooks.
+
+`TurnEnd` is special among lifecycle events: its stdin payload includes a
+`text` field containing the assistant's rendered text output for the turn.
+The hook remains observe-only. It fires only for top-level turns, not for
+sub-agents (`agentic_fetch`, the task tool), so it runs once per user-facing
+turn rather than once per delegated sub-agent turn.
 
 ## Configuration
 

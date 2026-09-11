@@ -13,6 +13,8 @@ import (
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
+
+	"github.com/charmbracelet/crush/internal/pinentry"
 )
 
 // RunOptions configures a single stateless shell execution via [Run].
@@ -68,6 +70,10 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 	if opts.Cwd == "" {
 		return fmt.Errorf("shell.Run: Cwd is required")
 	}
+
+	// Let the pinentry watcher poll at full rate for the lifetime of the
+	// command so a gpg-agent passphrase prompt gets the terminal quickly.
+	defer pinentry.TrackCommand()()
 
 	stdout := opts.Stdout
 	if stdout == nil {

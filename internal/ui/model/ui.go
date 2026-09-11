@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -42,6 +43,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pinentry"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
@@ -383,6 +385,23 @@ type UI struct {
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
 
+	// program is the running Bubble Tea program, set via SetProgram. It is
+	// needed to release and restore the terminal when a terminal-based GPG
+	// pinentry dialog takes over the screen.
+	program *tea.Program
+
+	// pinentryActive tracks whether the terminal is currently handed over
+	// to a pinentry dialog; pinentryTouchPending tracks whether the status
+	// bar shows the security key touch hint.
+	pinentryActive       bool
+	pinentryTouchPending bool
+	// pinentryCtrlL tracks whether the active pinentry dialog is an
+	// ncurses flavor that repaints its UI on Ctrl-L.
+	pinentryCtrlL bool
+	// pinentryTermMu serializes terminal release/restore commands, which
+	// Bubble Tea runs on separate goroutines.
+	pinentryTermMu sync.Mutex
+
 	// mouse highlighting related state
 	lastClickTime time.Time
 	hoverX        int
@@ -536,6 +555,14 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.mouseEnabled = opts.TUI.Mouse == nil || *opts.TUI.Mouse
 
 	return ui
+}
+
+// SetProgram gives the model a handle to the running Bubble Tea program.
+// It is used to release and restore the terminal when a terminal-based GPG
+// pinentry dialog takes over the screen. Must be called before the program
+// starts processing pinentry events.
+func (m *UI) SetProgram(program *tea.Program) {
+	m.program = program
 }
 
 // Init initializes the UI model.
@@ -1009,6 +1036,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[permission.PermissionNotification]:
 		m.handlePermissionNotification(msg.Payload)
+	case pubsub.Event[pinentry.Event]:
+		cmds = append(cmds, m.handlePinentryEvent(msg.Payload))
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
 		m.chat.ScrollToBottom()

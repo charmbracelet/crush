@@ -82,7 +82,7 @@ func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string
 			return
 		}
 	}
-	sessionID, err := channelTargetSession(ws.ctx, ws.viewedSessions(), ws.Sessions)
+	sessionID, err := channelTargetSession(ws.ctx, serverName, ws.viewedSessions(), ws.Sessions)
 	if err != nil {
 		slog.Warn("Channel message dropped: no target session",
 			"workspace", ws.ID, "server", serverName, "error", err)
@@ -107,21 +107,29 @@ func (b *Backend) injectChannelMessage(ws *Workspace, serverName, content string
 //   - several distinct sessions are viewed: use the most recently
 //     updated of them (ties broken by smallest ID for determinism);
 //   - none viewed (all clients on the landing screen, or no clients):
-//     use the most recently updated top-level session so repeated
-//     pushes coalesce into one conversation, creating a session only
-//     when the workspace has none.
+//     the most recent top-level session already bound to this channel
+//     wins, so a push lands in the conversation it has been driving
+//     rather than whatever unrelated session a local edit touched last;
+//     otherwise the most recently updated top-level session, so
+//     repeated pushes coalesce into one conversation, creating a
+//     session only when the workspace has none.
 //
 // The fallback relies on session.Service.List returning only top-level
-// sessions (no sub-agent sessions) ordered by updated_at DESC, so
-// existing[0] is the most recently updated top-level session. The
-// underlying query (ListSessions) enforces both: WHERE parent_session_id
-// IS NULL ORDER BY updated_at DESC.
-func channelTargetSession(ctx context.Context, viewed []string, sessions channelSessionStore) (string, error) {
+// sessions (no sub-agent sessions) ordered by updated_at DESC, so the
+// first hit in the list is the most recently updated top-level session.
+// The underlying query (ListSessions) enforces both: WHERE
+// parent_session_id IS NULL ORDER BY updated_at DESC.
+func channelTargetSession(ctx context.Context, channel string, viewed []string, sessions channelSessionStore) (string, error) {
 	switch len(viewed) {
 	case 0:
 		existing, err := sessions.List(ctx)
 		if err != nil {
 			return "", err
+		}
+		for _, sess := range existing {
+			if sess.Channel == channel {
+				return sess.ID, nil
+			}
 		}
 		if len(existing) > 0 {
 			return existing[0].ID, nil
@@ -155,7 +163,7 @@ func channelTargetSession(ctx context.Context, viewed []string, sessions channel
 	}
 	// Every viewed session failed to load; fall back to the no-viewed
 	// path.
-	return channelTargetSession(ctx, nil, sessions)
+	return channelTargetSession(ctx, channel, nil, sessions)
 }
 
 // viewedSessions returns the distinct sessions currently being viewed by

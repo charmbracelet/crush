@@ -101,7 +101,11 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	if sessionID == "" {
 		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 	}
-	if state, ok := mcp.GetState(m.mcpName); ok && state.Channel && GetChannelFromContext(ctx) != m.mcpName {
+	// A channel-scoped tool is callable from a local turn (channel ==
+	// "", so the TUI user can ask the agent to send via Signal) and from
+	// turns originating on its own channel, but not from other channels.
+	ch := GetChannelFromContext(ctx)
+	if state, ok := mcp.GetState(m.mcpName); ok && state.Channel && ch != "" && ch != m.mcpName {
 		return fantasy.NewTextErrorResponse("This channel tool is only available for messages from its originating channel."), nil
 	}
 

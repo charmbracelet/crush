@@ -715,7 +715,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	promptPrefix := a.systemPromptPrefix.Get()
 	mcpInstructions := collectMCPInstructions()
 	basePromptBytes := len(systemPrompt)
-
+	// base + name-sorted MCP instructions is already deterministic, so
+	// the provider sees byte-identical prefixes every turn; a plain
+	// concat is all that is needed.
 	if mcpInstructions != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + mcpInstructions + "\n</mcp-instructions>"
 	}
@@ -723,6 +725,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
 		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
+		// When MCP tools are present, add a breakpoint after the last
+		// built-in tool too: the stable built-in prefix survives MCP
+		// servers connecting or changing their tool sets.
+		for i := len(agentTools) - 1; i >= 0; i-- {
+			if !isMCPTool(agentTools[i]) {
+				if i < len(agentTools)-1 {
+					agentTools[i].SetProviderOptions(a.getCacheControlOptions())
+				}
+				break
+			}
+		}
 	}
 
 	logPromptComposition(call.SessionID, basePromptBytes, mcpInstructions, agentTools, a.promptSections.Copy())
@@ -890,6 +903,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
+			// Anthropic allows at most 4 cache breakpoints per request.
+			// With MCP tools present, Run adds a second tool breakpoint
+			// (after the built-in partition), so cache only the last
+			// message instead of the last two to stay under the limit.
+			mcpToolsPresent := false
+			for _, t := range prepared.Tools {
+				if isMCPTool(t) {
+					mcpToolsPresent = true
+					break
+				}
+			}
+			tailStart := len(prepared.Messages) - 2
+			if mcpToolsPresent {
+				tailStart = len(prepared.Messages) - 1
+			}
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
 			for i, msg := range prepared.Messages {
@@ -900,8 +928,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
 					systemMessageUpdated = true
 				}
-				// Than add cache control to the last 2 messages.
-				if i > len(prepared.Messages)-3 {
+				// Than add cache control to the tail messages.
+				if i >= tailStart {
 					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
 				}
 			}

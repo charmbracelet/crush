@@ -112,7 +112,32 @@ func ThemePath(name string) (string, error) {
 	if err := validateThemeNameFormat(name); err != nil {
 		return "", err
 	}
+	filename, err := findThemeFilename(name)
+	if err != nil {
+		return "", err
+	}
+	if filename != "" {
+		return filepath.Join(ThemeDirs()[0], filename), nil
+	}
 	return filepath.Join(ThemeDirs()[0], name+".json"), nil
+}
+
+func findThemeFilename(name string) (string, error) {
+	dir := ThemeDirs()[0]
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("list themes in %s: %w", dir, err)
+	}
+	target := strings.ToLower(name) + ".json"
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.EqualFold(entry.Name(), target) {
+			return entry.Name(), nil
+		}
+	}
+	return "", nil
 }
 
 // FindThemeFile locates a global theme file by name. Returns an error for an
@@ -124,6 +149,13 @@ func FindThemeFile(name string) (string, error) {
 	}
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
+	}
+	filename, err := findThemeFilename(name)
+	if err != nil {
+		return "", err
+	}
+	if filename != "" {
+		return filepath.Join(ThemeDirs()[0], filename), nil
 	}
 	return "", fmt.Errorf("theme file %q not found", strings.ToLower(name))
 }
@@ -185,19 +217,19 @@ func ValidateThemeRename(oldName, newName string) error {
 // the file in the same directory. Returns an error if the source file
 // is not found, the new name is invalid, or a theme with the new name
 // already exists.
-func RenameThemeFile(oldName, newName string) error {
+func RenameThemeFile(oldName, newName string) (string, string, error) {
 	if err := ValidateThemeRename(oldName, newName); err != nil {
-		return err
+		return "", "", err
 	}
 	oldPath, err := FindThemeFile(oldName)
 	if err != nil {
-		return fmt.Errorf("rename theme: %w", err)
+		return "", "", fmt.Errorf("rename theme: %w", err)
 	}
 	newPath := filepath.Join(filepath.Dir(oldPath), strings.ToLower(newName)+".json")
 	if err := os.Rename(oldPath, newPath); err != nil {
-		return fmt.Errorf("rename theme file: %w", err)
+		return "", "", fmt.Errorf("rename theme file: %w", err)
 	}
-	return nil
+	return oldPath, newPath, nil
 }
 
 // ListUserThemes returns the names of all user-defined themes found
@@ -221,7 +253,7 @@ func ListUserThemes() ([]string, error) {
 			}
 			name := strings.TrimSuffix(e.Name(), ".json")
 			lower := strings.ToLower(name)
-			if name != lower || validateThemeNameFormat(lower) != nil {
+			if validateThemeNameFormat(lower) != nil {
 				slog.Warn("Ignoring invalid theme filename", "file", e.Name(), "directory", dir)
 				continue
 			}

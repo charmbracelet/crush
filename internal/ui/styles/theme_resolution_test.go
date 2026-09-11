@@ -51,6 +51,50 @@ func TestLoadTheme_UserOnlyTheme(t *testing.T) {
 	require.NotNil(t, s.WorkingGradFromColor)
 }
 
+func TestLoadTheme_UserThemeCanInheritUserTheme(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "parent.json"), &ThemeFile{
+		Base:    "gruvbox-dark",
+		Palette: Palette{Primary: "#111111"},
+	}))
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "child.json"), &ThemeFile{
+		Base:    "parent",
+		Palette: Palette{Secondary: "#222222"},
+	}))
+
+	resolved, err := ExportResolvedPalette("child")
+	require.NoError(t, err)
+	require.Equal(t, "gruvbox-dark", resolved.Base)
+	require.Equal(t, "#111111", resolved.Primary)
+	require.Equal(t, "#222222", resolved.Secondary)
+}
+
+func TestLoadTheme_RejectsInheritanceCycle(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "first.json"), &ThemeFile{Base: "second"}))
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "second.json"), &ThemeFile{Base: "first"}))
+
+	_, err := LoadTheme("first")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "inheritance cycle")
+}
+
+func TestLoadTheme_OverriddenBuiltinKeepsThemeOverrides(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+	require.NoError(t, SaveThemeFile(filepath.Join(dir, "charmtone.json"), &ThemeFile{Base: "charmtone"}))
+
+	loaded, err := LoadTheme("charmtone")
+	require.NoError(t, err)
+	builtin := CharmtonePantera()
+	require.Equal(t, builtin.Editor.PromptBangIconFocused.GetForeground(), loaded.Editor.PromptBangIconFocused.GetForeground())
+	require.Equal(t, builtin.Messages.ShellPrompt.GetForeground(), loaded.Messages.ShellPrompt.GetForeground())
+}
+
 func TestLoadTheme_BuiltinFallback(t *testing.T) {
 	dir := t.TempDir()
 	setTestThemeDirs(t, []string{dir})

@@ -2029,12 +2029,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		m.applyTheme(newStyles)
-		m.preThemeStyles = nil
 		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", themeName); err != nil {
+			if m.preThemeStyles != nil {
+				m.applyTheme(*m.preThemeStyles)
+				m.preThemeStyles = nil
+			}
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
+		m.applyTheme(newStyles)
+		m.preThemeStyles = nil
 		cmds = append(cmds, util.ReportInfo("Theme switched to "+themeName))
 		m.userThemeSelected = true
 		m.dialog.CloseDialog(dialog.ThemeID)
@@ -2111,7 +2115,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		// If the reverted theme is the active one, re-apply the pristine
 		// built-in so the change is visible immediately.
-		if common.ThemeNameFromConfig(m.com.Config()) == msg.Name {
+		if strings.EqualFold(common.ThemeNameFromConfig(m.com.Config()), msg.Name) {
 			if newStyles, err := styles.LoadTheme(msg.Name); err == nil {
 				m.applyTheme(newStyles)
 			}
@@ -2157,13 +2161,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionRenameTheme:
 		oldName := msg.OldName
 		newName := strings.ToLower(msg.NewName)
-		if err := styles.RenameThemeFile(oldName, newName); err != nil {
+		oldPath, newPath, err := styles.RenameThemeFile(oldName, newName)
+		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
 		cfg := m.com.Config()
-		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.ActiveTheme == oldName {
+		if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && strings.EqualFold(cfg.Options.TUI.ActiveTheme, oldName) {
 			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.active_theme", newName); err != nil {
+				if rollbackErr := os.Rename(newPath, oldPath); rollbackErr != nil {
+					slog.Error("Failed to roll back theme rename", "error", rollbackErr)
+				}
 				cmds = append(cmds, util.ReportError(err))
 				break
 			}

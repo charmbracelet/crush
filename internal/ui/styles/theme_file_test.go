@@ -106,6 +106,16 @@ func TestFindThemeFile_RejectsUnsafeName(t *testing.T) {
 	require.Contains(t, err.Error(), "lowercase letters")
 }
 
+func TestFindThemeFile_MatchesFilenameCaseInsensitively(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "MyTheme.json"), []byte(`{}`), 0o644))
+
+	path, err := FindThemeFile("mytheme")
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(dir, "MyTheme.json"), path)
+}
+
 func TestThemePath_UsesGlobalDirectory(t *testing.T) {
 	dir := t.TempDir()
 	setTestThemeDirs(t, []string{dir})
@@ -148,16 +158,30 @@ func TestListUserThemes_ReadsDirectory(t *testing.T) {
 	require.Equal(t, []string{"alpha.json", "beta.json"}, names)
 }
 
-func TestListUserThemes_IgnoresInvalidFilenames(t *testing.T) {
+func TestRenameThemeFile_ReturnsPaths(t *testing.T) {
 	dir := t.TempDir()
 	setTestThemeDirs(t, []string{dir})
-	for _, name := range []string{"valid-theme.json", "BadTheme.json", "bad--theme.json"} {
+	oldPath := filepath.Join(dir, "old-name.json")
+	require.NoError(t, os.WriteFile(oldPath, []byte(`{}`), 0o644))
+
+	gotOld, gotNew, err := RenameThemeFile("old-name", "new-name")
+	require.NoError(t, err)
+	require.Equal(t, oldPath, gotOld)
+	require.Equal(t, filepath.Join(dir, "new-name.json"), gotNew)
+	_, err = os.Stat(gotNew)
+	require.NoError(t, err)
+}
+
+func TestListUserThemes_NormalizesFilenameCase(t *testing.T) {
+	dir := t.TempDir()
+	setTestThemeDirs(t, []string{dir})
+	for _, name := range []string{"valid-theme.json", "MyTheme.json", "bad--theme.json"} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(`{}`), 0o644))
 	}
 
 	names, err := ListUserThemes()
 	require.NoError(t, err)
-	require.Equal(t, []string{"valid-theme"}, names)
+	require.ElementsMatch(t, []string{"valid-theme", "mytheme"}, names)
 }
 
 func TestThemeFile_AllPaletteFieldsRoundTrip(t *testing.T) {

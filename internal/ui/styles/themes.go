@@ -252,26 +252,22 @@ func BuiltinThemeNames() []string {
 // precedence over built-in themes of the same name. Returns
 // CharmtonePantera styles for an empty name. Returns an error if the
 // name is not recognized as either a user file or a built-in.
+// LoadTheme loads a theme by name. Global user theme files take precedence
+// over built-in themes of the same name. Empty names use Charmtone.
 func LoadTheme(name string) (Styles, error) {
 	if name == "" {
 		return CharmtonePantera(), nil
 	}
 	key := strings.ToLower(name)
 
-	// Check global user theme files first.
 	if path, err := FindThemeFile(key); err == nil {
 		tf, err := LoadThemeFile(path)
 		if err != nil {
 			return Styles{}, err
 		}
-		base := tf.Base
-		if base == "" {
-			base = "charmtone"
-		}
-		return LoadPaletteTheme(base, tf.Palette)
+		return LoadPaletteTheme(tf.Base, tf.Palette)
 	}
 
-	// Fall back to built-in themes.
 	optsFn, ok := builtinThemes[key]
 	if !ok {
 		return Styles{}, fmt.Errorf("unknown theme %q; available themes: %s", name, strings.Join(BuiltinThemeNames(), ", "))
@@ -369,35 +365,15 @@ func ListAllThemes() []ThemeInfo {
 // This is used when forking a built-in theme or exporting the current
 // palette. The returned ThemeFile has Base set to the source theme name
 // and all Palette fields populated with resolved color values.
+// ExportResolvedPalette resolves a theme fully and returns it as a ThemeFile
+// suitable for writing to disk.
 func ExportResolvedPalette(name string) (*ThemeFile, error) {
 	key := strings.ToLower(name)
-
-	// Check if there's a user theme file first.
-	if path, err := FindThemeFile(key); err == nil {
-		tf, err := LoadThemeFile(path)
-		if err != nil {
-			return nil, err
-		}
-		baseName := tf.Base
-		if baseName == "" {
-			baseName = "charmtone"
-		}
-		resolved, err := MergePalette(baseName, tf.Palette)
-		if err != nil {
-			return nil, err
-		}
-		return &ThemeFile{Base: baseName, Palette: resolved}, nil
+	palette, root, err := resolveThemePalette(key, map[string]bool{})
+	if err != nil {
+		return nil, err
 	}
-
-	// Built-in theme: extract full palette from its opts.
-	optsFn, ok := builtinThemes[key]
-	if !ok {
-		return nil, fmt.Errorf("unknown theme %q", name)
-	}
-	return &ThemeFile{
-		Base:    key,
-		Palette: PaletteFromOpts(optsFn()),
-	}, nil
+	return &ThemeFile{Base: root, Palette: palette}, nil
 }
 
 // IsBuiltinTheme reports whether the given name matches a built-in theme.

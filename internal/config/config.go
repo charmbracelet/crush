@@ -310,102 +310,13 @@ func (t *TUIOptions) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(loose.Theme, &legacyName); err != nil {
 		// Legacy inline theme maps are ignored now that files are the only
 		// palette source, but they must remain loadable during migration.
-		var legacyThemes map[string]ThemeConfig
+		var legacyThemes map[string]json.RawMessage
 		return json.Unmarshal(loose.Theme, &legacyThemes)
 	}
 	if legacyName != "" && t.ActiveTheme == "" {
 		t.ActiveTheme = legacyName
 	}
 	return nil
-}
-
-// ThemeConfig supports reading legacy inline theme definitions. New theme
-// changes are stored in global user theme files instead.
-type ThemeConfig struct {
-	Base      string          `json:"base,omitempty"`
-	RawObject json.RawMessage `json:"-"`
-}
-
-// UnmarshalJSON accepts an object containing palette overrides plus an
-// optional base field. For backward compatibility, also accepts a string
-// (theme name) which is converted to {"base": "theme_name"}.
-func (t *ThemeConfig) UnmarshalJSON(data []byte) error {
-	*t = ThemeConfig{}
-	if string(data) == "null" {
-		return nil
-	}
-
-	// Backward compatibility: accept string format
-	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
-		t.Base = str
-		raw, err := json.Marshal(struct {
-			Base string `json:"base"`
-		}{Base: str})
-		if err != nil {
-			return err
-		}
-		t.RawObject = append(t.RawObject[:0], raw...)
-		return nil
-	}
-
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return fmt.Errorf("theme config must be an object: %w", err)
-	}
-	if base, ok := obj["base"].(string); ok {
-		t.Base = base
-	}
-	t.RawObject = append(t.RawObject[:0], data...)
-	return nil
-}
-
-// MarshalJSON preserves the original representation.
-func (t ThemeConfig) MarshalJSON() ([]byte, error) {
-	if len(t.RawObject) > 0 {
-		return t.RawObject, nil
-	}
-	return json.Marshal(struct{}{})
-}
-
-// Name returns the base theme name if specified, otherwise empty string.
-func (t ThemeConfig) Name() string {
-	return t.Base
-}
-
-// IsObject reports whether this theme config has palette overrides.
-func (t ThemeConfig) IsObject() bool {
-	if len(t.RawObject) == 0 {
-		return false
-	}
-	// Check if RawObject has any fields beyond "base"
-	var obj map[string]any
-	if err := json.Unmarshal(t.RawObject, &obj); err != nil {
-		return false
-	}
-	// Has overrides if there are fields other than "base"
-	for key := range obj {
-		if key != "base" {
-			return true
-		}
-	}
-	return false
-}
-
-// IsZero reports whether the theme config is unset (empty object).
-func (t ThemeConfig) IsZero() bool {
-	if t.Base != "" {
-		return false
-	}
-	if len(t.RawObject) == 0 {
-		return true
-	}
-	// Check if RawObject is an empty object {}
-	var obj map[string]any
-	if err := json.Unmarshal(t.RawObject, &obj); err != nil {
-		return false
-	}
-	return len(obj) == 0
 }
 
 // Completions defines options for the completions UI.

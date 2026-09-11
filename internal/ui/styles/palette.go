@@ -281,20 +281,81 @@ func ThemePalette(name string) (Palette, error) {
 
 // MergePalette applies palette overrides on top of a built-in base theme
 // and returns the fully resolved palette. Empty baseName uses Charmtone.
+// MergePalette applies palette overrides on top of a built-in or user theme
+// and returns the fully resolved palette. Empty baseName uses Charmtone.
 func MergePalette(baseName string, palette Palette) (Palette, error) {
-	base, err := baseThemeOpts(baseName)
+	base, root, err := resolveThemePalette(baseName, map[string]bool{})
 	if err != nil {
 		return Palette{}, err
 	}
 	if err := palette.Validate(); err != nil {
 		return Palette{}, err
 	}
-	return PaletteFromOpts(palette.ToQuickStyleOpts(base)), nil
+	rootOpts, err := builtinThemeOpts(root)
+	if err != nil {
+		return Palette{}, err
+	}
+	return PaletteFromOpts(palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts))), nil
 }
 
 // baseThemeOpts returns the quickStyleOpts of the named built-in theme.
 // An empty name yields the default Charmtone palette.
-func baseThemeOpts(name string) (quickStyleOpts, error) {
+// resolveThemePalette returns the fully resolved palette and root built-in for
+// a theme. User themes may inherit from other user themes; cycles are rejected.
+func resolveThemePalette(name string, visiting map[string]bool) (Palette, string, error) {
+	if name == "" {
+		name = "charmtone"
+	}
+	key := strings.ToLower(name)
+	if visiting[key] {
+		return Palette{}, "", fmt.Errorf("theme inheritance cycle at %q", key)
+	}
+	visiting[key] = true
+	defer delete(visiting, key)
+
+	if path, err := FindThemeFile(key); err == nil {
+		tf, err := LoadThemeFile(path)
+		if err != nil {
+			return Palette{}, "", err
+		}
+		baseName := tf.Base
+		if baseName == "" {
+			baseName = "charmtone"
+		}
+		var base Palette
+		var root string
+		if strings.EqualFold(baseName, key) && IsBuiltinTheme(key) {
+			opts, err := builtinThemeOpts(key)
+			if err != nil {
+				return Palette{}, "", err
+			}
+			base = PaletteFromOpts(opts)
+			root = key
+		} else {
+			base, root, err = resolveThemePalette(baseName, visiting)
+			if err != nil {
+				return Palette{}, "", err
+			}
+		}
+		if err := tf.Palette.Validate(); err != nil {
+			return Palette{}, "", err
+		}
+		rootOpts, err := builtinThemeOpts(root)
+		if err != nil {
+			return Palette{}, "", err
+		}
+		return PaletteFromOpts(tf.Palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts))), root, nil
+	}
+
+	optsFn, ok := builtinThemes[key]
+	if !ok {
+		return Palette{}, "", fmt.Errorf("unknown theme %q; available themes: %s", name, strings.Join(BuiltinThemeNames(), ", "))
+	}
+	return PaletteFromOpts(optsFn()), key, nil
+}
+
+// builtinThemeOpts returns the quickStyleOpts of a built-in theme.
+func builtinThemeOpts(name string) (quickStyleOpts, error) {
 	if name == "" {
 		name = "charmtone"
 	}
@@ -307,15 +368,25 @@ func baseThemeOpts(name string) (quickStyleOpts, error) {
 
 // LoadPaletteTheme builds Styles by applying palette overrides on top of
 // a built-in base theme. Empty baseName uses the default Charmtone theme.
+// LoadPaletteTheme builds Styles by applying palette overrides on top of a
+// built-in or user theme. Empty baseName uses the default Charmtone theme.
 func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
-	base, err := baseThemeOpts(baseName)
+	base, root, err := resolveThemePalette(baseName, map[string]bool{})
 	if err != nil {
 		return Styles{}, err
 	}
 	if err := palette.Validate(); err != nil {
 		return Styles{}, err
 	}
-	return quickStyle(palette.ToQuickStyleOpts(base)), nil
+	rootOpts, err := builtinThemeOpts(root)
+	if err != nil {
+		return Styles{}, err
+	}
+	s := quickStyle(palette.ToQuickStyleOpts(base.ToQuickStyleOpts(rootOpts)))
+	if override, ok := builtinThemeOverrides[root]; ok {
+		s = override(s)
+	}
+	return s, nil
 }
 
 // colorToHex returns a canonical display string for a color. If the color

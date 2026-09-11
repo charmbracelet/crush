@@ -571,7 +571,7 @@ func (th *Theme) setThemeItems() {
 	default:
 		selected := 0
 		for i, it := range items {
-			if ti, ok := it.(*ThemeItem); ok && ti.name == currentTheme && ti.name != newThemeItemName {
+			if ti, ok := it.(*ThemeItem); ok && strings.EqualFold(ti.name, currentTheme) && ti.name != newThemeItemName {
 				selected = i
 				break
 			}
@@ -592,7 +592,7 @@ func (th *Theme) newThemeItem(info styles.ThemeInfo, currentTheme string) *Theme
 		Versioned:  &list.Versioned{},
 		name:       info.Name,
 		label:      label,
-		isCurrent:  info.Name == currentTheme,
+		isCurrent:  strings.EqualFold(info.Name, currentTheme),
 		overridden: info.Overridden,
 		t:          th.com.Styles,
 		mode:       th.mode,

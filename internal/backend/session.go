@@ -4,6 +4,7 @@ import (
 	"context"
 
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
@@ -133,6 +134,17 @@ func (b *Backend) SetMCPServerDisabled(ctx context.Context, workspaceID, name st
 	}
 
 	return ws.Sessions.SetMCPServerDisabled(ctx, name, disabled)
+}
+
+// SetMCPServerConfigDisabled toggles an MCP server's disabled flag in the
+// global config and applies the change to the running client.
+func (b *Backend) SetMCPServerConfigDisabled(ctx context.Context, workspaceID, name string, disabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return mcptools.SetConfigDisabled(ctx, ws.Cfg, config.ScopeGlobal, name, disabled)
 }
 
 // StartMCPServer starts the named MCP server for the given workspace even

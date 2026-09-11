@@ -59,6 +59,58 @@ func TestMCPToggles_ConfigDisabledCanBeEnabled(t *testing.T) {
 	require.Equal(t, "starting...", m.Items()[1].Status, "enabling a config-disabled server must show immediate feedback")
 }
 
+func TestMCPToggles_ScopeSwitchAndGlobalToggle(t *testing.T) {
+	t.Parallel()
+
+	m := newMCPTogglesForTest([]MCPToggleItem{
+		{Name: "docker", Status: "connected"},
+	})
+	require.Equal(t, MCPToggleScopeLocal, m.Scope(), "local must be the default scope")
+
+	// Tab cycles to global.
+	require.Nil(t, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}))
+	require.Equal(t, MCPToggleScopeGlobal, m.Scope())
+
+	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	toggled, ok := action.(ActionToggleMCP)
+	require.True(t, ok)
+	require.Equal(t, "docker", toggled.Name)
+	require.True(t, toggled.Disabled, "global toggle should disable an enabled server")
+	require.True(t, toggled.Global, "toggle must be flagged global when the global scope is selected")
+	require.True(t, m.Items()[0].ConfigDisabled, "the config flag must flip optimistically")
+
+	// Tab again returns to local.
+	require.Nil(t, m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}))
+	require.Equal(t, MCPToggleScopeLocal, m.Scope())
+}
+
+func TestMCPToggles_LocalEnableDoesNotAffectGlobalScope(t *testing.T) {
+	t.Parallel()
+
+	// A config-disabled server enabled locally for this repository.
+	m := newMCPTogglesForTest([]MCPToggleItem{
+		{Name: "docker", ConfigDisabled: true, EnabledOverride: true, Status: "connected"},
+	})
+
+	// Local scope: the override wins, the server shows enabled.
+	require.Equal(t, "connected", m.itemStatus(m.Items()[0]))
+
+	// Global scope: the config still disables it, so it must show
+	// disabled even though it is running for this repository.
+	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, MCPToggleScopeGlobal, m.Scope())
+	require.Equal(t, "disabled", m.itemStatus(m.Items()[0]))
+
+	// A global enable flips the config flag and clears the need for a
+	// local override display.
+	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	toggled, ok := action.(ActionToggleMCP)
+	require.True(t, ok)
+	require.False(t, toggled.Disabled)
+	require.True(t, toggled.Global)
+	require.False(t, m.Items()[0].ConfigDisabled)
+}
+
 func TestMCPToggles_NavigationClamps(t *testing.T) {
 	t.Parallel()
 

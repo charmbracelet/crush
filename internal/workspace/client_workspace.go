@@ -740,6 +740,10 @@ func (w *ClientWorkspace) MCPSetServerDisabled(ctx context.Context, name string,
 	return w.client.SetMCPServerDisabled(ctx, w.workspaceID(), name, disabled)
 }
 
+func (w *ClientWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.SetMCPServerConfigDisabled(ctx, w.workspaceID(), name, disabled)
+}
+
 func (w *ClientWorkspace) MCPStartServer(ctx context.Context, name string) error {
 	return w.client.StartMCPServer(ctx, w.workspaceID(), name)
 }

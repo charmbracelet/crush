@@ -152,9 +152,10 @@ func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
 	for _, configured := range m.com.Config().MCP.Sorted() {
 		_, enabledOverride := enabled[configured.Name]
 		item := dialog.MCPToggleItem{
-			Name:           configured.Name,
-			ConfigDisabled: configured.MCP.Disabled && !enabledOverride,
-			Status:         mcpStatusText(m.mcpStates[configured.Name]),
+			Name:            configured.Name,
+			ConfigDisabled:  configured.MCP.Disabled,
+			EnabledOverride: enabledOverride,
+			Status:          mcpStatusText(m.mcpStates[configured.Name]),
 		}
 		if _, off := disabled[configured.Name]; off {
 			item.Disabled = true
@@ -164,14 +165,26 @@ func (m *UI) mcpToggleItems() ([]dialog.MCPToggleItem, error) {
 	return items, nil
 }
 
-// applyMCPToggle persists a repository-scoped MCP toggle. Enabling a
-// config-disabled server also starts it now and records an enabled
-// override, so it stays enabled across restarts. The dialog keeps its own
-// optimistic state; failures surface as an error toast.
+// applyMCPToggle persists an MCP toggle. Local toggles write a
+// repository-scoped override; enabling a config-disabled server also starts
+// it now and records an enabled override, so it stays enabled across
+// restarts. Global toggles write the disabled flag to the config and apply
+// the change to the running client. The dialog keeps its own optimistic
+// state; failures surface as an error toast.
 func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
 	name := msg.Name
 	disable := msg.Disabled
+	status := "enabled"
+	if disable {
+		status = "disabled"
+	}
 	return func() tea.Msg {
+		if msg.Global {
+			if err := m.com.Workspace.MCPSetServerConfigDisabled(context.TODO(), name, disable); err != nil {
+				return util.NewErrorMsg(err)
+			}
+			return util.NewInfoMsg(fmt.Sprintf("MCP %q %s globally", name, status))
+		}
 		if !disable {
 			if configured, ok := m.com.Config().MCP[name]; ok && configured.Disabled {
 				if err := m.com.Workspace.MCPStartServer(context.TODO(), name); err != nil {
@@ -181,10 +194,6 @@ func (m *UI) applyMCPToggle(msg dialog.ActionToggleMCP) tea.Cmd {
 		}
 		if err := m.com.Workspace.MCPSetServerDisabled(context.TODO(), name, disable); err != nil {
 			return util.NewErrorMsg(err)
-		}
-		status := "enabled"
-		if disable {
-			status = "disabled"
 		}
 		return util.NewInfoMsg(fmt.Sprintf("MCP %q %s for this repository", name, status))
 	}

@@ -5,63 +5,70 @@ ACP standardizes editor-agent communication over JSON-RPC 2.0 (stdio default).
 Crush acts as **ACP Server** (for Zed, JetBrains, Neovim) and optionally
 **ACP Client** (driving external agents).
 
-This plan is split into two parallel, independently-trackable tracks:
-- [ ] **ACP Server Track** (`internal/acp/server`) — Crush as ACP server over stdio.
-- [ ] **ACP Client Track** (`internal/acp/client`) — Crush as ACP client to external agents.
+### Library Choice: `github.com/coder/acp-go-sdk`
+Evaluated official community Go SDKs (from https://agentclientprotocol.com/libraries/community#go):
+- **`github.com/coder/acp-go-sdk` (Coder, v0.13.x, 230+ stars) — SELECTED**
+  - Most active, battle-tested, backed by Coder.
+  - Complete ACP v1 typed definitions for both Agent and Client.
+  - Built-in stdio connection management (`NewAgentSideConnection`, `NewClientSideConnection`).
+  - Native streaming update helpers (`UpdateAgentMessageText`, `UpdateAgentThoughtText`, `UpdatePlan`, `StartToolCall`, `UpdateToolCall`).
+  - Native client RPC helpers (`RequestPermission`, `ReadTextFile`, `WriteTextFile`, `terminal/*`).
+  - Built-in context cancellation map and `$/cancel_request` handling.
+- Alternatives evaluated:
+  - `ironpark/acp-go` (30 stars) — smaller scope, fewer helpers.
+  - `eino-contrib/acp` (11 stars) — ByteDance Eino-specific transport adapters.
+  - `spachava753/acp-sdk` & `Tangerg/acp` — require Go 1.25+, unmaintained.
 
-> The two tracks share the `internal/acp/protocol` package (Phase 1). The server
-> track is the MVP and is expected to be implemented first; the client track is
-> an optional follow-on that unlocks external-agent delegation.
+### Work Offloaded to SDK vs. Local Responsibilities
+
+| Responsibility | Handled By | Details |
+|---|---|---|
+| Protocol types & validation | **SDK** (`acp.*`) | All 170+ ACP v1 message structs, enums, unions, validation. |
+| JSON-RPC 2.0 transport & framing | **SDK** (`acp.Connection`) | Stdio read/write loop, ID correlation, request/notification routing. |
+| Cancellation routing | **SDK** | Maps client `session/cancel` & `$/cancel_request` to Go `context.Context`. |
+| Outbound streaming formatting | **SDK** (`helpers.go`) | `UpdateAgentMessageText`, `UpdatePlan`, `StartToolCall`, `ToolDiffContent`. |
+| Outbound editor RPC | **SDK** (`AgentSideConnection`) | Typed methods: `RequestPermission`, `ReadTextFile`, `CreateTerminal`, etc. |
+| **Crush Server Adapter** | **Local** (`internal/acp`) | Implements `acp.Agent` interface, maps to `app.App` & `coordinator`. |
+| **PubSub Event Bridge** | **Local** (`internal/acp`) | Subscribes to Crush events, converts to SDK `SessionUpdate` calls. |
+| **Permission Bridge** | **Local** (`internal/acp`) | Converts Crush `permission.Decision` requests to SDK `conn.RequestPermission`. |
+| **CLI Integration** | **Local** (`internal/cmd`) | `--acp` flag, headless workspace boot, redirect logs to stderr. |
+| **Client Track** (optional) | **Local** (`internal/acp/client`) | Implements `acp.Client` callbacks to drive external agents via SDK. |
 
 ---
 
-## Architecture & Mapping
+## Architecture
 
 ```
-IDE / Client (Zed, JetBrains)
+IDE / Client (Zed, JetBrains, Neovim)
        |
-       |  JSON-RPC 2.0 (stdio)
+       |  JSON-RPC 2.0 over stdio (managed by coder/acp-go-sdk)
        v
-internal/acp/server.go
+acp.AgentSideConnection  <-- github.com/coder/acp-go-sdk
        |
-       +---> initialize / session/*
-       |          |
-       |          v
-       |    internal/app (Workspace, Session Service)
-       |          |
-       |          v
-       |    internal/agent (Coordinator / SessionAgent)
+       |  acp.Agent interface calls (Initialize, NewSession, Prompt, Cancel...)
+       v
+internal/acp/server.go   (Crush ACP Adapter)
        |
-       +---> Streaming Events --> session/update (Text, Reasoning, ToolCalls, Plan)
+       +---> Session lifecycle --> session.Service (SQLite)
+       +---> Prompt execution  --> coordinator.Run / SessionAgent.Run
        |
-       +---> Client Delegation (when negotiated):
-       |          +---> session/request_permission
-       |          +---> fs/read_text_file & fs/write_text_file
-       |          +---> terminal/create, terminal/output, terminal/wait_for_exit
+       +---> PubSub Event Bridge (internal/acp/bridge.go)
+       |          agent.OnTextDelta       --> conn.SessionUpdate(UpdateAgentMessageText(...))
+       |          agent.OnReasoningDelta  --> conn.SessionUpdate(UpdateAgentThoughtText(...))
+       |          agent.OnToolCallStart   --> conn.SessionUpdate(StartToolCall(...))
+       |          agent.OnToolCallEnd     --> conn.SessionUpdate(UpdateToolCall(...))
        |
-       +---> ACP Client (optional, separate track)
-                  internal/acp/client.go  <-- drives external agent process
+       +---> Permission Bridge (internal/acp/permission.go)
+       |          tool permission check   --> conn.RequestPermission(...)
+       |
+       +---> Client-Delegated Tools (when client capabilities permit)
+                  fs/read, fs/write       --> conn.ReadTextFile / conn.WriteTextFile
+                  terminal/*              --> conn.CreateTerminal / conn.WaitForTerminalExit
 ```
-
-### Protocol Mapping to Crush Primitives
-
-| ACP Method / Direction | Crush Internal Subsystem | Notes |
-|---|---|---|
-| `initialize` (C -> S) | Version & Capabilities handshake | Advertise tools, streaming, modes (`coder`, `task`), prompt options. |
-| `session/new` (C -> S) | `session.Service.Create` + workspace setup | Scopes session to client `cwd`. Initialises DB record. |
-| `session/prompt` (C -> S) | `coordinator.Run` / `SessionAgent.Run` | Streams turn; blocks until completion or returns terminal status. |
-| `session/cancel` (C -> S) | Context cancellation (`csync` / `dispatchMu`) | Cancels in-flight prompt context for `sessionId`. |
-| `session/update` (S -> C) | PubSub: `agent.OnTextDelta`, `OnReasoningDelta`, tool events | Emits chunks, reasoning deltas, tool status, and plan updates. |
-| `session/request_permission` (S -> C) | `internal/permission` engine | Hooks into Crush tool permission check before running command. |
-| `fs/*`, `terminal/*` (S -> C) | `tools.Bash`, `tools.Edit`, `tools.View` | Delegated to editor if client capabilities permit; fallback to local tools. |
 
 ---
 
 ## Checkpoint Legend
-
-Each checkable item below is a **checkpoint**. When implementation of that item
-is complete, change `- [ ]` to `- [x]` (or mark it done in the checklist table
-at the bottom of this file). Checkpoints are grouped per track and per phase.
 
 - [ ] = not started
 - [x] = complete
@@ -72,96 +79,73 @@ at the bottom of this file). Checkpoints are grouped per track and per phase.
 ## ACP SERVER TRACK
 ## ===================================
 
-### Phase 1: Shared Protocol Types & Transport (`internal/acp/protocol`)
-> Shared with the ACP Client Track. Implemented once, consumed by both.
+### Phase 1: SDK Integration & Transport Setup
+> Integrate `github.com/coder/acp-go-sdk`, deprecating manual schema definitions.
 
-1. [ ] Create `internal/acp/protocol/`:
-   - [ ] JSON-RPC 2.0 message envelope structs (`Request`, `Response`, `Notification`, `Error`).
-   - [ ] ACP v1 schema definitions:
-     - [ ] Initialization (`InitializeRequest`, `InitializeResponse`, capabilities).
-     - [ ] Session types (`NewSessionRequest`, `PromptRequest`, `SessionUpdateParams`, `PromptResponse`).
-     - [ ] Content blocks (`TextContent`, `ImageContent`, `ResourceContent`).
-     - [ ] Permissions (`RequestPermissionRequest`, `RequestPermissionResponse`).
-2. [ ] Build stdio transport loop using `bufio.Reader` and
-       `json.Decoder`/`Encoder` (newline-delimited JSON or Content-Length
-       framing per spec).
+1. [ ] Add `github.com/coder/acp-go-sdk` to `go.mod`.
+2. [ ] Create `internal/acp/server.go` with minimal `acp.Agent` boilerplate.
+3. [ ] Verify stdio loop and handshake via in-memory pipe smoke test.
 
-### Phase 2: ACP Server Engine (`internal/acp/server`)
-1. [ ] Implement `Server` struct wrapping Crush `*app.App` or workspace services.
-2. [ ] Dispatch handlers:
-   - [ ] `initialize`: report agent info (`name: "Crush"`, `version`), supported capabilities.
-   - [ ] `session/new`: create session in DB, bind working directory.
-   - [ ] `session/prompt`: invoke `coordinator.Run`. Map streaming callbacks
-         (`OnTextDelta`, `OnReasoningDelta`, `OnToolInputStart`) to outbound
-         `session/update` notifications.
-   - [ ] `session/cancel`: trigger cancellation of the active run context
-         for the session.
-   - [ ] `session/list`, `session/load`, `session/delete`: wire directly to
-         `session.Service`.
-   - [ ] `session/close`, `session/set_mode`, `session/set_config_option`:
-         wire to coordinator / config.
+### Phase 2: Server Engine & Session Lifecycle (`internal/acp`)
+1. [ ] Implement `acp.Agent` methods on `internal/acp.Server`:
+   - [ ] `Initialize`: return Crush agent info (`name: "Crush"`, current version), supported capabilities (`loadSession: false`, prompt/MCP/session capabilities).
+   - [ ] `NewSession`: create session via `session.Service.Create`, scope working directory (`cwd`), store active session mapping.
+   - [ ] `Prompt`: invoke `coordinator.Run` or `SessionAgent.Run`. Await turn completion, return `StopReasonEndTurn`, `StopReasonCancelled`, etc.
+   - [ ] `Cancel`: cancel active prompt context for the given `sessionId`.
+   - [ ] `ListSessions`: delegate to `session.Service.List`.
+   - [ ] `ResumeSession`: restore session state without replaying message history.
+   - [ ] `CloseSession`: cancel running prompt if any, free session resources.
+   - [ ] `SetSessionMode`: map mode ("coder", "task") to Crush coordinator mode.
+2. [ ] Event Bridge:
+   - [ ] Wire pubsub / callbacks to `conn.SessionUpdate`:
+     - Text deltas -> `acp.UpdateAgentMessageText`.
+     - Reasoning deltas -> `acp.UpdateAgentThoughtText`.
+     - Tool lifecycle -> `acp.StartToolCall` / `acp.UpdateToolCall`.
+     - Plan updates -> `acp.UpdatePlan`.
 
-### Phase 3: Permissions & Tool Execution
-1. [ ] Wrap permission handler:
-   - [ ] When tool requires approval and running in ACP server mode, issue
-         `session/request_permission` to client.
-   - [ ] Map response (`allow_once`, `allow_always`, `reject_once`) to Crush
-         `permission.Decision`.
-2. [ ] Client-delegated tools vs. local tools:
-   - [ ] If client advertises `fs` / `terminal` capabilities, map tool calls
-         to client-side `fs/read_text_file`, `fs/write_text_file`,
-         `terminal/create`.
-   - [ ] If client lacks capabilities, execute tools via Crush's internal
-         runtime (`bash`, native tools).
+### Phase 3: Permissions & Tool Delegation
+1. [ ] Permission Bridge:
+   - [ ] Intercept Crush permission prompts in ACP mode.
+   - [ ] Issue `conn.RequestPermission` with `acp.ToolCallUpdate` and permission options (`allow_once`, `allow_always`, `reject_once`).
+   - [ ] Map client `RequestPermissionOutcome` back to Crush `permission.Decision`.
+2. [ ] Client Tools Delegation (optional enhancement):
+   - [ ] Inspect `clientCapabilities.FS` and `clientCapabilities.Terminal`.
+   - [ ] If available, delegate `tools.Edit`/`tools.View` to `conn.ReadTextFile`/`conn.WriteTextFile`.
+   - [ ] Fall back to local Crush bash/filesystem tools if client lacks capabilities.
 
 ### Phase 4: CLI Integration (`internal/cmd`)
-1. [ ] Add `--acp` persistent flag to `crush` command in `internal/cmd/root.go`.
-2. [ ] Add dedicated `crush acp` subcommand (alias/wrapper).
-3. [ ] If --acp supplied:
-   - [ ] Suppress Bubble Tea TUI startup.
-   - [ ] Redirect all application logs (slog) to file or stderr (stdout
-       reserved for JSON-RPC).
-   - [ ] Boot workspace headlessly and start stdio ACP server.
+1. [ ] Add `--acp` persistent flag to root command (`internal/cmd/root.go`).
+2. [ ] Add `crush acp` subcommand (alias/dedicated command).
+3. [ ] If `--acp` active:
+   - [ ] Suppress Bubble Tea TUI.
+   - [ ] Redirect all logger output (slog / charm.land/log) to stderr or file (stdout strictly reserved for JSON-RPC).
+   - [ ] Boot workspace services headlessly.
+   - [ ] Start `acp.NewAgentSideConnection` on `os.Stdin`/`os.Stdout` and block until client disconnects.
 
 ### Phase 5: Server Tests & Conformance
-1. [ ] Unit tests for JSON-RPC serialization and deserialization.
-2. [ ] In-memory round-trip test harness (`testnet` / pipes) simulating
-       client queries (`initialize`, `session/new`, `session/prompt`).
-3. [ ] Integration test with Zed / official ACP test harness.
+1. [ ] Unit test: `Server` initialization and capability negotiation.
+2. [ ] Integration test: pipe-based roundtrip (`NewClientSideConnection` <-> `NewAgentSideConnection`) testing `initialize` -> `session/new` -> `session/prompt` -> `session/update` streaming -> response.
+3. [ ] Test session cancellation flow.
+4. [ ] Test permission request/response roundtrip.
 
 ---
 
 ## ===================================
-## ACP CLIENT TRACK (Optional)
+## ACP CLIENT TRACK (Optional Follow-On)
 ## ===================================
 
 ### Phase 6: ACP Client (`internal/acp/client`)
-1. [ ] Implement `Client` struct:
-   - [ ] JSON-RPC 2.0 stdio transport (reuses `protocol` package).
-   - [ ] Outbound request helpers for all client -> agent methods:
-         `initialize`, `session/new`, `session/prompt`, `session/cancel`,
-         `session/load`, `session/list`, `session/delete`, `session/resume`,
-         `session/close`, `session/set_mode`, `session/set_config_option`.
-   - [ ] Notification handlers for agent -> client messages:
-         `session/update` (stream decoding), `session/request_permission`,
-         `fs/read_text_file`, `fs/write_text_file`, `terminal/create`,
-         `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`,
-         `elicitation/create`, `elicitation/complete`.
-   - [ ] Responders:
-         [ ] Permission responder (emit `session/request_permission` answers).
-         [ ] File system responder (`fs/*` -> local filesystem reads/writes).
-         [ ] Terminal responder (`terminal/*` -> `internal/shell` subprocess).
-         [ ] Elicitation responder (`elicitation/create` -> prompt user).
-2. [ ] Wire external ACP agent process as an LLM provider or specialized
-       agent delegate in Crush (`internal/agent` / `internal/app`).
-   - [ ] `Client.Run` / `Client.Stream` mirroring `SessionAgent` interface
-         so it can slot into `coordinator`.
+1. [ ] Implement `acp.Client` handlers using SDK:
+   - [ ] `SessionUpdate`: forward stream deltas to Crush UI/events.
+   - [ ] `RequestPermission`: prompt user in Crush TUI for permission decision.
+   - [ ] `ReadTextFile` / `WriteTextFile`: read/write local filesystem.
+   - [ ] `CreateTerminal` / `TerminalOutput` / etc.: execute commands via `internal/shell`.
+2. [ ] Spawn external ACP agent subprocess, bind via `acp.NewClientSideConnection`.
+3. [ ] Implement Crush agent provider interface wrapping the ACP client connection.
 
-### Phase 7: Client Tests & Conformance
-1. [ ] Unit tests for client JSON-RPC framing and message parsing.
-2. [ ] Round-trip test harness (pipes) simulating an ACP agent server
-       responding to a `session/prompt`.
-3. [ ] Conformance against the official ACP test harness / external agent.
+### Phase 7: Client Tests
+1. [ ] In-memory pipe test driving mock ACP agent.
+2. [ ] E2E test launching an external ACP agent process.
 
 ---
 
@@ -169,10 +153,10 @@ at the bottom of this file). Checkpoints are grouped per track and per phase.
 
 | Track / Phase | Checkpoint | Status |
 |---|---|---|
-| Server / 1 | Protocol types & transport | - [ ] |
-| Server / 2 | Server engine + dispatch | - [ ] |
-| Server / 3 | Permissions & tool execution | - [ ] |
+| Server / 1 | SDK integration & transport setup | - [ ] |
+| Server / 2 | Server engine & session lifecycle | - [ ] |
+| Server / 3 | Permissions & tool delegation | - [ ] |
 | Server / 4 | CLI integration (`--acp`) | - [ ] |
 | Server / 5 | Server tests & conformance | - [ ] |
 | Client / 6 | ACP client implementation | - [ ] |
-| Client / 7 | Client tests & conformance | - [ ] |
+| Client / 7 | Client tests | - [ ] |

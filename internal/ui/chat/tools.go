@@ -102,6 +102,9 @@ type ToolRenderOpts struct {
 	// items restored from history, where the real start time is unknown,
 	// so no elapsed time is shown for them.
 	StartedAt time.Time
+	// Elapsed is how long the tool call has been (or was) running.
+	// Zero when the start time is unknown (restored items).
+	Elapsed time.Duration
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -163,6 +166,7 @@ type baseToolMessageItem struct {
 	anim            *anim.Anim
 	expandedContent bool
 	startedAt       time.Time
+	finishedAt      time.Time
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
@@ -214,6 +218,16 @@ func newBaseToolMessageItem(
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
+		// Per-tool elapsed time on the pending spinner, so long-running
+		// tools (e.g. bash) show a timer from the moment they appear.
+		// Reads startedAt lazily: it is cleared for restored items.
+		Suffix: func() string {
+			if d := t.elapsed(); d > 0 {
+				return common.FormatDuration(d)
+			}
+			return ""
+		},
+		SuffixColor: sty.WorkingTimerColor,
 	})
 
 	return t
@@ -363,6 +377,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			IsSpinning:      t.isSpinning(),
 			Status:          t.computeStatus(),
 			StartedAt:       t.startedAt,
+			Elapsed:         t.elapsed(),
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.
@@ -426,9 +441,27 @@ func (t *baseToolMessageItem) ToolCall() message.ToolCall {
 
 // SetToolCall sets the tool call associated with this message item.
 func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
+	// Capture the end time on the live finished transition so the tool's
+	// total duration can be shown after completion.
+	if tc.Finished && !t.toolCall.Finished && !t.startedAt.IsZero() {
+		t.finishedAt = time.Now()
+	}
 	t.toolCall = tc
 	t.clearCache()
 	t.Bump()
+}
+
+// elapsed returns how long the tool call has been (or was) running. Zero
+// when the start time is unknown (restored items).
+func (t *baseToolMessageItem) elapsed() time.Duration {
+	if t.startedAt.IsZero() {
+		return 0
+	}
+	end := t.finishedAt
+	if end.IsZero() {
+		end = time.Now()
+	}
+	return end.Sub(t.startedAt)
 }
 
 // SetResult sets the tool result associated with this message item.

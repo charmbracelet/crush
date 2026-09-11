@@ -157,6 +157,6 @@ internal/acp/server.go   (Crush ACP Adapter)
 | Server / 2 | Server engine & session lifecycle | - [x] |
 | Server / 3 | Permissions & tool delegation | - [ ] |
 | Server / 4 | CLI integration (`--acp`) | - [x] |
-| Server / 5 | Server tests & conformance | - [ ] |
+| Server / 5 | Server tests & conformance | - [x] |
 | Client / 6 | ACP client implementation | - [ ] |
 | Client / 7 | Client tests | - [ ] |

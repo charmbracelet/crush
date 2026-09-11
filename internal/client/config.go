@@ -355,6 +355,23 @@ func (c *Client) StartMCPServer(ctx context.Context, id, name string) error {
 	return nil
 }
 
+// SetMCPServerConfigDisabled toggles an MCP server's disabled flag in the
+// global config on the workspace's server.
+func (c *Client) SetMCPServerConfigDisabled(ctx context.Context, id, name string, disabled bool) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/config-disabled", id), nil, jsonBody(proto.MCPSetServerDisabledRequest{
+		Name:     name,
+		Disabled: disabled,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set config-disabled MCP server: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set config-disabled MCP server: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // RefreshMCPTools refreshes tools for a named MCP server.
 func (c *Client) RefreshMCPTools(ctx context.Context, id, name string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/refresh-tools", id), nil, jsonBody(struct {

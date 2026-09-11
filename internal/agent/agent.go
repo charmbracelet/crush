@@ -294,12 +294,16 @@ type SessionAgentOptions struct {
 	// results in raw history with stub text once the notebook
 	// boundary advances. Only takes effect in notebook mode.
 	StubSuperseded bool
+	// StubBoundary/StubStats let a coordinator share stub bookkeeping
+	// across agent rebuilds. When nil the agent allocates its own.
+	StubBoundary *csync.Map[string, int]
+	StubStats    *csync.Map[string, stubStats]
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
-	return &sessionAgent{
+	a := &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -326,9 +330,10 @@ func NewSessionAgent(
 		notebookMemoryServer: opts.NotebookMemoryServer,
 		notebookAutoInject:   opts.NotebookAutoInject,
 		stubSuperseded:       opts.StubSuperseded,
-		stubBoundary:         csync.NewMap[string, int](),
-		stubStats:            csync.NewMap[string, stubStats](),
+		stubBoundary:         cmp.Or(opts.StubBoundary, csync.NewMap[string, int]()),
+		stubStats:            cmp.Or(opts.StubStats, csync.NewMap[string, stubStats]()),
 	}
+	return a
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
@@ -1752,7 +1757,7 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 				// Only record the boundary when persistence succeeded;
 				// otherwise the next render would flip back to verbatim
 				// and promotion would never retry.
-				if persisted {
+				if persisted && sessionID != "" {
 					a.stubBoundary.Set(sessionID, boundary)
 				}
 			}

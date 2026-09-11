@@ -3,6 +3,7 @@ package notebook
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -84,4 +85,33 @@ func TestRecallToolResult(t *testing.T) {
 		resp := runRecall(t, tool, ctx, "result:")
 		require.True(t, resp.IsError)
 	})
+}
+
+func TestRecallToolResult_TruncatesLargeContent(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newRecallTestEnv(t)
+	tool := NewRecallTool(nil, svc, nil, "", false)
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, sessionID)
+
+	_, err := svc.Create(ctx, sessionID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-big", Name: "view", Input: `{"file_path":"a.go"}`, Finished: true},
+		},
+	})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, sessionID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			// Well over the recall cap.
+			message.ToolResult{ToolCallID: "tc-big", Name: "view", Content: strings.Repeat("x", tools.MaxOutputLength*2)},
+		},
+	})
+	require.NoError(t, err)
+
+	resp := runRecall(t, tool, ctx, "result:tc-big")
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "lines truncated")
+	require.Less(t, len(resp.Content), tools.MaxOutputLength+1000)
 }

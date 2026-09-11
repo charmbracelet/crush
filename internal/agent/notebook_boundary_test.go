@@ -38,6 +38,25 @@ func TestFindTurnBoundaryByTokenBudget_ZeroBudget(t *testing.T) {
 	require.Equal(t, 0, boundary)
 }
 
+func TestEstimateRawMessageTokens_CountsStubNotOriginal(t *testing.T) {
+	// An applied superseded mark renders the stub, not the stored
+	// original — the estimator must count what the model sees or the
+	// raw window underfills by the stubbed bytes.
+	big := strings.Repeat("file content line\n", 500) // ~9KB.
+	result := message.ToolResult{ToolCallID: "tc-1", Name: "view", Content: big}
+	pendingResult := result
+	pendingResult.Superseded = &message.SupersededMark{Path: "a.go", ByTool: "edit", Turn: 2}
+	pending := []message.Message{{Role: message.Tool, Parts: []message.ContentPart{pendingResult}}}
+
+	appliedResult := result
+	appliedResult.Superseded = &message.SupersededMark{Path: "a.go", ByTool: "edit", Turn: 2, Applied: true}
+	applied := []message.Message{{Role: message.Tool, Parts: []message.ContentPart{appliedResult}}}
+
+	require.Equal(t, len(big)/4, estimateRawMessageTokens(pending))
+	stubLen := len(supersededStubText(*appliedResult.Superseded, "tc-1"))
+	require.Equal(t, stubLen/4, estimateRawMessageTokens(applied))
+}
+
 func TestFindNextSafeBoundary_AtTurnEnd(t *testing.T) {
 	msgs := []message.Message{
 		{Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "hello"}}},

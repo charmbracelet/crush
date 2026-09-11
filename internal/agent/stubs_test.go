@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"database/sql"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -152,6 +154,69 @@ func bigContent() string {
 	return strings.Repeat("file content line\n", 30) // ~540 bytes.
 }
 
+// echoEntryGen produces one generated entry per input event carrying
+// the result's full content — standing in for the LLM generator's
+// capture of the original tool output.
+type echoEntryGen struct{}
+
+func (echoEntryGen) Generate(_ context.Context, _ string, events []notebook.EntryInput) ([]notebook.GeneratedEntry, error) {
+	entries := make([]notebook.GeneratedEntry, len(events))
+	for i, ev := range events {
+		text := "## " + ev.Title
+		if ev.ToolResult != nil {
+			text += "\n" + ev.ToolResult.Content
+		}
+		entries[i] = notebook.GeneratedEntry{
+			EventType: ev.EventType,
+			Title:     ev.Title,
+			Text:      text,
+		}
+	}
+	return entries, nil
+}
+
+// TestStubRenderKeepsNotebookOriginal is the combined invariant: after
+// a boundary advance promotes the raw-window result to a stub, the same
+// turn's notebook generation still sees the full original content.
+func TestStubRenderKeepsNotebookOriginal(t *testing.T) {
+	t.Parallel()
+
+	a, svc, sessionID := newStubTestAgent(t)
+	ctx := t.Context()
+
+	msgs := viewThenEdit(t, svc, sessionID, bigContent(), true)
+	msgs = append(msgs, mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "later"}))
+	a.flagSupersededViewResults(ctx, msgs)
+	require.True(t, a.promoteSupersededStubs(ctx, msgs, 0))
+
+	// Raw render shows the stub, not the original.
+	stubbed, count, _ := applySupersededStubs(msgs[2])
+	require.Equal(t, 1, count)
+	require.Contains(t, resultOf(t, stubbed, "tc-view").Content, "superseded by edit")
+	require.NotContains(t, resultOf(t, stubbed, "tc-view").Content, "file content line")
+
+	// Notebook generation over the same messages stores the original.
+	conn, err := db.Connect(ctx, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	nbSession, err := session.NewService(q, conn).Create(ctx, "nb")
+	require.NoError(t, err)
+	nbSvc := notebook.NewService(q, echoEntryGen{}, notebook.Options{MaxEntryTokens: 10000})
+	require.NoError(t, nbSvc.GenerateEntries(ctx, nbSession.ID, 1, msgs[:3]))
+
+	entries, err := nbSvc.GetEntries(ctx, nbSession.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	found := false
+	for _, e := range entries {
+		if strings.Contains(e.EntryText, "file content line") || strings.Contains(e.EntryTextFull, "file content line") {
+			found = true
+		}
+	}
+	require.True(t, found, "notebook entry must retain the pre-stub original content")
+}
+
 func resultOf(t *testing.T, m message.Message, callID string) message.ToolResult {
 	t.Helper()
 	for _, tr := range m.ToolResults() {
@@ -300,6 +365,56 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		require.False(t, mark.Applied)
 	})
 
+	t.Run("reverts in-memory marks when persistence fails", func(t *testing.T) {
+		t.Parallel()
+		conn, err := db.Connect(t.Context(), t.TempDir())
+		require.NoError(t, err)
+		q := db.New(conn)
+		sess, err := session.NewService(q, conn).Create(t.Context(), "test")
+		require.NoError(t, err)
+		svc := message.NewService(q)
+		a := &sessionAgent{messages: svc, stubStats: csync.NewMap[string, stubStats]()}
+
+		msgs := viewThenEdit(t, svc, sess.ID, bigContent(), true)
+		msgs = append(msgs, mkMsg(t, svc, sess.ID, message.User, message.TextContent{Text: "later"}))
+		a.flagSupersededViewResults(t.Context(), msgs)
+
+		// With the DB closed the update fails: promotion reports
+		// false and the in-memory marks revert so this render stays
+		// consistent with the stored verbatim content.
+		require.NoError(t, conn.Close())
+		ok := a.promoteSupersededStubs(t.Context(), msgs, 0)
+		require.False(t, ok)
+		mark := resultOf(t, msgs[2], "tc-view").Superseded
+		require.NotNil(t, mark)
+		require.False(t, mark.Applied)
+	})
+
+	t.Run("stale flag write does not clobber promoted mark", func(t *testing.T) {
+		t.Parallel()
+		a, svc, sessionID := newStubTestAgent(t)
+		ctx := t.Context()
+		msgs := viewThenEdit(t, svc, sessionID, bigContent(), true)
+		msgs = append(msgs, mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "later"}))
+		a.flagSupersededViewResults(ctx, msgs)
+
+		// Stale snapshot as the async flag path would hold it:
+		// pending mark, fetched before promotion lands.
+		stale, err := svc.Get(ctx, msgs[2].ID)
+		require.NoError(t, err)
+		require.False(t, resultOf(t, stale, "tc-view").Superseded.Applied)
+
+		require.True(t, a.promoteSupersededStubs(ctx, msgs, 0))
+
+		// The stale whole-message write merges stored marks, so the
+		// promoted Applied bit survives the clobber.
+		a.mergeSupersededMarks(ctx, &stale)
+		require.NoError(t, svc.Update(ctx, stale))
+		persisted, err := svc.Get(ctx, msgs[2].ID)
+		require.NoError(t, err)
+		require.True(t, resultOf(t, persisted, "tc-view").Superseded.Applied)
+	})
+
 	t.Run("flags before the boundary are left alone", func(t *testing.T) {
 		t.Parallel()
 		a, svc, sessionID := newStubTestAgent(t)
@@ -352,15 +467,52 @@ func TestApplySupersededStubs(t *testing.T) {
 	require.Equal(t, bigContent(), m.ToolResults()[1].Content)
 }
 
-func TestSameFilePath(t *testing.T) {
+func TestNormalizedPath(t *testing.T) {
 	t.Parallel()
 
-	require.True(t, sameFilePath("a.go", "a.go"))
-	require.True(t, sameFilePath("./x.go", "x.go"))
-	// Different directories — the file that exists is resolved
-	// against the working dir, not suffix-matched.
-	require.False(t, sameFilePath("internal/x.go", "x.go"))
-	require.False(t, sameFilePath("x.go", "internal/x.go"))
-	require.False(t, sameFilePath("a/x.go", "b/x.go"))
-	require.False(t, sameFilePath("x.go", "y.go"))
+	require.Equal(t, normalizedPath("a.go"), normalizedPath("a.go"))
+	require.Equal(t, normalizedPath("./x.go"), normalizedPath("x.go"))
+	// Different directories — paths resolve against the working dir,
+	// not suffix-match.
+	require.NotEqual(t, normalizedPath("internal/x.go"), normalizedPath("x.go"))
+	require.NotEqual(t, normalizedPath("x.go"), normalizedPath("internal/x.go"))
+	require.NotEqual(t, normalizedPath("a/x.go"), normalizedPath("b/x.go"))
+	require.NotEqual(t, normalizedPath("x.go"), normalizedPath("y.go"))
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		require.Equal(t, normalizedPath("Foo.go"), normalizedPath("foo.go"))
+	}
+}
+
+// TestStubSupersededRequiresNotebook covers the misconfig where
+// notebook_stub_superseded is on but the notebook is off: stubbing
+// must be fully inactive — flagging, promotion, and rendering alike —
+// since the recall escape hatch the stub text advertises is only
+// registered in notebook mode.
+func TestStubSupersededRequiresNotebook(t *testing.T) {
+	t.Parallel()
+
+	crushJSON := func(extraOptions string) string {
+		return `{
+  "options": {"disable_default_providers": true, "disable_provider_auto_update": true` + extraOptions + `},
+  "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
+    "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
+    "models": [{"id": "mock-model", "name": "Mock", "context_window": 8192, "default_max_tokens": 128}]}},
+  "models": {"large": {"provider": "mock", "model": "mock-model"},
+             "small": {"provider": "mock", "model": "mock-model"}}
+}`
+	}
+
+	t.Run("option without notebook keeps stubbing off", func(t *testing.T) {
+		coord := newSummaryTestCoordinator(t, crushJSON(`, "notebook_stub_superseded": true, "notebook_enabled": false`))
+		sa, ok := coord.currentAgent.(*sessionAgent)
+		require.True(t, ok)
+		require.False(t, sa.stubSuperseded)
+	})
+
+	t.Run("option with notebook enables stubbing", func(t *testing.T) {
+		coord := newSummaryTestCoordinator(t, crushJSON(`, "notebook_stub_superseded": true`))
+		sa, ok := coord.currentAgent.(*sessionAgent)
+		require.True(t, ok)
+		require.True(t, sa.stubSuperseded)
+	})
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/notebook"
@@ -143,7 +144,9 @@ func (rc *recallContext) recallToolResult(ctx context.Context, sessionID, toolCa
 				sb.WriteString(" (error)")
 			}
 			sb.WriteString("\n")
-			sb.WriteString(tr.Content)
+			// Cap like bash output: a stubbed 200KB result shouldn't
+			// re-import wholesale what stubbing removed.
+			sb.WriteString(tools.TruncateOutput(tr.Content))
 			return fantasy.NewTextResponse(sb.String()), nil
 		}
 	}

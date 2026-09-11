@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -382,8 +383,12 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 func (c *coordinator) syncSessionChannel(ctx context.Context, sessionID, channel string) {
 	sess, err := c.sessions.Get(ctx, sessionID)
 	if err != nil {
-		// The session may not exist yet (e.g. it is created later in the
-		// run); there is no binding to reconcile.
+		// A missing session is expected (it may be created later in the
+		// run), but a real database failure would otherwise be silent.
+		if !errors.Is(err, sql.ErrNoRows) {
+			slog.Warn("Failed to load session for channel binding sync",
+				"session", sessionID, "channel", channel, "error", err)
+		}
 		return
 	}
 	if sess.Channel == channel {

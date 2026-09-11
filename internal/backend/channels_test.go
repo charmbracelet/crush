@@ -55,7 +55,7 @@ func TestChannelTargetSession(t *testing.T) {
 
 	t.Run("single viewed session wins", func(t *testing.T) {
 		t.Parallel()
-		got, err := channelTargetSession(ctx, []string{"s1"}, &fakeChannelSessions{})
+		got, err := channelTargetSession(ctx, "signal", []string{"s1"}, &fakeChannelSessions{})
 		require.NoError(t, err)
 		require.Equal(t, "s1", got)
 	})
@@ -66,7 +66,7 @@ func TestChannelTargetSession(t *testing.T) {
 			"old": {ID: "old", UpdatedAt: 100},
 			"new": {ID: "new", UpdatedAt: 200},
 		}}
-		got, err := channelTargetSession(ctx, []string{"new", "old"}, store)
+		got, err := channelTargetSession(ctx, "signal", []string{"new", "old"}, store)
 		require.NoError(t, err)
 		require.Equal(t, "new", got)
 	})
@@ -77,7 +77,7 @@ func TestChannelTargetSession(t *testing.T) {
 			"b": {ID: "b", UpdatedAt: 100},
 			"a": {ID: "a", UpdatedAt: 100},
 		}}
-		got, err := channelTargetSession(ctx, []string{"b", "a"}, store)
+		got, err := channelTargetSession(ctx, "signal", []string{"b", "a"}, store)
 		require.NoError(t, err)
 		require.Equal(t, "a", got)
 	})
@@ -87,16 +87,27 @@ func TestChannelTargetSession(t *testing.T) {
 		store := &fakeChannelSessions{listed: []session.Session{
 			{ID: "recent"}, {ID: "older"},
 		}}
-		got, err := channelTargetSession(ctx, nil, store)
+		got, err := channelTargetSession(ctx, "signal", nil, store)
 		require.NoError(t, err)
 		require.Equal(t, "recent", got)
+		require.Empty(t, store.created)
+	})
+
+	t.Run("none viewed prefers session bound to the channel", func(t *testing.T) {
+		t.Parallel()
+		store := &fakeChannelSessions{listed: []session.Session{
+			{ID: "unrelated"}, {ID: "channel-chat", Channel: "signal"}, {ID: "older-channel", Channel: "signal"},
+		}}
+		got, err := channelTargetSession(ctx, "signal", nil, store)
+		require.NoError(t, err)
+		require.Equal(t, "channel-chat", got)
 		require.Empty(t, store.created)
 	})
 
 	t.Run("none viewed and no sessions creates one", func(t *testing.T) {
 		t.Parallel()
 		store := &fakeChannelSessions{}
-		got, err := channelTargetSession(ctx, nil, store)
+		got, err := channelTargetSession(ctx, "signal", nil, store)
 		require.NoError(t, err)
 		require.Equal(t, "created-New Session", got)
 		require.Equal(t, []string{"New Session"}, store.created)
@@ -105,7 +116,7 @@ func TestChannelTargetSession(t *testing.T) {
 	t.Run("all viewed sessions unloadable falls back", func(t *testing.T) {
 		t.Parallel()
 		store := &fakeChannelSessions{getErr: errors.New("boom")}
-		got, err := channelTargetSession(ctx, []string{"x", "y"}, store)
+		got, err := channelTargetSession(ctx, "signal", []string{"x", "y"}, store)
 		require.NoError(t, err)
 		require.Equal(t, "created-New Session", got)
 	})

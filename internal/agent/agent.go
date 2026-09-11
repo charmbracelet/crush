@@ -1245,6 +1245,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if updateErr != nil {
 			return nil, updateErr
 		}
+		// A channel-originated turn has no caller watching the error, so
+		// tell the channel side something went wrong instead of leaving
+		// the sender hanging. sendChannelReply detaches from the
+		// (possibly cancelled) run context and no-ops for local turns.
+		if call.Channel != "" {
+			a.sendChannelReply(ctx, call,
+				"Something went wrong while handling your message. Please try again.",
+				completedToolCalls)
+		}
 		return nil, err
 	}
 

@@ -741,6 +741,26 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Update terminal capabilities
 	m.caps.Update(msg)
 	switch msg := msg.(type) {
+	case rewindResultMsg:
+		if msg.err != nil {
+			return m, util.ReportError(msg.err)
+		}
+		if !m.hasSession() || m.session.ID != msg.sessionID {
+			return m, nil
+		}
+		if msg.action == "list" {
+			if len(msg.result.Points) == 0 {
+				return m, util.ReportInfo("No saved prompts yet. New prompts are checkpointed automatically.")
+			}
+			m.dialog.OpenDialog(dialog.NewRewind(m.com, msg.sessionID, msg.result.Points))
+			return m, nil
+		}
+		m.textarea.SetValue("")
+		return m, tea.Batch(m.loadSession(msg.sessionID), util.ReportInfo("Files and conversation restored. /redo reverses the last rewind."))
+	case dialog.ActionRewind:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.RewindID)
+		return m, m.rewindCommand(msg.Action, msg.Target, msg.SessionID)
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !m.sendProgressBar {
@@ -4237,6 +4257,14 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
+	switch strings.TrimSpace(content) {
+	case "/rewind":
+		return m.rewindCommand("list", "", "")
+	case "/redo":
+		return m.rewindCommand("redo", "", "")
+	case "/rewind-recover":
+		return m.rewindCommand("recover", "", "")
+	}
 	if err := m.com.Workspace.AgentReadyErr(); err != nil {
 		return util.ReportError(err)
 	}

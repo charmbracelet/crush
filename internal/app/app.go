@@ -53,6 +53,7 @@ type UpdateAvailableMsg struct {
 }
 
 type App struct {
+	conn        *sql.DB
 	Sessions    session.Service
 	Messages    message.Service
 	History     history.Service
@@ -107,6 +108,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	app := &App{
+		conn:        conn,
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,

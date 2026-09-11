@@ -29,6 +29,7 @@ snapshot:
 before:
   hooks:
     - go mod tidy
+    - go run ./internal/filehistory/cmd/bundle
     - rm -rf completions
     - mkdir completions
     - rm -rf manpages
@@ -73,6 +74,7 @@ builds:
       - -s -w -X github.com/charmbracelet/crush/internal/version.Version={{.Version}}
     flags:
       - -trimpath
+      - -tags=filesnap_bundle
 
 archives:
   - name_template: >-
@@ -325,6 +327,7 @@ changelog:
       - Merge pull request
       - Merge remote-tracking branch
       - go mod tidy
+    - go run ./internal/filehistory/cmd/bundle
       - "^wip "
       - "^wip:"
   groups:

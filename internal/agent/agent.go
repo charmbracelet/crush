@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filehistory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -167,6 +168,7 @@ type activeCancel struct {
 }
 
 type sessionAgent struct {
+	fileHistory        *filehistory.Store
 	largeModel         *csync.Value[Model]
 	smallModel         *csync.Value[Model]
 	systemPromptPrefix *csync.Value[string]
@@ -223,6 +225,7 @@ type sessionAgent struct {
 }
 
 type SessionAgentOptions struct {
+	FileHistory          *filehistory.Store
 	LargeModel           Model
 	SmallModel           Model
 	SystemPromptPrefix   string
@@ -241,6 +244,7 @@ func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	return &sessionAgent{
+		fileHistory:          opts.FileHistory,
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -655,6 +659,29 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// concurrent run registers in the completion window, silently wiping
 	// the new run's cancel and breaking cancellation.
 	defer a.activeRequests.CompareAndDelete(call.SessionID, ac)
+
+	releaseFileHistory := func() {}
+	if a.fileHistory != nil && !a.isSubAgent {
+		var release func()
+		var err error
+		genCtx, release, err = a.fileHistory.Begin(genCtx, call.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("file history capture: %w", err)
+		}
+		releaseFileHistory = sync.OnceFunc(release)
+		defer releaseFileHistory()
+		sess, err := a.sessions.Get(genCtx, call.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		conversation, err := message.SnapshotConversation(genCtx, a.messages, sess)
+		if err != nil {
+			return nil, err
+		}
+		if err = filehistory.RecordConversation(genCtx, call.Prompt, conversation); err != nil {
+			return nil, err
+		}
+	}
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
@@ -1198,6 +1225,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
+		// Summarize can dispatch queued prompts recursively; no file tools remain in this turn.
+		releaseFileHistory()
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
 			return nil, summarizeErr
 		}
@@ -1330,6 +1359,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		a.publishRunComplete(ctx, call, complete)
 	}
+	// Release the previous turn before recursively dispatching its queued successor.
+	releaseFileHistory()
 	return a.Run(ctx, firstQueuedMessage)
 }
 

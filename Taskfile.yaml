@@ -45,7 +45,8 @@ tasks:
     vars:
       LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
-      - "go build -v {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
+      - go run ./internal/filehistory/cmd/bundle --platform host
+      - "go build -tags=filesnap_bundle -v {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
     sources:
       - ./**/*.go
       - go.mod

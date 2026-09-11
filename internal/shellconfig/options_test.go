@@ -257,3 +257,14 @@ func TestOption_RequestTimeoutInvalid(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "expects a number of seconds")
 }
+
+func TestFileHistoryOptions(t *testing.T) {
+	t.Parallel()
+	jsonBytes, err := LoadShellConfig(t.Context(), filepath.Join(t.TempDir(), "crushrc"), []byte("option file-history true\noption filesnap-binary /opt/filesnap\n"))
+	require.NoError(t, err)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	opts := result["options"].(map[string]any)
+	require.Equal(t, true, opts["file_history"])
+	require.Equal(t, "/opt/filesnap", opts["filesnap_binary"])
+}

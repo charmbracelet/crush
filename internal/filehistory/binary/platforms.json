@@ -1,0 +1,44 @@
+{
+  "linux/amd64": {
+    "url": "https://registry.npmjs.org/filesnap/-/filesnap-0.5.0-linux-x64.tgz",
+    "integrity": "sha512-UE3tULZLVc/HiI88ZIh5QiwZL/BotSadYRNhLFOMG8G3gzyZTFmwMAunZqqQwG1k6cApLdcYb2HUtc1Dj/f7RQ==",
+    "member": "package/vendor/x86_64-unknown-linux-musl/bin/filesnap",
+    "sha256": "fd00e33c6b3a87c232068a02dca06d1ed8719c99889a29b3a2d75714c0a52324",
+    "archive": "linux-x64.tgz"
+  },
+  "linux/arm64": {
+    "url": "https://registry.npmjs.org/filesnap/-/filesnap-0.5.0-linux-arm64.tgz",
+    "integrity": "sha512-xVAaNwqV9nnkyl9GWOh4+Q5+9e1ytneaOZBIDdoqeju6joHcOYOCFgw/mlmKETRQOUE/tggk8LYMQwbib4jimA==",
+    "member": "package/vendor/aarch64-unknown-linux-musl/bin/filesnap",
+    "sha256": "fe7e52518037dc3404947b7c7e25375576ce81a38be07681d283b52dead63f9c",
+    "archive": "linux-arm64.tgz"
+  },
+  "darwin/amd64": {
+    "url": "https://registry.npmjs.org/filesnap/-/filesnap-0.5.0-darwin-x64.tgz",
+    "integrity": "sha512-/eE9MjLN0658RunVnAoYOj3/Qkppb+mkcWpsFd1OEJjl7GWdVyvDRMT5MpYPxSkgGVL97ZsIjWwny5rUM7suHQ==",
+    "member": "package/vendor/x86_64-apple-darwin/bin/filesnap",
+    "sha256": "5d307dd60a1b0399e723befd22f56845f6a03555ef0982bc1be4f4af7928628c",
+    "archive": "darwin-x64.tgz"
+  },
+  "darwin/arm64": {
+    "url": "https://registry.npmjs.org/filesnap/-/filesnap-0.5.0-darwin-arm64.tgz",
+    "integrity": "sha512-EQXeP23WVL2DExoNZ1hSgWvE1qskpob5Nj7a8zRxisiwcLgG9Mn3yRuJsi7alybkvIRR2uw+ieRfQN3v4/qdJA==",
+    "member": "package/vendor/aarch64-apple-darwin/bin/filesnap",
+    "sha256": "872f0018914bb6a872e6498b794d3f3933151f27206aa866603e135f74bb9b6a",
+    "archive": "darwin-arm64.tgz"
+  },
+  "windows/amd64": {
+    "url": "https://registry.npmjs.org/filesnap/-/filesnap-0.5.0-win32-x64.tgz",
+    "integrity": "sha512-uqIjOz41Cj+dnORjyQY1p3RquNRQYfZM6OemTYhCdBRNZqOoHaYk1mUp2gscyKi6xK1Z8/2Qj8HZhh+tchnKFQ==",
+    "member": "package/vendor/x86_64-pc-windows-msvc/bin/filesnap.exe",
+    "sha256": "8c7081b92498765144d085994aea865ebc6ed3df5f612c55d69ca9add3f7ee4d",
+    "archive": "win32-x64.tgz"
+  },
+  "windows/arm64": {
+    "url": "https://registry.npmjs.org/filesnap/-/filesnap-0.5.0-win32-arm64.tgz",
+    "integrity": "sha512-R5fUfeH37gPWBmVu/Dn7mZqCkCAEH4IZIIsCFgOLw6pwr0GRRuhSVEYZ5TEF829pNzmIkipbNSAwI8FcTY0KCQ==",
+    "member": "package/vendor/aarch64-pc-windows-msvc/bin/filesnap.exe",
+    "sha256": "7c66f81c3bf11b58f9438ca1c4fd56964a9f3a4dc1f42b8e0b0efc32c297439b",
+    "archive": "win32-arm64.tgz"
+  }
+}

@@ -42,6 +42,9 @@ func runACP(cmd *cobra.Command, _ []string) error {
 	srv := acp.NewServer(app, log, os.Stdin, os.Stdout)
 	srv.SetLogger(log)
 
+	// Wire the ACP permission service into the app so tools use it.
+	app.Permissions = srv.PermissionService()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 

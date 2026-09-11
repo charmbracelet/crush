@@ -1,4 +1,4 @@
-# Context Notebook — Per-Event Summarization
+# Context Notebook — Per-Event Summarization - Implemented
 
 ## Problem
 
@@ -13,13 +13,13 @@ usage showed 46.6M tokens consumed in one night on the Alibaba Token Plan
 Data from local SQLite DB (107 sessions, 1453 messages):
 
 | Metric                          | Measured value |
-|---------------------------------|----------------|
+| ------------------------------- | -------------- |
 | Total sessions                  | 107            |
 | Total messages                  | 1,453          |
 | Stored bytes (parts)            | 34,765         |
 | Estimated stored tokens (~4 ch) | ~8,700         |
 | Sum of last-call prompt_tokens  | 1,161,857      |
-| Sum of completion_tokens         | 17,430         |
+| Sum of completion_tokens        | 17,430         |
 
 Note: `prompt_tokens` in the DB is the **last API call's** token count per
 session, not cumulative. The 46.6M Alibaba figure reflects cumulative tokens
@@ -28,12 +28,12 @@ across all turns across all sessions. The DB cannot directly reproduce the
 
 ### Token breakdown by content type (estimated from session data)
 
-| Content type                | % of tokens | Needed on next turn? |
-|-----------------------------|-------------|----------------------|
-| Old tool results            | ~70% (est)  | No — already read    |
-| Old assistant responses     | ~15% (est)  | Sometimes            |
-| System prompt               | ~10% (est)  | Yes — always         |
-| Current turn                | ~5% (est)   | Yes                  |
+| Content type            | % of tokens | Needed on next turn? |
+| ----------------------- | ----------- | -------------------- |
+| Old tool results        | ~70% (est)  | No — already read    |
+| Old assistant responses | ~15% (est)  | Sometimes            |
+| System prompt           | ~10% (est)  | Yes — always         |
+| Current turn            | ~5% (est)   | Yes                  |
 
 These percentages are estimates based on the structure of typical coding
 agent sessions (file reads, bash output, grep results dominate). They should
@@ -62,14 +62,14 @@ Crush already has auto-summarization (`agent.go:1329 Summarize()`). This plan
 
 ### Notebook replaces auto-summarize
 
-| Aspect                | Current `Summarize()`        | Notebook                     |
-|-----------------------|------------------------------|------------------------------|
-| Trigger               | Reactive (near overflow)     | Proactive (per significant event) |
-| Model                 | Large (expensive)            | Small (cheap)                |
-| Granularity           | Entire history → 1 summary    | Per-event → precise units    |
-| Detail preservation   | Lossy (one-shot compression)  | Rich (one entry per event)   |
-| Retrieval             | None (summary is final)      | Recall tool retrieves full   |
-| Cross-session memory  | None                         | Via mem0 tags (optional)     |
+| Aspect               | Current `Summarize()`        | Notebook                          |
+| -------------------- | ---------------------------- | --------------------------------- |
+| Trigger              | Reactive (near overflow)     | Proactive (per significant event) |
+| Model                | Large (expensive)            | Small (cheap)                     |
+| Granularity          | Entire history → 1 summary   | Per-event → precise units         |
+| Detail preservation  | Lossy (one-shot compression) | Rich (one entry per event)        |
+| Retrieval            | None (summary is final)      | Recall tool retrieves full        |
+| Cross-session memory | None                         | Via mem0 tags (optional)          |
 
 ### Migration plan
 
@@ -82,11 +82,11 @@ Crush already has auto-summarization (`agent.go:1329 Summarize()`). This plan
 
 ### What gets removed/modified
 
-| Code path                        | Action |
-|----------------------------------|--------|
-| `shouldSummarize` (agent.go:1053) | Guarded by `if !notebookEnabled` |
-| `Summarize()` (agent.go:1329)    | Kept as fallback when notebook disabled |
-| `summaryPrompt` template         | Kept for fallback path |
+| Code path                         | Action                                            |
+| --------------------------------- | ------------------------------------------------- |
+| `shouldSummarize` (agent.go:1053) | Guarded by `if !notebookEnabled`                  |
+| `Summarize()` (agent.go:1329)     | Kept as fallback when notebook disabled           |
+| `summaryPrompt` template          | Kept for fallback path                            |
 | `preparePrompt()` (agent.go:1527) | Modified to inject notebook + adaptive raw window |
 
 ## Solution: Per-Event Context Notebook
@@ -117,16 +117,16 @@ func isSignificant(toolCall message.ToolCall) bool {
 
 ### Event types and handling
 
-| Event type | Significant? | Entry | Size |
-|------------|-------------|-------|------|
-| File read > 100 lines | Yes | Own entry with key code | 500-1000 tok |
-| File read ≤ 100 lines | No | Grouped into exploration mini-entry | ~100 tok |
-| File edit/write | Always | Own entry with code diff | 500-1000 tok |
-| Bash command | Always | Own entry with result | 500-1000 tok |
-| grep/glob/ls | No | Grouped into exploration mini-entry | ~100 tok |
-| Assistant decision | If contains decision | Own entry tagged #decision | 300-500 tok |
-| Assistant "done" response | No | Skip | 0 |
-| No tools + < 200 tok response | No | Skip entirely | 0 |
+| Event type                    | Significant?         | Entry                               | Size         |
+| ----------------------------- | -------------------- | ----------------------------------- | ------------ |
+| File read > 100 lines         | Yes                  | Own entry with key code             | 500-1000 tok |
+| File read ≤ 100 lines         | No                   | Grouped into exploration mini-entry | ~100 tok     |
+| File edit/write               | Always               | Own entry with code diff            | 500-1000 tok |
+| Bash command                  | Always               | Own entry with result               | 500-1000 tok |
+| grep/glob/ls                  | No                   | Grouped into exploration mini-entry | ~100 tok     |
+| Assistant decision            | If contains decision | Own entry tagged #decision          | 300-500 tok  |
+| Assistant "done" response     | No                   | Skip                                | 0            |
+| No tools + < 200 tok response | No                   | Skip entirely                       | 0            |
 
 ### What gets sent to the LLM each turn
 
@@ -142,22 +142,22 @@ Default budget: 25K tokens. The boundary walks backwards from the latest
 message, accumulating tokens, and stops when the budget is exceeded —
 always at a safe turn boundary (no split tool-call sequences).
 
-| Session type | Avg tokens/turn | Adaptive sends | Fixed-5 would send |
-|---|---|---|---|
-| Chat-only (no tools) | ~800 | ~30 turns (24K) | 5 turns (4K) — wasteful cutoff |
-| Light coding (small reads) | ~3K | ~8 turns (24K) | 5 turns (15K) — fine |
-| Heavy coding (big files) | ~10K | ~2 turns (20K) | 5 turns (50K) — blows budget |
-| Mixed | ~5K | ~5 turns (25K) | 5 turns (25K) — same |
+| Session type               | Avg tokens/turn | Adaptive sends  | Fixed-5 would send             |
+| -------------------------- | --------------- | --------------- | ------------------------------ |
+| Chat-only (no tools)       | ~800            | ~30 turns (24K) | 5 turns (4K) — wasteful cutoff |
+| Light coding (small reads) | ~3K             | ~8 turns (24K)  | 5 turns (15K) — fine           |
+| Heavy coding (big files)   | ~10K            | ~2 turns (20K)  | 5 turns (50K) — blows budget   |
+| Mixed                      | ~5K             | ~5 turns (25K)  | 5 turns (25K) — same           |
 
 Token usage stays **flat** instead of growing to 1M.
 
 ### Why per-event, not per-turn or per-phase
 
-| Approach | Entries for 15-tool turn | Recall precision | Detail |
-|----------|-------------------------|------------------|--------|
-| Per-turn | 1 entry (all 15 tools compressed) | Low — `recall("file:auth.go")` returns entry about 5 files | Loses code snippets |
-| Per-phase | 3 entries (exploration/modification/verification) | Medium — `recall("file:auth.go")` returns exploration phase with 5 files | Some code snippets |
-| **Per-event** | ~6-8 entries (one per significant tool) | **High — `recall("file:auth.go")` returns entry only about auth.go** | **Full code snippets per file** |
+| Approach      | Entries for 15-tool turn                          | Recall precision                                                         | Detail                          |
+| ------------- | ------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------- |
+| Per-turn      | 1 entry (all 15 tools compressed)                 | Low — `recall("file:auth.go")` returns entry about 5 files               | Loses code snippets             |
+| Per-phase     | 3 entries (exploration/modification/verification) | Medium — `recall("file:auth.go")` returns exploration phase with 5 files | Some code snippets              |
+| **Per-event** | ~6-8 entries (one per significant tool)           | **High — `recall("file:auth.go")` returns entry only about auth.go**     | **Full code snippets per file** |
 
 Per-event gives **maximum recall precision**: each entry is about exactly
 one thing. Searching for `#file:auth.go` returns the entry about auth.go,
@@ -199,6 +199,7 @@ size, which compaction (Step 8) then compresses to 100K.
 ### Notebook entry format (per-event)
 
 **Significant file read:**
+
 ```
 ## Turn 5.1 — Read auth.go
 - internal/middleware/auth.go (120 lines)
@@ -208,6 +209,7 @@ size, which compaction (Step 8) then compresses to 100K.
 ```
 
 **File edit:**
+
 ```
 ## Turn 5.4 — Edit auth.go
 - internal/middleware/auth.go line 67
@@ -216,6 +218,7 @@ size, which compaction (Step 8) then compresses to 100K.
 ```
 
 **Command execution:**
+
 ```
 ## Turn 5.5 — Run tests
 - go test ./internal/middleware/ → PASS (3 tests, 0.4s)
@@ -224,6 +227,7 @@ size, which compaction (Step 8) then compresses to 100K.
 ```
 
 **Trivial exploration (grouped):**
+
 ```
 ## Turn 5.3 — Trivial exploration
 - grep "ValidateToken" → 8 results across 4 files
@@ -232,6 +236,7 @@ size, which compaction (Step 8) then compresses to 100K.
 ```
 
 **Decision:**
+
 ```
 ## Turn 5.6 — Decision
 - Chose nil check over error wrapping (minimal change for PR scope)
@@ -274,6 +279,7 @@ Model: "OK, I'll handle that in PR #850"
 ```
 
 **Why this is primary:**
+
 - The model knows what it needs better than any regex
 - No false positives (model asks for exactly what it wants)
 - No false negatives (model can search by concept, not just file path)
@@ -329,6 +335,7 @@ Returns:
 ```
 
 **Why one tool, not two:**
+
 - `notebook_list()` and `search(query)` do the same thing — return
   matching entries. One takes no query, one does.
 - Collapsing to one tool with an optional query reduces tool-surface
@@ -364,7 +371,7 @@ func notebookSearch(query string) string {
 
 **Status: experimental, best-effort, disabled by default.**
 
-`preparePrompt` *may* scan the user's new message for explicit file path
+`preparePrompt` _may_ scan the user's new message for explicit file path
 references and upgrade matching compacted entries to full. This is a
 convenience optimization, not a load-bearing mechanism. It will both
 over-inject (incidental mentions like "compare auth.go to auth_test.go
@@ -373,6 +380,7 @@ login bug we discussed," "that flaky test," function names without file
 extensions).
 
 **Strict limits to mitigate fragility:**
+
 - Only matches **full file paths with path separators** (e.g.,
   `internal/middleware/auth.go`), not bare filenames (`auth.go`)
 - Maximum **2 entries** auto-injected per turn
@@ -400,12 +408,13 @@ Context sent to model:
 
 **What gets detected (conservative):**
 
-| Pattern in user message | Tag extracted | Example |
-|-------------------------|---------------|---------|
+| Pattern in user message       | Tag extracted      | Example                                         |
+| ----------------------------- | ------------------ | ----------------------------------------------- |
 | Full file path with separator | `#file:{basename}` | "internal/middleware/auth.go" → `#file:auth.go` |
-| Explicit PR reference | `#pr:{number}` | "PR #847" → `#pr:847` |
+| Explicit PR reference         | `#pr:{number}`     | "PR #847" → `#pr:847`                           |
 
 **What does NOT get detected (by design):**
+
 - Bare filenames: "auth.go" (too many false positives)
 - Conceptual references: "the login bug" (use recall instead)
 - Function names: "ValidateToken" (use recall instead)
@@ -534,23 +543,23 @@ primary retrieval path.
 
 ### Token cost comparison: retrieval methods
 
-| Method | Tool calls | Tokens | Latency | Reliability |
-|--------|-----------|--------|---------|-------------|
-| `recall("file:auth.go")` | 1 | ~500 (result) | ~50ms (SQLite) | High — model asks for what it needs |
-| `notebook_search()` | 1 | ~200 (listing) | ~50ms (SQLite) | High — complete listing |
-| `notebook_search("decision")` | 1 | ~300 (filtered) | ~50ms (SQLite) | High — filtered listing |
-| Auto-injection (if enabled) | 0 | ~500 (in context) | 0ms | Low — regex-based, best-effort |
-| `view auth.go` (re-read) | 1 | ~8K (full file) | ~500ms | High but expensive |
-| Without notebook (current) | 0 | ~8K (already in history) | 0ms but grows | — |
+| Method                        | Tool calls | Tokens                   | Latency        | Reliability                         |
+| ----------------------------- | ---------- | ------------------------ | -------------- | ----------------------------------- |
+| `recall("file:auth.go")`      | 1          | ~500 (result)            | ~50ms (SQLite) | High — model asks for what it needs |
+| `notebook_search()`           | 1          | ~200 (listing)           | ~50ms (SQLite) | High — complete listing             |
+| `notebook_search("decision")` | 1          | ~300 (filtered)          | ~50ms (SQLite) | High — filtered listing             |
+| Auto-injection (if enabled)   | 0          | ~500 (in context)        | 0ms            | Low — regex-based, best-effort      |
+| `view auth.go` (re-read)      | 1          | ~8K (full file)          | ~500ms         | High but expensive                  |
+| Without notebook (current)    | 0          | ~8K (already in history) | 0ms but grows  | —                                   |
 
 ### Retrieval tools summary
 
-| Tool | Purpose | When | Cost | Reliability |
-|------|---------|------|------|------------|
-| `recall(query)` | Retrieve full entry by tag/file/turn/concept | Model needs old context | ~500 tok | Primary — model-driven |
-| `notebook_search(query?)` | Browse all or filter by query | Model doesn't know what's available | ~200-300 tok | Supporting — complete listing |
-| Auto-injection | Upgrade compacted entries to full | User mentions explicit file path | Free | Experimental — opt-in, best-effort |
-| mem0 sync | Cross-session search via mem0 | Need context from previous sessions | ~500 tok | Optional — requires mem0 |
+| Tool                      | Purpose                                      | When                                | Cost         | Reliability                        |
+| ------------------------- | -------------------------------------------- | ----------------------------------- | ------------ | ---------------------------------- |
+| `recall(query)`           | Retrieve full entry by tag/file/turn/concept | Model needs old context             | ~500 tok     | Primary — model-driven             |
+| `notebook_search(query?)` | Browse all or filter by query                | Model doesn't know what's available | ~200-300 tok | Supporting — complete listing      |
+| Auto-injection            | Upgrade compacted entries to full            | User mentions explicit file path    | Free         | Experimental — opt-in, best-effort |
+| mem0 sync                 | Cross-session search via mem0                | Need context from previous sessions | ~500 tok     | Optional — requires mem0           |
 
 ## Turn Boundaries and Tool-Call Pairing
 
@@ -631,27 +640,27 @@ This reuses the same `ToolCalls()` / `ToolResults()` pattern that
 
 **Why adaptive, not fixed turn count:**
 
-| Session type | Avg tokens/turn | Adaptive (25K budget) | Fixed 5 turns |
-|---|---|---|---|
-| Chat-only (no tools) | ~800 | ~30 turns | 5 turns (wasteful) |
-| Light coding | ~3K | ~8 turns | 5 turns (fine) |
-| Heavy coding (big files) | ~10K | ~2 turns | 5 turns (50K, blows budget) |
-| Mixed | ~5K | ~5 turns | 5 turns (same) |
+| Session type             | Avg tokens/turn | Adaptive (25K budget) | Fixed 5 turns               |
+| ------------------------ | --------------- | --------------------- | --------------------------- |
+| Chat-only (no tools)     | ~800            | ~30 turns             | 5 turns (wasteful)          |
+| Light coding             | ~3K             | ~8 turns              | 5 turns (fine)              |
+| Heavy coding (big files) | ~10K            | ~2 turns              | 5 turns (50K, blows budget) |
+| Mixed                    | ~5K             | ~5 turns              | 5 turns (same)              |
 
 Adaptive always stays within budget while maximizing recent context.
 
 ### Edge cases
 
-| Case | Handling |
-|------|----------|
-| Entire history fits in token budget | Send all raw, no notebook injection |
-| Budget exceeded mid-turn | Extend to next safe boundary (don't split) |
-| Turn has 10+ tool calls | Include all as raw (don't split) |
-| Cancelled mid-tool-call | `FinishReasonCanceled` counts as turn end |
-| Sub-agent sessions | Same rules apply (sub-agent has own notebook) |
-| Trivial turn (no tools, short response) | No notebook entries generated |
-| Chat-only session (small turns) | Adaptive sends more turns (up to budget) |
-| Heavy-coding session (large turns) | Adaptive sends fewer turns (within budget) |
+| Case                                    | Handling                                      |
+| --------------------------------------- | --------------------------------------------- |
+| Entire history fits in token budget     | Send all raw, no notebook injection           |
+| Budget exceeded mid-turn                | Extend to next safe boundary (don't split)    |
+| Turn has 10+ tool calls                 | Include all as raw (don't split)              |
+| Cancelled mid-tool-call                 | `FinishReasonCanceled` counts as turn end     |
+| Sub-agent sessions                      | Same rules apply (sub-agent has own notebook) |
+| Trivial turn (no tools, short response) | No notebook entries generated                 |
+| Chat-only session (small turns)         | Adaptive sends more turns (up to budget)      |
+| Heavy-coding session (large turns)      | Adaptive sends fewer turns (within budget)    |
 
 ## Notebook Generation Cost Analysis
 
@@ -661,12 +670,12 @@ into a single small model call.
 
 ### Per-event notebook generation cost
 
-| Component | Tokens (est) |
-|-----------|-------------|
+| Component                         | Tokens (est)              |
+| --------------------------------- | ------------------------- |
 | Input: event's tool call + result | ~2K-20K (varies by event) |
-| Input: notebook template | ~300 |
-| Output: notebook entry | ~300-1000 (capped) |
-| **Total per event** | **~3K-21K** |
+| Input: notebook template          | ~300                      |
+| Output: notebook entry            | ~300-1000 (capped)        |
+| **Total per event**               | **~3K-21K**               |
 
 ### Batching: one LLM call per turn, multiple entries out
 
@@ -703,11 +712,11 @@ call, not eight.
 
 ### Cost comparison: with vs without notebook
 
-| Scenario | Without notebook (current) | With notebook |
-|----------|---------------------------|---------------|
-| 20-turn session | ~200K × 20 = **~4M** | Main: ~41K × 20 = 820K + Notebook: ~15K × 20 = 300K = **~1.1M** |
-| 50-turn session | ~500K × 50 = **~25M** | Main: ~61K × 50 = 3.05M + Notebook: ~15K × 50 = 750K = **~3.8M** |
-| 100-turn session | ~1M × 100 = **~100M** | Main: ~106K × 100 = 10.6M + Notebook: ~15K × 100 = 1.5M = **~12.1M** |
+| Scenario         | Without notebook (current) | With notebook                                                        |
+| ---------------- | -------------------------- | -------------------------------------------------------------------- |
+| 20-turn session  | ~200K × 20 = **~4M**       | Main: ~41K × 20 = 820K + Notebook: ~15K × 20 = 300K = **~1.1M**      |
+| 50-turn session  | ~500K × 50 = **~25M**      | Main: ~61K × 50 = 3.05M + Notebook: ~15K × 50 = 750K = **~3.8M**     |
+| 100-turn session | ~1M × 100 = **~100M**      | Main: ~106K × 100 = 10.6M + Notebook: ~15K × 100 = 1.5M = **~12.1M** |
 
 Main per-call = notebook (10-75K, compacted) + raw (25K budget) + system (~5K) + new msg (~1K).
 Notebook gen = ~15K tokens/turn on small model.
@@ -732,11 +741,11 @@ Current Credits = 1M tokens × 100 turns × 0.1 ÷ 1000 = 10,000 Credits (100%)
 
 ### Why per-event costs less than per-turn
 
-| Approach | 100-turn session | Entries | Total notebook tokens | Gen cost |
-|----------|-----------------|---------|----------------------|----------|
-| Per-turn | 100 entries × 2000 tok | 200K | ~340 Credits |
-| Per-phase | ~150 entries × 1000 tok | 150K | ~255 Credits |
-| **Per-event** | ~200 entries × ~500 tok | **100K** | **~170 Credits** |
+| Approach      | 100-turn session        | Entries  | Total notebook tokens | Gen cost |
+| ------------- | ----------------------- | -------- | --------------------- | -------- |
+| Per-turn      | 100 entries × 2000 tok  | 200K     | ~340 Credits          |
+| Per-phase     | ~150 entries × 1000 tok | 150K     | ~255 Credits          |
+| **Per-event** | ~200 entries × ~500 tok | **100K** | **~170 Credits**      |
 
 Per-event has **more entries but smaller entries** — total notebook size is
 actually **smaller** because trivial tool calls (grep, glob, ls) get grouped
@@ -793,12 +802,12 @@ turn as raw (temporarily increasing the raw budget).
 
 ### Before vs After (estimated, needs validation)
 
-| Turns | Current (raw history, est) | With notebook (est) | Notebook gen cost | Net total |
-|-------|----------------------------|----------------------|-------------------|-----------|
-| 5     | ~40K/call × 5 = 200K       | ~31K/call × 5 = 155K | ~15K × 5 = 75K   | ~230K     |
-| 20    | ~200K/call × 20 = 4M       | ~41K/call × 20 = 820K | ~15K × 20 = 300K | ~1.1M     |
-| 50    | ~500K/call × 50 = 25M      | ~61K/call × 50 = 3.05M | ~15K × 50 = 750K | ~3.8M    |
-| 100   | ~1M/call × 100 = 100M     | ~106K/call × 100 = 10.6M | ~15K × 100 = 1.5M | ~12.1M  |
+| Turns | Current (raw history, est) | With notebook (est)      | Notebook gen cost | Net total |
+| ----- | -------------------------- | ------------------------ | ----------------- | --------- |
+| 5     | ~40K/call × 5 = 200K       | ~31K/call × 5 = 155K     | ~15K × 5 = 75K    | ~230K     |
+| 20    | ~200K/call × 20 = 4M       | ~41K/call × 20 = 820K    | ~15K × 20 = 300K  | ~1.1M     |
+| 50    | ~500K/call × 50 = 25M      | ~61K/call × 50 = 3.05M   | ~15K × 50 = 750K  | ~3.8M     |
+| 100   | ~1M/call × 100 = 100M      | ~106K/call × 100 = 10.6M | ~15K × 100 = 1.5M | ~12.1M    |
 
 Main per-call = notebook (grows with session, capped at 100K) + raw (25K budget) + system (~5K) + new msg (~1K).
 Early turns: notebook is small, most of the 25K budget is used for raw.
@@ -825,6 +834,7 @@ slog.Info("preparePrompt token estimate",
 ```
 
 Run 2-3 real Crush sessions, then analyze the logs to validate:
+
 - Average tokens per turn
 - % of tokens from old tool results
 - Actual growth curve
@@ -872,6 +882,7 @@ DROP TABLE IF EXISTS notebook_entries;
 **File**: `internal/db/sql/notebook.sql`
 
 Queries for:
+
 - Insert notebook entry
 - Insert notebook tags (batch)
 - Get entries by session (ordered by turn, then event_number)
@@ -886,6 +897,7 @@ Queries for:
 **File**: `internal/db/notebook.go`
 
 Generated by sqlc from `notebook.sql`. Functions:
+
 - `CreateNotebookEntry(ctx, params)`
 - `CreateNotebookTags(ctx, params)`
 - `GetNotebookEntries(ctx, sessionID)`
@@ -1100,6 +1112,7 @@ func (a *sessionAgent) buildNotebookMessage(
 ```
 
 **Why rebuild instead of string surgery:**
+
 - `replaceEntryInMessage` on a rendered markdown blob requires stable
   per-entry markers (e.g., `<!-- entry:id -->`) and find-and-replace —
   fiddly and error-prone.
@@ -1127,6 +1140,7 @@ func extractExplicitFilePaths(msg string) []string {
 ```
 
 Logic:
+
 - `findTurnBoundaryByTokenBudget` walks backwards from latest message,
   accumulates tokens, stops at 25K budget. Boundary always falls at a
   safe turn end (assistant message with no pending tool calls).
@@ -1234,6 +1248,7 @@ If configured with mem0, also searches across previous sessions.
 ```
 
 **Why one tool, not two:**
+
 - `notebook_list()` (no args) and `search(query)` (with args) do the same
   thing — return matching entries.
 - Collapsing to one tool with an optional query reduces tool-surface
@@ -1272,6 +1287,7 @@ func (a *sessionAgent) compactNotebook(
 ```
 
 Logic:
+
 1. Get total token count for session's notebook
 2. If <= 100K, do nothing
 3. If > 100K, compress oldest entries:
@@ -1281,6 +1297,7 @@ Logic:
    - Replace in-context entry with compressed version
 
 Compression levels:
+
 - 0: full entry (≤1000 tokens)
 - 1: tags + 1 sentence (~100 tokens)
 - 2: tags only (~20 tokens, for very old entries)
@@ -1319,6 +1336,7 @@ type Config struct {
 ```
 
 Defaults:
+
 - `Enabled`: true
 - `RawTokenBudget`: 25000 (adaptive, not fixed turn count)
 - `MaxNotebookTokens`: 100000
@@ -1331,6 +1349,7 @@ Defaults:
 **File**: `internal/agent/notebook_test.go`
 
 Tests using mock providers:
+
 - Test event classification (significant vs trivial)
 - Test that trivial turns generate no entries
 - Test that trivial tool calls are grouped into exploration mini-entry
@@ -1358,56 +1377,56 @@ Tests using mock providers:
 
 ## Commit Plan
 
-| Commit | Description |
-|--------|-------------|
+| Commit | Description                                                                          |
+| ------ | ------------------------------------------------------------------------------------ |
 | 0      | `chore: instrument preparePrompt to log token estimates` (temporary, for validation) |
-| 1      | `feat: add notebook tables migration and SQL queries` |
-| 2      | `feat: add event classification and notebook entry generation` |
-| 3      | `feat: modify preparePrompt to rebuild notebook from DB + recent turns` |
-| 4      | `feat: add recall tool for retrieving compacted context` |
-| 5      | `feat: add notebook_search tool for browsing and querying entries` |
-| 6      | `feat: update system prompt with notebook retrieval instructions` |
-| 7      | `feat: add notebook compaction for large sessions` |
-| 8      | `feat: add mem0 sync for cross-session notebook search` |
-| 9      | `feat: add notebook config options` |
-| 10     | `test: add notebook feature tests` |
-| 11     | `docs: add notebook architecture documentation` |
-| 12     | `refactor: remove temporary token instrumentation` |
+| 1      | `feat: add notebook tables migration and SQL queries`                                |
+| 2      | `feat: add event classification and notebook entry generation`                       |
+| 3      | `feat: modify preparePrompt to rebuild notebook from DB + recent turns`              |
+| 4      | `feat: add recall tool for retrieving compacted context`                             |
+| 5      | `feat: add notebook_search tool for browsing and querying entries`                   |
+| 6      | `feat: update system prompt with notebook retrieval instructions`                    |
+| 7      | `feat: add notebook compaction for large sessions`                                   |
+| 8      | `feat: add mem0 sync for cross-session notebook search`                              |
+| 9      | `feat: add notebook config options`                                                  |
+| 10     | `test: add notebook feature tests`                                                   |
+| 11     | `docs: add notebook architecture documentation`                                      |
+| 12     | `refactor: remove temporary token instrumentation`                                   |
 
 ## Expected Results (estimated — validate with Step 0)
 
-| Metric                         | Current (est)    | With notebook (est) | Savings |
-|--------------------------------|------------------|---------------------|---------|
-| 20-turn session total tokens   | ~4M              | ~1.1M               | ~72%    |
-| 50-turn session total tokens   | ~25M             | ~3.8M               | ~85%    |
-| 100-turn session total tokens  | ~100M            | ~12.1M              | ~88%    |
-| Credits/night (5M tokens)       | ~7,500 (71%)     | ~1,200 (12%)        | ~84%    |
-| Context quality                | 70% junk         | 95% useful          | —       |
-| Recall precision               | None             | Per-event (exact)   | —       |
-| Cross-session memory           | None             | Via mem0 tags       | —       |
+| Metric                        | Current (est) | With notebook (est) | Savings |
+| ----------------------------- | ------------- | ------------------- | ------- |
+| 20-turn session total tokens  | ~4M           | ~1.1M               | ~72%    |
+| 50-turn session total tokens  | ~25M          | ~3.8M               | ~85%    |
+| 100-turn session total tokens | ~100M         | ~12.1M              | ~88%    |
+| Credits/night (5M tokens)     | ~7,500 (71%)  | ~1,200 (12%)        | ~84%    |
+| Context quality               | 70% junk      | 95% useful          | —       |
+| Recall precision              | None          | Per-event (exact)   | —       |
+| Cross-session memory          | None          | Via mem0 tags       | —       |
 
 All numbers are **estimates** based on assumed ~10K tokens/turn average.
 Must be validated by Step 0 instrumentation on real sessions.
 
 ## Risks and Mitigations
 
-| Risk                              | Mitigation |
-|-----------------------------------|------------|
-| Notebook generation adds latency  | Async after response; uses small model (fast) |
-| Notebook gen not ready before next turn | Include stale turn as raw (R+1 temporarily) |
-| Summary loses critical detail     | Recall tool retrieves full content; 1000 token cap per entry |
-| Model doesn't know it can recall   | System prompt instructs model; auto-injection handles common case |
-| Model re-reads files instead of recalling | System prompt says "use recall first, 16× cheaper"; recall tool description reinforces |
-| Notebook grows too large          | Compaction at 100K tokens; compression levels 0→1→2 |
-| Tool-call sequence split          | `findTurnBoundaryByTokenBudget` + `findNextSafeBoundary` guarantee safe cut points |
-| Token estimate inaccuracy         | Adaptive budget is approximate; over-estimate is safe (fewer raw turns), under-estimate sends slightly more |
-| mem0 not configured               | Feature works without mem0 (SQLite-only mode) |
-| Notebook gen cost offsets savings | Small model (0.17× multiplier); per-event is cheaper than per-turn; net savings ~87% |
-| Existing Summarize conflicts      | Notebook replaces Summarize when enabled; fallback when disabled |
-| Too many entries for complex turns | Batched into one small model call; trivial events grouped |
-| Auto-injection injects too much   | Disabled by default; max 2 entries; only full paths with separators |
-| Auto-injection misses references  | Expected — model uses recall tool instead; auto-injection is bonus |
-| Auto-injection over-injects      | Only matches full paths with separators, not bare filenames |
+| Risk                                      | Mitigation                                                                                                  |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Notebook generation adds latency          | Async after response; uses small model (fast)                                                               |
+| Notebook gen not ready before next turn   | Include stale turn as raw (R+1 temporarily)                                                                 |
+| Summary loses critical detail             | Recall tool retrieves full content; 1000 token cap per entry                                                |
+| Model doesn't know it can recall          | System prompt instructs model; auto-injection handles common case                                           |
+| Model re-reads files instead of recalling | System prompt says "use recall first, 16× cheaper"; recall tool description reinforces                      |
+| Notebook grows too large                  | Compaction at 100K tokens; compression levels 0→1→2                                                         |
+| Tool-call sequence split                  | `findTurnBoundaryByTokenBudget` + `findNextSafeBoundary` guarantee safe cut points                          |
+| Token estimate inaccuracy                 | Adaptive budget is approximate; over-estimate is safe (fewer raw turns), under-estimate sends slightly more |
+| mem0 not configured                       | Feature works without mem0 (SQLite-only mode)                                                               |
+| Notebook gen cost offsets savings         | Small model (0.17× multiplier); per-event is cheaper than per-turn; net savings ~87%                        |
+| Existing Summarize conflicts              | Notebook replaces Summarize when enabled; fallback when disabled                                            |
+| Too many entries for complex turns        | Batched into one small model call; trivial events grouped                                                   |
+| Auto-injection injects too much           | Disabled by default; max 2 entries; only full paths with separators                                         |
+| Auto-injection misses references          | Expected — model uses recall tool instead; auto-injection is bonus                                          |
+| Auto-injection over-injects               | Only matches full paths with separators, not bare filenames                                                 |
 
 ## Open Questions (resolved)
 

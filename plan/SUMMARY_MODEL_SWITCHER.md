@@ -1,4 +1,4 @@
-# Summary Model Switcher — Implementation Plan
+# Summary Model Switcher — Implementation Plan - Implemented
 
 ## Goal
 
@@ -39,15 +39,15 @@ User types / in the editor
 
 ### What changes
 
-| Component | Change |
-|-----------|--------|
-| `config.go` | Add `SelectedModelTypeSummary = "summary"`, update stale comment |
-| `commands.go` (dialog) | Add "Switch Model Summary" command item |
-| `models.go` (dialog) | Add `id` field, `summaryMode` flag, `ModelTypeSummary`, hide toggle/help in summary mode |
-| `ui.go` | Handle the new command, open model dialog in summary mode, close correct dialog ID, guard auto-set-small |
-| `coordinator.go` | Extract shared `buildSelectedModel` from `buildAgentModels`, resolve summary model in `UpdateModels`, use `*csync.Value[Model]` for live updates |
-| `shellconfig/model.go` | Add `model summary` crushrc command (for config files) |
-| `schema.json` | Regenerate via `task schema` only if annotations change |
+| Component              | Change                                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `config.go`            | Add `SelectedModelTypeSummary = "summary"`, update stale comment                                                                                 |
+| `commands.go` (dialog) | Add "Switch Model Summary" command item                                                                                                          |
+| `models.go` (dialog)   | Add `id` field, `summaryMode` flag, `ModelTypeSummary`, hide toggle/help in summary mode                                                         |
+| `ui.go`                | Handle the new command, open model dialog in summary mode, close correct dialog ID, guard auto-set-small                                         |
+| `coordinator.go`       | Extract shared `buildSelectedModel` from `buildAgentModels`, resolve summary model in `UpdateModels`, use `*csync.Value[Model]` for live updates |
+| `shellconfig/model.go` | Add `model summary` crushrc command (for config files)                                                                                           |
+| `schema.json`          | Regenerate via `task schema` only if annotations change                                                                                          |
 
 ### Fallback chain
 
@@ -156,6 +156,7 @@ operations (`ContainsDialog`, `BringToFront`, `CloseDialog`) are
 entirely based on `Dialog.ID()` (`dialog.go:93-105`). Without an
 overridable ID, the summary dialog would identify itself as
 `"models"`, causing:
+
 - `ContainsDialog(SummaryModelsID)` to always return false
 - Duplicate stacking on reopen
 - The normal model dialog treating the summary dialog as itself
@@ -547,6 +548,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 ```
 
 This ensures:
+
 - `c.summaryModel` is non-nil when the resolver closure captures it
   (no nil-pointer panic).
 - The resolver returns a valid model immediately after construction,
@@ -564,6 +566,7 @@ it returns a valid (non-nil) model.
 
 The current `buildAgentModels` (lines 924-1019) does several things
 that a naive `resolveSelectedModel` helper would miss:
+
 - Validates the model exists in the provider catalog (lines 974-980)
 - Applies OpenRouter `:exacto` model-ID transformation (lines 985-991)
 - Wraps the model with the configured request timeout (lines 1005-1007)
@@ -780,12 +783,14 @@ func (c *coordinator) clearSummaryFailure() {
 
 Using a comparable fingerprint (`provider`, `model`, `err.Error()`)
 instead of `errors.Is` avoids two problems:
+
 - Separately constructed provider errors with identical content
   generally do not match via `errors.Is`.
 - Different model selections returning the same sentinel would
   incorrectly suppress the first error for the newly selected model.
 
 This ensures:
+
 - Summary slot absent → use small (existing behavior, unchanged).
 - Summary slot present and valid → use it.
 - Summary slot present but invalid → log error once (not per-run),
@@ -815,6 +820,7 @@ invalid, `UpdateModels` logs but doesn't return an error — so the
 user sees a false success message.
 
 The two contexts need different error semantics:
+
 - **Per-run (before every agent request):** summary failures are
   nonfatal, log only, keep previous model.
 - **Explicit selection (after dialog pick):** the UI should know
@@ -990,6 +996,7 @@ if msg.ModelType == config.SelectedModelTypeSummary {
 ```
 
 This ensures:
+
 - Explicit summary selection that fails → user sees a warning, not
   a false success.
 - Per-run `UpdateModels` → summary failures remain nonfatal.
@@ -1013,6 +1020,7 @@ dedicated `UpdateSummaryModel` handles the explicit-selection path.
 `task schema` (`Taskfile.yaml:145-151`).
 
 Actions:
+
 - Update the stale `Config.Models` comment at `config.go:746` (done
   in Step 1).
 - Update user-facing config documentation/examples to mention the
@@ -1087,38 +1095,38 @@ behavior for large/small on first use.
 
 ## Commit Plan
 
-| Commit | Description |
-|--------|-------------|
-| 1 | `feat: add summary model type to config` |
-| 2 | `feat: add model summary crushrc command` |
-| 3 | `refactor: extract buildSelectedModel from buildAgentModels` |
-| 4 | `feat: add Switch Model Summary command and dialog` |
-| 5 | `feat: wire notebook generator to summary model with live updates` |
-| 6 | `feat: add UpdateSummaryModel for explicit selection validation` |
-| 7 | `test: add summary model tests` |
+| Commit | Description                                                        |
+| ------ | ------------------------------------------------------------------ |
+| 1      | `feat: add summary model type to config`                           |
+| 2      | `feat: add model summary crushrc command`                          |
+| 3      | `refactor: extract buildSelectedModel from buildAgentModels`       |
+| 4      | `feat: add Switch Model Summary command and dialog`                |
+| 5      | `feat: wire notebook generator to summary model with live updates` |
+| 6      | `feat: add UpdateSummaryModel for explicit selection validation`   |
+| 7      | `test: add summary model tests`                                    |
 
 ## Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Existing users have no summary model | Fallback to small when slot absent — behavior unchanged |
-| `sync.Once` freezes resolver | Use `*csync.Value[Model]` instead of captured variable |
-| Summary model on different provider | Each model resolved independently — no issue |
-| Dialog ID collision | `id` field on `Models` struct, overridden in `NewSummaryModels` |
-| `handleSelectModel` doesn't close summary dialog | Close both `ModelsID` and `SummaryModelsID` unconditionally (no-op on non-open) |
-| Re-auth flow hardcodes `ModelsID` | Same fix — close both IDs in re-auth branch |
-| Auto-set-small fires on summary selection | Move small-init inside `SelectedModelTypeLarge` condition |
-| Tab help visible in summary mode | Exclude `m.keyMap.Tab` from `ShortHelp` when `summaryMode` |
-| Invalid summary model blocks primary agent | Log error, keep previous summary model, never return error from `UpdateModels` for summary failures |
-| UI shows false success on invalid explicit selection | Dedicated `UpdateSummaryModel` returns error; UI shows warning on failure |
+| Risk                                                      | Mitigation                                                                                                                                     |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Existing users have no summary model                      | Fallback to small when slot absent — behavior unchanged                                                                                        |
+| `sync.Once` freezes resolver                              | Use `*csync.Value[Model]` instead of captured variable                                                                                         |
+| Summary model on different provider                       | Each model resolved independently — no issue                                                                                                   |
+| Dialog ID collision                                       | `id` field on `Models` struct, overridden in `NewSummaryModels`                                                                                |
+| `handleSelectModel` doesn't close summary dialog          | Close both `ModelsID` and `SummaryModelsID` unconditionally (no-op on non-open)                                                                |
+| Re-auth flow hardcodes `ModelsID`                         | Same fix — close both IDs in re-auth branch                                                                                                    |
+| Auto-set-small fires on summary selection                 | Move small-init inside `SelectedModelTypeLarge` condition                                                                                      |
+| Tab help visible in summary mode                          | Exclude `m.keyMap.Tab` from `ShortHelp` when `summaryMode`                                                                                     |
+| Invalid summary model blocks primary agent                | Log error, keep previous summary model, never return error from `UpdateModels` for summary failures                                            |
+| UI shows false success on invalid explicit selection      | Dedicated `UpdateSummaryModel` returns error; UI shows warning on failure                                                                      |
 | `UpdateSummaryModel` not wired through workspace boundary | Full 7-layer implementation: Coordinator → App → Workspace interface → AppWorkspace + ClientWorkspace → Client HTTP → Server handler → Backend |
-| `buildSelectedModel` diverges from `buildAgentModels` | Extract shared helper, refactor `buildAgentModels` to use it, translate errors back to sentinels |
-| `NewSummaryModels` mutates `recent_models.large` | Private `newModelsInternal` constructor sets model type before single `setProviderItems()` call |
-| Resolver returns nil before first `UpdateModels` | Initialize `summaryModel` in `buildAgent` before installing resolver, with small model fallback |
-| Resolver closure captures nil pointer | `c.summaryModel` initialized in `c` literal before `buildAgent` runs |
-| Sub-agent builds overwrite notebook model | Guard summary init with `!isSubAgent` in `buildAgent` |
-| Repeated identical log lines per run | `summaryFailure` fingerprint suppresses duplicate logs, clears on recovery |
-| Data race on failure state | `summaryErrMu` mutex guards all access to `summaryFailure` (both write and clear); run tests with `-race` |
-| `errors.Is` unreliable for deduplication | Comparable fingerprint (`provider`, `model`, `err.Error()`) instead of `errors.Is` |
-| Absent-slot fallback resolves wrong model | `UpdateSummaryModel` resolves only `SelectedModelTypeSmall`, not `AgentCoder.Model` |
-| Schema drift | Regenerate via `task schema` only if annotations change, don't hand-edit |
+| `buildSelectedModel` diverges from `buildAgentModels`     | Extract shared helper, refactor `buildAgentModels` to use it, translate errors back to sentinels                                               |
+| `NewSummaryModels` mutates `recent_models.large`          | Private `newModelsInternal` constructor sets model type before single `setProviderItems()` call                                                |
+| Resolver returns nil before first `UpdateModels`          | Initialize `summaryModel` in `buildAgent` before installing resolver, with small model fallback                                                |
+| Resolver closure captures nil pointer                     | `c.summaryModel` initialized in `c` literal before `buildAgent` runs                                                                           |
+| Sub-agent builds overwrite notebook model                 | Guard summary init with `!isSubAgent` in `buildAgent`                                                                                          |
+| Repeated identical log lines per run                      | `summaryFailure` fingerprint suppresses duplicate logs, clears on recovery                                                                     |
+| Data race on failure state                                | `summaryErrMu` mutex guards all access to `summaryFailure` (both write and clear); run tests with `-race`                                      |
+| `errors.Is` unreliable for deduplication                  | Comparable fingerprint (`provider`, `model`, `err.Error()`) instead of `errors.Is`                                                             |
+| Absent-slot fallback resolves wrong model                 | `UpdateSummaryModel` resolves only `SelectedModelTypeSmall`, not `AgentCoder.Model`                                                            |
+| Schema drift                                              | Regenerate via `task schema` only if annotations change, don't hand-edit                                                                       |

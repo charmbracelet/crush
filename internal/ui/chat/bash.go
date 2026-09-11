@@ -78,6 +78,12 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	if params.RunInBackground {
 		toolParams = append(toolParams, "background", "true")
 	}
+	// Show how long the command ran (or has been running) beside the
+	// command: bash calls can take minutes and the bare header gives no
+	// sense of it.
+	if opts.Elapsed > 0 {
+		toolParams = append(toolParams, "took", common.FormatDuration(opts.Elapsed))
+	}
 
 	// The command is always rendered expanded (wrapped, never
 	// truncated); expansion only controls the output body.

@@ -760,6 +760,14 @@ type Config struct {
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
 	Agents map[string]Agent `json:"-"`
+
+	// LargeFallback is true when models.large was set but did not resolve
+	// against the catalog. Interactive TUI still uses the default; crush
+	// run refuses to start unless -m / --model overrides.
+	LargeFallback bool `json:"large_fallback,omitempty" jsonschema:"-"`
+
+	// LargeConfigured is the models.large value before fallback.
+	LargeConfigured SelectedModel `json:"large_configured,omitempty" jsonschema:"-"`
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators
@@ -867,6 +875,20 @@ func (c *Config) LargeModel() *catwalk.Model {
 		return nil
 	}
 	return c.GetModel(model.Provider, model.Model)
+}
+
+// ResolvedLargeLine is the default-verbosity model pin for headless crush run.
+// Missing or zero-value large selection prints "crush run: model unresolved"
+// rather than "crush run: /".
+func (c *Config) ResolvedLargeLine() string {
+	if c == nil {
+		return "crush run: model unresolved"
+	}
+	m, ok := c.Models[SelectedModelTypeLarge]
+	if !ok || m.Provider == "" || m.Model == "" {
+		return "crush run: model unresolved"
+	}
+	return fmt.Sprintf("crush run: %s/%s", m.Provider, m.Model)
 }
 
 func (c *Config) SmallModel() *catwalk.Model {

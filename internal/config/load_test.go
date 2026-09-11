@@ -1910,11 +1910,12 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 
 		resolved, resolveErr := resolveSelectedModels(cfg, knownProviders)
 		require.NoError(t, resolveErr)
-		cfg.Models[SelectedModelTypeLarge] = resolved.Large
-		cfg.Models[SelectedModelTypeSmall] = resolved.Small
+		applyResolvedModels(cfg, resolved)
 
 		// In-memory falls back to default.
 		require.True(t, resolved.LargeFallback)
+		require.Equal(t, "ghost", cfg.LargeConfigured.Provider)
+		require.Equal(t, "missing", cfg.LargeConfigured.Model)
 		require.Equal(t, "openai", cfg.Models[SelectedModelTypeLarge].Provider)
 		require.Equal(t, "large-model", cfg.Models[SelectedModelTypeLarge].Model)
 

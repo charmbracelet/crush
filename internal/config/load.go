@@ -143,8 +143,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
-	cfg.Models[SelectedModelTypeLarge] = resolved.Large
-	cfg.Models[SelectedModelTypeSmall] = resolved.Small
+	applyResolvedModels(cfg, resolved)
 
 	// Persist any fallback corrections while we still hold writeMu.
 	if resolved.LargeFallback {
@@ -782,10 +781,22 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 // resolvedModels holds the result of resolving user-configured model
 // selections against the provider catalog.
 type resolvedModels struct {
-	Large         SelectedModel
-	Small         SelectedModel
-	LargeFallback bool // true if Large was corrected to a default
-	SmallFallback bool // true if Small was corrected to a default
+	Large           SelectedModel
+	Small           SelectedModel
+	LargeConfigured SelectedModel
+	LargeFallback   bool // true if Large was corrected to a default
+	SmallFallback   bool // true if Small was corrected to a default
+}
+
+// applyResolvedModels copies resolution results onto cfg. It does not persist.
+func applyResolvedModels(cfg *Config, resolved resolvedModels) {
+	if cfg.Models == nil {
+		cfg.Models = make(map[SelectedModelType]SelectedModel)
+	}
+	cfg.Models[SelectedModelTypeLarge] = resolved.Large
+	cfg.Models[SelectedModelTypeSmall] = resolved.Small
+	cfg.LargeFallback = resolved.LargeFallback
+	cfg.LargeConfigured = resolved.LargeConfigured
 }
 
 // resolveSelectedModels validates the user's configured model selections
@@ -803,6 +814,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 
 	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
+		result.LargeConfigured = largeModelSelected
 		if largeModelSelected.Model != "" {
 			large.Model = largeModelSelected.Model
 		}

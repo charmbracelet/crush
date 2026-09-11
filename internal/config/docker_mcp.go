@@ -119,6 +119,21 @@ func (s *ConfigStore) EnableDockerMCP() error {
 	return nil
 }
 
+// SetMCPServerDisabledConfig persists the disabled flag of a single MCP
+// server in the given scope's config file. It does not touch the running
+// client; callers coordinate the runtime state separately.
+func (s *ConfigStore) SetMCPServerDisabledConfig(scope Scope, name string, disabled bool) error {
+	return s.update(scope, func(c *Config) map[string]any {
+		if c.MCP == nil {
+			c.MCP = make(map[string]MCPConfig)
+		}
+		m := c.MCP[name]
+		m.Disabled = disabled
+		c.MCP[name] = m
+		return map[string]any{"mcp." + name + ".disabled": disabled}
+	})
+}
+
 // DisableDockerMCP removes Docker MCP configuration and persists the change.
 func (s *ConfigStore) DisableDockerMCP() error {
 	return s.update(ScopeGlobal, func(c *Config) map[string]any {

@@ -83,6 +83,12 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	if params.RunInBackground {
 		options = append(options, "background", "true")
 	}
+	// Show how long the command ran (or has been running) beside the
+	// command: bash calls can take minutes and the bare header gives no
+	// sense of it.
+	if opts.Elapsed > 0 {
+		options = append(options, "took", common.FormatDuration(opts.Elapsed))
+	}
 
 	header := bashHeader(sty, opts, cappedWidth, params.Description, cmd, options)
 	if opts.Compact {

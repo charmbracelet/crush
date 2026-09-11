@@ -117,3 +117,11 @@ type testWorkspace struct {
 func (w *testWorkspace) Config() *config.Config {
 	return w.cfg
 }
+
+func (w *testWorkspace) WorkingDir() string {
+	return "/tmp/crush-test"
+}
+
+func (w *testWorkspace) AgentIsReady() bool {
+	return false
+}

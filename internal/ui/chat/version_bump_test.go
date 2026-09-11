@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -169,13 +168,13 @@ func TestBaseToolMessageItem_MutatorsBumpVersion(t *testing.T) {
 	})
 }
 
-// TestAssistantMessageItem_AnimateBumpsVersion covers the spinner
-// regression: while the assistant message is spinning, every
-// anim.StepMsg fed through Animate must bump Version() so the
-// list-level cache invalidates and the next draw re-renders the
-// advanced spinner frame. Without this bump the cached entry's
-// version stays put and the spinner appears frozen.
-func TestAssistantMessageItem_AnimateBumpsVersion(t *testing.T) {
+// TestAssistantMessageItem_AdvanceBumpsVersion covers the spinner
+// regression: while the assistant message is spinning, every clock
+// frame fed through Advance must bump Version() so the list-level
+// cache invalidates and the next draw re-renders the advanced spinner
+// frame. Without this bump the cached entry's version stays put and
+// the spinner appears frozen.
+func TestAssistantMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -187,12 +186,13 @@ func TestAssistantMessageItem_AnimateBumpsVersion(t *testing.T) {
 		},
 	}
 	item := NewAssistantMessageItem(&sty, streaming).(*AssistantMessageItem)
+	require.True(t, item.Spinning())
 
-	requireBump(t, "Animate", item, func() {
-		item.Animate(anim.StepMsg{})
+	requireBump(t, "Advance", item, func() {
+		item.Advance()
 	})
 
-	// A non-spinning item must not bump on Animate: the bump only
+	// A non-spinning item must not bump on Advance: the bump only
 	// makes sense while the spinner is live, and a stray bump on a
 	// finished item would needlessly invalidate frozen entries.
 	finished := &message.Message{
@@ -205,9 +205,10 @@ func TestAssistantMessageItem_AnimateBumpsVersion(t *testing.T) {
 	}
 	item.SetMessage(finished)
 	require.True(t, item.Finished(), "item must report Finished() once the message finishes")
+	require.False(t, item.Spinning())
 	before := item.Version()
-	item.Animate(anim.StepMsg{})
-	require.Equal(t, before, item.Version(), "Animate must not bump Version() on a non-spinning item")
+	item.Advance()
+	require.Equal(t, before, item.Version(), "Advance must not bump Version() on a non-spinning item")
 }
 
 // TestAssistantMessageItem_FinishedTransition covers §4.5.1: a
@@ -417,14 +418,13 @@ func requireNoBump(t *testing.T, name string, item versionedItem, mutate func())
 		"%s must not bump Version() (before=%d, after=%d)", name, before, after)
 }
 
-// TestBaseToolMessageItem_AnimateBumpsVersion is the spinner
+// TestBaseToolMessageItem_AdvanceBumpsVersion is the spinner
 // regression test for non-agent tools: while the tool is spinning,
-// every anim.StepMsg whose ID matches the tool must bump Version()
-// so the list-level cache invalidates and the next draw re-renders
-// the advanced spinner frame. Foreign IDs must not bump (they would
-// churn the cache on every frame), and a finished tool must not
-// bump on any ID (the entry is frozen and stays frozen).
-func TestBaseToolMessageItem_AnimateBumpsVersion(t *testing.T) {
+// every clock frame must bump Version() so the list-level cache
+// invalidates and the next draw re-renders the advanced spinner
+// frame. A finished tool must not bump (the entry is frozen and stays
+// frozen) and must report that it no longer needs frames.
+func TestBaseToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -433,43 +433,32 @@ func TestBaseToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 	v := item.(versionedItem)
 	a, ok := item.(Animatable)
 	require.True(t, ok, "base tool message item must implement Animatable")
+	require.True(t, a.Spinning())
 
-	// Spinning + matching ID → bump.
-	requireBump(t, "Animate[spinning,own ID]", v, func() {
-		a.Animate(anim.StepMsg{ID: tc.ID})
+	requireBump(t, "Advance[spinning]", v, func() {
+		a.Advance()
 	})
 
-	// Spinning + foreign ID → no bump. Routing this StepMsg here at
-	// all would mean a future chat.Animate refactor; the item must
-	// be defensive against it so we don't churn the list cache.
-	requireNoBump(t, "Animate[spinning,foreign ID]", v, func() {
-		a.Animate(anim.StepMsg{ID: "some-other-tool"})
-	})
-
-	// Finished → no bump on any ID. The entry is frozen; a stray
-	// bump would needlessly invalidate frozen entries.
+	// Finished → no bump. The entry is frozen; a stray bump would
+	// needlessly invalidate frozen entries.
 	tcFinished := tc
 	tcFinished.Finished = true
 	item.SetToolCall(tcFinished)
 	item.SetResult(&message.ToolResult{ToolCallID: tc.ID, Content: "ok"})
 	require.True(t, item.Finished(), "tool must report Finished() once the result lands")
+	require.False(t, a.Spinning(), "finished tool must not request frames")
 
-	requireNoBump(t, "Animate[finished,own ID]", v, func() {
-		a.Animate(anim.StepMsg{ID: tc.ID})
-	})
-	requireNoBump(t, "Animate[finished,foreign ID]", v, func() {
-		a.Animate(anim.StepMsg{ID: "some-other-tool"})
+	requireNoBump(t, "Advance[finished]", v, func() {
+		a.Advance()
 	})
 }
 
-// TestAgentToolMessageItem_AnimateBumpsVersion is the spinner
-// regression test for agent tools. The parent must bump on both
-// the parent-tick branch (msg.ID == parent.ID()) and the
-// nested-tick branch (msg.ID == nested.ID()) because the list
-// only checks the parent's version — nested tools are not list
-// entries of their own. Unrelated IDs must not bump, and a parent
-// with a result must not bump on any ID.
-func TestAgentToolMessageItem_AnimateBumpsVersion(t *testing.T) {
+// TestAgentToolMessageItem_AdvanceBumpsVersion is the spinner
+// regression test for agent tools. One clock frame must advance the
+// parent and every spinning nested tool and bump the parent, because
+// the list only checks the parent's version — nested tools are not
+// list entries of their own. A parent with a result must not bump.
+func TestAgentToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -479,42 +468,32 @@ func TestAgentToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 	childTC := message.ToolCall{ID: "agent-child", Name: "bash", Input: `{}`, Finished: false}
 	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, "")
 	parent.AddNestedTool(child)
+	childV := child.(versionedItem)
 
-	// Spinning + parent's own ID → parent bumps.
-	requireBump(t, "Animate[spinning,parent ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+	requireBump(t, "Advance[spinning,parent]", parent, func() {
+		parent.Advance()
+	})
+	// The nested child must have advanced in the same frame.
+	requireBump(t, "Advance[spinning,nested]", childV, func() {
+		parent.Advance()
 	})
 
-	// Spinning + nested child ID → parent bumps. The list only
-	// invalidates on the parent; without this the nested
-	// spinner's frame would never reach the screen even though
-	// the nested anim's step has advanced.
-	requireBump(t, "Animate[spinning,nested ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: childTC.ID})
-	})
-
-	// Spinning + unrelated ID → no bump.
-	requireNoBump(t, "Animate[spinning,foreign ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: "unrelated"})
-	})
-
-	// Once the parent has a result, neither branch bumps.
+	// Once the parent has a result, nothing bumps.
 	parent.SetResult(&message.ToolResult{ToolCallID: parentTC.ID, Content: "done"})
-	requireNoBump(t, "Animate[finished,parent ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+	require.False(t, parent.Spinning())
+	requireNoBump(t, "Advance[finished,parent]", parent, func() {
+		parent.Advance()
 	})
-	requireNoBump(t, "Animate[finished,nested ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: childTC.ID})
+	requireNoBump(t, "Advance[finished,nested]", childV, func() {
+		parent.Advance()
 	})
 }
 
-// TestAgenticFetchToolMessageItem_AnimateBumpsVersion is the
-// agentic-fetch counterpart of the agent-tool Animate bump test.
-// Without an explicit override the embedded base Animate would
-// drop nested-child StepMsgs at anim.Animate's ID check and never
-// bump the parent on its own ticks; this test locks in the
-// override.
-func TestAgenticFetchToolMessageItem_AnimateBumpsVersion(t *testing.T) {
+// TestAgenticFetchToolMessageItem_AdvanceBumpsVersion is the
+// agentic-fetch counterpart of the agent-tool Advance bump test.
+// Without an explicit override the embedded base Advance would never
+// advance the nested children; this test locks in the override.
+func TestAgenticFetchToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -524,23 +503,21 @@ func TestAgenticFetchToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 	childTC := message.ToolCall{ID: "fetch-child", Name: "fetch", Input: `{}`, Finished: false}
 	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, "")
 	parent.AddNestedTool(child)
+	childV := child.(versionedItem)
 
-	requireBump(t, "Animate[spinning,parent ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+	requireBump(t, "Advance[spinning,parent]", parent, func() {
+		parent.Advance()
 	})
-	requireBump(t, "Animate[spinning,nested ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: childTC.ID})
-	})
-	requireNoBump(t, "Animate[spinning,foreign ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: "unrelated"})
+	requireBump(t, "Advance[spinning,nested]", childV, func() {
+		parent.Advance()
 	})
 
 	parent.SetResult(&message.ToolResult{ToolCallID: parentTC.ID, Content: "done"})
-	requireNoBump(t, "Animate[finished,parent ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+	requireNoBump(t, "Advance[finished,parent]", parent, func() {
+		parent.Advance()
 	})
-	requireNoBump(t, "Animate[finished,nested ID]", parent, func() {
-		parent.Animate(anim.StepMsg{ID: childTC.ID})
+	requireNoBump(t, "Advance[finished,nested]", childV, func() {
+		parent.Advance()
 	})
 }
 

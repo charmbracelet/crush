@@ -468,10 +468,10 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 }
 
 // TestSetSessionMessagesGatesAnimationsOnBusy verifies that reloading a
-// session does not start spinner animations when the agent is not busy.
+// session does not run spinner animations when the agent is not busy.
 // A session that was killed mid-generation can persist an assistant message
-// with no Finish part, which still reports isSpinning() even though nothing
-// is running. Starting animations for it would leave a ghost "working"
+// with no Finish part, which still reports Spinning() even though nothing
+// is running. Arming the clock for it would leave a ghost "working"
 // spinner after the session is reloaded.
 func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 	pinTTLs(t)
@@ -492,14 +492,21 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 		},
 	}
 
-	// When the agent is not busy, setSessionMessages must not start animations.
+	// When the agent is not busy, setSessionMessages must freeze the
+	// animation clock so the ghost spinner stays still.
 	cmd := m.setSessionMessages(msgs)
 	require.Nil(t, cmd, "setSessionMessages must not start animations when agent is idle")
+	require.False(t, m.chat.animAllowed, "an idle session reload must freeze the animation clock")
+	require.Nil(t, m.chat.EnsureAnimating(), "a frozen clock must not arm while idle")
+	require.False(t, m.chat.animRunning)
 
-	// When the agent is busy, animations should start.
+	// When the agent is busy, the clock may run for the same message.
 	warmCaches(m, true)
 	cmd = m.setSessionMessages(msgs)
-	require.NotNil(t, cmd, "setSessionMessages must start animations when agent is busy")
+	require.Nil(t, cmd, "setSessionMessages must not arm the clock itself")
+	require.True(t, m.chat.animAllowed, "setSessionMessages must allow animations when agent is busy")
+	require.NotNil(t, m.chat.EnsureAnimating(), "a visible spinning message must arm the clock")
+	require.True(t, m.chat.animRunning)
 }
 
 // TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for

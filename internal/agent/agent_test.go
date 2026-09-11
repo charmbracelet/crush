@@ -893,6 +893,294 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	require.Equal(t, 1, syntheticCount, "expected exactly one synthetic result for the orphaned call")
 }
 
+// requireToolCallAdjacency asserts that every assistant message in history
+// with tool calls is immediately followed by a tool message that responds to
+// each of those calls, with no other message in between. This is what
+// strict-adjacency providers (e.g. Kimi, DeepSeek) require.
+func requireToolCallAdjacency(t *testing.T, history []fantasy.Message) {
+	t.Helper()
+	for i, msg := range history {
+		if msg.Role != fantasy.MessageRoleAssistant {
+			continue
+		}
+		var callIDs []string
+		for _, part := range msg.Content {
+			if tc, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](part); ok {
+				callIDs = append(callIDs, tc.ToolCallID)
+			}
+		}
+		if len(callIDs) == 0 {
+			continue
+		}
+		require.Less(t, i+1, len(history), "assistant with tool calls must be followed by a tool message")
+		next := history[i+1]
+		require.Equal(t, fantasy.MessageRoleTool, next.Role,
+			"assistant with tool calls %v must be immediately followed by a tool message, got %q", callIDs, next.Role)
+		responded := make(map[string]bool, len(callIDs))
+		for _, part := range next.Content {
+			if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+				responded[tr.ToolCallID] = true
+			}
+		}
+		for _, id := range callIDs {
+			require.True(t, responded[id],
+				"tool result for call %q must immediately follow its assistant message", id)
+		}
+	}
+}
+
+func TestPreparePrompt_NonAdjacentToolResults(t *testing.T) {
+	// A user message written between an assistant's tool call and its
+	// result (e.g. resuming while a tool is still running) must not end up
+	// between the two in the built history.
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "run commands"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{
+				ID:       "call_A",
+				Name:     "bash",
+				Input:    `{"command":"date"}`,
+				Finished: true,
+			},
+			message.ToolCall{
+				ID:       "call_B",
+				Name:     "bash",
+				Input:    `{"command":"uptime"}`,
+				Finished: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// Interleaved user message written while the tools were still running.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "are we done?"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Results arrive late, after the interleaved user message.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call_A",
+				Name:       "bash",
+				Content:    "Fri May 2 21:00:00 UTC 2026",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call_B",
+				Name:       "bash",
+				Content:    "21:00  up 3 days",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	require.Equal(t, message.User, msgs[2].Role, "interleaved user should be between assistant and results in DB order")
+
+	history, _ := agent.preparePrompt(msgs, false)
+
+	requireToolCallAdjacency(t, history)
+
+	// The interleaved user message must still be present, after the results.
+	var foundInterleaved bool
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleUser {
+			continue
+		}
+		for _, part := range msg.Content {
+			if text, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok && text.Text == "are we done?" {
+				foundInterleaved = true
+			}
+		}
+	}
+	require.True(t, foundInterleaved, "interleaved user message must not be dropped")
+}
+
+func TestPreparePrompt_ResultBeforeAssistant(t *testing.T) {
+	// A tool result written before its assistant message (e.g. concurrent
+	// writes) must be emitted after the assistant, exactly once, not at its
+	// stored position.
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "call_X", Name: "bash", Content: "result"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call_X", Name: "bash", Input: `{}`, Finished: true},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs, false)
+
+	requireToolCallAdjacency(t, history)
+
+	resultCount := 0
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok && tr.ToolCallID == "call_X" {
+				resultCount++
+			}
+		}
+	}
+	require.Equal(t, 1, resultCount, "result must be emitted exactly once")
+}
+
+func TestPreparePrompt_BundledResultsAcrossAssistants(t *testing.T) {
+	// A single tool message can hold results for calls issued by different
+	// assistant messages. Each assistant must be followed by its own
+	// results, and no result may be emitted twice.
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call_1", Name: "bash", Input: `{}`, Finished: true},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "and now?"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call_2", Name: "view", Input: `{"path":"/foo"}`, Finished: true},
+		},
+	})
+	require.NoError(t, err)
+
+	// Both results land in the same tool message, out of order.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "call_2", Name: "view", Content: "file contents"},
+			message.ToolResult{ToolCallID: "call_1", Name: "bash", Content: "output"},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs, false)
+
+	requireToolCallAdjacency(t, history)
+
+	counts := make(map[string]int)
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+				counts[tr.ToolCallID]++
+			}
+		}
+	}
+	require.Equal(t, map[string]int{"call_1": 1, "call_2": 1}, counts,
+		"each result must be emitted exactly once, next to its assistant")
+}
+
+func TestPreparePrompt_DropsOrphanedToolResults(t *testing.T) {
+	// A tool result whose call is not in the history (e.g. the assistant
+	// message was cut off by a session summary) must be dropped instead of
+	// producing an unanswerable tool message.
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "call_gone", Name: "bash", Content: "output"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "hello"},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs, false)
+
+	for _, msg := range history {
+		require.NotEqual(t, fantasy.MessageRoleTool, msg.Role, "orphaned tool results must be dropped")
+	}
+}
+
 func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, nil, "test prompt")

@@ -946,6 +946,26 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	return nil
 }
 
+// ValidateReasoningEffort checks that effort is a reasoning level the
+// given provider/model supports. It returns an error listing the accepted
+// levels when the model cannot use it.
+func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error {
+	model := c.GetModel(provider, modelID)
+	if model == nil {
+		return fmt.Errorf("model %q not found for provider %q", modelID, provider)
+	}
+	if len(model.ReasoningLevels) == 0 {
+		return fmt.Errorf("model %q does not support reasoning effort", modelID)
+	}
+	if slices.Contains(model.ReasoningLevels, effort) {
+		return nil
+	}
+	return fmt.Errorf(
+		"model %q does not support reasoning effort %q, accepted values: %s",
+		modelID, effort, strings.Join(model.ReasoningLevels, ", "),
+	)
+}
+
 // IsModelAvailable returns true if the provider is enabled and the model
 // exists in its catalog. Unlike GetModel, it rejects disabled providers.
 func (c *Config) IsModelAvailable(provider, model string) bool {

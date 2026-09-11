@@ -922,9 +922,7 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
 		wasFollowing := m.follow
-		if !expandable.ToggleExpanded() {
-			m.ScrollToIndex(m.list.Selected())
-		}
+		expandable.ToggleExpanded()
 		if wasFollowing {
 			m.ScrollToBottom()
 		}
@@ -1053,9 +1051,7 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 		if handled {
 			if expandable, ok := selectedItem.(chat.Expandable); ok {
 				wasFollowing := m.follow
-				if !expandable.ToggleExpanded() {
-					m.ScrollToIndex(m.list.Selected())
-				}
+				expandable.ToggleExpanded()
 				if wasFollowing {
 					m.ScrollToBottom()
 				}

@@ -1570,6 +1570,12 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			for _, part := range aiMsg.Content {
 				tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part)
 				if !ok {
+					// Tool-role ToAIMessage only emits ToolResultParts today;
+					// log so unexpected parts do not vanish silently.
+					slog.Warn(
+						"Dropping unexpected non-tool-result part from tool message",
+						"part_type", fmt.Sprintf("%T", part),
+					)
 					continue
 				}
 				if _, known := knownToolCallIDs[tr.ToolCallID]; !known {

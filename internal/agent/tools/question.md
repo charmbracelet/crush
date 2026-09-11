@@ -3,11 +3,11 @@ when you need clarification, confirmation, or a choice before proceeding.
 
 ## How it works
 
-Always provide a `questions` array with at least one item. A single item
-renders as a plain question; multiple items render as a tabbed form with
-a confirmation screen at the end.
+Provide a `questions` array with at least one item; multiple items
+render as a tabbed form ending in a confirmation screen.
 
 Every question MUST include:
+
 - `type` — `yes_no`, `single_choice`, `multi_choice`, or `free_text`
 - `question` — a short, direct question (one line)
 - `description` — markdown context shown below the question with details,
@@ -45,54 +45,59 @@ Single and multi choice questions automatically include a free-text
 fill-in option so the user can type a custom answer. Do not add an
 "Other", "Something else", or "Custom" choice manually.
 
-## Confirmation screen (batches only)
-
-When asking multiple questions, a confirmation tab is **always shown**
-after all questions are answered. The user sees a summary of their answers
-and must confirm before submitting. If they say no, they go back to editing.
-
-- `confirm_title`: a short question like "Ready to go?" or "Sound good?"
-- `confirm_description`: summarize what will happen based on the expected
-  answers. Write it as if you already know what they'll pick. This gives
-  the user context for their confirmation decision.
-
 ## Multiple questions
 
-When providing multiple questions, each item can include an optional
-`label` (3 words max) used as the tab header. If omitted, the first 3
-words of `question` are used.
+Each item can include an optional `label` (3 words max) used as the tab
+header; if omitted, the first 3 words of `question` are used. For
+batches, `confirm_title` is a short question like "Ready to go?" and
+`confirm_description` should summarize what will happen based on the
+expected answers, written as if you already know what they'll pick.
 
-Example — single question:
+Example:
+
 ```json
 {
-  "questions": [
-    {"type": "yes_no", "question": "Enable caching?", "description": "Reduces latency for repeated queries but adds invalidation complexity."}
-  ]
+	"questions": [
+		{
+			"type": "yes_no",
+			"question": "Enable caching?",
+			"description": "Reduces latency for repeated queries but adds invalidation complexity."
+		}
+	]
 }
 ```
 
-Example — multiple questions with confirmation:
+Batched example (tabbed form + confirmation screen):
+
 ```json
 {
-  "questions": [
-    {"label": "Database", "type": "single_choice", "question": "Which database?", "description": "PostgreSQL for relational data, MongoDB for documents.", "choices": [{"id": "pg", "label": "PostgreSQL"}, {"id": "mongo", "label": "MongoDB"}]},
-    {"label": "Caching", "type": "yes_no", "question": "Enable caching?", "description": "Reduces latency for repeated queries but adds invalidation complexity."},
-    {"label": "Concerns", "type": "free_text", "question": "Any concerns about this approach?", "description": "Share any reservations or edge cases we should consider."}
-  ],
-  "confirm_title": "Ready to configure?",
-  "confirm_description": "We'll set up PostgreSQL with query caching enabled."
+	"questions": [
+		{
+			"type": "single_choice",
+			"question": "Which database?",
+			"label": "Database",
+			"description": "Determines the driver and migration target.",
+			"choices": [
+				{"id": "sqlite", "label": "SQLite"},
+				{"id": "postgres", "label": "PostgreSQL"}
+			]
+		},
+		{
+			"type": "yes_no",
+			"question": "Enable foreign keys?",
+			"description": "Recommended unless bulk import order is unmanaged."
+		}
+	],
+	"confirm_title": "Ready to go?",
+	"confirm_description": "Creates the database with the chosen engine and settings."
 }
 ```
 
 ## When to use
 
-- Confirm destructive or ambiguous actions
-- User's request has multiple valid interpretations
-- Need the user to pick from options
+- Confirm destructive or ambiguous actions, or pick between
+  interpretations
 - Gather multiple related answers at once
-
-## When NOT to use
-
-- Questions answerable by reading code or docs
-- Information obtainable via other tools
-- Asking permission (use the permission system)
+- NOT for questions answerable by reading code or docs, information
+  obtainable via other tools, or permission requests (use the
+  permission system)

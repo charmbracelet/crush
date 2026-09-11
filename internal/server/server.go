@@ -227,6 +227,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/docker/disable", c.handlePostWorkspaceMCPDisableDocker)
 	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/disabled", c.handleGetWorkspaceMCPServersDisabled)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/disabled", c.handlePostWorkspaceMCPSetServerDisabled)
+	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/config-disabled", c.handlePostWorkspaceMCPSetServerConfigDisabled)
 	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/enabled", c.handleGetWorkspaceMCPServersEnabled)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/start", c.handlePostWorkspaceMCPStartServer)
 	mux.Handle("/v1/docs/", httpswagger.WrapHandler)

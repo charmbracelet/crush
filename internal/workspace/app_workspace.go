@@ -490,6 +490,12 @@ func (w *AppWorkspace) MCPSetServerDisabled(ctx context.Context, name string, di
 	return w.app.Sessions.SetMCPServerDisabled(ctx, name, disabled)
 }
 
+// MCPSetServerConfigDisabled toggles an MCP server's disabled flag in the
+// global config and applies the change to the running client.
+func (w *AppWorkspace) MCPSetServerConfigDisabled(ctx context.Context, name string, disabled bool) error {
+	return mcptools.SetConfigDisabled(ctx, w.store, config.ScopeGlobal, name, disabled)
+}
+
 // MCPStartServer starts the named MCP server even when its config entry is
 // disabled. The repository-scoped enabled override recorded by
 // MCPSetServerDisabled makes the start survive restarts. Config files are

@@ -649,6 +649,20 @@ func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name strin
 // persistOAuthToken saves the OAuth token from a session to the global
 // config so it survives restarts.
 
+// SetConfigDisabled persists the disabled flag of a single MCP server in
+// the given config scope and applies the change to the running client:
+// disabling tears the connection down, enabling starts it even if it was
+// disabled before.
+func SetConfigDisabled(ctx context.Context, cfg *config.ConfigStore, scope config.Scope, name string, disabled bool) error {
+	if err := cfg.SetMCPServerDisabledConfig(scope, name, disabled); err != nil {
+		return err
+	}
+	if disabled {
+		return DisableSingle(cfg, name)
+	}
+	return InitializeSingleForced(ctx, name, cfg)
+}
+
 // DisableSingle disables and closes a single MCP client by name.
 func DisableSingle(cfg *config.ConfigStore, name string) error {
 	// teardown bumps the generation, invalidating any in-flight connect, and

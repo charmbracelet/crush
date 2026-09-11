@@ -21,35 +21,66 @@ type MCPToggleItem struct {
 	// Disabled is the repository-scoped override: when true the server's
 	// tools are hidden from every session in this repository.
 	Disabled bool
-	// ConfigDisabled is true when the server is disabled in the config
-	// (global or local) without a repository-scoped enabled override.
-	// Toggling it on starts the server at runtime and persists an enabled
-	// override.
+	// ConfigDisabled is the server's disabled flag in the config, before
+	// any repository-scoped override. The Global scope reads and writes
+	// this flag.
 	ConfigDisabled bool
+	// EnabledOverride is the repository-scoped enabled override: a config
+	// server enabled locally for this repository. Only the Local scope
+	// considers it.
+	EnabledOverride bool
 	// Status is the human-readable connection status.
 	Status string
 }
 
-// ActionToggleMCP is sent when the user toggles an MCP server for the
-// current repository. The model persists the new state.
+// localDisabled returns the effective local state: a config-disabled
+// server stays disabled locally unless the repository enabled override
+// turned it on.
+func (i MCPToggleItem) localDisabled() bool {
+	return i.Disabled || (i.ConfigDisabled && !i.EnabledOverride)
+}
+
+// ActionToggleMCP is sent when the user toggles an MCP server. Local
+// toggles persist a repository-scoped override; global toggles write the
+// disabled flag to the global config.
 type ActionToggleMCP struct {
 	Name     string
 	Disabled bool
+	Global   bool
 }
 
-// MCPToggles lets the user enable and disable MCP servers for the current
-// repository. The overrides are repository-scoped and never written to
-// config.
+// MCPToggleScope selects which store a toggle affects.
+type MCPToggleScope int
+
+const (
+	// MCPToggleScopeLocal persists repository-scoped overrides.
+	MCPToggleScopeLocal MCPToggleScope = iota
+	// MCPToggleScopeGlobal writes the disabled flag to the config.
+	MCPToggleScopeGlobal
+)
+
+// String returns the radio label for the scope.
+func (s MCPToggleScope) String() string {
+	if s == MCPToggleScopeGlobal {
+		return "Global"
+	}
+	return "Local"
+}
+
+// MCPToggles lets the user enable and disable MCP servers, either for
+// the current repository (Local, the default) or in the config (Global).
 type MCPToggles struct {
 	com    *common.Common
 	width  int
 	items  []MCPToggleItem
 	cursor int
+	scope  MCPToggleScope
 	help   help.Model
 	keyMap struct {
 		Up     key.Binding
 		Down   key.Binding
 		Toggle key.Binding
+		Scope  key.Binding
 		Close  key.Binding
 	}
 }
@@ -80,6 +111,10 @@ func NewMCPToggles(com *common.Common, items []MCPToggleItem) *MCPToggles {
 		key.WithKeys("enter", " ", "space"),
 		key.WithHelp("enter", "toggle"),
 	)
+	m.keyMap.Scope = key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "switch scope"),
+	)
 	m.keyMap.Close = CloseKey
 
 	return m
@@ -95,6 +130,11 @@ func (m *MCPToggles) Items() []MCPToggleItem {
 	return m.items
 }
 
+// Scope returns the selected toggle scope.
+func (m *MCPToggles) Scope() MCPToggleScope {
+	return m.scope
+}
+
 // HandleMsg implements Dialog.
 func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -104,27 +144,41 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 			m.cursor = max(0, m.cursor-1)
 		case key.Matches(msg, m.keyMap.Down):
 			m.cursor = min(len(m.items)-1, m.cursor+1)
+		case key.Matches(msg, m.keyMap.Scope):
+			if m.scope == MCPToggleScopeLocal {
+				m.scope = MCPToggleScopeGlobal
+			} else {
+				m.scope = MCPToggleScopeLocal
+			}
 		case key.Matches(msg, m.keyMap.Toggle):
 			if m.cursor < 0 || m.cursor >= len(m.items) {
 				return nil
 			}
 			item := m.items[m.cursor]
-			// Toggle based on the effective state: a config-disabled
-			// server starts disabled even without a repository override.
-			if item.ConfigDisabled || item.Disabled {
-				m.items[m.cursor].Disabled = false
-			} else {
-				m.items[m.cursor].Disabled = true
+			// Toggle based on the effective state for the active scope:
+			// local considers the repository overrides, global reads the
+			// config's raw disabled flag.
+			currentlyDisabled := item.localDisabled()
+			if m.scope == MCPToggleScopeGlobal {
+				currentlyDisabled = item.ConfigDisabled
 			}
-			// A config-disabled server must be started at runtime when
-			// enabled; surface that immediately instead of waiting for
-			// the connection state event.
-			if item.ConfigDisabled && !m.items[m.cursor].Disabled {
-				m.items[m.cursor].Status = "starting..."
+			newState := !currentlyDisabled
+			if m.scope == MCPToggleScopeGlobal {
+				m.items[m.cursor].ConfigDisabled = newState
+			} else {
+				m.items[m.cursor].Disabled = newState
+				// A config-disabled server enabled locally must be started
+				// at runtime; surface that immediately instead of waiting
+				// for the connection state event.
+				if item.ConfigDisabled && !newState {
+					m.items[m.cursor].EnabledOverride = true
+					m.items[m.cursor].Status = "starting..."
+				}
 			}
 			return ActionToggleMCP{
 				Name:     item.Name,
-				Disabled: m.items[m.cursor].Disabled,
+				Disabled: newState,
+				Global:   m.scope == MCPToggleScopeGlobal,
 			}
 		case key.Matches(msg, m.keyMap.Close):
 			return ActionClose{}
@@ -137,9 +191,7 @@ func (m *MCPToggles) HandleMsg(msg tea.Msg) Action {
 func (m *MCPToggles) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 	m.width = max(0, min(m.requiredWidth(t), area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	dialogStyle := t.Dialog.View.Width(m.width)
-	view := dialogStyle.Render(m.dialogContent())
-	DrawCenter(scr, area, view)
+	DrawCenter(scr, area, m.dialogContent())
 	return nil
 }
 
@@ -159,22 +211,25 @@ func (m *MCPToggles) requiredWidth(t *styles.Styles) int {
 func (m *MCPToggles) dialogContent() string {
 	t := m.com.Styles
 	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
-	elements := []string{
-		m.headerContent(),
-		m.innerContent(),
-		renderDialogHelp(t, &m.help, m, innerWidth),
-	}
-	return strings.Join(elements, "\n")
+	rc := NewRenderContext(t, m.width)
+	rc.Title = "Toggle MCPs"
+	rc.TitleInfo = m.scopeRadioView(t)
+	rc.AddPart(m.innerContent())
+	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
+	return rc.Render()
 }
 
-func (m *MCPToggles) headerContent() string {
-	t := m.com.Styles
-	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View.Width(m.width)
-	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-
-	title := "Toggle MCPs"
-	return common.DialogTitle(t, titleStyle.Render(title), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+// scopeRadioView renders the Local/Global radio selector, mirroring the
+// command palette's System/User switch on the title line.
+func (m *MCPToggles) scopeRadioView(t *styles.Styles) string {
+	radio := func(s MCPToggleScope) string {
+		bullet := t.Radio.Off
+		if s == m.scope {
+			bullet = t.Radio.On
+		}
+		return bullet.Render() + t.Radio.Label.Padding(0, 1).Render(s.String())
+	}
+	return " " + radio(MCPToggleScopeLocal) + " " + radio(MCPToggleScopeGlobal)
 }
 
 func (m *MCPToggles) innerContent() string {
@@ -231,10 +286,17 @@ func (m *MCPToggles) innerContent() string {
 // itemStatus returns the right-hand status label for an item. The live
 // connection state speaks for itself: a config-disabled server that was
 // runtime-enabled shows "starting..."/"connected", an untouched one shows
-// "disabled" via its connection state. Only a repository override forces
-// the "disabled" label over a live connection.
+// "disabled" via its connection state. Only a repository override (local
+// scope) or the config flag (global scope) forces the "disabled" label
+// over a live connection.
 func (m *MCPToggles) itemStatus(item MCPToggleItem) string {
-	if item.Disabled {
+	if m.scope == MCPToggleScopeGlobal {
+		if item.ConfigDisabled {
+			return "disabled"
+		}
+		return item.Status
+	}
+	if item.localDisabled() {
 		return "disabled"
 	}
 	return item.Status
@@ -259,5 +321,5 @@ func (m *MCPToggles) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (m *MCPToggles) ShortHelp() []key.Binding {
-	return []key.Binding{m.keyMap.Up, m.keyMap.Down, m.keyMap.Toggle, m.keyMap.Close}
+	return []key.Binding{m.keyMap.Up, m.keyMap.Down, m.keyMap.Toggle, m.keyMap.Scope, m.keyMap.Close}
 }

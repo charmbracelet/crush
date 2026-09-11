@@ -406,6 +406,39 @@ func (c *controllerV1) handlePostWorkspaceMCPSetServerDisabled(w http.ResponseWr
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceMCPSetServerConfigDisabled toggles an MCP server's
+// disabled flag in the global config.
+//
+//	@Summary		Toggle an MCP server in the config
+//	@Tags			mcp
+//	@Accept			json
+//	@Param			id		path	string						true	"Workspace ID"
+//	@Param			request	body	proto.MCPSetServerDisabledRequest	true	"Toggle request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/config-disabled [post]
+func (c *controllerV1) handlePostWorkspaceMCPSetServerConfigDisabled(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.MCPSetServerDisabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	if req.Name == "" {
+		jsonError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := c.backend.SetMCPServerConfigDisabled(r.Context(), id, req.Name, req.Disabled); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceMCPServersEnabled returns the MCP servers with a
 // repository-scoped enabled override for the workspace's repository.
 //

@@ -187,6 +187,9 @@ func TestYourFunction(t *testing.T) {
   `docs:`, `sec:`, etc).
 - Try to keep commits to one line, not including your attribution. Only use
   multi-line commits when additional context is truly necessary.
+- NEVER force-push. To update a stacked branch onto a new base, merge the
+  base branch into it (`git merge <base>`) instead of rebasing — merge
+  commits are fine since PRs are squash-merged.
 
 ## Working on the TUI (UI)
 

@@ -36,7 +36,11 @@ func Elapsed() string {
 	if !turnTimer.active {
 		return ""
 	}
-	elapsed := time.Since(turnTimer.startTime)
+	return FormatDuration(time.Since(turnTimer.startTime))
+}
+
+// FormatDuration formats a duration as a human friendly string.
+func FormatDuration(elapsed time.Duration) string {
 	totalSeconds := int(elapsed.Seconds())
 	minutes := int(elapsed.Minutes())
 	hours := int(elapsed.Hours())

@@ -15,6 +15,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/keyring"
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
@@ -568,7 +569,11 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 
 	switch v := apiKey.(type) {
 	case string:
-		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
+		ref, err := s.storeSecret(providerID, v)
+		if err != nil {
+			return err
+		}
+		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), ref); err != nil {
 			return fmt.Errorf("failed to save api key to config file: %w", err)
 		}
 		setKeyOrToken = func() { providerConfig.APIKey = v }
@@ -577,9 +582,13 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		// token exchange cannot land on top of a credential the user just
 		// obtained interactively — which would silently invalidate the
 		// login they only just completed.
+		accessTokenRef, err := s.storeSecret(providerID, v.AccessToken)
+		if err != nil {
+			return err
+		}
 		if err := s.withRefreshLock(providerID, func() error {
 			return s.SetConfigFields(scope, map[string]any{
-				fmt.Sprintf("providers.%s.api_key", providerID): v.AccessToken,
+				fmt.Sprintf("providers.%s.api_key", providerID): accessTokenRef,
 				fmt.Sprintf("providers.%s.oauth", providerID):   v,
 			})
 		}); err != nil {
@@ -740,12 +749,51 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	}
 
 	if err := s.SetConfigFields(scope, map[string]any{
-		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
+		fmt.Sprintf("providers.%s.api_key", providerID): s.refreshedSecretValue(providerID, refreshedToken.AccessToken),
 		fmt.Sprintf("providers.%s.oauth", providerID):   refreshedToken,
 	}); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 	return nil
+}
+
+// storeSecret persists a secret to the system keyring when one is
+// available and returns the config-file value to persist instead of the
+// secret itself: a keyring reference when the secret was stored, or the
+// secret itself when no usable keyring exists (headless Linux,
+// containers) or the backend refuses the write. The latter keeps the
+// historical plaintext behavior; saving the key must not fail just
+// because an optional convenience backend is broken.
+func (s *ConfigStore) storeSecret(providerID, secret string) (string, error) {
+	if !keyring.Available() {
+		return secret, nil
+	}
+	if err := keyring.Set(providerID, secret); err != nil {
+		slog.Warn("Failed to store API key in system keyring; falling back to config file", "provider", providerID, "error", err)
+		return secret, nil
+	}
+	return keyring.Ref(providerID), nil
+}
+
+// refreshedSecretValue returns the config-file value for a refreshed
+// OAuth access token. When the keyring already holds an entry for the
+// provider, the entry is updated in place and a reference is returned;
+// providers that store their access token in plaintext keep doing so.
+// On a keyring update failure the plaintext token is returned so the
+// rotated credential is still persisted (a stale keyring entry is
+// overwritten on the next successful update).
+func (s *ConfigStore) refreshedSecretValue(providerID, accessToken string) string {
+	if !keyring.Available() {
+		return accessToken
+	}
+	if _, err := keyring.Get(providerID); err != nil {
+		return accessToken
+	}
+	if err := keyring.Set(providerID, accessToken); err != nil {
+		slog.Warn("Failed to update API key in system keyring after token refresh", "provider", providerID, "error", err)
+		return accessToken
+	}
+	return keyring.Ref(providerID)
 }
 
 // WaitForTokenChange blocks until SignalAuthComplete is called for the
@@ -1013,13 +1061,6 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 
 	if err := s.SetProviderAPIKey(ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
 		return token, false
-	}
-
-	if err := s.SetConfigFields(ScopeGlobal, map[string]any{
-		"providers.copilot.api_key": token.AccessToken,
-		"providers.copilot.oauth":   token,
-	}); err != nil {
-		slog.Error("Unable to save GitHub Copilot token to disk", "error", err)
 	}
 
 	slog.Info("GitHub Copilot successfully imported")

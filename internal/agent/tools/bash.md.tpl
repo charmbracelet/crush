@@ -21,6 +21,7 @@ Common shell builtins and core utils available on Windows.
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 - Each command runs in independent shell (no state persistence between calls)
 - Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)
+- IMPORTANT: When starting long-running processes (servers, watchers, daemons), the command auto-moves to background after {{ .MaxAutoBackgroundSeconds }} seconds. Use job_output with wait=false (polling) or a short timeout_seconds to check status. NEVER use job_output with wait=true on a server process — it will block until timeout.
 {{- if .RgAvailable }}
 - Ripgrep (`rg`) is available; prefer it over `grep` for faster, more intuitive searching
 {{- end }}

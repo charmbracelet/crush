@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -160,7 +161,10 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
-	if err := goose.Up(conn, "migrations"); err != nil {
+	// AllowMissing lets older migrations that were merged after newer ones
+	// (e.g. across feature branches) still be applied instead of hard
+	// failing against a database already on a higher version.
+	if err := goose.UpToContext(ctx, conn, "migrations", math.MaxInt64, goose.WithAllowMissing()); err != nil {
 		conn.Close()
 		releaseLock()
 		slog.Error("Failed to apply migrations", "error", err)

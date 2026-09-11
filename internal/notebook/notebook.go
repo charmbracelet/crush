@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 )
 
@@ -49,6 +50,15 @@ type Entry struct {
 	CompressionLevel int64
 	CreatedAt        int64
 	Tags             []string
+	// Succeeded reports whether the underlying tool event completed
+	// without error. Only successful events may supersede earlier
+	// same-file entries: a failed edit leaves the file — and every
+	// prior read of it — untouched.
+	Succeeded bool
+	// ErrorHeadline is a one-line digest of the underlying failure for
+	// failed tool events. It survives compaction so later turns can
+	// compare repeated failures against it.
+	ErrorHeadline string
 }
 
 // EntryInput is the input for generating a notebook entry from a
@@ -60,6 +70,12 @@ type EntryInput struct {
 	Description string // Human-readable description of the event.
 	ToolCall    *message.ToolCall
 	ToolResult  *message.ToolResult
+	// Succeeded mirrors !ToolResult.IsError for tool events. Entries
+	// without a tool result (decisions) are always successful.
+	Succeeded bool
+	// ErrorHeadline carries a one-line digest of the failure for
+	// entries whose tool result is an error.
+	ErrorHeadline string
 }
 
 // Service is the interface for notebook operations.
@@ -108,6 +124,10 @@ type service struct {
 type Options struct {
 	MaxEntryTokens    int64
 	MaxNotebookTokens int64
+	// PreCompactRunner, when set, fires PreCompact hooks before
+	// Compact compresses entries. A deny or halt decision skips
+	// compaction for that round.
+	PreCompactRunner *hooks.Runner
 }
 
 // Generator generates notebook entries from classified events using an

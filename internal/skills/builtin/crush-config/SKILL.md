@@ -212,8 +212,9 @@ option ui exit-banner compact
 
 ## Hooks runtime
 
-Hooks are user-defined shell commands that fire on agent events. Currently only
-`PreToolUse` is supported, which runs before a tool executes. This behavior is
+Hooks are user-defined shell commands that fire on agent events. `PreToolUse`
+runs before a tool executes, and `PreCompact` runs before the context notebook
+compresses old entries (a `deny` skips the compaction round). This behavior is
 the same however the hook is defined (`hook add` or JSON).
 
 ### How hooks work

@@ -232,10 +232,15 @@ func withWhitespaceNote(message string, whitespaceCorrected bool) string {
 
 // notFoundError builds the "old_string not found" error, appending a
 // diagnostic hint when one is available to help the caller self-correct.
+// The file's current content around the closest match is attached so a
+// retry does not need a separate view call.
 func notFoundError(content, old string) error {
 	msg := "old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"
 	if hint := diagnoseMismatch(content, old); hint != "" {
 		msg += "\n\n" + hint
+	}
+	if region := currentRegionContext(content, old); region != "" {
+		msg += "\n\n" + region
 	}
 	return errors.New(msg)
 }

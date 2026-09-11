@@ -18,9 +18,11 @@ const maxNotebookInjectionTokens = 12_000
 //
 //  1. Entries from the two most recent turns (immediate context) —
 //     recency runs first so a large ref set can't starve it.
-//  2. Entries relevant to refs (file paths from the current user
+//  2. Entries pinned to files under active edit (a successful edit
+//     entry in the last two turns pins all entries for that file).
+//  3. Entries relevant to refs (file paths from the current user
 //     message and active todos).
-//  3. Remaining entries, newest first, until the token cap.
+//  4. Remaining entries, newest first, until the token cap.
 //
 // Entries are deduplicated by ID, superseded file reads are dropped in
 // favor of newer entries for the same file, and the result is returned
@@ -60,6 +62,19 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, maxTurn int6
 	for _, e := range entries {
 		if e.TurnNumber >= maxTurn-1 {
 			trySelect(e)
+		}
+	}
+	// Pass 1.5: entries pinned to files under active edit — an edit
+	// in the last two turns keeps every entry for that file alive.
+	pinned := notebook.PinnedFileTags(entries)
+	if len(pinned) > 0 {
+		for _, e := range entries {
+			for _, tag := range e.Tags {
+				if pinned[tag] {
+					trySelect(e)
+					break
+				}
+			}
 		}
 	}
 	// Pass 2: entries matching explicit file paths from the user
@@ -135,12 +150,17 @@ func entryMatchesRefs(e notebook.Entry, refs []string) bool {
 
 // dropSupersededReads drops older file_read entries when a newer entry
 // for the same file exists — a re-read or an edit makes the earlier
-// read's snapshot stale. Entries without file tags are untouched.
+// read's snapshot stale. Only successful events supersede: a failed
+// edit leaves the file — and the earlier read — untouched. Entries
+// without file tags are untouched.
 func dropSupersededReads(entries []notebook.Entry) []notebook.Entry {
 	// newestForFile maps a file: tag to the newest entry tagged with it.
 	type key struct{ turn, event int64 }
 	newestForFile := map[string]key{}
 	for _, e := range entries {
+		if !e.Succeeded {
+			continue
+		}
 		for _, tag := range e.Tags {
 			if !strings.HasPrefix(tag, "file:") {
 				continue

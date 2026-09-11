@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -194,7 +196,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
+func NewBashTool(lspManager *lsp.Manager, permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelID)),
@@ -271,6 +273,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					}
 
 					stdout = formatOutput(stdout, stderr, execErr)
+					stdout += lspDiagnosticsForFailure(params.Command, exitCode, interrupted, lspManager)
 
 					metadata := BashResponseMetadata{
 						StartTime:        startTime.UnixMilli(),
@@ -355,6 +358,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 
 				stdout = formatOutput(stdout, stderr, execErr)
+				stdout += lspDiagnosticsForFailure(params.Command, exitCode, interrupted, lspManager)
 
 				metadata := BashResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
@@ -446,4 +450,147 @@ func normalizeWorkingDir(path string) string {
 		path = strings.ReplaceAll(path, fsext.WindowsWorkingDirDrive(), "")
 	}
 	return filepath.ToSlash(path)
+}
+
+// buildTestCommands maps a command name to the subcommands that mark a
+// build, test, or lint invocation. An empty slice means the command is
+// itself a build/test tool and needs no subcommand. The "run" and
+// "exec" subcommands are handled separately via buildTestRunTargets.
+var buildTestCommands = map[string][]string{
+	"go":            {"build", "test", "vet"},
+	"cargo":         {"build", "test", "check", "clippy"},
+	"npm":           {"test", "ci"},
+	"pnpm":          {"test", "build", "lint"},
+	"yarn":          {"test", "build", "lint"},
+	"bun":           {"test", "build"},
+	"deno":          {"test", "check", "lint"},
+	"dotnet":        {"build", "test"},
+	"mvn":           {"compile", "test", "verify", "package"},
+	"gradle":        {"build", "test", "check"},
+	"gradlew":       {"build", "test", "check"},
+	"cmake":         {"--build"},
+	"pytest":        {},
+	"tsc":           {},
+	"make":          {},
+	"task":          {},
+	"just":          {},
+	"ctest":         {},
+	"golangci-lint": {},
+	"staticcheck":   {},
+}
+
+// buildTestRunTargets lists script names accepted after a "run"
+// subcommand (e.g. "npm run build").
+var buildTestRunTargets = []string{
+	"build", "test", "lint", "check", "typecheck", "type-check", "tsc", "ci",
+}
+
+// commandWrappers are leading words that wrap the real command.
+var commandWrappers = map[string]bool{
+	"sudo": true, "env": true, "time": true,
+	"nice": true, "nohup": true, "command": true, "exec": true,
+}
+
+// wrapperFlagArgs are wrapper flags that consume a following value
+// argument (e.g. "env -u NAME", "nice -n 5", "sudo -u root"). Keyed by
+// flag name without leading dashes.
+var wrapperFlagArgs = map[string]bool{
+	"u": true, "g": true, "h": true, "unset": true,
+	"C": true, "chdir": true, "S": true, "split-string": true,
+	"P": true, "alternate-argv": true,
+	"n": true, "adjustment": true,
+}
+
+// isEnvAssignment reports whether a leading field is a KEY=VALUE env
+// assignment rather than the command name.
+func isEnvAssignment(field string) bool {
+	if strings.HasPrefix(field, "-") {
+		return false
+	}
+	idx := strings.IndexByte(field, '=')
+	if idx <= 0 {
+		return false
+	}
+	for i := range idx {
+		c := field[i]
+		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' ||
+			'0' <= c && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// isBuildOrTestCommand reports whether command invokes a known build,
+// test, or lint tool. Each segment separated by shell chaining
+// operators is checked, so "cd x && go test" still matches.
+func isBuildOrTestCommand(command string) bool {
+	segments := strings.FieldsFunc(command, func(r rune) bool {
+		return r == ';' || r == '&' || r == '|' || r == '\n'
+	})
+	for _, seg := range segments {
+		fields := strings.Fields(seg)
+		// Skip leading env assignments, command wrappers, and wrapper
+		// flags so "CGO_ENABLED=0 go test", "env -i go test", or
+		// "nice -n 5 make" still classify.
+		sawWrapper := false
+	fieldsLoop:
+		for len(fields) > 0 {
+			f := fields[0]
+			switch {
+			case isEnvAssignment(f):
+				fields = fields[1:]
+			case commandWrappers[f]:
+				sawWrapper = true
+				fields = fields[1:]
+			case sawWrapper && strings.HasPrefix(f, "-"):
+				fields = fields[1:]
+				if wrapperFlagArgs[strings.TrimLeft(f, "-")] && len(fields) > 0 {
+					fields = fields[1:]
+				}
+			default:
+				break fieldsLoop
+			}
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		name := strings.TrimSuffix(filepath.Base(fields[0]), ".exe")
+		subs, ok := buildTestCommands[name]
+		if !ok {
+			continue
+		}
+		if len(subs) == 0 {
+			return true
+		}
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[1] == "run" || fields[1] == "exec" {
+			if len(fields) >= 3 && slices.Contains(buildTestRunTargets, fields[2]) {
+				return true
+			}
+			continue
+		}
+		if slices.Contains(subs, fields[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// lspDiagnosticsForFailure appends current LSP project diagnostics to
+// failed build/test command output so the model gets ground truth to
+// fix against without a separate lsp_diagnostics call. Returns "" when
+// the command is not a known build/test invocation, when the command
+// did not fail, or when no diagnostics are available.
+func lspDiagnosticsForFailure(command string, exitCode int, interrupted bool, lspManager *lsp.Manager) string {
+	if interrupted || exitCode == 0 || lspManager == nil || !isBuildOrTestCommand(command) {
+		return ""
+	}
+	diags := getDiagnostics("", lspManager)
+	if diags == "" {
+		return ""
+	}
+	return "\n\n" + diags
 }

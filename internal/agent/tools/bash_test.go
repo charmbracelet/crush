@@ -117,7 +117,7 @@ func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context)
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model")
+	return NewBashTool(nil, permissions, workingDir, attribution, "test-model")
 }
 
 func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.AgentTool, *recordingPermissionService) {
@@ -126,7 +126,7 @@ func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.Agent
 		allow:  allow,
 	}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(perms, workingDir, attribution, "test-model"), perms
+	return NewBashTool(nil, perms, workingDir, attribution, "test-model"), perms
 }
 
 func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
@@ -210,4 +210,63 @@ func TestTruncateOutputEmoji(t *testing.T) {
 	out := TruncateOutput(content)
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
 	require.Contains(t, out, "lines truncated")
+}
+
+func TestIsBuildOrTestCommand(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		cmd  string
+		want bool
+	}{
+		{"go build ./...", true},
+		{"go test -run Foo ./pkg", true},
+		{"go vet .", true},
+		{"go run main.go", false},
+		{"go fmt .", false},
+		{"cargo test", true},
+		{"cargo clippy -- -D warnings", true},
+		{"npm test", true},
+		{"npm run build", true},
+		{"npm run lint", true},
+		{"npm run dev", false},
+		{"npm install", false},
+		{"pnpm run typecheck", true},
+		{"make", true},
+		{"task build", true},
+		{"pytest -x", true},
+		{"tsc --noEmit", true},
+		{"golangci-lint run", true},
+		{"cmake --build build", true},
+		{"./gradlew test", true},
+		{"cd pkg && go test ./...", true},
+		{"echo ok; go build .", true},
+		{"CGO_ENABLED=0 go test ./...", true},
+		{"env X=1 pytest", true},
+		{"env -i go test ./...", true},
+		{"nice -n 5 make", true},
+		{"sudo -u root make test", true},
+		{"sudo make", true},
+		{"time make test", true},
+		{"GOFLAGS=-race go run main.go", false},
+		{"FOO=bar ls", false},
+		{"ls -la", false},
+		{"git status", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, isBuildOrTestCommand(tc.cmd), "command: %q", tc.cmd)
+	}
+}
+
+func TestLSPDiagnosticsForFailure(t *testing.T) {
+	t.Parallel()
+
+	// Nil manager never produces diagnostics.
+	require.Empty(t, lspDiagnosticsForFailure("go test ./...", 1, false, nil))
+	// Non-build/test commands are ignored.
+	require.Empty(t, lspDiagnosticsForFailure("ls -la", 1, false, nil))
+	// Success and interrupts produce nothing.
+	require.Empty(t, lspDiagnosticsForFailure("go build .", 0, false, nil))
+	require.Empty(t, lspDiagnosticsForFailure("go build .", 130, true, nil))
 }

@@ -16,7 +16,16 @@ need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
+Two events are supported:
+
+- `PreToolUse` — fires before a tool executes; can block, allow, or rewrite
+  the call.
+- `PreCompact` — fires before the context notebook compresses old entries;
+  `tool_name` is `"compact"` and `tool_input` is
+  `{"token_count": N, "max_tokens": M}`. A `deny` decision skips the
+  compaction round.
+
+Event names are case-insensitive and
 accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
 
 ## Configuration

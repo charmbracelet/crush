@@ -167,7 +167,9 @@ func getDiagnostics(filePath string, manager *lsp.Manager) string {
 		projectErrors := countSeverity(projectDiagnostics, "Error")
 		projectWarnings := countSeverity(projectDiagnostics, "Warn")
 		output.WriteString("\n<diagnostic_summary>\n")
-		fmt.Fprintf(&output, "Current file: %d errors, %d warnings\n", fileErrors, fileWarnings)
+		if filePath != "" {
+			fmt.Fprintf(&output, "Current file: %d errors, %d warnings\n", fileErrors, fileWarnings)
+		}
 		fmt.Fprintf(&output, "Project: %d errors, %d warnings\n", projectErrors, projectWarnings)
 		output.WriteString("</diagnostic_summary>\n")
 	}

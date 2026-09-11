@@ -276,11 +276,14 @@ func formatWhitespaceHint(contentLines []string, startLine, endLine int) string 
 	return b.String()
 }
 
-// diagnoseBestLineMatch finds the window of lines in contentLines that best
-// matches oldLines (compared after trimming leading/trailing whitespace).
-func diagnoseBestLineMatch(contentLines, oldLines []string) string {
+// bestLineMatch finds the window of lines in contentLines that best
+// matches oldLines (compared after trimming whitespace). It returns the
+// 0-based start line, the window length, and the number of matching
+// lines. ok is false when no window reaches the usefulness threshold
+// (at least half of the lines matching).
+func bestLineMatch(contentLines, oldLines []string) (start, window, score int, ok bool) {
 	if len(oldLines) == 0 || len(contentLines) == 0 {
-		return ""
+		return 0, 0, 0, false
 	}
 
 	// Trimmed old lines for comparison.
@@ -297,29 +300,39 @@ func diagnoseBestLineMatch(contentLines, oldLines []string) string {
 		trimmedOld = trimmedOld[:len(trimmedOld)-1]
 	}
 	if len(trimmedOld) == 0 {
-		return ""
+		return 0, 0, 0, false
 	}
 
 	bestScore := 0
 	bestStart := -1
-	window := len(trimmedOld)
+	window = len(trimmedOld)
 
-	for start := range len(contentLines) - window + 1 {
-		score := 0
+	for s := range len(contentLines) - window + 1 {
+		sc := 0
 		for j := range window {
-			candidate := strings.TrimSpace(contentLines[start+j])
+			candidate := strings.TrimSpace(contentLines[s+j])
 			if candidate == trimmedOld[j] {
-				score++
+				sc++
 			}
 		}
-		if score > bestScore {
-			bestScore = score
-			bestStart = start
+		if sc > bestScore {
+			bestScore = sc
+			bestStart = s
 		}
 	}
 
 	// Require at least half the lines to match for a useful hint.
 	if bestStart == -1 || bestScore < (window+1)/2 {
+		return 0, 0, 0, false
+	}
+	return bestStart, window, bestScore, true
+}
+
+// diagnoseBestLineMatch finds the window of lines in contentLines that best
+// matches oldLines (compared after trimming leading/trailing whitespace).
+func diagnoseBestLineMatch(contentLines, oldLines []string) string {
+	bestStart, window, bestScore, ok := bestLineMatch(contentLines, oldLines)
+	if !ok {
 		return ""
 	}
 
@@ -350,4 +363,45 @@ func visualizeWS(s string) string {
 		s = strings.Repeat("·", leading) + trimmed
 	}
 	return s
+}
+
+// Region context bounds for the current-content block attached to
+// old_string-not-found errors: enough surrounding lines that the caller
+// can retry without a separate view call, capped in bytes so a dense
+// region cannot blow up the error.
+const (
+	regionContextLines  = 40
+	regionContextMaxLen = 8000
+)
+
+// currentRegionContext returns the file's current content around the
+// best fuzzy match for old, so a failed edit carries fresh ground truth
+// to retry against. Returns "" when nothing in the file resembles old.
+func currentRegionContext(content, old string) string {
+	contentLines := strings.Split(content, "\n")
+	oldLines := strings.Split(old, "\n")
+
+	start, window, _, ok := bestLineMatch(contentLines, oldLines)
+	if !ok {
+		return ""
+	}
+
+	lo := max(0, start-regionContextLines)
+	hi := min(len(contentLines)-1, start+window-1+regionContextLines)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Current file content (lines %d-%d):\n", lo+1, hi+1)
+	for i := lo; i <= hi; i++ {
+		line := contentLines[i]
+		if len(line) > MaxLineLength {
+			line = line[:MaxLineLength] + "…"
+		}
+		fmt.Fprintf(&b, "%6d|%s\n", i+1, line)
+		if b.Len() > regionContextMaxLen {
+			b.WriteString("… [region truncated] …\n")
+			break
+		}
+	}
+	b.WriteString("Edit against the exact text shown above.")
+	return b.String()
 }

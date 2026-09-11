@@ -13,6 +13,9 @@ import (
 // Hook event name constants.
 const (
 	EventPreToolUse = "PreToolUse"
+	// EventPreCompact fires before the context notebook compresses
+	// entries. Hooks may deny (or halt) to skip compaction this round.
+	EventPreCompact = "PreCompact"
 )
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the

@@ -204,6 +204,17 @@ type sessionAgent struct {
 	// notebookAutoInject controls whether file references in the
 	// user message trigger auto-injection of full notebook entries.
 	notebookAutoInject bool
+	// stubSuperseded enables replacing superseded file-read tool
+	// results in the raw window with stub text once the notebook
+	// boundary advances.
+	stubSuperseded bool
+	// stubBoundary records the last raw-window boundary index per
+	// session, so pending superseded flags promote to stubs only on
+	// boundary moves.
+	stubBoundary *csync.Map[string, int]
+	// stubStats accumulates per-session stubbing telemetry for
+	// step-composition logging.
+	stubStats *csync.Map[string, stubStats]
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -279,6 +290,10 @@ type SessionAgentOptions struct {
 	// NotebookAutoInject controls whether file references in the user
 	// message trigger auto-injection of full notebook entries.
 	NotebookAutoInject bool
+	// StubSuperseded enables replacing superseded file-read tool
+	// results in raw history with stub text once the notebook
+	// boundary advances. Only takes effect in notebook mode.
+	StubSuperseded bool
 }
 
 func NewSessionAgent(
@@ -310,6 +325,9 @@ func NewSessionAgent(
 		notebookSyncMem0:     opts.NotebookSyncMem0,
 		notebookMemoryServer: opts.NotebookMemoryServer,
 		notebookAutoInject:   opts.NotebookAutoInject,
+		stubSuperseded:       opts.StubSuperseded,
+		stubBoundary:         csync.NewMap[string, int](),
+		stubStats:            csync.NewMap[string, stubStats](),
 	}
 }
 
@@ -938,7 +956,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
-			logStepComposition(call.SessionID, prepared.Messages, prepared.Tools)
+			stats, _ := a.stubStats.Get(call.SessionID)
+			logStepComposition(call.SessionID, prepared.Messages, prepared.Tools, stats)
 
 			sessionLock.Lock()
 			stepMessages = cloneFantasyMessages(prepared.Messages)
@@ -1299,6 +1318,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if err != nil {
 				slog.Error("Failed to list messages for notebook generation", "error", err, "session_id", notebookSessionID)
 				return
+			}
+			// Flag file-read results superseded by this turn's writes.
+			// The flag is metadata only; stub application waits for a
+			// boundary move in preparePrompt.
+			if a.stubSuperseded {
+				a.flagSupersededViewResults(notebookCtx, allMsgs)
 			}
 			// Extract only the current turn's messages. Stop at
 			// the next user message to avoid including the next
@@ -1715,6 +1740,23 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 				}
 			}
 		}
+		if a.stubSuperseded {
+			// Boundary moves already invalidate the prompt-cache
+			// prefix, so pending superseded flags promote to stubs
+			// only here — never mid-window.
+			sessionID := sessionIDFromMessages(msgs)
+			if last, ok := a.stubBoundary.Get(sessionID); !ok || last != boundary {
+				promoteCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				persisted := a.promoteSupersededStubs(promoteCtx, msgs, boundary)
+				cancel()
+				// Only record the boundary when persistence succeeded;
+				// otherwise the next render would flip back to verbatim
+				// and promotion would never retry.
+				if persisted {
+					a.stubBoundary.Set(sessionID, boundary)
+				}
+			}
+		}
 		rawMsgs = msgs[boundary:]
 	} else {
 		rawMsgs = msgs
@@ -1739,6 +1781,7 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 		}
 	}
 
+	var stubs stubReport
 	for _, m := range rawMsgs {
 		if len(m.Parts) == 0 {
 			continue
@@ -1748,6 +1791,13 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 			continue
 		}
 		if m.Role == message.Tool {
+			if a.stubSuperseded {
+				var count int
+				var saved int64
+				m, count, saved = applySupersededStubs(m)
+				stubs.results += count
+				stubs.savedBytes += saved
+			}
 			if msg, ok := filterOrphanedToolResults(m, knownToolCallIDs); ok {
 				history = append(history, msg)
 			}
@@ -1783,6 +1833,14 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 			Data:      attachment.Content,
 			MediaType: attachment.MimeType,
 		})
+	}
+
+	if stubs.results > 0 {
+		slog.Debug("Tool result stubs in prompt",
+			"session_id", sessionIDFromMessages(msgs),
+			"stubbed_results", stubs.results,
+			"stubbed_saved_bytes", stubs.savedBytes,
+		)
 	}
 
 	return history, files
@@ -1975,37 +2033,51 @@ func (a *sessionAgent) maybeAutoInject(msgs []message.Message, sessionID string,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	var sb strings.Builder
-	sb.WriteString("<notebook_auto_inject>\n")
-	injected := 0
+
+	// Gather all entries matching the refs, deduplicated, then drop
+	// superseded reads — injecting a stale pre-edit snapshot would
+	// reintroduce the phantom-state hazard stubbing exists to remove.
+	// The superseding edit must be in the set for the check to see it,
+	// so compression/turn filters apply only afterwards.
+	seen := make(map[string]bool)
+	var tagged []notebook.Entry
 	for _, tag := range refs {
 		entries, err := a.notebook.SearchByTag(ctx, sessionID, tag)
 		if err != nil {
 			continue
 		}
+		for _, e := range entries {
+			if seen[e.ID] {
+				continue
+			}
+			seen[e.ID] = true
+			tagged = append(tagged, e)
+		}
+	}
+	tagged = dropSupersededReads(tagged)
+
+	var sb strings.Builder
+	sb.WriteString("<notebook_auto_inject>\n")
+	injected := 0
+	for _, e := range tagged {
 		// Only inject entries that have been compressed (level > 0)
 		// — uncompressed entries are already in the notebook message
 		// at full detail.
-		for _, e := range entries {
-			if e.CompressionLevel == 0 || e.TurnNumber >= boundaryTurn {
-				continue
-			}
-			text := e.EntryTextFull
-			if text == "" {
-				text = e.EntryText
-			}
-			sb.WriteString(fmt.Sprintf("## Turn %d.%d — %s\n", e.TurnNumber, e.EventNumber, e.Title))
-			sb.WriteString(text)
-			if len(e.Tags) > 0 {
-				sb.WriteString("\nTags: ")
-				sb.WriteString(strings.Join(e.Tags, " "))
-			}
-			sb.WriteString("\n\n---\n\n")
-			injected++
-			if injected >= 2 {
-				break
-			}
+		if e.CompressionLevel == 0 || e.TurnNumber >= boundaryTurn {
+			continue
 		}
+		text := e.EntryTextFull
+		if text == "" {
+			text = e.EntryText
+		}
+		sb.WriteString(fmt.Sprintf("## Turn %d.%d — %s\n", e.TurnNumber, e.EventNumber, e.Title))
+		sb.WriteString(text)
+		if len(e.Tags) > 0 {
+			sb.WriteString("\nTags: ")
+			sb.WriteString(strings.Join(e.Tags, " "))
+		}
+		sb.WriteString("\n\n---\n\n")
+		injected++
 		if injected >= 2 {
 			break
 		}

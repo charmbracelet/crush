@@ -122,6 +122,21 @@ type ToolResult struct {
 	MIMEType   string `json:"mime_type"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
+	// Superseded marks this result as stale: a later successful write
+	// changed the file it describes. The mark is metadata only —
+	// Content is never rewritten — so notebook generation and recall
+	// still see the original. Prompt assembly renders a stub once
+	// Applied is set.
+	Superseded *SupersededMark `json:"superseded,omitempty"`
+}
+
+// SupersededMark records that a later successful file write made a
+// tool result's content stale.
+type SupersededMark struct {
+	Path    string `json:"path"`    // File whose newer state superseded this result.
+	ByTool  string `json:"by_tool"` // edit, write, or multiedit.
+	Turn    int64  `json:"turn"`    // Turn containing the superseding write.
+	Applied bool   `json:"applied"` // True once the result renders as a stub.
 }
 
 func (ToolResult) isPart() {}

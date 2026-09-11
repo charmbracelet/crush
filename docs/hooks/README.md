@@ -17,8 +17,9 @@ forward.
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure
   hooks; just tell Crush how to configure Crush
-- Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Crush currently supports two hooks: `PreToolUse` and `PreCompact`, with
+  plans to support the full gamut; please let us know which hooks you'd
+  like to see next
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -176,7 +177,7 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+Here are the events you can hook into:
 
 ### PreToolUse
 
@@ -199,6 +200,34 @@ agent spawn sub-agents" still works.
 
 Hooks are keyed by event name. Only `command` is required, and you can omit
 `matcher` to match all tools.
+
+### PreCompact
+
+This hook fires when the context notebook is about to compress old entries —
+right before entries are downgraded to summary or tags-only form. Use it to
+audit compaction, snapshot the notebook, or veto a round of compression.
+
+**Matched against**: the literal name `compact`. Most `PreCompact` hooks
+should omit `matcher`.
+
+**Payload**: `tool_name` is `"compact"` and `tool_input` describes the
+pending compaction:
+
+```jsonc
+{
+  "event": "PreCompact",
+  "session_id": "313909e",
+  "cwd": "/home/user/project",
+  "tool_name": "compact",
+  "tool_input": { "token_count": 103200, "max_tokens": 100000 },
+}
+```
+
+A `deny` decision (exit code 2 or `{"decision": "deny"}`) skips compaction
+for that round — nothing is compressed and no error surfaces; the notebook
+simply stays over budget until the next trigger. Other hooks semantics
+(`context`, `updated_input`) have no effect on compaction, but a deny/halt
+`reason` is logged.
 
 ## Building Hooks
 

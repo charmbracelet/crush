@@ -11,8 +11,10 @@ recall("command") — retrieve all command events
 recall("decision") — retrieve all decision events
 recall("auth.go") — fuzzy text search for auth.go
 recall("cross:auth.go") — search across sessions via mem0 (requires sync enabled)
+recall("result:<tool_call_id>") — retrieve the original full output of a tool call that was compacted to a stub or digested
 
-Returns: full notebook entries with all preserved details.
+Returns: full notebook entries with all preserved details, or the
+original tool result for result: queries.
 Each entry is about ONE event — no noise from unrelated events.
 
 Do NOT re-read files with notebook entries — use recall first.

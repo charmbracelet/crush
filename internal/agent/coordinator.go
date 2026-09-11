@@ -753,6 +753,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		NotebookSyncMem0:     c.cfg.Config().Options.NotebookSyncMem0Enabled(),
 		NotebookMemoryServer: c.cfg.Config().Options.NotebookMemoryServerName(),
 		NotebookAutoInject:   c.cfg.Config().Options.NotebookAutoInjectEnabled(),
+		StubSuperseded:       c.cfg.Config().Options.NotebookStubSupersededEnabled(),
 	})
 
 	// Initialize the summary model before installing the resolver.
@@ -857,7 +858,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
+		tools.NewBashTool(c.lspManager, c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
@@ -881,6 +882,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	if c.notebook != nil && c.cfg.Config().Options.NotebookIsEnabled() {
 		nbTools := notebooktools.Build(
 			c.notebook,
+			c.messages,
 			c.cfg,
 			c.cfg.Config().Options.NotebookMemoryServerName(),
 			c.cfg.Config().Options.NotebookSyncMem0Enabled(),

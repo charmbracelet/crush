@@ -43,10 +43,12 @@ type NotebookEntry struct {
 	EventType        string         `json:"event_type"`
 	Title            string         `json:"title"`
 	EntryText        string         `json:"entry_text"`
+	EntryTextFull    sql.NullString `json:"entry_text_full"`
 	TokenCount       int64          `json:"token_count"`
 	CompressionLevel int64          `json:"compression_level"`
 	CreatedAt        int64          `json:"created_at"`
-	EntryTextFull    sql.NullString `json:"entry_text_full"`
+	Succeeded        int64          `json:"succeeded"`
+	ErrorHeadline    string         `json:"error_headline"`
 }
 
 type NotebookTag struct {

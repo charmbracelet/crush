@@ -4,10 +4,12 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/notebook"
 )
 
@@ -19,23 +21,26 @@ var recallDescription []byte
 
 // RecallParams holds the parameters for the recall tool.
 type RecallParams struct {
-	Query string `json:"query" description:"Search query: a tag (file:auth.go), event type (command, decision), turn number (turn:5), or text to search for. Use cross: prefix to search across sessions via mem0."`
+	Query string `json:"query" description:"Search query: a tag (file:auth.go), event type (command, decision), turn number (turn:5), an original tool result (result:<tool_call_id>), or text to search for. Use cross: prefix to search across sessions via mem0."`
 }
 
 // recallContext holds dependencies for the recall tool.
 type recallContext struct {
 	svc        notebook.Service
+	messages   message.Service
 	cfg        *config.ConfigStore
 	mem0Server string
 	syncMem0   bool
 }
 
 // NewRecallTool creates a tool that retrieves full notebook entries by
-// tag, event type, turn number, or text search. When mem0 sync is
-// enabled, cross-session search is available via the "cross:" prefix.
-func NewRecallTool(svc notebook.Service, cfg *config.ConfigStore, mem0Server string, syncMem0 bool) fantasy.AgentTool {
+// tag, event type, turn number, or text search, and original tool
+// results via the "result:" prefix. When mem0 sync is enabled,
+// cross-session search is available via the "cross:" prefix.
+func NewRecallTool(svc notebook.Service, messages message.Service, cfg *config.ConfigStore, mem0Server string, syncMem0 bool) fantasy.AgentTool {
 	rc := &recallContext{
 		svc:        svc,
+		messages:   messages,
 		cfg:        cfg,
 		mem0Server: mem0Server,
 		syncMem0:   syncMem0,
@@ -47,6 +52,11 @@ func NewRecallTool(svc notebook.Service, cfg *config.ConfigStore, mem0Server str
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("query parameter is required"), nil
 			}
+
+			slog.Debug("Notebook recall",
+				"session_id", getSessionID(ctx),
+				"query", params.Query,
+			)
 
 			// Cross-session search via mem0.
 			if strings.HasPrefix(params.Query, "cross:") {
@@ -67,6 +77,13 @@ func NewRecallTool(svc notebook.Service, cfg *config.ConfigStore, mem0Server str
 			sessionID := getSessionID(ctx)
 			if sessionID == "" {
 				return fantasy.NewTextErrorResponse("session ID is required for recall"), nil
+			}
+
+			// Original tool result recall — used by superseded-result
+			// stubs and error digests to fetch pre-edit snapshots and
+			// full failure output.
+			if strings.HasPrefix(params.Query, "result:") {
+				return rc.recallToolResult(ctx, sessionID, strings.TrimPrefix(params.Query, "result:"))
 			}
 
 			entries, err := searchNotebook(ctx, rc.svc, sessionID, params.Query)
@@ -98,6 +115,39 @@ func NewRecallTool(svc notebook.Service, cfg *config.ConfigStore, mem0Server str
 			return fantasy.NewTextResponse(sb.String()), nil
 		},
 	)
+}
+
+// recallToolResult returns the original persisted content of the tool
+// result identified by tool call ID. The result is never rewritten by
+// the supersession stubber, so this always yields the pre-stub full
+// content — including failed results kept for diagnosis.
+func (rc *recallContext) recallToolResult(ctx context.Context, sessionID, toolCallID string) (fantasy.ToolResponse, error) {
+	if toolCallID == "" {
+		return fantasy.NewTextErrorResponse("result: query requires a tool call ID, e.g. result:toolu_01ABC"), nil
+	}
+	if rc.messages == nil {
+		return fantasy.NewTextErrorResponse("result recall requires the message service"), nil
+	}
+	msgs, err := rc.messages.List(ctx, sessionID)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to list messages: %v", err)), nil
+	}
+	for _, m := range msgs {
+		for _, tr := range m.ToolResults() {
+			if tr.ToolCallID != toolCallID {
+				continue
+			}
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "## Tool result %s — %s", tr.ToolCallID, tr.Name)
+			if tr.IsError {
+				sb.WriteString(" (error)")
+			}
+			sb.WriteString("\n")
+			sb.WriteString(tr.Content)
+			return fantasy.NewTextResponse(sb.String()), nil
+		}
+	}
+	return fantasy.NewTextResponse(fmt.Sprintf("No tool result found for %q in this session.", toolCallID)), nil
 }
 
 // searchNotebook dispatches a query to the appropriate search method

@@ -10,6 +10,10 @@ import (
 )
 
 func nbEntry(id string, turn, event int64, eventType, text string, tokens int64, tags ...string) notebook.Entry {
+	return nbEntryResult(id, turn, event, eventType, text, tokens, true, tags...)
+}
+
+func nbEntryResult(id string, turn, event int64, eventType, text string, tokens int64, succeeded bool, tags ...string) notebook.Entry {
 	return notebook.Entry{
 		ID:          id,
 		TurnNumber:  turn,
@@ -18,6 +22,7 @@ func nbEntry(id string, turn, event int64, eventType, text string, tokens int64,
 		EntryText:   text,
 		TokenCount:  tokens,
 		Tags:        tags,
+		Succeeded:   succeeded,
 	}
 }
 
@@ -154,6 +159,73 @@ func TestSelectNotebookEntries(t *testing.T) {
 		got := selectNotebookEntries(entries, nil, 2)
 		require.NotContains(t, entryIDs(got), "read")
 		require.Contains(t, entryIDs(got), "edit")
+	})
+
+	t.Run("failed edit does not supersede older read", func(t *testing.T) {
+		t.Parallel()
+		entries := []notebook.Entry{
+			nbEntry("read", 1, 1, notebook.EventFileRead, "read auth.go", 10, "file:auth.go"),
+			nbEntryResult("edit", 2, 1, notebook.EventFileEdit, "failed edit auth.go", 10, false, "file:auth.go"),
+		}
+		got := selectNotebookEntries(entries, nil, 2)
+		require.Contains(t, entryIDs(got), "read")
+		require.Contains(t, entryIDs(got), "edit")
+	})
+
+	t.Run("failed read does not supersede older read", func(t *testing.T) {
+		t.Parallel()
+		entries := []notebook.Entry{
+			nbEntry("read1", 1, 1, notebook.EventFileRead, "first read of auth.go", 10, "file:auth.go"),
+			nbEntryResult("read2", 3, 1, notebook.EventFileRead, "failed re-read", 10, false, "file:auth.go"),
+		}
+		got := selectNotebookEntries(entries, nil, 3)
+		require.Contains(t, entryIDs(got), "read1")
+		require.Contains(t, entryIDs(got), "read2")
+	})
+
+	t.Run("failed edit does not mask a later successful edit", func(t *testing.T) {
+		t.Parallel()
+		entries := []notebook.Entry{
+			nbEntry("read", 1, 1, notebook.EventFileRead, "read auth.go", 10, "file:auth.go"),
+			nbEntryResult("badedit", 2, 1, notebook.EventFileEdit, "failed edit", 10, false, "file:auth.go"),
+			nbEntry("goodedit", 3, 1, notebook.EventFileEdit, "edited auth.go", 10, "file:auth.go"),
+		}
+		got := selectNotebookEntries(entries, nil, 3)
+		require.NotContains(t, entryIDs(got), "read")
+		require.Contains(t, entryIDs(got), "badedit")
+		require.Contains(t, entryIDs(got), "goodedit")
+	})
+
+	t.Run("pinned file entries beat unpinned fill under budget pressure", func(t *testing.T) {
+		t.Parallel()
+		// Recent turns consume almost the whole injection budget; a
+		// pinned entry from an old turn wins the remainder over an
+		// equally old unpinned entry.
+		entries := []notebook.Entry{
+			nbEntry("old-pinned", 0, 1, notebook.EventExploration, "explored a.go", 400, "file:a.go"),
+			nbEntry("old-free", 0, 2, notebook.EventExploration, "unrelated", 400),
+			nbEntry("filler", 2, 1, notebook.EventGeneral, "big", 11400),
+			nbEntry("edit", 2, 2, notebook.EventFileEdit, "edited a.go", 100, "file:a.go"),
+		}
+		got := selectNotebookEntries(entries, nil, 2)
+		require.Contains(t, entryIDs(got), "old-pinned")
+		require.NotContains(t, entryIDs(got), "old-free")
+		require.Contains(t, entryIDs(got), "edit")
+	})
+
+	t.Run("failed edit still pins", func(t *testing.T) {
+		t.Parallel()
+		// A file in an edit-fail-retry loop is still under active
+		// edit — its older entries stay pinned.
+		entries := []notebook.Entry{
+			nbEntry("old-pinned", 0, 1, notebook.EventExploration, "explored a.go", 400, "file:a.go"),
+			nbEntry("old-free", 0, 2, notebook.EventExploration, "unrelated", 400),
+			nbEntry("filler", 2, 1, notebook.EventGeneral, "big", 11400),
+			nbEntryResult("edit", 2, 2, notebook.EventFileEdit, "failed edit a.go", 100, false, "file:a.go"),
+		}
+		got := selectNotebookEntries(entries, nil, 2)
+		require.Contains(t, entryIDs(got), "old-pinned")
+		require.NotContains(t, entryIDs(got), "old-free")
 	})
 
 	t.Run("output chronological", func(t *testing.T) {

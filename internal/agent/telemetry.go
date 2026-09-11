@@ -41,8 +41,10 @@ func logPromptComposition(sessionID string, systemPromptBytes int, mcpInstructio
 // tool list for the step are finalized. System-role messages are
 // bucketed separately from conversation history: the main system
 // prompt (and any system prompt prefix) counts toward system_bytes,
-// while notebook recall blobs count toward notebook_bytes.
-func logStepComposition(sessionID string, messages []fantasy.Message, agentTools []fantasy.AgentTool) {
+// while notebook recall blobs count toward notebook_bytes. stubs
+// carries cumulative per-session stubbing telemetry: stubbed results,
+// saved bytes, and promotion events (each a prompt-cache invalidation).
+func logStepComposition(sessionID string, messages []fantasy.Message, agentTools []fantasy.AgentTool, stubs stubStats) {
 	var historyBytes, notebookBytes, systemBytes int
 	for _, msg := range messages {
 		n := messageContentBytes(msg)
@@ -73,6 +75,9 @@ func logStepComposition(sessionID string, messages []fantasy.Message, agentTools
 		"system_bytes", systemBytes,
 		"raw_history_bytes", historyBytes,
 		"notebook_bytes", notebookBytes,
+		"stubbed_tool_results_total", stubs.Results,
+		"stubbed_saved_bytes_total", stubs.SavedBytes,
+		"stub_invalidations", stubs.Invalidations,
 		"builtin_tool_schema_bytes", builtinSchemaBytes,
 		"mcp_tool_schema_bytes", mcpSchemaBytes,
 		"tool_count", len(agentTools),

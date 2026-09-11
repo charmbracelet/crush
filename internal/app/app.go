@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/herdr"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -143,6 +144,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	notebookOpts := notebook.Options{
 		MaxEntryTokens:    cfg.Options.NotebookMaxEntryTokens,
 		MaxNotebookTokens: cfg.Options.NotebookMaxTokens,
+	}
+	// Fire PreCompact hooks before entry compression when configured.
+	if preCompactHooks := cfg.Hooks[hooks.EventPreCompact]; len(preCompactHooks) > 0 {
+		notebookOpts.PreCompactRunner = hooks.NewRunner(preCompactHooks, store.WorkingDir(), store.WorkingDir())
 	}
 	var notebookModelResolver func() fantasy.LanguageModel
 	app.Notebook = notebook.NewService(q, notebook.NewLLMGenerator(func() fantasy.LanguageModel {

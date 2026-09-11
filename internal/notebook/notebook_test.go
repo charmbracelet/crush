@@ -2,10 +2,13 @@ package notebook
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -15,11 +18,26 @@ import (
 type mockGenerator struct {
 	entries []GeneratedEntry
 	err     error
+	// echo produces one generated entry per input event, preserving
+	// index alignment with the significant-event list.
+	echo bool
 }
 
 func (m *mockGenerator) Generate(ctx context.Context, sessionID string, events []EntryInput) ([]GeneratedEntry, error) {
 	if m.err != nil {
 		return nil, m.err
+	}
+	if m.echo {
+		entries := make([]GeneratedEntry, len(events))
+		for i, ev := range events {
+			entries[i] = GeneratedEntry{
+				EventType: ev.EventType,
+				Title:     ev.Title,
+				Text:      "## " + ev.Title + "\ncontent",
+				Tags:      defaultTagsForEvent(ev),
+			}
+		}
+		return entries, nil
 	}
 	return m.entries, nil
 }
@@ -135,6 +153,116 @@ func TestGenerateEntries_WithSignificantEvent(t *testing.T) {
 	require.Len(t, entries, 1)
 	require.Equal(t, "Read auth.go", entries[0].Title)
 	require.Contains(t, entries[0].Tags, "file:auth.go")
+}
+
+func TestGenerateEntries_RecordsSucceeded(t *testing.T) {
+	svc, _, sessionID := newTestService(t, &mockGenerator{echo: true})
+
+	msgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc1", Name: "edit", Input: `{"file_path":"auth.go"}`, Finished: true},
+			message.ToolCall{ID: "tc2", Name: "bash", Input: `{"command":"make test"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc1", Name: "edit", Content: "old_string not found", IsError: true},
+			message.ToolResult{ToolCallID: "tc2", Name: "bash", Content: "ok"},
+		}},
+	}
+	err := svc.GenerateEntries(context.Background(), sessionID, 1, msgs)
+	require.NoError(t, err)
+	entries, err := svc.GetEntries(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	require.False(t, entries[0].Succeeded, "failed edit should record succeeded=false")
+	require.True(t, entries[1].Succeeded)
+}
+
+func TestClassifyEvents_SucceededFromResult(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc1", Name: "edit", Input: `{"file_path":"a.go"}`, Finished: true},
+			message.ToolCall{ID: "tc2", Name: "edit", Input: `{"file_path":"b.go"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc1", Name: "edit", Content: "boom", IsError: true},
+			message.ToolResult{ToolCallID: "tc2", Name: "edit", Content: "ok"},
+		}},
+	}
+	significant, _ := classifyEvents(msgs)
+	require.Len(t, significant, 2)
+	require.False(t, significant[0].Succeeded)
+	require.True(t, significant[1].Succeeded)
+}
+
+func TestClassifyEvents_MissingResultIsNotSuccess(t *testing.T) {
+	// A finished call with no result (interrupted turn) must not
+	// count as successful — an edit that may never have run cannot
+	// supersede a still-accurate read.
+	msgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc1", Name: "edit", Input: `{"file_path":"a.go"}`, Finished: true},
+		}},
+	}
+	significant, _ := classifyEvents(msgs)
+	require.Len(t, significant, 1)
+	require.False(t, significant[0].Succeeded)
+}
+
+func TestGenerateEntries_RecordsErrorHeadline(t *testing.T) {
+	svc, _, sessionID := newTestService(t, &mockGenerator{echo: true})
+
+	msgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc1", Name: "bash", Input: `{"command":"go build ."}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc1", Name: "bash",
+				Content: "\nmain.go:12: undefined: foo\nmain.go:13: missing return", IsError: true},
+		}},
+	}
+	require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, 1, msgs))
+
+	entries, err := svc.GetEntries(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.False(t, entries[0].Succeeded)
+	require.Equal(t, "main.go:12: undefined: foo", entries[0].ErrorHeadline)
+}
+
+func TestErrorHeadline(t *testing.T) {
+	t.Parallel()
+
+	// First non-empty line.
+	require.Equal(t, "boom", errorHeadline("\n\nboom\nmore\n"))
+	// Exit code from failed bash output is appended.
+	require.Equal(t,
+		"main.go:12: undefined: foo — Exit code 2",
+		errorHeadline("main.go:12: undefined: foo\n\nExit code 2"))
+	// No duplication when the first line already is the exit line.
+	require.Equal(t, "Exit code 1", errorHeadline("Exit code 1"))
+	// Empty content.
+	require.Equal(t, "", errorHeadline("\n\n"))
+}
+
+func TestCompressEntryPreservesErrorHeadline(t *testing.T) {
+	entry := "some long entry body\nwith details"
+	headline := "exit status 1: build failed"
+
+	summary := compressEntry(entry, "Title", []string{"file:x.go"}, headline, CompressionSummary)
+	require.Contains(t, summary, "some long entry body")
+	require.Contains(t, summary, "Error: "+headline)
+
+	tagsOnly := compressEntry(entry, "Title", []string{"file:x.go"}, headline, CompressionTagsOnly)
+	require.Contains(t, tagsOnly, "file:x.go")
+	require.Contains(t, tagsOnly, "Error: "+headline)
+
+	// Headline not injected at full-fidelity level.
+	full := compressEntry(entry, "Title", nil, headline, CompressionFull)
+	require.NotContains(t, full, "Error:")
+	require.Equal(t, entry, full)
+
+	// No headline → output unchanged.
+	require.Equal(t, "file:x.go", compressEntry(entry, "Title", []string{"file:x.go"}, "", CompressionTagsOnly))
 }
 
 func TestSearchByTag(t *testing.T) {
@@ -586,6 +714,150 @@ func TestCompact_Phase2_TagsOnly(t *testing.T) {
 	total, err := svc.GetTokenCount(context.Background(), sessionID)
 	require.NoError(t, err)
 	require.LessOrEqual(t, total, int64(10))
+}
+
+func TestCompact_SkipsPinnedEntries(t *testing.T) {
+	dataDir := t.TempDir()
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Release(dataDir) })
+	q := db.New(conn)
+	sessionID := uuid.New().String()
+	_, err = q.CreateSession(context.Background(), db.CreateSessionParams{
+		ID:    sessionID,
+		Title: "test",
+	})
+	require.NoError(t, err)
+
+	svc := NewService(q, &mockGenerator{echo: true}, Options{
+		MaxEntryTokens:    10000,
+		MaxNotebookTokens: 5, // Force compaction.
+	})
+
+	// Turn 1: big read of old.go.
+	readMsgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-r", Name: "view", Input: `{"file_path":"old.go"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc-r", Name: "view", Content: strings.Repeat("line of code\n", 200)},
+		}},
+	}
+	require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, 1, readMsgs))
+
+	// Turns 2 and 3: successful edits to pinned.go — the file is
+	// under active edit, so its entries are pinned.
+	for turn := int64(2); turn <= 3; turn++ {
+		editMsgs := []message.Message{
+			{Role: message.Assistant, Parts: []message.ContentPart{
+				message.ToolCall{ID: "tc-e", Name: "edit", Input: `{"file_path":"pinned.go"}`, Finished: true},
+			}},
+			{Role: message.Tool, Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "tc-e", Name: "edit", Content: "ok"},
+			}},
+		}
+		require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, turn, editMsgs))
+	}
+
+	entries, err := svc.GetEntries(context.Background(), sessionID)
+	require.NoError(t, err)
+
+	var pinned, unpinned []Entry
+	for _, e := range entries {
+		isPinned := slices.Contains(e.Tags, "file:pinned.go")
+		if isPinned {
+			pinned = append(pinned, e)
+		} else {
+			unpinned = append(unpinned, e)
+		}
+	}
+	require.NotEmpty(t, pinned)
+	require.NotEmpty(t, unpinned)
+	for _, e := range pinned {
+		require.Equal(t, int64(CompressionFull), e.CompressionLevel,
+			"pinned entry %q must not be compressed", e.Title)
+	}
+	for _, e := range unpinned {
+		require.Greater(t, e.CompressionLevel, int64(CompressionFull),
+			"unpinned entry %q should have been compressed", e.Title)
+	}
+}
+
+func TestCompact_PreCompactHookDeny(t *testing.T) {
+	dataDir := t.TempDir()
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Release(dataDir) })
+	q := db.New(conn)
+	sessionID := uuid.New().String()
+	_, err = q.CreateSession(context.Background(), db.CreateSessionParams{
+		ID:    sessionID,
+		Title: "test",
+	})
+	require.NoError(t, err)
+
+	runner := hooks.NewRunner([]config.HookConfig{
+		{Command: `echo '{"decision":"deny","reason":"paused"}'`, Name: "blocker"},
+	}, dataDir, dataDir)
+	svc := NewService(q, &mockGenerator{echo: true}, Options{
+		MaxEntryTokens:    10000,
+		MaxNotebookTokens: 5,
+		PreCompactRunner:  runner,
+	})
+
+	editMsgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-e", Name: "edit", Input: `{"file_path":"a.go"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc-e", Name: "edit", Content: "ok"},
+		}},
+	}
+	require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, 1, editMsgs))
+	require.NoError(t, svc.Compact(context.Background(), sessionID))
+
+	entries, err := svc.GetEntries(context.Background(), sessionID)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	for _, e := range entries {
+		require.Equal(t, int64(CompressionFull), e.CompressionLevel,
+			"denied compaction must leave entries untouched")
+	}
+}
+
+func TestPinnedFileTags(t *testing.T) {
+	t.Parallel()
+
+	edit := func(turn int64, file string, ok bool) Entry {
+		return Entry{TurnNumber: turn, EventType: EventFileEdit, Succeeded: ok, Tags: []string{"file:" + file}}
+	}
+
+	t.Run("edit in last two turns pins the file", func(t *testing.T) {
+		t.Parallel()
+		entries := []Entry{
+			edit(1, "old.go", true),
+			edit(4, "active.go", true),
+		}
+		pinned := PinnedFileTags(entries)
+		require.True(t, pinned["file:active.go"])
+		require.False(t, pinned["file:old.go"])
+	})
+
+	t.Run("failed edit still pins", func(t *testing.T) {
+		t.Parallel()
+		entries := []Entry{
+			edit(5, "broken.go", false),
+		}
+		require.True(t, PinnedFileTags(entries)["file:broken.go"])
+	})
+
+	t.Run("non-edit entries never contribute pins", func(t *testing.T) {
+		t.Parallel()
+		entries := []Entry{
+			{TurnNumber: 5, EventType: EventFileRead, Succeeded: true, Tags: []string{"file:read.go"}},
+		}
+		require.Empty(t, PinnedFileTags(entries))
+	})
 }
 
 func TestFindToolResult_NoDanglingPointer(t *testing.T) {

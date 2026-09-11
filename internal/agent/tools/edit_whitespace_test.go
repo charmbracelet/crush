@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -138,6 +139,60 @@ func TestFindAndReplaceWithDiagnostics(t *testing.T) {
 		require.Contains(t, err.Error(), "old_string not found")
 		require.NotContains(t, err.Error(), "whitespace-normalized")
 		require.NotContains(t, err.Error(), "Closest match")
+	})
+}
+
+func TestCurrentRegionContext(t *testing.T) {
+	t.Parallel()
+
+	t.Run("not found error includes current region", func(t *testing.T) {
+		t.Parallel()
+		var sb strings.Builder
+		for i := 1; i <= 100; i++ {
+			fmt.Fprintf(&sb, "line %d\n", i)
+		}
+		sb.WriteString("func target() {\n\tactual body\n}\n")
+		content := sb.String()
+
+		// old resembles the target block but has drifted — the best
+		// match is deep in the file, far from line 1.
+		old := "func target() {\n\tstale body\n}"
+		_, _, err := findAndReplace(content, old, "func target() {\n\tnew body\n}", false)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Current file content (lines")
+		require.Contains(t, err.Error(), "actual body")
+	})
+
+	t.Run("region bounded around the match", func(t *testing.T) {
+		t.Parallel()
+		var sb strings.Builder
+		for i := 1; i <= 200; i++ {
+			fmt.Fprintf(&sb, "padding %d\n", i)
+		}
+		sb.WriteString("func target() {\n\treal line\n}\n")
+		for i := 1; i <= 200; i++ {
+			fmt.Fprintf(&sb, "trailer %d\n", i)
+		}
+		content := sb.String()
+
+		old := "func target() {\n\twrong line\n}"
+		_, _, err := findAndReplace(content, old, "x", false)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Current file content (lines")
+		require.Contains(t, err.Error(), "real line")
+		// ±40 lines around the match: line 1 and the tail are out of
+		// range.
+		require.NotContains(t, err.Error(), "padding 1\n")
+		require.NotContains(t, err.Error(), "trailer 200")
+	})
+
+	t.Run("no region when nothing resembles old", func(t *testing.T) {
+		t.Parallel()
+		content := "package main\n\nfunc main() {}\n"
+		old := "completely unrelated content that exists nowhere"
+		_, _, err := findAndReplace(content, old, "x", false)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "Current file content")
 	})
 }
 

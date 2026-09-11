@@ -53,6 +53,14 @@ func classifyEvents(msgs []message.Message) (significant []EntryInput, trivial [
 				input := EntryInput{
 					ToolCall:   &tc,
 					ToolResult: result,
+					// A missing result means the call never completed —
+					// the session was interrupted between the call and
+					// its result. Unknown is not success: a write that
+					// may never have run must not supersede reads.
+					Succeeded: result != nil && !result.IsError,
+				}
+				if result != nil && result.IsError {
+					input.ErrorHeadline = errorHeadline(result.Content)
 				}
 				input.EventType = eventTypeForTool(tc.Name)
 				input.Title = titleForTool(tc)
@@ -265,8 +273,45 @@ func buildTrivialExplorationEntry(trivial []EntryInput) GeneratedEntry {
 	}
 }
 
-// storeEntry persists a generated entry to the database.
-func (s *service) storeEntry(ctx context.Context, sessionID string, turnNumber, eventNumber int64, entry GeneratedEntry) error {
+// errorHeadline extracts a one-line digest from a failed tool result:
+// the first non-empty line plus the trailing exit code when the result
+// carries one (failed bash output ends with "Exit code N"). It
+// survives entry compaction so later turns can compare repeated
+// failures.
+func errorHeadline(content string) string {
+	var first, exitCode string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if first == "" {
+			first = line
+		}
+		if strings.HasPrefix(line, "Exit code") {
+			exitCode = line
+		}
+	}
+	if exitCode != "" && exitCode != first {
+		// Keep the exit code intact; trim the first line so the
+		// combined digest still fits.
+		limit := 200 - len(exitCode) - 3
+		if limit > 0 && len(first) > limit {
+			first = first[:limit-1] + "…"
+		}
+		return first + " — " + exitCode
+	}
+	if len(first) > 200 {
+		first = first[:199] + "…"
+	}
+	return first
+}
+
+// storeEntry persists a generated entry to the database. succeeded is
+// the success flag of the originating event; entries not backed by a
+// tool result are stored as succeeded. headline is the failure digest
+// for failed tool events.
+func (s *service) storeEntry(ctx context.Context, sessionID string, turnNumber, eventNumber int64, entry GeneratedEntry, succeeded bool, headline string) error {
 	tokenCount := estimateTokens(entry.Text)
 	id := uuid.New().String()
 	now := time.Now().Unix()
@@ -282,6 +327,8 @@ func (s *service) storeEntry(ctx context.Context, sessionID string, turnNumber, 
 		EntryTextFull:    sql.NullString{String: entry.Text, Valid: true},
 		TokenCount:       tokenCount,
 		CompressionLevel: CompressionFull,
+		Succeeded:        boolToInt64(succeeded),
+		ErrorHeadline:    headline,
 		CreatedAt:        now,
 	})
 	if err != nil {
@@ -304,6 +351,23 @@ func estimateTokens(text string) int64 {
 	return int64(len(text) / 4)
 }
 
+// eventsSucceeded reports whether every classified event succeeded.
+func eventsSucceeded(events []EntryInput) bool {
+	for _, e := range events {
+		if !e.Succeeded {
+			return false
+		}
+	}
+	return true
+}
+
+func boolToInt64(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // GenerateEntries implements the Service interface.
 func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNumber int64, msgs []message.Message) error {
 	significant, trivial := classifyEvents(msgs)
@@ -318,6 +382,7 @@ func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNum
 			EventType:   EventDecision,
 			Title:       "Decision",
 			Description: extractAssistantText(msgs),
+			Succeeded:   true,
 		})
 	}
 
@@ -330,7 +395,7 @@ func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNum
 	// Store trivial exploration mini-entry.
 	if len(trivial) > 0 {
 		entry := buildTrivialExplorationEntry(trivial)
-		if err := s.storeEntry(ctx, sessionID, turnNumber, 0, entry); err != nil {
+		if err := s.storeEntry(ctx, sessionID, turnNumber, 0, entry, eventsSucceeded(trivial), ""); err != nil {
 			slog.Error("Failed to store trivial exploration entry", "error", err)
 		}
 	}
@@ -350,7 +415,15 @@ func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNum
 		if estimateTokens(entry.Text) > s.opts.MaxEntryTokens {
 			entry.Text = truncateEntry(entry.Text, s.opts.MaxEntryTokens)
 		}
-		if err := s.storeEntry(ctx, sessionID, turnNumber, int64(i+1), entry); err != nil {
+		// Entries are index-aligned with significant events; entries
+		// beyond the input list are generator extras and default to
+		// succeeded.
+		succeeded := i >= len(significant) || significant[i].Succeeded
+		var headline string
+		if i < len(significant) {
+			headline = significant[i].ErrorHeadline
+		}
+		if err := s.storeEntry(ctx, sessionID, turnNumber, int64(i+1), entry, succeeded, headline); err != nil {
 			slog.Error("Failed to store notebook entry", "error", err)
 		}
 	}

@@ -326,6 +326,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			SessionID:        sessionID,
 			RunID:            runID,
 			Prompt:           prompt,
+			PermissionPolicy: permission.RequestPolicyFromContext(ctx),
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  mergedOptions,
@@ -1479,9 +1480,6 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
-	// SessionSetup is an optional callback invoked after session creation
-	// but before agent execution, for custom session configuration.
-	SessionSetup func(sessionID string)
 }
 
 // callTopK returns topK for use on fantasy.Call.TopK, suppressing it for
@@ -1506,11 +1504,6 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
-	// Call session setup function if provided
-	if params.SessionSetup != nil {
-		params.SessionSetup(session.ID)
-	}
-
 	// Get model configuration
 	model := params.Agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
@@ -1528,6 +1521,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return params.Agent.Run(ctx, SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
+			PermissionPolicy: permission.RequestPolicyFromContext(ctx),
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  getProviderOptions(model, providerCfg),
 			Temperature:      model.ModelCfg.Temperature,

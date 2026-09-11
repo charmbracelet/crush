@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -36,10 +37,11 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	hook := func(notify.RunComplete) { called = true }
 
 	res, err := a.Run(t.Context(), SessionAgentCall{
-		SessionID:  sessionID,
-		RunID:      "run-xyz",
-		Prompt:     "queued prompt",
-		OnComplete: hook,
+		SessionID:        sessionID,
+		RunID:            "run-xyz",
+		Prompt:           "queued prompt",
+		PermissionPolicy: permission.RequestPolicyAutoApprove,
+		OnComplete:       hook,
 	})
 	require.NoError(t, err)
 	require.Nil(t, res, "queued Run must return (nil, nil)")
@@ -56,6 +58,8 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	require.Equal(t, "run-xyz", queued[0].RunID,
 		"RunID must be preserved on the queued copy so the drained turn's "+
 			"RunComplete still correlates with the originating SendMessage")
+	require.Equal(t, permission.RequestPolicyAutoApprove, queued[0].PermissionPolicy,
+		"permission policy must be preserved so the queued turn does not inherit the active turn's policy")
 }
 
 // TestDrainQueueForStep_FiltersUnderDispatchLock verifies that the queue
@@ -85,7 +89,7 @@ func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	// Cancel high-water mark at seq 2: seq <= 2 and seq == 0 are covered.
 	a.cancelMark.Set(sessionID, 2)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceledWithRunID := a.drainQueueForStep(sessionID, permission.RequestPolicyPrompt)
 
 	require.Len(t, fold, 1,
 		"only the follow-up queued after the cancel (seq > mark) must be folded")
@@ -114,9 +118,51 @@ func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 		{SessionID: sessionID, Prompt: "b", acceptSeq: 5},
 	})
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceledWithRunID := a.drainQueueForStep(sessionID, permission.RequestPolicyPrompt)
 	require.Len(t, fold, 2, "no cancel mark means all non-RunID queued calls are folded")
 	require.Empty(t, canceledWithRunID)
+}
+
+func TestDrainQueueForStep_KeepsDifferentPermissionPolicyQueued(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := NewSessionAgent(SessionAgentOptions{
+		Sessions: env.sessions,
+		Messages: env.messages,
+	}).(*sessionAgent)
+
+	const sessionID = "drain-permission-policy"
+	a.messageQueue.Set(sessionID, []SessionAgentCall{
+		{
+			SessionID:        sessionID,
+			Prompt:           "fold-before-barrier",
+			PermissionPolicy: permission.RequestPolicyPrompt,
+		},
+		{
+			SessionID:        sessionID,
+			Prompt:           "policy-barrier",
+			PermissionPolicy: permission.RequestPolicyAutoApprove,
+		},
+		{
+			SessionID:        sessionID,
+			Prompt:           "keep-after-barrier",
+			PermissionPolicy: permission.RequestPolicyPrompt,
+		},
+	})
+
+	fold, canceledWithRunID := a.drainQueueForStep(sessionID, permission.RequestPolicyPrompt)
+	require.Len(t, fold, 1)
+	require.Equal(t, "fold-before-barrier", fold[0].Prompt)
+	require.Empty(t, canceledWithRunID)
+
+	kept, ok := a.messageQueue.Get(sessionID)
+	require.True(t, ok)
+	require.Len(t, kept, 2)
+	require.Equal(t, "policy-barrier", kept[0].Prompt)
+	require.Equal(t, permission.RequestPolicyAutoApprove, kept[0].PermissionPolicy)
+	require.Equal(t, "keep-after-barrier", kept[1].Prompt)
+	require.Equal(t, permission.RequestPolicyPrompt, kept[1].PermissionPolicy)
 }
 
 // TestDrainQueueForStep_KeepsRunIDPromptsQueued is the core of fix 2: a
@@ -142,7 +188,7 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 		{SessionID: sessionID, RunID: "run-b", Prompt: "keep-me-too", acceptSeq: 3},
 	})
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceledWithRunID := a.drainQueueForStep(sessionID, permission.RequestPolicyPrompt)
 
 	require.Len(t, fold, 1, "only the non-RunID prompt is folded into the active turn")
 	require.Equal(t, "fold-me", fold[0].Prompt)
@@ -177,7 +223,7 @@ func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
 	})
 	a.cancelMark.Set(sessionID, 2)
 
-	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
+	fold, canceledWithRunID := a.drainQueueForStep(sessionID, permission.RequestPolicyPrompt)
 
 	require.Empty(t, fold, "no uncanceled non-RunID prompts to fold")
 	require.Len(t, canceledWithRunID, 1,
@@ -314,7 +360,7 @@ func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.
 	})
 	a.cancelMark.Set(sessionID, 2)
 
-	_, canceledWithRunID := a.drainQueueForStep(sessionID)
+	_, canceledWithRunID := a.drainQueueForStep(sessionID, permission.RequestPolicyPrompt)
 	require.Len(t, canceledWithRunID, 1)
 	a.publishCanceledQueueDrops(canceledWithRunID)
 

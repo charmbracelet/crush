@@ -567,6 +567,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err := ValidateCall(call); err != nil {
 		return nil, err
 	}
+	if err := a.sessions.AcquireWriter(ctx, call.SessionID); err != nil {
+		if call.Accepted != nil {
+			call.Accepted.Close()
+		}
+		a.publishRunComplete(ctx, call, notify.RunComplete{
+			SessionID: call.SessionID,
+			RunID:     call.RunID,
+			Error:     err.Error(),
+			Cancelled: errors.Is(err, context.Canceled),
+		})
+		return nil, err
+	}
 
 	// genCtx/cancel are the run context and its cancel func, created under
 	// the per-session dispatch mutex below so a concurrent Cancel can observe
@@ -1334,6 +1346,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+	if err := a.sessions.AcquireWriter(ctx, sessionID); err != nil {
+		return err
+	}
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}

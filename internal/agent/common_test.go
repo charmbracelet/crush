@@ -68,7 +68,8 @@ func testEnv(t *testing.T) fakeEnv {
 	err := os.MkdirAll(workingDir, 0o755)
 	require.NoError(t, err)
 
-	conn, err := db.Connect(t.Context(), t.TempDir())
+	dataDir := t.TempDir()
+	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 
 	q := db.New(conn)
@@ -81,7 +82,7 @@ func testEnv(t *testing.T) fakeEnv {
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
 	t.Cleanup(func() {
-		conn.Close()
+		_ = db.Release(dataDir)
 		os.RemoveAll(workingDir)
 	})
 

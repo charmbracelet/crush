@@ -63,6 +63,7 @@ type Session struct {
 }
 
 type Service interface {
+	AcquireWriter(ctx context.Context, id string) error
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
@@ -136,6 +137,9 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {
+	if err := s.AcquireWriter(ctx, id); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
@@ -189,6 +193,9 @@ func (s *service) GetLast(ctx context.Context) (Session, error) {
 }
 
 func (s *service) Save(ctx context.Context, session Session) (Session, error) {
+	if err := s.AcquireWriter(ctx, session.ID); err != nil {
+		return Session{}, err
+	}
 	todosJSON, err := marshalTodos(session.Todos)
 	if err != nil {
 		return Session{}, err
@@ -223,6 +230,9 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 // UpdateTitleAndUsage updates only the title and usage fields atomically.
 // This is safer than fetching, modifying, and saving the entire session.
 func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error {
+	if err := s.AcquireWriter(ctx, sessionID); err != nil {
+		return err
+	}
 	if err := s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
 		ID:               sessionID,
 		Title:            title,
@@ -239,6 +249,9 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 // Rename updates only the title of a session without touching updated_at or
 // usage fields.
 func (s *service) Rename(ctx context.Context, id string, title string) error {
+	if err := s.AcquireWriter(ctx, id); err != nil {
+		return err
+	}
 	if err := s.q.RenameSession(ctx, db.RenameSessionParams{
 		ID:    id,
 		Title: title,

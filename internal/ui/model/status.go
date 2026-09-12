@@ -68,6 +68,15 @@ func (s *Status) ClearInfoMsg(seq uint64) {
 	}
 }
 
+// ClearCurrent retires the info message now, without waiting for the
+// command returned by Show to fire. A retire command that was already in
+// flight becomes a no-op because it no longer identifies the message on
+// screen.
+func (s *Status) ClearCurrent() {
+	s.msg = util.InfoMsg{}
+	s.msgSeq++
+}
+
 // SetMode sets the input mode and YOLO state used for the mode badge.
 func (s *Status) SetMode(mode uiInputMode, yolo bool) {
 	s.inputMode = mode

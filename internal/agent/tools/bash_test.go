@@ -49,6 +49,9 @@ func (m *mockBashPermissionService) SetAutoMode(enabled bool) {}
 
 func (m *mockBashPermissionService) AutoMode() bool { return false }
 
+func (m *mockBashPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
 
 func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
@@ -135,6 +138,9 @@ func (m *recordingPermissionService) SetAutoMode(enabled bool) {}
 
 func (m *recordingPermissionService) AutoMode() bool { return false }
 
+func (m *recordingPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
 
 func (m *recordingPermissionService) SkipRequests() bool {
 	return false

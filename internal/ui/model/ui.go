@@ -5943,15 +5943,14 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 	// status line that persists until the outcome arrives.
 	if !notification.Granted && !notification.Denied && !notification.Cancelled {
 		if m.autoModeCached() {
-			m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: autoModeEvaluatingMsg, TTL: autoModeEvaluatingTTL})
-			return clearInfoMsgCmd(autoModeEvaluatingTTL)
+			return m.status.Show(util.InfoMsg{Type: util.InfoTypeInfo, Msg: autoModeEvaluatingMsg, TTL: autoModeEvaluatingTTL})
 		}
 		return nil
 	}
 
 	// Final resolution: clear the evaluating status if it was showing.
 	if m.autoModeCached() {
-		m.status.ClearInfoMsg()
+		m.status.ClearCurrent()
 	}
 
 	// If this notification reflects a final resolution (granted or denied),

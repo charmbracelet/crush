@@ -34,6 +34,13 @@ func Static(hooks map[string][]HookConfig) Source {
 	return func() map[string][]HookConfig { return hooks }
 }
 
+// TranscriptProvider returns a reasoning-blind excerpt of the recent
+// session conversation (user messages and tool calls only, assistant
+// prose and tool outputs stripped) for the given session, for hooks that
+// opt in via include_transcript. It may return an empty string when no
+// transcript is available (e.g. sub-agents, which do not fire hooks).
+type TranscriptProvider func(ctx context.Context, sessionID string) string
+
 // Runner executes hook commands and aggregates their results. One
 // Runner serves every event for the application. A nil Runner is valid
 // and runs nothing, so callers never have to guard against it.
@@ -41,6 +48,10 @@ type Runner struct {
 	source     Source
 	cwd        string
 	projectDir string
+
+	// transcriptProvider is consulted only when a matched hook opts in
+	// via include_transcript.
+	transcriptProvider TranscriptProvider
 
 	matchersMu sync.Mutex
 	matchers   map[string]*regexp.Regexp // nil value: pattern did not compile
@@ -60,6 +71,15 @@ func NewRunner(source Source, cwd, projectDir string) *Runner {
 	}
 }
 
+// WithTranscriptProvider wires a transcript provider that is consulted
+// when a matched hook opts in via include_transcript. It is safe to call
+// before or after construction; the provider is only invoked for hooks
+// that actually requested transcript context.
+func (r *Runner) WithTranscriptProvider(p TranscriptProvider) *Runner {
+	r.transcriptProvider = p
+	return r
+}
+
 // Run executes every configured hook for the event in parallel and
 // returns their aggregated result. Hooks with a matcher only run when
 // it matches the event's tool name. Execution failures are logged and
@@ -73,6 +93,7 @@ func (r *Runner) Run(ctx context.Context, ev Event) AggregateResult {
 		return AggregateResult{}
 	}
 
+	ev.Transcript = r.transcriptFor(hooks, ctx, ev.SessionID)
 	envVars := BuildEnv(ev, r.cwd, r.projectDir)
 	payload := BuildPayload(ev, r.cwd)
 
@@ -111,6 +132,27 @@ func (r *Runner) Run(ctx context.Context, ev Event) AggregateResult {
 		"decision", agg.Decision.String(),
 	)
 	return agg
+}
+
+// transcriptFor builds the transcript excerpt once for a run, but only
+// when at least one matched hook opted into include_transcript. The
+// provider is consulted at most once per run so concurrent hooks share a
+// single snapshot.
+func (r *Runner) transcriptFor(hooks []HookConfig, ctx context.Context, sessionID string) string {
+	if r.transcriptProvider == nil {
+		return ""
+	}
+	want := false
+	for _, h := range hooks {
+		if h.IncludeTranscript {
+			want = true
+			break
+		}
+	}
+	if !want {
+		return ""
+	}
+	return r.transcriptProvider(ctx, sessionID)
 }
 
 // matchingHooks returns the hooks configured for the event, deduplicated

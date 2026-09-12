@@ -238,6 +238,13 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		hookRunner:   opts.HookRunner,
 	}
 
+	// Bridge external policy hooks (PrePermission, PermissionDenied)
+	// from the permission service to the hooks runner. Reading config
+	// fresh per dispatch means reloads apply to these hooks too.
+	if opts.Permissions != nil && opts.Messages != nil {
+		opts.Permissions.SetPermissionHooks(newPermissionHookDispatcher(opts.Config, opts.Messages))
+	}
+
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil, errCoderAgentNotConfigured

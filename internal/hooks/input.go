@@ -16,12 +16,12 @@ import (
 // an older version. Unknown higher versions are still parsed but logged.
 const SupportedOutputVersion = 1
 
-// Payload is the JSON structure piped to hook commands via stdin. Field
-// names follow Claude Code where an equivalent exists so scripts written
-// for it keep working; `event` is kept alongside `hook_event_name`
-// because earlier Crush releases shipped it.
+//	ToolInput is emitted as a parsed JSON object rather than a string.
 //
-// ToolInput is emitted as a parsed JSON object rather than a string.
+// Transcript, when present, is a reasoning-blind excerpt of the recent
+// session conversation (user messages and tool calls only; assistant
+// prose and tool outputs are stripped). It is only populated for hooks
+// that opt in via include_transcript, so existing hooks are unaffected.
 type Payload struct {
 	Event                string          `json:"event"`
 	HookEventName        string          `json:"hook_event_name"`
@@ -37,6 +37,7 @@ type Payload struct {
 	Source               string          `json:"source,omitempty"`
 	Reason               string          `json:"reason,omitempty"`
 	Trigger              string          `json:"trigger,omitempty"`
+	Transcript           string          `json:"transcript,omitempty"`
 }
 
 // BuildPayload constructs the JSON stdin payload for an event.
@@ -53,6 +54,7 @@ func BuildPayload(ev Event, cwd string) []byte {
 		Source:               ev.Source,
 		Reason:               ev.Reason,
 		Trigger:              ev.Trigger,
+		Transcript:           ev.Transcript,
 	}
 	if ev.Tool != nil {
 		p.ToolName = ev.Tool.Name
@@ -71,9 +73,10 @@ func BuildPayload(ev Event, cwd string) []byte {
 
 // BuildEnv constructs the environment variable slice for a hook command.
 // It includes all current process env vars plus hook-specific ones. The
-// tool variables are only set for events that carry a tool call.
-// CLAUDE_PROJECT_DIR mirrors CRUSH_PROJECT_DIR so hook scripts written
-// for Claude Code can locate themselves.
+// tool variables are only set for events that carry a tool call, and the
+// transcript only when non-empty. CLAUDE_PROJECT_DIR mirrors
+// CRUSH_PROJECT_DIR so hook scripts written for Claude Code can locate
+// themselves.
 func BuildEnv(ev Event, cwd, projectDir string) []string {
 	env := os.Environ()
 	env = append(env, shell.CrushEnvMarkers()...)
@@ -85,6 +88,9 @@ func BuildEnv(ev Event, cwd, projectDir string) []string {
 		fmt.Sprintf("CRUSH_PROJECT_DIR=%s", projectDir),
 		fmt.Sprintf("CLAUDE_PROJECT_DIR=%s", projectDir),
 	)
+	if ev.Transcript != "" {
+		env = append(env, fmt.Sprintf("CRUSH_TRANSCRIPT=%s", ev.Transcript))
+	}
 	if ev.Tool == nil {
 		return env
 	}

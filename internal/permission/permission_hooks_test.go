@@ -62,7 +62,6 @@ func awaitOutcome(t *testing.T, ch <-chan pubsub.Event[PermissionNotification]) 
 	}
 }
 
-
 func TestPermissionService_PrePermissionAllow(t *testing.T) {
 	t.Parallel()
 	service := NewPermissionService("/tmp", false, nil)
@@ -256,4 +255,76 @@ func TestPermissionService_NoHooksUnchanged(t *testing.T) {
 	wg.Wait()
 	require.NoError(t, err)
 	assert.True(t, granted, "no hooks installed: normal flow must be unchanged")
+}
+func TestPermissionService_EscalationNote(t *testing.T) {
+	t.Parallel()
+
+	t.Run("granted escalation leaves a note for the tool", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		events := service.Subscribe(t.Context())
+		var (
+			wg      sync.WaitGroup
+			granted bool
+			err     error
+		)
+		wg.Go(func() {
+			granted, err = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "s1",
+				ToolCallID: "call-esc",
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       "/tmp",
+			})
+		})
+
+		event := <-events
+		service.Grant(event.Payload)
+		wg.Wait()
+		require.NoError(t, err)
+		require.True(t, granted)
+
+		note := service.EscalationNote("call-esc")
+		assert.Contains(t, note, "approved by the user", "escalated grant must leave a note")
+		assert.Empty(t, service.EscalationNote("call-esc"), "note is consumed once")
+	})
+
+	t.Run("automatic grants leave no note", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, []string{"bash"})
+
+		granted, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "call-auto",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       "/tmp",
+		})
+		require.NoError(t, err)
+		require.True(t, granted)
+		assert.Empty(t, service.EscalationNote("call-auto"))
+	})
+
+	t.Run("denied escalation leaves no note", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		events := service.Subscribe(t.Context())
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			_, _ = service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "s1",
+				ToolCallID: "call-den",
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       "/tmp",
+			})
+		})
+
+		event := <-events
+		service.Deny(event.Payload)
+		wg.Wait()
+		assert.Empty(t, service.EscalationNote("call-den"))
+	})
 }

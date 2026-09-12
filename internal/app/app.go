@@ -364,9 +364,13 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
-	// Automatically approve all permission requests for this non-interactive
-	// session.
-	app.Permissions.AutoApproveSession(sess.ID)
+	// Automatically approve all permission requests for this
+	// non-interactive session — except when auto mode is enabled, in
+	// which case requests flow through the native classifier instead.
+	am := app.Config().AutoMode
+	if am == nil || !am.Enabled {
+		app.Permissions.AutoApproveSession(sess.ID)
+	}
 
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)

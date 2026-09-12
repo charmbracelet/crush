@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/automode"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
@@ -216,7 +217,14 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	// from the permission service to the hooks runner. Reading config
 	// fresh per dispatch means reloads apply to these hooks too.
 	if opts.Permissions != nil && opts.Messages != nil {
-		opts.Permissions.SetPermissionHooks(newPermissionHookDispatcher(opts.Config, opts.Messages))
+		var policyHooks permission.PermissionHooks = newPermissionHookDispatcher(opts.Config, opts.Messages)
+		// Native auto mode runs as the primary policy hook when enabled;
+		// external hooks remain as fallback.
+		if am := opts.Config.Config().AutoMode; am != nil && am.Enabled {
+			native := automode.New(c.automodeOptions(am))
+			policyHooks = compositeHooks{primary: native, secondary: policyHooks}
+		}
+		opts.Permissions.SetPermissionHooks(policyHooks)
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]

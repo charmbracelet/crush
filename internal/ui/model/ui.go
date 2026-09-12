@@ -384,6 +384,7 @@ type UI struct {
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
 	agentBusyCache    ttlCache
 	yoloCache         ttlCache
+	autoCache         ttlCache
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
 	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
@@ -515,6 +516,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// and View never probe the workspace synchronously.
 	yolo := com.Workspace.PermissionSkipRequests()
 	ui.yoloCache.set(yolo)
+
+	// Seed the auto-mode cache the same way so the first frame reflects
+	// the current native auto-mode state.
+	ui.autoCache.set(com.Workspace.PermissionAutoMode())
 
 	// Seed the memoized agent ready/model state the same way so the first
 	// frame renders the model info; the busy probe keeps it fresh
@@ -1498,8 +1503,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if !m.bangMode && m.mode != uiInputModePlan && m.yoloModeCached() {
-			m.textarea.Placeholder = "Go crazy"
+		if !m.bangMode && m.mode != uiInputModePlan {
+			if m.yoloModeCached() {
+				m.textarea.Placeholder = "Go crazy"
+			} else if m.autoModeCached() {
+				m.textarea.Placeholder = "Auto mode!"
+			}
 		}
 	}
 	if m.textarea.Placeholder != prevPlaceholder {
@@ -2052,6 +2061,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionOpenAutoModeModels:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.openModelsDialogPreset(dialog.ModelTypeAutoMode); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
@@ -2064,6 +2078,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		} else {
 			m.toggleYoloMode()
 		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleAutoMode:
+		m.toggleAutoMode()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
@@ -2479,6 +2496,20 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
+	// The auto-mode classifier is stored under auto_mode.classifier, not
+	// the models map, and does not re-authenticate or swap agent models.
+	if msg.ModelType == config.SelectedModelTypeAutoMode {
+		m.dialog.CloseDialog(dialog.ModelsID)
+		providerID := string(msg.Provider.ID)
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "auto_mode.classifier.provider", providerID); err != nil {
+			return util.ReportError(err)
+		}
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "auto_mode.classifier.model", msg.Model.Model); err != nil {
+			return util.ReportError(err)
+		}
+		return util.ReportInfo(fmt.Sprintf("Auto mode classifier set to %s/%s", providerID, msg.Model.Model))
+	}
+
 	// Attempt to import GitHub Copilot tokens from VSCode if available.
 	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
 		m.com.Workspace.ImportCopilot()
@@ -2719,12 +2750,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				return true
 			}
-			yolo := m.toggleYoloMode()
-			if yolo {
-				cmds = append(cmds, util.CmdHandler(util.InfoMsg{Type: util.InfoTypeYolo, Msg: yoloModeBannerMsg}))
-			} else {
-				cmds = append(cmds, util.ReportInfo("Yolo mode disabled"))
-			}
+			cmds = append(cmds, util.ReportInfo(m.cyclePermissionMode()))
 			return true
 		}
 		return false
@@ -4173,8 +4199,8 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	})
 }
 
-// setEditorPrompt configures the textarea prompt function based on whether
-// plan, yolo, or bang mode is enabled.
+// setEditorPrompt configures the textarea prompt function based on which
+// mode is active: bang, plan, yolo, auto, or normal.
 func (m *UI) setEditorPrompt(yolo bool) {
 	if m.bangMode {
 		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
@@ -4186,6 +4212,10 @@ func (m *UI) setEditorPrompt(yolo bool) {
 	}
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
+		return
+	}
+	if m.autoModeCached() {
+		m.textarea.SetPromptFunc(4, m.autoPromptFunc)
 		return
 	}
 	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
@@ -4237,6 +4267,22 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.Editor.PromptYoloDotsFocused.Render()
 	}
 	return t.Editor.PromptYoloDotsBlurred.Render()
+}
+
+// autoPromptFunc returns the auto mode editor prompt style with an "A"
+// icon and colored dots.
+func (m *UI) autoPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptAutoIconFocused.Render()
+		}
+		return t.Editor.PromptAutoIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.Editor.PromptAutoDotsFocused.Render()
+	}
+	return t.Editor.PromptAutoDotsBlurred.Render()
 }
 
 // bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
@@ -4953,6 +4999,27 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(modelsDialog)
 
+	return nil
+}
+
+// openModelsDialogPreset opens the models dialog with the given model
+// type preselected (e.g. the auto-mode classifier slot).
+func (m *UI) openModelsDialogPreset(mt dialog.ModelType) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ModelsID) {
+		m.dialog.BringToFront(dialog.ModelsID)
+		return nil
+	}
+
+	isOnboarding := m.state == uiOnboarding
+	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	if err := modelsDialog.SetModelType(mt); err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(modelsDialog)
 	return nil
 }
 

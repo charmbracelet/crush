@@ -405,6 +405,20 @@ func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
 	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
 }
 
+// PermissionAutoMode reports the runtime auto-mode state.
+func (w *ClientWorkspace) PermissionAutoMode() bool {
+	enabled, err := w.client.GetPermissionsAutoMode(context.Background(), w.workspaceID())
+	if err != nil {
+		return false
+	}
+	return enabled
+}
+
+// PermissionSetAutoMode sets the runtime auto-mode state.
+func (w *ClientWorkspace) PermissionSetAutoMode(enabled bool) {
+	_ = w.client.SetPermissionsAutoMode(context.Background(), w.workspaceID(), enabled)
+}
+
 // -- Questions --
 
 // QuestionAnswer submits answers for a question via the client SDK.

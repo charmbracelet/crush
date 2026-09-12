@@ -105,3 +105,13 @@ func (c *coordinator) AutoModeEnabled() bool {
 	am := c.cfg.Config().AutoMode
 	return am != nil && am.Enabled
 }
+
+// amOrDefault returns the auto_mode config section, or a zero-value
+// section when unset, so the native hooks can always be installed and
+// toggled at runtime.
+func amOrDefault(cfg *config.ConfigStore) *config.AutoModeConfig {
+	if am := cfg.Config().AutoMode; am != nil {
+		return am
+	}
+	return &config.AutoModeConfig{}
+}

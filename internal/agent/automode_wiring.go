@@ -109,6 +109,17 @@ func (h compositeHooks) PermissionDenied(ctx context.Context, req permission.Per
 	h.secondary.PermissionDenied(ctx, req)
 }
 
+// OnAutoModeGrant forwards grant notifications to members that track
+// auto-mode quota state.
+func (h compositeHooks) OnAutoModeGrant(sessionID string) {
+	if obs, ok := h.primary.(permission.AutoModeGrantObserver); ok {
+		obs.OnAutoModeGrant(sessionID)
+	}
+	if obs, ok := h.secondary.(permission.AutoModeGrantObserver); ok {
+		obs.OnAutoModeGrant(sessionID)
+	}
+}
+
 // AutoModeEnabled reports whether the native auto mode is enabled in the
 // current config. Note: `auto_mode.enabled` is intended to be honored
 // from user-level config only — a repository should not be able to grant

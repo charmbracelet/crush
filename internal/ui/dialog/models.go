@@ -23,6 +23,7 @@ type ModelType int
 const (
 	ModelTypeLarge ModelType = iota
 	ModelTypeSmall
+	ModelTypeAutoMode
 )
 
 // String returns the string representation of the [ModelType].
@@ -32,6 +33,8 @@ func (mt ModelType) String() string {
 		return "Large Task"
 	case ModelTypeSmall:
 		return "Small Task"
+	case ModelTypeAutoMode:
+		return "Auto Mode"
 	default:
 		return "Unknown"
 	}
@@ -44,6 +47,8 @@ func (mt ModelType) Config() config.SelectedModelType {
 		return config.SelectedModelTypeLarge
 	case ModelTypeSmall:
 		return config.SelectedModelTypeSmall
+	case ModelTypeAutoMode:
+		return config.SelectedModelTypeAutoMode
 	default:
 		return ""
 	}
@@ -56,6 +61,8 @@ func (mt ModelType) Placeholder() string {
 		return largeModelInputPlaceholder
 	case ModelTypeSmall:
 		return smallModelInputPlaceholder
+	case ModelTypeAutoMode:
+		return "Choose the classifier model for auto mode"
 	default:
 		return ""
 	}
@@ -212,9 +219,12 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			if m.isOnboarding {
 				break
 			}
-			if m.modelType == ModelTypeLarge {
+			switch m.modelType {
+			case ModelTypeLarge:
 				m.modelType = ModelTypeSmall
-			} else {
+			case ModelTypeSmall:
+				m.modelType = ModelTypeAutoMode
+			default:
 				m.modelType = ModelTypeLarge
 			}
 			if err := m.setProviderItems(); err != nil {
@@ -248,18 +258,31 @@ func (m *Models) modelTypeRadioView() string {
 	textStyle := t.Radio.Label
 	largeRadioStyle := t.Radio.Off
 	smallRadioStyle := t.Radio.Off
-	if m.modelType == ModelTypeLarge {
+	autoRadioStyle := t.Radio.Off
+	switch m.modelType {
+	case ModelTypeLarge:
 		largeRadioStyle = t.Radio.On
-	} else {
+	case ModelTypeSmall:
 		smallRadioStyle = t.Radio.On
+	case ModelTypeAutoMode:
+		autoRadioStyle = t.Radio.On
 	}
 
 	largeRadio := largeRadioStyle.Padding(0, 1).Render()
 	smallRadio := smallRadioStyle.Padding(0, 1).Render()
+	autoRadio := autoRadioStyle.Padding(0, 1).Render()
 
-	return fmt.Sprintf("%s%s  %s%s",
+	return fmt.Sprintf("%s%s  %s%s  %s%s",
 		largeRadio, textStyle.Render(ModelTypeLarge.String()),
-		smallRadio, textStyle.Render(ModelTypeSmall.String()))
+		smallRadio, textStyle.Render(ModelTypeSmall.String()),
+		autoRadio, textStyle.Render(ModelTypeAutoMode.String()))
+}
+
+// SetModelType presets the model type (e.g. from the commands dialog)
+// and refreshes the provider list.
+func (m *Models) SetModelType(mt ModelType) error {
+	m.modelType = mt
+	return m.setProviderItems()
 }
 
 // Draw implements [Dialog].
@@ -353,6 +376,14 @@ func (m *Models) setProviderItems() error {
 	var selectedItemID string
 	selectedType := m.modelType.Config()
 	currentModel := cfg.Models[selectedType]
+	if selectedType == config.SelectedModelTypeAutoMode {
+		if am := cfg.AutoMode; am != nil && am.Classifier != nil {
+			currentModel = config.SelectedModel{
+				Provider: am.Classifier.Provider,
+				Model:    am.Classifier.Model,
+			}
+		}
+	}
 	recentItems := cfg.RecentModels[selectedType]
 
 	// Track providers already added to avoid duplicates

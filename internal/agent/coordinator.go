@@ -218,13 +218,17 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	// fresh per dispatch means reloads apply to these hooks too.
 	if opts.Permissions != nil && opts.Messages != nil {
 		var policyHooks permission.PermissionHooks = newPermissionHookDispatcher(opts.Config, opts.Messages)
-		// Native auto mode runs as the primary policy hook when enabled;
-		// external hooks remain as fallback.
-		if am := opts.Config.Config().AutoMode; am != nil && am.Enabled {
-			native := automode.New(c.automodeOptions(am))
-			policyHooks = compositeHooks{primary: native, secondary: policyHooks}
-		}
+		// Native auto mode is always installed so the TUI mode cycle can
+		// toggle it at runtime; its initial state comes from config. It
+		// runs as the primary policy hook, with external hooks as
+		// fallback.
+		native := automode.New(c.automodeOptions(amOrDefault(opts.Config)))
+		policyHooks = compositeHooks{primary: native, secondary: policyHooks}
 		opts.Permissions.SetPermissionHooks(policyHooks)
+		// Seed the runtime auto-mode state (also forwards to the native
+		// toggler) so headless gating and the TUI toggle agree with the
+		// config's initial value.
+		opts.Permissions.SetAutoMode(c.AutoModeEnabled())
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]

@@ -54,6 +54,9 @@ func (s SelectedModelType) String() string {
 const (
 	SelectedModelTypeLarge SelectedModelType = "large"
 	SelectedModelTypeSmall SelectedModelType = "small"
+	// SelectedModelTypeAutoMode selects the auto-mode classifier model.
+	// It is stored under auto_mode.classifier, not the models map.
+	SelectedModelTypeAutoMode SelectedModelType = "auto_mode"
 )
 
 const (

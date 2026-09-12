@@ -129,6 +129,10 @@
           "type": "integer",
           "description": "Timeout in seconds for the hook command",
           "default": 30
+        },
+        "include_transcript": {
+          "type": "boolean",
+          "description": "When true"
         }
       },
       "additionalProperties": false,

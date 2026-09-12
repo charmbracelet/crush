@@ -65,7 +65,7 @@ func awaitOutcome(t *testing.T, ch <-chan pubsub.Event[PermissionNotification]) 
 
 func TestPermissionService_PrePermissionAllow(t *testing.T) {
 	t.Parallel()
-	service := NewPermissionService("/tmp", false, nil)
+	service := NewPermissionService("/tmp", false, nil, nil)
 	hooks := &fakePermissionHooks{decision: PreHookResult{Decision: HookDecisionAllow}}
 	service.SetPermissionHooks(hooks)
 
@@ -88,7 +88,7 @@ func TestPermissionService_PrePermissionAllow(t *testing.T) {
 
 func TestPermissionService_PrePermissionDeny(t *testing.T) {
 	t.Parallel()
-	service := NewPermissionService("/tmp", false, nil)
+	service := NewPermissionService("/tmp", false, nil, nil)
 	hooks := &fakePermissionHooks{decision: PreHookResult{
 		Decision: HookDecisionDeny,
 		Reason:   "command matches a dangerous pattern",
@@ -114,7 +114,7 @@ func TestPermissionService_PrePermissionDeny(t *testing.T) {
 
 func TestPermissionService_PrePermissionNoneFallsThroughToPrompt(t *testing.T) {
 	t.Parallel()
-	service := NewPermissionService("/tmp", false, nil)
+	service := NewPermissionService("/tmp", false, nil, nil)
 	hooks := &fakePermissionHooks{decision: PreHookResult{Decision: HookDecisionNone}}
 	service.SetPermissionHooks(hooks)
 
@@ -144,7 +144,7 @@ func TestPermissionService_PrePermissionNoneFallsThroughToPrompt(t *testing.T) {
 
 func TestPermissionService_PrePermissionSkippedByEarlierGrants(t *testing.T) {
 	t.Run("allowlisted tool never consults hooks", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, []string{"bash"})
+		service := NewPermissionService("/tmp", false, []string{"bash"}, nil)
 		hooks := &fakePermissionHooks{decision: PreHookResult{Decision: HookDecisionDeny}}
 		service.SetPermissionHooks(hooks)
 
@@ -161,7 +161,7 @@ func TestPermissionService_PrePermissionSkippedByEarlierGrants(t *testing.T) {
 	})
 
 	t.Run("hook approval never consults PrePermission hooks", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, nil)
+		service := NewPermissionService("/tmp", false, nil, nil)
 		hooks := &fakePermissionHooks{decision: PreHookResult{Decision: HookDecisionDeny}}
 		service.SetPermissionHooks(hooks)
 
@@ -179,7 +179,7 @@ func TestPermissionService_PrePermissionSkippedByEarlierGrants(t *testing.T) {
 	})
 
 	t.Run("session auto-approve never consults PrePermission hooks", func(t *testing.T) {
-		service := NewPermissionService("/tmp", false, nil)
+		service := NewPermissionService("/tmp", false, nil, nil)
 		hooks := &fakePermissionHooks{decision: PreHookResult{Decision: HookDecisionDeny}}
 		service.SetPermissionHooks(hooks)
 		service.AutoApproveSession("s1")
@@ -199,7 +199,7 @@ func TestPermissionService_PrePermissionSkippedByEarlierGrants(t *testing.T) {
 
 func TestPermissionService_PermissionDeniedHook(t *testing.T) {
 	t.Parallel()
-	service := NewPermissionService("/tmp", false, nil)
+	service := NewPermissionService("/tmp", false, nil, nil)
 	hooks := &fakePermissionHooks{}
 	service.SetPermissionHooks(hooks)
 
@@ -233,7 +233,7 @@ func TestPermissionService_PermissionDeniedHook(t *testing.T) {
 
 func TestPermissionService_NoHooksUnchanged(t *testing.T) {
 	t.Parallel()
-	service := NewPermissionService("/tmp", false, nil)
+	service := NewPermissionService("/tmp", false, nil, nil)
 
 	events := service.Subscribe(t.Context())
 	var (

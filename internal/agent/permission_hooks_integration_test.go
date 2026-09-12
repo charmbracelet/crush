@@ -30,7 +30,7 @@ func loadStoreWithHooks(t *testing.T, hooksJSON string) (*config.ConfigStore, st
 	cfgJSON := `{"hooks":` + hooksJSON + `}`
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "crush.json"), []byte(cfgJSON), 0o600))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := config.Load(context.Background(), workDir, dataDir, false)
 	require.NoError(t, err)
 	return store, workDir
 }
@@ -65,7 +65,7 @@ func TestPrePermissionBridge_Deny(t *testing.T) {
 		]
 	}`)
 
-	svc := permission.NewPermissionService(workDir, false, nil)
+	svc := permission.NewPermissionService(workDir, false, nil, nil)
 	svc.SetPermissionHooks(newPermissionHookDispatcher(store, nil))
 
 	notifications := svc.SubscribeNotifications(context.Background())
@@ -95,7 +95,7 @@ func TestPrePermissionBridge_Allow(t *testing.T) {
 		]
 	}`)
 
-	svc := permission.NewPermissionService(workDir, false, nil)
+	svc := permission.NewPermissionService(workDir, false, nil, nil)
 	svc.SetPermissionHooks(newPermissionHookDispatcher(store, nil))
 
 	notifications := svc.SubscribeNotifications(context.Background())
@@ -125,7 +125,7 @@ func TestPrePermissionBridge_SilenceFallsThroughToPrompt(t *testing.T) {
 		]
 	}`)
 
-	svc := permission.NewPermissionService(workDir, false, nil)
+	svc := permission.NewPermissionService(workDir, false, nil, nil)
 	svc.SetPermissionHooks(newPermissionHookDispatcher(store, nil))
 
 	events := svc.Subscribe(context.Background())
@@ -157,7 +157,7 @@ func TestPrePermissionBridge_SilenceFallsThroughToPrompt(t *testing.T) {
 func TestPrePermissionBridge_NoHooksConfigured(t *testing.T) {
 	store, workDir := loadStoreWithHooks(t, `{}`)
 
-	svc := permission.NewPermissionService(workDir, false, nil)
+	svc := permission.NewPermissionService(workDir, false, nil, nil)
 	svc.SetPermissionHooks(newPermissionHookDispatcher(store, nil))
 
 	events := svc.Subscribe(context.Background())
@@ -194,7 +194,7 @@ func TestPermissionDeniedBridge(t *testing.T) {
 		]
 	}`)
 
-	svc := permission.NewPermissionService(workDir, false, nil)
+	svc := permission.NewPermissionService(workDir, false, nil, nil)
 	svc.SetPermissionHooks(newPermissionHookDispatcher(store, nil))
 
 	events := svc.Subscribe(context.Background())

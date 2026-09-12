@@ -151,6 +151,11 @@ type Service interface {
 	// be called once at startup; calls after the service is in use should
 	// be avoided.
 	SetPermissionHooks(hooks PermissionHooks)
+	// DenialReason returns and clears the reason recorded for a denied
+	// tool call (e.g. by a PrePermission hook or the native auto mode),
+	// so tools can surface it to the model. Empty when the denial had no
+	// recorded reason.
+	DenialReason(toolCallID string) string
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -177,6 +182,7 @@ type permissionService struct {
 	hooksMu               sync.RWMutex
 	hooks                 PermissionHooks
 	hooksWG               sync.WaitGroup
+	denialReasons         *csync.Map[string, string]
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -356,6 +362,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 			})
 			return true, nil
 		case HookDecisionDeny:
+			s.denialReasons.Set(opts.ToolCallID, res.Reason)
 			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 				ToolCallID: opts.ToolCallID,
 				Denied:     true,
@@ -364,7 +371,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 			return false, nil
 		}
 	}
-
 
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission
@@ -456,6 +462,20 @@ func (s *permissionService) SetPermissionHooks(hooks PermissionHooks) {
 	s.hooksMu.Unlock()
 }
 
+// DenialReason returns and clears the recorded denial reason for a tool
+// call, so the tool can surface it to the model. It is consumed exactly
+// once, keeping the map bounded.
+func (s *permissionService) DenialReason(toolCallID string) string {
+	if toolCallID == "" {
+		return ""
+	}
+	reason, ok := s.denialReasons.Take(toolCallID)
+	if !ok {
+		return ""
+	}
+	return reason
+}
+
 func (s *permissionService) currentHooks() PermissionHooks {
 	s.hooksMu.RLock()
 	h := s.hooks
@@ -510,6 +530,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string, o
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 		observer:            observer,
+		denialReasons:       csync.NewMap[string, string](),
 	}
 	svc.skip.Store(skip)
 	return svc

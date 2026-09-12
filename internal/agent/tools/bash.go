@@ -242,7 +242,7 @@ func NewBashTool(permissions permission.Service, workingDir, spillDir string, at
 					return fantasy.ToolResponse{}, err
 				}
 				if !p {
-					return NewPermissionDeniedResponse(), nil
+					return NewPermissionDeniedResponse(permissions.DenialReason(call.ID)), nil
 				}
 			}
 

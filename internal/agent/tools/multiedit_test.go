@@ -42,6 +42,10 @@ func (m *mockPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
 
+func (m *mockPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
 
 func (m *mockPermissionService) SkipRequests() bool {
 	return false

@@ -231,3 +231,17 @@ func TestQuotasRecordAndPause(t *testing.T) {
 	assert.True(t, q.paused("s", 3, 20), "3 consecutive pauses")
 	assert.True(t, q.paused("s", 0, 5), "5 total pauses")
 }
+
+func TestQuotasGrantResetsConsecutive(t *testing.T) {
+	t.Parallel()
+	q := newQuotas()
+	q.recordDenial("s")
+	q.recordDenial("s")
+	q.recordDenial("s")
+	require.True(t, q.paused("s", 3, 20), "3 consecutive pauses")
+
+	// The human approves an escalated request: consecutive resets, total keeps accumulating.
+	q.recordGrant("s")
+	assert.False(t, q.paused("s", 3, 20), "grant must lift the pause")
+	assert.Equal(t, 3, q.get("s").totalDenials, "total counter keeps its history")
+}

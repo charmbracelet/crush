@@ -75,6 +75,14 @@ type busyStateMsg struct {
 	ready     bool
 	agentBusy bool
 	yolo      bool
+	// forSession is the session sessionBusy was probed for; a result that
+	// raced a session switch must not retire the new session's spinner.
+	forSession string
+	// sessionBusy reports whether forSession specifically has a run in
+	// flight. Unlike agentBusy it is not true merely because some other
+	// session or a shell command is working, which makes it the
+	// authoritative answer for retiring that session's turn spinner.
+	sessionBusy bool
 	// model is the coordinator's selected model, fetched by the same probe
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
@@ -93,10 +101,14 @@ type promptQueueMsg struct {
 	prompts []string
 }
 
-// agentRunSubmittedMsg reports that AgentRun accepted a prompt (it either
-// started a run or was enqueued behind one), so busy and queue state should
-// be re-fetched.
-type agentRunSubmittedMsg struct{}
+// agentRunSubmittedMsg reports the outcome of handing a prompt to the
+// agent. On success the run either started or was enqueued, so busy and
+// queue state should be re-fetched. On failure the turn never began, so
+// nothing else will ever retire its spinner.
+type agentRunSubmittedMsg struct {
+	sessionID string
+	err       error
+}
 
 // agentModelChangedMsg reports that the coordinator's model was updated
 // (model selection, thinking toggle, reasoning effort), so the memoized
@@ -146,12 +158,16 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	m.busyFetchInFlight = true
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
+	sessionID := m.currentSessionID()
 	return func() tea.Msg {
-		st := busyStateMsg{gen: gen}
+		st := busyStateMsg{gen: gen, forSession: sessionID}
 		if ws.AgentIsReady() {
 			st.ready = true
 			st.agentBusy = ws.AgentIsBusy()
 			st.model = ws.AgentModel()
+			if sessionID != "" {
+				st.sessionBusy = ws.AgentIsSessionBusy(sessionID)
+			}
 		}
 		st.yolo = ws.PermissionSkipRequests()
 		return st
@@ -212,6 +228,17 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 	if m.todoIsSpinning && !busy {
 		m.todoIsSpinning = false
+	}
+	// Retire a pending turn once its session has been seen working and
+	// then goes idle. This is the backstop that makes the spinner safe: a
+	// cancel, a re-auth prompt, or a dropped notification all end a turn
+	// without a terminal event, and the TTL guarantees this probe lands.
+	if msg.forSession != "" && msg.forSession == m.pending.sessionID {
+		if msg.sessionBusy {
+			m.pending.seenBusy = true
+		} else if m.pending.seenBusy {
+			m.endPendingTurn(msg.forSession)
+		}
 	}
 	if prevBusy != busy {
 		m.renderPills()

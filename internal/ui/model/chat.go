@@ -2,6 +2,7 @@ package model
 
 import (
 	"image"
+	"slices"
 	"strings"
 	"time"
 
@@ -450,7 +451,16 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 }
 
 // AppendMessages appends a new message item to the chat list.
+//
+// The turn placeholder is carried to the end, so a message that lands while
+// it is up goes above it rather than below: the spinner marks the bottom of
+// the transcript for the whole turn instead of hopping over each arrival.
 func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
+	if pending := m.MessageItem(chat.PendingAssistantID); pending != nil && !containsMessage(msgs, chat.PendingAssistantID) {
+		m.RemoveMessage(chat.PendingAssistantID)
+		msgs = append(append(make([]chat.MessageItem, 0, len(msgs)+1), msgs...), pending)
+	}
+
 	items := make([]list.Item, len(msgs))
 	indexOffset := m.list.Len()
 	for i, msg := range msgs {
@@ -464,6 +474,13 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 		items[i] = msg
 	}
 	m.list.AppendItems(items...)
+}
+
+// containsMessage reports whether any of msgs carries the given id.
+func containsMessage(msgs []chat.MessageItem, id string) bool {
+	return slices.ContainsFunc(msgs, func(msg chat.MessageItem) bool {
+		return msg.ID() == id
+	})
 }
 
 // UpdateNestedToolIDs updates the ID map for nested tools within a container.
@@ -495,6 +512,19 @@ func (m *Chat) UpdateNestedToolIDs(containerID string) {
 // of how many items are animating. gen is the clock generation the tick
 // was armed for.
 type animTickMsg struct{ gen uint64 }
+
+// HasSpinningItem reports whether any item in the transcript is spinning,
+// whether or not it is on screen. Unlike hasVisibleAnimation this answers
+// "is a turn already showing progress", so it is scanned from the tail
+// where a live item almost always sits.
+func (m *Chat) HasSpinningItem() bool {
+	for idx := m.list.Len() - 1; idx >= 0; idx-- {
+		if animatable, ok := m.list.ItemAt(idx).(chat.Animatable); ok && animatable.Spinning() {
+			return true
+		}
+	}
+	return false
+}
 
 // hasVisibleAnimation reports whether any item in the viewport is spinning.
 func (m *Chat) hasVisibleAnimation() bool {

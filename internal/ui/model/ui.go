@@ -1021,7 +1021,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[permission.PermissionNotification]:
-		m.handlePermissionNotification(msg.Payload)
+		if cmd := m.handlePermissionNotification(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
 		m.chat.ScrollToBottom()
@@ -4854,8 +4856,19 @@ func (m *UI) shouldCollapseQuestion(qf *dialog.QuestionForm) bool {
 	return m.focus != uiFocusEditor && m.height > 0 && qf.Height(m.editorContentWidth()) > m.height*2/5
 }
 
-// handlePermissionNotification updates tool items when permission state changes.
-func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
+// autoModeEvaluatingMsg is the status message shown while the native
+// auto mode classifier is evaluating a permission request.
+const autoModeEvaluatingMsg = "Auto mode: evaluating command…"
+
+// autoModeEvaluatingTTL bounds how long the evaluating status line
+// lingers if the outcome never arrives (e.g. classifier hang).
+const autoModeEvaluatingTTL = 90 * time.Second
+
+// handlePermissionNotification updates tool items when permission state
+// changes. When auto mode is active, it surfaces an "evaluating" status
+// while the classifier runs so the prompt doesn't look hung during the
+// (potentially slow) LLM call.
+func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) tea.Cmd {
 	if toolItem := m.chat.MessageItem(notification.ToolCallID); toolItem != nil {
 		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
 			if notification.Granted {
@@ -4866,17 +4879,30 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 		}
 	}
 
+	// "Requested" ping (no outcome yet): auto mode is evaluating. Show a
+	// status line that persists until the outcome arrives.
+	if !notification.Granted && !notification.Denied {
+		if m.autoModeCached() {
+			m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: autoModeEvaluatingMsg, TTL: autoModeEvaluatingTTL})
+			return clearInfoMsgCmd(autoModeEvaluatingTTL)
+		}
+		return nil
+	}
+
+	// Final resolution: clear the evaluating status if it was showing.
+	if m.autoModeCached() {
+		m.status.ClearInfoMsg()
+	}
+
 	// If this notification reflects a final resolution (granted or denied),
 	// dismiss any open permissions dialog whose tool call ID matches. This
 	// covers the case where another client resolved the request remotely.
-	if !notification.Granted && !notification.Denied {
-		return
-	}
 	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
 		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
 			m.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
+	return nil
 }
 
 // handleAgentNotification translates domain agent events into desktop

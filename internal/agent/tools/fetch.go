@@ -119,7 +119,13 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 			resp, err := client.Do(req)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
+				// Preserve abort semantics when the caller cancelled the run.
+				if requestCtx.Err() == context.Canceled {
+					return fantasy.ToolResponse{}, err
+				}
+				// Network failures (timeouts, DNS errors) should degrade to a
+				// recoverable tool error so the agent can retry or move on.
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 			}
 			defer resp.Body.Close()
 

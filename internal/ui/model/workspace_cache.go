@@ -208,6 +208,12 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	if prevBusy != busy {
 		m.renderPills()
 	}
+	if prevBusy && !busy {
+		// Busy-to-idle edge: any in-flight turn (including one that
+		// sat through retry backoffs) ended. Retire a lingering
+		// retry notice; per-chunk updates deliberately do not.
+		m.clearRetryNotice()
+	}
 	return cmds
 }
 

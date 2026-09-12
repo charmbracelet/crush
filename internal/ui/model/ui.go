@@ -939,10 +939,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
+			m.clearRetryNotice()
 		}
-		// Any message traffic on the current session means the turn
+		// A new message row on the current session means the turn
 		// moved past the backoff: drop a lingering retry notice.
-		m.clearRetryNotice()
+		// UpdatedEvents are deliberately excluded: the reset write
+		// that accompanies every retry notice and every streaming
+		// chunk arrive as updates, and clearing on them would erase
+		// the notice before it ever renders a frame. Per-chunk
+		// progress needs no clearing — the busy-to-idle edge below
+		// retires the notice when the turn actually ends.
+		if msg.Type == pubsub.CreatedEvent {
+			m.clearRetryNotice()
+		}
 		// start the spinner if there is a new message
 		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
 			m.todoIsSpinning = true

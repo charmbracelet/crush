@@ -814,17 +814,45 @@ func TestAgentRetryingNotificationIsStatusOnly(t *testing.T) {
 	require.Contains(t, m.status.msg.Msg, "overloaded",
 		"a retry notice must surface the failure reason in the status bar")
 
-	// The next message on the session proves the backoff is over and
-	// must drop the notice.
+	// Streaming chunks (UpdatedEvent) must NOT clear the notice:
+	// the reset write accompanying every retry arrives as an update,
+	// and clearing on it erases the notice before it renders.
 	_, cmd := m.Update(pubsub.Event[message.Message]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant},
 	})
 	runCmds(m, cmd)
+	require.True(t, m.retryNotice,
+		"streaming updates must leave a lingering retry notice alone")
+	require.Contains(t, m.status.msg.Msg, "overloaded",
+		"the notice must survive its own reset write")
+
+	// A new message row proves the backoff is over and must drop it.
+	_, cmd = m.Update(pubsub.Event[message.Message]{
+		Type:    pubsub.CreatedEvent,
+		Payload: message.Message{ID: "m2", SessionID: "s1", Role: message.Tool},
+	})
+	runCmds(m, cmd)
 	require.False(t, m.retryNotice,
-		"message traffic must clear a lingering retry notice")
+		"a new message row must clear a lingering retry notice")
 	require.True(t, m.status.msg.IsEmpty(),
 		"clearing the retry notice must release the status bar")
+
+	// Re-pin, then let the turn end: the busy-to-idle edge retires
+	// the notice for pure-text recoveries that produce no new rows.
+	m.handleAgentNotification(notify.Notification{
+		SessionID: "s1",
+		Type:      notify.TypeAgentRetrying,
+		Message:   "overloaded; retrying in 5s (attempt 2)",
+	})
+	require.True(t, m.retryNotice)
+	// The intermediate probe above already flipped the cache idle;
+	// re-warm it so the edge below is a genuine busy-to-idle.
+	m.agentBusyCache.set(true)
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, agentBusy: false})
+	require.False(t, m.retryNotice,
+		"the busy-to-idle edge must retire a lingering retry notice")
+	require.True(t, m.status.msg.IsEmpty())
 }
 
 // TestAgentErrorNotificationToastsTerminalFailure pins the toast

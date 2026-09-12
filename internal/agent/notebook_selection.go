@@ -108,19 +108,25 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmen
 // ordered by construction, so the scan is cheap.
 func coveredSegmentFloor(segs []segment, boundary int) segmentKey {
 	var last, prev segmentKey
+	var covered int
 	for _, s := range segs {
 		if s.end > boundary {
 			break
 		}
 		prev, last = last, s.key()
+		covered++
 	}
-	if last == (segmentKey{}) && len(segs) > 0 {
-		return segs[0].key()
+	if covered == 0 {
+		if len(segs) > 0 {
+			return segs[0].key()
+		}
+		return segmentKey{}
 	}
 	// Two covered segments or more: the floor is the second-to-last,
 	// matching the "two most recent" window. With a single covered
-	// segment, that segment is the floor.
-	if prev != (segmentKey{}) {
+	// segment, that segment is the floor. The count — not the zero
+	// key — distinguishes the cases: (0,0) is a valid prev.
+	if covered >= 2 {
 		return prev
 	}
 	return last

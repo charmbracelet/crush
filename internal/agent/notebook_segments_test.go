@@ -165,6 +165,26 @@ func TestSegmentBoundaries_StragglerResultDoesNotBlockUserClose(t *testing.T) {
 	require.Equal(t, int64(0), segs[0].turn)
 }
 
+func TestSegmentBoundaries_OrphanCallDoesNotBlockThresholdClose(t *testing.T) {
+	t.Parallel()
+
+	big := strings.Repeat("x", 4000)
+	msgs := []message.Message{
+		segUser("go"),
+		// A cancelled call — no result lands anywhere — must not
+		// block a threshold close: pending only tracks calls with a
+		// known result position.
+		segAssistant(big, message.ToolCall{ID: "tc-orphan", Name: "bash"}),
+		segAssistant(big),
+		segAssistant(big),
+	}
+	segs := segmentBoundaries(msgs, 2000, 100)
+	require.GreaterOrEqual(t, len(segs), 2)
+	for _, s := range segs[:len(segs)-1] {
+		require.True(t, allCallsResolved(msgs, s.end))
+	}
+}
+
 func TestSegmentBoundaries_FoldedUserMessageIsHardBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -423,6 +443,41 @@ func TestDetectSegments_BackfillsLegacyTurnWithoutRegenerating(t *testing.T) {
 	require.Equal(t, int64(1), gen.calls.Load())
 	_, processed := a.detectSegments(ctx, sessionID, msgs)
 	require.NotEmpty(t, processed)
+}
+
+func TestDetectSegments_BackfillCoversLegacyOpenTail(t *testing.T) {
+	t.Parallel()
+
+	gen := &countingGen{}
+	a, svc, nb, sessionID := newSegmentTestAgent(t, gen)
+	a.segmentMaxSteps = 2
+
+	// A legacy session's last turn has turn-grain entries but its
+	// tail — holding the final step — is still the open segment: it
+	// closes only when the next user message lands.
+	msgs := segBuildTurn(t, svc, sessionID, "work", 5, "step content")
+	require.NoError(t, nb.GenerateEntries(t.Context(), sessionID, 0, msgs))
+	require.Equal(t, int64(1), gen.calls.Load())
+
+	segs := segmentBoundaries(msgs, a.segTokenBudget(), a.segMaxSteps())
+	require.True(t, segs[len(segs)-1].open)
+	require.NotEmpty(t, msgs[segs[len(segs)-1].start:segs[len(segs)-1].end], "the open tail must hold messages")
+
+	ctx := t.Context()
+	a.detectSegments(ctx, sessionID, msgs)
+
+	// The new user message closes the tail at exactly the extent the
+	// backfill recorded, so it stays processed — regenerating would
+	// duplicate coverage the turn-grain entries already provide.
+	mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "next"})
+	msgs, err := svc.List(ctx, sessionID)
+	require.NoError(t, err)
+	segs, processed := a.detectSegments(ctx, sessionID, msgs)
+
+	require.Equal(t, int64(1), gen.calls.Load(), "closed legacy tail must not regenerate")
+	for _, s := range segs[:len(segs)-1] {
+		require.True(t, processed[s.key()], "segment %v should report processed coverage", s.key())
+	}
 }
 
 func TestGenerateRunEndSegments_NoDuplicatesForCoveredSegments(t *testing.T) {

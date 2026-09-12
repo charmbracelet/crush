@@ -40,6 +40,11 @@ const (
 	// segment at once; uncovered segments stay raw via pull-back and
 	// are picked up by later passes.
 	segmentGenBurstLimit = 4
+	// segmentGenTimeout bounds a detached generation goroutine. A
+	// hung small-model call must eventually release its in-flight
+	// mark so the segment retries under backoff instead of staying
+	// raw forever.
+	segmentGenTimeout = 10 * time.Minute
 )
 
 // segmentKey identifies a segment within a session: its turn number
@@ -438,7 +443,6 @@ func (a *sessionAgent) detectSegments(ctx context.Context, sessionID string, msg
 		}
 	}
 
-	genCtx := context.WithoutCancel(ctx)
 	fired := 0
 	closed := false
 	for _, s := range segs {
@@ -496,12 +500,19 @@ func (a *sessionAgent) detectSegments(ctx context.Context, sessionID string, msg
 		// Each goroutine gets a private deep clone: flagging and
 		// promotion mutate tool-result parts and mark pointers, so a
 		// shared or shallow clone would race with sibling goroutines
-		// and with stub promotion on this goroutine.
+		// and with stub promotion on this goroutine. The context is
+		// detached but bounded — a hung call must release the
+		// in-flight mark so the segment retries under backoff.
 		genMsgs := cloneMessagesForGen(msgs)
+		genCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), segmentGenTimeout)
 		if a.syncSegmentGen {
 			a.generateSegment(genCtx, sessionID, s, genMsgs[s.start:s.end], tracker)
+			cancel()
 		} else {
-			go a.generateSegment(genCtx, sessionID, s, genMsgs[s.start:s.end], tracker)
+			go func() {
+				defer cancel()
+				a.generateSegment(genCtx, sessionID, s, genMsgs[s.start:s.end], tracker)
+			}()
 		}
 	}
 	// Flag superseded tool results once per pass that fired generation
@@ -511,10 +522,15 @@ func (a *sessionAgent) detectSegments(ctx context.Context, sessionID string, msg
 	// a slow generation sits in-flight.
 	if (fired > 0 || closed) && a.stubSuperseded {
 		flagMsgs := cloneMessagesForGen(msgs)
+		flagCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), segmentGenTimeout)
 		if a.syncSegmentGen {
-			a.flagPrunableToolResults(genCtx, flagMsgs)
+			a.flagPrunableToolResults(flagCtx, flagMsgs)
+			cancel()
 		} else {
-			go a.flagPrunableToolResults(genCtx, flagMsgs)
+			go func() {
+				defer cancel()
+				a.flagPrunableToolResults(flagCtx, flagMsgs)
+			}()
 		}
 	}
 	return segs, processed
@@ -555,9 +571,14 @@ func (a *sessionAgent) segmentRegistry(ctx context.Context, sessionID string) (m
 	return registry, nil
 }
 
-// backfillSegmentRegistry marks closed segments of turns that already
-// have entries as processed. Returns false when the backfill could not
-// complete so the caller retries on the next pass.
+// backfillSegmentRegistry marks segments of turns that already have
+// entries as processed — including the open tail. A turn with
+// turn-grain entries is always a completed run, so its open tail's
+// extent [start, len(msgs)) is final: it closes at exactly that index
+// when the next user message lands, and the extent match keeps it
+// processed instead of regenerating over messages the turn-grain
+// entries already summarize. Returns false when the backfill could
+// not complete so the caller retries on the next pass.
 func (a *sessionAgent) backfillSegmentRegistry(ctx context.Context, sessionID string, segs []segment) bool {
 	turns, err := a.notebook.TurnsWithEntries(ctx, sessionID)
 	if err != nil || len(turns) == 0 {
@@ -565,7 +586,7 @@ func (a *sessionAgent) backfillSegmentRegistry(ctx context.Context, sessionID st
 	}
 	var covered []notebook.ProcessedSegment
 	for _, s := range segs {
-		if s.open || !turns[s.turn] {
+		if !turns[s.turn] {
 			continue
 		}
 		covered = append(covered, notebook.ProcessedSegment{
@@ -665,10 +686,15 @@ func (a *sessionAgent) generateRunEndSegments(ctx context.Context, sessionID str
 			continue
 		}
 		genMsgs := cloneMessagesForGen(msgs)
+		genCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), segmentGenTimeout)
 		if a.syncSegmentGen {
-			a.generateSegment(ctx, sessionID, s, genMsgs[s.start:s.end], tracker)
+			a.generateSegment(genCtx, sessionID, s, genMsgs[s.start:s.end], tracker)
+			cancel()
 		} else {
-			go a.generateSegment(ctx, sessionID, s, genMsgs[s.start:s.end], tracker)
+			go func() {
+				defer cancel()
+				a.generateSegment(genCtx, sessionID, s, genMsgs[s.start:s.end], tracker)
+			}()
 		}
 	}
 }
@@ -789,30 +815,31 @@ func envEnabled(name string) bool {
 	return os.Getenv(name) == "1" || strings.EqualFold(os.Getenv(name), "true")
 }
 
-// diffFantasyMessages compares the rebuilt message list with what
-// Fantasy accumulated and logs the first divergence. Part-level
-// provider metadata (reasoning signatures, provider-executed calls)
-// and rewritten tool-call inputs are the expected mismatch sources.
-func diffFantasyMessages(sessionID string, want, got []fantasy.Message) {
-	n := min(len(want), len(got))
+// diffFantasyMessages compares what Fantasy accumulated (the list
+// actually sent) with the rebuilt candidate and logs the first
+// divergence. Part-level provider metadata (reasoning signatures,
+// provider-executed calls) and rewritten tool-call inputs are the
+// expected mismatch sources.
+func diffFantasyMessages(sessionID string, accumulated, rebuilt []fantasy.Message) {
+	n := min(len(accumulated), len(rebuilt))
 	for i := 0; i < n; i++ {
-		if !fantasyMessageEqual(want[i], got[i]) {
+		if !fantasyMessageEqual(accumulated[i], rebuilt[i]) {
 			slog.Info("Notebook shadow diff: rebuilt message diverges",
 				"session_id", sessionID,
 				"index", i,
-				"want_role", want[i].Role,
-				"got_role", got[i].Role,
-				"want_parts", len(want[i].Content),
-				"got_parts", len(got[i].Content),
+				"accumulated_role", accumulated[i].Role,
+				"rebuilt_role", rebuilt[i].Role,
+				"accumulated_parts", len(accumulated[i].Content),
+				"rebuilt_parts", len(rebuilt[i].Content),
 			)
 			return
 		}
 	}
-	if len(want) != len(got) {
+	if len(accumulated) != len(rebuilt) {
 		slog.Info("Notebook shadow diff: rebuilt list length diverges",
 			"session_id", sessionID,
-			"want_len", len(want),
-			"got_len", len(got),
+			"accumulated_len", len(accumulated),
+			"rebuilt_len", len(rebuilt),
 		)
 	}
 }

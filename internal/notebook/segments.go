@@ -41,8 +41,10 @@ type ProcessedSegment struct {
 
 // RecordSegmentClose records a freshly closed segment's extent as
 // unprocessed. It is idempotent: segment detection re-runs every step,
-// so the insert is INSERT OR IGNORE under the (session, turn, segment)
-// primary key. Callers fire generation separately.
+// so the insert upserts under the (session, turn, segment) primary key
+// — refreshing start/end only while the row stays unprocessed, which
+// lets a drifted recomputation self-heal while a processed row's
+// extent remains authoritative. Callers fire generation separately.
 func (s *service) RecordSegmentClose(ctx context.Context, sessionID string, turnNumber, segmentNumber, startIndex, endIndex int64) error {
 	return s.q.RecordProcessedSegment(ctx, db.RecordProcessedSegmentParams{
 		SessionID:     sessionID,

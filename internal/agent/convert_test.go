@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -91,4 +92,39 @@ func TestConvertToToolResult_ASCIIButInvalidBase64(t *testing.T) {
 	require.True(t, tr.IsError)
 	require.Empty(t, tr.Data)
 	require.Contains(t, tr.Content, "invalid encoding")
+}
+
+func TestConvertToToolResult_UniversalCap(t *testing.T) {
+	t.Parallel()
+
+	a := &sessionAgent{}
+	big := strings.Repeat("log line with some text\n", 3000) // ~72KB, over the 50KB cap.
+
+	result := fantasy.ToolResultContent{
+		ToolCallID: "call_big",
+		ToolName:   "mcp_dump",
+		Result:     fantasy.ToolResultOutputContentText{Text: big},
+	}
+
+	tr := a.convertToToolResult(result)
+	require.False(t, tr.IsError)
+	require.LessOrEqual(t, len(tr.Content), toolResultMaxContentBytes+1024)
+	require.Contains(t, tr.Content, "truncated at capture")
+	// Head and tail both survive the cut.
+	require.True(t, strings.HasPrefix(tr.Content, "log line"))
+	require.Contains(t, tr.Content, "log line with some text")
+}
+
+func TestConvertToToolResult_UnderCap(t *testing.T) {
+	t.Parallel()
+
+	a := &sessionAgent{}
+	result := fantasy.ToolResultContent{
+		ToolCallID: "call_small",
+		ToolName:   "mcp_tool",
+		Result:     fantasy.ToolResultOutputContentText{Text: "small output"},
+	}
+
+	tr := a.convertToToolResult(result)
+	require.Equal(t, "small output", tr.Content)
 }

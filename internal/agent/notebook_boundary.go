@@ -143,7 +143,7 @@ func estimateRawMessageTokens(msgs []message.Message) int {
 				if v.Superseded != nil && v.Superseded.Applied {
 					// The render emits the stub, not the stored
 					// original — count what the model actually sees.
-					totalChars += len(supersededStubText(*v.Superseded, v.ToolCallID))
+					totalChars += len(v.Superseded.StubText(v))
 				} else {
 					totalChars += len(v.Content)
 				}

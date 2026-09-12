@@ -112,6 +112,8 @@ func TestRecallToolResult_TruncatesLargeContent(t *testing.T) {
 
 	resp := runRecall(t, tool, ctx, "result:tc-big")
 	require.False(t, resp.IsError)
-	require.Contains(t, resp.Content, "lines truncated")
+	// The marker distinguishes this read-back cut from a capture-time
+	// cap already embedded in stored content.
+	require.Contains(t, resp.Content, "truncated at recall")
 	require.Less(t, len(resp.Content), tools.MaxOutputLength+1000)
 }

@@ -3,9 +3,14 @@ package agent
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -186,7 +191,7 @@ func TestStubRenderKeepsNotebookOriginal(t *testing.T) {
 
 	msgs := viewThenEdit(t, svc, sessionID, bigContent(), true)
 	msgs = append(msgs, mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "later"}))
-	a.flagSupersededViewResults(ctx, msgs)
+	a.flagPrunableToolResults(ctx, msgs)
 	require.True(t, a.promoteSupersededStubs(ctx, msgs, 0))
 
 	// Raw render shows the stub, not the original.
@@ -236,7 +241,7 @@ func TestFlagSupersededViewResults(t *testing.T) {
 		a, svc, sessionID := newStubTestAgent(t)
 		msgs := viewThenEdit(t, svc, sessionID, bigContent(), true)
 
-		a.flagSupersededViewResults(t.Context(), msgs)
+		a.flagPrunableToolResults(t.Context(), msgs)
 
 		tr := resultOf(t, msgs[2], "tc-view")
 		require.NotNil(t, tr.Superseded)
@@ -256,7 +261,7 @@ func TestFlagSupersededViewResults(t *testing.T) {
 		a, svc, sessionID := newStubTestAgent(t)
 		msgs := viewThenEdit(t, svc, sessionID, bigContent(), false)
 
-		a.flagSupersededViewResults(t.Context(), msgs)
+		a.flagPrunableToolResults(t.Context(), msgs)
 
 		stored, err := svc.Get(t.Context(), msgs[2].ID)
 		require.NoError(t, err)
@@ -278,7 +283,7 @@ func TestFlagSupersededViewResults(t *testing.T) {
 		msgs = append(msgs, mkMsg(t, svc, sessionID, message.Tool,
 			message.ToolResult{ToolCallID: "tc-view", Name: "view", Content: bigContent()}))
 
-		a.flagSupersededViewResults(t.Context(), msgs)
+		a.flagPrunableToolResults(t.Context(), msgs)
 
 		stored, err := svc.Get(t.Context(), msgs[4].ID)
 		require.NoError(t, err)
@@ -291,7 +296,7 @@ func TestFlagSupersededViewResults(t *testing.T) {
 		a, svc, sessionID := newStubTestAgent(t)
 		msgs := viewThenEdit(t, svc, sessionID, "tiny", true)
 
-		a.flagSupersededViewResults(t.Context(), msgs)
+		a.flagPrunableToolResults(t.Context(), msgs)
 
 		stored, err := svc.Get(t.Context(), msgs[2].ID)
 		require.NoError(t, err)
@@ -307,7 +312,7 @@ func TestFlagSupersededViewResults(t *testing.T) {
 		m.Parts[0] = message.ToolResult{ToolCallID: "tc-view", Name: "view", Content: bigContent(), IsError: true}
 		require.NoError(t, svc.Update(t.Context(), m))
 
-		a.flagSupersededViewResults(t.Context(), msgs)
+		a.flagPrunableToolResults(t.Context(), msgs)
 
 		stored, err := svc.Get(t.Context(), m.ID)
 		require.NoError(t, err)
@@ -324,7 +329,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		msgs := viewThenEdit(t, svc, sessionID, bigContent(), true)
 		// Turn 3 — the flagged read at turn 0 is old enough.
 		msgs = append(msgs, mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "later"}))
-		a.flagSupersededViewResults(t.Context(), msgs)
+		a.flagPrunableToolResults(t.Context(), msgs)
 
 		a.promoteSupersededStubs(t.Context(), msgs, 0)
 
@@ -355,7 +360,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 			message.ToolCall{ID: "tc-edit2", Name: "edit", Input: `{"file_path":"b.go"}`, Finished: true}))
 		rebuilt = append(rebuilt, mkMsg(t, svc, sessionID, message.Tool,
 			message.ToolResult{ToolCallID: "tc-edit2", Name: "edit", Content: "edited"}))
-		a.flagSupersededViewResults(t.Context(), rebuilt)
+		a.flagPrunableToolResults(t.Context(), rebuilt)
 
 		// currentTurn=4, read at turn 2 → protected (2 >= 4-2).
 		a.promoteSupersededStubs(t.Context(), rebuilt, 0)
@@ -377,7 +382,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 
 		msgs := viewThenEdit(t, svc, sess.ID, bigContent(), true)
 		msgs = append(msgs, mkMsg(t, svc, sess.ID, message.User, message.TextContent{Text: "later"}))
-		a.flagSupersededViewResults(t.Context(), msgs)
+		a.flagPrunableToolResults(t.Context(), msgs)
 
 		// With the DB closed the update fails: promotion reports
 		// false and the in-memory marks revert so this render stays
@@ -396,7 +401,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		ctx := t.Context()
 		msgs := viewThenEdit(t, svc, sessionID, bigContent(), true)
 		msgs = append(msgs, mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "later"}))
-		a.flagSupersededViewResults(ctx, msgs)
+		a.flagPrunableToolResults(ctx, msgs)
 
 		// Stale snapshot as the async flag path would hold it:
 		// pending mark, fetched before promotion lands.
@@ -420,7 +425,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		a, svc, sessionID := newStubTestAgent(t)
 		msgs := viewThenEdit(t, svc, sessionID, bigContent(), true)
 		msgs = append(msgs, mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "later"}))
-		a.flagSupersededViewResults(t.Context(), msgs)
+		a.flagPrunableToolResults(t.Context(), msgs)
 
 		// Boundary past the flagged result: it lives in notebook
 		// territory now and is never rendered raw anyway.
@@ -515,4 +520,260 @@ func TestStubSupersededRequiresNotebook(t *testing.T) {
 		require.True(t, ok)
 		require.True(t, sa.stubSuperseded)
 	})
+}
+
+// bashRuns builds a turn-per-run message list: each call carries a
+// user message, the bash call, and its result. contents[i] is the
+// i-th run's output.
+func bashRuns(t *testing.T, svc message.Service, sessionID string, contents ...string) []message.Message {
+	t.Helper()
+	var msgs []message.Message
+	for i, content := range contents {
+		msgs = append(msgs, mkMsg(t, svc, sessionID, message.User,
+			message.TextContent{Text: "run"}))
+		msgs = append(msgs, mkMsg(t, svc, sessionID, message.Assistant,
+			message.ToolCall{
+				ID: fmt.Sprintf("tc-%d", i), Name: "bash",
+				Input: `{"command":"git status"}`, Finished: true,
+			}))
+		msgs = append(msgs, mkMsg(t, svc, sessionID, message.Tool,
+			message.ToolResult{ToolCallID: fmt.Sprintf("tc-%d", i), Name: "bash", Content: content}))
+	}
+	return msgs
+}
+
+func cmdContent() string {
+	return strings.Repeat("M\tinternal/x.go\n", 40) // ~640 bytes.
+}
+
+func TestFlagPrunableToolResults_Duplicate(t *testing.T) {
+	t.Parallel()
+	a, svc, sessionID := newStubTestAgent(t)
+
+	// Three identical runs: the two earlier copies flag duplicate,
+	// the latest stays unflagged — it is the surviving verbatim copy.
+	msgs := bashRuns(t, svc, sessionID, cmdContent(), cmdContent(), cmdContent())
+	a.flagPrunableToolResults(t.Context(), msgs)
+
+	for _, idx := range []int{2, 5} {
+		stored, err := svc.Get(t.Context(), msgs[idx].ID)
+		require.NoError(t, err)
+		tr := stored.ToolResults()[0]
+		require.NotNil(t, tr.Superseded)
+		require.Equal(t, message.StubKindDuplicate, tr.Superseded.Kind)
+		require.Equal(t, int64(2), tr.Superseded.Turn)
+	}
+	stored, err := svc.Get(t.Context(), msgs[8].ID)
+	require.NoError(t, err)
+	require.Nil(t, stored.ToolResults()[0].Superseded,
+		"latest identical run keeps the verbatim copy")
+}
+
+func TestFlagPrunableToolResults_Rerun(t *testing.T) {
+	t.Parallel()
+	a, svc, sessionID := newStubTestAgent(t)
+
+	// A differing re-run is evidence of delta, not staleness: the
+	// earlier output gets a digest mark, not a plain stub.
+	out1, out2 := cmdContent()+"A", cmdContent()+"B"
+	msgs := bashRuns(t, svc, sessionID, out1, out2)
+	a.flagPrunableToolResults(t.Context(), msgs)
+
+	stored, err := svc.Get(t.Context(), msgs[2].ID)
+	require.NoError(t, err)
+	tr := stored.ToolResults()[0]
+	require.NotNil(t, tr.Superseded)
+	require.Equal(t, message.StubKindRerun, tr.Superseded.Kind)
+	require.Equal(t, int64(1), tr.Superseded.Turn)
+}
+
+func TestFlagPrunableToolResults_Stale(t *testing.T) {
+	t.Parallel()
+	a, svc, sessionID := newStubTestAgent(t)
+
+	msgs := bashRuns(t, svc, sessionID, cmdContent())
+	a.flagPrunableToolResults(t.Context(), msgs)
+
+	stored, err := svc.Get(t.Context(), msgs[2].ID)
+	require.NoError(t, err)
+	tr := stored.ToolResults()[0]
+	require.NotNil(t, tr.Superseded)
+	require.Equal(t, message.StubKindStale, tr.Superseded.Kind)
+	require.Equal(t, int64(0), tr.Superseded.Turn)
+
+	// Small outputs stay verbatim — the stub would save nothing.
+	small := bashRuns(t, svc, sessionID, "on branch main")
+	a.flagPrunableToolResults(t.Context(), small)
+	stored, err = svc.Get(t.Context(), small[2].ID)
+	require.NoError(t, err)
+	require.Nil(t, stored.ToolResults()[0].Superseded)
+}
+
+func TestFlagPrunableToolResults_ObservedModification(t *testing.T) {
+	t.Parallel()
+	a, svc, sessionID := newStubTestAgent(t)
+	dir := t.TempDir()
+
+	read := func(name string) []message.Message {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte("original"), 0o644))
+		fi, err := os.Stat(path)
+		require.NoError(t, err)
+		input, _ := json.Marshal(map[string]string{"file_path": path})
+		return []message.Message{
+			mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "look"}),
+			mkMsg(t, svc, sessionID, message.Assistant,
+				message.ToolCall{ID: "tc-view", Name: "view", Input: string(input), Finished: true}),
+			mkMsg(t, svc, sessionID, message.Tool,
+				message.ToolResult{ToolCallID: "tc-view", Name: "view", Content: bigContent(), FileMtime: fi.ModTime().UnixNano()}),
+		}
+	}
+
+	t.Run("mtime change flags modified", func(t *testing.T) {
+		msgs := read("m.go")
+		path := filepath.Join(dir, "m.go")
+		// A bash redirection writes the file after the read.
+		require.NoError(t, os.WriteFile(path, []byte("rewritten by sed -i"), 0o644))
+		later := time.Now().Add(time.Hour)
+		require.NoError(t, os.Chtimes(path, later, later))
+
+		a.flagPrunableToolResults(t.Context(), msgs)
+		stored, err := svc.Get(t.Context(), msgs[2].ID)
+		require.NoError(t, err)
+		tr := stored.ToolResults()[0]
+		require.NotNil(t, tr.Superseded)
+		require.Equal(t, message.StubKindModified, tr.Superseded.Kind)
+	})
+
+	t.Run("deleted file flags deleted", func(t *testing.T) {
+		msgs := read("d.go")
+		require.NoError(t, os.Remove(filepath.Join(dir, "d.go")))
+
+		a.flagPrunableToolResults(t.Context(), msgs)
+		stored, err := svc.Get(t.Context(), msgs[2].ID)
+		require.NoError(t, err)
+		tr := stored.ToolResults()[0]
+		require.NotNil(t, tr.Superseded)
+		require.Equal(t, message.StubKindDeleted, tr.Superseded.Kind)
+	})
+
+	t.Run("unchanged file is not flagged", func(t *testing.T) {
+		msgs := read("u.go")
+
+		a.flagPrunableToolResults(t.Context(), msgs)
+		stored, err := svc.Get(t.Context(), msgs[2].ID)
+		require.NoError(t, err)
+		require.Nil(t, stored.ToolResults()[0].Superseded)
+	})
+
+	t.Run("unstamped reads are skipped", func(t *testing.T) {
+		msgs := read("n.go")
+		// Clear FileMtime — a result without the stamp can't tell a
+		// deleted file from a read that never hit the filesystem.
+		m := msgs[2]
+		m.Parts[0] = message.ToolResult{ToolCallID: "tc-view", Name: "view", Content: bigContent()}
+		require.NoError(t, svc.Update(t.Context(), m))
+		msgs[2] = m
+		require.NoError(t, os.Remove(filepath.Join(dir, "n.go")))
+
+		a.flagPrunableToolResults(t.Context(), msgs)
+		stored, err := svc.Get(t.Context(), m.ID)
+		require.NoError(t, err)
+		require.Nil(t, stored.ToolResults()[0].Superseded)
+	})
+}
+
+func TestApplySupersededStubs_Kinds(t *testing.T) {
+	t.Parallel()
+
+	results := []message.ToolResult{
+		{
+			ToolCallID: "tc-mod", Name: "view", Content: bigContent(),
+			Superseded: &message.SupersededMark{Path: "a.go", Turn: 4, Applied: true, Kind: message.StubKindModified},
+		},
+		{
+			ToolCallID: "tc-del", Name: "view", Content: bigContent(),
+			Superseded: &message.SupersededMark{Path: "b.go", Turn: 4, Applied: true, Kind: message.StubKindDeleted},
+		},
+		{
+			ToolCallID: "tc-dup", Name: "bash", Content: cmdContent(),
+			Superseded: &message.SupersededMark{Turn: 2, Applied: true, Kind: message.StubKindDuplicate},
+		},
+		{
+			ToolCallID: "tc-rerun", Name: "bash", Content: "first line\n" + cmdContent(),
+			Superseded: &message.SupersededMark{Turn: 3, Applied: true, Kind: message.StubKindRerun},
+		},
+		{
+			ToolCallID: "tc-stale", Name: "ls", Content: "head\n" + cmdContent(),
+			Superseded: &message.SupersededMark{Turn: 1, Applied: true, Kind: message.StubKindStale},
+		},
+	}
+	parts := make([]message.ContentPart, len(results))
+	for i, r := range results {
+		parts[i] = r
+	}
+	m := message.Message{Role: message.Tool, Parts: parts}
+
+	out, count, saved := applySupersededStubs(m)
+	require.Equal(t, 5, count)
+	require.Positive(t, saved)
+
+	got := out.ToolResults()
+	require.Contains(t, got[0].Content, "a.go is stale")
+	require.Contains(t, got[0].Content, "result:tc-mod")
+	require.Contains(t, got[1].Content, "b.go was deleted")
+	require.Contains(t, got[1].Content, "result:tc-del")
+	require.Contains(t, got[2].Content, "identical bash output")
+	require.Contains(t, got[2].Content, "result:tc-dup")
+	require.Contains(t, got[3].Content, "differed from a re-run")
+	require.Contains(t, got[3].Content, `"first line"`)
+	require.Contains(t, got[4].Content, "head")
+	require.Contains(t, got[4].Content, "bytes of ls output")
+	require.Contains(t, got[4].Content, "result:tc-stale")
+
+	// Originals untouched.
+	require.Equal(t, bigContent(), m.ToolResults()[0].Content)
+}
+
+func TestStampReadMtime(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.go")
+	require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
+	fi, err := os.Stat(path)
+	require.NoError(t, err)
+
+	input, _ := json.Marshal(map[string]string{"file_path": path})
+	calls := []message.ToolCall{{ID: "tc-1", Name: "view", Input: string(input), Finished: true}}
+
+	tr := message.ToolResult{ToolCallID: "tc-1", Name: "view", Content: "x"}
+	stampReadMtime(&tr, calls)
+	require.Equal(t, fi.ModTime().UnixNano(), tr.FileMtime)
+
+	// Errors and non-read tools are never stamped.
+	trErr := message.ToolResult{ToolCallID: "tc-1", Name: "view", IsError: true}
+	stampReadMtime(&trErr, calls)
+	require.Zero(t, trErr.FileMtime)
+	trOther := message.ToolResult{ToolCallID: "tc-1", Name: "bash"}
+	stampReadMtime(&trOther, calls)
+	require.Zero(t, trOther.FileMtime)
+}
+
+func TestCanonicalToolInput(t *testing.T) {
+	t.Parallel()
+
+	// Key order and volatile keys don't affect identity.
+	a := canonicalToolInput("bash", `{"command":"ls","description":"x"}`)
+	b := canonicalToolInput("bash", `{"description":"y","command":"ls"}`)
+	require.Equal(t, a, b)
+	// Zero values spell the same as absent.
+	require.Equal(t,
+		canonicalToolInput("ls", `{"path":""}`),
+		canonicalToolInput("ls", `{}`))
+	// Semantically different inputs stay different.
+	require.NotEqual(t,
+		canonicalToolInput("bash", `{"command":"ls"}`),
+		canonicalToolInput("bash", `{"command":"ls -la"}`))
+	require.Empty(t, canonicalToolInput("bash", "not json"))
 }

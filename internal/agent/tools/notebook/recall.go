@@ -145,8 +145,10 @@ func (rc *recallContext) recallToolResult(ctx context.Context, sessionID, toolCa
 			}
 			sb.WriteString("\n")
 			// Cap like bash output: a stubbed 200KB result shouldn't
-			// re-import wholesale what stubbing removed.
-			sb.WriteString(tools.TruncateOutput(tr.Content))
+			// re-import wholesale what stubbing removed. The marker
+			// labels this a recall-time cut, distinct from any cap the
+			// stored content already carries.
+			sb.WriteString(tools.TruncateHeadTail(tr.Content, tools.MaxOutputLength, tools.TruncatedAtRecall))
 			return fantasy.NewTextResponse(sb.String()), nil
 		}
 	}

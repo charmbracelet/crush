@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,6 +17,10 @@ import (
 // stubMinContentBytes is the minimum result size worth stubbing — below
 // it the stub text saves nothing.
 const stubMinContentBytes = 200
+
+// stubCommandMinBytes is the size floor for command-output stubs: their
+// stub carries a head-prefix digest, so smaller results save nothing.
+const stubCommandMinBytes = 512
 
 // stubRecentTurnGuard is the recency guard for stub promotion: results
 // from the last two completed turns are never stubbed, matching the
@@ -28,6 +34,18 @@ var writeToolNames = map[string]bool{"edit": true, "write": true, "multiedit": t
 
 // readToolNames capture file content; their results go stale on writes.
 var readToolNames = map[string]bool{"view": true, "read": true}
+
+// commandToolNames emit re-derivable output: once a result is old
+// enough to leave the recency guard, or a re-run makes it redundant,
+// a labeled stub suffices.
+var commandToolNames = map[string]bool{"bash": true, "grep": true, "glob": true, "ls": true}
+
+// volatileInputKeys are tool-call inputs that do not change what the
+// tool runs — dropping them lets two invocations of the same command
+// compare equal.
+var volatileInputKeys = map[string][]string{
+	"bash": {"description", "auto_background_after"},
+}
 
 // stubReport carries per-render stubbing telemetry: how many tool
 // results rendered as stubs and how many original bytes they replaced.
@@ -80,6 +98,43 @@ func toolCallFilePath(input string) string {
 	return ""
 }
 
+// canonicalToolInput normalizes a tool-call input for identity
+// comparison: keys are re-marshaled in sorted order, volatile keys are
+// dropped, and zero values are removed so "absent" and "default" spell
+// the same call. Returns "" for unparseable input.
+func canonicalToolInput(name, input string) string {
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(input), &fields); err != nil {
+		return ""
+	}
+	for _, k := range volatileInputKeys[name] {
+		delete(fields, k)
+	}
+	for k, v := range fields {
+		switch t := v.(type) {
+		case string:
+			if t == "" {
+				delete(fields, k)
+			}
+		case float64:
+			if t == 0 {
+				delete(fields, k)
+			}
+		case bool:
+			if !t {
+				delete(fields, k)
+			}
+		case nil:
+			delete(fields, k)
+		}
+	}
+	canon, err := json.Marshal(fields)
+	if err != nil {
+		return ""
+	}
+	return string(canon)
+}
+
 // normalizedPath resolves a tool-call path for comparison: filepath.Abs
 // anchors relative paths to the process working directory (the file
 // tools resolve against the configured working dir — equal in
@@ -101,36 +156,38 @@ func normalizedPath(p string) string {
 	return abs
 }
 
-// flagSupersededViewResults marks prior file-read tool results as
-// superseded when a successful edit/write/multiedit touched the same
-// file. The flag is monotonic — once set it is never cleared — and
-// metadata only: the original ToolResult.Content stays in the DB so
-// notebook generation and recall still see it. Results are only
-// flagged when the write's result follows the read's result in message
-// order, so a same-turn view→edit pair is flagged but a re-read after
-// the edit is not.
-func (a *sessionAgent) flagSupersededViewResults(ctx context.Context, msgs []message.Message) {
+// flagPrunableToolResults marks tool results whose stored content no
+// longer needs to replay verbatim. Four passes run in priority order —
+// the first flag wins:
+//
+//  1. Write-tool supersession: a successful edit/write/multiedit
+//     supersedes earlier reads of the same path.
+//  2. Observed modification: a read whose file changed on disk since
+//     the result was produced (or was deleted) — catches mutations no
+//     tool name reveals: bash redirection, MCP writes, external edits,
+//     and view→view re-reads of a changed file.
+//  3. Command supersession: a later re-run of the same command tool
+//     with identical input — identical output flags the earlier copies
+//     as duplicates, differing output flags them as digests.
+//  4. Age: remaining large command outputs flag stale and promote
+//     once they fall past the recency guard.
+//
+// Flags are monotonic and metadata only: Content is never rewritten,
+// so notebook generation and recall still see the original.
+func (a *sessionAgent) flagPrunableToolResults(ctx context.Context, msgs []message.Message) {
 	turns := messageTurns(msgs)
+	currentTurn := int64(countUserMessages(msgs))
 
-	type writeEvent struct {
-		msgIdx int
-		turn   int64
-		tool   string
-	}
-	// writesByPath indexes successful writes by normalized path, each
-	// bucket in message order — O(W) to build instead of scanning all
-	// writes per read.
-	writesByPath := make(map[string][]writeEvent)
-
-	// Index read/write calls by ID so results can be traced back to
-	// their inputs.
+	// Index flaggable calls by ID so results can be traced back to
+	// their inputs. Command tools keep a canonical input for re-run
+	// comparison.
 	type callInfo struct {
-		name   string
-		path   string
-		msgIdx int
+		name  string
+		path  string
+		input string
 	}
 	calls := make(map[string]callInfo)
-	for i, m := range msgs {
+	for _, m := range msgs {
 		if m.Role != message.Assistant {
 			continue
 		}
@@ -138,14 +195,38 @@ func (a *sessionAgent) flagSupersededViewResults(ctx context.Context, msgs []mes
 			if !tc.Finished {
 				continue
 			}
-			if !readToolNames[tc.Name] && !writeToolNames[tc.Name] {
-				continue
+			switch {
+			case readToolNames[tc.Name] || writeToolNames[tc.Name]:
+				calls[tc.ID] = callInfo{name: tc.Name, path: toolCallFilePath(tc.Input), input: canonicalToolInput(tc.Name, tc.Input)}
+			case commandToolNames[tc.Name]:
+				calls[tc.ID] = callInfo{name: tc.Name, input: canonicalToolInput(tc.Name, tc.Input)}
 			}
-			calls[tc.ID] = callInfo{name: tc.Name, path: toolCallFilePath(tc.Input), msgIdx: i}
 		}
 	}
+	if len(calls) == 0 {
+		return
+	}
 
-	// Collect successful writes in message order.
+	dirty := make(map[int]bool)
+	mark := func(msgIdx, partIdx int, mk message.SupersededMark) {
+		tr, ok := msgs[msgIdx].Parts[partIdx].(message.ToolResult)
+		if !ok || tr.Superseded != nil {
+			return
+		}
+		tr.Superseded = &mk
+		msgs[msgIdx].Parts[partIdx] = tr
+		dirty[msgIdx] = true
+	}
+
+	// Pass 1 — write-tool supersession. writesByPath indexes
+	// successful writes by normalized path in message order, so the
+	// earliest write following a read owns the flag.
+	type writeEvent struct {
+		msgIdx int
+		turn   int64
+		tool   string
+	}
+	writesByPath := make(map[string][]writeEvent)
 	for i, m := range msgs {
 		if m.Role != message.Tool {
 			continue
@@ -159,18 +240,10 @@ func (a *sessionAgent) flagSupersededViewResults(ctx context.Context, msgs []mes
 			writesByPath[key] = append(writesByPath[key], writeEvent{msgIdx: i, turn: turns[i], tool: call.name})
 		}
 	}
-	if len(writesByPath) == 0 {
-		return
-	}
-
-	// Flag each read result whose message precedes a successful write
-	// to the same file. The earliest such write owns the flag.
-	var updated []message.Message
 	for i, m := range msgs {
-		if m.Role != message.Tool {
+		if m.Role != message.Tool || len(writesByPath) == 0 {
 			continue
 		}
-		changed := false
 		for j, part := range m.Parts {
 			tr, ok := part.(message.ToolResult)
 			if !ok || tr.Superseded != nil || tr.IsError ||
@@ -181,9 +254,6 @@ func (a *sessionAgent) flagSupersededViewResults(ctx context.Context, msgs []mes
 			if !ok || !readToolNames[call.name] || call.path == "" {
 				continue
 			}
-			// Writes to the same file that follow this read's message.
-			// The bucket is in message order, so the first later one
-			// owns the flag.
 			var best *writeEvent
 			pathWrites := writesByPath[normalizedPath(call.path)]
 			for k := range pathWrites {
@@ -195,19 +265,134 @@ func (a *sessionAgent) flagSupersededViewResults(ctx context.Context, msgs []mes
 			if best == nil {
 				continue
 			}
-			tr.Superseded = &message.SupersededMark{
+			mark(i, j, message.SupersededMark{
 				Path:   call.path,
 				ByTool: best.tool,
 				Turn:   best.turn,
-			}
-			m.Parts[j] = tr
-			changed = true
-		}
-		if changed {
-			updated = append(updated, m)
+			})
 		}
 	}
 
+	// Pass 2 — observed modification. A read carrying a recorded
+	// mtime whose file has since changed (or vanished) is stale
+	// regardless of which tool mutated it. Results without a recorded
+	// mtime are skipped: a failed stat can't distinguish a deleted
+	// file from a read that never touched the filesystem.
+	for i, m := range msgs {
+		if m.Role != message.Tool {
+			continue
+		}
+		for j, part := range m.Parts {
+			tr, ok := part.(message.ToolResult)
+			if !ok || tr.Superseded != nil || tr.IsError ||
+				len(tr.Content) < stubMinContentBytes || tr.Data != "" ||
+				tr.FileMtime == 0 {
+				continue
+			}
+			call, ok := calls[tr.ToolCallID]
+			if !ok || !readToolNames[call.name] || call.path == "" {
+				continue
+			}
+			fi, err := os.Stat(call.path)
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+				mark(i, j, message.SupersededMark{
+					Path: call.path,
+					Turn: currentTurn,
+					Kind: message.StubKindDeleted,
+				})
+			case err == nil && fi.ModTime().UnixNano() != tr.FileMtime:
+				mark(i, j, message.SupersededMark{
+					Path: call.path,
+					Turn: currentTurn,
+					Kind: message.StubKindModified,
+				})
+			}
+		}
+	}
+
+	// Pass 3 — command supersession. Re-runs group by (tool, canonical
+	// input); against the latest output, identical earlier copies flag
+	// as duplicates and differing ones as rerun digests. Reads join the
+	// grouping too: an identical re-view of an unchanged file leaves
+	// the earlier copy redundant. The latest of each group is exempt
+	// from the age pass so a repeated call keeps one verbatim copy.
+	keep := make(map[[2]int]bool)
+	{
+		type cmdOut struct {
+			msgIdx  int
+			partIdx int
+			turn    int64
+			content string
+		}
+		byRun := make(map[string][]cmdOut)
+		for i, m := range msgs {
+			if m.Role != message.Tool {
+				continue
+			}
+			for j, part := range m.Parts {
+				tr, ok := part.(message.ToolResult)
+				if !ok || tr.IsError || tr.Data != "" {
+					continue
+				}
+				call, ok := calls[tr.ToolCallID]
+				if !ok || call.input == "" ||
+					(!commandToolNames[call.name] && !readToolNames[call.name]) {
+					continue
+				}
+				min := stubCommandMinBytes
+				if readToolNames[call.name] {
+					min = stubMinContentBytes
+				}
+				if len(tr.Content) < min {
+					continue
+				}
+				key := call.name + "\x00" + call.input
+				byRun[key] = append(byRun[key], cmdOut{msgIdx: i, partIdx: j, turn: turns[i], content: tr.Content})
+			}
+		}
+		for _, outs := range byRun {
+			if len(outs) < 2 {
+				continue
+			}
+			last := outs[len(outs)-1]
+			keep[[2]int{last.msgIdx, last.partIdx}] = true
+			for _, o := range outs[:len(outs)-1] {
+				kind := message.StubKindRerun
+				if o.content == last.content {
+					kind = message.StubKindDuplicate
+				}
+				mark(o.msgIdx, o.partIdx, message.SupersededMark{Turn: last.turn, Kind: kind})
+			}
+		}
+	}
+
+	// Pass 4 — age. Remaining large command outputs flag stale; the
+	// recency guard at promotion time is what "old" means.
+	for i, m := range msgs {
+		if m.Role != message.Tool {
+			continue
+		}
+		for j, part := range m.Parts {
+			tr, ok := part.(message.ToolResult)
+			if !ok || tr.Superseded != nil || tr.IsError || tr.Data != "" ||
+				len(tr.Content) < stubCommandMinBytes || keep[[2]int{i, j}] {
+				continue
+			}
+			call, ok := calls[tr.ToolCallID]
+			if !ok || !commandToolNames[call.name] {
+				continue
+			}
+			mark(i, j, message.SupersededMark{Turn: turns[i], Kind: message.StubKindStale})
+		}
+	}
+
+	var updated []message.Message
+	for i := range msgs {
+		if dirty[i] {
+			updated = append(updated, msgs[i])
+		}
+	}
 	for i := range updated {
 		// Merge stored marks first: this snapshot may predate a
 		// concurrent promotion — without the union the whole-message
@@ -215,11 +400,32 @@ func (a *sessionAgent) flagSupersededViewResults(ctx context.Context, msgs []mes
 		// to verbatim.
 		a.mergeSupersededMarks(ctx, &updated[i])
 		if err := a.messages.Update(ctx, updated[i]); err != nil {
-			slog.Warn("Failed to flag superseded tool result", "session_id", updated[i].SessionID, "error", err)
+			slog.Warn("Failed to flag tool result", "session_id", updated[i].SessionID, "error", err)
 		}
 	}
 	if len(updated) > 0 {
-		slog.Debug("Flagged superseded tool results", "session_id", sessionIDFromMessages(msgs), "count", len(updated))
+		slog.Debug("Flagged prunable tool results", "session_id", sessionIDFromMessages(msgs), "count", len(updated))
+	}
+}
+
+// stampReadMtime records the file's modification time on a successful
+// file-read result, anchoring pass-2 supersession to the state the
+// read actually observed. Path resolution matches the file tools:
+// relative paths land on the process working directory.
+func stampReadMtime(tr *message.ToolResult, calls []message.ToolCall) {
+	if tr.IsError || !readToolNames[tr.Name] {
+		return
+	}
+	for _, tc := range calls {
+		if tc.ID != tr.ToolCallID {
+			continue
+		}
+		if p := toolCallFilePath(tc.Input); p != "" {
+			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+				tr.FileMtime = fi.ModTime().UnixNano()
+			}
+		}
+		return
 	}
 }
 
@@ -251,7 +457,7 @@ func (a *sessionAgent) promoteSupersededStubs(ctx context.Context, msgs []messag
 			if !ok || tr.Superseded == nil || tr.Superseded.Applied || tr.IsError {
 				continue
 			}
-			msgSaved += int64(len(tr.Content)) - int64(len(supersededStubText(*tr.Superseded, tr.ToolCallID)))
+			msgSaved += int64(len(tr.Content)) - int64(len(tr.Superseded.StubText(tr)))
 			tr.Superseded.Applied = true
 			m.Parts[j] = tr
 			flipped = append(flipped, tr.Superseded)
@@ -292,14 +498,6 @@ func (a *sessionAgent) promoteSupersededStubs(ctx context.Context, msgs []messag
 	return !persistFailed
 }
 
-// supersededStubText renders the placeholder that replaces a stubbed
-// tool result. It names the file, the write that superseded it, and the
-// recall escape hatch for the original content.
-func supersededStubText(mark message.SupersededMark, toolCallID string) string {
-	return fmt.Sprintf("[content of %s superseded by %s at turn %d; re-view for current state, or recall(\"result:%s\") for the pre-edit snapshot]",
-		mark.Path, mark.ByTool, mark.Turn, toolCallID)
-}
-
 // applySupersededStubs returns the message with applied superseded
 // results replaced by stub text, plus how many results were stubbed
 // and how many original content bytes that removed. The input message
@@ -315,7 +513,7 @@ func applySupersededStubs(m message.Message) (stubbed message.Message, count int
 			m = m.Clone()
 			cloned = true
 		}
-		stub := supersededStubText(*tr.Superseded, tr.ToolCallID)
+		stub := tr.Superseded.StubText(tr)
 		saved += int64(len(tr.Content)) - int64(len(stub))
 		tr.Content = stub
 		m.Parts[i] = tr

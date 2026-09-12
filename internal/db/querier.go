@@ -35,6 +35,10 @@ type Querier interface {
 	GetNotebookTagsByEntry(ctx context.Context, entryID string) ([]string, error)
 	GetNotebookTokenCount(ctx context.Context, sessionID string) (int64, error)
 	GetOldestNotebookEntries(ctx context.Context, arg GetOldestNotebookEntriesParams) ([]NotebookEntry, error)
+	// One row per tool result that renders as a stub (applied superseded
+	// mark). content_head carries the first 1024 chars so callers can
+	// recompute exact stub text for prefix-bearing stub kinds.
+	GetPruningStats(ctx context.Context) ([]GetPruningStatsRow, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error)

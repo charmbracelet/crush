@@ -66,6 +66,61 @@ func (q *Queries) GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow
 	return items, nil
 }
 
+const getPruningStats = `-- name: GetPruningStats :many
+SELECT
+    session_id,
+    json_extract(value, '$.data.tool_call_id') as tool_call_id,
+    json_extract(value, '$.data.name') as tool_name,
+    json_extract(value, '$.data.superseded') as mark_json,
+    LENGTH(CAST(json_extract(value, '$.data.content') AS TEXT)) as content_bytes,
+    SUBSTR(CAST(json_extract(value, '$.data.content') AS TEXT), 1, 1024) as content_head
+FROM messages, json_each(parts)
+WHERE json_extract(value, '$.type') = 'tool_result'
+  AND json_extract(value, '$.data.superseded.applied') = 1
+`
+
+type GetPruningStatsRow struct {
+	SessionID    string        `json:"session_id"`
+	ToolCallID   interface{}   `json:"tool_call_id"`
+	ToolName     interface{}   `json:"tool_name"`
+	MarkJson     interface{}   `json:"mark_json"`
+	ContentBytes sql.NullInt64 `json:"content_bytes"`
+	ContentHead  string        `json:"content_head"`
+}
+
+// One row per tool result that renders as a stub (applied superseded
+// mark). content_head carries the first 1024 chars so callers can
+// recompute exact stub text for prefix-bearing stub kinds.
+func (q *Queries) GetPruningStats(ctx context.Context) ([]GetPruningStatsRow, error) {
+	rows, err := q.query(ctx, q.getPruningStatsStmt, getPruningStats)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetPruningStatsRow{}
+	for rows.Next() {
+		var i GetPruningStatsRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.MarkJson,
+			&i.ContentBytes,
+			&i.ContentHead,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getRecentActivity = `-- name: GetRecentActivity :many
 SELECT
     date(created_at, 'unixepoch') as day,

@@ -102,6 +102,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getOldestNotebookEntriesStmt, err = db.PrepareContext(ctx, getOldestNotebookEntries); err != nil {
 		return nil, fmt.Errorf("error preparing query GetOldestNotebookEntries: %w", err)
 	}
+	if q.getPruningStatsStmt, err = db.PrepareContext(ctx, getPruningStats); err != nil {
+		return nil, fmt.Errorf("error preparing query GetPruningStats: %w", err)
+	}
 	if q.getRecentActivityStmt, err = db.PrepareContext(ctx, getRecentActivity); err != nil {
 		return nil, fmt.Errorf("error preparing query GetRecentActivity: %w", err)
 	}
@@ -312,6 +315,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getOldestNotebookEntriesStmt: %w", cerr)
 		}
 	}
+	if q.getPruningStatsStmt != nil {
+		if cerr := q.getPruningStatsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getPruningStatsStmt: %w", cerr)
+		}
+	}
 	if q.getRecentActivityStmt != nil {
 		if cerr := q.getRecentActivityStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getRecentActivityStmt: %w", cerr)
@@ -502,6 +510,7 @@ type Queries struct {
 	getNotebookTagsByEntryStmt           *sql.Stmt
 	getNotebookTokenCountStmt            *sql.Stmt
 	getOldestNotebookEntriesStmt         *sql.Stmt
+	getPruningStatsStmt                  *sql.Stmt
 	getRecentActivityStmt                *sql.Stmt
 	getSessionByIDStmt                   *sql.Stmt
 	getToolUsageStmt                     *sql.Stmt
@@ -559,6 +568,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getNotebookTagsByEntryStmt:           q.getNotebookTagsByEntryStmt,
 		getNotebookTokenCountStmt:            q.getNotebookTokenCountStmt,
 		getOldestNotebookEntriesStmt:         q.getOldestNotebookEntriesStmt,
+		getPruningStatsStmt:                  q.getPruningStatsStmt,
 		getRecentActivityStmt:                q.getRecentActivityStmt,
 		getSessionByIDStmt:                   q.getSessionByIDStmt,
 		getToolUsageStmt:                     q.getToolUsageStmt,

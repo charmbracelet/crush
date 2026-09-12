@@ -91,3 +91,18 @@ FROM sessions
 WHERE parent_session_id IS NULL
 GROUP BY day_of_week, hour
 ORDER BY day_of_week, hour;
+
+-- name: GetPruningStats :many
+-- One row per tool result that renders as a stub (applied superseded
+-- mark). content_head carries the first 1024 chars so callers can
+-- recompute exact stub text for prefix-bearing stub kinds.
+SELECT
+    session_id,
+    json_extract(value, '$.data.tool_call_id') as tool_call_id,
+    json_extract(value, '$.data.name') as tool_name,
+    json_extract(value, '$.data.superseded') as mark_json,
+    LENGTH(CAST(json_extract(value, '$.data.content') AS TEXT)) as content_bytes,
+    SUBSTR(CAST(json_extract(value, '$.data.content') AS TEXT), 1, 1024) as content_head
+FROM messages, json_each(parts)
+WHERE json_extract(value, '$.type') = 'tool_result'
+  AND json_extract(value, '$.data.superseded.applied') = 1;

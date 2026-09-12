@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -426,23 +424,6 @@ func formatOutput(stdout, stderr string, execErr error) string {
 	}
 
 	return stdout
-}
-
-func TruncateOutput(content string) string {
-	if ansi.StringWidth(content) <= MaxOutputLength {
-		return content
-	}
-
-	halfLength := MaxOutputLength / 2
-	start := ansi.Truncate(content, halfLength, "")
-	end := ansi.TruncateLeft(content, ansi.StringWidth(content)-halfLength, "")
-
-	truncatedLinesCount := max(strings.Count(content, "\n")-strings.Count(start, "\n")-strings.Count(end, "\n"), 0)
-	return fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, truncatedLinesCount, end)
-}
-
-func truncateOutput(content string) string {
-	return TruncateOutput(content)
 }
 
 func normalizeWorkingDir(path string) string {

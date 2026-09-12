@@ -53,7 +53,7 @@ func TestEstimateRawMessageTokens_CountsStubNotOriginal(t *testing.T) {
 	applied := []message.Message{{Role: message.Tool, Parts: []message.ContentPart{appliedResult}}}
 
 	require.Equal(t, len(big)/4, estimateRawMessageTokens(pending))
-	stubLen := len(supersededStubText(*appliedResult.Superseded, "tc-1"))
+	stubLen := len(appliedResult.Superseded.StubText(appliedResult))
 	require.Equal(t, stubLen/4, estimateRawMessageTokens(applied))
 }
 

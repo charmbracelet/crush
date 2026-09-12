@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
@@ -70,6 +71,7 @@ type Stats struct {
 	AvgResponseTimeMs float64            `json:"avg_response_time_ms"`
 	ToolUsage         []ToolUsage        `json:"tool_usage"`
 	HourDayHeatmap    []HourDayHeatmapPt `json:"hour_day_heatmap"`
+	Pruning           *PruningStats      `json:"pruning,omitempty"`
 }
 
 type TotalStats struct {
@@ -127,6 +129,23 @@ type HourDayHeatmapPt struct {
 	DayOfWeek    int   `json:"day_of_week"`
 	Hour         int   `json:"hour"`
 	SessionCount int64 `json:"session_count"`
+}
+
+// PruningKindStats aggregates stubbed tool results by stub kind.
+type PruningKindStats struct {
+	Kind       string `json:"kind"`
+	Results    int64  `json:"results"`
+	SavedBytes int64  `json:"saved_bytes"`
+}
+
+// PruningStats summarizes tool-result pruning: results that render as
+// labeled stubs instead of replaying stored content verbatim in the
+// raw window.
+type PruningStats struct {
+	StubbedResults int64              `json:"stubbed_results"`
+	SavedBytes     int64              `json:"saved_bytes"`
+	Sessions       int64              `json:"sessions"`
+	ByKind         []PruningKindStats `json:"by_kind"`
 }
 
 // ProjectStats associates stats with a project path.
@@ -398,6 +417,7 @@ func mergeStats(projectStats []ProjectStats) *Stats {
 	recentActivityMap := make(map[string]DailyActivity)
 	toolUsageMap := make(map[string]ToolUsage)
 	heatmapMap := make(map[string]HourDayHeatmapPt) // key: "day-hour"
+	pruningKindMap := make(map[string]*PruningKindStats)
 
 	var totalResponseTimeMs float64
 	var responseTimeCount int64
@@ -483,6 +503,25 @@ func mergeStats(projectStats []ProjectStats) *Stats {
 			heatmapMap[key] = existing
 		}
 
+		// Aggregate tool-result pruning.
+		if s.Pruning != nil {
+			if merged.Pruning == nil {
+				merged.Pruning = &PruningStats{}
+			}
+			merged.Pruning.StubbedResults += s.Pruning.StubbedResults
+			merged.Pruning.SavedBytes += s.Pruning.SavedBytes
+			merged.Pruning.Sessions += s.Pruning.Sessions
+			for _, k := range s.Pruning.ByKind {
+				ks, ok := pruningKindMap[k.Kind]
+				if !ok {
+					ks = &PruningKindStats{Kind: k.Kind}
+					pruningKindMap[k.Kind] = ks
+				}
+				ks.Results += k.Results
+				ks.SavedBytes += k.SavedBytes
+			}
+		}
+
 		// Accumulate response time for averaging.
 		if s.AvgResponseTimeMs > 0 {
 			totalResponseTimeMs += s.AvgResponseTimeMs * float64(s.Total.TotalMessages)
@@ -521,6 +560,14 @@ func mergeStats(projectStats []ProjectStats) *Stats {
 	}
 	for _, h := range heatmapMap {
 		merged.HourDayHeatmap = append(merged.HourDayHeatmap, h)
+	}
+	if merged.Pruning != nil {
+		for _, ks := range pruningKindMap {
+			merged.Pruning.ByKind = append(merged.Pruning.ByKind, *ks)
+		}
+		sort.Slice(merged.Pruning.ByKind, func(i, j int) bool {
+			return merged.Pruning.ByKind[i].SavedBytes > merged.Pruning.ByKind[j].SavedBytes
+		})
 	}
 
 	// Sort slices by count (descending).
@@ -663,7 +710,77 @@ func gatherStats(ctx context.Context, conn *sql.DB) (*Stats, error) {
 		})
 	}
 
+	// Tool-result pruning.
+	pruning, err := gatherPruningStats(ctx, queries)
+	if err != nil {
+		return nil, err
+	}
+	stats.Pruning = pruning
+
 	return stats, nil
+}
+
+// gatherPruningStats aggregates applied superseded marks persisted on
+// tool results. SavedBytes recomputes each stub's rendered text exactly
+// so the figure reflects what the raw window actually saved.
+func gatherPruningStats(ctx context.Context, queries *db.Queries) (*PruningStats, error) {
+	rows, err := queries.GetPruningStats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get pruning stats: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	stats := &PruningStats{}
+	sessions := make(map[string]bool)
+	byKind := make(map[string]*PruningKindStats)
+	for _, row := range rows {
+		var mark message.SupersededMark
+		if err := json.Unmarshal([]byte(sqlText(row.MarkJson)), &mark); err != nil {
+			continue
+		}
+		tr := message.ToolResult{
+			ToolCallID: sqlText(row.ToolCallID),
+			Name:       sqlText(row.ToolName),
+			Content:    row.ContentHead,
+		}
+		saved := max(row.ContentBytes.Int64-int64(len(mark.StubText(tr))), 0)
+		kind := string(mark.Kind)
+		if kind == "" {
+			kind = "superseded"
+		}
+		ks, ok := byKind[kind]
+		if !ok {
+			ks = &PruningKindStats{Kind: kind}
+			byKind[kind] = ks
+		}
+		ks.Results++
+		ks.SavedBytes += saved
+		stats.StubbedResults++
+		stats.SavedBytes += saved
+		sessions[row.SessionID] = true
+	}
+	stats.Sessions = int64(len(sessions))
+	for _, ks := range byKind {
+		stats.ByKind = append(stats.ByKind, *ks)
+	}
+	sort.Slice(stats.ByKind, func(i, j int) bool {
+		return stats.ByKind[i].SavedBytes > stats.ByKind[j].SavedBytes
+	})
+	return stats, nil
+}
+
+// sqlText coerces a json_extract result — TEXT or BLOB depending on
+// the driver — to string.
+func sqlText(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		return ""
+	}
 }
 
 func toInt64(v any) int64 {

@@ -1077,6 +1077,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
 			}
+			stampReadMtime(&toolResult, currentAssistant.ToolCalls())
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
 			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
@@ -1324,11 +1325,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				slog.Error("Failed to list messages for notebook generation", "error", err, "session_id", notebookSessionID)
 				return
 			}
-			// Flag file-read results superseded by this turn's writes.
-			// The flag is metadata only; stub application waits for a
-			// boundary move in preparePrompt.
+			// Flag tool results superseded by this turn's writes,
+			// observed file mutations, re-runs, or age. The flag is
+			// metadata only; stub application waits for a boundary
+			// move in preparePrompt.
 			if a.stubSuperseded {
-				a.flagSupersededViewResults(notebookCtx, allMsgs)
+				a.flagPrunableToolResults(notebookCtx, allMsgs)
 			}
 			// Extract only the current turn's messages. Stop at
 			// the next user message to avoid including the next
@@ -2665,6 +2667,15 @@ func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
 }
 
+// toolResultMaxContentBytes is the universal write-time cap on a
+// single tool result's text content. Per-tool caps (e.g. bash
+// MaxOutputLength) are tighter; this is the seatbelt for tools
+// without one — MCP, LSP, job_output, and anything added later. The
+// cut is destructive at the message level (nothing stores the
+// untruncated original), so the marker points recovery at the live
+// source — re-run or re-view — not result: recall.
+const toolResultMaxContentBytes = 50_000
+
 // convertToToolResult converts a fantasy tool result to a message tool result.
 func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
 	baseResult := message.ToolResult{
@@ -2703,6 +2714,10 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 				baseResult.MIMEType = r.MediaType
 			}
 		}
+	}
+
+	if len(baseResult.Content) > toolResultMaxContentBytes {
+		baseResult.Content = tools.TruncateHeadTail(baseResult.Content, toolResultMaxContentBytes, tools.TruncatedAtCapture)
 	}
 
 	return baseResult

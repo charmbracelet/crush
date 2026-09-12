@@ -37,6 +37,10 @@ func (m *mockBashPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockBashPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
 
+func (m *mockBashPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
 
 func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
@@ -110,6 +114,10 @@ func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
 func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *recordingPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
+func (m *recordingPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
 
 
 func (m *recordingPermissionService) SkipRequests() bool {

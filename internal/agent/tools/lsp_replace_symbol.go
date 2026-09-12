@@ -147,7 +147,7 @@ func NewReplaceSymbolTool(
 					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
 				}
 				if !granted {
-					return NewPermissionDeniedResponse(), nil
+					return NewPermissionDeniedResponse(permissions.DenialReason(call.ID)), nil
 				}
 			}
 

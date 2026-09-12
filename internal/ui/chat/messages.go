@@ -10,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -445,15 +444,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if len(items) > 0 {
 			return items
 		}
-		r := attachments.NewRenderer(
-			sty.Attachments.Normal,
-			sty.Attachments.Deleting,
-			sty.Attachments.Image,
-			sty.Attachments.Text,
-			sty.Attachments.Skill,
-			sty.Attachments.Remove,
-		)
-		return []MessageItem{NewUserMessageItem(sty, msg, r)}
+		return []MessageItem{NewUserMessageItem(sty, msg, newAttachmentRenderer(sty))}
 	case message.Assistant:
 		var items []MessageItem
 		if ShouldRenderAssistantMessage(msg) {

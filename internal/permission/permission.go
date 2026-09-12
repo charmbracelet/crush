@@ -108,6 +108,14 @@ type AutoModeToggler interface {
 	SetAutoModeEnabled(enabled bool)
 }
 
+// AutoModeGrantObserver is implemented by hooks that track quota state
+// and want to learn when the human grants a request that was escalated
+// to them. A human decision restores trust, so the auto mode resets its
+// consecutive-denial counter.
+type AutoModeGrantObserver interface {
+	OnAutoModeGrant(sessionID string)
+}
+
 type Service interface {
 	pubsub.Subscriber[PermissionRequest]
 	// GrantPersistent grants a permission request and remembers the grant
@@ -209,6 +217,15 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 
 	if denied {
 		s.dispatchPermissionDenied(permission)
+	} else if granted {
+		// The human resolved an escalated request with a grant: notify
+		// quota-tracking hooks so consecutive-denial counters reset.
+		s.hooksMu.RLock()
+		h := s.hooks
+		s.hooksMu.RUnlock()
+		if obs, ok := h.(AutoModeGrantObserver); ok {
+			obs.OnAutoModeGrant(permission.SessionID)
+		}
 	}
 
 	// respCh is buffered (cap 1) and only ever has at most one sender

@@ -45,6 +45,10 @@ func (m *mockPermissionService) DenialReason(toolCallID string) string {
 	return ""
 }
 
+func (m *mockPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *mockPermissionService) AutoMode() bool { return false }
+
 
 func (m *mockPermissionService) SkipRequests() bool {
 	return false

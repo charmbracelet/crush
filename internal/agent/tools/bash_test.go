@@ -193,7 +193,7 @@ func TestTruncateOutputValidUTF8(t *testing.T) {
 
 	out := TruncateOutput(content)
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
-	require.Contains(t, out, "lines truncated")
+	require.Contains(t, out, "truncated at capture")
 }
 
 func TestTruncateOutputShortContent(t *testing.T) {
@@ -209,7 +209,7 @@ func TestTruncateOutputEmoji(t *testing.T) {
 
 	out := TruncateOutput(content)
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
-	require.Contains(t, out, "lines truncated")
+	require.Contains(t, out, "truncated at capture")
 }
 
 func TestIsBuildOrTestCommand(t *testing.T) {
@@ -269,4 +269,32 @@ func TestLSPDiagnosticsForFailure(t *testing.T) {
 	// Success and interrupts produce nothing.
 	require.Empty(t, lspDiagnosticsForFailure("go build .", 0, false, nil))
 	require.Empty(t, lspDiagnosticsForFailure("go build .", 130, true, nil))
+}
+
+func TestTruncateOutputANSISafe(t *testing.T) {
+	t.Parallel()
+
+	esc := "\x1b[38;5;200m" // 12-byte SGR sequence.
+	half := MaxOutputLength / 2
+
+	// Head cut straddles the escape: it must land whole in the
+	// omitted middle, not split into a partial sequence.
+	content := strings.Repeat("x", half-5) + esc + strings.Repeat("y", MaxOutputLength)
+	out := TruncateOutput(content)
+	require.True(t, utf8.ValidString(out))
+	parts := strings.SplitN(out, "\n\n... [", 2)
+	require.Len(t, parts, 2)
+	require.NotContains(t, parts[0], "\x1b", "head must not end inside an ANSI escape")
+
+	// Tail cut straddles the escape: the tail must start after the
+	// escape's terminator, not mid-sequence.
+	total := MaxOutputLength * 2
+	tailStart := total - half
+	content = strings.Repeat("z", tailStart-3) + esc + strings.Repeat("w", total-tailStart+3-len(esc))
+	out = TruncateOutput(content)
+	parts = strings.SplitN(out, "] ...\n\n", 2)
+	require.Len(t, parts, 2)
+	tail := parts[1]
+	require.NotContains(t, tail[:len(esc)], "\x1b[38;5;2",
+		"tail must not begin inside an ANSI escape")
 }

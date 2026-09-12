@@ -36,6 +36,12 @@ function formatCost(n) {
   return "$" + n.toFixed(2);
 }
 
+function formatBytes(n) {
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+  return Math.round(n) + " B";
+}
+
 function formatDate(dateStr) {
   // SQL returns UTC dates (YYYY-MM-DD); convert to local date.
   const utc = new Date(dateStr + "T00:00:00Z");
@@ -433,5 +439,46 @@ if (projectStats && projectStats.length > 1) {
     });
 
     projectTableBody.appendChild(fragment);
+  }
+}
+
+// Tool Result Pruning (only shown when stubbing has applied marks)
+if (stats.pruning && stats.pruning.stubbed_results > 0) {
+  const kindLabels = {
+    superseded: "superseded by edit",
+    modified: "file changed on disk",
+    deleted: "file deleted",
+    duplicate: "duplicate output",
+    rerun: "re-run delta",
+    stale: "aged out",
+  };
+  const section = document.createElement("div");
+  section.className = "chart-card full-width";
+  const rows = (stats.pruning.by_kind || [])
+    .map(
+      (k) =>
+        `<tr><td>${kindLabels[k.kind] || k.kind}</td><td>${formatNumber(k.results)}</td><td>${formatBytes(k.saved_bytes)}</td></tr>`,
+    )
+    .join("");
+  section.innerHTML = `
+    <h2>Tool Result Pruning</h2>
+    <p style="color: var(--text-muted); margin: 0">
+      ${formatNumber(stats.pruning.stubbed_results)} tool results rendered as stubs —
+      ${formatBytes(stats.pruning.saved_bytes)} kept out of the raw context window across
+      ${formatNumber(stats.pruning.sessions)} sessions. Originals stay recoverable via
+      recall("result:&lt;tool_call_id&gt;").
+    </p>
+    <div style="overflow-x: auto">
+      <table>
+        <thead>
+          <tr><th>Kind</th><th>Results</th><th>Bytes Saved</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  const container = document.querySelector(".charts-grid");
+  if (container) {
+    container.appendChild(section);
   }
 }

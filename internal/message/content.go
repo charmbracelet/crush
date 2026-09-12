@@ -122,6 +122,12 @@ type ToolResult struct {
 	MIMEType   string `json:"mime_type"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
+	// FileMtime is the file's modification time (UnixNano) observed
+	// when a read result was produced — zero when unrecorded (older
+	// results, non-file reads). It lets the flagger supersede on
+	// observed modification rather than trusting which tool claims
+	// to write.
+	FileMtime int64 `json:"file_mtime,omitempty"`
 	// Superseded marks this result as stale: a later successful write
 	// changed the file it describes. The mark is metadata only —
 	// Content is never rewritten — so notebook generation and recall
@@ -130,13 +136,112 @@ type ToolResult struct {
 	Superseded *SupersededMark `json:"superseded,omitempty"`
 }
 
-// SupersededMark records that a later successful file write made a
-// tool result's content stale.
+// StubKind classifies why a tool result was marked for stubbing, so
+// the rendered placeholder can state the right reason and recovery
+// path.
+type StubKind string
+
+const (
+	// StubKindSuperseded is a file-read result invalidated by a
+	// successful write tool. It is the zero value so marks written
+	// before kinds existed keep their meaning.
+	StubKindSuperseded StubKind = ""
+	// StubKindModified is a read whose file changed on disk after the
+	// read with no write tool to attribute — bash redirection, an MCP
+	// file write, an external editor.
+	StubKindModified StubKind = "modified"
+	// StubKindDeleted is a read whose file no longer exists.
+	StubKindDeleted StubKind = "deleted"
+	// StubKindDuplicate is output identical to a later re-run; the
+	// newest copy stays verbatim.
+	StubKindDuplicate StubKind = "duplicate"
+	// StubKindRerun is output that differs from a later re-run. The
+	// difference is evidence of delta (fail→pass means the fix
+	// worked), so the earlier result degrades to a digest carrying
+	// its first line, not a bare stub.
+	StubKindRerun StubKind = "rerun"
+	// StubKindStale is re-derivable command output old enough to
+	// collapse; the head-prefix kept in the stub is the digest.
+	StubKindStale StubKind = "stale"
+)
+
+// SupersededMark records why a tool result's stored content no longer
+// needs to replay verbatim in the raw window.
 type SupersededMark struct {
-	Path    string `json:"path"`    // File whose newer state superseded this result.
-	ByTool  string `json:"by_tool"` // edit, write, or multiedit.
-	Turn    int64  `json:"turn"`    // Turn containing the superseding write.
-	Applied bool   `json:"applied"` // True once the result renders as a stub.
+	Path    string   `json:"path"`    // File whose newer state superseded this result.
+	ByTool  string   `json:"by_tool"` // edit, write, or multiedit.
+	Turn    int64    `json:"turn"`    // Turn containing the superseding event.
+	Applied bool     `json:"applied"` // True once the result renders as a stub.
+	Kind    StubKind `json:"kind,omitempty"`
+	// Bytes is the result's total content length at flag time — the
+	// stub label reports it and stats recompute exact savings from it
+	// without fetching full content.
+	Bytes int64 `json:"bytes,omitempty"`
+}
+
+// stubHeadPrefixBytes caps the head-prefix kept inside stale-result
+// stubs — the prefix is the digest the model keeps.
+const stubHeadPrefixBytes = 320
+
+// stubHeadLineBytes caps the first-line excerpt kept in rerun digests.
+const stubHeadLineBytes = 160
+
+// StubText renders the placeholder a stubbed tool result shows in the
+// raw window. Every stub self-labels what was cut, why, and how to
+// recover — recall("result:<tool_call_id>") resolves to the stored
+// original, which is never rewritten.
+func (m SupersededMark) StubText(tr ToolResult) string {
+	recall := fmt.Sprintf(`recall("result:%s")`, tr.ToolCallID)
+	switch m.Kind {
+	case StubKindModified:
+		return fmt.Sprintf("[content of %s is stale — the file changed on disk after this read (turn %d); re-view for current state, or %s for the snapshot]",
+			m.Path, m.Turn, recall)
+	case StubKindDeleted:
+		return fmt.Sprintf("[%s was deleted after this read (turn %d); %s for the last snapshot]",
+			m.Path, m.Turn, recall)
+	case StubKindDuplicate:
+		return fmt.Sprintf("[identical %s output superseded by a later run at turn %d; %s for this copy]",
+			tr.Name, m.Turn, recall)
+	case StubKindRerun:
+		return fmt.Sprintf("[earlier %s output differed from a re-run at turn %d — it began %q; %s for the full output]",
+			tr.Name, m.Turn, headLine(tr.Content, stubHeadLineBytes), recall)
+	case StubKindStale:
+		total := m.Bytes
+		if total == 0 {
+			total = int64(len(tr.Content))
+		}
+		return fmt.Sprintf("%s\n[rest of %s output elided (%d bytes total, turn %d); %s or re-run for the rest]",
+			headPrefix(tr.Content, stubHeadPrefixBytes), tr.Name, total, m.Turn, recall)
+	default:
+		return fmt.Sprintf("[content of %s superseded by %s at turn %d; re-view for current state, or %s for the pre-edit snapshot]",
+			m.Path, m.ByTool, m.Turn, recall)
+	}
+}
+
+// headPrefix returns the first n bytes of s, preferring a line
+// boundary inside the last quarter and never splitting a rune or an
+// ANSI escape sequence.
+func headPrefix(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n
+	if i := strings.LastIndexByte(s[:cut], '\n'); i >= n*3/4 {
+		cut = i + 1
+	}
+	return s[:stringext.CutANSISafeLeft(s, cut)]
+}
+
+// headLine returns the first line of s, capped at n bytes on a rune
+// and ANSI-escape boundary.
+func headLine(s string, n int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > n {
+		s = s[:stringext.CutANSISafeLeft(s, n)] + "…"
+	}
+	return s
 }
 
 func (ToolResult) isPart() {}

@@ -383,7 +383,7 @@ type Options struct {
 	NotebookSyncMem0       *bool    `json:"notebook_sync_mem0,omitempty" jsonschema:"description=Sync notebook entries to mem0 for cross-session search,default=false"`
 	NotebookMemoryServer   string   `json:"notebook_memory_server,omitempty" jsonschema:"description=Name of the MCP server to use for mem0 cross-session memory sync and search,default=mem0"`
 	NotebookAutoInject     *bool    `json:"notebook_auto_inject,omitempty" jsonschema:"description=Auto-inject full notebook entries for files mentioned in the user message,default=false"`
-	NotebookStubSuperseded *bool    `json:"notebook_stub_superseded,omitempty" jsonschema:"description=Replace superseded file-read tool results in raw history with stubs (experimental),default=false"`
+	NotebookStubSuperseded *bool    `json:"notebook_stub_superseded,omitempty" jsonschema:"description=Replace stale or superseded tool results in raw history with labeled stubs (experimental),default=false"`
 	InitializeAs           string   `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	AutoLSP                *bool    `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress               *bool    `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`

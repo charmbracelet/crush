@@ -1,0 +1,84 @@
+package chat
+
+import (
+	"strings"
+
+	"github.com/charmbracelet/crush/internal/ui/anim"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/list"
+	"github.com/charmbracelet/crush/internal/ui/styles"
+)
+
+// PendingAssistantID is the placeholder spinner's id. At most one exists.
+const PendingAssistantID = "pending-assistant"
+
+// PendingAssistantItem holds the turn spinner between a prompt being sent
+// and the assistant message that owns the animation arriving. It reads the
+// same turn clock, so elapsed time counts from the prompt.
+type PendingAssistantItem struct {
+	*list.Versioned
+	sty  *styles.Styles
+	anim *anim.Anim
+}
+
+var (
+	_ MessageItem = (*PendingAssistantItem)(nil)
+	_ Animatable  = (*PendingAssistantItem)(nil)
+)
+
+// NewPendingAssistantItem creates the placeholder spinner for a sent turn.
+func NewPendingAssistantItem(sty *styles.Styles) *PendingAssistantItem {
+	p := &PendingAssistantItem{
+		Versioned: list.NewVersioned(),
+		sty:       sty,
+	}
+	// Matches the assistant spinner so the handover is invisible.
+	p.anim = anim.New(anim.Settings{
+		ID:          PendingAssistantID,
+		Size:        15,
+		GradColorA:  sty.WorkingGradFromColor,
+		GradColorB:  sty.WorkingGradToColor,
+		LabelColor:  sty.WorkingLabelColor,
+		CycleColors: true,
+		Suffix: func() string {
+			return common.Elapsed()
+		},
+		SuffixColor: sty.WorkingTimerColor,
+	})
+	return p
+}
+
+// ID implements MessageItem.
+func (p *PendingAssistantItem) ID() string { return PendingAssistantID }
+
+// FilterValue implements list.Item.
+func (p *PendingAssistantItem) FilterValue() string { return "" }
+
+// Finished implements list.Item. Never finished; it is removed instead.
+func (p *PendingAssistantItem) Finished() bool { return false }
+
+// Spinning implements [Animatable].
+func (p *PendingAssistantItem) Spinning() bool { return true }
+
+// Advance implements [Animatable].
+func (p *PendingAssistantItem) Advance() bool {
+	if !p.anim.Advance() {
+		return false
+	}
+	// The frame changes output the list cache cannot see; say so or it freezes.
+	p.Bump()
+	return true
+}
+
+// RawRender implements list.RawRenderable.
+func (p *PendingAssistantItem) RawRender(int) string { return p.anim.Render() }
+
+// Render implements list.Item.
+func (p *PendingAssistantItem) Render(width int) string {
+	prefix := p.sty.Messages.AssistantBlurred.Render()
+	lines := strings.Split(p.RawRender(width), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
+}

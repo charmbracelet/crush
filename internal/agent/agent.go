@@ -2196,12 +2196,12 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
 func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
-	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
-		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock) ||
-		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrockEurope)
-
-	if providerSupportsMedia {
-		return messages
+	if servesAnthropicModels(largeModel.ModelCfg.Provider) {
+		// Anthropic takes media inline, so there is nothing to unpack. What
+		// it does need is its image-dimension cap honoured once a request
+		// carries enough images, which a session reaches on its own as tool
+		// screenshots accumulate.
+		return boundImages(messages, largeModel.ModelCfg.Provider)
 	}
 
 	supportsImages := largeModel.CatwalkCfg.SupportsImages

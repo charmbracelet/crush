@@ -36,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/exitbanner"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
@@ -324,7 +325,11 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	appInstance, err := app.New(ctx, conn, store, skillsMgr)
+	subagentsCfg := subagents.DiscoveryConfigFromStore(store, skillsMgr)
+	allSubagents, activeSubagents, subagentStates := subagents.DiscoverFromConfig(subagentsCfg)
+	subagentsMgr := subagents.NewManager(allSubagents, activeSubagents, subagentStates)
+
+	appInstance, err := app.New(ctx, conn, store, skillsMgr, subagentsMgr)
 	if err != nil {
 		_ = conn.Close()
 		slog.Error("Failed to create app instance", "error", err)

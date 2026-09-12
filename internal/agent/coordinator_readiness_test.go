@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -30,8 +29,9 @@ import (
 //
 // The fix detaches the readiness work from the caller context via
 // context.WithoutCancel, so canceling the context that triggered the build no
-// longer poisons readyWg. Here we build an agent with a cancelable context,
-// cancel it, and require that readyWg still completes cleanly.
+// longer poisons readyWg. Here we install a blocking waitForInit seam, build
+// an agent with a cancelable context, cancel it, and require that readyWg
+// keeps waiting for init instead of failing with context.Canceled.
 func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	env := testEnv(t)
 
@@ -61,20 +61,28 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		permissions: env.permissions,
 		history:     env.history,
 		filetracker: *env.filetracker,
+		// Simulate a slow MCP initialization through the coordinator's
+		// waitForInit seam instead of arming the mcp package's process-wide
+		// init gate: the armed flag would otherwise leak into later tests
+		// that build a coordinator and block forever on a gate this test
+		// never completes. buildAgent detaches the readiness context from
+		// the caller via context.WithoutCancel, so this wait stays blocked
+		// for the whole assertion, mirroring an MCP server that never
+		// finishes initializing. The goroutine parked here is leaked; the
+		// agent package's TestMain does not enforce goleak, so that is
+		// harmless.
+		waitForInit: func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
 	}
-
-	// Arm the MCP init gate. We never complete init; the readiness goroutines
-	// must not care, since they build the tool list from the registry as it
-	// stands rather than waiting for initialization to finish.
-	mcp.ArmInit()
-	t.Cleanup(mcp.DisarmInit)
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 
 	ctx, cancel := context.WithCancel(context.Background())
-	_, err = coord.buildAgent(ctx, p, agentCfg, false)
+	_, err = coord.buildAgent(ctx, p, agentCfg, false, subagentModel{}, &coord.readyWg)
 	require.NoError(t, err)
 
 	// The caller goes away, mirroring an HTTP handler returning and canceling

@@ -42,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -179,6 +180,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	permissions          permission.Service
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
 
@@ -233,6 +235,7 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	Permissions          permission.Service
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
@@ -249,6 +252,7 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		permissions:          opts.Permissions,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
@@ -967,6 +971,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			toolResult := a.convertToToolResult(result)
+			// Surface escalation notes: when auto mode escalated a call and
+			// the user approved it, the model should know the action was
+			// not automatic. The note is consumed once.
+			if a.permissions != nil && !toolResult.IsError {
+				if note := a.permissions.EscalationNote(result.ToolCallID); note != "" {
+					toolResult.Content = "[auto-mode] " + note + "\n\n" + toolResult.Content
+				}
+			}
 			if sanitizedToolCalls[result.ToolCallID] {
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true

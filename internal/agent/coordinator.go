@@ -783,6 +783,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Permissions:          c.permissions,
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,

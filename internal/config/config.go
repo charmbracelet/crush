@@ -729,6 +729,12 @@ type HookConfig struct {
 	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
 	// Timeout in seconds. Default 30.
 	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
+	// IncludeTranscript, when true, adds a reasoning-blind excerpt of the
+	// recent session conversation (user messages and tool calls only;
+	// assistant prose and tool outputs are stripped) to the hook payload
+	// and to CRUSH_TRANSCRIPT. Opt-in: hooks that do not set it are
+	// unaffected.
+	IncludeTranscript bool `json:"include_transcript,omitempty" jsonschema:"description=When true, include a reasoning-blind excerpt of the recent conversation transcript in the hook payload"`
 }
 
 // DisplayName returns the hook name for display purposes. It returns Name

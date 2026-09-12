@@ -219,6 +219,13 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:  opts.Interactive,
 	}
 
+	// Bridge external policy hooks (PrePermission, PermissionDenied)
+	// from the permission service to the hooks runner. Reading config
+	// fresh per dispatch means reloads apply to these hooks too.
+	if opts.Permissions != nil && opts.Messages != nil {
+		opts.Permissions.SetPermissionHooks(newPermissionHookDispatcher(opts.Config, opts.Messages))
+	}
+
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil, errCoderAgentNotConfigured
@@ -833,7 +840,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// Build hook runner if PreToolUse hooks are configured.
 	var hookRunner *hooks.Runner
 	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir()).
+			WithTranscriptProvider(transcriptProvider(c.messages))
 	}
 
 	allTools = append(

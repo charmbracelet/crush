@@ -7,10 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUserMessagesUseRoleIndex pins the reason idx_messages_role_created_at
-// exists. Prompt history reads every user message in the database, and
-// without this index SQLite serves that by walking the whole messages table,
-// which on a long history is the slowest query Crush runs at startup.
+// TestUserMessagesUseRoleIndex pins why idx_messages_role_created_at exists:
+// without it, listing user messages scans the whole table.
 func TestUserMessagesUseRoleIndex(t *testing.T) {
 	t.Parallel()
 
@@ -35,8 +33,7 @@ func TestUserMessagesUseRoleIndex(t *testing.T) {
 	got := plan.String()
 	require.Contains(t, got, "idx_messages_role_created_at",
 		"listing user messages must use the role index, not walk the table")
-	// role first, created_at second: the rows arrive in order, so there is
-	// nothing left to sort.
+	// role first, created_at second, so the rows arrive already ordered.
 	require.NotContains(t, got, "TEMP B-TREE",
 		"the index covers the ordering, so no sort should be needed")
 }

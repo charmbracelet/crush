@@ -47,16 +47,21 @@ DELETE FROM messages
 WHERE session_id = ?;
 
 -- name: ListUserMessagesBySession :many
+-- Backs prompt history, which steps back one entry at a time.
 SELECT *
 FROM messages
 WHERE session_id = ? AND role = 'user'
-ORDER BY created_at DESC;
+ORDER BY created_at DESC
+LIMIT 200;
 
 -- name: ListAllUserMessages :many
+-- Backs prompt history when no session is open. Needs
+-- idx_messages_role_created_at to seek rather than scan the table.
 SELECT *
 FROM messages
 WHERE role = 'user'
-ORDER BY created_at DESC;
+ORDER BY created_at DESC
+LIMIT 200;
 
 -- name: GetLastAssistantMessageBySession :one
 SELECT *

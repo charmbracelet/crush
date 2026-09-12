@@ -150,7 +150,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		resp := NewPermissionDeniedResponse()
+		resp := NewPermissionDeniedResponse(edit.permissions.DenialReason(call.ID))
 		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
 			OldContent: "",
 			NewContent: content,
@@ -351,7 +351,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		resp := NewPermissionDeniedResponse()
+		resp := NewPermissionDeniedResponse(edit.permissions.DenialReason(call.ID))
 		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: newContent,
@@ -424,7 +424,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		resp := NewPermissionDeniedResponse()
+		resp := NewPermissionDeniedResponse(edit.permissions.DenialReason(call.ID))
 		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: result,

@@ -45,6 +45,7 @@ type countingWorkspace struct {
 	permSetCalls    int
 	clearQueueCalls int
 	cancelCalls     int
+	lspStopAllCalls int
 	modelCalls      int
 	lspStateCalls   int
 	lspDiagCalls    int
@@ -104,9 +105,19 @@ func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message
 	return nil, nil
 }
 
+func (w *countingWorkspace) ListAllUserMessages(context.Context) ([]message.Message, error) {
+	return nil, nil
+}
+
 func (w *countingWorkspace) WorkingDir() string { return "" }
 
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
+
+func (w *countingWorkspace) LSPStopAll(context.Context) { w.lspStopAllCalls++ }
+
+func (w *countingWorkspace) SetCurrentSession(context.Context, string) error {
+	return nil
+}
 
 func (w *countingWorkspace) Config() *config.Config { return nil }
 
@@ -123,6 +134,7 @@ func (w *countingWorkspace) resetCounters() {
 	w.readyCalls, w.agentBusyCalls = 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
+	w.lspStopAllCalls = 0
 	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
 }
 
@@ -784,4 +796,41 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	require.False(t, m.yoloModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
+}
+
+// TestNewSessionWhileAgentBusy pins that ctrl+n starts a new session even
+// while a run is active. Runs are scoped per session, so the previous
+// session's run keeps going in the background; the UI must not block the
+// switch, and must leave the shared LSP servers running for that run.
+func TestNewSessionWhileAgentBusy(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	require.True(t, m.isAgentBusy())
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	require.Nil(t, m.session, "ctrl+n must start a new session while the agent is busy")
+
+	runCmds(m, cmd)
+	require.Zero(t, ws.lspStopAllCalls,
+		"the background run may still need the LSP servers; they must not be stopped")
+}
+
+// TestNewSessionWhenIdleStopsLSPs pins the idle half of the same behavior:
+// with no run active, starting a new session still tears down the shared LSP
+// servers.
+func TestNewSessionWhenIdleStopsLSPs(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: false}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	require.Nil(t, m.session, "ctrl+n must start a new session")
+
+	runCmds(m, cmd)
+	require.Equal(t, 1, ws.lspStopAllCalls, "an idle new session must stop the shared LSP servers")
 }

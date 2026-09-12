@@ -368,6 +368,46 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 	}
 
+	// PlanMarkdown keeps the rich markdown colors but paints the plan-card
+	// background under every primitive, so glamour's per-token SGR resets
+	// cannot punch holes in the card that PlanBox draws around the content.
+	//
+	// H2–H5 in s.Markdown only set Prefix; they rely on glamour inheriting
+	// Color/Bold from the base Heading style. Once withMarkdownBackground
+	// adds BackgroundColor to those primitives, glamour stops inheriting and
+	// the heading text renders without color/bold. Copy them explicitly.
+	planMD := s.Markdown
+	headingColor := hex(o.info)
+	headingBold := new(true)
+	for _, h := range []*ansi.StyleBlock{&planMD.H2, &planMD.H3, &planMD.H4, &planMD.H5} {
+		if h.Color == nil {
+			h.Color = headingColor
+		}
+		if h.Bold == nil {
+			h.Bold = headingBold
+		}
+	}
+	// Replace raw markdown prefixes ("## ", "### ", …) with clean indentation so
+	// the plan card doesn't show literal ## / ### characters. H1 keeps its own
+	// distinct box styling; H2 gets no prefix (top-level sections stand on their
+	// own with bold+color); H3–H5 use increasing indentation for hierarchy.
+	planMD.H2.Prefix = ""
+	planMD.H3.Prefix = "  "
+	planMD.H4.Prefix = "    "
+	planMD.H5.Prefix = "      "
+	planMD.Code.Color = hex(o.destructive)
+	planMD.Code.Bold = new(true)
+	// The card is painted in bgLeastVisible; the default inline-code chip
+	// (bgLessVisible) is only one step away from it and reads as no chip at
+	// all. bgMostVisible keeps the chip distinguishable inside the card.
+	planMD.Code.BackgroundColor = hex(o.bgMostVisible)
+	// H1 carries a primary-colored badge background in s.Markdown. renderPlanBox
+	// used to flatten it away; now that intentional backgrounds survive, pin H1
+	// to the card background so the plan heading keeps looking as it does today.
+	planMD.H1.BackgroundColor = hex(o.bgLeastVisible)
+	planMD.CodeBlock.Color = hex(o.fgBase)
+	s.PlanMarkdown = withMarkdownBackground(planMD, hex(o.bgLeastVisible))
+
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
 	plainBg := hex(o.bgLeastVisible)
 	plainFg := hex(o.fgMoreSubtle)
@@ -499,12 +539,17 @@ func quickStyle(o quickStyleOpts) Styles {
 			Color:           plainFg,
 			BackgroundColor: plainBg,
 		},
+		// Inline code is the one primitive that must NOT take plainFg/plainBg:
+		// with both matching the surrounding text it renders identically to it,
+		// leaving only the Prefix/Suffix spaces to hint at a code span. A step up
+		// in background (and a slightly brighter foreground) keeps the quiet
+		// palette while making the chip readable.
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				Prefix:          CodespanPadding,
 				Suffix:          CodespanPadding,
-				Color:           plainFg,
-				BackgroundColor: plainBg,
+				Color:           hex(o.fgSubtle),
+				BackgroundColor: hex(o.bgLessVisible),
 			},
 		},
 		CodeBlock: ansi.StyleCodeBlock{
@@ -733,6 +778,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Editor
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
 	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptPlanIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" P ")
+	s.Editor.PromptPlanIconBlurred = s.Editor.PromptPlanIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptPlanDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
+	s.Editor.PromptPlanDotsBlurred = s.Editor.PromptPlanDotsFocused.Foreground(o.fgMoreSubtle)
 	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" Y ")
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
@@ -920,6 +969,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.SubduedHypercreditIcon = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
 
+	// Plan section styles
+	s.Messages.PlanBox = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLeastVisible).Padding(1, 2)
+
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted
@@ -1075,4 +1127,48 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Pills.Area = base
 
 	return s
+}
+
+// withMarkdownBackground returns a copy of cfg with bg applied to every style
+// primitive that does not already set its own background, so glamour paints an
+// uninterrupted background under all rendered text. Primitives that carry an
+// intentional background of their own (e.g. H1, inline code) keep it.
+func withMarkdownBackground(cfg ansi.StyleConfig, bg *string) ansi.StyleConfig {
+	for _, p := range []*ansi.StylePrimitive{
+		&cfg.Document.StylePrimitive,
+		&cfg.BlockQuote.StylePrimitive,
+		&cfg.Paragraph.StylePrimitive,
+		&cfg.Heading.StylePrimitive,
+		&cfg.H1.StylePrimitive,
+		&cfg.H2.StylePrimitive,
+		&cfg.H3.StylePrimitive,
+		&cfg.H4.StylePrimitive,
+		&cfg.H5.StylePrimitive,
+		&cfg.H6.StylePrimitive,
+		&cfg.Text,
+		&cfg.Strikethrough,
+		&cfg.Emph,
+		&cfg.Strong,
+		&cfg.HorizontalRule,
+		&cfg.Item,
+		&cfg.Enumeration,
+		&cfg.Task.StylePrimitive,
+		&cfg.Link,
+		&cfg.LinkText,
+		&cfg.Image,
+		&cfg.ImageText,
+		&cfg.Code.StylePrimitive,
+		&cfg.CodeBlock.StylePrimitive,
+		&cfg.Table.StylePrimitive,
+		&cfg.DefinitionList.StylePrimitive,
+		&cfg.DefinitionTerm,
+		&cfg.DefinitionDescription,
+		&cfg.HTMLBlock.StylePrimitive,
+		&cfg.HTMLSpan.StylePrimitive,
+	} {
+		if p.BackgroundColor == nil {
+			p.BackgroundColor = bg
+		}
+	}
+	return cfg
 }

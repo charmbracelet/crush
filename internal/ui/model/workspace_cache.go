@@ -314,6 +314,9 @@ func (m *UI) toggleYoloMode() bool {
 	// re-dispatches the stale probe.
 	m.busyFetchGen++
 	m.setEditorPrompt(yolo)
+	// Any explicit toggle hands YOLO ownership back to the user; the
+	// Shift+Tab cycle re-claims it right after its own call.
+	m.cycleYolo = false
 	return yolo
 }
 

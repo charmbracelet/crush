@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -89,6 +90,9 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	defer accept.Close()
 
 	ctx := ws.ctx
+	if msg.HiddenUserMessage {
+		ctx = message.WithHiddenUserMessage(ctx)
+	}
 	if msg.RunID != "" {
 		ctx = agent.WithRunID(ctx, msg.RunID)
 	}
@@ -162,6 +166,20 @@ func (b *Backend) UpdateAgent(ctx context.Context, workspaceID string) error {
 	}
 
 	return ws.UpdateAgentModel(ctx)
+}
+
+// SetMainAgent switches the workspace's active agent (coder or plan).
+func (b *Backend) SetMainAgent(workspaceID, agentID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	if ws.AgentCoordinator == nil {
+		return ErrAgentNotInitialized
+	}
+
+	return ws.AgentCoordinator.SetMainAgent(agentID)
 }
 
 // CancelSession cancels an ongoing agent operation for the given

@@ -483,6 +483,20 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 	return nil
 }
 
+// SetMainAgent switches the workspace's active agent (e.g. "coder" or
+// "plan") on the server.
+func (c *Client) SetMainAgent(ctx context.Context, id, agentID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/main", id), nil, jsonBody(proto.AgentSetMainRequest{AgentID: agentID}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set main agent: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set main agent: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // SendMessage sends a message to the agent for a workspace.
 //
 // When runID is non-empty it is echoed back on the resulting
@@ -492,10 +506,11 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 // turn on the same session (e.g. interactive TUI usage).
 func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, prompt string, attachments ...message.Attachment) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(proto.AgentMessage{
-		SessionID:   sessionID,
-		RunID:       runID,
-		Prompt:      prompt,
-		Attachments: proto.AttachmentsFromMessage(attachments),
+		HiddenUserMessage: message.HiddenUserMessage(ctx),
+		SessionID:         sessionID,
+		RunID:             runID,
+		Prompt:            prompt,
+		Attachments:       proto.AttachmentsFromMessage(attachments),
 	}), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("failed to send message to agent: %w", err)

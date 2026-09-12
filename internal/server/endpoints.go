@@ -325,6 +325,15 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceAgentUpdate),
 
+		apigen.Post("/v1/workspaces/{id}/agent/main").
+			Summary("Set main agent").
+			Description(`Switches the workspace's active agent (e.g. "coder" or "plan").`).
+			Tags("agent").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.AgentSetMainRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceAgentMain),
+
 		apigen.Get("/v1/workspaces/{id}/agent/sessions/{sid}").
 			Summary("Get agent session").
 			Tags("agent").

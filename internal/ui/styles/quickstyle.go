@@ -12,7 +12,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 // quickStyleOpts is the palette of colors used by quickStyle to simplify the
@@ -234,7 +233,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Unticked:       "[ ] ",
 		},
 		Link: ansi.StylePrimitive{
-			Color:     hex(charmtone.Zinc),
+			Color:     hex(o.info),
 			Underline: new(true),
 		},
 		LinkText: ansi.StylePrimitive{
@@ -242,7 +241,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Bold:  new(true),
 		},
 		Image: ansi.StylePrimitive{
-			Color:     hex(charmtone.Cheeky),
+			Color:     hex(o.accent),
 			Underline: new(true),
 		},
 		ImageText: ansi.StylePrimitive{
@@ -286,22 +285,22 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgMostSubtle),
 				},
 				CommentPreproc: ansi.StylePrimitive{
-					Color: hex(charmtone.Bengal),
+					Color: hex(o.accent),
 				},
 				Keyword: ansi.StylePrimitive{
 					Color: hex(o.info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(o.keyword),
 				},
 				KeywordNamespace: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(o.keyword),
 				},
 				KeywordType: ansi.StylePrimitive{
-					Color: hex(charmtone.Guppy),
+					Color: hex(o.infoMoreSubtle),
 				},
 				Operator: ansi.StylePrimitive{
-					Color: hex(charmtone.Salmon),
+					Color: hex(o.fgSubtle),
 				},
 				Punctuation: ansi.StylePrimitive{
 					Color: hex(o.warningSubtle),
@@ -310,21 +309,21 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgSubtle),
 				},
 				NameBuiltin: ansi.StylePrimitive{
-					Color: hex(charmtone.Cheeky),
+					Color: hex(o.accent),
 				},
 				NameTag: ansi.StylePrimitive{
-					Color: hex(charmtone.Mauve),
+					Color: hex(o.secondary),
 				},
 				NameAttribute: ansi.StylePrimitive{
-					Color: hex(charmtone.Hazy),
+					Color: hex(o.infoMoreSubtle),
 				},
 				NameClass: ansi.StylePrimitive{
-					Color:     hex(charmtone.Salt),
+					Color:     hex(o.primary),
 					Underline: new(true),
 					Bold:      new(true),
 				},
 				NameDecorator: ansi.StylePrimitive{
-					Color: hex(charmtone.Citron),
+					Color: hex(o.attention),
 				},
 				NameFunction: ansi.StylePrimitive{
 					Color: hex(o.successMostSubtle),
@@ -333,7 +332,7 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.success),
 				},
 				LiteralString: ansi.StylePrimitive{
-					Color: hex(charmtone.Cumin),
+					Color: hex(o.warningSubtle),
 				},
 				LiteralStringEscape: ansi.StylePrimitive{
 					Color: hex(o.successMoreSubtle),

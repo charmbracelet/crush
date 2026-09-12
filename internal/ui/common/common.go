@@ -43,11 +43,15 @@ func (c *Common) Config() *config.Config {
 	return c.Workspace.Config()
 }
 
-// DefaultCommon returns the default common UI configurations. When the
-// workspace has a large model selected, the theme is chosen based on its
-// provider; otherwise the default theme is used.
+// DefaultCommon returns the default common UI configurations using the
+// theme from config (or the default Charmtone theme if unset).
 func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.ThemeForProvider(largeModelProviderID(ws))
+	var s styles.Styles
+	if ws != nil {
+		s = ThemeStylesFromConfig(ws.Config())
+	} else {
+		s = LoadThemeStyles("")
+	}
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
@@ -65,6 +69,37 @@ func largeModelProviderID(ws workspace.Workspace) string {
 		return ""
 	}
 	return cfg.Models[config.SelectedModelTypeLarge].Provider
+}
+
+// NewCommon returns common UI configurations using the given theme.
+func NewCommon(ws workspace.Workspace, themeName string) *Common {
+	s := LoadThemeStyles(themeName)
+	return &Common{
+		Workspace: ws,
+		Styles:    &s,
+	}
+}
+
+// ThemeNameFromConfig extracts the theme name from config, returning ""
+// (which LoadTheme treats as the default) when config is nil or unset.
+func ThemeNameFromConfig(cfg *config.Config) string {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
+		return ""
+	}
+	return cfg.Options.TUI.ActiveTheme
+}
+
+// LoadThemeStyles resolves a theme name to Styles, falling back to
+// CharmtonePantera on error or empty name.
+func LoadThemeStyles(name string) styles.Styles {
+	return styles.ThemeFromConfig(name)
+}
+
+// ThemeStylesFromConfig resolves the configured theme to Styles. The
+// active_theme field selects either a built-in theme or a global user theme
+// file.
+func ThemeStylesFromConfig(cfg *config.Config) styles.Styles {
+	return LoadThemeStyles(ThemeNameFromConfig(cfg))
 }
 
 // IsHyper reports whether the currently selected large model is provided

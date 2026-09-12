@@ -302,7 +302,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.ThemeForProvider(app.config.Config().Models[config.SelectedModelTypeLarge].Provider)
+		activeTheme := ""
+		if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			activeTheme = cfg.Options.TUI.ActiveTheme
+		}
+		t := styles.ThemeFromConfig(activeTheme)
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,

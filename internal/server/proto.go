@@ -742,6 +742,55 @@ func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, 
 	jsonEncode(w, proto.PermissionSkipRequest{Skip: skip})
 }
 
+// handlePostWorkspacePermissionsAutoMode sets the native auto-mode state.
+//
+//	@Summary		Set auto mode state
+//	@Tags			permissions
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string							true	"Workspace ID"
+//	@Param			request	body		proto.PermissionAutoModeRequest	true	"Auto mode state"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/auto-mode [post]
+func (c *controllerV1) handlePostWorkspacePermissionsAutoMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.PermissionAutoModeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.SetPermissionsAutoMode(id, req.Enabled); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+}
+
+// handleGetWorkspacePermissionsAutoMode returns the native auto-mode state.
+//
+//	@Summary		Get auto mode state
+//	@Tags			permissions
+//	@Produce		json
+//	@Param			id	path		string							true	"Workspace ID"
+//	@Success		200	{object}	proto.PermissionAutoModeRequest
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/permissions/auto-mode [get]
+func (c *controllerV1) handleGetWorkspacePermissionsAutoMode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	enabled, err := c.backend.GetPermissionsAutoMode(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.PermissionAutoModeRequest{Enabled: enabled})
+}
+
 // handleError maps backend errors to HTTP status codes and writes the
 // JSON error response.
 //

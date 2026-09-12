@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/permission"
@@ -73,13 +74,14 @@ type AutoMode struct {
 	rules        *Rules
 	quotas       *quotas
 	classifyOpts ClassifierConfig
+	enabled      atomic.Bool
 }
 
 // New creates a native auto mode from the given options.
 func New(opts Options) *AutoMode {
 	opts.Defaults()
 	prompts := LoadPromptSet(opts.PromptStage1File, opts.PromptStage2File)
-	return &AutoMode{
+	am := &AutoMode{
 		opts:   opts,
 		rules:  DefaultRules(),
 		quotas: newQuotas(),
@@ -90,6 +92,14 @@ func New(opts Options) *AutoMode {
 			FailOpen:           opts.FailOpen,
 		},
 	}
+	am.enabled.Store(true)
+	return am
+}
+
+// SetAutoModeEnabled toggles auto mode at runtime. When disabled,
+// PrePermission defers to the normal permission prompt.
+func (a *AutoMode) SetAutoModeEnabled(enabled bool) {
+	a.enabled.Store(enabled)
 }
 
 // generateFor builds the GenerateFunc for this evaluation, returning nil
@@ -111,6 +121,10 @@ func (a *AutoMode) generateFor(ctx context.Context) GenerateFunc {
 // PrePermission implements permission.PermissionHooks. It runs only when
 // a request is about to prompt the user.
 func (a *AutoMode) PrePermission(ctx context.Context, req permission.PermissionRequest) permission.PreHookResult {
+	if !a.enabled.Load() {
+		return permission.PreHookResult{Decision: permission.HookDecisionNone}
+	}
+
 	toolName := strings.ToLower(req.ToolName)
 	command, filePath := extractCallArgs(req.Params)
 

@@ -328,6 +328,56 @@ func (m *UI) toggleYoloMode() bool {
 	return yolo
 }
 
+// toggleAutoMode flips native auto mode and writes the new value through
+// the auto cache (no re-probe needed) and the editor prompt. Returns the
+// new mode.
+func (m *UI) toggleAutoMode() bool {
+	auto := !m.com.Workspace.PermissionAutoMode()
+	m.com.Workspace.PermissionSetAutoMode(auto)
+	m.autoCache.set(auto)
+	m.busyFetchGen++
+	m.setEditorPrompt(m.yoloModeCached())
+	return auto
+}
+
+// autoModeCached reports the memoized native auto-mode state. Toggles
+// write through the cache; the Update-tail backstop keeps it
+// bounded-stale otherwise.
+func (m *UI) autoModeCached() bool {
+	return m.autoCache.val
+}
+
+// setAutoMode writes the auto-mode state through the workspace and
+// cache, refreshing the editor prompt.
+func (m *UI) setAutoMode(enabled bool) {
+	m.com.Workspace.PermissionSetAutoMode(enabled)
+	m.autoCache.set(enabled)
+	m.busyFetchGen++
+	m.setEditorPrompt(m.yoloModeCached())
+}
+
+// cyclePermissionMode cycles the permission mode through normal ->
+// auto -> yolo -> normal, mirroring the single-key mode cycle in other
+// agentic CLIs. Returns a human-readable description of the new mode.
+func (m *UI) cyclePermissionMode() string {
+	yolo := m.yoloModeCached()
+	auto := m.autoModeCached()
+	switch {
+	case !yolo && !auto:
+		m.setAutoMode(true)
+		return "Auto mode: classifier gates permission prompts"
+	case auto:
+		// Auto -> yolo.
+		m.setAutoMode(false)
+		m.toggleYoloMode()
+		return "Yolo mode: all permissions bypassed"
+	default:
+		// Yolo -> normal (disable both).
+		m.toggleYoloMode()
+		return "Permission prompts enabled"
+	}
+}
+
 // yoloModeCached reports the memoized permission-skip ("yolo") mode. Toggles
 // write through the cache; the Update-tail backstop keeps it bounded-stale
 // otherwise.

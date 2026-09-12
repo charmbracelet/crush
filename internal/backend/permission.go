@@ -58,3 +58,24 @@ func (b *Backend) GetPermissionsSkip(workspaceID string) (bool, error) {
 
 	return ws.Permissions.SkipRequests(), nil
 }
+
+// SetPermissionsAutoMode sets the native auto-mode state.
+func (b *Backend) SetPermissionsAutoMode(workspaceID string, enabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	ws.Permissions.SetAutoMode(enabled)
+	return nil
+}
+
+// GetPermissionsAutoMode returns the native auto-mode state.
+func (b *Backend) GetPermissionsAutoMode(workspaceID string) (bool, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return false, err
+	}
+
+	return ws.Permissions.AutoMode(), nil
+}

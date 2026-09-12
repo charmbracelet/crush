@@ -41,6 +41,10 @@ func (m *mockBashPermissionService) DenialReason(toolCallID string) string {
 	return ""
 }
 
+func (m *mockBashPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *mockBashPermissionService) AutoMode() bool { return false }
+
 
 func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
@@ -118,6 +122,10 @@ func (m *recordingPermissionService) SetPermissionHooks(hooks permission.Permiss
 func (m *recordingPermissionService) DenialReason(toolCallID string) string {
 	return ""
 }
+
+func (m *recordingPermissionService) SetAutoMode(enabled bool) {}
+
+func (m *recordingPermissionService) AutoMode() bool { return false }
 
 
 func (m *recordingPermissionService) SkipRequests() bool {

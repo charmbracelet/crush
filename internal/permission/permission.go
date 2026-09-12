@@ -101,6 +101,13 @@ type PermissionHooks interface {
 	PermissionDenied(ctx context.Context, req PermissionRequest)
 }
 
+// AutoModeToggler is implemented by hooks that can be enabled/disabled
+// at runtime (the native auto mode). SetAutoMode forwards to any
+// installed hooks implementing this interface.
+type AutoModeToggler interface {
+	SetAutoModeEnabled(enabled bool)
+}
+
 type Service interface {
 	pubsub.Subscriber[PermissionRequest]
 	// GrantPersistent grants a permission request and remembers the grant
@@ -129,6 +136,11 @@ type Service interface {
 	// so tools can surface it to the model. Empty when the denial had no
 	// recorded reason.
 	DenialReason(toolCallID string) string
+	// SetAutoMode sets the runtime auto-mode state and forwards it to any
+	// installed hooks that support runtime toggling (the native auto
+	// mode). AutoMode reports the current runtime state.
+	SetAutoMode(enabled bool)
+	AutoMode() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -155,6 +167,7 @@ type permissionService struct {
 	hooks                 PermissionHooks
 	hooksWG               sync.WaitGroup
 	denialReasons         *csync.Map[string, string]
+	autoMode              atomic.Bool
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -384,6 +397,22 @@ func (s *permissionService) DenialReason(toolCallID string) string {
 		return ""
 	}
 	return reason
+}
+
+// SetAutoMode sets the runtime auto-mode state and forwards it to any
+// installed hooks that support runtime toggling.
+func (s *permissionService) SetAutoMode(enabled bool) {
+	s.autoMode.Store(enabled)
+	if h := s.currentHooks(); h != nil {
+		if toggler, ok := h.(AutoModeToggler); ok {
+			toggler.SetAutoModeEnabled(enabled)
+		}
+	}
+}
+
+// AutoMode reports the runtime auto-mode state.
+func (s *permissionService) AutoMode() bool {
+	return s.autoMode.Load()
 }
 
 func (s *permissionService) currentHooks() PermissionHooks {

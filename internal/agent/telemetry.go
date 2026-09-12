@@ -78,6 +78,7 @@ func logStepComposition(sessionID string, messages []fantasy.Message, agentTools
 		"stubbed_tool_results_total", stubs.Results,
 		"stubbed_saved_bytes_total", stubs.SavedBytes,
 		"stub_invalidations", stubs.Invalidations,
+		"boundary_advances", stubs.BoundaryAdvances,
 		"builtin_tool_schema_bytes", builtinSchemaBytes,
 		"mcp_tool_schema_bytes", mcpSchemaBytes,
 		"tool_count", len(agentTools),

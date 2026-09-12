@@ -150,6 +150,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		notebookOpts.PreCompactRunner = hooks.NewRunner(preCompactHooks, store.WorkingDir(), store.WorkingDir())
 	}
 	var notebookModelResolver func() fantasy.LanguageModel
+	notebookOpts.DB = conn
 	app.Notebook = notebook.NewService(q, notebook.NewLLMGenerator(func() fantasy.LanguageModel {
 		if notebookModelResolver != nil {
 			return notebookModelResolver()

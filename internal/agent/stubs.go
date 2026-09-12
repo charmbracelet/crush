@@ -23,12 +23,6 @@ const stubMinContentBytes = 200
 // stub carries a head-prefix digest, so smaller results save nothing.
 const stubCommandMinBytes = 512
 
-// stubRecentTurnGuard is the recency guard for stub promotion: results
-// from the last two completed turns are never stubbed, matching the
-// recency rule in selectNotebookEntries. Turn-based, not count-based:
-// a bash-spam turn must not push a still-active view past the guard.
-const stubRecentTurnGuard = 2
-
 // writeToolNames mutate files; a successful result supersedes earlier
 // reads of the same path.
 var writeToolNames = map[string]bool{"edit": true, "write": true, "multiedit": true}
@@ -67,6 +61,10 @@ type stubStats struct {
 	Results int
 	// SavedBytes is the cumulative original content replaced by stubs.
 	SavedBytes int64
+	// BoundaryAdvances counts raw-window boundary moves — the
+	// telemetry counterpart of Invalidations for turns long enough
+	// to have moved the boundary without promoting anything.
+	BoundaryAdvances int
 }
 
 // messageTurns returns the turn index of each message: the number of
@@ -450,20 +448,22 @@ func (a *sessionAgent) stampReadMtime(tr *message.ToolResult, calls []message.To
 // raw/notebook boundary moved since the last render — the move already
 // invalidates the prompt-cache prefix, so stubbing piggybacks on it
 // rather than paying an invalidation mid-window. Results in the last
-// two completed turns are left pending.
+// two segments (the open segment and the most recent closed one) are
+// left pending — the guard counts segments, not turns, so promotion
+// still works inside a single long-running turn.
 //
 // Returns false when any persistence write failed; callers should then
 // leave the recorded boundary alone so promotion retries next render
 // instead of flip-flopping between stubbed and verbatim renders.
-func (a *sessionAgent) promoteSupersededStubs(ctx context.Context, msgs []message.Message, boundary int) bool {
-	currentTurn := int64(countUserMessages(msgs))
-	turns := messageTurns(msgs)
+func (a *sessionAgent) promoteSupersededStubs(ctx context.Context, msgs []message.Message, boundary int, segs []segment) bool {
+	ordinals := segmentOrdinals(segs, len(msgs))
+	recentFloor := len(segs) - stubRecentSegmentGuard
 	promoted := 0
 	var saved int64
 	persistFailed := false
 	for i := boundary; i < len(msgs); i++ {
 		m := &msgs[i]
-		if m.Role != message.Tool || turns[i] >= currentTurn-stubRecentTurnGuard {
+		if m.Role != message.Tool || ordinals[i] >= recentFloor {
 			continue
 		}
 		var flipped []*message.SupersededMark

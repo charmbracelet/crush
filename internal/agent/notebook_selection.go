@@ -16,10 +16,10 @@ const maxNotebookInjectionTokens = 12_000
 // selectNotebookEntries chooses which notebook entries to render into
 // the request. Selection order:
 //
-//  1. Entries from the two most recent turns (immediate context) —
+//  1. Entries from the two most recent segments (immediate context) —
 //     recency runs first so a large ref set can't starve it.
-//  2. Entries pinned to files under active edit (a successful edit
-//     entry in the last two turns pins all entries for that file).
+//  2. Entries pinned to files under active edit (an edit entry in the
+//     last two segments pins all entries for that file).
 //  3. Entries relevant to refs (file paths from the current user
 //     message and active todos).
 //  4. Remaining entries, newest first, until the token cap.
@@ -27,7 +27,7 @@ const maxNotebookInjectionTokens = 12_000
 // Entries are deduplicated by ID, superseded file reads are dropped in
 // favor of newer entries for the same file, and the result is returned
 // in chronological order for rendering.
-func selectNotebookEntries(entries []notebook.Entry, refs []string, maxTurn int64) []notebook.Entry {
+func selectNotebookEntries(entries []notebook.Entry, refs []string, floor segmentKey) []notebook.Entry {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -58,15 +58,18 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, maxTurn int6
 		selected = append(selected, e)
 	}
 
-	// Pass 1: the two most recent turns.
+	// Pass 1: entries at or after the recency floor — the last two
+	// covered segments. Recency is keyed on (turn, segment), not
+	// turns: a single long turn would otherwise select every entry it
+	// ever produced.
 	for _, e := range entries {
-		if e.TurnNumber >= maxTurn-1 {
+		if e.TurnNumber > floor.turn || (e.TurnNumber == floor.turn && e.SegmentNumber >= floor.segment) {
 			trySelect(e)
 		}
 	}
 	// Pass 1.5: entries pinned to files under active edit — an edit
-	// in the last two turns keeps every entry for that file alive.
-	pinned := notebook.PinnedFileTags(entries)
+	// in the last two segments keeps every entry for that file alive.
+	pinned := notebook.PinnedFileTagsSince(entries, floor.turn, floor.segment)
 	if len(pinned) > 0 {
 		for _, e := range entries {
 			for _, tag := range e.Tags {
@@ -97,6 +100,30 @@ func selectNotebookEntries(entries []notebook.Entry, refs []string, maxTurn int6
 		return int(a.EventNumber - b.EventNumber)
 	})
 	return selected
+}
+
+// coveredSegmentFloor returns the recency floor for selection: the
+// key of the second-to-last segment that ends at or before the
+// boundary. Entries at or after it count as recent. Segments are
+// ordered by construction, so the scan is cheap.
+func coveredSegmentFloor(segs []segment, boundary int) segmentKey {
+	var last, prev segmentKey
+	for _, s := range segs {
+		if s.end > boundary {
+			break
+		}
+		prev, last = last, s.key()
+	}
+	if last == (segmentKey{}) && len(segs) > 0 {
+		return segs[0].key()
+	}
+	// Two covered segments or more: the floor is the second-to-last,
+	// matching the "two most recent" window. With a single covered
+	// segment, that segment is the floor.
+	if prev != (segmentKey{}) {
+		return prev
+	}
+	return last
 }
 
 // formatTurnRanges renders a sorted turn list compactly, grouping

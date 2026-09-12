@@ -49,11 +49,24 @@ type NotebookEntry struct {
 	CreatedAt        int64          `json:"created_at"`
 	Succeeded        int64          `json:"succeeded"`
 	ErrorHeadline    string         `json:"error_headline"`
+	SegmentNumber    int64          `json:"segment_number"`
 }
 
 type NotebookTag struct {
 	EntryID string `json:"entry_id"`
 	Tag     string `json:"tag"`
+}
+
+type ProcessedSegment struct {
+	SessionID     string        `json:"session_id"`
+	TurnNumber    int64         `json:"turn_number"`
+	SegmentNumber int64         `json:"segment_number"`
+	StartIndex    int64         `json:"start_index"`
+	EndIndex      int64         `json:"end_index"`
+	State         string        `json:"state"`
+	RetryCount    int64         `json:"retry_count"`
+	LastAttemptAt sql.NullInt64 `json:"last_attempt_at"`
+	CreatedAt     int64         `json:"created_at"`
 }
 
 type ReadFile struct {

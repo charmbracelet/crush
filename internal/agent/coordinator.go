@@ -184,6 +184,11 @@ type coordinator struct {
 	// per-agent subscription. Nil when stubbing is disabled.
 	stubBoundary *csync.Map[string, int]
 	stubStats    *csync.Map[string, stubStats]
+	// segmentTrackers/prefixCache share intra-turn segment state and
+	// the rendered notebook prefix across agent rebuilds. Nil when
+	// the notebook is disabled.
+	segmentTrackers *csync.Map[string, *segmentTracker]
+	prefixCache     *csync.Map[string, cachedPrefix]
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -261,15 +266,18 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		summaryModel:          csync.NewValue(Model{}),
 	}
 
-	// Share stub bookkeeping maps across all built agents and run one
-	// deletion watcher here — a per-agent watcher would leak a
-	// goroutine and broker subscriber on every agent rebuild. Stubbing
-	// only runs when the notebook is also enabled, so gate both.
-	if opts.Sessions != nil &&
-		opts.Config.Config().Options.NotebookStubSupersededEnabled() &&
-		opts.Config.Config().Options.NotebookIsEnabled() {
-		c.stubBoundary = csync.NewMap[string, int]()
-		c.stubStats = csync.NewMap[string, stubStats]()
+	// Share per-session bookkeeping maps across all built agents and
+	// run one deletion watcher here — a per-agent watcher would leak
+	// a goroutine and broker subscriber on every agent rebuild. The
+	// segment maps exist whenever the notebook is on; stub maps
+	// additionally need stubbing enabled.
+	if opts.Sessions != nil && opts.Config.Config().Options.NotebookIsEnabled() {
+		c.segmentTrackers = csync.NewMap[string, *segmentTracker]()
+		c.prefixCache = csync.NewMap[string, cachedPrefix]()
+		if opts.Config.Config().Options.NotebookStubSupersededEnabled() {
+			c.stubBoundary = csync.NewMap[string, int]()
+			c.stubStats = csync.NewMap[string, stubStats]()
+		}
 		go c.watchSessionDeletions()
 	}
 
@@ -293,17 +301,27 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	return c, nil
 }
 
-// watchSessionDeletions drops per-session stub bookkeeping when a
-// session is deleted so the shared stub maps don't grow unbounded
-// across a process's lifetime. Runs once per coordinator.
+// watchSessionDeletions drops per-session stub and segment
+// bookkeeping when a session is deleted so the shared maps don't grow
+// unbounded across a process's lifetime. Runs once per coordinator.
 func (c *coordinator) watchSessionDeletions() {
 	ch := c.sessions.Subscribe(context.Background())
 	for ev := range ch {
 		if ev.Type != pubsub.DeletedEvent {
 			continue
 		}
-		c.stubBoundary.Del(ev.Payload.ID)
-		c.stubStats.Del(ev.Payload.ID)
+		if c.stubBoundary != nil {
+			c.stubBoundary.Del(ev.Payload.ID)
+		}
+		if c.stubStats != nil {
+			c.stubStats.Del(ev.Payload.ID)
+		}
+		if c.segmentTrackers != nil {
+			c.segmentTrackers.Del(ev.Payload.ID)
+		}
+		if c.prefixCache != nil {
+			c.prefixCache.Del(ev.Payload.ID)
+		}
 	}
 }
 
@@ -795,8 +813,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		NotebookAutoInject:   c.cfg.Config().Options.NotebookAutoInjectEnabled(),
 		StubSuperseded: c.cfg.Config().Options.NotebookStubSupersededEnabled() &&
 			c.cfg.Config().Options.NotebookIsEnabled(),
-		StubBoundary: c.stubBoundary,
-		StubStats:    c.stubStats,
+		StubBoundary:    c.stubBoundary,
+		StubStats:       c.stubStats,
+		SegmentTrackers: c.segmentTrackers,
+		PrefixCache:     c.prefixCache,
 	})
 
 	if c.cfg.Config().Options.NotebookStubSupersededEnabled() && !c.cfg.Config().Options.NotebookIsEnabled() {

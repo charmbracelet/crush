@@ -73,7 +73,7 @@ func TestMaybeAutoInject_SkipsSupersededRead(t *testing.T) {
 			message.TextContent{Text: "look at internal/auth.go please"},
 		}},
 	}
-	msg := agent.maybeAutoInject(msgs, sessionID, 10)
+	msg := agent.maybeAutoInject(t.Context(), msgs, sessionID, segmentKey{turn: 10})
 	if msg != nil {
 		for _, part := range msg.Content {
 			if tp, ok := part.(fantasy.TextPart); ok {
@@ -95,7 +95,7 @@ func TestMaybeAutoInject_InjectsUnsupersededRead(t *testing.T) {
 			message.TextContent{Text: "look at internal/auth.go please"},
 		}},
 	}
-	msg := agent.maybeAutoInject(msgs, sessionID, 10)
+	msg := agent.maybeAutoInject(t.Context(), msgs, sessionID, segmentKey{turn: 10})
 	require.NotNil(t, msg)
 	var text string
 	for _, part := range msg.Content {
@@ -192,7 +192,7 @@ func TestStubRenderKeepsNotebookOriginal(t *testing.T) {
 	msgs := viewThenEdit(t, svc, sessionID, bigContent(), true)
 	msgs = append(msgs, mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "later"}))
 	a.flagPrunableToolResults(ctx, msgs)
-	require.True(t, a.promoteSupersededStubs(ctx, msgs, 0))
+	require.True(t, a.promoteSupersededStubs(ctx, msgs, 0, segmentBoundaries(msgs, segmentTokenThreshold, segmentMaxStepCount)))
 
 	// Raw render shows the stub, not the original.
 	stubbed, count, _ := applySupersededStubs(msgs[2])
@@ -331,7 +331,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		msgs = append(msgs, mkMsg(t, svc, sessionID, message.User, message.TextContent{Text: "later"}))
 		a.flagPrunableToolResults(t.Context(), msgs)
 
-		a.promoteSupersededStubs(t.Context(), msgs, 0)
+		a.promoteSupersededStubs(t.Context(), msgs, 0, segmentBoundaries(msgs, segmentTokenThreshold, segmentMaxStepCount))
 
 		mark := resultOf(t, msgs[2], "tc-view").Superseded
 		require.NotNil(t, mark)
@@ -363,7 +363,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		a.flagPrunableToolResults(t.Context(), rebuilt)
 
 		// currentTurn=4, read at turn 2 → protected (2 >= 4-2).
-		a.promoteSupersededStubs(t.Context(), rebuilt, 0)
+		a.promoteSupersededStubs(t.Context(), rebuilt, 0, segmentBoundaries(rebuilt, segmentTokenThreshold, segmentMaxStepCount))
 
 		mark := resultOf(t, rebuilt[4], "tc-view2").Superseded
 		require.NotNil(t, mark)
@@ -388,7 +388,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		// false and the in-memory marks revert so this render stays
 		// consistent with the stored verbatim content.
 		require.NoError(t, conn.Close())
-		ok := a.promoteSupersededStubs(t.Context(), msgs, 0)
+		ok := a.promoteSupersededStubs(t.Context(), msgs, 0, segmentBoundaries(msgs, segmentTokenThreshold, segmentMaxStepCount))
 		require.False(t, ok)
 		mark := resultOf(t, msgs[2], "tc-view").Superseded
 		require.NotNil(t, mark)
@@ -409,7 +409,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, resultOf(t, stale, "tc-view").Superseded.Applied)
 
-		require.True(t, a.promoteSupersededStubs(ctx, msgs, 0))
+		require.True(t, a.promoteSupersededStubs(ctx, msgs, 0, segmentBoundaries(msgs, segmentTokenThreshold, segmentMaxStepCount)))
 
 		// The stale whole-message write merges stored marks, so the
 		// promoted Applied bit survives the clobber.
@@ -429,7 +429,7 @@ func TestPromoteSupersededStubs(t *testing.T) {
 
 		// Boundary past the flagged result: it lives in notebook
 		// territory now and is never rendered raw anyway.
-		a.promoteSupersededStubs(t.Context(), msgs, 3)
+		a.promoteSupersededStubs(t.Context(), msgs, 3, segmentBoundaries(msgs, segmentTokenThreshold, segmentMaxStepCount))
 
 		mark := resultOf(t, msgs[2], "tc-view").Superseded
 		require.NotNil(t, mark)

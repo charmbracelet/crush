@@ -17,6 +17,7 @@ type Querier interface {
 	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteNotebookEntriesBySession(ctx context.Context, sessionID string) error
+	DeleteProcessedSegmentsBySession(ctx context.Context, sessionID string) error
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
@@ -27,14 +28,18 @@ type Querier interface {
 	GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error)
 	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error)
 	GetLastSession(ctx context.Context) (Session, error)
+	GetMaxNotebookEventNumber(ctx context.Context, arg GetMaxNotebookEventNumberParams) (int64, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetNotebookEntries(ctx context.Context, sessionID string) ([]NotebookEntry, error)
 	GetNotebookEntriesByEventType(ctx context.Context, arg GetNotebookEntriesByEventTypeParams) ([]NotebookEntry, error)
 	GetNotebookEntriesByTurn(ctx context.Context, arg GetNotebookEntriesByTurnParams) ([]NotebookEntry, error)
+	GetNotebookEntriesByTurnSegment(ctx context.Context, arg GetNotebookEntriesByTurnSegmentParams) ([]NotebookEntry, error)
 	GetNotebookEntryCount(ctx context.Context, sessionID string) (int64, error)
 	GetNotebookTagsByEntry(ctx context.Context, entryID string) ([]string, error)
 	GetNotebookTokenCount(ctx context.Context, sessionID string) (int64, error)
+	GetNotebookTurnsWithEntries(ctx context.Context, sessionID string) ([]int64, error)
 	GetOldestNotebookEntries(ctx context.Context, arg GetOldestNotebookEntriesParams) ([]NotebookEntry, error)
+	GetProcessedSegment(ctx context.Context, arg GetProcessedSegmentParams) (ProcessedSegment, error)
 	// One row per tool result that renders as a stub (applied superseded
 	// mark). content_head carries the first 1024 chars so callers can
 	// recompute exact stub text for prefix-bearing stub kinds.
@@ -53,10 +58,14 @@ type Querier interface {
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)
+	ListProcessedSegments(ctx context.Context, sessionID string) ([]ProcessedSegment, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
+	MarkSegmentProcessed(ctx context.Context, arg MarkSegmentProcessedParams) error
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
+	RecordProcessedSegment(ctx context.Context, arg RecordProcessedSegmentParams) error
+	RecordSegmentAttempt(ctx context.Context, arg RecordSegmentAttemptParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	SearchNotebookByTag(ctx context.Context, arg SearchNotebookByTagParams) ([]NotebookEntry, error)
 	SearchNotebookByText(ctx context.Context, arg SearchNotebookByTextParams) ([]NotebookEntry, error)

@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -215,6 +214,21 @@ type sessionAgent struct {
 	// stubStats accumulates per-session stubbing telemetry for
 	// step-composition logging.
 	stubStats *csync.Map[string, stubStats]
+	// segmentTrackers holds per-session intra-turn segment state:
+	// in-flight generation marks and backfill claims, shared across
+	// agent rebuilds so a rebuilt coordinator cannot double-fire.
+	segmentTrackers *csync.Map[string, *segmentTracker]
+	// prefixCache holds the last rendered notebook prefix per
+	// session, reusable while the boundary and its inputs are
+	// unchanged.
+	prefixCache *csync.Map[string, cachedPrefix]
+	// segmentTokenBudget and segmentMaxSteps override the segment
+	// close thresholds; zero uses the package defaults.
+	segmentTokenBudget int
+	segmentMaxSteps    int
+	// syncSegmentGen runs segment entry generation inline instead of
+	// in a goroutine — a deterministic seam for tests.
+	syncSegmentGen bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -298,6 +312,11 @@ type SessionAgentOptions struct {
 	// across agent rebuilds. When nil the agent allocates its own.
 	StubBoundary *csync.Map[string, int]
 	StubStats    *csync.Map[string, stubStats]
+	// SegmentTrackers/PrefixCache let a coordinator share segment
+	// bookkeeping and the rendered-prefix cache across agent
+	// rebuilds. When nil the agent allocates its own.
+	SegmentTrackers *csync.Map[string, *segmentTracker]
+	PrefixCache     *csync.Map[string, cachedPrefix]
 }
 
 func NewSessionAgent(
@@ -332,6 +351,8 @@ func NewSessionAgent(
 		stubSuperseded:       opts.StubSuperseded,
 		stubBoundary:         cmp.Or(opts.StubBoundary, csync.NewMap[string, int]()),
 		stubStats:            cmp.Or(opts.StubStats, csync.NewMap[string, stubStats]()),
+		segmentTrackers:      cmp.Or(opts.SegmentTrackers, csync.NewMap[string, *segmentTracker]()),
+		prefixCache:          cmp.Or(opts.PrefixCache, csync.NewMap[string, cachedPrefix]()),
 	}
 	return a
 }
@@ -785,9 +806,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// we can identify the current turn's messages after the turn
 	// completes. This is used for notebook entry generation.
 	preTurnMsgCount := len(msgs)
-	// Turn number is the number of user messages before this turn
-	// (0-indexed). Each user message starts a new turn.
-	turnNumber := int64(countUserMessages(msgs))
 
 	// Generate title from the first real (non-shell) user prompt.
 	// can take tens of seconds. Blocking Run on it delays the
@@ -869,7 +887,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}()
 
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	history, files := a.preparePrompt(ctx, msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -916,12 +934,40 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// RunComplete) via the recursive run path below.
 			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
 			a.publishCanceledQueueDrops(canceledRunIDs)
+			notebookOn := a.notebookEnabled && a.notebook != nil
+			var folded []message.Message
 			for _, queued := range fold {
 				userMessage, createErr := a.createUserMessage(callContext, queued)
 				if createErr != nil {
 					return callContext, prepared, createErr
 				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				// In notebook mode the per-step rebuild re-renders the
+				// persisted folded message; appending it here would
+				// duplicate it.
+				if !notebookOn {
+					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				} else {
+					folded = append(folded, userMessage)
+				}
+			}
+
+			// Per-step boundary application: Fantasy rebuilds
+			// stepInputMessages every loop, so a prompt rewrite never
+			// persists — the splice must run every step, or the tail
+			// would flip-flop between pruned and verbatim. The fold
+			// block runs first so folded user messages are already
+			// persisted (and form hard segment boundaries) before the
+			// rebuild lists messages.
+			if notebookOn {
+				if rebuilt, ok := a.rebuildStepMessages(callContext, call.SessionID, prepared.Messages, largeModel.CatwalkCfg.SupportsImages); ok {
+					prepared.Messages = rebuilt
+				} else {
+					// Rebuild failed — fall back to Fantasy's list and
+					// append the folded messages it is missing.
+					for _, um := range folded {
+						prepared.Messages = append(prepared.Messages, um.ToAIMessage()...)
+					}
+				}
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
@@ -1314,9 +1360,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// unprocessed turns as raw.
 	if a.notebookEnabled && a.notebook != nil {
 		notebookCtx := context.WithoutCancel(ctx)
-		notebookTurnNumber := turnNumber
 		notebookSessionID := call.SessionID
 		notebookPreTurnCount := preTurnMsgCount
+		// Capture the final assistant message ID now — by the time the
+		// goroutine lists messages a newer run may have appended, and
+		// the tail segment then belongs to that run, not this one.
+		var lastAssistantID string
+		if currentAssistant != nil {
+			lastAssistantID = currentAssistant.ID
+		}
 		go func() {
 			// Re-fetch messages to get the current turn's messages
 			// (user message + assistant response + tool calls/results).
@@ -1332,33 +1384,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if a.stubSuperseded {
 				a.flagPrunableToolResults(notebookCtx, allMsgs)
 			}
-			// Extract only the current turn's messages. Stop at
-			// the next user message to avoid including the next
-			// turn's messages if the user sent a new message before
-			// this goroutine ran.
-			if notebookPreTurnCount >= len(allMsgs) {
-				return
-			}
-			turnMsgs := extractCurrentTurnMessages(allMsgs, notebookPreTurnCount)
-			if len(turnMsgs) == 0 {
-				return
-			}
-			// Skip if no significant events (avoids duplicate
-			// entries for trivial turns).
-			if err := a.notebook.GenerateEntries(notebookCtx, notebookSessionID, notebookTurnNumber, turnMsgs); err != nil {
-				slog.Error("Failed to generate notebook entries", "error", err, "session_id", notebookSessionID)
-			}
-			// Sync to mem0 if enabled. This is best-effort and
-			// runs after entries are stored.
-			if a.notebookSyncMem0 && a.configStore != nil {
-				entries, err := a.notebook.GetByTurn(notebookCtx, notebookSessionID, notebookTurnNumber)
-				if err != nil {
-					slog.Error("Failed to get entries for mem0 sync", "error", err)
-				} else {
-					mem0 := notebook.NewMem0Sync(a.configStore, a.notebookMemoryServer, notebookSessionID)
-					mem0.SyncEntries(notebookCtx, entries)
-				}
-			}
+			// Generate entries for the segments this run produced that
+			// still lack coverage — the open tail plus any mid-run
+			// segments whose generation failed. Coverage is per
+			// segment, so a covered segment is never re-generated.
+			a.generateRunEndSegments(notebookCtx, notebookSessionID, allMsgs, notebookPreTurnCount, lastAssistantID)
 		}()
 	}
 
@@ -1521,7 +1551,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(ctx, msgs, largeModel.CatwalkCfg.SupportsImages)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1697,12 +1727,16 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func (a *sessionAgent) preparePrompt(ctx context.Context, msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
 
-	// When notebook is enabled, split messages into notebook (old
-	// turns) and raw (recent turns within token budget). The notebook
+	// When notebook is enabled, split messages into notebook (closed
+	// segments with committed coverage) and raw (the open segment plus
+	// trailing closed segments within the token budget). The notebook
 	// entries are injected as a system message before the raw history.
+	// detectSegments runs here so the same pass serves the Run-start
+	// build and the per-step rebuild in PrepareStep — one boundary
+	// implementation, two call sites.
 	notebookEnabled := a.notebookEnabled && a.notebook != nil
 	var rawMsgs []message.Message
 	if notebookEnabled {
@@ -1710,57 +1744,35 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 		if budget <= 0 {
 			budget = notebook.DefaultRawTokenBudget
 		}
-		boundary := findTurnBoundaryByTokenBudget(msgs, budget, estimateRawMessageTokens)
-		boundaryTurn := int64(countUserMessages(msgs[:boundary]))
-		// buildNotebookMessage filters entries to only include turns
-		// before boundaryTurn, so there is no overlap between the
-		// notebook system message and the raw window.
-		notebookMsg := a.buildNotebookMessage(msgs[:boundary], msgs[boundary:], boundaryTurn)
-		// Stale-turn fallback: if any turns before the boundary
-		// don't have notebook entries yet (async generation hasn't
-		// finished), extend the raw window to include those
-		// unprocessed turns so their context isn't lost.
-		if notebookMsg.turnsWithEntries != nil && boundary > 0 {
-			staleBoundary := findStaleTurnBoundary(msgs[:boundary], boundaryTurn, notebookMsg.turnsWithEntries)
-			if staleBoundary < boundary {
-				boundary = staleBoundary
-				boundaryTurn = int64(countUserMessages(msgs[:boundary]))
-				notebookMsg = a.buildNotebookMessage(msgs[:boundary], msgs[boundary:], boundaryTurn)
-			}
-		}
-		if notebookMsg.msg != nil {
-			history = append(history, *notebookMsg.msg)
-		}
-		// Auto-injection: when enabled, extract file paths from the
-		// latest user message and inject full notebook entries for
-		// any compressed references. This is best-effort and
-		// disabled by default.
-		if a.notebookAutoInject && len(msgs) > 0 {
-			sessionID := msgs[len(msgs)-1].SessionID
-			if sessionID == "" && len(msgs) > 1 {
-				sessionID = msgs[len(msgs)-2].SessionID
-			}
-			if sessionID != "" {
-				injectMsg := a.maybeAutoInject(msgs, sessionID, boundaryTurn)
-				if injectMsg != nil {
-					history = append(history, *injectMsg)
-				}
-			}
-		}
-		if a.stubSuperseded {
-			// Boundary moves already invalidate the prompt-cache
-			// prefix, so pending superseded flags promote to stubs
-			// only here — never mid-window.
-			sessionID := sessionIDFromMessages(msgs)
+		sessionID := sessionIDFromMessages(msgs)
+		segs, processed := a.detectSegments(ctx, sessionID, msgs)
+		boundary := findSegmentBoundaryByTokenBudget(msgs, budget, segs, processed)
+		bKey := boundarySegmentKey(segs, boundary)
+		history = append(history, a.notebookPrefix(ctx, sessionID, msgs, boundary, bKey, segs)...)
+		if sessionID != "" {
 			if last, ok := a.stubBoundary.Get(sessionID); !ok || last != boundary {
-				promoteCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				persisted := a.promoteSupersededStubs(promoteCtx, msgs, boundary)
-				cancel()
-				// Only record the boundary when persistence succeeded;
-				// otherwise the next render would flip back to verbatim
-				// and promotion would never retry.
-				if persisted && sessionID != "" {
+				moved := ok
+				persisted := true
+				if a.stubSuperseded {
+					// Boundary moves already invalidate the
+					// prompt-cache prefix, so pending superseded
+					// flags promote to stubs only here — never
+					// mid-window.
+					promoteCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					persisted = a.promoteSupersededStubs(promoteCtx, msgs, boundary, segs)
+					cancel()
+				}
+				// Only record the boundary when persistence
+				// succeeded; otherwise the next render would flip
+				// back to verbatim and promotion would never retry.
+				if persisted {
 					a.stubBoundary.Set(sessionID, boundary)
+					if moved {
+						if stats, ok := a.stubStats.Get(sessionID); ok {
+							stats.BoundaryAdvances++
+							a.stubStats.Set(sessionID, stats)
+						}
+					}
 				}
 			}
 		}
@@ -1882,103 +1894,6 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 	return history, files
 }
 
-// notebookMessageResult holds the rendered notebook system message and
-// the set of turn numbers that have notebook entries.
-type notebookMessageResult struct {
-	msg     *fantasy.Message
-	maxTurn int64
-	// turnsWithEntries is the set of turn numbers that have at
-	// least one notebook entry.
-	turnsWithEntries map[int64]bool
-}
-
-// buildNotebookMessage reconstructs the notebook system message from
-// DB state. It queries entries for the session, filters to only
-// include turns before the raw window, and renders them into a single
-// system message. Returns the message and the set of turns that have
-// entries.
-func (a *sessionAgent) buildNotebookMessage(oldMsgs []message.Message, rawMsgs []message.Message, boundaryTurn int64) notebookMessageResult {
-	if a.notebook == nil || len(oldMsgs) == 0 {
-		return notebookMessageResult{}
-	}
-	// Derive the session ID from the messages.
-	sessionID := oldMsgs[0].SessionID
-	if sessionID == "" && len(oldMsgs) > 1 {
-		sessionID = oldMsgs[1].SessionID
-	}
-	if sessionID == "" && len(rawMsgs) > 0 {
-		sessionID = rawMsgs[0].SessionID
-	}
-	if sessionID == "" {
-		return notebookMessageResult{}
-	}
-	// Use a bounded context so we don't block indefinitely during
-	// prompt preparation.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	entries, err := a.notebook.GetEntries(ctx, sessionID)
-	if err != nil {
-		slog.Error("Failed to get notebook entries", "error", err)
-		return notebookMessageResult{}
-	}
-	// Track which turns have entries, regardless of boundary. This set
-	// marks coverage for the stale-turn fallback: a turn counts as
-	// covered when entries exist for it, even if the injection cap
-	// later evicts them — budget-evicted turns are pointed at by the
-	// breadcrumb below rather than extending the raw window.
-	turnsWithEntries := make(map[int64]bool)
-	var filtered []notebook.Entry
-	var maxTurn int64
-	for _, e := range entries {
-		turnsWithEntries[e.TurnNumber] = true
-		if e.TurnNumber < boundaryTurn {
-			filtered = append(filtered, e)
-			if e.TurnNumber > maxTurn {
-				maxTurn = e.TurnNumber
-			}
-		}
-	}
-	if len(filtered) == 0 {
-		return notebookMessageResult{maxTurn: maxTurn, turnsWithEntries: turnsWithEntries}
-	}
-
-	// Relevance-select entries instead of rendering all of them: the
-	// notebook retains the full record, and recall can fetch anything
-	// not injected here.
-	refs := notebookRelevanceRefs(ctx, a.sessions, sessionID, rawMsgs)
-	selected := selectNotebookEntries(filtered, refs, maxTurn)
-	if len(selected) == 0 {
-		return notebookMessageResult{maxTurn: maxTurn, turnsWithEntries: turnsWithEntries}
-	}
-	rendered := notebook.RenderEntries(selected)
-	if rendered == "" {
-		return notebookMessageResult{maxTurn: maxTurn, turnsWithEntries: turnsWithEntries}
-	}
-	// Turns whose every entry was budget-evicted have entries but
-	// nothing rendered. Emit a breadcrumb so the omission isn't
-	// silent — the raw window intentionally does not extend to them:
-	// evicted turns are the oldest, and extending to the oldest could
-	// dwarf the raw token budget.
-	selectedTurns := make(map[int64]bool, len(selected))
-	for _, e := range selected {
-		selectedTurns[e.TurnNumber] = true
-	}
-	var omitted []int64
-	for _, e := range filtered {
-		if !selectedTurns[e.TurnNumber] && !slices.Contains(omitted, e.TurnNumber) {
-			omitted = append(omitted, e.TurnNumber)
-		}
-	}
-	if len(omitted) > 0 {
-		slices.Sort(omitted)
-		rendered += fmt.Sprintf(
-			"\n\n[turns %s have notebook entries not injected here — recallable via recall/notebook_search]",
-			formatTurnRanges(omitted))
-	}
-	msg := fantasy.NewSystemMessage("<notebook>\n" + rendered + "</notebook>")
-	return notebookMessageResult{msg: &msg, maxTurn: maxTurn, turnsWithEntries: turnsWithEntries}
-}
-
 // notebookRelevanceRefs gathers "file:basename" refs from the latest
 // user message in the raw window and from the session's active
 // (pending/in-progress) todos. If the session lookup fails, the user
@@ -2048,7 +1963,7 @@ func extractExplicitFilePaths(msg string) []string {
 // entries are found, it returns a system message with their full
 // text so the model has the original detail without needing to call
 // recall. Returns nil if no entries are found or auto-inject is off.
-func (a *sessionAgent) maybeAutoInject(msgs []message.Message, sessionID string, boundaryTurn int64) *fantasy.Message {
+func (a *sessionAgent) maybeAutoInject(ctx context.Context, msgs []message.Message, sessionID string, bKey segmentKey) *fantasy.Message {
 	if a.notebook == nil || len(msgs) == 0 {
 		return nil
 	}
@@ -2067,14 +1982,12 @@ func (a *sessionAgent) maybeAutoInject(msgs []message.Message, sessionID string,
 	if len(refs) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
 	// Gather all entries matching the refs, deduplicated, then drop
 	// superseded reads — injecting a stale pre-edit snapshot would
 	// reintroduce the phantom-state hazard stubbing exists to remove.
 	// The superseding edit must be in the set for the check to see it,
-	// so compression/turn filters apply only afterwards.
+	// so compression/coverage filters apply only afterwards.
 	seen := make(map[string]bool)
 	var tagged []notebook.Entry
 	for _, tag := range refs {
@@ -2098,15 +2011,17 @@ func (a *sessionAgent) maybeAutoInject(msgs []message.Message, sessionID string,
 	for _, e := range tagged {
 		// Only inject entries that have been compressed (level > 0)
 		// — uncompressed entries are already in the notebook message
-		// at full detail.
-		if e.CompressionLevel == 0 || e.TurnNumber >= boundaryTurn {
+		// at full detail. The coverage compare is segment-keyed so an
+		// entry from the boundary's own segment does not double into
+		// both prefix and raw.
+		if e.CompressionLevel == 0 || e.TurnNumber > bKey.turn || (e.TurnNumber == bKey.turn && e.SegmentNumber >= bKey.segment) {
 			continue
 		}
 		text := e.EntryTextFull
 		if text == "" {
 			text = e.EntryText
 		}
-		sb.WriteString(fmt.Sprintf("## Turn %d.%d — %s\n", e.TurnNumber, e.EventNumber, e.Title))
+		fmt.Fprintf(&sb, "## Turn %d.%d — %s\n", e.TurnNumber, e.EventNumber, e.Title)
 		sb.WriteString(text)
 		if len(e.Tags) > 0 {
 			sb.WriteString("\nTags: ")
@@ -2218,25 +2133,6 @@ func countUserMessages(msgs []message.Message) int {
 		}
 	}
 	return count
-}
-
-// extractCurrentTurnMessages returns the messages belonging to the
-// current turn, starting at startIndex. The turn ends at the next
-// user message (exclusive) or the end of the slice. This prevents
-// the async notebook goroutine from including the next turn's
-// messages if the user sent a new message before the goroutine ran.
-func extractCurrentTurnMessages(msgs []message.Message, startIndex int) []message.Message {
-	if startIndex >= len(msgs) {
-		return nil
-	}
-	end := len(msgs)
-	for i := startIndex + 1; i < len(msgs); i++ {
-		if msgs[i].Role == message.User {
-			end = i
-			break
-		}
-	}
-	return msgs[startIndex:end]
 }
 
 // hasUserTextMessage reports whether any user message in msgs contains

@@ -216,8 +216,10 @@ func TestGenerateEntries_RecordsErrorHeadline(t *testing.T) {
 			message.ToolCall{ID: "tc1", Name: "bash", Input: `{"command":"go build ."}`, Finished: true},
 		}},
 		{Role: message.Tool, Parts: []message.ContentPart{
-			message.ToolResult{ToolCallID: "tc1", Name: "bash",
-				Content: "\nmain.go:12: undefined: foo\nmain.go:13: missing return", IsError: true},
+			message.ToolResult{
+				ToolCallID: "tc1", Name: "bash",
+				Content: "\nmain.go:12: undefined: foo\nmain.go:13: missing return", IsError: true,
+			},
 		}},
 	}
 	require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, 1, msgs))

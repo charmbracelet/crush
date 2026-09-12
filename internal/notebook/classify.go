@@ -311,15 +311,16 @@ func errorHeadline(content string) string {
 // the success flag of the originating event; entries not backed by a
 // tool result are stored as succeeded. headline is the failure digest
 // for failed tool events.
-func (s *service) storeEntry(ctx context.Context, sessionID string, turnNumber, eventNumber int64, entry GeneratedEntry, succeeded bool, headline string) error {
+func storeEntry(ctx context.Context, q *db.Queries, sessionID string, turnNumber, segmentNumber, eventNumber int64, entry GeneratedEntry, succeeded bool, headline string) error {
 	tokenCount := estimateTokens(entry.Text)
 	id := uuid.New().String()
 	now := time.Now().Unix()
 
-	_, err := s.q.CreateNotebookEntry(ctx, db.CreateNotebookEntryParams{
+	_, err := q.CreateNotebookEntry(ctx, db.CreateNotebookEntryParams{
 		ID:               id,
 		SessionID:        sessionID,
 		TurnNumber:       turnNumber,
+		SegmentNumber:    segmentNumber,
 		EventNumber:      eventNumber,
 		EventType:        entry.EventType,
 		Title:            entry.Title,
@@ -336,7 +337,7 @@ func (s *service) storeEntry(ctx context.Context, sessionID string, turnNumber, 
 	}
 
 	for _, tag := range entry.Tags {
-		if err := s.q.CreateNotebookTag(ctx, db.CreateNotebookTagParams{
+		if err := q.CreateNotebookTag(ctx, db.CreateNotebookTagParams{
 			EntryID: id,
 			Tag:     tag,
 		}); err != nil {
@@ -395,7 +396,7 @@ func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNum
 	// Store trivial exploration mini-entry.
 	if len(trivial) > 0 {
 		entry := buildTrivialExplorationEntry(trivial)
-		if err := s.storeEntry(ctx, sessionID, turnNumber, 0, entry, eventsSucceeded(trivial), ""); err != nil {
+		if err := storeEntry(ctx, s.q, sessionID, turnNumber, 0, 0, entry, eventsSucceeded(trivial), ""); err != nil {
 			slog.Error("Failed to store trivial exploration entry", "error", err)
 		}
 	}
@@ -423,7 +424,7 @@ func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNum
 		if i < len(significant) {
 			headline = significant[i].ErrorHeadline
 		}
-		if err := s.storeEntry(ctx, sessionID, turnNumber, int64(i+1), entry, succeeded, headline); err != nil {
+		if err := storeEntry(ctx, s.q, sessionID, turnNumber, 0, int64(i+1), entry, succeeded, headline); err != nil {
 			slog.Error("Failed to store notebook entry", "error", err)
 		}
 	}

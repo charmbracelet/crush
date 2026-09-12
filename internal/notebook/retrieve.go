@@ -78,12 +78,18 @@ func (s *service) GetTokenCount(ctx context.Context, sessionID string) (int64, e
 	return count, nil
 }
 
-// DeleteEntries removes all notebook entries for a session.
+// DeleteEntries removes all notebook entries and segment coverage
+// rows for a session.
 func (s *service) DeleteEntries(ctx context.Context, sessionID string) error {
-	if err := s.q.DeleteNotebookEntriesBySession(ctx, sessionID); err != nil {
-		return fmt.Errorf("failed to delete notebook entries: %w", err)
-	}
-	return nil
+	return s.withTx(ctx, func(q *db.Queries) error {
+		if err := q.DeleteNotebookEntriesBySession(ctx, sessionID); err != nil {
+			return fmt.Errorf("failed to delete notebook entries: %w", err)
+		}
+		if err := q.DeleteProcessedSegmentsBySession(ctx, sessionID); err != nil {
+			return fmt.Errorf("failed to delete processed segments: %w", err)
+		}
+		return nil
+	})
 }
 
 // enrichEntries converts DB rows to Entry structs and loads their tags.
@@ -98,6 +104,7 @@ func (s *service) enrichEntries(ctx context.Context, rows []db.NotebookEntry) ([
 			ID:               row.ID,
 			SessionID:        row.SessionID,
 			TurnNumber:       row.TurnNumber,
+			SegmentNumber:    row.SegmentNumber,
 			EventNumber:      row.EventNumber,
 			EventType:        row.EventType,
 			Title:            row.Title,
@@ -132,6 +139,29 @@ func PinnedFileTags(entries []Entry) map[string]bool {
 	pinned := make(map[string]bool)
 	for _, e := range entries {
 		if e.EventType != EventFileEdit || e.TurnNumber < maxTurn-1 {
+			continue
+		}
+		for _, tag := range e.Tags {
+			if strings.HasPrefix(tag, "file:") {
+				pinned[tag] = true
+			}
+		}
+	}
+	return pinned
+}
+
+// PinnedFileTagsSince is the segment-grained variant of
+// PinnedFileTags: an edit entry pins its file when its (turn, segment)
+// key is at or after (sinceTurn, sinceSegment). Selection uses this so
+// a single long turn does not pin every file it ever edited — only
+// the segments near the tail count as "under active edit".
+func PinnedFileTagsSince(entries []Entry, sinceTurn, sinceSegment int64) map[string]bool {
+	pinned := make(map[string]bool)
+	for _, e := range entries {
+		if e.EventType != EventFileEdit {
+			continue
+		}
+		if e.TurnNumber < sinceTurn || (e.TurnNumber == sinceTurn && e.SegmentNumber < sinceSegment) {
 			continue
 		}
 		for _, tag := range e.Tags {

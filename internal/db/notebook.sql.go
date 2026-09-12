@@ -15,6 +15,7 @@ INSERT INTO notebook_entries (
     id,
     session_id,
     turn_number,
+    segment_number,
     event_number,
     event_type,
     title,
@@ -26,14 +27,15 @@ INSERT INTO notebook_entries (
     error_headline,
     created_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-) RETURNING id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+) RETURNING id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
 `
 
 type CreateNotebookEntryParams struct {
 	ID               string         `json:"id"`
 	SessionID        string         `json:"session_id"`
 	TurnNumber       int64          `json:"turn_number"`
+	SegmentNumber    int64          `json:"segment_number"`
 	EventNumber      int64          `json:"event_number"`
 	EventType        string         `json:"event_type"`
 	Title            string         `json:"title"`
@@ -51,6 +53,7 @@ func (q *Queries) CreateNotebookEntry(ctx context.Context, arg CreateNotebookEnt
 		arg.ID,
 		arg.SessionID,
 		arg.TurnNumber,
+		arg.SegmentNumber,
 		arg.EventNumber,
 		arg.EventType,
 		arg.Title,
@@ -77,6 +80,7 @@ func (q *Queries) CreateNotebookEntry(ctx context.Context, arg CreateNotebookEnt
 		&i.CreatedAt,
 		&i.Succeeded,
 		&i.ErrorHeadline,
+		&i.SegmentNumber,
 	)
 	return i, err
 }
@@ -106,8 +110,36 @@ func (q *Queries) DeleteNotebookEntriesBySession(ctx context.Context, sessionID 
 	return err
 }
 
+const deleteProcessedSegmentsBySession = `-- name: DeleteProcessedSegmentsBySession :exec
+DELETE FROM processed_segments
+WHERE session_id = ?
+`
+
+func (q *Queries) DeleteProcessedSegmentsBySession(ctx context.Context, sessionID string) error {
+	_, err := q.exec(ctx, q.deleteProcessedSegmentsBySessionStmt, deleteProcessedSegmentsBySession, sessionID)
+	return err
+}
+
+const getMaxNotebookEventNumber = `-- name: GetMaxNotebookEventNumber :one
+SELECT CAST(COALESCE(MAX(event_number), -1) AS INTEGER) AS max_event
+FROM notebook_entries
+WHERE session_id = ? AND turn_number = ?
+`
+
+type GetMaxNotebookEventNumberParams struct {
+	SessionID  string `json:"session_id"`
+	TurnNumber int64  `json:"turn_number"`
+}
+
+func (q *Queries) GetMaxNotebookEventNumber(ctx context.Context, arg GetMaxNotebookEventNumberParams) (int64, error) {
+	row := q.queryRow(ctx, q.getMaxNotebookEventNumberStmt, getMaxNotebookEventNumber, arg.SessionID, arg.TurnNumber)
+	var max_event int64
+	err := row.Scan(&max_event)
+	return max_event, err
+}
+
 const getNotebookEntries = `-- name: GetNotebookEntries :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
 FROM notebook_entries
 WHERE session_id = ?
 ORDER BY turn_number ASC, event_number ASC
@@ -136,6 +168,7 @@ func (q *Queries) GetNotebookEntries(ctx context.Context, sessionID string) ([]N
 			&i.CreatedAt,
 			&i.Succeeded,
 			&i.ErrorHeadline,
+			&i.SegmentNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -151,7 +184,7 @@ func (q *Queries) GetNotebookEntries(ctx context.Context, sessionID string) ([]N
 }
 
 const getNotebookEntriesByEventType = `-- name: GetNotebookEntriesByEventType :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
 FROM notebook_entries
 WHERE session_id = ? AND event_type = ?
 ORDER BY turn_number ASC, event_number ASC
@@ -185,6 +218,7 @@ func (q *Queries) GetNotebookEntriesByEventType(ctx context.Context, arg GetNote
 			&i.CreatedAt,
 			&i.Succeeded,
 			&i.ErrorHeadline,
+			&i.SegmentNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -200,7 +234,7 @@ func (q *Queries) GetNotebookEntriesByEventType(ctx context.Context, arg GetNote
 }
 
 const getNotebookEntriesByTurn = `-- name: GetNotebookEntriesByTurn :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
 FROM notebook_entries
 WHERE session_id = ? AND turn_number = ?
 ORDER BY event_number ASC
@@ -234,6 +268,58 @@ func (q *Queries) GetNotebookEntriesByTurn(ctx context.Context, arg GetNotebookE
 			&i.CreatedAt,
 			&i.Succeeded,
 			&i.ErrorHeadline,
+			&i.SegmentNumber,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getNotebookEntriesByTurnSegment = `-- name: GetNotebookEntriesByTurnSegment :many
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
+FROM notebook_entries
+WHERE session_id = ? AND turn_number = ? AND segment_number = ?
+ORDER BY event_number ASC
+`
+
+type GetNotebookEntriesByTurnSegmentParams struct {
+	SessionID     string `json:"session_id"`
+	TurnNumber    int64  `json:"turn_number"`
+	SegmentNumber int64  `json:"segment_number"`
+}
+
+func (q *Queries) GetNotebookEntriesByTurnSegment(ctx context.Context, arg GetNotebookEntriesByTurnSegmentParams) ([]NotebookEntry, error) {
+	rows, err := q.query(ctx, q.getNotebookEntriesByTurnSegmentStmt, getNotebookEntriesByTurnSegment, arg.SessionID, arg.TurnNumber, arg.SegmentNumber)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotebookEntry{}
+	for rows.Next() {
+		var i NotebookEntry
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.TurnNumber,
+			&i.EventNumber,
+			&i.EventType,
+			&i.Title,
+			&i.EntryText,
+			&i.EntryTextFull,
+			&i.TokenCount,
+			&i.CompressionLevel,
+			&i.CreatedAt,
+			&i.Succeeded,
+			&i.ErrorHeadline,
+			&i.SegmentNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -303,8 +389,38 @@ func (q *Queries) GetNotebookTokenCount(ctx context.Context, sessionID string) (
 	return total_tokens, err
 }
 
+const getNotebookTurnsWithEntries = `-- name: GetNotebookTurnsWithEntries :many
+SELECT DISTINCT turn_number
+FROM notebook_entries
+WHERE session_id = ?
+ORDER BY turn_number ASC
+`
+
+func (q *Queries) GetNotebookTurnsWithEntries(ctx context.Context, sessionID string) ([]int64, error) {
+	rows, err := q.query(ctx, q.getNotebookTurnsWithEntriesStmt, getNotebookTurnsWithEntries, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var turn_number int64
+		if err := rows.Scan(&turn_number); err != nil {
+			return nil, err
+		}
+		items = append(items, turn_number)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getOldestNotebookEntries = `-- name: GetOldestNotebookEntries :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
 FROM notebook_entries
 WHERE session_id = ? AND compression_level = ?
 ORDER BY turn_number ASC, event_number ASC
@@ -340,6 +456,7 @@ func (q *Queries) GetOldestNotebookEntries(ctx context.Context, arg GetOldestNot
 			&i.CreatedAt,
 			&i.Succeeded,
 			&i.ErrorHeadline,
+			&i.SegmentNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -354,8 +471,154 @@ func (q *Queries) GetOldestNotebookEntries(ctx context.Context, arg GetOldestNot
 	return items, nil
 }
 
+const getProcessedSegment = `-- name: GetProcessedSegment :one
+SELECT session_id, turn_number, segment_number, start_index, end_index, state, retry_count, last_attempt_at, created_at
+FROM processed_segments
+WHERE session_id = ? AND turn_number = ? AND segment_number = ?
+`
+
+type GetProcessedSegmentParams struct {
+	SessionID     string `json:"session_id"`
+	TurnNumber    int64  `json:"turn_number"`
+	SegmentNumber int64  `json:"segment_number"`
+}
+
+func (q *Queries) GetProcessedSegment(ctx context.Context, arg GetProcessedSegmentParams) (ProcessedSegment, error) {
+	row := q.queryRow(ctx, q.getProcessedSegmentStmt, getProcessedSegment, arg.SessionID, arg.TurnNumber, arg.SegmentNumber)
+	var i ProcessedSegment
+	err := row.Scan(
+		&i.SessionID,
+		&i.TurnNumber,
+		&i.SegmentNumber,
+		&i.StartIndex,
+		&i.EndIndex,
+		&i.State,
+		&i.RetryCount,
+		&i.LastAttemptAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listProcessedSegments = `-- name: ListProcessedSegments :many
+SELECT session_id, turn_number, segment_number, start_index, end_index, state, retry_count, last_attempt_at, created_at
+FROM processed_segments
+WHERE session_id = ?
+ORDER BY turn_number ASC, segment_number ASC
+`
+
+func (q *Queries) ListProcessedSegments(ctx context.Context, sessionID string) ([]ProcessedSegment, error) {
+	rows, err := q.query(ctx, q.listProcessedSegmentsStmt, listProcessedSegments, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProcessedSegment{}
+	for rows.Next() {
+		var i ProcessedSegment
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.TurnNumber,
+			&i.SegmentNumber,
+			&i.StartIndex,
+			&i.EndIndex,
+			&i.State,
+			&i.RetryCount,
+			&i.LastAttemptAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markSegmentProcessed = `-- name: MarkSegmentProcessed :exec
+UPDATE processed_segments
+SET state = 'processed'
+WHERE session_id = ? AND turn_number = ? AND segment_number = ?
+`
+
+type MarkSegmentProcessedParams struct {
+	SessionID     string `json:"session_id"`
+	TurnNumber    int64  `json:"turn_number"`
+	SegmentNumber int64  `json:"segment_number"`
+}
+
+func (q *Queries) MarkSegmentProcessed(ctx context.Context, arg MarkSegmentProcessedParams) error {
+	_, err := q.exec(ctx, q.markSegmentProcessedStmt, markSegmentProcessed, arg.SessionID, arg.TurnNumber, arg.SegmentNumber)
+	return err
+}
+
+const recordProcessedSegment = `-- name: RecordProcessedSegment :exec
+INSERT INTO processed_segments (
+    session_id,
+    turn_number,
+    segment_number,
+    start_index,
+    end_index,
+    state,
+    created_at
+) VALUES (?, ?, ?, ?, ?, 'unprocessed', ?)
+ON CONFLICT(session_id, turn_number, segment_number) DO UPDATE SET
+    start_index = excluded.start_index,
+    end_index = excluded.end_index
+WHERE processed_segments.state = 'unprocessed'
+`
+
+type RecordProcessedSegmentParams struct {
+	SessionID     string `json:"session_id"`
+	TurnNumber    int64  `json:"turn_number"`
+	SegmentNumber int64  `json:"segment_number"`
+	StartIndex    int64  `json:"start_index"`
+	EndIndex      int64  `json:"end_index"`
+	CreatedAt     int64  `json:"created_at"`
+}
+
+func (q *Queries) RecordProcessedSegment(ctx context.Context, arg RecordProcessedSegmentParams) error {
+	_, err := q.exec(ctx, q.recordProcessedSegmentStmt, recordProcessedSegment,
+		arg.SessionID,
+		arg.TurnNumber,
+		arg.SegmentNumber,
+		arg.StartIndex,
+		arg.EndIndex,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const recordSegmentAttempt = `-- name: RecordSegmentAttempt :exec
+UPDATE processed_segments
+SET retry_count = retry_count + 1, last_attempt_at = ?
+WHERE session_id = ? AND turn_number = ? AND segment_number = ?
+`
+
+type RecordSegmentAttemptParams struct {
+	LastAttemptAt sql.NullInt64 `json:"last_attempt_at"`
+	SessionID     string        `json:"session_id"`
+	TurnNumber    int64         `json:"turn_number"`
+	SegmentNumber int64         `json:"segment_number"`
+}
+
+func (q *Queries) RecordSegmentAttempt(ctx context.Context, arg RecordSegmentAttemptParams) error {
+	_, err := q.exec(ctx, q.recordSegmentAttemptStmt, recordSegmentAttempt,
+		arg.LastAttemptAt,
+		arg.SessionID,
+		arg.TurnNumber,
+		arg.SegmentNumber,
+	)
+	return err
+}
+
 const searchNotebookByTag = `-- name: SearchNotebookByTag :many
-SELECT DISTINCT e.id, e.session_id, e.turn_number, e.event_number, e.event_type, e.title, e.entry_text, e.entry_text_full, e.token_count, e.compression_level, e.created_at, e.succeeded, e.error_headline
+SELECT DISTINCT e.id, e.session_id, e.turn_number, e.event_number, e.event_type, e.title, e.entry_text, e.entry_text_full, e.token_count, e.compression_level, e.created_at, e.succeeded, e.error_headline, e.segment_number
 FROM notebook_entries e
 JOIN notebook_tags t ON t.entry_id = e.id
 WHERE e.session_id = ? AND t.tag = ?
@@ -390,6 +653,7 @@ func (q *Queries) SearchNotebookByTag(ctx context.Context, arg SearchNotebookByT
 			&i.CreatedAt,
 			&i.Succeeded,
 			&i.ErrorHeadline,
+			&i.SegmentNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -405,7 +669,7 @@ func (q *Queries) SearchNotebookByTag(ctx context.Context, arg SearchNotebookByT
 }
 
 const searchNotebookByText = `-- name: SearchNotebookByText :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
 FROM notebook_entries
 WHERE session_id = ? AND entry_text LIKE ?2
 ORDER BY turn_number ASC, event_number ASC
@@ -439,6 +703,7 @@ func (q *Queries) SearchNotebookByText(ctx context.Context, arg SearchNotebookBy
 			&i.CreatedAt,
 			&i.Succeeded,
 			&i.ErrorHeadline,
+			&i.SegmentNumber,
 		); err != nil {
 			return nil, err
 		}

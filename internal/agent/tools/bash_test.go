@@ -39,6 +39,9 @@ func (m *mockBashPermissionService) ActiveRequest() (permission.PermissionReques
 
 func (m *mockBashPermissionService) SetSkipRequests(skip bool) {}
 
+func (m *mockBashPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
+
 func (m *mockBashPermissionService) SkipRequests() bool {
 	return false
 }
@@ -113,6 +116,9 @@ func (m *recordingPermissionService) ActiveRequest() (permission.PermissionReque
 }
 
 func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
+
+func (m *recordingPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
+
 
 func (m *recordingPermissionService) SkipRequests() bool {
 	return false

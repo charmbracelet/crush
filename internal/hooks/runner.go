@@ -32,11 +32,19 @@ type compiledHook struct {
 	matcher *regexp.Regexp
 }
 
+// TranscriptProvider returns a reasoning-blind excerpt of the recent
+// session conversation (user messages and tool calls only, assistant
+// prose and tool outputs stripped) for the given session, for hooks that
+// opt in via include_transcript. It may return an empty string when no
+// transcript is available (e.g. sub-agents, which do not fire hooks).
+type TranscriptProvider func(ctx context.Context, sessionID string) string
+
 // Runner executes hook commands and aggregates their results.
 type Runner struct {
-	hooks      []compiledHook
-	cwd        string
-	projectDir string
+	hooks              []compiledHook
+	cwd                string
+	projectDir         string
+	transcriptProvider TranscriptProvider
 }
 
 // NewRunner creates a Runner from the given hook configs. Each hook's
@@ -73,6 +81,15 @@ func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
 	}
 }
 
+// WithTranscriptProvider wires a transcript provider that is consulted
+// when a matched hook opts in via include_transcript. It is safe to call
+// before or after construction; the provider is only invoked for hooks
+// that actually requested transcript context.
+func (r *Runner) WithTranscriptProvider(p TranscriptProvider) *Runner {
+	r.transcriptProvider = p
+	return r
+}
+
 // Hooks returns the hook configs the runner was created with, in config
 // order. Hooks whose matcher failed to compile at construction are
 // omitted. Intended for diagnostics; callers should not rely on ordering
@@ -104,8 +121,9 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 		deduped = append(deduped, h)
 	}
 
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
+	transcript := r.transcriptFor(deduped, ctx, sessionID)
+	envVars := BuildEnvWithTranscript(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON, transcript)
+	payload := BuildPayloadWithTranscript(eventName, sessionID, r.cwd, toolName, toolInputJSON, transcript)
 
 	results := make([]HookResult, len(deduped))
 	var wg sync.WaitGroup
@@ -139,6 +157,27 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 		"decision", agg.Decision.String(),
 	)
 	return agg, nil
+}
+
+// transcriptFor builds the transcript excerpt once for a run, but only
+// when at least one matched hook opted into include_transcript. The
+// provider is consulted at most once per run so concurrent hooks share a
+// single snapshot.
+func (r *Runner) transcriptFor(hooks []config.HookConfig, ctx context.Context, sessionID string) string {
+	if r.transcriptProvider == nil {
+		return ""
+	}
+	want := false
+	for _, h := range hooks {
+		if h.IncludeTranscript {
+			want = true
+			break
+		}
+	}
+	if !want {
+		return ""
+	}
+	return r.transcriptProvider(ctx, sessionID)
 }
 
 // matchingHooks returns hooks whose matcher matches the tool name (or has

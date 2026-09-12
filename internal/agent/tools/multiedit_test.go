@@ -45,6 +45,9 @@ func (m *mockPermissionService) SetAutoMode(enabled bool) {}
 
 func (m *mockPermissionService) AutoMode() bool { return false }
 
+func (m *mockPermissionService) EscalationNote(toolCallID string) string {
+	return ""
+}
 
 func (m *mockPermissionService) SkipRequests() bool {
 	return false

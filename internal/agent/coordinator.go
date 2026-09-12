@@ -819,6 +819,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Sessions:             c.sessions,
 		Messages:             c.messages,
 		Cfg:                  c.cfg,
+		Permissions:          c.permissions,
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,

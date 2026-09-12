@@ -149,6 +149,11 @@ type Service interface {
 	// mode). AutoMode reports the current runtime state.
 	SetAutoMode(enabled bool)
 	AutoMode() bool
+	// EscalationNote returns and clears the note recorded for a tool call
+	// that was escalated to the human and granted, so the tool can tell
+	// the model the action required manual approval. Empty when the grant
+	// was automatic (allowlist, hook, classifier, session permission).
+	EscalationNote(toolCallID string) string
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -175,6 +180,8 @@ type permissionService struct {
 	hooks                 PermissionHooks
 	hooksWG               sync.WaitGroup
 	denialReasons         *csync.Map[string, string]
+	escalatedCalls        *csync.Map[string, bool]
+	escalationNotes       *csync.Map[string, string]
 	autoMode              atomic.Bool
 
 	// used to make sure we only process one request at a time
@@ -214,6 +221,16 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 		Granted:    granted,
 		Denied:     denied,
 	})
+
+	// A grant on a call that was escalated to the human carries a note so
+	// the tool can tell the model the action required manual approval;
+	// automatic grants (allowlist, classifier, session permission) leave
+	// no note. Denials discard the marker.
+	if _, escalated := s.escalatedCalls.Take(permission.ToolCallID); escalated {
+		if granted {
+			s.escalationNotes.Set(permission.ToolCallID, "this action was escalated and approved by the user")
+		}
+	}
 
 	if denied {
 		s.dispatchPermissionDenied(permission)
@@ -369,6 +386,10 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		}
 	}
 
+	// The prompt path is an escalation: mark the call so a grant records a
+	// note the tool can surface to the model.
+	s.escalatedCalls.Set(permission.ToolCallID, true)
+
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission
 	s.activeRequestMu.Unlock()
@@ -414,6 +435,19 @@ func (s *permissionService) DenialReason(toolCallID string) string {
 		return ""
 	}
 	return reason
+}
+
+// EscalationNote returns and clears the note recorded for a tool call
+// that was escalated to the human and granted.
+func (s *permissionService) EscalationNote(toolCallID string) string {
+	if toolCallID == "" {
+		return ""
+	}
+	note, ok := s.escalationNotes.Take(toolCallID)
+	if !ok {
+		return ""
+	}
+	return note
 }
 
 // SetAutoMode sets the runtime auto-mode state and forwards it to any
@@ -484,6 +518,8 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 		denialReasons:       csync.NewMap[string, string](),
+		escalatedCalls:      csync.NewMap[string, bool](),
+		escalationNotes:     csync.NewMap[string, string](),
 	}
 	svc.skip.Store(skip)
 	return svc

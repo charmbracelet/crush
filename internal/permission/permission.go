@@ -49,6 +49,10 @@ type PermissionNotification struct {
 	ToolCallID string `json:"tool_call_id"`
 	Granted    bool   `json:"granted"`
 	Denied     bool   `json:"denied"`
+	// Reason optionally explains a denial (e.g. a PrePermission hook
+	// verdict). Empty when the denial came from the user or from an
+	// automatic path without a reason.
+	Reason string `json:"reason,omitempty"`
 }
 
 type PermissionRequest struct {
@@ -60,6 +64,41 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+}
+
+// HookDecision is the outcome of a permission-hook evaluation.
+type HookDecision int
+
+const (
+	// HookDecisionNone means the hook expressed no opinion; the normal
+	// prompt proceeds.
+	HookDecisionNone HookDecision = iota
+	// HookDecisionAllow means the hook approved the call; the prompt is
+	// skipped and the call is granted.
+	HookDecisionAllow
+	// HookDecisionDeny means the hook blocked the call; the prompt is
+	// skipped and the call is denied with Reason surfacing to the UI.
+	HookDecisionDeny
+)
+
+// PreHookResult is the outcome of a PrePermission hook evaluation.
+type PreHookResult struct {
+	Decision HookDecision
+	Reason   string
+}
+
+// PermissionHooks lets the agent layer run external policy hooks around
+// the permission prompt. Implementations are optional; the service
+// behaves unchanged when none is set.
+//
+// PrePermission runs only when a request is about to prompt the user
+// (after allowlists, session auto-approvals, and prior grants have been
+// exhausted). Returning allow or deny short-circuits the prompt.
+// PermissionDenied is a fire-and-forget notification that a request was
+// denied; it never blocks the denial.
+type PermissionHooks interface {
+	PrePermission(ctx context.Context, req PermissionRequest) PreHookResult
+	PermissionDenied(ctx context.Context, req PermissionRequest)
 }
 
 type Service interface {
@@ -81,6 +120,10 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	// SetPermissionHooks installs optional external policy hooks. It may
+	// be called once at startup; calls after the service is in use should
+	// be avoided.
+	SetPermissionHooks(hooks PermissionHooks)
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -103,6 +146,9 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
+	hooksMu               sync.RWMutex
+	hooks                 PermissionHooks
+	hooksWG               sync.WaitGroup
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -141,6 +187,10 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 		Granted:    granted,
 		Denied:     denied,
 	})
+
+	if denied {
+		s.dispatchPermissionDenied(permission)
+	}
 
 	// respCh is buffered (cap 1) and only ever has at most one sender
 	// per request because Take removes the entry under the map lock,
@@ -258,6 +308,31 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
+	// PrePermission hooks decide only when a prompt would actually
+	// happen: allowlists, hook approvals, session auto-approvals, and
+	// previously granted permissions have all been exhausted at this
+	// point. They run while holding requestMu, so a slow hook delays
+	// other permission requests; hooks that classify should keep a short
+	// timeout (see the docs for the default and how to tune it).
+	if h := s.currentHooks(); h != nil {
+		switch res := h.PrePermission(ctx, permission); res.Decision {
+		case HookDecisionAllow:
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				ToolCallID: opts.ToolCallID,
+				Granted:    true,
+			})
+			return true, nil
+		case HookDecisionDeny:
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				ToolCallID: opts.ToolCallID,
+				Denied:     true,
+				Reason:     res.Reason,
+			})
+			return false, nil
+		}
+	}
+
+
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission
 	s.activeRequestMu.Unlock()
@@ -281,6 +356,44 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Lock()
 	s.autoApproveSessions[sessionID] = true
 	s.autoApproveSessionsMu.Unlock()
+}
+
+// SetPermissionHooks installs the external policy hooks, replacing any
+// previously installed implementation.
+func (s *permissionService) SetPermissionHooks(hooks PermissionHooks) {
+	s.hooksMu.Lock()
+	s.hooks = hooks
+	s.hooksMu.Unlock()
+}
+
+func (s *permissionService) currentHooks() PermissionHooks {
+	s.hooksMu.RLock()
+	h := s.hooks
+	s.hooksMu.RUnlock()
+	return h
+}
+
+// dispatchPermissionDenied fires the PermissionDenied hook asynchronously
+// with a background context so denials are never blocked by hook
+// execution, and so the hook does not inherit a cancelled/timed-out
+// request context. In-flight dispatches are tracked so tests can wait
+// for completion via waitForHookDispatches.
+func (s *permissionService) dispatchPermissionDenied(req PermissionRequest) {
+	h := s.currentHooks()
+	if h == nil {
+		return
+	}
+	s.hooksWG.Add(1)
+	go func() {
+		defer s.hooksWG.Done()
+		h.PermissionDenied(context.Background(), req)
+	}()
+}
+
+// waitForHookDispatches blocks until all in-flight PermissionDenied hook
+// dispatches have completed. Test-only helper.
+func (s *permissionService) waitForHookDispatches() {
+	s.hooksWG.Wait()
 }
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {

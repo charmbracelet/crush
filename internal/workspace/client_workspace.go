@@ -1388,6 +1388,70 @@ func protoToFiles(files []proto.File) []history.File {
 	return out
 }
 
+// ClientSessionStore exposes a server workspace's sessions and messages
+// through the REST client, so CLI subcommands (crush session list/show/
+// last/delete/rename) behave as true thin clients in client/server mode
+// instead of opening the local database.
+type ClientSessionStore struct {
+	client *client.Client
+	wsID   string
+}
+
+// NewClientSessionStore returns a session store bound to a workspace on
+// the given client.
+func NewClientSessionStore(c *client.Client, workspaceID string) *ClientSessionStore {
+	return &ClientSessionStore{client: c, wsID: workspaceID}
+}
+
+// List implements the session listing used by session commands.
+func (s *ClientSessionStore) List(ctx context.Context) ([]session.Session, error) {
+	protoSessions, err := s.client.ListSessions(ctx, s.wsID)
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]session.Session, len(protoSessions))
+	for i, ps := range protoSessions {
+		sessions[i] = protoToSession(ps)
+	}
+	return sessions, nil
+}
+
+// Get returns one session by UUID (hash-prefix resolution happens in
+// the command layer, which needs the full list anyway).
+func (s *ClientSessionStore) Get(ctx context.Context, id string) (session.Session, error) {
+	ps, err := s.client.GetSession(ctx, s.wsID, id)
+	if err != nil {
+		return session.Session{}, err
+	}
+	return protoToSession(*ps), nil
+}
+
+// Delete removes a session on the server.
+func (s *ClientSessionStore) Delete(ctx context.Context, id string) error {
+	return s.client.DeleteSession(ctx, s.wsID, id)
+}
+
+// Rename retitles a session on the server via a get-modify-save round
+// trip; the session endpoints have no dedicated rename route.
+func (s *ClientSessionStore) Rename(ctx context.Context, id string, title string) error {
+	ps, err := s.client.GetSession(ctx, s.wsID, id)
+	if err != nil {
+		return err
+	}
+	ps.Title = title
+	_, err = s.client.SaveSession(ctx, s.wsID, *ps)
+	return err
+}
+
+// ListMessages returns a session's messages from the server.
+func (s *ClientSessionStore) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	msgs, err := s.client.ListMessages(ctx, s.wsID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return protoToMessages(msgs), nil
+}
+
 func sessionToProto(s session.Session) proto.Session {
 	return proto.Session{
 		ID:               s.ID,

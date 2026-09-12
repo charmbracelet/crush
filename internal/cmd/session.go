@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
@@ -99,21 +100,58 @@ func init() {
 }
 
 type sessionServices struct {
-	sessions session.Service
-	messages message.Service
+	sessions sessionStore
+	messages messageStore
 	cfg      *config.ConfigStore
+}
+
+// sessionStore is the subset of session.Service the session commands
+// use. The local sqlite-backed service satisfies it directly; in
+// client/server mode [workspace.ClientSessionStore] satisfies it by
+// proxying to the server, so the commands behave as thin clients.
+type sessionStore interface {
+	List(ctx context.Context) ([]session.Session, error)
+	Get(ctx context.Context, id string) (session.Session, error)
+	Delete(ctx context.Context, id string) error
+	Rename(ctx context.Context, id string, title string) error
+}
+
+// messageStore is the message listing the show/last commands need.
+type messageStore interface {
+	ListMessages(ctx context.Context, sessionID string) ([]message.Message, error)
+}
+
+// localMessages adapts the sqlite-backed message.Service to the
+// ListMessages shape the thin-client store exposes natively.
+type localMessages struct{ svc message.Service }
+
+func (m localMessages) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	return m.svc.List(ctx, sessionID)
 }
 
 func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
-	cwd, err := ResolveCwd(cmd)
-	if err != nil {
-		return nil, nil, nil, err
+	// In client/server mode the sessions live on the server: proxy
+	// every operation instead of opening the local database. The local
+	// config is still initialized for client-side rendering (themes),
+	// but no session data is read from this machine.
+	if useClientServer() {
+		c, ws, cleanup, err := connectToServer(cmd)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		cfg, err := config.Init("", dataDir, false)
+		if err != nil {
+			cleanup()
+			return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
+		}
+		store := workspace.NewClientSessionStore(c, ws.ID)
+		return ctx, &sessionServices{sessions: store, messages: store, cfg: cfg}, cleanup, nil
 	}
 
-	cfg, err := config.Init(cwd, dataDir, false)
+	cfg, err := config.Init("", dataDir, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
@@ -132,7 +170,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	queries := db.New(conn)
 	svc := &sessionServices{
 		sessions: session.NewService(queries, conn),
-		messages: message.NewService(queries),
+		messages: localMessages{svc: message.NewService(queries)},
 		cfg:      cfg,
 	}
 	return ctx, svc, func() { conn.Close() }, nil
@@ -219,7 +257,7 @@ type sessionMutationResult struct {
 
 // resolveSessionID resolves a session ID that can be a UUID, full hash, or hash prefix.
 // Returns an error if the prefix is ambiguous (matches multiple sessions).
-func resolveSessionID(ctx context.Context, svc session.Service, id string) (session.Session, error) {
+func resolveSessionID(ctx context.Context, svc sessionStore, id string) (session.Session, error) {
 	// Try direct UUID lookup first
 	if s, err := svc.Get(ctx, id); err == nil {
 		return s, nil
@@ -278,7 +316,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	msgs, err := svc.messages.List(ctx, sess.ID)
+	msgs, err := svc.messages.ListMessages(ctx, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
@@ -385,7 +423,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 
 	sess := list[0]
 
-	msgs, err := svc.messages.List(ctx, sess.ID)
+	msgs, err := svc.messages.ListMessages(ctx, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
@@ -561,12 +599,12 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 	}
 
 	return &colorprofile.Writer{
-			Forward: pipe,
-			Profile: profile,
-		}, func() {
-			pipe.Close()
-			_ = cmd.Wait()
-		}, true
+		Forward: pipe,
+		Profile: profile,
+	}, func() {
+		pipe.Close()
+		_ = cmd.Wait()
+	}, true
 }
 
 type sessionShowMeta struct {

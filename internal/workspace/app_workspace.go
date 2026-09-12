@@ -115,7 +115,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	var persist shell.PersistFunc
 	if sessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode)
+			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode, w.store.Config().Options.DataDirectory)
 		}
 	}
 

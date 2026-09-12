@@ -252,10 +252,18 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		return proto.ShellCommandResponse{}, err
 	}
 
+	// Oversized output spills into the workspace data directory. Tests
+	// build workspaces without a config store; those fall back to the
+	// system temp directory.
+	var dataDir string
+	if ws.Cfg != nil {
+		dataDir = ws.Cfg.Config().Options.DataDirectory
+	}
+
 	var persist shell.PersistFunc
 	if req.SessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			return shell.PersistOutput(ctx, ws.Messages, req.SessionID, cmd, output, exitCode)
+			return shell.PersistOutput(ctx, ws.Messages, req.SessionID, cmd, output, exitCode, dataDir)
 		}
 	}
 

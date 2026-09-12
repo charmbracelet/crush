@@ -77,7 +77,7 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 // is irrelevant in single-client local mode, but herdr still needs
 // to know which session is live to support agent resume.
 func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
-	w.app.ReportCurrentSession(sessionID)
+	w.app.ReportCurrentSession(ctx, sessionID)
 	return nil
 }
 

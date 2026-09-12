@@ -7,11 +7,13 @@
 //     falling back to OSC 777 (urxvt extension, widely supported). Used for SSH sessions.
 //   - BellBackend: Triggers the terminal bell character (\x07), causing an audible
 //     beep or visual flash. Works in virtually all terminals but provides no message text.
+//   - HerdrBackend: Surfaces toasts in herdr's own UI via its notification.show
+//     socket API. Only useful when Crush runs inside a herdr pane.
 //   - NoopBackend: A no-op backend that silently discards notifications. Used when
 //     notifications are disabled or no suitable backend is available.
 //
 // Backend selection is based on terminal capabilities, environment, and user config:
-//   - Users can explicitly set notifications in crush.json (auto/native/osc/bell/disabled)
+//   - Users can explicitly set notifications in crush.json (auto/native/osc/bell/herdr/disabled)
 //   - Auto mode: SSH sessions use OSC backend (auto-detects OSC 99 vs 777)
 //   - Auto mode: Local sessions use native OS notifications
 //   - If focus events are not supported in local sessions, notifications are disabled (NoopBackend)

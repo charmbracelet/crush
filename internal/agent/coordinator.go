@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/notebook"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	openaioauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
@@ -701,7 +702,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 
 	default:
-		// Known custom providers are openai-compat under the hood.
+		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
+		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
 			// Set "top_k" under "extra_body", as it is not part of the OpenAI protocol
 			// and will be explicitly omitted by Fantasy downstream.
@@ -715,6 +717,11 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				if _, hasTopK := extraBody["top_k"]; !hasTopK {
 					extraBody["top_k"] = *topK
 				}
+			}
+
+			_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+			if !hasReasoningEffort && shouldSetEffort {
+				mergedOptions["reasoning_effort"] = reasoningEffort
 			}
 
 			parsed, err := openaicompat.ParseOptions(mergedOptions)
@@ -1156,7 +1163,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, token *oauth.Token) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
@@ -1164,6 +1171,18 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
+	}
+	if token != nil {
+		// ChatGPT OAuth: requests go through the Codex backend, which
+		// expects account headers and rejects some request fields, so
+		// they pass through the Codex transport.
+		if httpClient == nil {
+			httpClient = &http.Client{}
+		}
+		httpClient.Transport = &openaioauth.Transport{
+			Base:  httpClient.Transport,
+			Token: token,
+		}
 	}
 	opts = append(opts, openai.WithHTTPClient(instrumentedHTTPClient(httpClient)))
 	if len(headers) > 0 {
@@ -1380,7 +1399,18 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers)
+		// A ChatGPT login is the provider's single credential: every
+		// request goes through the Codex backend with the OAuth token.
+		token := providerCfg.OAuthToken
+		if token != nil {
+			baseURL = openaioauth.CodexBaseURL
+			apiKey = token.AccessToken
+			headers["originator"] = "crush"
+			if token.AccountID != "" {
+				headers["chatgpt-account-id"] = token.AccountID
+			}
+		}
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, token)
 	case anthropic.Name:
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 	case openrouter.Name:
@@ -1408,8 +1438,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
 	default:
-		// Known custom providers (litellm, ollama, omlx) are
-		// openai-compat under the hood.
+		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
+		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
 			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
 		}
@@ -1462,6 +1492,12 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
+	// A ChatGPT login without its model catalog — the fetch at login
+	// failed, or the credentials predate it — would leave the models
+	// dialog's ChatGPT section empty. Fill it in lazily; the guard makes
+	// this a no-op once the catalog exists.
+	c.cfg.RefetchOpenAIChatGPTModels(ctx)
+
 	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
 	if !ok {
 		return errCoderAgentNotConfigured

@@ -226,6 +226,28 @@ func (l *List) Overflows(height int) bool {
 	return false
 }
 
+// ItemsVersion folds every item's version into one number. It changes
+// whenever any item in this list mutates in a way that affects its rendered
+// output, since that is exactly the contract [Versioned.Bump] carries.
+//
+// It reads one field per item and renders nothing, so it is cheap enough to
+// call once per frame. Callers that memoize a whole rendered frame fold it
+// into their cache key to pick up item mutations they do not otherwise know
+// about.
+func (l *List) ItemsVersion() uint64 {
+	var v uint64
+	for _, item := range l.items {
+		v = v*31 + item.Version()
+	}
+	return v
+}
+
+// ScrollPosition returns the index of the first visible item and the line
+// offset into it. Unlike Offset it is O(1) and does not render items.
+func (l *List) ScrollPosition() (offsetIdx, offsetLine int) {
+	return l.offsetIdx, l.offsetLine
+}
+
 // Offset returns the current scroll offset in lines from the top.
 func (l *List) Offset() int {
 	offset := 0

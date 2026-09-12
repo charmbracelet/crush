@@ -521,6 +521,13 @@ type Styles struct {
 			Spinner lipgloss.Style // Loading spinner while validating the key
 		}
 
+		// AuthMethod styles the OAuth-vs-API-key choice dialog.
+		AuthMethod struct {
+			Prompt      lipgloss.Style // "How would you like to authenticate?" question line
+			CardBlurred lipgloss.Style // Unselected choice card frame and label
+			CardFocused lipgloss.Style // Selected choice card frame and label
+		}
+
 		OAuth struct {
 			Spinner      lipgloss.Style // Loading spinner
 			Instructions lipgloss.Style // Emphasized instruction text

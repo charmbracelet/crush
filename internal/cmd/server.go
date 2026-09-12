@@ -25,8 +25,9 @@ func init() {
 }
 
 var serverCmd = &cobra.Command{
-	Use:   "server",
-	Short: "Start the Crush server",
+	Aliases: []string{"serve"},
+	Use:     "server",
+	Short:   "Start the Crush server",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		dataDir, err := cmd.Flags().GetString("data-dir")
 		if err != nil {

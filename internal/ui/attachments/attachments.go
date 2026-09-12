@@ -2,10 +2,8 @@ package attachments
 
 import (
 	"fmt"
-	"math"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -144,14 +142,22 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 	var chips []string
 	r.bounds = r.bounds[:0]
 
-	removeStr := r.removeStyle.String()
-	// Only reserve width for the remove button when it will be drawn.
-	removeReserve := ""
-	if showRemove {
-		removeReserve = removeStr
+	// A collapsed pane has room for nothing, not even the hint: lipgloss
+	// ignores MaxWidth at non-positive values, so it would render in full.
+	if width <= 0 {
+		return ""
 	}
-	maxItemWidth := lipgloss.Width(r.imageStyle.String() + r.normalStyle.Render(strings.Repeat("x", maxFilename)) + removeReserve)
-	fits := int(math.Floor(float64(width)/float64(maxItemWidth))) - 1
+
+	removeStr := r.removeStyle.String()
+	// The "N more…" hint is not an attachment, so it drops the chips'
+	// background — but it does take the theme's foreground. Rendering it
+	// with a bare style left it in the terminal's default color, which is
+	// what made it stand out against the chips beside it.
+	hintStyle := r.normalStyle.UnsetBackground()
+	// Reserve the widest the hint can get — every attachment hidden — so
+	// the row stays inside its pane without having to know up front where
+	// truncation will land.
+	hintW := lipgloss.Width(hintStyle.Render(fmt.Sprintf("%d more…", len(attachments))))
 
 	var offset int
 	for i, att := range attachments {
@@ -172,19 +178,38 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 			nameStyle = nameStyle.MarginRight(1)
 		}
 		nameStr := nameStyle.Render(filename)
-
-		chips = append(chips, iconStr, nameStr)
 		chipW := lipgloss.Width(iconStr) + lipgloss.Width(nameStr)
 
+		var tailStr string
 		switch {
 		case deleting:
-			numStr := r.deletingStyle.Render(fmt.Sprintf("%d", i))
-			chips = append(chips, numStr)
-			offset += chipW + lipgloss.Width(numStr)
+			tailStr = r.deletingStyle.Render(fmt.Sprintf("%d", i))
 		case showRemove:
-			chips = append(chips, removeStr)
+			tailStr = removeStr
+		}
+		tailW := lipgloss.Width(tailStr)
+
+		// Stop *before* a chip that doesn't fit, so the count below is what
+		// was actually left out. Room for the hint only has to be reserved
+		// while attachments remain after this one.
+		var reserve int
+		if i < len(attachments)-1 {
+			reserve = hintW
+		}
+		if offset+chipW+tailW+reserve > width {
+			// MaxWidth is a backstop for panes too narrow to hold even the
+			// hint; at any width that fits it, this changes nothing.
+			chips = append(chips, hintStyle.MaxWidth(width).
+				Render(fmt.Sprintf("%d more…", len(attachments)-i)))
+			break
+		}
+
+		chips = append(chips, iconStr, nameStr)
+		if tailStr != "" {
+			chips = append(chips, tailStr)
+		}
+		if showRemove && !deleting {
 			removeStart := offset + chipW
-			removeW := lipgloss.Width(removeStr)
 			// If the button carries a trailing margin it is the gap between
 			// chips, not part of the button, so exclude it from the hit
 			// region. (Currently the button uses padding rather than a
@@ -192,17 +217,10 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 			// changes.)
 			r.bounds = append(r.bounds, chipBounds{
 				startX:    removeStart,
-				removeEnd: removeStart + removeW - r.removeStyle.GetHorizontalMargins(),
+				removeEnd: removeStart + tailW - r.removeStyle.GetHorizontalMargins(),
 			})
-			offset = removeStart + removeW
-		default:
-			offset += chipW
 		}
-
-		if i == fits && len(attachments) > i {
-			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more…", len(attachments)-fits)))
-			break
-		}
+		offset += chipW + tailW
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Left, chips...)

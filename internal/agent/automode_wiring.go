@@ -13,35 +13,48 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
+// classifierModelSelection resolves which model the auto-mode classifier
+// should use, in priority order: the explicit auto_mode.classifier
+// selection, then the small model slot, then the large model slot
+// (matching how the small model slot falls back to the primary model).
+// The second return value reports whether any selection exists.
+func classifierModelSelection(cfg *config.Config) (config.SelectedModel, bool) {
+	if am := cfg.AutoMode; am != nil && am.Classifier != nil &&
+		am.Classifier.Provider != "" && am.Classifier.Model != "" {
+		return config.SelectedModel{
+			Provider: am.Classifier.Provider,
+			Model:    am.Classifier.Model,
+		}, true
+	}
+	if small, ok := cfg.Models[config.SelectedModelTypeSmall]; ok && small.Model != "" {
+		return small, true
+	}
+	if large, ok := cfg.Models[config.SelectedModelTypeLarge]; ok && large.Model != "" {
+		return large, true
+	}
+	return config.SelectedModel{}, false
+}
+
 // automodeModelResolver builds the classifier's language model on demand,
-// re-reading config so reloads apply. It references the provider and
-// model declared in auto_mode.classifier, which must exist in the
-// providers config. The classifier never silently uses the main agent's
-// model: without an explicit classifier selection, auto mode runs in
-// rules-only mode.
+// re-reading config so reloads apply. Model selection falls back from
+// auto_mode.classifier to the small model slot to the large model slot;
+// when none exists, auto mode runs in rules-only mode.
 func (c *coordinator) automodeModelResolver() automode.LanguageModelResolver {
 	return func(ctx context.Context) (fantasy.LanguageModel, error) {
 		cfg := c.cfg.Config()
-		am := cfg.AutoMode
-		if am == nil || am.Classifier == nil {
-			return nil, errors.New("no auto_mode classifier configured")
-		}
-		if am.Classifier.Provider == "" || am.Classifier.Model == "" {
-			return nil, errors.New("auto_mode classifier requires both provider and model")
-		}
-		providerCfg, ok := cfg.Providers.Get(am.Classifier.Provider)
+		selected, ok := classifierModelSelection(cfg)
 		if !ok {
-			return nil, fmt.Errorf("auto_mode classifier provider %q is not configured", am.Classifier.Provider)
+			return nil, errors.New("no auto_mode classifier or agent model configured")
 		}
-		selected := config.SelectedModel{
-			Provider: am.Classifier.Provider,
-			Model:    am.Classifier.Model,
+		providerCfg, ok := cfg.Providers.Get(selected.Provider)
+		if !ok {
+			return nil, fmt.Errorf("auto_mode classifier provider %q is not configured", selected.Provider)
 		}
 		provider, err := c.buildProvider(providerCfg, selected, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build auto_mode classifier provider: %w", err)
 		}
-		model, err := provider.LanguageModel(ctx, am.Classifier.Model)
+		model, err := provider.LanguageModel(ctx, selected.Model)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build auto_mode classifier model: %w", err)
 		}

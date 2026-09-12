@@ -62,6 +62,7 @@ type ToolMessageItem interface {
 	SetMessageID(id string)
 	SetStatus(status ToolStatus)
 	Status() ToolStatus
+	Unresolved() bool
 }
 
 // Compactable is an interface for tool items that can render in a compacted mode.
@@ -448,6 +449,22 @@ func (t *baseToolMessageItem) SetStatus(status ToolStatus) {
 // Status returns the current tool status.
 func (t *baseToolMessageItem) Status() ToolStatus {
 	return t.status
+}
+
+// Unresolved reports whether the tool call never reached a terminal state:
+// no result was recorded, and it was neither canceled nor errored. A process
+// killed mid-call leaves tool calls this way, either with their arguments
+// still half-streamed or fully streamed and waiting on a result that will
+// never arrive.
+func (t *baseToolMessageItem) Unresolved() bool {
+	if t.result != nil {
+		return false
+	}
+	switch t.status {
+	case ToolStatusCanceled, ToolStatusError, ToolStatusSuccess:
+		return false
+	}
+	return true
 }
 
 // computeStatus computes the effective status considering the result.

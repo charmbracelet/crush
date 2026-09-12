@@ -43,6 +43,19 @@ func (q *quotas) recordAllow(sessionID string) {
 	}
 }
 
+// recordGrant resets the consecutive counter for a session after the
+// human approved an escalated request. The total counter is unchanged.
+func (q *quotas) recordGrant(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if s, ok := q.state[sessionID]; ok {
+		s.consecutiveDenials = 0
+	}
+}
+
 // recordDenial increments both counters and returns the updated state.
 func (q *quotas) recordDenial(sessionID string) quotaState {
 	if sessionID == "" {

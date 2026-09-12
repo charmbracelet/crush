@@ -179,6 +179,13 @@ func (a *AutoMode) PrePermission(ctx context.Context, req permission.PermissionR
 // auto mode records denials in PrePermission itself; this is a no-op.
 func (a *AutoMode) PermissionDenied(context.Context, permission.PermissionRequest) {}
 
+// OnAutoModeGrant implements permission.AutoModeGrantObserver: the human
+// approved an escalated request, so the consecutive-denial counter
+// resets (the total counter keeps accumulating toward its cap).
+func (a *AutoMode) OnAutoModeGrant(sessionID string) {
+	a.quotas.recordGrant(sessionID)
+}
+
 func (a *AutoMode) transcript(ctx context.Context, sessionID string) string {
 	if a.opts.Transcript == nil {
 		return ""

@@ -351,6 +351,51 @@ type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
 }
 
+// AutoModeConfig configures Crush's native auto mode: a safety
+// classifier that runs in-process before permission prompts and grants,
+// denies, or defers to the prompt based on static rules and an LLM
+// classifier. All fields are optional; unset fields use the tested
+// defaults.
+type AutoModeConfig struct {
+	Enabled bool `json:"enabled,omitempty" jsonschema:"description=Enable native auto mode. Intended to be set in user-level config only: a repository should not be able to grant itself auto mode,default=false"`
+	// Classifier selects the LLM used for classification, referencing
+	// an existing provider and model in this config (e.g.
+	// local-llama/gemma4-e4b). Without it, auto mode runs rules-only:
+	// static allow/deny, ambiguities escalate to the prompt.
+	Classifier *AutoModeClassifier `json:"classifier,omitempty" jsonschema:"description=Classifier model selection"`
+	// MaxTokens caps the classifier completion length. Reasoning models
+	// need a generous budget. Default 1024.
+	MaxTokens int `json:"max_tokens,omitempty" jsonschema:"description=Max completion tokens for the classifier,default=1024"`
+	// TimeoutSeconds bounds each classification (both LLM stages).
+	// Default 60.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty" jsonschema:"description=Per-evaluation timeout in seconds,default=60"`
+	// FailOpen allows on classifier failure instead of escalating to
+	// the prompt. Default false.
+	FailOpen bool `json:"fail_open,omitempty" jsonschema:"description=Allow on classifier failure instead of escalating,default=false"`
+	// MaxConsecutiveDenials / MaxTotalDenials pause classification when
+	// exceeded, escalating to the prompt. Defaults 3 / 20.
+	MaxConsecutiveDenials int `json:"max_consecutive_denials,omitempty" jsonschema:"description=Consecutive denials before auto mode pauses,default=3"`
+	MaxTotalDenials       int `json:"max_total_denials,omitempty" jsonschema:"description=Total denials before auto mode pauses,default=20"`
+	// Environment is prose describing trusted repos, domains, buckets,
+	// and services, injected into the classifier prompts.
+	Environment []string `json:"environment,omitempty" jsonschema:"description=Prose describing the trusted environment, injected into classifier prompts"`
+	// PromptStage1File / PromptStage2File override the built-in
+	// classifier prompts with template files. Placeholders: {{cwd}},
+	// {{tool}}, {{params}}, {{environment}}, {{transcript}}.
+	PromptStage1File string `json:"prompt_stage1_file,omitempty" jsonschema:"description=Optional stage 1 (fast filter) prompt template file"`
+	PromptStage2File string `json:"prompt_stage2_file,omitempty" jsonschema:"description=Optional stage 2 (chain of thought) prompt template file"`
+	// TranscriptMaxChars caps the reasoning-blind transcript excerpt
+	// passed to the classifier. Default 24000.
+	TranscriptMaxChars int `json:"transcript_max_chars,omitempty" jsonschema:"description=Max characters of transcript passed to the classifier,default=24000"`
+}
+
+// AutoModeClassifier selects the classifier model by referencing a
+// provider and model id already declared in the providers config.
+type AutoModeClassifier struct {
+	Provider string `json:"provider,omitempty" jsonschema:"description=Provider id from the providers config,example=local-llama"`
+	Model    string `json:"model,omitempty" jsonschema:"description=Model id on that provider,example=gemma4-e4b"`
+}
+
 type TrailerStyle string
 
 const (
@@ -774,7 +819,8 @@ type Config struct {
 
 	Options *Options `json:"options,omitempty" jsonschema:"description=General application options"`
 
-	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
+	Permissions *Permissions    `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
+	AutoMode    *AutoModeConfig `json:"auto_mode,omitempty" jsonschema:"description=Native auto mode: an in-process safety classifier that runs before permission prompts"`
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 

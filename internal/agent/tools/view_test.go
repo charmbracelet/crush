@@ -230,6 +230,10 @@ func (m *mockViewPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockViewPermissionService) SetPermissionHooks(hooks permission.PermissionHooks) {}
 
+func (m *mockViewPermissionService) DenialReason(toolCallID string) string {
+	return ""
+}
+
 
 func (m *mockViewPermissionService) SkipRequests() bool {
 	return false

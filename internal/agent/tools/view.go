@@ -150,7 +150,7 @@ func NewViewTool(
 					return fantasy.ToolResponse{}, permReqErr
 				}
 				if !granted {
-					return NewPermissionDeniedResponse(), nil
+					return NewPermissionDeniedResponse(permissions.DenialReason(call.ID)), nil
 				}
 			}
 

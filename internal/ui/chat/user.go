@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
@@ -174,8 +175,8 @@ func (m *UserMessageItem) renderAttachments(width int) string {
 }
 
 // HandleKeyEvent implements KeyEventHandler.
-func (m *UserMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if k := key.String(); k == "c" || k == "y" {
+func (m *UserMessageItem) HandleKeyEvent(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if key.Matches(msg, ItemCopy) {
 		text := m.message.Content().Text
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")
 	}

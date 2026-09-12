@@ -43,9 +43,9 @@ func NewYesNo(sty *styles.Styles, req question.Question) *YesNo {
 		Request:        req,
 		selectedNo:     true, // Default to "No" for safety.
 		keyLeftRight:   key.NewBinding(key.WithKeys("left", "right", "h", "l"), key.WithHelp("←/→", "switch")),
-		keyEnter:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
-		keyYes:         key.NewBinding(key.WithKeys("y", "Y"), key.WithHelp("y", "yes")),
-		keyNo:          key.NewBinding(key.WithKeys("n", "N"), key.WithHelp("n", "no")),
+		keyEnter:       QuestionConfirm,
+		keyYes:         QuestionYes,
+		keyNo:          QuestionNo,
 		keyClose:       CloseKey,
 	}
 }

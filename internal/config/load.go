@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/keybinds"
 	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
@@ -84,6 +85,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	if err := cfg.ValidateHooks(); err != nil {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
+
+	// Normalize keybinds after merge so typos warn once here instead
+	// of silently doing nothing in the UI.
+	cfg.ValidateKeybinds()
 
 	if !isInsideWorktree() {
 		const depth = 2
@@ -1057,7 +1062,11 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return &Config{}, nil
 	}
 
-	data, err := jsons.Merge(configs)
+	// Keybinds ride outside the generic merge: it concatenates arrays,
+	// but an override must replace an action's keys, not extend them.
+	keybinds, stripped := extractKeybinds(configs)
+
+	data, err := jsons.Merge(stripped)
 	if err != nil {
 		return nil, err
 	}
@@ -1065,7 +1074,43 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
+	config.Keybinds = keybinds
 	return &config, nil
+}
+
+// extractKeybinds returns the per-action keybind overrides merged with
+// later configs winning, alongside the input blobs with the keybinds
+// section removed. Keybind values are key lists, and the generic merge
+// concatenates lists where an override must replace: merging here keeps
+// a global binding from leaking into a project override of the same
+// action. Callers pass the stripped blobs to jsons.Merge unchanged.
+func extractKeybinds(configs [][]byte) (map[string][]string, [][]byte) {
+	merged := map[string][]string{}
+	stripped := make([][]byte, len(configs))
+	for i, data := range configs {
+		var section struct {
+			Keybinds map[string][]string `json:"keybinds"`
+		}
+		if json.Unmarshal(data, &section) != nil || len(section.Keybinds) == 0 {
+			stripped[i] = data
+			continue
+		}
+		for action, keys := range section.Keybinds {
+			merged[action] = keys
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(data, &obj); err != nil {
+			stripped[i] = data
+			continue
+		}
+		delete(obj, "keybinds")
+		if replaced, err := json.Marshal(obj); err == nil {
+			stripped[i] = replaced
+		} else {
+			stripped[i] = data
+		}
+	}
+	return merged, stripped
 }
 
 func hasAWSCredentials(env env.Env) bool {
@@ -1419,6 +1464,18 @@ func normalizeHookEvent(name string) string {
 		return "PreToolUse"
 	default:
 		return name
+	}
+}
+
+// ValidateKeybinds drops overrides for unknown actions. Key matching
+// itself is owned by the UI apply step; this only warns up front so
+// typos surface at load time rather than as silent no-ops.
+func (c *Config) ValidateKeybinds() {
+	for action := range c.Keybinds {
+		if !keybinds.Valid(action) {
+			slog.Warn("Unknown keybind action; skipping", "action", action)
+			delete(c.Keybinds, action)
+		}
 	}
 }
 

@@ -140,6 +140,12 @@ func (c *Completions) KeyMap() KeyMap {
 	return c.keyMap
 }
 
+// SetKeyMap replaces the key bindings, e.g. after applying user
+// overrides onto the defaults.
+func (c *Completions) SetKeyMap(km KeyMap) {
+	c.keyMap = km
+}
+
 // Open opens the completions with file items from the filesystem.
 func (c *Completions) Open(depth, limit int) tea.Cmd {
 	return func() tea.Msg {

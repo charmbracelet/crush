@@ -32,9 +32,9 @@ on conflicts) and Crush logs a warning.
 
 A `crushrc` is a plain Bash script executed at load time with the same embedded
 shell the `bash` tool uses. It builds config by calling builtins (`provider`,
-`model`, `mcp`, `lsp`, `hook`, `permissions`, `option`). Statements run top to
-bottom; later statements win, and `remove`/`reset` operate on anything defined
-earlier or pulled in via `source`.
+`model`, `mcp`, `lsp`, `hook`, `keybind`, `permissions`, `option`). Statements
+run top to bottom; later statements win, and `remove`/`reset` operate on
+anything defined earlier or pulled in via `source`.
 
 ```bash
 #!/usr/bin/env bash
@@ -158,6 +158,29 @@ execute (stdin payload, env vars, decisions).
 
 ```bash
 hook add PreToolUse --matcher "^bash$" --command ".crush/hooks/no-haskell.sh" --name no-haskell
+```
+
+### keybinds
+
+```bash
+keybind set <action> <key> [<key> ...]   # replace an action's keys
+keybind unset <action>                   # restore the default keys
+keybind disable <action>                 # unbind the action
+keybind reset                            # clear every keybind in the script
+```
+
+Actions are `<scope>.name` IDs (`global.quit`, `editor.send_message`,
+`chat.copy`, `dialog.select`). Key tokens are `bubbles/key` names verbatim
+(`ctrl+q`, `shift+enter`, `space`); single runes are case-sensitive. Overrides
+apply at startup; the status bar shows a warning if two remapped actions
+share a key in the same scope or an action ID is unknown. Project config
+overrides global per action. The full action table with defaults lives in
+[the config docs](https://github.com/charmbracelet/crush/blob/main/docs/config/README.md#action-reference).
+
+```bash
+keybind set global.quit ctrl+q
+keybind set editor.send_message ctrl+enter
+keybind disable chat.expand
 ```
 
 ### permissions
@@ -329,6 +352,7 @@ user-invocable: true
   "mcp": {},
   "lsp": {},
   "hooks": {},
+  "keybinds": {"global.quit": ["ctrl+q"]},
   "options": {},
   "permissions": {}
 }
@@ -346,6 +370,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `mcp add gh --type http --url U`     | `mcp.gh = {"type":"http","url":"U"}`                   |
 | `lsp add go --command gopls`         | `lsp.go = {"command":"gopls"}`                         |
 | `hook add PreToolUse --command C`    | append to `hooks.PreToolUse[]`                         |
+| `keybind set global.quit ctrl+q`     | `keybinds = {"global.quit": ["ctrl+q"]}`               |
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |

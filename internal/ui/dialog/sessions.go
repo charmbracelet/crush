@@ -137,6 +137,17 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 		key.WithHelp("n", "cancel"),
 	)
 	s.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select":                  &s.keyMap.Select,
+		"next":                    &s.keyMap.Next,
+		"previous":                &s.keyMap.Previous,
+		"sessions.delete":         &s.keyMap.Delete,
+		"sessions.rename":         &s.keyMap.Rename,
+		"sessions.confirm_rename": &s.keyMap.ConfirmRename,
+		"sessions.cancel_rename":  &s.keyMap.CancelRename,
+		"sessions.confirm_delete": &s.keyMap.ConfirmDelete,
+		"sessions.cancel_delete":  &s.keyMap.CancelDelete,
+	})
 
 	return s, nil
 }
@@ -514,26 +525,17 @@ func (s *Session) ShortHelp() []key.Binding {
 			s.keyMap.CancelRename,
 		}
 	default:
-		return []key.Binding{
-			s.keyMap.UpDown,
-			s.keyMap.Rename,
-			s.keyMap.Delete,
-			s.keyMap.Select,
-			s.keyMap.Close,
-		}
+		h := navHelp(s.keyMap.Next, s.keyMap.Previous)
+		h = append(h, s.keyMap.Rename, s.keyMap.Delete, s.keyMap.Select, s.keyMap.Close)
+		return h
 	}
 }
 
 // FullHelp implements [help.KeyMap].
 func (s *Session) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
-	slice := []key.Binding{
-		s.keyMap.UpDown,
-		s.keyMap.Rename,
-		s.keyMap.Delete,
-		s.keyMap.Select,
-		s.keyMap.Close,
-	}
+	slice := navHelp(s.keyMap.Next, s.keyMap.Previous)
+	slice = append(slice, s.keyMap.Rename, s.keyMap.Delete, s.keyMap.Select, s.keyMap.Close)
 
 	switch s.sessionsMode {
 	case sessionsModeDeleting:

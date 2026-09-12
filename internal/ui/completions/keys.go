@@ -54,6 +54,29 @@ func (k KeyMap) KeyBindings() []key.Binding {
 	}
 }
 
+// Apply overlays user overrides onto the key map. Unknown actions are
+// ignored; the defaults stand. An empty key list disables the binding.
+func (k *KeyMap) Apply(overrides map[string][]string) {
+	apply := func(action string, b *key.Binding) {
+		keys, ok := overrides[action]
+		if !ok {
+			return
+		}
+		if len(keys) == 0 {
+			b.SetEnabled(false)
+			return
+		}
+		b.SetKeys(keys...)
+		b.SetHelp(keys[0], b.Help().Desc)
+	}
+	apply("completions.down", &k.Down)
+	apply("completions.up", &k.Up)
+	apply("completions.select", &k.Select)
+	apply("completions.cancel", &k.Cancel)
+	apply("completions.down_insert", &k.DownInsert)
+	apply("completions.up_insert", &k.UpInsert)
+}
+
 // FullHelp returns the full help for the key bindings.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}

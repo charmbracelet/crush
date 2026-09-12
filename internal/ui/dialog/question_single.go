@@ -28,7 +28,7 @@ type SingleChoice struct {
 func NewSingleChoice(sty *styles.Styles, req question.Question) *SingleChoice {
 	return &SingleChoice{
 		choiceList: newChoiceList(sty, req),
-		keyEnter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+		keyEnter:   QuestionSelect,
 	}
 }
 

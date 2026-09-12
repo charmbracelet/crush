@@ -91,6 +91,9 @@ func NewAPIKeyInput(
 		key.WithHelp("enter", "submit"),
 	)
 	m.keyMap.Close = CloseKey
+	applyDialogKeybinds(com, map[string]*key.Binding{
+		"select": &m.keyMap.Submit,
+	})
 
 	return &m, nil
 }

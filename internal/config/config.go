@@ -773,6 +773,8 @@ type Config struct {
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
+	Keybinds map[string][]string `json:"keybinds,omitempty" jsonschema:"description=Per-action key remapping keyed by action ID (e.g. global.quit). Absent means default."`
+
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
@@ -786,15 +788,24 @@ type Config struct {
 // mutator must never write through the live pointer. Instead it clones,
 // mutates the clone, and atomically swaps it in. The clone gives fresh
 // copies of every field a typed mutator touches in place — Models,
-// RecentModels, MCP, and Options (with its nested TUI pointer). Providers
-// is a *csync.Map (internally synchronized) and is shared by reference;
-// the remaining fields are immutable after load from the mutators'
-// standpoint and are likewise shared.
+// RecentModels, MCP, Keybinds, and Options (with its nested TUI
+// pointer). Providers is a *csync.Map (internally synchronized) and is
+// shared by reference; the remaining fields are immutable after load
+// from the mutators' standpoint and are likewise shared.
+//
+// Keybinds needs its inner slices cloned too: maps.Clone alone would
+// share the backing arrays with the live Config.
 func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.Models = maps.Clone(c.Models)
 	nc.RecentModels = maps.Clone(c.RecentModels)
 	nc.MCP = maps.Clone(c.MCP)
+	if c.Keybinds != nil {
+		nc.Keybinds = make(map[string][]string, len(c.Keybinds))
+		for k, v := range c.Keybinds {
+			nc.Keybinds[k] = slices.Clone(v)
+		}
+	}
 	if c.Options != nil {
 		opts := *c.Options
 		if c.Options.TUI != nil {

@@ -3,6 +3,7 @@ package message
 import (
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,6 +21,7 @@ func TestPartsRoundTrip(t *testing.T) {
 		ToolResult{ToolCallID: "c1", Name: "bash", Content: "out", MIMEType: "text/plain", IsError: true},
 		Finish{Reason: FinishReasonEndTurn, Time: 42, Message: "done"},
 		ShellCommand{Command: "ls -la", Output: "total 0", ExitCode: 0},
+		SubAgentReport{Label: "auth-review", Output: "two findings", Failed: true},
 	}
 
 	encoded, err := marshalParts(parts)
@@ -63,4 +65,23 @@ func TestUnmarshalPartsEdgeCases(t *testing.T) {
 		_, err := unmarshalParts([]byte(`{`))
 		require.Error(t, err)
 	})
+}
+
+// TestSubAgentReportToAIMessage pins what the model reads for a report: the
+// part renders into a tagged block, since the message itself carries no text.
+func TestSubAgentReportToAIMessage(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{
+		Role:  User,
+		Parts: []ContentPart{SubAgentReport{Label: "auth-review", Output: "two findings"}},
+	}
+
+	aiMsgs := msg.ToAIMessage()
+	require.Len(t, aiMsgs, 1)
+	require.Len(t, aiMsgs[0].Content, 1)
+
+	text, ok := aiMsgs[0].Content[0].(fantasy.TextPart)
+	require.True(t, ok)
+	require.Equal(t, "<sub-agent-report label=\"auth-review\">\ntwo findings\n</sub-agent-report>", text.Text)
 }

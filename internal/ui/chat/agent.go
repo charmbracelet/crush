@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
@@ -27,6 +28,18 @@ type AgentToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
+
+	// dispatchLabel is set for agent_dispatch calls, which return as soon
+	// as the sub-agent starts. Such an item keeps spinning until the
+	// sub-agent's report arrives and clears it, since the tool result
+	// landing says only that the sub-agent launched, not that it is done.
+	dispatchLabel    string
+	dispatchReported bool
+	dispatchStarted  time.Time
+	// dispatchReportedAt is when the report landed. The sidebar retires a
+	// sub-agent that has been finished a while, so the section does not
+	// grow for the whole session.
+	dispatchReportedAt time.Time
 }
 
 var (
@@ -43,11 +56,80 @@ func NewAgentToolMessageItem(
 ) *AgentToolMessageItem {
 	t := &AgentToolMessageItem{}
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
+	t.parseDispatchLabel(toolCall)
 	// For the agent tool we keep spinning until the tool call is finished.
+	// A dispatched sub-agent runs on past its tool result, so it spins
+	// until its report arrives instead.
 	t.spinningFunc = func(state SpinningState) bool {
+		if t.dispatchLabel != "" {
+			return !t.dispatchReported && !state.IsCanceled()
+		}
 		return !state.HasResult() && !state.IsCanceled()
 	}
 	return t
+}
+
+// parseDispatchLabel reads the sub-agent's label out of an agent_dispatch
+// call. The tool call arrives with its input still streaming, so the label is
+// re-read on every update until it parses rather than once at construction.
+func (a *AgentToolMessageItem) parseDispatchLabel(toolCall message.ToolCall) {
+	if toolCall.Name != agent.AgentDispatchToolName || a.dispatchLabel != "" {
+		return
+	}
+	var params agent.AgentDispatchParams
+	if json.Unmarshal([]byte(toolCall.Input), &params) == nil && params.Label != "" {
+		a.dispatchLabel = params.Label
+		a.dispatchStarted = time.Now()
+	}
+}
+
+// SetToolCall updates the tool call, picking up the dispatch label once the
+// streamed input is complete enough to parse.
+func (a *AgentToolMessageItem) SetToolCall(tc message.ToolCall) {
+	a.baseToolMessageItem.SetToolCall(tc)
+	a.parseDispatchLabel(tc)
+}
+
+// DispatchLabel returns the label of the sub-agent this item dispatched, or
+// the empty string for a synchronous agent call.
+func (a *AgentToolMessageItem) DispatchLabel() string { return a.dispatchLabel }
+
+// MarkDispatchRunning puts the item back into its working state after its
+// sub-agent was reopened with a follow-up.
+func (a *AgentToolMessageItem) MarkDispatchRunning() {
+	if !a.dispatchReported {
+		return
+	}
+	a.dispatchReported = false
+	a.dispatchStarted = time.Now()
+	a.dispatchReportedAt = time.Time{}
+	a.clearCache()
+	a.Bump()
+}
+
+// MarkDispatchReported records that the dispatched sub-agent reported back,
+// which stops the item's spinner.
+func (a *AgentToolMessageItem) MarkDispatchReported() {
+	if a.dispatchReported {
+		return
+	}
+	a.dispatchReported = true
+	a.dispatchReportedAt = time.Now()
+	a.clearCache()
+	a.Bump()
+}
+
+// Unresolved implements [ToolMessageItem].
+//
+// A dispatch call is answered the moment its sub-agent starts, so the tool
+// result landing says only that the sub-agent was launched. What settles the
+// item is the sub-agent's report, and until that arrives the work is still
+// outstanding however complete the tool result looks.
+func (a *AgentToolMessageItem) Unresolved() bool {
+	if a.dispatchLabel != "" {
+		return !a.dispatchReported && a.Status() != ToolStatusCanceled
+	}
+	return a.baseToolMessageItem.Unresolved()
 }
 
 // Advance implements [Animatable].
@@ -60,7 +142,15 @@ func NewAgentToolMessageItem(
 // Without the bump, the list cache would serve the previously rendered
 // frame indefinitely and the spinner would appear frozen.
 func (a *AgentToolMessageItem) Advance() bool {
-	if a.result != nil || a.Status() == ToolStatusCanceled {
+	if a.Status() == ToolStatusCanceled {
+		return false
+	}
+	// A dispatched sub-agent keeps working after its tool result lands, so
+	// its animation runs until the report arrives.
+	if a.dispatchLabel == "" && a.result != nil {
+		return false
+	}
+	if a.dispatchLabel != "" && a.dispatchReported {
 		return false
 	}
 	changed := a.anim.Advance()
@@ -119,6 +209,33 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
+// DispatchStatus reports what a dispatched sub-agent is up to. The second
+// return is false for a synchronous agent call.
+func (a *AgentToolMessageItem) DispatchStatus() (DispatchStatus, bool) {
+	if a.dispatchLabel == "" {
+		return DispatchStatus{}, false
+	}
+	status := DispatchStatus{
+		Label:    a.dispatchLabel,
+		Running:  !a.dispatchReported && a.Status() != ToolStatusCanceled,
+		Started:  a.dispatchStarted,
+		Finished: a.dispatchReportedAt,
+	}
+	if len(a.nestedTools) > 0 {
+		status.Activity = prettifyToolName(a.nestedTools[len(a.nestedTools)-1].ToolCall().Name)
+	}
+	return status, true
+}
+
+// DispatchStatus describes what a dispatched sub-agent is up to.
+type DispatchStatus struct {
+	Label    string
+	Running  bool
+	Activity string // Name of the last tool it called.
+	Started  time.Time
+	Finished time.Time // When its report landed; zero while running.
+}
+
 // AgentToolRenderContext renders agent tool messages.
 type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
@@ -139,7 +256,15 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		prompt = strings.ReplaceAll(prompt, "\n", " ")
 	}
 
-	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
+	// A dispatch is named for the sub-agent it launched, so its header
+	// pairs with the report item that arrives later under the same label.
+	name := "Agent"
+	var headerParams []string
+	if r.agent.dispatchLabel != "" {
+		name = "Sub-agent"
+		headerParams = []string{r.agent.dispatchLabel}
+	}
+	header := toolHeader(sty, opts.Status, name, cappedWidth, opts, headerParams...)
 	if opts.Compact {
 		return header
 	}
@@ -177,14 +302,25 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	var parts []string
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, taskTagWidth-5)).String())
 
-	// Show animation if still running.
-	if !opts.HasResult() && !opts.IsCanceled() {
+	// Show animation if still running. A dispatch has its result the
+	// moment the sub-agent starts, so it animates until the report lands
+	// instead.
+	stillRunning := !opts.HasResult()
+	if r.agent.dispatchLabel != "" {
+		stillRunning = !r.agent.dispatchReported
+	}
+	if stillRunning && !opts.IsCanceled() {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 
 	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
-	// Add body content when completed.
+	// Add body content when completed. A dispatch result only says the
+	// sub-agent started, which is bookkeeping rather than output; its real
+	// output arrives later as its own report item.
+	if r.agent.dispatchLabel != "" {
+		return result
+	}
 	if opts.HasResult() && opts.Result.Content != "" {
 		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal, opts.ExpandedContent)
 		return joinToolParts(result, body)

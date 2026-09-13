@@ -91,6 +91,10 @@ type Chat struct {
 	list     *list.List
 	idInxMap map[string]int // Map of message IDs to their indices in the list
 
+	// externalAnimation is set when something outside the list is animating
+	// and needs the shared clock, such as the header's sub-agent spinner.
+	externalAnimation bool
+
 	// animRunning is true while the shared animation clock has a tick
 	// outstanding. The clock stops itself when no visible item is spinning
 	// and is re-armed by EnsureAnimating once one is. animGen identifies
@@ -541,6 +545,14 @@ func (m *Chat) SetAnimationsAllowed(allowed bool) {
 // every message so any change that puts a spinner on screen (new message,
 // tool update, scroll, session load) starts the clock without per-call-site
 // wiring. It is the only place a tick is armed apart from Tick itself.
+// SetExternalAnimation records whether something outside the transcript is
+// animating, such as the header's sub-agent spinner. The clock is shared, and
+// its gate otherwise only looks at items currently on screen, so an animation
+// living in the chrome would never keep it running.
+func (m *Chat) SetExternalAnimation(animating bool) {
+	m.externalAnimation = animating
+}
+
 func (m *Chat) EnsureAnimating() tea.Cmd {
 	if !m.animAllowed {
 		m.animRunning = false
@@ -549,7 +561,7 @@ func (m *Chat) EnsureAnimating() tea.Cmd {
 	if m.animRunning && m.now().Sub(m.animArmedAt) < animClockLostAfter {
 		return nil
 	}
-	if !m.hasVisibleAnimation() {
+	if !m.hasVisibleAnimation() && !m.externalAnimation {
 		m.animRunning = false
 		return nil
 	}
@@ -939,6 +951,19 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 		return nil
 	}
 	item, ok := m.list.ItemAt(idx).(chat.MessageItem)
+	if !ok {
+		return nil
+	}
+	return item
+}
+
+// MessageItemAt returns the message item at index i, or nil if i is out of
+// range or the item is not a [chat.MessageItem].
+func (m *Chat) MessageItemAt(i int) chat.MessageItem {
+	if i < 0 || i >= m.list.Len() {
+		return nil
+	}
+	item, ok := m.list.ItemAt(i).(chat.MessageItem)
 	if !ok {
 		return nil
 	}

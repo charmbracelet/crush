@@ -99,7 +99,9 @@ func (m *UI) updateSidebarScrollState() {
 	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
 
-	// Build the scrollable content.
+	// Build the scrollable content. The sub-agent section renders empty
+	// until something is dispatched, so it takes no space in a session
+	// that never uses them.
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
@@ -108,6 +110,13 @@ func (m *UI) updateSidebarScrollState() {
 		"",
 		m.modelInfo(contentWidth),
 		"",
+	)
+	if subAgentSection := m.subAgentsInfo(contentWidth, true); subAgentSection != "" {
+		content = lipgloss.JoinVertical(lipgloss.Left, content, subAgentSection, "")
+	}
+	content = lipgloss.JoinVertical(
+		lipgloss.Left,
+		content,
 		filesSection,
 		"",
 		lspSection,

@@ -1,9 +1,12 @@
 package dialog
 
 import (
+	"fmt"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -15,7 +18,10 @@ const QuitID = "quit"
 type Quit struct {
 	com        *common.Common
 	selectedNo bool // true if "No" button is selected
-	keyMap     struct {
+	// runningSubAgents is how many detached sub-agents are still working.
+	// They die with the process, so quitting throws their work away.
+	runningSubAgents int
+	keyMap           struct {
 		LeftRight,
 		EnterSpace,
 		Yes,
@@ -29,10 +35,11 @@ type Quit struct {
 var _ Dialog = (*Quit)(nil)
 
 // NewQuit creates a new quit confirmation dialog.
-func NewQuit(com *common.Common) *Quit {
+func NewQuit(com *common.Common, runningSubAgents int) *Quit {
 	q := &Quit{
-		com:        com,
-		selectedNo: true,
+		com:              com,
+		selectedNo:       true,
+		runningSubAgents: runningSubAgents,
 	}
 	q.keyMap.LeftRight = key.NewBinding(
 		key.WithKeys("left", "right"),
@@ -101,25 +108,37 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		hintLineTwo = "press ctrl+c twice."
 	)
 	var (
-		baseStyle = q.com.Styles.Dialog.Quit.Content
-		hintStyle = q.com.Styles.Dialog.Quit.Hint
+		baseStyle    = q.com.Styles.Dialog.Quit.Content
+		hintStyle    = q.com.Styles.Dialog.Quit.Hint
+		warningStyle = q.com.Styles.Dialog.Quit.Warning
 	)
 	buttonOpts := []common.ButtonOpts{
 		{Text: "Yep!", Selected: !q.selectedNo, Padding: 3},
 		{Text: "Nope", Selected: q.selectedNo, Padding: 3},
 	}
 	buttons := common.ButtonGroup(q.com.Styles, buttonOpts, " ")
-	content := baseStyle.Render(
-		lipgloss.JoinVertical(
-			lipgloss.Center,
-			question,
-			"",
-			buttons,
-			"",
-			hintStyle.Render(hintLineOne),
-			hintStyle.Render(hintLineTwo),
-		),
+
+	// Sub-agents run in this process, so quitting kills them mid-task and
+	// their work is not recoverable.
+	lines := []string{question}
+	if q.runningSubAgents > 0 {
+		noun := "sub-agents are"
+		if q.runningSubAgents == 1 {
+			noun = "sub-agent is"
+		}
+		lines = append(lines, "", warningStyle.Render(fmt.Sprintf(
+			"%d %s still working. Quitting stops them and loses their work.",
+			q.runningSubAgents, noun,
+		)))
+	}
+	lines = append(lines, "", buttons)
+
+	lines = append(lines,
+		"",
+		hintStyle.Render(hintLineOne),
+		hintStyle.Render(hintLineTwo),
 	)
+	content := baseStyle.Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
 
 	frameStyle := q.com.Styles.Dialog.Quit.Frame
 	maxWidth := area.Dx() - frameStyle.GetHorizontalBorderSize()

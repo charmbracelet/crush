@@ -289,6 +289,7 @@ type Styles struct {
 		Name            lipgloss.Style // Resource name (e.g. "gopls")
 		StatusText      lipgloss.Style // Row status description (e.g. "starting...")
 		OfflineIcon     lipgloss.Style // Offline/unstarted/stopped status icon
+		WorkingIcon     lipgloss.Style // In-progress icon style with no preset glyph
 		DisabledIcon    lipgloss.Style // Disabled status icon
 		BusyIcon        lipgloss.Style // Busy/starting status icon
 		ErrorIcon       lipgloss.Style // Error status icon
@@ -337,7 +338,8 @@ type Styles struct {
 		ShellOutput        lipgloss.Style // Plain output text.
 		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
-		SectionHeader      lipgloss.Style
+
+		SectionHeader lipgloss.Style
 
 		// Plan section styles
 		PlanBox lipgloss.Style // Border+padding for the final plan message
@@ -534,6 +536,7 @@ type Styles struct {
 		Quit struct {
 			Content lipgloss.Style // Wrapper for the quit dialog's inner content
 			Hint    lipgloss.Style // Style for quit hint
+			Warning lipgloss.Style // Style for the work-in-progress warning
 			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 

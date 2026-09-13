@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -27,6 +28,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
@@ -430,6 +432,12 @@ type UI struct {
 	lastClickTime time.Time
 	hoverX        int
 	hoverY        int
+
+	// subAgentsRunning is how many sub-agents were still working as of the
+	// last update. Counting them walks the whole transcript, and the header
+	// needs the number on every frame, so it is counted once per update
+	// rather than once per frame.
+	subAgentsRunning int
 
 	// hyperCredits is the remaining Hyper credits as last fetched from
 	// the /v1/credits endpoint. It is nil when no fetch has reported a
@@ -1567,7 +1575,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// scroll, session load); make sure the clock is running. This is the
 	// sole place the clock is armed so a tick never sits inside a caller's
 	// tea.Sequence.
+	// The header spins while sub-agents work, and they work out of sight:
+	// that is the whole reason the header says anything about them. So the
+	// clock cannot be left to the transcript alone, which only arms it for
+	// an item currently on screen. Without this the spinner sat still and
+	// then jumped several frames whenever an unrelated message happened to
+	// force a repaint.
+	m.subAgentsRunning = m.runningSubAgents()
 	if m.state == uiChat {
+		m.chat.SetExternalAnimation(m.subAgentsRunning > 0)
 		if cmd := m.chat.EnsureAnimating(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1589,7 +1605,10 @@ func (m *UI) handleAnimTick(msg animTickMsg) tea.Cmd {
 		return nil
 	}
 	changed, cmd := m.chat.Tick(msg)
-	if !changed {
+	if !changed && m.subAgentsRunning == 0 {
+		// Nothing moved on screen, so the frame can be reused. It cannot be
+		// when the header is spinning: that spinner is outside the list and
+		// reusing the frame would freeze it.
 		m.markScrollOnly()
 		return cmd
 	}
@@ -1633,6 +1652,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// Load nested tool calls for agent/agentic_fetch tools.
 	m.loadNestedToolCalls(items)
 	m.setMessagePlanFlags(items)
+	replayDispatchReports(items, msgPtrs)
 
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
@@ -1656,6 +1676,57 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
+}
+
+// replayDispatchReports settles dispatch items whose sub-agent already
+// reported back.
+//
+// A dispatched sub-agent outlives its own tool result, so the report landing
+// later is the only sign it finished. On a live run that report arrives as
+// an event, but a session read back from storage has to recover it from the
+// transcript: without this every sub-agent that finished long ago would look
+// like it is still working, in the transcript, the sidebar, the header count
+// and the warning shown when quitting.
+func replayDispatchReports(items []chat.MessageItem, msgs []*message.Message) {
+	reported := make(map[string]struct{})
+	for _, msg := range msgs {
+		for _, report := range msg.SubAgentReports() {
+			if report.Label != "" {
+				reported[report.Label] = struct{}{}
+			}
+		}
+	}
+	if len(reported) == 0 {
+		return
+	}
+	forEachToolItem(items, func(item chat.ToolMessageItem) {
+		dispatch, ok := item.(*chat.AgentToolMessageItem)
+		if !ok {
+			return
+		}
+		if _, ok := reported[dispatch.DispatchLabel()]; ok {
+			dispatch.MarkDispatchReported()
+		}
+	})
+}
+
+// forEachToolItem visits every tool item in items, including those nested
+// inside another tool.
+func forEachToolItem(items []chat.MessageItem, visit func(chat.ToolMessageItem)) {
+	for _, item := range items {
+		tool, ok := item.(chat.ToolMessageItem)
+		if !ok {
+			continue
+		}
+		visit(tool)
+		if container, ok := item.(chat.NestedToolContainer); ok {
+			nested := make([]chat.MessageItem, 0, len(container.NestedTools()))
+			for _, n := range container.NestedTools() {
+				nested = append(nested, n)
+			}
+			forEachToolItem(nested, visit)
+		}
+	}
 }
 
 // handleConnectionEvent reports the health of the client-server link and,
@@ -1794,7 +1865,17 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		if hasShellCmd {
 			return nil
 		}
-		m.lastUserMessageTime = msg.CreatedAt
+		// A sub-agent report arrives on a user-role message but is not
+		// the user speaking, so it does not move the last-user mark. It
+		// does end the dispatch item's spinner, since the report landing
+		// is the only signal that the sub-agent finished.
+		if reports := msg.SubAgentReports(); len(reports) > 0 {
+			for _, report := range reports {
+				m.markDispatchReported(report.Label)
+			}
+		} else {
+			m.lastUserMessageTime = msg.CreatedAt
+		}
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		m.chat.AppendMessages(items...)
 		m.chat.ScrollToBottom()
@@ -1821,6 +1902,14 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 			if toolMsgItem, ok := toolItem.(chat.ToolMessageItem); ok {
 				toolMsgItem.SetResult(&tr)
+				// Reopening a finished sub-agent puts it back to work, so
+				// its dispatch item has to start spinning again.
+				if tr.Name == agent.AgentSendToolName && tr.Metadata != "" {
+					var meta agent.AgentSendResponseMetadata
+					if json.Unmarshal([]byte(tr.Metadata), &meta) == nil && meta.Reopened {
+						m.markDispatchRunning(meta.Label)
+					}
+				}
 				if m.chat.Follow() {
 					m.chat.ScrollToBottom()
 				}
@@ -3474,6 +3563,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
+		m.subAgentsRunning,
 	)
 }
 
@@ -5435,7 +5525,7 @@ func (m *UI) openQuitDialog() tea.Cmd {
 		return nil
 	}
 
-	quitDialog := dialog.NewQuit(m.com)
+	quitDialog := dialog.NewQuit(m.com, m.runningSubAgents())
 	m.dialog.OpenDialog(quitDialog)
 	return nil
 }
@@ -6156,6 +6246,11 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	skillsSection := m.skillsInfo(sectionWidth, maxItemsPerSection, false)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
 	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
+	// Sub-agents take the leading column when any exist, since a running
+	// sub-agent is the one thing here that changes while you watch.
+	if subAgentSection := m.subAgentsInfo(sectionWidth, false); subAgentSection != "" {
+		sections = lipgloss.JoinHorizontal(lipgloss.Top, subAgentSection, " ", sections)
+	}
 	uv.NewStyledString(
 		s.CompactDetails.View.
 			Width(area.Dx()).
@@ -6267,4 +6362,33 @@ func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 		Width:        width,
 		Hyper:        hyper,
 	})
+}
+
+// markDispatchRunning puts the dispatch item for this label back into its
+// working state after its sub-agent was reopened with a follow-up.
+func (m *UI) markDispatchRunning(label string) {
+	if label == "" {
+		return
+	}
+	for i := range m.chat.Len() {
+		item, ok := m.chat.MessageItemAt(i).(*chat.AgentToolMessageItem)
+		if ok && item.DispatchLabel() == label {
+			item.MarkDispatchRunning()
+		}
+	}
+	m.chat.SetAnimationsAllowed(true)
+}
+
+// markDispatchReported stops the spinner on the agent_dispatch item that
+// launched the sub-agent with this label.
+func (m *UI) markDispatchReported(label string) {
+	if label == "" {
+		return
+	}
+	for i := range m.chat.Len() {
+		item, ok := m.chat.MessageItemAt(i).(*chat.AgentToolMessageItem)
+		if ok && item.DispatchLabel() == label {
+			item.MarkDispatchReported()
+		}
+	}
 }

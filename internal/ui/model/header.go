@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -73,6 +74,7 @@ func (h *header) drawHeader(
 	width int,
 	lspErrorCount int,
 	hyperCredits *int,
+	runningSubAgents int,
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
@@ -102,6 +104,7 @@ func (h *header) drawHeader(
 		detailsOpen,
 		availDetailWidth,
 		hyperCredits,
+		runningSubAgents,
 	)
 
 	remainingWidth := width -
@@ -134,10 +137,19 @@ func renderHeaderDetails(
 	detailsOpen bool,
 	availWidth int,
 	hyperCredits *int,
+	runningSubAgents int,
 ) string {
 	t := com.Styles
 
 	var parts []string
+
+	// Sub-agents work out of sight in compact mode, so the header carries
+	// a live count of how many are still going.
+	if runningSubAgents > 0 {
+		parts = append(parts, t.Header.Percentage.Render(fmt.Sprintf(
+			"%s %d", subAgentSpinner(time.Now()), runningSubAgents,
+		)))
+	}
 
 	if lspErrorCount > 0 {
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))

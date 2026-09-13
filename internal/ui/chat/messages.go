@@ -435,11 +435,16 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if msg.Content().Hidden {
 			return nil
 		}
-		// Reconstruct shell command items from ShellCommand parts.
+		// Reconstruct shell command and sub-agent report items from their
+		// parts. Both are carried on user-role messages but neither is
+		// something the user typed, so they render as their own items.
 		var items []MessageItem
 		for _, part := range msg.Parts {
-			if sc, ok := part.(message.ShellCommand); ok {
-				items = append(items, NewShellItem(sty, sc.Command, sc.Output, sc.ExitCode))
+			switch p := part.(type) {
+			case message.ShellCommand:
+				items = append(items, NewShellItem(sty, p.Command, p.Output, p.ExitCode))
+			case message.SubAgentReport:
+				items = append(items, NewSubAgentReportItem(sty, p.Label, p.Output, p.Failed))
 			}
 		}
 		if len(items) > 0 {

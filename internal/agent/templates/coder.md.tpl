@@ -303,7 +303,7 @@ After significant changes:
 </testing>
 
 <tool_usage>
-- Default to using tools (ls, grep, view, agent, tests, web_fetch, etc.) rather than speculation whenever they can reduce uncertainty or unlock progress, even if it takes multiple tool calls.
+- Default to using tools (ls, grep, view, sub-agents, tests, web_fetch, etc.) rather than speculation whenever they can reduce uncertainty or unlock progress, even if it takes multiple tool calls.
 - Search before assuming
 - Read files before editing
 - Always use absolute paths for file operations (editing, reading, writing)

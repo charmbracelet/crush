@@ -186,7 +186,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Tools:                fetchTools,
 			})
 
-			return c.runSubAgent(ctx, subAgentParams{
+			return c.runSubAgentMaybeBackground(ctx, tools.AgenticFetchToolName, accessRead, subAgentParams{
 				Agent:          agent,
 				SessionID:      validationResult.SessionID,
 				AgentMessageID: validationResult.AgentMessageID,

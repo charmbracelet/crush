@@ -375,6 +375,25 @@ endings — plus non-`Stop` terminations (`Length`, `Other`,
 `Unknown` — the run didn't cleanly claim done). `result` is nil
 when `Stream` errors; guard before indexing steps.
 
+Second trigger, no check required: the session's todo list is the
+model's own declared scope — a clean stop that leaves items
+`pending`/`in_progress` is a premature-done claim on its own. The
+gate reads `sessions.Get` at run end (the todos tool saves
+synchronously mid-run, so the list is current) and prepends a
+reconcile retry through the same budget/RunID machinery — the
+prompt lists the open items and offers both honest resolutions
+(finish the work, or rewrite the list: mark done, drop abandoned).
+Guard: skip when the `todos` tool isn't in the toolset — a model
+that can't write the list can't reconcile it, and the retry would
+be guaranteed thrash.
+
+Semantic consequence worth stating: todos are session-scoped while
+the gate is per-turn. An item deliberately parked for a later turn
+("phase 2, after user confirms") gets force-reconciled at every
+clean stop — the list can no longer serve as a cross-turn backlog;
+dropping the item is the honest out. That is the intended semantic
+of #29, not an accident of it.
+
 On trigger, the scan sorts this run's write-tool results into three
 states: _failed_ or _pending_ (a check was selected but deferred)
 proceed to the gate; _unverified_ (no check applies — no LSP, no

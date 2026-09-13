@@ -1392,11 +1392,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	// Verification gate: a run ending on a clean stop with failed or
-	// pending checks does not get to report done — the gate resolves the
-	// checks, lands outcomes on stored tool-result metadata (flushed so
-	// the notebook goroutine below observes them), and prepends a
-	// bounded retry ahead of queued prompts. Must run before the
-	// notebook goroutine spawn AND before the queue dequeue.
+	// pending checks — or session todos still open — does not get to
+	// report done — the gate resolves the checks, lands outcomes on
+	// stored tool-result metadata (flushed so the notebook goroutine
+	// below observes them), and prepends a bounded retry ahead of
+	// queued prompts. Must run before the notebook goroutine spawn AND
+	// before the queue dequeue.
 	verifyRetryQueued := a.runVerificationGate(ctx, call, result, currentAssistant)
 
 	// Generate notebook entries asynchronously when notebook is

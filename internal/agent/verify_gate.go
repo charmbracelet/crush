@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -52,11 +54,11 @@ type resolvedCheck struct {
 }
 
 // runVerificationGate implements the end-of-turn verification gate. When
-// the run ended on a clean stop with failed or pending checks, it
-// resolves them, lands the outcomes on the stored tool-result metadata,
-// and — within budget — prepends a retry call carrying the check output.
-// Returns true when a retry was queued so the caller can suppress the
-// finished notification.
+// the run ended on a clean stop with failed or pending checks — or left
+// session todos open — it resolves the checks, lands outcomes on stored
+// tool-result metadata, and — within budget — prepends a retry call
+// carrying the check output and open items. Returns true when a retry
+// was queued so the caller can suppress the finished notification.
 func (a *sessionAgent) runVerificationGate(ctx context.Context, call SessionAgentCall, result *fantasy.AgentResult, currentAssistant *message.Message) bool {
 	if a.configStore == nil || result == nil || len(result.Steps) == 0 {
 		return false
@@ -74,9 +76,6 @@ func (a *sessionAgent) runVerificationGate(ctx context.Context, call SessionAgen
 	}
 
 	failed, pending, observed := scanVerification(result.Steps)
-	if len(failed) == 0 && len(pending) == 0 {
-		return false
-	}
 
 	if len(pending) > 0 {
 		unique := map[string]bool{}
@@ -114,7 +113,12 @@ func (a *sessionAgent) runVerificationGate(ctx context.Context, call SessionAgen
 		}
 	}
 
-	if len(failed) == 0 {
+	// The session's todo list is the model's own declared scope: a
+	// clean stop that leaves items open is the same premature-done
+	// claim a failed check is — reconcile before the turn counts.
+	openTodos := a.incompleteTodos(ctx, call.SessionID)
+
+	if len(failed) == 0 && len(openTodos) == 0 {
 		return false
 	}
 
@@ -123,13 +127,23 @@ func (a *sessionAgent) runVerificationGate(ctx context.Context, call SessionAgen
 		// assistant message — it is the last assistant message of the
 		// run, so the text reaches RunComplete.Text for `crush run`.
 		if currentAssistant != nil {
-			headline := failed[0].check.Detail
-			if headline == "" {
-				headline = firstLine(failed[0].output)
+			var note strings.Builder
+			if len(failed) > 0 {
+				headline := failed[0].check.Detail
+				if headline == "" {
+					headline = firstLine(failed[0].output)
+				}
+				fmt.Fprintf(&note, "%d check(s) still failing after %d attempt(s). Last failure: %s",
+					len(failed), call.VerificationAttempts, headline)
 			}
-			currentAssistant.AppendContent(fmt.Sprintf(
-				"\n\nVerification: %d check(s) still failing after %d attempt(s). Last failure: %s",
-				len(failed), call.VerificationAttempts, headline))
+			if len(openTodos) > 0 {
+				if note.Len() > 0 {
+					note.WriteString(" ")
+				}
+				fmt.Fprintf(&note, "%d todo item(s) still incomplete after %d attempt(s).",
+					len(openTodos), call.VerificationAttempts)
+			}
+			currentAssistant.AppendContent("\n\nVerification: " + note.String())
 			if err := a.messages.Update(ctx, *currentAssistant); err != nil {
 				slog.Error("Failed to record verification exhaustion", "error", err, "session_id", call.SessionID)
 			} else if err := a.messages.FlushAll(ctx); err != nil {
@@ -148,7 +162,7 @@ func (a *sessionAgent) runVerificationGate(ctx context.Context, call SessionAgen
 	// the retry non-foldable and suppresses the premature RunComplete;
 	// Accepted/acceptSeq are cleared so a cancel mark drops it.
 	retry := call
-	retry.Prompt = verificationRetryPrompt(failed)
+	retry.Prompt = gateRetryPrompt(failed, openTodos)
 	retry.VerificationAttempts++
 	retry.Accepted = nil
 	retry.acceptSeq = 0
@@ -512,19 +526,61 @@ func (a *sessionAgent) notifyVerifying(call SessionAgentCall, n int) {
 	})
 }
 
-// verificationRetryPrompt builds the retry prompt from the failed
-// checks' raw output, truncated to the tool-result cap.
-func verificationRetryPrompt(failed []gateCheckOutcome) string {
-	var b strings.Builder
-	b.WriteString("Verification failed. The following check(s) did not pass — fix the underlying issue; do not restate success.\n")
-	for _, f := range failed {
-		fmt.Fprintf(&b, "\n<check name=%q>\n", f.check.Check)
-		out := f.output
-		if out == "" {
-			out = f.check.Detail
+// incompleteTodos returns the session's open todo items — the model's
+// own declared checklist. Returns nil when the toolset is unknown (nil)
+// or lacks the todos tool: a model that cannot write the list cannot
+// reconcile it, and the retry would be a guaranteed thrash.
+func (a *sessionAgent) incompleteTodos(ctx context.Context, sessionID string) []session.Todo {
+	if a.sessions == nil || a.tools == nil {
+		return nil
+	}
+	if !slices.ContainsFunc(a.tools.Copy(), func(t fantasy.AgentTool) bool {
+		return t.Info().Name == tools.TodosToolName
+	}) {
+		return nil
+	}
+	sess, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		slog.Error("Failed to load session todos for verification gate", "error", err, "session_id", sessionID)
+		return nil
+	}
+	var open []session.Todo
+	for _, t := range sess.Todos {
+		if t.Status != session.TodoStatusCompleted {
+			open = append(open, t)
 		}
-		b.WriteString(tools.TruncateOutput(out))
-		b.WriteString("\n</check>\n")
+	}
+	return open
+}
+
+// gateRetryPrompt builds the retry prompt from the failed checks' raw
+// output (truncated to the tool-result cap) plus any todo items left
+// open — both are evidence the turn claimed done prematurely.
+func gateRetryPrompt(failed []gateCheckOutcome, openTodos []session.Todo) string {
+	var b strings.Builder
+	if len(failed) > 0 {
+		b.WriteString("Verification failed. The following check(s) did not pass — fix the underlying issue; do not restate success.\n")
+		for _, f := range failed {
+			fmt.Fprintf(&b, "\n<check name=%q>\n", f.check.Check)
+			out := f.output
+			if out == "" {
+				out = f.check.Detail
+			}
+			b.WriteString(tools.TruncateOutput(out))
+			b.WriteString("\n</check>\n")
+		}
+	}
+	if len(openTodos) > 0 {
+		b.WriteString("\nThe todo list still has incomplete item(s) — a turn is not done while its declared tasks are open:\n")
+		const maxListedTodos = 20
+		for i, t := range openTodos {
+			if i >= maxListedTodos {
+				fmt.Fprintf(&b, "- … and %d more\n", len(openTodos)-maxListedTodos)
+				break
+			}
+			fmt.Fprintf(&b, "- [%s] %s\n", t.Status, t.Content)
+		}
+		b.WriteString("Finish the remaining work, or reconcile the list with the todos tool (mark genuinely done items completed; drop abandoned ones). Do not report the task finished while the list says otherwise.\n")
 	}
 	return b.String()
 }

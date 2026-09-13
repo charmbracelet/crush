@@ -758,6 +758,39 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 	return time.Duration(h.Timeout) * time.Second
 }
 
+// VerifyConfig defines a deterministic check command run by the
+// verification gate before a run may report completion. The command's
+// exit code is the verdict — the model's interpretation of the output is
+// not consulted.
+type VerifyConfig struct {
+	// Friendly display name. Falls back to Command when empty.
+	Name string `json:"name,omitempty" jsonschema:"description=Friendly display name for this check"`
+	// Shell command to execute; its exit code is the verdict. Commands
+	// run without a permission prompt once per gate turn and once per
+	// retry, so they must be idempotent and side-effect-safe.
+	Command string `json:"command" jsonschema:"required,description=Shell command whose exit code is the check verdict"`
+	// Timeout in seconds. Default 120.
+	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the check command,default=120"`
+}
+
+// TimeoutDuration returns the check timeout as a time.Duration,
+// defaulting to 120s.
+func (v *VerifyConfig) TimeoutDuration() time.Duration {
+	if v.Timeout <= 0 {
+		return 120 * time.Second
+	}
+	return time.Duration(v.Timeout) * time.Second
+}
+
+// DisplayName returns the check name for display purposes, falling back
+// to Command.
+func (v *VerifyConfig) DisplayName() string {
+	if v.Name != "" {
+		return v.Name
+	}
+	return v.Command
+}
+
 // Config holds the configuration for crush.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
@@ -782,6 +815,12 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
+
+	// Verify lists deterministic check commands the verification gate
+	// runs before a run may report completion. Commands declared here
+	// are implicitly user-approved: they run without the bash tool's
+	// permission prompt and without its banned-command blocking.
+	Verify []VerifyConfig `json:"verify,omitempty" jsonschema:"description=Deterministic check commands run by the verification gate before completion"`
 
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`

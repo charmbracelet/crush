@@ -117,6 +117,7 @@ func (s *service) enrichEntries(ctx context.Context, rows []db.NotebookEntry) ([
 			Tags:             tags,
 			Succeeded:        row.Succeeded != 0,
 			ErrorHeadline:    row.ErrorHeadline,
+			Verified:         row.Verified,
 		})
 	}
 	return entries, nil

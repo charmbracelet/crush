@@ -715,7 +715,9 @@ func TestCompact_Phase2_TagsOnly(t *testing.T) {
 
 	total, err := svc.GetTokenCount(context.Background(), sessionID)
 	require.NoError(t, err)
-	require.LessOrEqual(t, total, int64(10))
+	// Mutation entries carry the structural "unverified" tag, adding a
+	// token or so per tags-only entry over the pre-verification count.
+	require.LessOrEqual(t, total, int64(20))
 }
 
 func TestCompact_SkipsPinnedEntries(t *testing.T) {

@@ -67,6 +67,11 @@ type Entry struct {
 	// failed tool events. It survives compaction so later turns can
 	// compare repeated failures against it.
 	ErrorHeadline string
+	// Verified records the verification outcome for mutation events:
+	// "verified", "unverified", or "failed". A different axis from
+	// Succeeded — an edit can land cleanly while its check fails.
+	// Empty for non-mutation events.
+	Verified string
 }
 
 // EntryInput is the input for generating a notebook entry from a
@@ -84,6 +89,10 @@ type EntryInput struct {
 	// ErrorHeadline carries a one-line digest of the failure for
 	// entries whose tool result is an error.
 	ErrorHeadline string
+	// Verified is the entry-level verification state aggregated from
+	// the tool result's "verification" metadata — worst wins, pending
+	// counts as unverified. Empty for non-mutation events.
+	Verified string
 }
 
 // Stats accumulates per-session sufficiency telemetry for the

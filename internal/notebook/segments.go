@@ -176,6 +176,7 @@ func (s *service) GenerateSegmentEntries(ctx context.Context, sessionID string, 
 		entry     GeneratedEntry
 		succeeded bool
 		headline  string
+		verified  string
 	}
 	var pending []pendingEntry
 	if len(trivial) > 0 {
@@ -190,16 +191,18 @@ func (s *service) GenerateSegmentEntries(ctx context.Context, sessionID string, 
 			return fmt.Errorf("failed to generate notebook entries: %w", err)
 		}
 		for i, entry := range entries {
-			if estimateTokens(entry.Text) > s.opts.MaxEntryTokens {
-				entry.Text = truncateEntry(entry.Text, s.opts.MaxEntryTokens)
-			}
-			var headline string
+			var headline, verified string
 			succeeded := true
 			if i < len(significant) {
 				succeeded = significant[i].Succeeded
 				headline = significant[i].ErrorHeadline
+				verified = significant[i].Verified
 			}
-			pending = append(pending, pendingEntry{entry: entry, succeeded: succeeded, headline: headline})
+			applyVerificationTag(&entry, verified)
+			if estimateTokens(entry.Text) > s.opts.MaxEntryTokens {
+				entry.Text = truncateEntry(entry.Text, s.opts.MaxEntryTokens)
+			}
+			pending = append(pending, pendingEntry{entry: entry, succeeded: succeeded, headline: headline, verified: verified})
 		}
 	}
 
@@ -240,7 +243,7 @@ func (s *service) GenerateSegmentEntries(ctx context.Context, sessionID string, 
 			return err
 		}
 		for i, p := range pending {
-			if err := storeEntry(ctx, q, sessionID, turnNumber, segmentNumber, maxEvent+1+int64(i), p.entry, p.succeeded, p.headline); err != nil {
+			if err := storeEntry(ctx, q, sessionID, turnNumber, segmentNumber, maxEvent+1+int64(i), p.entry, p.succeeded, p.headline, p.verified); err != nil {
 				return err
 			}
 		}

@@ -35,6 +35,11 @@ const (
 	// compaction stall ended — a round made progress or the
 	// notebook fell under budget. The UI clears the warning.
 	TypeNotebookStallResolved Type = "notebook_stall_resolved"
+	// TypeVerifying indicates the end-of-turn gate is running
+	// verification checks synchronously before the run may complete.
+	// Message carries the human-readable description. The session still
+	// reads busy; this exists so the UI can say why.
+	TypeVerifying Type = "verifying"
 )
 
 // Notification represents a domain event published by the agent.

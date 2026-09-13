@@ -133,6 +133,12 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
+	// VerificationAttempts counts the verification-repair retries this
+	// call has already consumed. The end-of-turn gate builds each retry
+	// as a clone of the caller with this field incremented, so the
+	// budget propagates across the recursive Run boundary where a
+	// Run-local counter would reset.
+	VerificationAttempts int
 }
 
 type SessionAgent interface {
@@ -1385,6 +1391,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
+	// Verification gate: a run ending on a clean stop with failed or
+	// pending checks does not get to report done — the gate resolves the
+	// checks, lands outcomes on stored tool-result metadata (flushed so
+	// the notebook goroutine below observes them), and prepends a
+	// bounded retry ahead of queued prompts. Must run before the
+	// notebook goroutine spawn AND before the queue dequeue.
+	verifyRetryQueued := a.runVerificationGate(ctx, call, result, currentAssistant)
+
 	// Generate notebook entries asynchronously when notebook is
 	// enabled. This runs in the background so the user sees the
 	// response immediately. Entries are ready before the next turn
@@ -1451,8 +1465,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for
-	// nested/non-interactive sessions).
-	if !call.NonInteractive && a.notify != nil {
+	// nested/non-interactive sessions, and when a gate retry is queued —
+	// the session is about to go busy again and the finished→busy flap
+	// would flicker the TUI on every attempt).
+	if !call.NonInteractive && a.notify != nil && !verifyRetryQueued {
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,

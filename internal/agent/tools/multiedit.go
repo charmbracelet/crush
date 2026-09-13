@@ -15,7 +15,6 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -57,7 +56,6 @@ const MultiEditToolName = "multiedit"
 var multieditDescription string
 
 func NewMultiEditTool(
-	lspManager *lsp.Manager,
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
@@ -101,13 +99,7 @@ func NewMultiEditTool(
 				return response, nil
 			}
 
-			// Notify LSP clients about the change
-			notifyLSPs(ctx, lspManager, params.FilePath)
-
-			// Wait for LSP diagnostics and add them to the response
-			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			text += getDiagnostics(params.FilePath, lspManager)
-			response.Content = text
+			response.Content = fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
 			return response, nil
 		},
 	)

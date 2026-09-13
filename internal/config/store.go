@@ -1103,6 +1103,14 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 	}
 }
 
+// NewTestStoreWithDir is NewTestStore with a working directory set, for
+// tests that exercise paths needing a real Cwd (e.g. gate-run checks).
+func NewTestStoreWithDir(cfg *Config, workingDir string, loadedPaths ...string) *ConfigStore {
+	s := NewTestStore(cfg, loadedPaths...)
+	s.workingDir = workingDir
+	return s
+}
+
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
 func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	if s.HasConfigField(ScopeGlobal, "providers.copilot.api_key") || s.HasConfigField(ScopeGlobal, "providers.copilot.oauth") {

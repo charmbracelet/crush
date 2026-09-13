@@ -32,7 +32,7 @@ on conflicts) and Crush logs a warning.
 
 A `crushrc` is a plain Bash script executed at load time with the same embedded
 shell the `bash` tool uses. It builds config by calling builtins (`provider`,
-`model`, `mcp`, `lsp`, `hook`, `permissions`, `option`). Statements run top to
+`model`, `mcp`, `lsp`, `hook`, `permissions`, `option`, `verify`). Statements run top to
 bottom; later statements win, and `remove`/`reset` operate on anything defined
 earlier or pulled in via `source`.
 
@@ -158,6 +158,26 @@ execute (stdin payload, env vars, decisions).
 
 ```bash
 hook add PreToolUse --matcher "^bash$" --command ".crush/hooks/no-haskell.sh" --name no-haskell
+```
+
+### verify
+
+```bash
+verify add --command CMD [--name NAME] [--timeout N]
+verify remove [--name NAME]    # alias: rm; without --name clears every check
+```
+
+Verification commands are deterministic checks the end-of-turn gate runs
+before a run may report completion; the command's exit code is the verdict.
+They gate every file mutation — a dependency or manifest edit breaks builds
+as readily as source does. They run without the bash tool's permission
+prompt and banned-command blocking — declaring one pre-approves it — once
+per gate turn and once per retry, so they must be idempotent and
+side-effect-safe. Only named checks can be removed individually.
+
+```bash
+verify add --command "go test ./..." --name tests --timeout 300
+verify add --command "golangci-lint run" --name lint
 ```
 
 ### permissions

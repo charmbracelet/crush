@@ -26,6 +26,7 @@ func init() {
 	shell.RegisterBuiltin("permissions", handlePermissions)
 	shell.RegisterBuiltin("hook", handleHook)
 	shell.RegisterBuiltin("option", handleOption)
+	shell.RegisterBuiltin("verify", handleVerify)
 }
 
 // usage prints a usage message to stderr and returns an error.

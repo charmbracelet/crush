@@ -128,6 +128,10 @@ func buildGeneratePrompt(events []EntryInput) string {
 			promptSB.WriteString("\nError headline: ")
 			promptSB.WriteString(event.ErrorHeadline)
 		}
+		if event.Verified != "" {
+			promptSB.WriteString("\nVerification: ")
+			promptSB.WriteString(event.Verified)
+		}
 		promptSB.WriteString("\n\n")
 	}
 	return promptSB.String()

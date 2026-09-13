@@ -101,14 +101,23 @@ func logStepComposition(sessionID string, messages []fantasy.Message, agentTools
 }
 
 // isMCPTool reports whether t is an MCP tool, looking through the hook
-// decorator. Origin is decided at call time; do not infer it elsewhere
-// from the flattened tool list without unwrapping first.
+// and verification decorators. Origin is decided at call time; do not
+// infer it elsewhere from the flattened tool list without unwrapping
+// first. verifyingTool only ever wraps built-in write tools, so a
+// decorator stack here never hides an MCP tool — unwrap anyway so the
+// invariant survives a future change in wrap order.
 func isMCPTool(t fantasy.AgentTool) bool {
-	if h, ok := t.(*hookedTool); ok {
-		t = h.Unwrap()
+	for {
+		switch d := t.(type) {
+		case *hookedTool:
+			t = d.Unwrap()
+		case *verifyingTool:
+			t = d.Unwrap()
+		default:
+			_, ok := t.(*tools.Tool)
+			return ok
+		}
 	}
-	_, ok := t.(*tools.Tool)
-	return ok
 }
 
 // toolSchemaBytes returns the serialized schema size of the tool list,

@@ -4907,6 +4907,16 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			}
 		}
 		return nil
+	case notify.TypeVerifying:
+		// Verification checks can run for a while; give the message a
+		// long TTL. It clears on its own or is replaced by the next
+		// status message — the turn-end path does not emit a paired
+		// "resolved" notification.
+		m.status.SetInfoMsg(util.InfoMsg{
+			Type: util.InfoTypeInfo,
+			Msg:  n.Message,
+		})
+		return tea.Batch(clearInfoMsgCmd(2*time.Minute, m.status.MsgSeq()))
 	default:
 		return nil
 	}

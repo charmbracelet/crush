@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/fantasy"
@@ -29,8 +30,8 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		DiagnosticsToolName,
 		diagnosticsDescription,
 		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			notifyLSPs(ctx, lspManager, params.FilePath)
-			output := getDiagnostics(params.FilePath, lspManager)
+			NotifyLSPs(ctx, lspManager, params.FilePath)
+			output := FormatDiagnostics(params.FilePath, lspManager)
 			return fantasy.NewTextResponse(output), nil
 		},
 	)
@@ -61,59 +62,77 @@ func openInLSPs(
 // waitForLSPDiagnostics waits briefly for diagnostics publication after a file
 // has been opened. Intended for read-only situations where viewing up-to-date
 // files matters but latency should remain low (i.e. when using the view tool).
+// It reports whether every handling client settled before its deadline —
+// false means a snapshot read now may be stale.
 func waitForLSPDiagnostics(
 	ctx context.Context,
 	manager *lsp.Manager,
 	filepath string,
 	timeout time.Duration,
-) {
+) bool {
 	if filepath == "" || manager == nil || timeout <= 0 {
-		return
+		return true
 	}
 
 	var wg sync.WaitGroup
+	var settled atomic.Bool
+	settled.Store(true)
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
 		wg.Go(func() {
-			client.WaitForDiagnostics(ctx, timeout)
+			if !client.WaitForDiagnostics(ctx, timeout) {
+				settled.Store(false)
+			}
 		})
 	}
 	wg.Wait()
+	return settled.Load()
 }
 
-// notifyLSPs notifies LSP servers that a file has changed and waits for
+// NotifyLSPs notifies LSP servers that a file has changed and waits for
 // updated diagnostics. Use this after edit/multiedit operations.
 // When filepath is empty, refreshes all open files across all LSP clients
 // and sends a workspace-level change notification for full re-analysis.
-func notifyLSPs(
+//
+// It reports whether the post-change diagnostics settled within the wait:
+// false means at least one handling client timed out or was cancelled, so
+// a snapshot taken now may be stale — a verification caller must treat
+// that as unknown, not clean.
+func NotifyLSPs(
 	ctx context.Context,
 	manager *lsp.Manager,
 	filepath string,
-) {
+) bool {
 	if manager == nil {
-		return
+		return true
 	}
 	if filepath == "" {
 		// No specific file — refresh all open files for all clients.
 		var wg sync.WaitGroup
+		var settled atomic.Bool
+		settled.Store(true)
 		for client := range manager.Clients().Seq() {
 			wg.Go(func() {
 				client.RefreshOpenFiles(ctx)
 				if err := client.NotifyWorkspaceChange(ctx); err != nil {
 					slog.WarnContext(ctx, "Failed to notify workspace change", "error", err)
 				}
-				client.WaitForDiagnostics(ctx, 5*time.Second)
+				if !client.WaitForDiagnostics(ctx, 5*time.Second) {
+					settled.Store(false)
+				}
 			})
 		}
 		wg.Wait()
-		return
+		return settled.Load()
 	}
 
 	manager.Start(ctx, filepath)
 
 	var wg sync.WaitGroup
+	var settled atomic.Bool
+	settled.Store(true)
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
@@ -121,19 +140,24 @@ func notifyLSPs(
 		_ = client.OpenFileOnDemand(ctx, filepath)
 		_ = client.NotifyChange(ctx, filepath)
 		wg.Go(func() {
-			client.WaitForDiagnostics(ctx, 5*time.Second)
+			if !client.WaitForDiagnostics(ctx, 5*time.Second) {
+				settled.Store(false)
+			}
 		})
 	}
 	wg.Wait()
+	return settled.Load()
 }
 
-func getDiagnostics(filePath string, manager *lsp.Manager) string {
+// FormatDiagnostics renders the file and project diagnostics as a
+// formatted, sorted, truncated string for tool-result output.
+func FormatDiagnostics(filePath string, manager *lsp.Manager) string {
 	if manager == nil {
 		return ""
 	}
 
-	var fileDiagnostics []string
-	var projectDiagnostics []string
+	var fileDiags []string
+	var projectDiags []string
 
 	for lspName, client := range manager.Clients().Seq2() {
 		for location, diags := range client.GetDiagnostics() {
@@ -146,26 +170,26 @@ func getDiagnostics(filePath string, manager *lsp.Manager) string {
 			for _, diag := range diags {
 				formattedDiag := formatDiagnostic(path, diag, lspName)
 				if isCurrentFile {
-					fileDiagnostics = append(fileDiagnostics, formattedDiag)
+					fileDiags = append(fileDiags, formattedDiag)
 				} else {
-					projectDiagnostics = append(projectDiagnostics, formattedDiag)
+					projectDiags = append(projectDiags, formattedDiag)
 				}
 			}
 		}
 	}
 
-	sortDiagnostics(fileDiagnostics)
-	sortDiagnostics(projectDiagnostics)
+	sortDiagnostics(fileDiags)
+	sortDiagnostics(projectDiags)
 
 	var output strings.Builder
-	writeDiagnostics(&output, "file_diagnostics", fileDiagnostics)
-	writeDiagnostics(&output, "project_diagnostics", projectDiagnostics)
+	writeDiagnostics(&output, "file_diagnostics", fileDiags)
+	writeDiagnostics(&output, "project_diagnostics", projectDiags)
 
-	if len(fileDiagnostics) > 0 || len(projectDiagnostics) > 0 {
-		fileErrors := countSeverity(fileDiagnostics, "Error")
-		fileWarnings := countSeverity(fileDiagnostics, "Warn")
-		projectErrors := countSeverity(projectDiagnostics, "Error")
-		projectWarnings := countSeverity(projectDiagnostics, "Warn")
+	if len(fileDiags) > 0 || len(projectDiags) > 0 {
+		fileErrors := countSeverity(fileDiags, "Error")
+		fileWarnings := countSeverity(fileDiags, "Warn")
+		projectErrors := countSeverity(projectDiags, "Error")
+		projectWarnings := countSeverity(projectDiags, "Warn")
 		output.WriteString("\n<diagnostic_summary>\n")
 		if filePath != "" {
 			fmt.Fprintf(&output, "Current file: %d errors, %d warnings\n", fileErrors, fileWarnings)
@@ -261,4 +285,74 @@ func countSeverity(diagnostics []string, severity string) int {
 		}
 	}
 	return count
+}
+
+// DiagnosticsSnapshot is a multiset of error-severity diagnostics across
+// all LSP clients, keyed by a stable identity. It is the input for the
+// before/after delta a verifying decorator computes around a mutation.
+type DiagnosticsSnapshot map[string]int
+
+// SnapshotDiagnostics returns the current project-wide error diagnostics
+// as a multiset keyed by "path|message". Position is deliberately
+// excluded: an edit that shifts a pre-existing error's line must not
+// read as a new error — that is the failure mode the baseline delta
+// exists to absorb.
+func SnapshotDiagnostics(manager *lsp.Manager) DiagnosticsSnapshot {
+	snapshot := DiagnosticsSnapshot{}
+	if manager == nil {
+		return snapshot
+	}
+	for client := range manager.Clients().Seq() {
+		for location, diags := range client.GetDiagnostics() {
+			path, err := location.Path()
+			if err != nil {
+				slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
+				continue
+			}
+			for _, diag := range diags {
+				if diag.Severity != protocol.SeverityError {
+					continue
+				}
+				key := fmt.Sprintf("%s|%s", path, diag.Message)
+				snapshot[key]++
+			}
+		}
+	}
+	return snapshot
+}
+
+// NewErrorsSince returns the diagnostic keys present in s beyond the
+// counts recorded in baseline — the multiset difference.
+func (s DiagnosticsSnapshot) NewErrorsSince(baseline DiagnosticsSnapshot) []string {
+	var newErrs []string
+	for key, count := range s {
+		for range count - baseline[key] {
+			newErrs = append(newErrs, key)
+		}
+	}
+	return newErrs
+}
+
+// AnyClientHandles reports whether any running LSP client claims the
+// file. When false, a diagnostics-delta check does not apply.
+func AnyClientHandles(manager *lsp.Manager, filepath string) bool {
+	if manager == nil || filepath == "" {
+		return false
+	}
+	for client := range manager.Clients().Seq() {
+		if client.HandlesFile(filepath) {
+			return true
+		}
+	}
+	return false
+}
+
+// PrepareDiagnosticsBaseline ensures the file is open in its LSP clients
+// and waits briefly for initial diagnostics — the pre-mutation step so a
+// never-opened file does not read an empty baseline. It reports whether
+// the baseline settled: false means a snapshot taken now may be stale or
+// empty, so a delta computed against it is untrustworthy.
+func PrepareDiagnosticsBaseline(ctx context.Context, manager *lsp.Manager, filepath string, timeout time.Duration) bool {
+	openInLSPs(ctx, manager, filepath)
+	return waitForLSPDiagnostics(ctx, manager, filepath, timeout)
 }

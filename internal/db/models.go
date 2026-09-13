@@ -50,6 +50,7 @@ type NotebookEntry struct {
 	Succeeded        int64          `json:"succeeded"`
 	ErrorHeadline    string         `json:"error_headline"`
 	SegmentNumber    int64          `json:"segment_number"`
+	Verified         string         `json:"verified"`
 }
 
 type NotebookTag struct {

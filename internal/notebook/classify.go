@@ -3,14 +3,17 @@ package notebook
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 )
 
 // significantReadThreshold is the minimum output size (in bytes) for a
@@ -62,6 +65,7 @@ func classifyEvents(msgs []message.Message) (significant []EntryInput, trivial [
 				if result != nil && result.IsError {
 					input.ErrorHeadline = errorHeadline(result.Content)
 				}
+				input.Verified = verificationState(tc.Name, result)
 				input.EventType = eventTypeForTool(tc.Name)
 				input.Title = titleForTool(tc)
 				input.Description = describeToolCall(tc, result)
@@ -307,11 +311,88 @@ func errorHeadline(content string) string {
 	return first
 }
 
+// isMutationTool reports whether a tool mutates files — the set the
+// verifyingTool decorator covers and the only events that carry
+// verification state. Keep it in sync with writeToolNames.
+func isMutationTool(name string) bool {
+	switch name {
+	case "edit", "write", "multiedit", "lsp_rename", "lsp_replace_symbol":
+		return true
+	}
+	return false
+}
+
+// Entry-level verification states. The check-level states on tool
+// metadata are passed/failed/pending/unverified; an entry aggregates
+// them into verified/unverified/failed.
+const (
+	entryVerified   = "verified"
+	entryUnverified = "unverified"
+	entryFailed     = "failed"
+)
+
+// verificationState aggregates a tool result's "verification" metadata
+// into an entry-level state: worst wins over the check list (failed >
+// unverified > verified), and pending maps to unverified — a leftover
+// pending means the gate never ran, which is not a pass. Returns ""
+// for non-mutation tools and missing results, and "unverified" for a
+// mutation result carrying no verification data.
+func verificationState(name string, result *message.ToolResult) string {
+	if !isMutationTool(name) || result == nil {
+		return ""
+	}
+	var checks []message.VerificationCheck
+	if raw := gjson.Get(result.Metadata, "verification"); raw.Exists() {
+		_ = json.Unmarshal([]byte(raw.Raw), &checks)
+	}
+	if len(checks) == 0 {
+		return entryUnverified
+	}
+	state := entryVerified
+	for _, c := range checks {
+		switch c.State {
+		case message.VerificationFailed:
+			return entryFailed
+		case message.VerificationPending, message.VerificationUnverified:
+			state = entryUnverified
+		}
+	}
+	return state
+}
+
+// verificationTag maps an entry-level verification state to its
+// structural tag. Empty state means the event is not a mutation — no
+// tag.
+func verificationTag(verified string) string {
+	switch verified {
+	case entryVerified:
+		return "verified"
+	case entryFailed:
+		return "verification-failed"
+	case entryUnverified:
+		return "unverified"
+	}
+	return ""
+}
+
+// applyVerificationTag injects the verification tag structurally —
+// the outcome claim comes from the field, not from generated prose, so
+// a failed-verification entry carries verification-failed regardless
+// of what the generator wrote.
+func applyVerificationTag(entry *GeneratedEntry, verified string) {
+	tag := verificationTag(verified)
+	if tag == "" || slices.Contains(entry.Tags, tag) {
+		return
+	}
+	entry.Tags = append(entry.Tags, tag)
+}
+
 // storeEntry persists a generated entry to the database. succeeded is
 // the success flag of the originating event; entries not backed by a
 // tool result are stored as succeeded. headline is the failure digest
-// for failed tool events.
-func storeEntry(ctx context.Context, q *db.Queries, sessionID string, turnNumber, segmentNumber, eventNumber int64, entry GeneratedEntry, succeeded bool, headline string) error {
+// for failed tool events. verified is the entry-level verification
+// state ("" when the event is not a mutation).
+func storeEntry(ctx context.Context, q *db.Queries, sessionID string, turnNumber, segmentNumber, eventNumber int64, entry GeneratedEntry, succeeded bool, headline string, verified string) error {
 	tokenCount := estimateTokens(entry.Text)
 	id := uuid.New().String()
 	now := time.Now().Unix()
@@ -330,6 +411,7 @@ func storeEntry(ctx context.Context, q *db.Queries, sessionID string, turnNumber
 		CompressionLevel: CompressionFull,
 		Succeeded:        boolToInt64(succeeded),
 		ErrorHeadline:    headline,
+		Verified:         verified,
 		CreatedAt:        now,
 	})
 	if err != nil {
@@ -396,7 +478,7 @@ func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNum
 	// Store trivial exploration mini-entry.
 	if len(trivial) > 0 {
 		entry := buildTrivialExplorationEntry(trivial)
-		if err := storeEntry(ctx, s.q, sessionID, turnNumber, 0, 0, entry, eventsSucceeded(trivial), ""); err != nil {
+		if err := storeEntry(ctx, s.q, sessionID, turnNumber, 0, 0, entry, eventsSucceeded(trivial), "", ""); err != nil {
 			slog.Error("Failed to store trivial exploration entry", "error", err)
 		}
 	}
@@ -412,6 +494,11 @@ func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNum
 	}
 
 	for i, entry := range entries {
+		var verified string
+		if i < len(significant) {
+			verified = significant[i].Verified
+		}
+		applyVerificationTag(&entry, verified)
 		// Enforce max entry token cap via truncation.
 		if estimateTokens(entry.Text) > s.opts.MaxEntryTokens {
 			entry.Text = truncateEntry(entry.Text, s.opts.MaxEntryTokens)
@@ -424,7 +511,7 @@ func (s *service) GenerateEntries(ctx context.Context, sessionID string, turnNum
 		if i < len(significant) {
 			headline = significant[i].ErrorHeadline
 		}
-		if err := storeEntry(ctx, s.q, sessionID, turnNumber, 0, int64(i+1), entry, succeeded, headline); err != nil {
+		if err := storeEntry(ctx, s.q, sessionID, turnNumber, 0, int64(i+1), entry, succeeded, headline, verified); err != nil {
 			slog.Error("Failed to store notebook entry", "error", err)
 		}
 	}

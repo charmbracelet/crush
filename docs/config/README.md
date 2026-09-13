@@ -121,6 +121,7 @@ Available Commands:
   mcp           Manage MCP servers
   lsp           Manage language servers
   hook          Manage hooks
+  verify        Manage verification commands
   permissions   Configure tool permissions
   option        Configure general Crush behavior
 ```
@@ -417,6 +418,62 @@ Flags:
       --name string              remove hooks with this name
 ```
 
+### verify
+
+Manage verification commands — deterministic checks the end-of-turn gate
+runs before a run may report completion. A command's exit code is the
+verdict; the model's summary of the output is not consulted. Declared
+checks gate every file mutation — a dependency or manifest edit breaks
+builds as readily as source does.
+
+```text
+Usage:
+  verify [command]
+
+Available Commands:
+  add       Add a verification command
+  remove    Remove a named check, or clear all checks
+  rm        Alias for remove
+```
+
+Declaring a command pre-approves it: verify commands run without the
+bash tool's permission prompt and without its banned-command blocking.
+A command runs once per gate turn and once per retry, so it must be
+idempotent and side-effect-safe — prefer checks that only read, like
+builds, tests, and lints.
+
+#### `verify add`
+
+Add a check command to the verify list.
+
+```text
+Usage:
+  verify add --command <command> [flags]
+
+Flags:
+      --command string           shell command to run (required)
+      --name string              name used for display and removal
+      --timeout int              timeout in seconds (default 120)
+```
+
+```bash
+verify add --command "go test ./..." --name tests --timeout 300
+verify add --command "golangci-lint run" --name lint
+```
+
+#### `verify remove`
+
+Remove checks from the verify list. Without `--name`, remove every check.
+
+```text
+Usage:
+  verify remove [--name <name>]
+  verify rm [--name <name>]
+
+Flags:
+      --name string              remove checks with this name
+```
+
 ### permissions
 
 Configure tool permissions. `allow` skips approval prompts; `deny` hides tools
@@ -565,7 +622,7 @@ option ui completions-max-items 200
 > `.cursor/skills`.
 
 > [!NOTE]
-> The command palette's "Disable Background Color" and "Disable Mouse" 
+> The command palette's "Disable Background Color" and "Disable Mouse"
 > toggles always write to the global config. If a project config
 > also sets `transparent` or `mouse`, project settings win on the next
 > launch (see [Where config lives](#where-config-lives)), so the toggle can
@@ -596,14 +653,14 @@ to Bash-based config.
 
 ```jsonc
 {
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "anthropic": { "api_key": "$ANTHROPIC_API_KEY" },
-  },
-  "models": {
-    "large": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
-  },
-  "permissions": { "allowed_tools": ["view", "ls", "grep"] },
+	"$schema": "https://charm.land/crush.json",
+	"providers": {
+		"anthropic": {"api_key": "$ANTHROPIC_API_KEY"},
+	},
+	"models": {
+		"large": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+	},
+	"permissions": {"allowed_tools": ["view", "ls", "grep"]},
 }
 ```
 

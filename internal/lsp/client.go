@@ -621,9 +621,14 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 // period, indicating the LSP server has finished processing. If no
 // diagnostics change within firstChangeDuration, it returns early since the
 // server likely isn't going to republish.
-func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) {
+//
+// It reports whether the diagnostics are settled at return: true when they
+// stabilized or the server evidently is not republishing, false when the
+// deadline or context cancellation cut the wait short — in which case a
+// snapshot read now may be stale.
+func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) bool {
 	if c == nil {
-		return
+		return true
 	}
 
 	const (
@@ -642,18 +647,17 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-deadline.C:
-			return
+			return false
 		case <-firstChangeTimer.C:
 			// No change arrived quickly — server isn't republishing.
-			return
+			return true
 		case <-ticker.C:
 			currentVersion := c.diagnostics.Version()
 			if currentVersion != previousVersion {
 				// Diagnostics changed — now wait for them to settle.
-				c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration)
-				return
+				return c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration)
 			}
 		}
 	}
@@ -661,7 +665,9 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) 
 
 // waitForDiagnosticsToSettle waits until diagnostics version stays the same
 // for settleDuration, indicating the LSP server has finished publishing.
-func (c *Client) waitForDiagnosticsToSettle(ctx context.Context, deadline <-chan time.Time, settleDuration time.Duration) {
+// It reports whether a settle was actually observed before the deadline or
+// cancellation ended the wait.
+func (c *Client) waitForDiagnosticsToSettle(ctx context.Context, deadline <-chan time.Time, settleDuration time.Duration) bool {
 	lastVersion := c.diagnostics.Version()
 	settleTicker := time.NewTicker(50 * time.Millisecond)
 	defer settleTicker.Stop()
@@ -672,9 +678,9 @@ func (c *Client) waitForDiagnosticsToSettle(ctx context.Context, deadline <-chan
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-deadline:
-			return
+			return false
 		case <-settleTicker.C:
 			currentVersion := c.diagnostics.Version()
 			if currentVersion != lastVersion {
@@ -683,7 +689,7 @@ func (c *Client) waitForDiagnosticsToSettle(ctx context.Context, deadline <-chan
 				stableStart = time.Now()
 			} else if time.Since(stableStart) >= settleDuration {
 				// Diagnostics have been stable for the settle duration.
-				return
+				return true
 			}
 		}
 	}

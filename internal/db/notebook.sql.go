@@ -25,10 +25,11 @@ INSERT INTO notebook_entries (
     compression_level,
     succeeded,
     error_headline,
+    verified,
     created_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-) RETURNING id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+) RETURNING id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number, verified
 `
 
 type CreateNotebookEntryParams struct {
@@ -45,6 +46,7 @@ type CreateNotebookEntryParams struct {
 	CompressionLevel int64          `json:"compression_level"`
 	Succeeded        int64          `json:"succeeded"`
 	ErrorHeadline    string         `json:"error_headline"`
+	Verified         string         `json:"verified"`
 	CreatedAt        int64          `json:"created_at"`
 }
 
@@ -63,6 +65,7 @@ func (q *Queries) CreateNotebookEntry(ctx context.Context, arg CreateNotebookEnt
 		arg.CompressionLevel,
 		arg.Succeeded,
 		arg.ErrorHeadline,
+		arg.Verified,
 		arg.CreatedAt,
 	)
 	var i NotebookEntry
@@ -81,6 +84,7 @@ func (q *Queries) CreateNotebookEntry(ctx context.Context, arg CreateNotebookEnt
 		&i.Succeeded,
 		&i.ErrorHeadline,
 		&i.SegmentNumber,
+		&i.Verified,
 	)
 	return i, err
 }
@@ -139,7 +143,7 @@ func (q *Queries) GetMaxNotebookEventNumber(ctx context.Context, arg GetMaxNoteb
 }
 
 const getNotebookEntries = `-- name: GetNotebookEntries :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number, verified
 FROM notebook_entries
 WHERE session_id = ?
 ORDER BY turn_number ASC, event_number ASC
@@ -169,6 +173,7 @@ func (q *Queries) GetNotebookEntries(ctx context.Context, sessionID string) ([]N
 			&i.Succeeded,
 			&i.ErrorHeadline,
 			&i.SegmentNumber,
+			&i.Verified,
 		); err != nil {
 			return nil, err
 		}
@@ -184,7 +189,7 @@ func (q *Queries) GetNotebookEntries(ctx context.Context, sessionID string) ([]N
 }
 
 const getNotebookEntriesByEventType = `-- name: GetNotebookEntriesByEventType :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number, verified
 FROM notebook_entries
 WHERE session_id = ? AND event_type = ?
 ORDER BY turn_number ASC, event_number ASC
@@ -219,6 +224,7 @@ func (q *Queries) GetNotebookEntriesByEventType(ctx context.Context, arg GetNote
 			&i.Succeeded,
 			&i.ErrorHeadline,
 			&i.SegmentNumber,
+			&i.Verified,
 		); err != nil {
 			return nil, err
 		}
@@ -234,7 +240,7 @@ func (q *Queries) GetNotebookEntriesByEventType(ctx context.Context, arg GetNote
 }
 
 const getNotebookEntriesByTurn = `-- name: GetNotebookEntriesByTurn :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number, verified
 FROM notebook_entries
 WHERE session_id = ? AND turn_number = ?
 ORDER BY event_number ASC
@@ -269,6 +275,7 @@ func (q *Queries) GetNotebookEntriesByTurn(ctx context.Context, arg GetNotebookE
 			&i.Succeeded,
 			&i.ErrorHeadline,
 			&i.SegmentNumber,
+			&i.Verified,
 		); err != nil {
 			return nil, err
 		}
@@ -284,7 +291,7 @@ func (q *Queries) GetNotebookEntriesByTurn(ctx context.Context, arg GetNotebookE
 }
 
 const getNotebookEntriesByTurnSegment = `-- name: GetNotebookEntriesByTurnSegment :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number, verified
 FROM notebook_entries
 WHERE session_id = ? AND turn_number = ? AND segment_number = ?
 ORDER BY event_number ASC
@@ -320,6 +327,7 @@ func (q *Queries) GetNotebookEntriesByTurnSegment(ctx context.Context, arg GetNo
 			&i.Succeeded,
 			&i.ErrorHeadline,
 			&i.SegmentNumber,
+			&i.Verified,
 		); err != nil {
 			return nil, err
 		}
@@ -420,7 +428,7 @@ func (q *Queries) GetNotebookTurnsWithEntries(ctx context.Context, sessionID str
 }
 
 const getOldestNotebookEntries = `-- name: GetOldestNotebookEntries :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number, verified
 FROM notebook_entries
 WHERE session_id = ? AND compression_level = ?
 ORDER BY turn_number ASC, event_number ASC
@@ -457,6 +465,7 @@ func (q *Queries) GetOldestNotebookEntries(ctx context.Context, arg GetOldestNot
 			&i.Succeeded,
 			&i.ErrorHeadline,
 			&i.SegmentNumber,
+			&i.Verified,
 		); err != nil {
 			return nil, err
 		}
@@ -618,7 +627,7 @@ func (q *Queries) RecordSegmentAttempt(ctx context.Context, arg RecordSegmentAtt
 }
 
 const searchNotebookByTag = `-- name: SearchNotebookByTag :many
-SELECT DISTINCT e.id, e.session_id, e.turn_number, e.event_number, e.event_type, e.title, e.entry_text, e.entry_text_full, e.token_count, e.compression_level, e.created_at, e.succeeded, e.error_headline, e.segment_number
+SELECT DISTINCT e.id, e.session_id, e.turn_number, e.event_number, e.event_type, e.title, e.entry_text, e.entry_text_full, e.token_count, e.compression_level, e.created_at, e.succeeded, e.error_headline, e.segment_number, e.verified
 FROM notebook_entries e
 JOIN notebook_tags t ON t.entry_id = e.id
 WHERE e.session_id = ? AND t.tag = ?
@@ -654,6 +663,7 @@ func (q *Queries) SearchNotebookByTag(ctx context.Context, arg SearchNotebookByT
 			&i.Succeeded,
 			&i.ErrorHeadline,
 			&i.SegmentNumber,
+			&i.Verified,
 		); err != nil {
 			return nil, err
 		}
@@ -669,7 +679,7 @@ func (q *Queries) SearchNotebookByTag(ctx context.Context, arg SearchNotebookByT
 }
 
 const searchNotebookByText = `-- name: SearchNotebookByText :many
-SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number
+SELECT id, session_id, turn_number, event_number, event_type, title, entry_text, entry_text_full, token_count, compression_level, created_at, succeeded, error_headline, segment_number, verified
 FROM notebook_entries
 WHERE session_id = ? AND entry_text LIKE ?2
 ORDER BY turn_number ASC, event_number ASC
@@ -704,6 +714,7 @@ func (q *Queries) SearchNotebookByText(ctx context.Context, arg SearchNotebookBy
 			&i.Succeeded,
 			&i.ErrorHeadline,
 			&i.SegmentNumber,
+			&i.Verified,
 		); err != nil {
 			return nil, err
 		}

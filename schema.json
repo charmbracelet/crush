@@ -3,6 +3,53 @@
   "$id": "https://github.com/charmbracelet/crush/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
+    "Agent": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string",
+          "description": "The model type (large/small) or a custom key from the models config to use for this agent",
+          "default": "large"
+        },
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowed_mcp": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "context_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "model"
+      ]
+    },
     "Attribution": {
       "properties": {
         "trailer_style": {
@@ -100,12 +147,25 @@
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
         },
+        "verify": {
+          "items": {
+            "$ref": "#/$defs/VerifyConfig"
+          },
+          "type": "array",
+          "description": "Deterministic check commands run by the verification gate before completion"
+        },
         "env": {
           "additionalProperties": {
             "type": "string"
           },
           "type": "object",
           "description": "Environment variables to set on startup"
+        },
+        "agents": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Agent"
+          },
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -534,6 +594,46 @@
           "description": "Disable sending metrics",
           "default": false
         },
+        "notebook_enabled": {
+          "type": "boolean",
+          "description": "Enable per-event context notebook for reducing token usage",
+          "default": true
+        },
+        "notebook_raw_token_budget": {
+          "type": "integer",
+          "description": "Token budget for raw recent turns in notebook mode",
+          "default": 25000
+        },
+        "notebook_max_tokens": {
+          "type": "integer",
+          "description": "Maximum total tokens for notebook entries before compaction",
+          "default": 100000
+        },
+        "notebook_max_entry_tokens": {
+          "type": "integer",
+          "description": "Maximum tokens per notebook entry",
+          "default": 1000
+        },
+        "notebook_sync_mem0": {
+          "type": "boolean",
+          "description": "Sync notebook entries to mem0 for cross-session search",
+          "default": false
+        },
+        "notebook_memory_server": {
+          "type": "string",
+          "description": "Name of the MCP server to use for mem0 cross-session memory sync and search",
+          "default": "mem0"
+        },
+        "notebook_auto_inject": {
+          "type": "boolean",
+          "description": "Auto-inject full notebook entries for files mentioned in the user message",
+          "default": false
+        },
+        "notebook_stub_superseded": {
+          "type": "boolean",
+          "description": "Replace stale or superseded tool results in raw history with labeled stubs (experimental)",
+          "default": false
+        },
         "initialize_as": {
           "type": "string",
           "description": "Name of the context file to create/update during project initialization",
@@ -933,6 +1033,28 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "VerifyConfig": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Friendly display name for this check"
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command whose exit code is the check verdict"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for the check command",
+          "default": 120
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "command"
+      ]
     }
   }
 }

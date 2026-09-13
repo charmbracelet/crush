@@ -45,6 +45,15 @@ type BashResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 	Background       bool   `json:"background,omitempty"`
 	ShellID          string `json:"shell_id,omitempty"`
+	// Done/ExitCode record the run's verdict when the command completed
+	// within the tool call. A non-zero exit is reported as text output,
+	// not an error response — consumers that need the verdict (e.g. the
+	// verification gate) must read exit_code, not the result type. Both
+	// marshal explicitly (no omitempty) so done:true + exit_code:0 is
+	// distinguishable from a still-running command by a consumer that
+	// checks key presence.
+	Done     bool `json:"done"`
+	ExitCode int  `json:"exit_code"`
 }
 
 const (
@@ -280,6 +289,8 @@ func NewBashTool(lspManager *lsp.Manager, permissions permission.Service, workin
 						Description:      params.Description,
 						Background:       params.RunInBackground,
 						WorkingDirectory: bgShell.WorkingDir,
+						Done:             true,
+						ExitCode:         exitCode,
 					}
 					if stdout == "" {
 						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
@@ -365,6 +376,8 @@ func NewBashTool(lspManager *lsp.Manager, permissions permission.Service, workin
 					Description:      params.Description,
 					Background:       params.RunInBackground,
 					WorkingDirectory: bgShell.WorkingDir,
+					Done:             true,
+					ExitCode:         exitCode,
 				}
 				if stdout == "" {
 					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
@@ -569,7 +582,7 @@ func lspDiagnosticsForFailure(command string, exitCode int, interrupted bool, ls
 	if interrupted || exitCode == 0 || lspManager == nil || !isBuildOrTestCommand(command) {
 		return ""
 	}
-	diags := getDiagnostics("", lspManager)
+	diags := FormatDiagnostics("", lspManager)
 	if diags == "" {
 		return ""
 	}

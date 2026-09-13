@@ -146,15 +146,19 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 }
 
 const listAllUserMessages = `-- name: ListAllUserMessages :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
-FROM messages
-WHERE role = 'user'
-ORDER BY created_at DESC
+SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at, m.finished_at, m.provider, m.is_summary_message, m.prism_model_id, m.prism_model_name, m.prism_hypercredit_savings, m.prism_dollar_savings
+FROM messages m
+JOIN sessions s ON s.id = m.session_id
+WHERE m.role = 'user' AND s.parent_session_id IS NULL
+ORDER BY m.created_at DESC
 LIMIT 200
 `
 
 // Backs prompt history when no session is open. Needs
 // idx_messages_role_created_at to seek rather than scan the table.
+// Child sessions are excluded: a sub-agent's task prompt is a user
+// message too, but the user never typed it, so it has no place in the
+// prompt history.
 func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	rows, err := q.query(ctx, q.listAllUserMessagesStmt, listAllUserMessages)
 	if err != nil {

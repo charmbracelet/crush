@@ -70,7 +70,10 @@ type (
 		Msg  string
 		TTL  time.Duration
 	}
-	ClearStatusMsg struct{}
+	// ClearStatusMsg clears the status info message — but only when
+	// Seq still matches the message the clear was scheduled for, so a
+	// stale tick can't wipe a message that arrived after it.
+	ClearStatusMsg struct{ Seq uint64 }
 )
 
 // IsEmpty checks if the [InfoMsg] is empty.

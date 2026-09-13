@@ -7,6 +7,7 @@ edit, command, decision).
 Usage:
 recall("file:auth.go") — retrieve all events that touched auth.go
 recall("turn:5") — retrieve all events from turn 5
+recall("segment:5.2") — retrieve all events from segment 2 of turn 5
 recall("command") — retrieve all command events
 recall("decision") — retrieve all decision events
 recall("auth.go") — fuzzy text search for auth.go

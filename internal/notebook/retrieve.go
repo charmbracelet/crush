@@ -81,6 +81,7 @@ func (s *service) GetTokenCount(ctx context.Context, sessionID string) (int64, e
 // DeleteEntries removes all notebook entries and segment coverage
 // rows for a session.
 func (s *service) DeleteEntries(ctx context.Context, sessionID string) error {
+	s.ForgetSession(sessionID)
 	return s.withTx(ctx, func(q *db.Queries) error {
 		if err := q.DeleteNotebookEntriesBySession(ctx, sessionID); err != nil {
 			return fmt.Errorf("failed to delete notebook entries: %w", err)
@@ -178,12 +179,19 @@ func PinnedFileTagsSince(entries []Entry, sinceTurn, sinceSegment int64) map[str
 // using GetOldestNotebookEntries, until the total is under the limit.
 // Compression progresses through levels 0 → 1 → 2. Entries pinned to
 // files under active edit are skipped.
+//
+// A round that makes no progress — a PreCompact denial, or every
+// remaining entry pinned — increments a per-session stall counter;
+// consecutive stalls past compactionStallThreshold surface a
+// user-visible warning via Options.OnCompactionStall. The counter
+// resets on any round that makes progress.
 func (s *service) Compact(ctx context.Context, sessionID string) error {
 	total, err := s.GetTokenCount(ctx, sessionID)
 	if err != nil {
 		return err
 	}
 	if total <= s.opts.MaxNotebookTokens {
+		s.noteCompactProgress(sessionID)
 		return nil
 	}
 
@@ -195,6 +203,8 @@ func (s *service) Compact(ctx context.Context, sessionID string) error {
 			slog.Warn("PreCompact hook failed; proceeding", "session_id", sessionID, "error", err)
 		} else if result.Decision == hooks.DecisionDeny || result.Halt {
 			slog.Info("PreCompact hook blocked compaction", "session_id", sessionID, "reason", result.Reason)
+			s.noteCompactStall(sessionID,
+				"PreCompact hook permanently blocking compaction; notebook DB grows unbounded — prompt unaffected")
 			return nil
 		}
 	}
@@ -206,7 +216,8 @@ func (s *service) Compact(ctx context.Context, sessionID string) error {
 
 	// Phase 1: Compress oldest level-0 entries to level 1 (tags + 1
 	// sentence), one batch at a time, until under the limit.
-	if err := s.compactOldestToLevel(ctx, sessionID, CompressionFull, CompressionSummary, pinned); err != nil {
+	compressed, err := s.compactOldestToLevel(ctx, sessionID, CompressionFull, CompressionSummary, pinned)
+	if err != nil {
 		return err
 	}
 
@@ -215,15 +226,81 @@ func (s *service) Compact(ctx context.Context, sessionID string) error {
 		return err
 	}
 	if total <= s.opts.MaxNotebookTokens {
+		s.noteCompactProgress(sessionID)
 		return nil
 	}
 
 	// Phase 2: Compress oldest level-1 entries to level 2 (tags only).
-	if err := s.compactOldestToLevel(ctx, sessionID, CompressionSummary, CompressionTagsOnly, pinned); err != nil {
+	n, err := s.compactOldestToLevel(ctx, sessionID, CompressionSummary, CompressionTagsOnly, pinned)
+	if err != nil {
 		return err
 	}
+	compressed += n
 
+	total, err = s.GetTokenCount(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	switch {
+	case total <= s.opts.MaxNotebookTokens || compressed > 0:
+		// Under budget, or at least moving: a session alternating
+		// stall and progress must not accumulate warnings.
+		s.noteCompactProgress(sessionID)
+	default:
+		s.noteCompactStall(sessionID,
+			"Notebook compaction stalled: no compressible entries remain (all pinned or already at maximum compression); notebook DB grows unbounded — prompt unaffected")
+	}
 	return nil
+}
+
+// compactionStallThreshold is the number of consecutive no-progress
+// Compact rounds before the stall callback fires. Compact runs per
+// segment commit, so a streak this long can accrue within one turn.
+const compactionStallThreshold = 3
+
+// ForgetSession drops the session's in-memory stall counter.
+func (s *service) ForgetSession(sessionID string) {
+	s.stallMu.Lock()
+	defer s.stallMu.Unlock()
+	s.stallCounts.Del(sessionID)
+}
+
+// noteCompactStall counts a no-progress compaction round and fires the
+// stall callback once the streak reaches the threshold — on every
+// further round too, so the warning stays live while the condition
+// persists.
+func (s *service) noteCompactStall(sessionID, reason string) {
+	if sessionID == "" {
+		return
+	}
+	s.stallMu.Lock()
+	defer s.stallMu.Unlock()
+	n, _ := s.stallCounts.Get(sessionID)
+	n++
+	s.stallCounts.Set(sessionID, n)
+	slog.Warn("Notebook compaction made no progress",
+		"session_id", sessionID, "consecutive", n, "reason", reason)
+	if n >= compactionStallThreshold && s.opts.OnCompactionStall != nil {
+		s.opts.OnCompactionStall(sessionID, reason)
+	}
+}
+
+// noteCompactProgress resets the stall counter for a round that
+// compressed something or ended under budget. When the reset streak
+// had already warned, the callback fires once more with an empty
+// reason — the resolution signal that lets the UI clear the warning
+// instead of waiting out a TTL.
+func (s *service) noteCompactProgress(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.stallMu.Lock()
+	defer s.stallMu.Unlock()
+	n, _ := s.stallCounts.Get(sessionID)
+	s.stallCounts.Del(sessionID)
+	if n >= compactionStallThreshold && s.opts.OnCompactionStall != nil {
+		s.opts.OnCompactionStall(sessionID, "")
+	}
 }
 
 // pinnedEntryIDs returns the IDs of entries pinned to files under
@@ -254,15 +331,18 @@ func (s *service) pinnedEntryIDs(ctx context.Context, sessionID string) (map[str
 // toLevel, one entry at a time, checking the token count after each
 // compression. This ensures earlier turns are always compressed before
 // later ones, and we stop as soon as we're under the limit. Entries in
-// the pinned ID set are skipped. pinned is keyed by entry ID.
-func (s *service) compactOldestToLevel(ctx context.Context, sessionID string, fromLevel, toLevel int64, pinned map[string]bool) error {
+// the pinned ID set are skipped. pinned is keyed by entry ID. Returns
+// the number of entries compressed so the caller can distinguish
+// "under budget" from "stalled on pins".
+func (s *service) compactOldestToLevel(ctx context.Context, sessionID string, fromLevel, toLevel int64, pinned map[string]bool) (int, error) {
+	compressed := 0
 	for {
 		total, err := s.GetTokenCount(ctx, sessionID)
 		if err != nil {
-			return err
+			return compressed, err
 		}
 		if total <= s.opts.MaxNotebookTokens {
-			return nil
+			return compressed, nil
 		}
 
 		// Fetch all entries at the source compression level and pick
@@ -275,7 +355,7 @@ func (s *service) compactOldestToLevel(ctx context.Context, sessionID string, fr
 			Limit:            math.MaxInt32,
 		})
 		if err != nil {
-			return err
+			return compressed, err
 		}
 		var entry *db.NotebookEntry
 		for i := range entries {
@@ -287,22 +367,23 @@ func (s *service) compactOldestToLevel(ctx context.Context, sessionID string, fr
 		}
 		if entry == nil {
 			// No unpinned entries at this level (or none at all).
-			return nil
+			return compressed, nil
 		}
 		tags, err := s.q.GetNotebookTagsByEntry(ctx, entry.ID)
 		if err != nil {
 			tags = nil
 		}
-		compressed := compressEntry(entry.EntryText, entry.Title, tags, entry.ErrorHeadline, toLevel)
-		newTokens := estimateTokens(compressed)
+		text := compressEntry(entry.EntryText, entry.Title, tags, entry.ErrorHeadline, toLevel)
+		newTokens := estimateTokens(text)
 		if err := s.q.UpdateNotebookCompression(ctx, db.UpdateNotebookCompressionParams{
-			EntryText:        compressed,
+			EntryText:        text,
 			TokenCount:       newTokens,
 			CompressionLevel: toLevel,
 			ID:               entry.ID,
 		}); err != nil {
-			return fmt.Errorf("failed to update notebook compression: %w", err)
+			return compressed, fmt.Errorf("failed to update notebook compression: %w", err)
 		}
+		compressed++
 	}
 }
 

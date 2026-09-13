@@ -25,6 +25,16 @@ const (
 	// finished. Message carries the error text when it failed, empty on
 	// success.
 	TypeAWSSSOAuthResult Type = "aws_sso_auth_result"
+	// TypeNotebookStall indicates notebook compaction has made no
+	// progress for several consecutive rounds — a PreCompact hook
+	// denying forever, or every remaining entry pinned. Message
+	// carries the human-readable reason. The UI surfaces it as a
+	// persistent warning; nothing overrides the deny or the pins.
+	TypeNotebookStall Type = "notebook_stall"
+	// TypeNotebookStallResolved indicates a previously warned
+	// compaction stall ended — a round made progress or the
+	// notebook fell under budget. The UI clears the warning.
+	TypeNotebookStallResolved Type = "notebook_stall_resolved"
 )
 
 // Notification represents a domain event published by the agent.

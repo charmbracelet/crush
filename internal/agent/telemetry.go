@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/notebook"
 )
 
 // logPromptComposition logs the byte size of each static request
@@ -44,7 +45,9 @@ func logPromptComposition(sessionID string, systemPromptBytes int, mcpInstructio
 // while notebook recall blobs count toward notebook_bytes. stubs
 // carries cumulative per-session stubbing telemetry: stubbed results,
 // saved bytes, and promotion events (each a prompt-cache invalidation).
-func logStepComposition(sessionID string, messages []fantasy.Message, agentTools []fantasy.AgentTool, stubs stubStats) {
+// nb carries the notebook sufficiency counters: entry vs result:
+// recalls, re-views, and per-pass selection contributions.
+func logStepComposition(sessionID string, messages []fantasy.Message, agentTools []fantasy.AgentTool, stubs stubStats, nb notebook.Stats) {
 	var historyBytes, notebookBytes, systemBytes int
 	for _, msg := range messages {
 		n := messageContentBytes(msg)
@@ -79,6 +82,17 @@ func logStepComposition(sessionID string, messages []fantasy.Message, agentTools
 		"stubbed_saved_bytes_total", stubs.SavedBytes,
 		"stub_invalidations", stubs.Invalidations,
 		"boundary_advances", stubs.BoundaryAdvances,
+		"nb_entry_recalls", nb.EntryRecalls,
+		"nb_result_recalls", nb.ResultRecalls,
+		"nb_cross_recalls", nb.CrossRecalls,
+		"nb_empty_recalls", nb.EmptyRecalls,
+		"nb_stub_reviews", nb.StubReViews,
+		"nb_covered_reviews", nb.CoveredReViews,
+		"nb_sel_recency", nb.SelPassRecency,
+		"nb_sel_pinned", nb.SelPassPinned,
+		"nb_sel_refs", nb.SelPassRefs,
+		"nb_sel_working", nb.SelPassWorking,
+		"nb_sel_fill", nb.SelPassFill,
 		"builtin_tool_schema_bytes", builtinSchemaBytes,
 		"mcp_tool_schema_bytes", mcpSchemaBytes,
 		"tool_count", len(agentTools),

@@ -3,10 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -380,11 +384,14 @@ func (t *segmentTracker) claimDriftLog(key segmentKey) bool {
 // relevance refs. A boundary that does not move reuses the cached
 // prefix — the splice still runs every step, but the re-render is
 // gated on actual input change, which makes the byte-identical-no-op
-// criterion trivially satisfiable.
+// criterion trivially satisfiable. files holds the file: basenames the
+// render injected — the set the re-view counter joins view calls
+// against.
 type cachedPrefix struct {
 	boundary    int
 	fingerprint uint64
 	msgs        []fantasy.Message
+	files       map[string]bool
 }
 
 func (a *sessionAgent) segTokenBudget() int {
@@ -701,10 +708,11 @@ func (a *sessionAgent) generateRunEndSegments(ctx context.Context, sessionID str
 
 // prefixFingerprint hashes every input the notebook prefix render
 // reads: the boundary position, its coverage key, the entries
-// (identity plus the fields compaction rewrites), and the relevance
-// refs. Identical inputs must render byte-identical output, so the
-// cache key is the input set itself.
-func prefixFingerprint(boundary int, bKey segmentKey, entries []notebook.Entry, refs []string) uint64 {
+// (identity plus the fields compaction rewrites), the relevance refs,
+// and the selection inputs — working set, file liveness, fill band.
+// Identical inputs must render byte-identical output, so the cache
+// key is the input set itself.
+func prefixFingerprint(boundary int, bKey, floor segmentKey, entries []notebook.Entry, refs []string, sel selectionInput) uint64 {
 	h := fnv.New64a()
 	var scratch [8]byte
 	write := func(v int64) {
@@ -714,6 +722,13 @@ func prefixFingerprint(boundary int, bKey segmentKey, entries []notebook.Entry, 
 	write(int64(boundary))
 	write(bKey.turn)
 	write(bKey.segment)
+	// The pass-1 recency floor moves when a zero-entry segment
+	// commits inside the covered region — entries, refs, and the
+	// boundary can all stay put while the render changes.
+	write(floor.turn)
+	write(floor.segment)
+	write(sel.bandFloor.turn)
+	write(sel.bandFloor.segment)
 	for _, e := range entries {
 		h.Write([]byte(e.ID))
 		write(e.TurnNumber)
@@ -733,7 +748,75 @@ func prefixFingerprint(boundary int, bKey segmentKey, entries []notebook.Entry, 
 		h.Write([]byte(r))
 		write(int64(len(r)))
 	}
+	// The working set grows mid-turn without touching entries/refs/
+	// boundary, and a file dying changes no existing input — both must
+	// join the hash or the cache serves stale renders.
+	for _, base := range slices.Sorted(maps.Keys(sel.workingSet)) {
+		h.Write([]byte(base))
+		for _, p := range slices.Sorted(slices.Values(sel.workingSet[base])) {
+			h.Write([]byte(p))
+		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(sel.livePaths)) {
+		h.Write([]byte(p))
+		if sel.livePaths[p] {
+			write(1)
+		} else {
+			write(0)
+		}
+	}
 	return h.Sum64()
+}
+
+// buildSelectionInput assembles the working set and file-liveness
+// inputs for selection. The working set is the session's most recently
+// touched files (basename -> tracked absolute paths); livePaths stats
+// only the tracked paths whose basename appears on a COVERED candidate
+// entry — bKey-scoped, so a post-boundary file's deletion can't churn
+// the fingerprint into a byte-identical re-render.
+func (a *sessionAgent) buildSelectionInput(ctx context.Context, sessionID string, entries []notebook.Entry, segs []segment, boundary int, bKey segmentKey) selectionInput {
+	sel := selectionInput{bandFloor: fillBandFloor(segs, boundary)}
+	if a.filetracker == nil {
+		return sel
+	}
+	paths, err := a.filetracker.ListRecentReadFiles(ctx, sessionID, workingSetFileCap)
+	if err != nil {
+		// Silent here would disable the pass invisibly every step.
+		slog.Debug("Working-set read list failed; skipping pass", "session_id", sessionID, "error", err)
+		return sel
+	}
+	if len(paths) == 0 {
+		return sel
+	}
+	sel.workingSet = make(map[string][]string, len(paths))
+	for _, p := range paths {
+		base := filepath.Base(p)
+		sel.workingSet[base] = append(sel.workingSet[base], p)
+	}
+	// Stat only the tracked paths whose basename some covered
+	// candidate entry carries — the demotion check can't see untagged
+	// basenames, and entries at/after the boundary never render.
+	want := make(map[string]bool)
+	for _, e := range entries {
+		if e.TurnNumber > bKey.turn || (e.TurnNumber == bKey.turn && e.SegmentNumber >= bKey.segment) {
+			continue
+		}
+		for _, tag := range e.Tags {
+			if base, ok := strings.CutPrefix(tag, "file:"); ok {
+				want[base] = true
+			}
+		}
+	}
+	sel.livePaths = make(map[string]bool)
+	for base := range want {
+		for _, p := range sel.workingSet[base] {
+			_, err := os.Stat(p)
+			// Only ErrNotExist counts as dead — a permission error or
+			// transient FS failure is not evidence of deletion.
+			sel.livePaths[p] = !errors.Is(err, fs.ErrNotExist)
+		}
+	}
+	return sel
 }
 
 // notebookPrefix returns the prefix messages (notebook system message
@@ -757,15 +840,17 @@ func (a *sessionAgent) notebookPrefix(ctx context.Context, sessionID string, msg
 	// restricting the scan to it would silently drop file: refs for
 	// the rest of the run.
 	refs := notebookRelevanceRefs(detCtx, a.sessions, sessionID, msgs)
-	fp := prefixFingerprint(boundary, bKey, entries, refs)
+	sel := a.buildSelectionInput(detCtx, sessionID, entries, segs, boundary, bKey)
+	floor := coveredSegmentFloor(segs, boundary)
+	fp := prefixFingerprint(boundary, bKey, floor, entries, refs, sel)
 	if a.prefixCache != nil {
 		if c, ok := a.prefixCache.Get(sessionID); ok && c.boundary == boundary && c.fingerprint == fp {
 			return c.msgs
 		}
 	}
-	prefix := a.renderNotebookPrefix(detCtx, sessionID, entries, msgs, bKey, coveredSegmentFloor(segs, boundary), refs)
+	prefix, files := a.renderNotebookPrefix(detCtx, sessionID, entries, msgs, bKey, floor, refs, sel)
 	if a.prefixCache != nil {
-		a.prefixCache.Set(sessionID, cachedPrefix{boundary: boundary, fingerprint: fp, msgs: prefix})
+		a.prefixCache.Set(sessionID, cachedPrefix{boundary: boundary, fingerprint: fp, msgs: prefix, files: files})
 	}
 	return prefix
 }
@@ -923,17 +1008,28 @@ func fantasyToolResultOutputEqual(a, b fantasy.ToolResultOutputContent) bool {
 // boundary, relevance-selects them, and renders the notebook system
 // message plus the optional auto-inject blob. msgs is the full stored
 // history — auto-inject scans it for the latest user message, which
-// may itself sit inside the covered prefix of a long turn.
-func (a *sessionAgent) renderNotebookPrefix(ctx context.Context, sessionID string, entries []notebook.Entry, msgs []message.Message, bKey segmentKey, floor segmentKey, refs []string) []fantasy.Message {
+// may itself sit inside the covered prefix of a long turn. The
+// returned file set holds the file: basenames this render injected —
+// the coverage signal the re-view counter joins against.
+func (a *sessionAgent) renderNotebookPrefix(ctx context.Context, sessionID string, entries []notebook.Entry, msgs []message.Message, bKey segmentKey, floor segmentKey, refs []string, sel selectionInput) ([]fantasy.Message, map[string]bool) {
 	var filtered []notebook.Entry
 	for _, e := range entries {
 		if e.TurnNumber < bKey.turn || (e.TurnNumber == bKey.turn && e.SegmentNumber < bKey.segment) {
 			filtered = append(filtered, e)
 		}
 	}
+	files := make(map[string]bool)
 	var out []fantasy.Message
 	if len(filtered) > 0 {
-		selected := selectNotebookEntries(filtered, refs, floor)
+		selected, diff := selectNotebookEntries(filtered, refs, floor, sel)
+		a.noteSelectionDiff(sessionID, diff)
+		for _, e := range selected {
+			for _, tag := range e.Tags {
+				if base, ok := strings.CutPrefix(tag, "file:"); ok {
+					files[base] = true
+				}
+			}
+		}
 		if rendered := notebook.RenderEntries(selected); rendered != "" {
 			// Turns whose every entry was budget-evicted have entries
 			// but nothing rendered. Emit a breadcrumb so the omission
@@ -958,9 +1054,24 @@ func (a *sessionAgent) renderNotebookPrefix(ctx context.Context, sessionID strin
 		}
 	}
 	if a.notebookAutoInject && len(msgs) > 0 {
-		if injectMsg := a.maybeAutoInject(ctx, msgs, sessionID, bKey); injectMsg != nil {
+		if injectMsg := a.maybeAutoInject(ctx, msgs, sessionID, bKey, files); injectMsg != nil {
 			out = append(out, *injectMsg)
 		}
 	}
-	return out
+	return out, files
+}
+
+// noteSelectionDiff folds one render's per-pass contribution counts
+// into the session's sufficiency stats.
+func (a *sessionAgent) noteSelectionDiff(sessionID string, diff selectionDiff) {
+	if a.nbStats == nil || sessionID == "" || diff.total() == 0 {
+		return
+	}
+	stats, _ := a.nbStats.Get(sessionID)
+	stats.SelPassRecency += diff.recency
+	stats.SelPassPinned += diff.pinned
+	stats.SelPassRefs += diff.refs
+	stats.SelPassWorking += diff.working
+	stats.SelPassFill += diff.fill
+	a.nbStats.Set(sessionID, stats)
 }

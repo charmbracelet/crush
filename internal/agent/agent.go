@@ -19,6 +19,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/notebook"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -214,6 +216,21 @@ type sessionAgent struct {
 	// stubStats accumulates per-session stubbing telemetry for
 	// step-composition logging.
 	stubStats *csync.Map[string, stubStats]
+	// nbStats accumulates per-session notebook sufficiency telemetry
+	// (recalls, re-views, selection pass contributions) shared with
+	// the recall tool.
+	nbStats *csync.Map[string, notebook.Stats]
+	// nbScanIdx is the per-session high-water message index for
+	// re-view scanning — only view/read calls past it count.
+	nbScanIdx *csync.Map[string, int]
+	// nbPendingReads holds view/read calls first seen unfinished
+	// (toolCallID → file basename) so a call that completes after
+	// the cursor swept past its index still counts once.
+	nbPendingReads *csync.Map[string, map[string]string]
+	// filetracker provides the session's read/write working set for
+	// notebook selection. Nil skips the working-set and liveness
+	// passes.
+	filetracker filetracker.Service
 	// segmentTrackers holds per-session intra-turn segment state:
 	// in-flight generation marks and backfill claims, shared across
 	// agent rebuilds so a rebuilt coordinator cannot double-fire.
@@ -317,6 +334,18 @@ type SessionAgentOptions struct {
 	// rebuilds. When nil the agent allocates its own.
 	SegmentTrackers *csync.Map[string, *segmentTracker]
 	PrefixCache     *csync.Map[string, cachedPrefix]
+	// NotebookStats/NotebookScanIdx share per-session notebook
+	// sufficiency telemetry and the re-view scan cursor across agent
+	// rebuilds; NotebookPendingReads tracks in-flight view/read
+	// calls so a late finish still counts. When nil the agent
+	// allocates its own.
+	NotebookStats        *csync.Map[string, notebook.Stats]
+	NotebookScanIdx      *csync.Map[string, int]
+	NotebookPendingReads *csync.Map[string, map[string]string]
+	// FileTracker provides the session's read/write working set for
+	// notebook selection. May be nil — the working-set and liveness
+	// passes are skipped without it.
+	FileTracker filetracker.Service
 }
 
 func NewSessionAgent(
@@ -353,6 +382,10 @@ func NewSessionAgent(
 		stubStats:            cmp.Or(opts.StubStats, csync.NewMap[string, stubStats]()),
 		segmentTrackers:      cmp.Or(opts.SegmentTrackers, csync.NewMap[string, *segmentTracker]()),
 		prefixCache:          cmp.Or(opts.PrefixCache, csync.NewMap[string, cachedPrefix]()),
+		nbStats:              cmp.Or(opts.NotebookStats, csync.NewMap[string, notebook.Stats]()),
+		nbScanIdx:            cmp.Or(opts.NotebookScanIdx, csync.NewMap[string, int]()),
+		nbPendingReads:       cmp.Or(opts.NotebookPendingReads, csync.NewMap[string, map[string]string]()),
+		filetracker:          opts.FileTracker,
 	}
 	return a
 }
@@ -1008,7 +1041,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			stats, _ := a.stubStats.Get(call.SessionID)
-			logStepComposition(call.SessionID, prepared.Messages, prepared.Tools, stats)
+			nbStats, _ := a.nbStats.Get(call.SessionID)
+			logStepComposition(call.SessionID, prepared.Messages, prepared.Tools, stats, nbStats)
 
 			sessionLock.Lock()
 			stepMessages = cloneFantasyMessages(prepared.Messages)
@@ -1748,6 +1782,9 @@ func (a *sessionAgent) preparePrompt(ctx context.Context, msgs []message.Message
 		segs, processed := a.detectSegments(ctx, sessionID, msgs)
 		boundary := findSegmentBoundaryByTokenBudget(msgs, budget, segs, processed)
 		bKey := boundarySegmentKey(segs, boundary)
+		// Count before this render refreshes the injected-file set —
+		// the join target is the files the LAST render injected.
+		a.countNotebookReViews(sessionID, msgs)
 		history = append(history, a.notebookPrefix(ctx, sessionID, msgs, boundary, bKey, segs)...)
 		if sessionID != "" {
 			if last, ok := a.stubBoundary.Get(sessionID); !ok || last != boundary {
@@ -1963,7 +2000,9 @@ func extractExplicitFilePaths(msg string) []string {
 // entries are found, it returns a system message with their full
 // text so the model has the original detail without needing to call
 // recall. Returns nil if no entries are found or auto-inject is off.
-func (a *sessionAgent) maybeAutoInject(ctx context.Context, msgs []message.Message, sessionID string, bKey segmentKey) *fantasy.Message {
+// injectedFiles, when non-nil, collects the file: basenames this call
+// injected so re-view counting sees them as covered.
+func (a *sessionAgent) maybeAutoInject(ctx context.Context, msgs []message.Message, sessionID string, bKey segmentKey, injectedFiles map[string]bool) *fantasy.Message {
 	if a.notebook == nil || len(msgs) == 0 {
 		return nil
 	}
@@ -2023,6 +2062,11 @@ func (a *sessionAgent) maybeAutoInject(ctx context.Context, msgs []message.Messa
 		}
 		fmt.Fprintf(&sb, "## Turn %d.%d — %s\n", e.TurnNumber, e.EventNumber, e.Title)
 		sb.WriteString(text)
+		for _, tag := range e.Tags {
+			if base, ok := strings.CutPrefix(tag, "file:"); ok && injectedFiles != nil {
+				injectedFiles[base] = true
+			}
+		}
 		if len(e.Tags) > 0 {
 			sb.WriteString("\nTags: ")
 			sb.WriteString(strings.Join(e.Tags, " "))
@@ -2039,6 +2083,114 @@ func (a *sessionAgent) maybeAutoInject(ctx context.Context, msgs []message.Messa
 	sb.WriteString("</notebook_auto_inject>")
 	msg := fantasy.NewSystemMessage(sb.String())
 	return &msg
+}
+
+// countNotebookReViews joins new view/read tool calls against the
+// files the previous prefix render injected and the set of stubbed
+// read paths — the sufficiency signals for entry quality. Only calls
+// past the session's scan high-water mark count, so each call counts
+// once; calls first seen unfinished are remembered by ID and counted
+// when a later scan finds them finished. The first sight of a session
+// initializes the mark without counting — pre-resume history is not
+// re-view pressure.
+func (a *sessionAgent) countNotebookReViews(sessionID string, msgs []message.Message) {
+	if a.nbStats == nil || a.nbScanIdx == nil || a.nbPendingReads == nil || sessionID == "" {
+		return
+	}
+	last, ok := a.nbScanIdx.Get(sessionID)
+	if !ok {
+		a.nbScanIdx.Set(sessionID, len(msgs))
+		return
+	}
+	if last > len(msgs) {
+		last = 0
+	}
+
+	// Resolve pending calls first: a view seen Finished=false at
+	// index i stays countable when it completes, even though the
+	// cursor moved past i. Paths are carried raw — the injected join
+	// wants the basename, the stubbed join the resolved full path.
+	pending, _ := a.nbPendingReads.Get(sessionID)
+	if pending == nil {
+		pending = map[string]string{}
+	}
+	var newCalls []string // Raw read paths of re-viewed files.
+	if len(pending) > 0 {
+		for _, m := range msgs {
+			if m.Role != message.Assistant {
+				continue
+			}
+			for _, tc := range m.ToolCalls() {
+				if p, wasPending := pending[tc.ID]; wasPending && tc.Finished {
+					newCalls = append(newCalls, p)
+					delete(pending, tc.ID)
+				}
+			}
+		}
+	}
+	for i := last; i < len(msgs); i++ {
+		m := msgs[i]
+		if m.Role != message.Assistant {
+			continue
+		}
+		for _, tc := range m.ToolCalls() {
+			p := toolCallFilePath(tc.Input)
+			switch {
+			case !readToolNames[tc.Name] || p == "":
+				// Not a read call, or no path to join against later.
+			case tc.Finished:
+				newCalls = append(newCalls, p)
+			default:
+				pending[tc.ID] = p
+			}
+		}
+	}
+	a.nbScanIdx.Set(sessionID, len(msgs))
+	// Persist once — Del drops the drained map so an empty pending
+	// set doesn't linger for the session's lifetime.
+	if len(pending) > 0 {
+		a.nbPendingReads.Set(sessionID, pending)
+	} else {
+		a.nbPendingReads.Del(sessionID)
+	}
+	if len(newCalls) == 0 {
+		return
+	}
+
+	// Files the last render injected — empty when nothing rendered.
+	var injected map[string]bool
+	if a.prefixCache != nil {
+		if c, ok := a.prefixCache.Get(sessionID); ok {
+			injected = c.files
+		}
+	}
+	// Read paths whose stored result carries an applied stub — the
+	// stub is what the model saw, so re-reading the file is pressure
+	// the stub track expects.
+	stubbed := make(map[string]bool)
+	for _, m := range msgs {
+		if m.Role != message.Tool {
+			continue
+		}
+		for _, tr := range m.ToolResults() {
+			if tr.Superseded != nil && tr.Superseded.Applied && tr.Superseded.Path != "" {
+				stubbed[normalizedPath(a.resolveReadPath(tr.Superseded.Path))] = true
+			}
+		}
+	}
+	stats, _ := a.nbStats.Get(sessionID)
+	for _, p := range newCalls {
+		if p == "" {
+			continue
+		}
+		if injected[filepath.Base(p)] {
+			stats.CoveredReViews++
+		}
+		if stubbed[normalizedPath(a.resolveReadPath(p))] {
+			stats.StubReViews++
+		}
+	}
+	a.nbStats.Set(sessionID, stats)
 }
 
 // filterFileParts removes fantasy.FilePart entries from a slice of message

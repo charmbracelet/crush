@@ -149,6 +149,20 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	if preCompactHooks := cfg.Hooks[hooks.EventPreCompact]; len(preCompactHooks) > 0 {
 		notebookOpts.PreCompactRunner = hooks.NewRunner(preCompactHooks, store.WorkingDir(), store.WorkingDir())
 	}
+	// Surface repeated no-progress compaction rounds as a user-visible
+	// notification — a hook denying forever or all-pinned stalls grow
+	// the notebook DB unbounded otherwise invisible.
+	notebookOpts.OnCompactionStall = func(sessionID, reason string) {
+		nt := notify.TypeNotebookStall
+		if reason == "" {
+			nt = notify.TypeNotebookStallResolved
+		}
+		app.agentNotifications.Publish(pubsub.CreatedEvent, notify.Notification{
+			SessionID: sessionID,
+			Type:      nt,
+			Message:   reason,
+		})
+	}
 	var notebookModelResolver func() fantasy.LanguageModel
 	notebookOpts.DB = conn
 	app.Notebook = notebook.NewService(q, notebook.NewLLMGenerator(func() fantasy.LanguageModel {

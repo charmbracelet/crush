@@ -7,7 +7,9 @@ package notebook
 import (
 	"context"
 	"database/sql"
+	"sync"
 
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
@@ -84,6 +86,45 @@ type EntryInput struct {
 	ErrorHeadline string
 }
 
+// Stats accumulates per-session sufficiency telemetry for the
+// notebook layer: how often the model reaches back for detail
+// (recalls, re-views) and which selection pass is doing the work.
+// Shared across the agent and the recall tool via a csync map so the
+// step-composition log line can emit one picture per session.
+type Stats struct {
+	// EntryRecalls counts recall queries that hit the notebook
+	// (tag/turn/segment/type/text). This layer's sufficiency signal.
+	EntryRecalls int
+	// ResultRecalls counts result: queries — raw tool-result lookups.
+	// A stubbing signal, not a notebook one; interpret it against the
+	// stub track's metrics.
+	ResultRecalls int
+	// CrossRecalls counts cross: queries — mem0 cross-session
+	// lookups.
+	CrossRecalls int
+	// EmptyRecalls counts recall queries that returned nothing —
+	// entry, cross, and result lookups alike. Distinct from attempts:
+	// "recall that found nothing" is its own sufficiency signal
+	// (missing entries or a broken stub pointer, not thin ones).
+	EmptyRecalls int
+	// StubReViews counts view/read calls on files whose earlier read
+	// result was stubbed — expected pressure, cheap to satisfy.
+	StubReViews int
+	// CoveredReViews counts view/read calls on files whose entries
+	// the last prefix render injected — the entry-sufficiency signal.
+	CoveredReViews int
+	// Selection pass contributions, cumulative across renders:
+	// SelPassRecency is the recency floor pass, SelPassPinned the
+	// active-edit pin pass, SelPassRefs the prompt/todo ref pass,
+	// SelPassWorking the working-set pass, SelPassFill the
+	// newest-first fill.
+	SelPassRecency int
+	SelPassPinned  int
+	SelPassRefs    int
+	SelPassWorking int
+	SelPassFill    int
+}
+
 // Service is the interface for notebook operations.
 type Service interface {
 	// GenerateEntries classifies events in a turn and generates notebook
@@ -153,6 +194,10 @@ type Service interface {
 
 	// DeleteEntries removes all notebook entries for a session.
 	DeleteEntries(ctx context.Context, sessionID string) error
+	// ForgetSession drops the service's in-memory per-session state
+	// (the compaction-stall counter). Called on session deletion; the
+	// DB rows are already cascade-deleted.
+	ForgetSession(sessionID string)
 }
 
 // service implements the notebook Service interface.
@@ -161,6 +206,13 @@ type service struct {
 	db        *sql.DB
 	generator Generator
 	opts      Options
+	// stallCounts tracks consecutive compaction rounds that made no
+	// progress, per session — hook denials and all-pinned stalls share
+	// one counter. stallMu serializes the counter's get-modify-set
+	// (and the ordering of stall vs. resolve callbacks) because
+	// per-segment generation runs Compacts on concurrent goroutines.
+	stallCounts *csync.Map[string, int]
+	stallMu     sync.Mutex
 }
 
 // Options configures the notebook service.
@@ -176,6 +228,15 @@ type Options struct {
 	// offset is read inside the write lock. Nil falls back to
 	// sequential statements.
 	DB *sql.DB
+	// OnCompactionStall fires when Compact makes no progress for
+	// several consecutive rounds — a PreCompact hook denying forever,
+	// or every remaining entry pinned. It never overrides the deny or
+	// pin; it only warns. reason describes the cause; an EMPTY reason
+	// signals resolution — fired once on the progress round that ends
+	// a warned streak, letting the UI clear the warning instead of
+	// waiting out a TTL. It runs under the service's stall mutex:
+	// implementations must not block or call back into the service.
+	OnCompactionStall func(sessionID, reason string)
 }
 
 // Generator generates notebook entries from classified events using an
@@ -208,9 +269,10 @@ func NewService(q *db.Queries, generator Generator, opts Options) Service {
 		llmGen.maxEntryTokens = opts.MaxEntryTokens
 	}
 	return &service{
-		q:         q,
-		db:        opts.DB,
-		generator: generator,
-		opts:      opts,
+		q:           q,
+		db:          opts.DB,
+		generator:   generator,
+		opts:        opts,
+		stallCounts: csync.NewMap[string, int](),
 	}
 }

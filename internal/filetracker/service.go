@@ -23,6 +23,12 @@ type Service interface {
 
 	// ListReadFiles returns the paths of all files read in a session.
 	ListReadFiles(ctx context.Context, sessionID string) ([]string, error)
+
+	// ListRecentReadFiles returns the paths of files read in a
+	// session, most recently touched first, capped at limit. The cap
+	// exists because the read set is cumulative — unbounded it
+	// degenerates to "every file ever touched".
+	ListRecentReadFiles(ctx context.Context, sessionID string, limit int) ([]string, error)
 }
 
 type service struct {
@@ -79,7 +85,25 @@ func (s *service) ListReadFiles(ctx context.Context, sessionID string) ([]string
 	if err != nil {
 		return nil, fmt.Errorf("listing read files: %w", err)
 	}
+	return s.absPaths(readFiles)
+}
 
+// ListRecentReadFiles returns the paths of files read in a session,
+// most recently touched first, capped at limit.
+func (s *service) ListRecentReadFiles(ctx context.Context, sessionID string, limit int) ([]string, error) {
+	readFiles, err := s.q.ListSessionReadFiles(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("listing read files: %w", err)
+	}
+	if limit > 0 && len(readFiles) > limit {
+		readFiles = readFiles[:limit]
+	}
+	return s.absPaths(readFiles)
+}
+
+// absPaths joins the stored relative paths to the process working
+// directory — the same base RecordRead's relpath strips.
+func (s *service) absPaths(readFiles []db.ReadFile) ([]string, error) {
 	basepath, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("getting working directory: %w", err)

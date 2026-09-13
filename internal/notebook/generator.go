@@ -71,24 +71,7 @@ func (g *llmGenerator) Generate(ctx context.Context, sessionID string, events []
 		return entries, nil
 	}
 
-	// Build the prompt with all events.
-	var promptSB strings.Builder
-	promptSB.WriteString("Generate a notebook entry for each of the following events. ")
-	promptSB.WriteString("Use the exact format from the instructions. ")
-	promptSB.WriteString("Separate entries with '---' on its own line.\n\n")
-
-	for i, event := range events {
-		promptSB.WriteString(fmt.Sprintf("### Event %d\n", i+1))
-		promptSB.WriteString("Type: ")
-		promptSB.WriteString(event.EventType)
-		promptSB.WriteString("\n")
-		promptSB.WriteString("Title: ")
-		promptSB.WriteString(event.Title)
-		promptSB.WriteString("\n")
-		promptSB.WriteString("Details:\n")
-		promptSB.WriteString(event.Description)
-		promptSB.WriteString("\n\n")
-	}
+	prompt := buildGeneratePrompt(events)
 
 	agent := fantasy.NewAgent(
 		model,
@@ -97,7 +80,7 @@ func (g *llmGenerator) Generate(ctx context.Context, sessionID string, events []
 	)
 
 	resp, err := agent.Stream(ctx, fantasy.AgentStreamCall{
-		Prompt: promptSB.String(),
+		Prompt: prompt,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate notebook entries: %w", err)
@@ -118,6 +101,36 @@ func (g *llmGenerator) Generate(ctx context.Context, sessionID string, events []
 		}
 	}
 	return entries, nil
+}
+
+// buildGeneratePrompt renders the batched entry prompt. Failure events
+// additionally carry their ErrorHeadline — the distilled first line
+// plus the "Exit code N" tail that describeToolCall's 2000-char cut
+// can lose, so a failure entry anchors on a digest guaranteed to
+// survive truncation.
+func buildGeneratePrompt(events []EntryInput) string {
+	var promptSB strings.Builder
+	promptSB.WriteString("Generate a notebook entry for each of the following events. ")
+	promptSB.WriteString("Use the exact format from the instructions. ")
+	promptSB.WriteString("Separate entries with '---' on its own line.\n\n")
+
+	for i, event := range events {
+		fmt.Fprintf(&promptSB, "### Event %d\n", i+1)
+		promptSB.WriteString("Type: ")
+		promptSB.WriteString(event.EventType)
+		promptSB.WriteString("\n")
+		promptSB.WriteString("Title: ")
+		promptSB.WriteString(event.Title)
+		promptSB.WriteString("\n")
+		promptSB.WriteString("Details:\n")
+		promptSB.WriteString(event.Description)
+		if event.ErrorHeadline != "" {
+			promptSB.WriteString("\nError headline: ")
+			promptSB.WriteString(event.ErrorHeadline)
+		}
+		promptSB.WriteString("\n\n")
+	}
+	return promptSB.String()
 }
 
 // parseGeneratedEntries splits the LLM output by '---' delimiters and

@@ -23,6 +23,9 @@ type Status struct {
 	help     help.Model
 	helpKm   help.KeyMap
 	msg      util.InfoMsg
+	// msgSeq increments on every SetInfoMsg so a delayed clear can
+	// tell "the message I was scheduled for" from a newer one.
+	msgSeq uint64
 }
 
 // NewStatus creates a new status bar and help model.
@@ -37,12 +40,31 @@ func NewStatus(com *common.Common, km help.KeyMap) *Status {
 
 // SetInfoMsg sets the status info message.
 func (s *Status) SetInfoMsg(msg util.InfoMsg) {
+	s.msgSeq++
 	s.msg = msg
+}
+
+// MsgSeq returns the current message generation.
+func (s *Status) MsgSeq() uint64 {
+	return s.msgSeq
 }
 
 // ClearInfoMsg clears the status info message.
 func (s *Status) ClearInfoMsg() {
 	s.msg = util.InfoMsg{}
+}
+
+// InfoMsg returns the currently displayed info message.
+func (s *Status) InfoMsg() util.InfoMsg {
+	return s.msg
+}
+
+// ClearInfoMsgIf clears the info message only when seq still matches
+// the current generation — the delayed clear for an older message.
+func (s *Status) ClearInfoMsgIf(seq uint64) {
+	if s.msgSeq == seq {
+		s.msg = util.InfoMsg{}
+	}
 }
 
 // SetWidth sets the width of the status bar and help view.
@@ -116,8 +138,8 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 // clearInfoMsgCmd returns a command that clears the info message after the
 // given TTL.
-func clearInfoMsgCmd(ttl time.Duration) tea.Cmd {
+func clearInfoMsgCmd(ttl time.Duration, seq uint64) tea.Cmd {
 	return tea.Tick(ttl, func(time.Time) tea.Msg {
-		return util.ClearStatusMsg{}
+		return util.ClearStatusMsg{Seq: seq}
 	})
 }

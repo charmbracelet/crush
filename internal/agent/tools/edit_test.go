@@ -29,6 +29,13 @@ func (m *mockEditFileTracker) ListReadFiles(ctx context.Context, sessionID strin
 	return m.reads, nil
 }
 
+func (m *mockEditFileTracker) ListRecentReadFiles(ctx context.Context, sessionID string, limit int) ([]string, error) {
+	if limit > 0 && len(m.reads) > limit {
+		return m.reads[:limit], nil
+	}
+	return m.reads, nil
+}
+
 func TestReplaceContentPreservesCRLFAndMetadata(t *testing.T) {
 	t.Parallel()
 

@@ -924,3 +924,148 @@ func TestMem0Sync_NilGuards(t *testing.T) {
 	m = NewMem0Sync(nil, "mem0", "session1")
 	m.SyncEntries(context.Background(), nil)
 }
+
+func TestCompact_StallWarnsAfterThreshold(t *testing.T) {
+	dataDir := t.TempDir()
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Release(dataDir) })
+	q := db.New(conn)
+	sessionID := uuid.New().String()
+	_, err = q.CreateSession(context.Background(), db.CreateSessionParams{
+		ID:    sessionID,
+		Title: "test",
+	})
+	require.NoError(t, err)
+
+	runner := hooks.NewRunner([]config.HookConfig{
+		{Command: `echo '{"decision":"deny","reason":"paused"}'`, Name: "blocker"},
+	}, dataDir, dataDir)
+	var reasons []string
+	svc := NewService(q, &mockGenerator{echo: true}, Options{
+		MaxEntryTokens: 10000,
+		// Any entry at all exceeds this budget, so every denied round
+		// counts — a larger cap would let the tiny entry under it.
+		MaxNotebookTokens: 1,
+		PreCompactRunner:  runner,
+		OnCompactionStall: func(_, reason string) { reasons = append(reasons, reason) },
+	})
+
+	editMsgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-e", Name: "edit", Input: `{"file_path":"a.go"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc-e", Name: "edit", Content: "ok"},
+		}},
+	}
+	// GenerateEntries compacts internally: that is denied round one.
+	require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, 1, editMsgs))
+	require.NoError(t, svc.Compact(context.Background(), sessionID))
+	require.Empty(t, reasons, "warning must not fire before the threshold")
+	require.NoError(t, svc.Compact(context.Background(), sessionID))
+	require.Len(t, reasons, 1, "third consecutive denial must warn")
+	require.Contains(t, reasons[0], "PreCompact")
+
+	// Every further stalled round republishes so the warning stays
+	// live while the condition persists.
+	require.NoError(t, svc.Compact(context.Background(), sessionID))
+	require.Len(t, reasons, 2)
+}
+
+func TestCompact_PinStallWarnsAndProgressResets(t *testing.T) {
+	dataDir := t.TempDir()
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Release(dataDir) })
+	q := db.New(conn)
+	sessionID := uuid.New().String()
+	_, err = q.CreateSession(context.Background(), db.CreateSessionParams{
+		ID:    sessionID,
+		Title: "test",
+	})
+	require.NoError(t, err)
+
+	var reasons []string
+	var resolved int
+	svc := NewService(q, &mockGenerator{echo: true}, Options{
+		MaxEntryTokens:    10000,
+		MaxNotebookTokens: 5,
+		OnCompactionStall: func(_, reason string) {
+			if reason == "" {
+				resolved++
+				return
+			}
+			reasons = append(reasons, reason)
+		},
+	})
+
+	// Turn 1: a big read of pinned.go. Turn 2: an edit to the same
+	// file — pinning it so nothing can compress.
+	readMsgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-r", Name: "view", Input: `{"file_path":"pinned.go"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc-r", Name: "view", Content: strings.Repeat("line of code\n", 200)},
+		}},
+	}
+	require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, 1, readMsgs))
+	editMsgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-e", Name: "edit", Input: `{"file_path":"pinned.go"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc-e", Name: "edit", Content: "ok"},
+		}},
+	}
+	require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, 2, editMsgs))
+
+	// Every remaining entry is pinned: each over-budget round stalls.
+	// The turn-2 generate already counted stall one; one more stall
+	// stays under the threshold, the third fires the warning.
+	require.NoError(t, svc.Compact(context.Background(), sessionID))
+	require.Empty(t, reasons)
+	require.NoError(t, svc.Compact(context.Background(), sessionID))
+	require.Len(t, reasons, 1)
+	require.Contains(t, reasons[0], "pinned")
+
+	// A round that makes progress resets the streak — turn 3's read
+	// of a different, unpinned file is compressible.
+	otherMsgs := []message.Message{
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-o", Name: "view", Input: `{"file_path":"other.go"}`, Finished: true},
+		}},
+		{Role: message.Tool, Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "tc-o", Name: "view", Content: strings.Repeat("other line\n", 200)},
+		}},
+	}
+	require.NoError(t, svc.GenerateEntries(context.Background(), sessionID, 3, otherMsgs))
+	inner, ok := svc.(*service)
+	require.True(t, ok)
+	n, _ := inner.stallCounts.Get(sessionID)
+	require.Equal(t, 0, n, "a progress round must reset the stall counter")
+	require.Equal(t, 1, resolved, "ending a warned streak must republish once to clear the warning")
+}
+
+func TestBuildGeneratePrompt_IncludesErrorHeadline(t *testing.T) {
+	t.Parallel()
+
+	events := []EntryInput{
+		{
+			EventType:     EventCommand,
+			Title:         "go build",
+			Description:   "[ERROR] command failed: " + strings.Repeat("x", 100),
+			ErrorHeadline: "main.go:12: undefined: foo — Exit code 2",
+		},
+		{
+			EventType:   EventFileRead,
+			Title:       "read a.go",
+			Description: "file contents",
+		},
+	}
+	prompt := buildGeneratePrompt(events)
+	require.Contains(t, prompt, "Error headline: main.go:12: undefined: foo — Exit code 2")
+	// The success event carries no headline line.
+	require.Equal(t, 1, strings.Count(prompt, "Error headline:"))
+}

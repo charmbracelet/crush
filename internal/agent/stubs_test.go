@@ -73,7 +73,7 @@ func TestMaybeAutoInject_SkipsSupersededRead(t *testing.T) {
 			message.TextContent{Text: "look at internal/auth.go please"},
 		}},
 	}
-	msg := agent.maybeAutoInject(t.Context(), msgs, sessionID, segmentKey{turn: 10})
+	msg := agent.maybeAutoInject(t.Context(), msgs, sessionID, segmentKey{turn: 10}, nil)
 	if msg != nil {
 		for _, part := range msg.Content {
 			if tp, ok := part.(fantasy.TextPart); ok {
@@ -95,7 +95,7 @@ func TestMaybeAutoInject_InjectsUnsupersededRead(t *testing.T) {
 			message.TextContent{Text: "look at internal/auth.go please"},
 		}},
 	}
-	msg := agent.maybeAutoInject(t.Context(), msgs, sessionID, segmentKey{turn: 10})
+	msg := agent.maybeAutoInject(t.Context(), msgs, sessionID, segmentKey{turn: 10}, nil)
 	require.NotNil(t, msg)
 	var text string
 	for _, part := range msg.Content {
@@ -777,4 +777,118 @@ func TestCanonicalToolInput(t *testing.T) {
 		canonicalToolInput("bash", `{"command":"ls"}`),
 		canonicalToolInput("bash", `{"command":"ls -la"}`))
 	require.Empty(t, canonicalToolInput("bash", "not json"))
+}
+
+// TestCountNotebookReViews_PendingCallFinishes covers the in-flight
+// window: a view call seen unfinished counts when a later scan finds
+// it finished — the scan cursor must not lose it.
+func TestCountNotebookReViews_PendingCallFinishes(t *testing.T) {
+	t.Parallel()
+
+	statsMap := csync.NewMap[string, notebook.Stats]()
+	scanIdx := csync.NewMap[string, int]()
+	pending := csync.NewMap[string, map[string]string]()
+	a := &sessionAgent{
+		nbStats:        statsMap,
+		nbScanIdx:      scanIdx,
+		nbPendingReads: pending,
+		prefixCache:    csync.NewMap[string, cachedPrefix](),
+	}
+
+	view := func(id, path string, finished bool) message.Message {
+		return segAssistant("", message.ToolCall{
+			ID:       id,
+			Name:     "view",
+			Input:    `{"file_path":"` + path + `"}`,
+			Finished: finished,
+		})
+	}
+
+	// First sight initializes the cursor without counting.
+	a.countNotebookReViews("sess", []message.Message{segUser("go")})
+
+	// The view call arrives unfinished — nothing counts yet, but the
+	// call is queued under its ID.
+	a.countNotebookReViews("sess", []message.Message{
+		segUser("go"),
+		view("tc-1", "internal/x.go", false),
+	})
+	got, _ := statsMap.Get("sess")
+	require.Equal(t, 0, got.StubReViews+got.CoveredReViews)
+	p, _ := pending.Get("sess")
+	require.Contains(t, p, "tc-1")
+
+	// A stubbed result for a NESTED path makes the later finish
+	// count as stub re-view pressure — regression: the join must
+	// resolve the call's raw path, not its basename (a basename
+	// resolves to <wd>/<base> and never matches a nested mark).
+	stubRes := message.ToolResult{ToolCallID: "tc-0", Name: "view", Content: "x"}
+	stubRes.Superseded = &message.SupersededMark{Path: "internal/x.go", Applied: true}
+	a.countNotebookReViews("sess", []message.Message{
+		segUser("go"),
+		view("tc-1", "internal/x.go", true),
+		segTool(stubRes),
+		segUser("next"),
+	})
+	got, _ = statsMap.Get("sess")
+	require.Equal(t, 1, got.StubReViews, "the late-finishing call must count")
+	p, _ = pending.Get("sess")
+	require.NotContains(t, p, "tc-1")
+}
+
+// taggedGen emits one entry per event tagged to file:x.go — enough to
+// make the rendered selection inject that basename into the covered
+// file set.
+type taggedGen struct{}
+
+func (taggedGen) Generate(_ context.Context, _ string, events []notebook.EntryInput) ([]notebook.GeneratedEntry, error) {
+	entries := make([]notebook.GeneratedEntry, len(events))
+	for i, ev := range events {
+		entries[i] = notebook.GeneratedEntry{
+			EventType: ev.EventType,
+			Title:     ev.Title,
+			Text:      "## " + ev.Title,
+			Tags:      []string{"file:x.go"},
+		}
+	}
+	return entries, nil
+}
+
+// TestCoveredReViews_CountsViewOnInjectedFile is the positive half of
+// the re-view instrumentation: render a prefix that injects the x.go
+// entry, then a finished view call on that file must count as a
+// covered re-view — the signal the whole track exists to measure.
+func TestCoveredReViews_CountsViewOnInjectedFile(t *testing.T) {
+	t.Parallel()
+
+	a, _, nb, sessionID := newSegmentTestAgent(t, taggedGen{})
+	a.nbStats = csync.NewMap[string, notebook.Stats]()
+	a.nbScanIdx = csync.NewMap[string, int]()
+	a.nbPendingReads = csync.NewMap[string, map[string]string]()
+
+	// Commit an entry tagged file:x.go as turn 1, segment 1.
+	editMsgs := []message.Message{
+		segAssistant("", message.ToolCall{ID: "tc-e", Name: "edit", Input: `{"file_path":"internal/x.go"}`, Finished: true}),
+		segTool(message.ToolResult{ToolCallID: "tc-e", Name: "edit", Content: "ok"}),
+	}
+	require.NoError(t, nb.GenerateSegmentEntries(t.Context(), sessionID, 1, 1, 0, 2, editMsgs))
+
+	// Render — the covered entry is selected, so its basename lands
+	// in the cached file set.
+	msgs := []message.Message{segUser("go")}
+	prefix := a.notebookPrefix(t.Context(), sessionID, msgs, len(msgs), segmentKey{turn: 2, segment: 0}, nil)
+	require.NotEmpty(t, prefix)
+	cached, ok := a.prefixCache.Get(sessionID)
+	require.True(t, ok)
+	require.Contains(t, cached.files, "x.go")
+
+	// The first scan initializes the cursor; the second finds the
+	// finished view call and joins it against the injected set.
+	a.countNotebookReViews(sessionID, msgs)
+	msgs = append(msgs, segAssistant("", message.ToolCall{
+		ID: "tc-1", Name: "view", Input: `{"file_path":"internal/x.go"}`, Finished: true,
+	}))
+	a.countNotebookReViews(sessionID, msgs)
+	got, _ := a.nbStats.Get(sessionID)
+	require.Equal(t, 1, got.CoveredReViews)
 }

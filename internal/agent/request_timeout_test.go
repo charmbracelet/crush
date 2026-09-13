@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"runtime"
 	"testing"
 	"time"
@@ -187,7 +188,10 @@ func TestRequestTimeoutModel_GenerateReportsTimeout(t *testing.T) {
 	var timeoutErr *requestTimeoutError
 	require.ErrorAs(t, err, &timeoutErr)
 	require.Equal(t, 10*time.Millisecond, timeoutErr.timeout)
-	require.ErrorIs(t, err, context.DeadlineExceeded, "the deadline must stay detectable through the chain")
+	// Retry logic treats a context error as a deliberate abort, so a
+	// timeout must not match one: losing the network is worth retrying.
+	require.NotErrorIs(t, err, context.DeadlineExceeded)
+	require.NotErrorIs(t, err, context.Canceled)
 	require.Contains(t, err.Error(), "timed out after 10ms")
 }
 
@@ -214,8 +218,9 @@ func TestRequestTimeoutModel_StreamReportsTimeout(t *testing.T) {
 
 	var timeoutErr *requestTimeoutError
 	require.ErrorAs(t, got, &timeoutErr)
-	require.True(t, timeoutErr.first, "nothing arrived, so this is a no-data timeout")
-	require.ErrorIs(t, got, context.DeadlineExceeded)
+	require.Equal(t, timeoutFirstPart, timeoutErr.kind, "nothing arrived, so this is a no-data timeout")
+	require.NotErrorIs(t, got, context.DeadlineExceeded)
+	require.NotErrorIs(t, got, context.Canceled)
 }
 
 func TestRequestTimeoutModel_ParentCancelPassesThrough(t *testing.T) {
@@ -248,10 +253,15 @@ func TestRequestTimeoutErrorMessages(t *testing.T) {
 	err.cause = context.DeadlineExceeded
 	require.Equal(t, "LLM request timed out after 1s: context deadline exceeded", err.Error())
 
-	idle := &requestTimeoutError{timeout: 2 * time.Second, idle: true}
+	idle := &requestTimeoutError{timeout: 2 * time.Second, kind: timeoutIdle}
 	require.Equal(t, "LLM stream received no data for 2s", idle.Error())
 	require.Contains(t, idle.userMessage(), "stopped sending data for 2s")
 	require.Contains(t, idle.userMessage(), "request-timeout")
+
+	stalled := &requestTimeoutError{timeout: 20 * time.Second, kind: timeoutStalled}
+	require.Equal(t, "LLM stream sent only keepalives for 20s", stalled.Error())
+	require.Contains(t, stalled.userMessage(), "model sent nothing for 20s")
+	require.Contains(t, stalled.userMessage(), "request-timeout")
 }
 
 // timeoutOnlyModel streams a single error part shaped exactly like the one
@@ -261,7 +271,7 @@ type timeoutOnlyModel struct {
 }
 
 func (m *timeoutOnlyModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
-	timeoutErr := &requestTimeoutError{timeout: time.Second, idle: true, cause: context.DeadlineExceeded}
+	timeoutErr := &requestTimeoutError{timeout: time.Second, kind: timeoutIdle, cause: context.DeadlineExceeded}
 	return func(yield func(fantasy.StreamPart) bool) {
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: timeoutErr})
 	}, nil
@@ -366,7 +376,7 @@ func TestRequestTimeoutModel_AbortsOnInterPartGap(t *testing.T) {
 
 	var timeoutErr *requestTimeoutError
 	require.ErrorAs(t, got, &timeoutErr)
-	require.False(t, timeoutErr.first, "data already arrived, so this is not a first-part timeout")
+	require.Equal(t, timeoutIdle, timeoutErr.kind, "data already arrived, so this is not a first-part timeout")
 	require.Equal(t, 10*time.Millisecond, timeoutErr.timeout)
 	require.Contains(t, got.Error(), "received no data for 10ms")
 	require.Contains(t, timeoutErr.userMessage(), "stopped sending data for 10ms")
@@ -499,19 +509,37 @@ func TestRequestTimeoutModel_DoesNotBoundToolCalls(t *testing.T) {
 func TestWrapTimedOutBreaksCycle(t *testing.T) {
 	t.Parallel()
 
-	timeoutErr := &requestTimeoutError{timeout: time.Minute, idle: true}
+	timeoutErr := &requestTimeoutError{timeout: time.Minute, kind: timeoutIdle}
 	ctx, cancel := context.WithTimeoutCause(context.Background(), 10*time.Millisecond, timeoutErr)
 	t.Cleanup(cancel)
 	<-ctx.Done()
 
-	err := wrapTimedOut(ctx, timeoutErr, fmt.Errorf("stream aborted: %w", context.Cause(ctx)))
+	err := wrapTimedOut(ctx, fmt.Errorf("stream aborted: %w", context.Cause(ctx)))
 
 	terminated := make(chan bool, 1)
 	go func() { terminated <- errors.Is(err, context.DeadlineExceeded) }()
 	select {
 	case matched := <-terminated:
-		require.True(t, matched, "a timeout must still match context.DeadlineExceeded")
+		require.False(t, matched, "a timeout must not read as the caller giving up")
 	case <-time.After(2 * time.Second):
 		t.Fatal("errors.Is never returned: the error chain is cyclic")
 	}
+}
+
+// An idle timeout usually means the connection died rather than the model
+// thinking, since provider keepalives reset the budget. Retry logic skips
+// anything that looks like a deliberate abort, so the error has to present
+// as a retryable network timeout instead.
+func TestRequestTimeoutIsRetryable(t *testing.T) {
+	t.Parallel()
+
+	err := error(&requestTimeoutError{timeout: time.Minute, kind: timeoutIdle})
+
+	var netErr net.Error
+	require.ErrorAs(t, err, &netErr, "must present as a net.Error to be retried")
+	require.True(t, netErr.Timeout())
+
+	// These are what retry logic reads as "the caller gave up".
+	require.NotErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, context.DeadlineExceeded)
 }

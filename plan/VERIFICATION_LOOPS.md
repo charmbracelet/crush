@@ -1,5 +1,11 @@
 # Verification Loops — Ground-Truth Gates on Task Completion
 
+> **Status:** Implemented (PR #28). Scope delivered: `verifyingTool`
+> decorator + `verification` metadata, `verify` crushrc builtin,
+> end-of-turn gate with bounded retries, notebook `verified` ground
+> truth. Deferred: `bash`-redirection/MCP-write coverage, gate-check
+> parallelism, the Measurement section's telemetry counters.
+
 Independent of the notebook selection work (`NOTEBOOK_QUALITY.md`)
 but composes with stubbing (`TOOL_RESULT_PRUNING.md`) and intra-turn
 boundaries (`INTRA_TURN_BOUNDARIES.md`, implemented — PRs #24, #25).

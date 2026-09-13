@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -558,6 +559,38 @@ func TestIsUnauthorized(t *testing.T) {
 		err := fmt.Errorf("request failed: %w", inner)
 		assert.True(t, isUnauthorized(err))
 	})
+}
+
+func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
+	// Custom local providers (lmstudio, ollama, omlx, litellm, llamacpp)
+	// go through the OpenAI-compat client and must receive the selected
+	// reasoning effort like any other OpenAI-compatible provider.
+	for _, providerType := range discover.RegisteredProviderTypes() {
+		t.Run(providerType, func(t *testing.T) {
+			model := Model{
+				CatwalkCfg: catwalk.Model{
+					ID:              "qwen/qwen3-8b",
+					CanReason:       true,
+					ReasoningLevels: []string{"low", "medium", "high"},
+				},
+				ModelCfg: config.SelectedModel{
+					Provider:        "local",
+					Model:           "qwen/qwen3-8b",
+					ReasoningEffort: "high",
+				},
+			}
+			providerCfg := config.ProviderConfig{ID: "local", Type: catwalk.Type(providerType)}
+
+			opts := getProviderOptions(model, providerCfg)
+
+			raw, ok := opts[openaicompat.Name]
+			require.True(t, ok, "options should be keyed under openaicompat.Name for type %q", providerType)
+			parsed, ok := raw.(*openaicompat.ProviderOptions)
+			require.True(t, ok)
+			require.NotNil(t, parsed.ReasoningEffort)
+			assert.Equal(t, "high", string(*parsed.ReasoningEffort))
+		})
+	}
 }
 
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {

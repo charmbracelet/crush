@@ -30,6 +30,16 @@ const responseContextHeight = 10
 // toolBodyLeftPaddingTotal represents the padding that should be applied to each tool body
 const toolBodyLeftPaddingTotal = 2
 
+// collapsedMaxLines returns the number of lines to display when content
+// is collapsed. If collapsing would hide only a single line, all lines
+// are shown instead.
+func collapsedMaxLines(totalLines int) int {
+	if totalLines <= responseContextHeight+1 {
+		return totalLines
+	}
+	return responseContextHeight
+}
+
 // ToolStatus represents the current state of a tool call.
 type ToolStatus int
 
@@ -300,32 +310,24 @@ func (t *baseToolMessageItem) ID() string {
 	return t.toolCall.ID
 }
 
-// StartAnimation starts the assistant message animation if it should be spinning.
-func (t *baseToolMessageItem) StartAnimation() tea.Cmd {
-	if !t.isSpinning() {
-		return nil
-	}
-	return t.anim.Start()
+// Spinning implements [Animatable].
+func (t *baseToolMessageItem) Spinning() bool {
+	return t.isSpinning()
 }
 
-// Animate progresses the assistant message animation if it should be spinning.
+// Advance implements [Animatable].
 //
 // Bumps the F6 list-cache version so the next draw re-renders this
-// item: a spinner tick mutates anim's internal frame counter, which
-// changes the rendered output but is invisible to the per-item
-// caches. Without the bump the list cache would serve the previously
-// rendered frame indefinitely and the spinner would appear frozen.
-// The ID gate keeps unrelated ticks (routed here by a future change
-// to chat.Animate's dispatch) from churning the cache.
-func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
-	if !t.isSpinning() {
-		return nil
-	}
-	if msg.ID != t.toolCall.ID {
-		return nil
+// item: a spinner frame mutates anim's internal counter, which changes
+// the rendered output but is invisible to the per-item caches. Without
+// the bump the list cache would serve the previously rendered frame
+// indefinitely and the spinner would appear frozen.
+func (t *baseToolMessageItem) Advance() bool {
+	if !t.isSpinning() || !t.anim.Advance() {
+		return false
 	}
 	t.Bump()
-	return t.anim.Animate(msg)
+	return true
 }
 
 // RawRender implements [MessageItem].
@@ -655,7 +657,7 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines) // Show all
 	}
@@ -672,12 +674,12 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
 	}
 
-	wasTruncated := len(lines) > responseContextHeight
+	wasTruncated := len(lines) > maxLines
 
 	if !expanded && wasTruncated {
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-responseContextHeight)))
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)))
 	}
 
 	return strings.Join(out, "\n")
@@ -688,7 +690,7 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	content = stringext.NormalizeSpace(content)
 
 	lines := strings.Split(content, "\n")
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -978,7 +980,7 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	lines := strings.Split(formatted, "\n")
 
 	// Truncate if needed.
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -1028,7 +1030,7 @@ func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.
 	lines := strings.Split(formatted, "\n")
 
 	// Truncate if needed.
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}
@@ -1088,7 +1090,7 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 	}
 
 	lines := strings.Split(rendered, "\n")
-	maxLines := responseContextHeight
+	maxLines := collapsedMaxLines(len(lines))
 	if expanded {
 		maxLines = len(lines)
 	}

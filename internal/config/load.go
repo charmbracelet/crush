@@ -366,6 +366,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				}
 			}
 		default:
+			// An OAuth login is a credential too: providers signed in
+			// through OAuth (e.g. OpenAI with a ChatGPT account) are
+			// configured even when no API key is present.
+			if config.OAuthToken != nil {
+				break
+			}
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
 			if v == "" || err != nil {

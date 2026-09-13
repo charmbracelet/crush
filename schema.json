@@ -853,6 +853,12 @@
         "refresh_token": {
           "type": "string"
         },
+        "id_token": {
+          "type": "string"
+        },
+        "account_id": {
+          "type": "string"
+        },
         "expires_in": {
           "type": "integer"
         },

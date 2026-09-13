@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 
-	acp "github.com/coder/acp-go-sdk"
-	"github.com/charmbracelet/crush/internal/app"
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/app"
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // crushAgent implements acp.Agent using Crush's internal services.
@@ -27,17 +28,16 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentInfo:       &acp.Implementation{Name: "Crush", Version: "dev"},
 		AgentCapabilities: acp.AgentCapabilities{
-			LoadSession: false,
+			LoadSession: true,
 			PromptCapabilities: acp.PromptCapabilities{
-				Image:           false,
-				Audio:           false,
-				EmbeddedContext: false,
+				Image: true,
+				Audio: true,
+				EmbeddedContext: true,
 			},
-			McpCapabilities: acp.McpCapabilities{
-				Http: false,
-				Sse:  false,
+			SessionCapabilities: acp.SessionCapabilities{
+				Close: &acp.SessionCloseCapabilities{},
 			},
-			SessionCapabilities: acp.SessionCapabilities{},
+			McpCapabilities: acp.McpCapabilities{},
 		},
 	}
 	a.log.Info("ACP initialize", "protocol", resp.ProtocolVersion)
@@ -47,6 +47,20 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 // NewSession implements acp.Agent.
 func (a *crushAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	title := "ACP Session"
+
+	// Crush resolves its working directory once at startup, so it cannot move
+	// on a per-session basis. A client asking for a different directory would
+	// otherwise get a session silently operating on the wrong tree, so surface
+	// the disagreement instead of dropping it.
+	if req.Cwd != "" {
+		if local := a.workingDir(); local != "" && !samePath(local, req.Cwd) {
+			return acp.NewSessionResponse{}, fmt.Errorf(
+				"session cwd %q does not match crush working directory %q; "+
+					"start crush with -c %s to use that workspace",
+				req.Cwd, local, req.Cwd)
+		}
+	}
+
 	session, err := a.app.Sessions.Create(context.Background(), title)
 	if err != nil {
 		return acp.NewSessionResponse{}, fmt.Errorf("create session: %w", err)
@@ -55,6 +69,33 @@ func (a *crushAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (a
 	return acp.NewSessionResponse{
 		SessionId: acp.SessionId(session.ID),
 	}, nil
+}
+
+// workingDir reports the directory Crush was started in, or "" when the app
+// carries no config store (as in tests).
+func (a *crushAgent) workingDir() string {
+	if a.app == nil {
+		return ""
+	}
+	store := a.app.Store()
+	if store == nil {
+		return ""
+	}
+	// A typed-nil *ConfigStore passes the comparison above, so guard the
+	// dereference too: tests construct an App without a store.
+	defer func() { _ = recover() }()
+	return store.WorkingDir()
+}
+
+// samePath compares two filesystem paths, tolerating a trailing separator and
+// relative forms.
+func samePath(a, b string) bool {
+	cleanA, errA := filepath.Abs(filepath.Clean(a))
+	cleanB, errB := filepath.Abs(filepath.Clean(b))
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return cleanA == cleanB
 }
 
 // ListSessions implements acp.Agent.
@@ -117,14 +158,30 @@ func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Pro
 	return acp.PromptResponse{StopReason: stopReason}, nil
 }
 
-// SetSessionMode is not yet wired.
-func (a *crushAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SetSessionModeResponse{}, fmt.Errorf("session/set_mode is not yet implemented")
+// SetSessionMode acknowledges a mode change.
+//
+// Crush has no mode concept, so there is nothing to change, but the method must
+// still succeed: editors send it during session setup and an error can abort
+// the session before the first prompt.
+func (a *crushAgent) SetSessionMode(_ context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	a.log.Info("ACP set session mode", "sessionId", req.SessionId, "modeId", req.ModeId)
+	return acp.SetSessionModeResponse{}, nil
 }
 
-// SetSessionConfigOption is not yet wired.
-func (a *crushAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("session/set_config_option is not yet implemented")
+// SetSessionConfigOption acknowledges a configuration change and reports the
+// options Crush supports.
+//
+// The response type requires a non-nil configOptions list, so an empty slice is
+// returned rather than nil.
+func (a *crushAgent) SetSessionConfigOption(_ context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	var sessionID string
+	if req.ValueId != nil {
+		sessionID = string(req.ValueId.SessionId)
+	} else if req.Boolean != nil {
+		sessionID = string(req.Boolean.SessionId)
+	}
+	a.log.Info("ACP set session config option", "sessionId", sessionID)
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: []acp.SessionConfigOption{}}, nil
 }
 
 // extractPromptText converts ACP content blocks to a plain-text prompt.

@@ -1,0 +1,428 @@
+{
+  "type": "PromptRequest",
+  "cases": [
+    {
+      "name": "minimal",
+      "why": "the baseline: the two required properties and nothing else",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "text": "hello",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty required array",
+      "why": "a required array may be empty, and must stay an array rather than becoming null",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": []
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": []
+      }
+    },
+    {
+      "name": "missing required array",
+      "why": "absence of a required property fails the message; there is no recovery for it",
+      "input": {
+        "sessionId": "sess-1"
+      },
+      "accepted": false
+    },
+    {
+      "name": "missing required id",
+      "why": "the same, for a required property that is a $ref rather than an array",
+      "input": {
+        "prompt": []
+      },
+      "accepted": false
+    },
+    {
+      "name": "null required id",
+      "why": "null is not the absent state, and this property is not nullable",
+      "input": {
+        "sessionId": null,
+        "prompt": []
+      },
+      "accepted": false
+    },
+    {
+      "name": "unknown property",
+      "why": "an unknown property is ignored, which is what makes _meta the place to put things",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [],
+        "somethingElse": 7
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": []
+      }
+    },
+    {
+      "name": "meta present",
+      "why": "_meta survives as an equivalent JSON value, nested containers and all",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [],
+        "_meta": {
+          "vendor.example/trace": "abc",
+          "depth": {
+            "list": [
+              1,
+              2,
+              {
+                "k": true
+              }
+            ]
+          }
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": [],
+        "_meta": {
+          "vendor.example/trace": "abc",
+          "depth": {
+            "list": [
+              1,
+              2,
+              {
+                "k": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "meta null",
+      "why": "present-as-null is a third state, and re-encoding it must not omit the property",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [],
+        "_meta": null
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": [],
+        "_meta": null
+      }
+    },
+    {
+      "name": "meta malformed",
+      "why": "x-deserialize-default-on-error with no declared default recovers to absent, not to an error",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [],
+        "_meta": "not an object"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": []
+      }
+    },
+    {
+      "name": "every content arm",
+      "why": "the five arms of a closed discriminated union, each selected by its tag",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "a"
+          },
+          {
+            "type": "image",
+            "data": "aGk=",
+            "mimeType": "image/png"
+          },
+          {
+            "type": "audio",
+            "data": "aGk=",
+            "mimeType": "audio/wav"
+          },
+          {
+            "type": "resource_link",
+            "name": "n",
+            "uri": "file:///a",
+            "size": 12
+          },
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "file:///a",
+              "text": "t"
+            }
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "text": "a",
+            "type": "text"
+          },
+          {
+            "data": "aGk=",
+            "mimeType": "image/png",
+            "type": "image"
+          },
+          {
+            "data": "aGk=",
+            "mimeType": "audio/wav",
+            "type": "audio"
+          },
+          {
+            "name": "n",
+            "size": 12,
+            "uri": "file:///a",
+            "type": "resource_link"
+          },
+          {
+            "resource": {
+              "text": "t",
+              "uri": "file:///a"
+            },
+            "type": "resource"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown content arm",
+      "why": "the union is closed, so a tag the schema does not define fails rather than being kept",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "type": "video",
+            "src": "x"
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "name": "known content arm with malformed payload",
+      "why": "a known tag whose payload is wrong fails; it does not fall through to another arm",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "type": "text"
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "name": "content arm with no tag",
+      "why": "every arm of this union declares a tag, so a value without one belongs to none",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "text": "a"
+          }
+        ]
+      },
+      "accepted": false
+    },
+    {
+      "name": "embedded resource, blob arm",
+      "why": "an untagged union is selected by shape: blob rather than text decides the arm",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "file:///a",
+              "blob": "aGk=",
+              "mimeType": "application/octet-stream"
+            }
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "resource": {
+              "blob": "aGk=",
+              "mimeType": "application/octet-stream",
+              "uri": "file:///a"
+            },
+            "type": "resource"
+          }
+        ]
+      }
+    },
+    {
+      "name": "annotations, three states and a skipped item",
+      "why": "optional-and-nullable properties keep absent, null and present apart, and an invalid array item is dropped",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "absent",
+            "annotations": {
+              "audience": [
+                "user"
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": "null",
+            "annotations": null
+          },
+          {
+            "type": "text",
+            "text": "present",
+            "annotations": {
+              "audience": [
+                "user",
+                "nobody",
+                "assistant"
+              ],
+              "lastModified": null,
+              "priority": 0.5
+            }
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "annotations": {
+              "audience": [
+                "user"
+              ]
+            },
+            "text": "absent",
+            "type": "text"
+          },
+          {
+            "annotations": null,
+            "text": "null",
+            "type": "text"
+          },
+          {
+            "annotations": {
+              "audience": [
+                "user",
+                "assistant"
+              ],
+              "lastModified": null,
+              "priority": 0.5
+            },
+            "text": "present",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    {
+      "name": "annotations audience malformed",
+      "why": "the array itself failing is not item recovery: the property falls back to absent",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "a",
+            "annotations": {
+              "audience": "user"
+            }
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "annotations": {},
+            "text": "a",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    {
+      "name": "not an object",
+      "why": "a request is an object; a string that happens to be valid JSON is not one",
+      "input": "sess-1",
+      "accepted": false
+    },
+    {
+      "name": "a fractional integer property",
+      "why": "the schema types size as an integer; this package refuses the value and recovers, and the reference implementation keeps it",
+      "input": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "type": "resource_link",
+            "name": "n",
+            "uri": "file:///a",
+            "size": 1.5
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "prompt": [
+          {
+            "name": "n",
+            "size": 1.5,
+            "uri": "file:///a",
+            "type": "resource_link"
+          }
+        ]
+      },
+      "divergence": {
+        "accepted": true,
+        "normalized": {
+          "sessionId": "sess-1",
+          "prompt": [
+            {
+              "type": "resource_link",
+              "name": "n",
+              "uri": "file:///a"
+            }
+          ]
+        },
+        "because": "The schema types this property `{\"type\":[\"integer\",\"null\"],\"format\":\"int64\"}`, so 1.5 is not a value it admits — and the property carries x-deserialize-default-on-error, so refusing it recovers to absent rather than failing the message. The reference implementation validates int64 and int32 properties as `z.number()`, reaching for `z.int()` only where the schema also states a minimum, so it keeps the fraction. AGENTS.md says the schema wins."
+      }
+    }
+  ]
+}

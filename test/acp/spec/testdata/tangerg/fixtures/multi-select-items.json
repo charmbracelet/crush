@@ -1,0 +1,170 @@
+{
+  "type": "MultiSelectItems",
+  "cases": [
+    {
+      "name": "known arm",
+      "why": "the one tagged arm, selected by its discriminant",
+      "input": {
+        "type": "string",
+        "enum": [
+          "a",
+          "b"
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "enum": [
+          "a",
+          "b"
+        ],
+        "type": "string"
+      }
+    },
+    {
+      "name": "known arm with malformed payload",
+      "why": "the catch-all's `not` clause reserves this tag, so a wrong payload fails instead of becoming custom",
+      "input": {
+        "type": "string"
+      },
+      "accepted": false
+    },
+    {
+      "name": "custom arm",
+      "why": "an unknown tag lands in the catch-all, and the properties it does not declare are the sender's payload",
+      "input": {
+        "type": "_vendor.example",
+        "shape": {
+          "list": [
+            1,
+            2
+          ],
+          "flag": false
+        },
+        "label": "x"
+      },
+      "accepted": true,
+      "normalized": {
+        "type": "_vendor.example",
+        "shape": {
+          "list": [
+            1,
+            2
+          ],
+          "flag": false
+        },
+        "label": "x"
+      }
+    },
+    {
+      "name": "future arm",
+      "why": "the same for a tag that does not begin with an underscore, which the schema reserves for later ACP versions",
+      "input": {
+        "type": "colour",
+        "swatches": [
+          "#fff"
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "type": "colour",
+        "swatches": [
+          "#fff"
+        ]
+      }
+    },
+    {
+      "name": "custom arm with only a tag",
+      "why": "the catch-all's declared property is enough on its own; the payload is optional",
+      "input": {
+        "type": "_bare"
+      },
+      "accepted": true,
+      "normalized": {
+        "type": "_bare"
+      }
+    },
+    {
+      "name": "untagged arm",
+      "why": "an arm that declares no discriminant is selected by the absence of one",
+      "input": {
+        "anyOf": [
+          {
+            "const": "a",
+            "title": "A"
+          },
+          {
+            "const": "b",
+            "title": "B",
+            "description": "the second"
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "anyOf": [
+          {
+            "const": "a",
+            "title": "A"
+          },
+          {
+            "const": "b",
+            "title": "B",
+            "description": "the second"
+          }
+        ]
+      }
+    },
+    {
+      "name": "non-string tag",
+      "why": "a discriminant that is not a string is not a discriminant, so the untagged arms are tried",
+      "input": {
+        "type": 12,
+        "anyOf": [
+          {
+            "const": "a",
+            "title": "A"
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "anyOf": [
+          {
+            "const": "a",
+            "title": "A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "null tag",
+      "why": "null is not a string either, and it must not be read as the empty-string discriminant",
+      "input": {
+        "type": null,
+        "anyOf": [
+          {
+            "const": "a",
+            "title": "A"
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "anyOf": [
+          {
+            "const": "a",
+            "title": "A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "no arm matches",
+      "why": "no tag and no untagged arm's shape: the value belongs to nothing the schema defines",
+      "input": {
+        "unrelated": true
+      },
+      "accepted": false
+    }
+  ]
+}

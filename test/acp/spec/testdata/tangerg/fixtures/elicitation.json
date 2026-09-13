@@ -1,0 +1,546 @@
+{
+  "type": "",
+  "$comment": "Elicitation is the schema's densest nesting: a request is a union of modes and each mode is a union of scopes in the same JSON object, and both of the schema's maps whose values are a union live here. The map cases are the layer-1 evidence for a codec that used to drop the discriminant those values are chosen by.",
+  "cases": [
+    {
+      "name": "a form elicitation scoped to a session",
+      "type": "CreateElicitationRequest",
+      "why": "the common shape: a mode and a scope flattened into the object the message already is",
+      "input": {
+        "message": "which branch?",
+        "mode": "form",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string"
+            }
+          }
+        },
+        "sessionId": "sess-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "form",
+        "message": "which branch?"
+      }
+    },
+    {
+      "name": "a form elicitation tied to a tool call",
+      "type": "CreateElicitationRequest",
+      "why": "the session scope's optional toolCallId, which an agent relaying an MCP server's elicitation sets",
+      "input": {
+        "message": "which branch?",
+        "mode": "form",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "sessionId": "sess-1",
+        "toolCallId": "call-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "toolCallId": "call-1",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "mode": "form",
+        "message": "which branch?"
+      }
+    },
+    {
+      "name": "a form elicitation scoped to a request",
+      "type": "CreateElicitationRequest",
+      "why": "the scope for the phases before any session exists, which names the request instead",
+      "input": {
+        "message": "paste your token",
+        "mode": "form",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "requestId": 7
+      },
+      "accepted": true,
+      "normalized": {
+        "requestId": 7,
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "mode": "form",
+        "message": "paste your token"
+      }
+    },
+    {
+      "name": "a request-scoped elicitation under a string request id",
+      "type": "CreateElicitationRequest",
+      "why": "a JSON-RPC id may be a string or a number, and the scope carries whichever the call used",
+      "input": {
+        "message": "paste your token",
+        "mode": "form",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "requestId": "c276409b"
+      },
+      "accepted": true,
+      "normalized": {
+        "requestId": "c276409b",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "mode": "form",
+        "message": "paste your token"
+      }
+    },
+    {
+      "name": "a url elicitation scoped to a session",
+      "type": "CreateElicitationRequest",
+      "why": "the mode answered twice: once by the response and again by elicitation/complete",
+      "input": {
+        "message": "sign in",
+        "mode": "url",
+        "elicitationId": "elicit-1",
+        "url": "https://example.invalid/sign-in",
+        "sessionId": "sess-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "elicitationId": "elicit-1",
+        "url": "https://example.invalid/sign-in",
+        "mode": "url",
+        "message": "sign in"
+      }
+    },
+    {
+      "name": "a url elicitation scoped to a request",
+      "type": "CreateElicitationRequest",
+      "why": "both scopes exist under both modes, so all four combinations are legal",
+      "input": {
+        "message": "sign in",
+        "mode": "url",
+        "elicitationId": "elicit-1",
+        "url": "https://example.invalid/sign-in",
+        "requestId": 9
+      },
+      "accepted": true,
+      "normalized": {
+        "requestId": 9,
+        "elicitationId": "elicit-1",
+        "url": "https://example.invalid/sign-in",
+        "mode": "url",
+        "message": "sign in"
+      }
+    },
+    {
+      "name": "a url elicitation with an empty url",
+      "type": "CreateElicitationRequest",
+      "why": "format uri is a constraint the schema states and this asks what it means",
+      "input": {
+        "message": "sign in",
+        "mode": "url",
+        "elicitationId": "e-1",
+        "url": "",
+        "sessionId": "sess-1"
+      },
+      "accepted": false
+    },
+    {
+      "name": "a url elicitation with a bare word",
+      "type": "CreateElicitationRequest",
+      "why": "no scheme, so not a URI under any reading",
+      "input": {
+        "message": "sign in",
+        "mode": "url",
+        "elicitationId": "e-1",
+        "url": "not a url",
+        "sessionId": "sess-1"
+      },
+      "accepted": false
+    },
+    {
+      "name": "a url elicitation with a relative path",
+      "type": "CreateElicitationRequest",
+      "why": "a relative reference is not an absolute URI",
+      "input": {
+        "message": "sign in",
+        "mode": "url",
+        "elicitationId": "e-1",
+        "url": "/sign-in",
+        "sessionId": "sess-1"
+      },
+      "accepted": false
+    },
+    {
+      "name": "a url elicitation with a mailto scheme",
+      "type": "CreateElicitationRequest",
+      "why": "a URI need not be http, and the oracle decides how far that goes",
+      "input": {
+        "message": "sign in",
+        "mode": "url",
+        "elicitationId": "e-1",
+        "url": "mailto:someone@example.invalid",
+        "sessionId": "sess-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "elicitationId": "e-1",
+        "url": "mailto:someone@example.invalid",
+        "mode": "url",
+        "message": "sign in"
+      }
+    },
+    {
+      "name": "a url elicitation with a urn",
+      "type": "CreateElicitationRequest",
+      "why": "the other end of the same question",
+      "input": {
+        "message": "sign in",
+        "mode": "url",
+        "elicitationId": "e-1",
+        "url": "urn:ietf:rfc:3986",
+        "sessionId": "sess-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "elicitationId": "e-1",
+        "url": "urn:ietf:rfc:3986",
+        "mode": "url",
+        "message": "sign in"
+      }
+    },
+    {
+      "name": "a mode no version of the schema defines",
+      "type": "CreateElicitationRequest",
+      "why": "the catch-all arm is how a mode from a later release survives being decoded; it carries a scope like every other arm",
+      "input": {
+        "message": "think at me",
+        "mode": "telepathy",
+        "channel": "alpha",
+        "sessionId": "sess-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "mode": "telepathy",
+        "message": "think at me",
+        "channel": "alpha"
+      }
+    },
+    {
+      "name": "a custom mode whose session scope is not a session scope",
+      "type": "CreateElicitationRequest",
+      "why": "an alternative is satisfied by decoding as it, not by naming the properties it requires",
+      "input": {
+        "message": "think at me",
+        "mode": "telepathy",
+        "sessionId": 1
+      },
+      "accepted": false
+    },
+    {
+      "name": "a custom mode whose request scope is not a request scope",
+      "type": "CreateElicitationRequest",
+      "why": "the same for the other alternative: a JSON-RPC id is a string, a number or null",
+      "input": {
+        "message": "think at me",
+        "mode": "telepathy",
+        "requestId": {}
+      },
+      "accepted": false
+    },
+    {
+      "name": "a form elicitation with no scope",
+      "type": "CreateElicitationRequest",
+      "why": "every mode carries a scope union of its own, so a mode naming neither a session nor a request is not one of them",
+      "input": {
+        "message": "which branch?",
+        "mode": "form",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "a url elicitation with no scope",
+      "type": "CreateElicitationRequest",
+      "why": "the same question under the other mode, because the scope union is repeated inside each",
+      "input": {
+        "message": "sign in",
+        "mode": "url",
+        "elicitationId": "e-1",
+        "url": "https://example.invalid/"
+      },
+      "accepted": false
+    },
+    {
+      "name": "a custom mode with no scope",
+      "type": "CreateElicitationRequest",
+      "why": "and under the catch-all arm, which carries the scope union too rather than accepting anything",
+      "input": {
+        "message": "think at me",
+        "mode": "telepathy",
+        "channel": "alpha"
+      },
+      "accepted": false
+    },
+    {
+      "name": "an elicitation with no message",
+      "type": "CreateElicitationRequest",
+      "why": "message is required, and a request without one is not an elicitation anybody could render",
+      "input": {
+        "mode": "form",
+        "requestedSchema": {
+          "type": "object",
+          "properties": {}
+        },
+        "sessionId": "sess-1"
+      },
+      "accepted": false
+    },
+    {
+      "name": "an accepted elicitation carrying every content type",
+      "type": "CreateElicitationResponse",
+      "why": "content is a map whose values are a union, so each one is decoded by the arm its JSON shape selects rather than by its key",
+      "input": {
+        "action": "accept",
+        "content": {
+          "branch": "main",
+          "count": 3,
+          "ratio": 0.5,
+          "force": true,
+          "tags": [
+            "a",
+            "b"
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "content": {
+          "branch": "main",
+          "count": 3,
+          "ratio": 0.5,
+          "force": true,
+          "tags": [
+            "a",
+            "b"
+          ]
+        },
+        "action": "accept"
+      }
+    },
+    {
+      "name": "an accepted elicitation with no content",
+      "type": "CreateElicitationResponse",
+      "why": "content is optional: the user may accept a form that asked for nothing",
+      "input": {
+        "action": "accept"
+      },
+      "accepted": true,
+      "normalized": {
+        "action": "accept"
+      }
+    },
+    {
+      "name": "an accepted elicitation with null content",
+      "type": "CreateElicitationResponse",
+      "why": "the schema permits null here, which is a state of its own and not the absent one",
+      "input": {
+        "action": "accept",
+        "content": null
+      },
+      "accepted": true,
+      "normalized": {
+        "content": null,
+        "action": "accept"
+      }
+    },
+    {
+      "name": "a declined elicitation",
+      "type": "CreateElicitationResponse",
+      "why": "the user said no, which is an outcome rather than a failure",
+      "input": {
+        "action": "decline"
+      },
+      "accepted": true,
+      "normalized": {
+        "action": "decline"
+      }
+    },
+    {
+      "name": "a cancelled elicitation",
+      "type": "CreateElicitationResponse",
+      "why": "cancellation is a third outcome, distinct from declining",
+      "input": {
+        "action": "cancel"
+      },
+      "accepted": true,
+      "normalized": {
+        "action": "cancel"
+      }
+    },
+    {
+      "name": "an action no version of the schema defines",
+      "type": "CreateElicitationResponse",
+      "why": "the response has a catch-all arm too, for the same reason the request does",
+      "input": {
+        "action": "deferred",
+        "until": "tomorrow"
+      },
+      "accepted": true,
+      "normalized": {
+        "action": "deferred",
+        "until": "tomorrow"
+      }
+    },
+    {
+      "name": "a schema with one property of each primitive type",
+      "type": "ElicitationSchema",
+      "why": "properties is the schema's other map of unions, and every arm's discriminant has to survive the round trip",
+      "input": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "a",
+                "b"
+              ]
+            }
+          }
+        },
+        "required": [
+          "branch"
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "force": {
+            "default": false,
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "enum": [
+                "a",
+                "b"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "branch"
+        ]
+      }
+    },
+    {
+      "name": "a schema with a property type no version defines",
+      "type": "ElicitationSchema",
+      "why": "a property whose type is unknown recovers through the catch-all arm rather than costing the whole form",
+      "input": {
+        "type": "object",
+        "properties": {
+          "colour": {
+            "type": "chromatic",
+            "palette": "warm"
+          }
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "type": "object",
+        "properties": {
+          "colour": {
+            "type": "chromatic",
+            "palette": "warm"
+          }
+        }
+      }
+    },
+    {
+      "name": "a schema with no properties",
+      "type": "ElicitationSchema",
+      "why": "properties has a declared default, so an absent one is the empty object rather than absent",
+      "input": {
+        "type": "object"
+      },
+      "accepted": true,
+      "normalized": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "the completion of a url elicitation",
+      "type": "CompleteElicitationNotification",
+      "why": "it names only the elicitation: a url elicitation may have been started before any session existed",
+      "input": {
+        "elicitationId": "elicit-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "elicitationId": "elicit-1"
+      }
+    },
+    {
+      "name": "a completion naming no elicitation",
+      "type": "CompleteElicitationNotification",
+      "why": "elicitationId is required; a completion that names nothing closes nothing",
+      "input": {},
+      "accepted": false
+    }
+  ]
+}

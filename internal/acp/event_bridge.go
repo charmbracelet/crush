@@ -5,11 +5,13 @@ package acp
 import (
 	"context"
 	"log/slog"
+	"sync"
 
-	acp "github.com/coder/acp-go-sdk"
-	"github.com/charmbracelet/crush/internal/app"
 	notify "github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // eventBridge translates Crush agent events into ACP session updates.
@@ -18,15 +20,22 @@ type eventBridge struct {
 	app    *app.App
 	log    *slog.Logger
 	cancel context.CancelFunc
+
+	// mu guards streamed, the per-message count of text bytes already sent to
+	// the client. Message events carry a whole-message snapshot rather than a
+	// delta, so the difference against the last snapshot is the new text.
+	mu       sync.Mutex
+	streamed map[string]int
 }
 
 // newEventBridge creates a bridge that listens for agent events and
 // forwards them as ACP session/update notifications.
 func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logger) *eventBridge {
 	return &eventBridge{
-		conn: conn,
-		app:  app,
-		log:  log,
+		conn:     conn,
+		app:      app,
+		log:      log,
+		streamed: make(map[string]int),
 	}
 }
 
@@ -35,9 +44,20 @@ func (b *eventBridge) Start(ctx context.Context) error {
 	ctx, b.cancel = context.WithCancel(ctx)
 
 	// Subscribe to agent notifications (errors, auth events, etc.)
-	if b.app.AgentNotifications() != nil { go b.subscribeNotifications(ctx, b.app.AgentNotifications()) }
+	if b.app.AgentNotifications() != nil {
+		go b.subscribeNotifications(ctx, b.app.AgentNotifications())
+	}
 	// Subscribe to run completions (turn-end signals)
-	if b.app.RunCompletions() != nil { go b.subscribeRunCompletions(ctx, b.app.RunCompletions()) }
+	if b.app.RunCompletions() != nil {
+		go b.subscribeRunCompletions(ctx, b.app.RunCompletions())
+	}
+	// Subscribe to message updates, which is where streaming assistant text
+	// actually lives. Without this a successful turn sends the client no
+	// session/update at all, and an editor that waits for the first
+	// agent_message_chunk shows a loading indicator forever.
+	if b.app.Messages != nil {
+		go b.subscribeMessages(ctx)
+	}
 
 	<-ctx.Done()
 	return ctx.Err()
@@ -47,6 +67,49 @@ func (b *eventBridge) Start(ctx context.Context) error {
 func (b *eventBridge) Shutdown() {
 	if b.cancel != nil {
 		b.cancel()
+	}
+}
+
+// subscribeMessages forwards assistant text as it streams. Message events hold
+// a full snapshot of the message, so what has not yet been sent is the tail
+// beyond the offset recorded for that message.
+func (b *eventBridge) subscribeMessages(ctx context.Context) {
+	ch := b.app.Messages.Subscribe(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-ch:
+			b.handleMessage(ctx, ev.Payload)
+		}
+	}
+}
+
+func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {
+	if m.Role != message.Assistant || m.SessionID == "" {
+		return
+	}
+	text := m.Content().Text
+
+	b.mu.Lock()
+	sent := b.streamed[m.ID]
+	if len(text) < sent {
+		// The message was replaced or rewritten; resend from the start.
+		sent = 0
+	}
+	b.streamed[m.ID] = len(text)
+	b.mu.Unlock()
+
+	if len(text) <= sent {
+		return
+	}
+	delta := text[sent:]
+	update := acp.SessionNotification{
+		SessionId: acp.SessionId(m.SessionID),
+		Update:    acp.UpdateAgentMessageText(delta),
+	}
+	if err := b.conn.SessionUpdate(ctx, update); err != nil {
+		b.log.Warn("Failed to send streamed session update", "error", err)
 	}
 }
 

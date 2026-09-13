@@ -1,0 +1,18 @@
+{
+  "sessionId": "sess_abc123def456",
+  "toolCall": {
+    "toolCallId": "call_001"
+  },
+  "options": [
+    {
+      "optionId": "allow-once",
+      "name": "Allow once",
+      "kind": "allow_once"
+    },
+    {
+      "optionId": "reject-once",
+      "name": "Reject",
+      "kind": "reject_once"
+    }
+  ]
+}

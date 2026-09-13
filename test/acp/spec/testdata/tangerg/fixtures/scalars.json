@@ -1,0 +1,96 @@
+{
+  "type": "",
+  "$comment": "Each case names its own type: these are the definitions that are not objects, and one case per file would say less than one file per shape.",
+  "cases": [
+    {
+      "name": "closed enumeration, a defined value",
+      "type": "StopReason",
+      "why": "the ordinary case",
+      "input": "cancelled",
+      "accepted": true,
+      "normalized": "cancelled"
+    },
+    {
+      "name": "closed enumeration, an undefined value",
+      "type": "StopReason",
+      "why": "the schema lists five and no others, so a sixth fails: a caller's switch was promised to be exhaustive",
+      "input": "gave_up",
+      "accepted": false
+    },
+    {
+      "name": "closed enumeration, wrong JSON type",
+      "type": "StopReason",
+      "why": "a number is not one of the five either",
+      "input": 3,
+      "accepted": false
+    },
+    {
+      "name": "open string union, a listed value",
+      "type": "SessionConfigOptionCategory",
+      "why": "the ordinary case",
+      "input": "model",
+      "accepted": true,
+      "normalized": "model"
+    },
+    {
+      "name": "open string union, an unlisted value",
+      "type": "SessionConfigOptionCategory",
+      "why": "the schema's last arm is a bare string, so this is valid and is kept exactly as received",
+      "input": "_house_brand",
+      "accepted": true,
+      "normalized": "_house_brand"
+    },
+    {
+      "name": "open string union, wrong JSON type",
+      "type": "SessionConfigOptionCategory",
+      "why": "open means any string, not any value",
+      "input": true,
+      "accepted": false
+    },
+    {
+      "name": "bounded integer, in range",
+      "type": "ProtocolVersion",
+      "why": "the ordinary case",
+      "input": 1,
+      "accepted": true,
+      "normalized": 1
+    },
+    {
+      "name": "bounded integer, at the top of the range",
+      "type": "ProtocolVersion",
+      "why": "the declared maximum is inclusive",
+      "input": 65535,
+      "accepted": true,
+      "normalized": 65535
+    },
+    {
+      "name": "bounded integer, above the range",
+      "type": "ProtocolVersion",
+      "why": "the schema's maximum is a constraint, and the Go type chosen from the format enforces it",
+      "input": 65536,
+      "accepted": false
+    },
+    {
+      "name": "bounded integer, below the range",
+      "type": "ProtocolVersion",
+      "why": "the same at the other end: the format is unsigned",
+      "input": -1,
+      "accepted": false
+    },
+    {
+      "name": "bounded integer, not an integer",
+      "type": "ProtocolVersion",
+      "why": "the format is an integer format",
+      "input": 1.5,
+      "accepted": false
+    },
+    {
+      "name": "identifier, any string",
+      "type": "SessionID",
+      "why": "the schema constrains a session id no further than to be a string",
+      "input": "sess-1",
+      "accepted": true,
+      "normalized": "sess-1"
+    }
+  ]
+}

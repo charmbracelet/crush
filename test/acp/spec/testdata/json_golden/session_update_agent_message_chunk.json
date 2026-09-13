@@ -1,0 +1,7 @@
+{
+  "sessionUpdate": "agent_message_chunk",
+  "content": {
+    "type": "text",
+    "text": "The capital of France is Paris."
+  }
+}

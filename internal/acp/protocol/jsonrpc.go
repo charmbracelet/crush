@@ -14,25 +14,25 @@ const (
 
 // Error codes defined by JSON-RPC 2.0 and ACP.
 const (
-	ErrCodeParse       = -32700
-	ErrCodeInvalidReq  = -32600
-	ErrCodeMethodNotFound = -32601
-	ErrCodeInvalidParams = -32602
-	ErrCodeInternal    = -32603
-	ErrCodeCancelled   = -32800
-	ErrCodeAuthRequired = -32000
+	ErrCodeParse            = -32700
+	ErrCodeInvalidReq       = -32600
+	ErrCodeMethodNotFound   = -32601
+	ErrCodeInvalidParams    = -32602
+	ErrCodeInternal         = -32603
+	ErrCodeCancelled        = -32800
+	ErrCodeAuthRequired     = -32000
 	ErrCodeResourceNotFound = -32002
 )
 
 // Message is the union of all JSON-RPC 2.0 message kinds.
 type Message struct {
 	// JSON-RPC fields.
-	JSONRPC string `json:"jsonrpc"`
-	ID      *int   `json:"id,omitempty"`
-	Method  string `json:"method,omitempty"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      *int            `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *RPCError `json:"error,omitempty"`
+	Error   *RPCError       `json:"error,omitempty"`
 }
 
 // RPCError is a JSON-RPC 2.0 error object.

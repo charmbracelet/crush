@@ -1,0 +1,13 @@
+{
+  "sessionUpdate": "tool_call",
+  "toolCallId": "call_lr",
+  "title": "Tracking file",
+  "locations": [
+    {
+      "path": "/home/user/project/src/config.json"
+    }
+  ],
+  "rawInput": {
+    "path": "/home/user/project/src/config.json"
+  }
+}

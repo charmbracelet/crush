@@ -1,0 +1,650 @@
+{
+  "type": "SessionNotification",
+  "$comment": "session/update carries the whole of a turn's output, and its update property is the schema's largest union: fifteen arms, three of which share one payload. It is the message this SDK sends most, so it is the one the corpus covers most closely.",
+  "cases": [
+    {
+      "name": "a message chunk",
+      "why": "the tag is the only thing separating three arms that carry the same payload",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "hello"
+          }
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "content": {
+            "text": "hello",
+            "type": "text"
+          },
+          "sessionUpdate": "agent_message_chunk"
+        }
+      }
+    },
+    {
+      "name": "the other two chunk arms",
+      "why": "each must round-trip to its own tag rather than to whichever arm was tried first",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "user_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "ask"
+          },
+          "messageId": "m-1"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "content": {
+            "text": "ask",
+            "type": "text"
+          },
+          "messageId": "m-1",
+          "sessionUpdate": "user_message_chunk"
+        }
+      }
+    },
+    {
+      "name": "a thought chunk",
+      "why": "the third arm sharing ContentChunk",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "agent_thought_chunk",
+          "content": {
+            "type": "text",
+            "text": "thinking"
+          }
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "content": {
+            "text": "thinking",
+            "type": "text"
+          },
+          "sessionUpdate": "agent_thought_chunk"
+        }
+      }
+    },
+    {
+      "name": "a tool call",
+      "why": "an arm whose payload no other arm shares, so the payload type is the arm",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call-1",
+          "title": "Read a file",
+          "kind": "read",
+          "status": "in_progress",
+          "locations": [
+            {
+              "path": "/a",
+              "line": 12
+            }
+          ],
+          "rawInput": {
+            "path": "/a"
+          }
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "toolCallId": "call-1",
+          "title": "Read a file",
+          "kind": "read",
+          "status": "in_progress",
+          "locations": [
+            {
+              "path": "/a",
+              "line": 12
+            }
+          ],
+          "rawInput": {
+            "path": "/a"
+          },
+          "sessionUpdate": "tool_call"
+        }
+      }
+    },
+    {
+      "name": "a tool call with every content arm",
+      "why": "ToolCallContent has three arms, one of which nests another union",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call-1",
+          "title": "Do work",
+          "content": [
+            {
+              "type": "content",
+              "content": {
+                "type": "text",
+                "text": "out"
+              }
+            },
+            {
+              "type": "diff",
+              "path": "/a",
+              "oldText": "before",
+              "newText": "after"
+            },
+            {
+              "type": "terminal",
+              "terminalId": "term-1"
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "toolCallId": "call-1",
+          "title": "Do work",
+          "content": [
+            {
+              "content": {
+                "text": "out",
+                "type": "text"
+              },
+              "type": "content"
+            },
+            {
+              "path": "/a",
+              "oldText": "before",
+              "newText": "after",
+              "type": "diff"
+            },
+            {
+              "terminalId": "term-1",
+              "type": "terminal"
+            }
+          ],
+          "sessionUpdate": "tool_call"
+        }
+      }
+    },
+    {
+      "name": "a tool call update",
+      "why": "its payload is also an ordinary property of RequestPermissionRequest, so the payload cannot own the tag",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "call-1",
+          "status": "completed"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "toolCallId": "call-1",
+          "status": "completed",
+          "sessionUpdate": "tool_call_update"
+        }
+      }
+    },
+    {
+      "name": "an unknown tool kind is salvaged",
+      "why": "kind carries x-deserialize-default-on-error with no declared default, so it recovers to absent",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call-1",
+          "title": "t",
+          "kind": "telepathy"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "toolCallId": "call-1",
+          "title": "t",
+          "sessionUpdate": "tool_call"
+        }
+      }
+    },
+    {
+      "name": "an invalid content item is dropped",
+      "why": "the content array carries x-deserialize-skip-invalid-items",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "toolCallId": "call-1",
+          "title": "t",
+          "content": [
+            {
+              "type": "diff",
+              "path": "/a",
+              "newText": "x"
+            },
+            {
+              "type": "diff",
+              "path": "/b"
+            },
+            {
+              "type": "terminal",
+              "terminalId": "term-1"
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "toolCallId": "call-1",
+          "title": "t",
+          "content": [
+            {
+              "path": "/a",
+              "newText": "x",
+              "type": "diff"
+            },
+            {
+              "terminalId": "term-1",
+              "type": "terminal"
+            }
+          ],
+          "sessionUpdate": "tool_call"
+        }
+      }
+    },
+    {
+      "name": "a plan",
+      "why": "an arm whose payload is named for the tag, so the two coincide",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "plan",
+          "entries": [
+            {
+              "content": "first",
+              "priority": "high",
+              "status": "pending"
+            },
+            {
+              "content": "second",
+              "priority": "low",
+              "status": "completed"
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "entries": [
+            {
+              "content": "first",
+              "priority": "high",
+              "status": "pending"
+            },
+            {
+              "content": "second",
+              "priority": "low",
+              "status": "completed"
+            }
+          ],
+          "sessionUpdate": "plan"
+        }
+      }
+    },
+    {
+      "name": "a plan update, whose content is another union",
+      "why": "plan_update is not part of the published stable schema",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "plan_update",
+          "plan": {
+            "type": "markdown",
+            "planId": "plan-1",
+            "content": "# steps"
+          }
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "a plan removal",
+      "why": "plan_removed is not part of the published stable schema",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "plan_removed",
+          "planId": "plan-1"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "available commands",
+      "why": "AvailableCommandInput is a union with exactly one arm, and that arm declares no discriminant",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "available_commands_update",
+          "availableCommands": [
+            {
+              "name": "test",
+              "description": "run the tests"
+            },
+            {
+              "name": "grep",
+              "description": "search",
+              "input": {
+                "hint": "pattern"
+              }
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "availableCommands": [
+            {
+              "name": "test",
+              "description": "run the tests"
+            },
+            {
+              "name": "grep",
+              "description": "search",
+              "input": {
+                "hint": "pattern"
+              }
+            }
+          ],
+          "sessionUpdate": "available_commands_update"
+        }
+      }
+    },
+    {
+      "name": "a mode change",
+      "why": "the arm a client watches to keep its own mode display honest",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "current_mode_update",
+          "currentModeId": "ask"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "currentModeId": "ask",
+          "sessionUpdate": "current_mode_update"
+        }
+      }
+    },
+    {
+      "name": "a config option update, whose items flatten a union",
+      "why": "SessionConfigOption is an object and a union at once: its own properties plus a kind-specific shape in the same JSON object",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "config_option_update",
+          "configOptions": [
+            {
+              "id": "cfg-1",
+              "name": "Verbose",
+              "type": "boolean",
+              "currentValue": true
+            },
+            {
+              "id": "cfg-2",
+              "name": "Model",
+              "category": "model",
+              "type": "select",
+              "currentValue": "fast",
+              "options": [
+                {
+                  "value": "fast",
+                  "name": "Fast"
+                },
+                {
+                  "value": "slow",
+                  "name": "Slow",
+                  "description": "more careful"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "configOptions": [
+            {
+              "currentValue": true,
+              "type": "boolean",
+              "id": "cfg-1",
+              "name": "Verbose"
+            },
+            {
+              "currentValue": "fast",
+              "options": [
+                {
+                  "value": "fast",
+                  "name": "Fast"
+                },
+                {
+                  "value": "slow",
+                  "name": "Slow",
+                  "description": "more careful"
+                }
+              ],
+              "type": "select",
+              "id": "cfg-2",
+              "name": "Model",
+              "category": "model"
+            }
+          ],
+          "sessionUpdate": "config_option_update"
+        }
+      }
+    },
+    {
+      "name": "a config option whose options are grouped",
+      "why": "SessionConfigSelectOptions is a value union: two differently-typed arrays, told apart by shape",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "config_option_update",
+          "configOptions": [
+            {
+              "id": "cfg-2",
+              "name": "Model",
+              "type": "select",
+              "currentValue": "fast",
+              "options": [
+                {
+                  "group": "cheap",
+                  "name": "Cheap",
+                  "options": [
+                    {
+                      "value": "fast",
+                      "name": "Fast"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "configOptions": [
+            {
+              "currentValue": "fast",
+              "options": [
+                {
+                  "group": "cheap",
+                  "name": "Cheap",
+                  "options": [
+                    {
+                      "value": "fast",
+                      "name": "Fast"
+                    }
+                  ]
+                }
+              ],
+              "type": "select",
+              "id": "cfg-2",
+              "name": "Model"
+            }
+          ],
+          "sessionUpdate": "config_option_update"
+        }
+      }
+    },
+    {
+      "name": "session info",
+      "why": "an arm all of whose properties are optional, so an empty payload is valid",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "session_info_update"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "session_info_update"
+        }
+      }
+    },
+    {
+      "name": "usage",
+      "why": "an arm carrying numbers, whose formats decide their Go types",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": {
+            "totalTokens": 120,
+            "inputTokens": 100,
+            "outputTokens": 20
+          },
+          "size": 200000,
+          "cost": {
+            "amount": 0.0125,
+            "currency": "USD"
+          }
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "a compaction",
+      "why": "compaction_update is not part of the published stable schema",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "compaction_update",
+          "compactionId": "c-1",
+          "status": "in_progress"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "a compaction with an unlisted status",
+      "why": "compaction_update remains non-standard even with an extension-like status",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "compaction_update",
+          "compactionId": "c-1",
+          "status": "_vendor_paused"
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "a compaction summary chunk",
+      "why": "compaction_summary_chunk is not part of the published stable schema",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "compaction_summary_chunk",
+          "compactionId": "c-1",
+          "content": {
+            "type": "text",
+            "text": "summary"
+          }
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "an unknown update arm",
+      "why": "the union is closed, so a tag the schema does not define fails the message",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "telepathy_chunk",
+          "content": {}
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "an update with no tag",
+      "why": "every arm declares one, so a value without it belongs to none",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "content": {
+            "type": "text",
+            "text": "a"
+          }
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "a known arm with a malformed payload",
+      "why": "a known tag whose payload is wrong fails rather than falling through",
+      "input": {
+        "sessionId": "sess-1",
+        "update": {
+          "sessionUpdate": "tool_call",
+          "title": "no id"
+        }
+      },
+      "accepted": false
+    }
+  ]
+}

@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"sync"
 
-	acp "github.com/coder/acp-go-sdk"
 	"github.com/charmbracelet/crush/internal/permission"
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // permissionBridge handles the mapping between Crush permission requests

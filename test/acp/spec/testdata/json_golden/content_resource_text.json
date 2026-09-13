@@ -1,0 +1,8 @@
+{
+  "type": "resource",
+  "resource": {
+    "uri": "file:///home/user/script.py",
+    "mimeType": "text/x-python",
+    "text": "def hello():\n    print('Hello, world!')"
+  }
+}

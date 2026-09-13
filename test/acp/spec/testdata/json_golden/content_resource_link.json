@@ -1,0 +1,7 @@
+{
+  "type": "resource_link",
+  "uri": "file:///home/user/document.pdf",
+  "name": "document.pdf",
+  "mimeType": "application/pdf",
+  "size": 1024000
+}

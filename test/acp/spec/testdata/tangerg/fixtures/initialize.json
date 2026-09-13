@@ -1,0 +1,345 @@
+{
+  "type": "",
+  "$comment": "initialize is the capability exchange, and capabilities are the schema's densest use of declared defaults: an absent property is not absent, it is the default, and a malformed one recovers to the same value.",
+  "cases": [
+    {
+      "name": "the minimum a client can send",
+      "type": "InitializeRequest",
+      "why": "only the version is required, and every capability defaults",
+      "input": {
+        "protocolVersion": 1
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": false,
+            "writeTextFile": false
+          },
+          "terminal": false,
+          "auth": {
+            "terminal": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a client that advertises nothing explicitly",
+      "type": "InitializeRequest",
+      "why": "an empty capability object still resolves to the declared defaults, one level down",
+      "input": {
+        "protocolVersion": 1,
+        "clientCapabilities": {}
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": false,
+            "writeTextFile": false
+          },
+          "terminal": false,
+          "auth": {
+            "terminal": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a client that advertises everything it can",
+      "type": "InitializeRequest",
+      "why": "the ordinary case, with a nested capability object and an identification",
+      "input": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": true,
+            "writeTextFile": true
+          },
+          "terminal": true,
+          "auth": {
+            "terminal": true
+          }
+        },
+        "clientInfo": {
+          "name": "an editor",
+          "version": "1.2.3",
+          "title": "An Editor"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": true,
+            "writeTextFile": true
+          },
+          "terminal": true,
+          "auth": {
+            "terminal": true
+          }
+        },
+        "clientInfo": {
+          "name": "an editor",
+          "title": "An Editor",
+          "version": "1.2.3"
+        }
+      }
+    },
+    {
+      "name": "a malformed capability object recovers to its declared default",
+      "type": "InitializeRequest",
+      "why": "this is the case design.md cites: a malformed fs must become both-false rather than fail the message",
+      "input": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": "yes please",
+          "terminal": true
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": false,
+            "writeTextFile": false
+          },
+          "terminal": true,
+          "auth": {
+            "terminal": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a malformed capability property inside a valid object",
+      "type": "InitializeRequest",
+      "why": "recovery is per property, so one bad value does not cost its neighbours",
+      "input": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": "yes",
+            "writeTextFile": true
+          }
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": false,
+            "writeTextFile": true
+          },
+          "terminal": false,
+          "auth": {
+            "terminal": false
+          }
+        }
+      }
+    },
+    {
+      "name": "a version outside the schema's range",
+      "type": "InitializeRequest",
+      "why": "the version is a bounded integer and the bound is a constraint, not advice",
+      "input": {
+        "protocolVersion": 70000
+      },
+      "accepted": false
+    },
+    {
+      "name": "the minimum an agent can answer",
+      "type": "InitializeResponse",
+      "why": "the same, from the other side",
+      "input": {
+        "protocolVersion": 1
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": false,
+          "promptCapabilities": {
+            "image": false,
+            "audio": false,
+            "embeddedContext": false
+          },
+          "mcpCapabilities": {
+            "http": false,
+            "sse": false
+          },
+          "sessionCapabilities": {},
+          "auth": {}
+        },
+        "authMethods": []
+      }
+    },
+    {
+      "name": "an agent that advertises auth methods",
+      "type": "InitializeResponse",
+      "why": "AuthMethod is a union with a tagged arm and an untagged one, and the tagged arm carries a map",
+      "input": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "image": true
+          }
+        },
+        "authMethods": [
+          {
+            "id": "oauth",
+            "name": "Sign in"
+          },
+          {
+            "type": "terminal",
+            "id": "cli",
+            "name": "Run a command",
+            "args": [
+              "login",
+              "--now"
+            ],
+            "env": {
+              "ZED": "1",
+              "ACP": "2"
+            }
+          }
+        ],
+        "agentInfo": {
+          "name": "an agent",
+          "version": "0.1.0"
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "image": true,
+            "audio": false,
+            "embeddedContext": false
+          },
+          "mcpCapabilities": {
+            "http": false,
+            "sse": false
+          },
+          "sessionCapabilities": {},
+          "auth": {}
+        },
+        "authMethods": [
+          {
+            "id": "oauth",
+            "name": "Sign in"
+          },
+          {
+            "id": "cli",
+            "name": "Run a command",
+            "args": [
+              "login",
+              "--now"
+            ],
+            "env": {
+              "ZED": "1",
+              "ACP": "2"
+            },
+            "type": "terminal"
+          }
+        ],
+        "agentInfo": {
+          "name": "an agent",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "name": "a malformed map recovers",
+      "why": "env is a map with x-deserialize-default-on-error and no declared default",
+      "type": "InitializeResponse",
+      "input": {
+        "protocolVersion": 1,
+        "authMethods": [
+          {
+            "type": "terminal",
+            "id": "cli",
+            "name": "n",
+            "env": [
+              "not",
+              "a",
+              "map"
+            ]
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": false,
+          "promptCapabilities": {
+            "image": false,
+            "audio": false,
+            "embeddedContext": false
+          },
+          "mcpCapabilities": {
+            "http": false,
+            "sse": false
+          },
+          "sessionCapabilities": {},
+          "auth": {}
+        },
+        "authMethods": [
+          {
+            "id": "cli",
+            "name": "n",
+            "type": "terminal"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an auth method with an unknown tag",
+      "type": "InitializeResponse",
+      "why": "no arm claims the tag and the untagged arm requires an id and a name, so this one has both and matches it",
+      "input": {
+        "protocolVersion": 1,
+        "authMethods": [
+          {
+            "type": "retina",
+            "id": "eye",
+            "name": "Look at the camera"
+          }
+        ]
+      },
+      "accepted": true,
+      "normalized": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": false,
+          "promptCapabilities": {
+            "image": false,
+            "audio": false,
+            "embeddedContext": false
+          },
+          "mcpCapabilities": {
+            "http": false,
+            "sse": false
+          },
+          "sessionCapabilities": {},
+          "auth": {}
+        },
+        "authMethods": [
+          {
+            "id": "eye",
+            "name": "Look at the camera"
+          }
+        ]
+      }
+    }
+  ]
+}

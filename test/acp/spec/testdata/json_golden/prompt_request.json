@@ -1,0 +1,17 @@
+{
+  "sessionId": "sess_abc123def456",
+  "prompt": [
+    {
+      "type": "text",
+      "text": "Can you analyze this code for potential issues?"
+    },
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "file:///home/user/project/main.py",
+        "mimeType": "text/x-python",
+        "text": "def process_data(items):\n    for item in items:\n        print(item)"
+      }
+    }
+  ]
+}

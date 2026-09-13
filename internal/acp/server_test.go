@@ -9,18 +9,21 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/coder/acp-go-sdk"
 	"github.com/charmbracelet/crush/internal/app"
+	acp "github.com/coder/acp-go-sdk"
 )
 
 func TestServerStartEndToEnd(t *testing.T) {
-	r, w := io.Pipe()
-	defer r.Close()
-	defer w.Close()
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
 
 	app := &app.App{Sessions: &stubSessionService{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := NewServer(app, log, r, w)
+	srv := NewServer(app, log, c2aR, a2cW)
 
 	done := make(chan error, 1)
 	go func() {
@@ -33,7 +36,7 @@ func TestServerStartEndToEnd(t *testing.T) {
 	var clientErr error
 	go func() {
 		defer close(clientDone)
-		c := acp.NewClientSideConnection(&testClient{}, w, r)
+		c := acp.NewClientSideConnection(&testClient{}, c2aW, a2cR)
 		ctx := context.Background()
 
 		// Initialize
@@ -60,7 +63,7 @@ func TestServerStartEndToEnd(t *testing.T) {
 			clientErr = err
 		}
 		// Close the write end to signal disconnect.
-		if cerr := w.Close(); cerr != nil {
+		if cerr := c2aW.Close(); cerr != nil {
 			clientErr = cerr
 		}
 	}()
@@ -91,27 +94,35 @@ func TestServerStartEndToEnd(t *testing.T) {
 type testClient struct{}
 
 func (c *testClient) SessionUpdate(_ context.Context, _ acp.SessionNotification) error { return nil }
+
 func (c *testClient) RequestPermission(_ context.Context, _ acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	return acp.RequestPermissionResponse{}, nil
 }
+
 func (c *testClient) ReadTextFile(_ context.Context, _ acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	return acp.ReadTextFileResponse{}, nil
 }
+
 func (c *testClient) WriteTextFile(_ context.Context, _ acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	return acp.WriteTextFileResponse{}, nil
 }
+
 func (c *testClient) CreateTerminal(_ context.Context, _ acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
 	return acp.CreateTerminalResponse{}, nil
 }
+
 func (c *testClient) TerminalOutput(_ context.Context, _ acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
 	return acp.TerminalOutputResponse{}, nil
 }
+
 func (c *testClient) WaitForTerminalExit(_ context.Context, _ acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
 	return acp.WaitForTerminalExitResponse{}, nil
 }
+
 func (c *testClient) ReleaseTerminal(_ context.Context, _ acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
 	return acp.ReleaseTerminalResponse{}, nil
 }
+
 func (c *testClient) KillTerminal(_ context.Context, _ acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
 	return acp.KillTerminalResponse{}, nil
 }

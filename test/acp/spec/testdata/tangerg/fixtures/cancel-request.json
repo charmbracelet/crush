@@ -1,0 +1,81 @@
+{
+  "type": "CancelRequestNotification",
+  "$comment": "$/cancel_request is the one method that belongs to neither peer, and its payload is the only place a JSON-RPC request identifier reaches the schema. The identifier is a value union: null, an integer or a string, told apart by shape rather than by a discriminant. Both types are generated unexported — a caller cancels by cancelling a context, and never names a request id.",
+  "cases": [
+    {
+      "name": "a string identifier",
+      "why": "the arm most implementations use",
+      "input": {
+        "requestId": "req-1"
+      },
+      "accepted": true,
+      "normalized": {
+        "requestId": "req-1"
+      }
+    },
+    {
+      "name": "a numeric identifier",
+      "why": "the second arm, whose format decides its Go type",
+      "input": {
+        "requestId": 42
+      },
+      "accepted": true,
+      "normalized": {
+        "requestId": 42
+      }
+    },
+    {
+      "name": "a negative numeric identifier",
+      "why": "the format is int64, so the sign is not a constraint",
+      "input": {
+        "requestId": -42
+      },
+      "accepted": true,
+      "normalized": {
+        "requestId": -42
+      }
+    },
+    {
+      "name": "the null identifier",
+      "why": "the arm every other arm's decoder refuses, so it is tried first",
+      "input": {
+        "requestId": null
+      },
+      "accepted": true,
+      "normalized": {
+        "requestId": null
+      }
+    },
+    {
+      "name": "an identifier that is neither",
+      "why": "three arms and no discriminant: a value matching none of them belongs to nothing",
+      "input": {
+        "requestId": {
+          "id": 1
+        }
+      },
+      "accepted": false
+    },
+    {
+      "name": "a fractional identifier",
+      "why": "the schema types this arm as an integer, and the reference implementation does not check that",
+      "input": {
+        "requestId": 1.5
+      },
+      "accepted": true,
+      "normalized": {
+        "requestId": 1.5
+      },
+      "divergence": {
+        "accepted": false,
+        "because": "The schema types this arm `{\"type\":\"integer\",\"format\":\"int64\"}`, and 1.5 is not an integer. The reference implementation validates it as `z.number()` — it reaches for `z.int()` only where the schema also states a minimum, so most of its integer fields accept fractions. AGENTS.md says the schema wins, so this is refused here, and the difference belongs upstream rather than in a local dialect."
+      }
+    },
+    {
+      "name": "no identifier",
+      "why": "the property is required: a cancellation with nothing to cancel is not a cancellation",
+      "input": {},
+      "accepted": false
+    }
+  ]
+}

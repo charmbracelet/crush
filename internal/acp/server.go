@@ -7,17 +7,17 @@ import (
 	"io"
 	"log/slog"
 
-	acp "github.com/coder/acp-go-sdk"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/permission"
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // Server is the ACP server adapter for Crush.
 type Server struct {
-	conn         *acp.AgentSideConnection
-	permb        *permissionBridge
-	permService  permission.Service
-	eventBridge  *eventBridge
+	conn        *acp.AgentSideConnection
+	permb       *permissionBridge
+	permService permission.Service
+	eventBridge *eventBridge
 }
 
 // Agent is the Crush-side interface the SDK calls into.
@@ -38,14 +38,14 @@ func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) 
 	agent := newCrushAgent(a, log)
 	d := &dispatcher{agent: agent, app: a}
 	conn := acp.NewAgentSideConnection(d, stdout, stdin)
-	
+
 	// Create permission bridge and wrap the real service.
 	permb := newPermissionBridge(conn, log)
 	permService := newACPPermissionService(a.Permissions, permb)
-	
+
 	// Create event bridge for streaming notifications.
 	eventBridge := newEventBridge(conn, a, log)
-	
+
 	return &Server{
 		conn:        conn,
 		permb:       permb,

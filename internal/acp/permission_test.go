@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/coder/acp-go-sdk"
 	"github.com/charmbracelet/crush/internal/app"
+	acp "github.com/coder/acp-go-sdk"
 )
 
 func TestBuildPermissionOptions(t *testing.T) {
@@ -104,30 +104,40 @@ func TestPermissionBridgeIntegration(t *testing.T) {
 // acceptingTestClient is a test client that accepts all permissions.
 type acceptingTestClient struct{}
 
-func (c *acceptingTestClient) SessionUpdate(_ context.Context, _ acp.SessionNotification) error { return nil }
+func (c *acceptingTestClient) SessionUpdate(_ context.Context, _ acp.SessionNotification) error {
+	return nil
+}
+
 func (c *acceptingTestClient) RequestPermission(_ context.Context, _ acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	return acp.RequestPermissionResponse{
 		Outcome: acp.NewRequestPermissionOutcomeSelected("allow_once"),
 	}, nil
 }
+
 func (c *acceptingTestClient) ReadTextFile(_ context.Context, _ acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	return acp.ReadTextFileResponse{}, nil
 }
+
 func (c *acceptingTestClient) WriteTextFile(_ context.Context, _ acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	return acp.WriteTextFileResponse{}, nil
 }
+
 func (c *acceptingTestClient) CreateTerminal(_ context.Context, _ acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
 	return acp.CreateTerminalResponse{}, nil
 }
+
 func (c *acceptingTestClient) TerminalOutput(_ context.Context, _ acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
 	return acp.TerminalOutputResponse{}, nil
 }
+
 func (c *acceptingTestClient) WaitForTerminalExit(_ context.Context, _ acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
 	return acp.WaitForTerminalExitResponse{}, nil
 }
+
 func (c *acceptingTestClient) ReleaseTerminal(_ context.Context, _ acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
 	return acp.ReleaseTerminalResponse{}, nil
 }
+
 func (c *acceptingTestClient) KillTerminal(_ context.Context, _ acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
 	return acp.KillTerminalResponse{}, nil
 }

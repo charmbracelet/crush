@@ -1,0 +1,15 @@
+{
+  "protocolVersion": 1,
+  "agentCapabilities": {
+    "auth": {},
+    "loadSession": true,
+    "mcpCapabilities": {},
+    "promptCapabilities": {
+      "image": true,
+      "audio": true,
+      "embeddedContext": true
+    },
+    "sessionCapabilities": {}
+  },
+  "authMethods": []
+}

@@ -1,0 +1,53 @@
+{
+  "type": "FileSystemCapabilities",
+  "cases": [
+    {
+      "name": "empty object",
+      "why": "both properties have a declared default, so an absent one is not absent — it is the default",
+      "input": {},
+      "accepted": true,
+      "normalized": {
+        "readTextFile": false,
+        "writeTextFile": false
+      }
+    },
+    {
+      "name": "both set",
+      "why": "the ordinary case",
+      "input": {
+        "readTextFile": true,
+        "writeTextFile": true
+      },
+      "accepted": true,
+      "normalized": {
+        "readTextFile": true,
+        "writeTextFile": true
+      }
+    },
+    {
+      "name": "one malformed",
+      "why": "a declared default is also the recovery value, so the wrong type becomes false rather than failing",
+      "input": {
+        "readTextFile": "yes",
+        "writeTextFile": true
+      },
+      "accepted": true,
+      "normalized": {
+        "readTextFile": false,
+        "writeTextFile": true
+      }
+    },
+    {
+      "name": "one null",
+      "why": "these properties are not nullable, so null takes the same recovery path as any other wrong value",
+      "input": {
+        "readTextFile": null
+      },
+      "accepted": true,
+      "normalized": {
+        "readTextFile": false,
+        "writeTextFile": false
+      }
+    }
+  ]
+}

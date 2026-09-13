@@ -613,14 +613,15 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 type partType string
 
 const (
-	reasoningType    partType = "reasoning"
-	textType         partType = "text"
-	imageURLType     partType = "image_url"
-	binaryType       partType = "binary"
-	toolCallType     partType = "tool_call"
-	toolResultType   partType = "tool_result"
-	finishType       partType = "finish"
-	shellCommandType partType = "shell_command"
+	reasoningType      partType = "reasoning"
+	textType           partType = "text"
+	imageURLType       partType = "image_url"
+	binaryType         partType = "binary"
+	toolCallType       partType = "tool_call"
+	toolResultType     partType = "tool_result"
+	finishType         partType = "finish"
+	shellCommandType   partType = "shell_command"
+	subAgentReportType partType = "sub_agent_report"
 )
 
 type partWrapper struct {
@@ -651,6 +652,8 @@ func marshalParts(parts []ContentPart) ([]byte, error) {
 			typ = finishType
 		case ShellCommand:
 			typ = shellCommandType
+		case SubAgentReport:
+			typ = subAgentReportType
 		default:
 			return nil, fmt.Errorf("unknown part type: %T", part)
 		}
@@ -709,6 +712,8 @@ func unmarshalPart(typ partType, data json.RawMessage) (ContentPart, error) {
 		return decodePart[Finish](data)
 	case shellCommandType:
 		return decodePart[ShellCommand](data)
+	case subAgentReportType:
+		return decodePart[SubAgentReport](data)
 	default:
 		return nil, fmt.Errorf("unknown part type: %s", typ)
 	}

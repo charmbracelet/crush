@@ -16,7 +16,7 @@ import (
 
 func newTestQuit() *Quit {
 	sty := styles.CharmtonePantera()
-	return NewQuit(&common.Common{Styles: &sty})
+	return NewQuit(&common.Common{Styles: &sty}, 0)
 }
 
 func drawQuit(t *testing.T, q *Quit) uv.ScreenBuffer {

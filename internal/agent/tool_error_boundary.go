@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"charm.land/fantasy"
@@ -19,7 +20,7 @@ import (
 // syscall.Errno implements both Timeout and Temporary, so any wrapped
 // filesystem error (ENOENT, ENOTDIR, EACCES from os.Stat, os.ReadFile or
 // os.WriteFile) matches net.Error through errors.As as well. Measured
-// against fantasy v0.43.0 with a real model, a view of a path under a
+// against fantasy v0.43.x with a real model, a view of a path under a
 // regular file cost 3 retries with 5s, 10s and 20s backoff and 4 model
 // requests before the turn ended with "Provider Error". Most tool errors
 // in crush are ordinary failures the model can recover from (an invalid
@@ -71,10 +72,16 @@ func (b *toolErrorBoundary) Run(ctx context.Context, call fantasy.ToolCall) (fan
 	if err == nil {
 		return resp, nil
 	}
-	if ctx.Err() != nil {
+	if ctxErr := ctx.Err(); ctxErr != nil {
 		// The run was canceled or timed out. Let fantasy abort the turn so
 		// the cancellation is recorded as such.
-		return resp, err
+		if errors.Is(err, ctxErr) {
+			return resp, err
+		}
+		// The tool reported something else, but the user has already
+		// canceled. Join the cancellation in so crush and fantasy classify
+		// the abort as a cancel while the tool's own text is kept.
+		return resp, errors.Join(ctxErr, err)
 	}
 	slog.Warn("Tool returned an error; reporting it to the model",
 		"tool", call.Name,

@@ -408,11 +408,27 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	}
 
 	if a.message.IsFinished() {
+		var banner string
 		switch {
 		case a.message.FinishReason() == message.FinishReasonCanceled:
-			messageParts = append(messageParts, a.sty.Messages.AssistantCanceled.Render("Canceled"))
+			// Tool calls render below this item, and cancelling a turn
+			// closes each unfinished one out with its own interrupted
+			// result. Saying it here too would put "Canceled" above the
+			// tools it is describing.
+			if len(a.message.ToolCalls()) > 0 {
+				break
+			}
+			banner = a.sty.Messages.AssistantCanceled.Render("Canceled")
 		case a.message.IsErrorLike():
-			messageParts = append(messageParts, a.cachedError(width))
+			banner = a.cachedError(width)
+		}
+		if banner != "" {
+			// Set the banner off from the text above it, or it reads as
+			// the end of the sentence the model was in the middle of.
+			if len(messageParts) > 0 {
+				messageParts = append(messageParts, "")
+			}
+			messageParts = append(messageParts, banner)
 		}
 	}
 

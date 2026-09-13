@@ -1675,7 +1675,7 @@ func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fanta
 		content = append(content, fantasy.ToolResultPart{
 			ToolCallID: tc.ID,
 			Output: fantasy.ToolResultOutputContentError{
-				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
+				Error: errors.New(interruptedToolResult),
 			},
 		})
 	}
@@ -2132,6 +2132,10 @@ func (a *sessionAgent) Model() Model {
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
+// interruptedToolResult is what a tool call reports when the turn was
+// cancelled out from under it, in place of the runtime's "context canceled".
+const interruptedToolResult = "tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"
+
 func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
 	baseResult := message.ToolResult{
 		ToolCallID: result.ToolCallID,
@@ -2147,6 +2151,9 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 	case fantasy.ToolResultContentTypeError:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result); ok {
 			baseResult.Content = r.Error.Error()
+			if errors.Is(r.Error, context.Canceled) {
+				baseResult.Content = interruptedToolResult
+			}
 			baseResult.IsError = true
 		}
 	case fantasy.ToolResultContentTypeMedia:

@@ -1,820 +1,286 @@
 # ACP (Agent Client Protocol) Implementation Plan
 
-## Overview
-ACP standardizes editor-agent communication over JSON-RPC 2.0 (stdio default).
-Crush acts as **ACP Server** (for Zed, JetBrains, Neovim) and optionally
-**ACP Client** (driving external agents).
+## 1. Overview
 
-### Library Choice: `github.com/coder/acp-go-sdk`
-Evaluated official community Go SDKs (from https://agentclientprotocol.com/libraries/community#go):
-- **`github.com/coder/acp-go-sdk` (Coder, v0.13.x, 230+ stars) — SELECTED**
-  - Most active, battle-tested, backed by Coder.
-  - Complete ACP v1 typed definitions for both Agent and Client.
-  - Built-in stdio connection management (`NewAgentSideConnection`, `NewClientSideConnection`).
-  - Native streaming update helpers (`UpdateAgentMessageText`, `UpdateAgentThoughtText`, `UpdatePlan`, `StartToolCall`, `UpdateToolCall`).
-  - Native client RPC helpers (`RequestPermission`, `ReadTextFile`, `WriteTextFile`, `terminal/*`).
-  - Built-in context cancellation map and `$/cancel_request` handling.
-- Alternatives evaluated:
-  - `ironpark/acp-go` (30 stars) — smaller scope, fewer helpers.
-  - `eino-contrib/acp` (11 stars) — ByteDance Eino-specific transport adapters.
-  - `spachava753/acp-sdk` — requires Go 1.25+, incompatible type layout, removed from the project.
-  - `Tangerg/acp` — v0.2.4, schema `schema-v1.21.0`, requires Go 1.25+ (Crush is on
-    `go 1.27.0`). Not selected as the runtime SDK, but its independent
-    implementation, Zed 1.17.2 transcript, and 154 cross-SDK fixtures make it the
-    intended **test-only** counterparty for conformance. See I-8.
+ACP standardizes editor↔agent communication over JSON-RPC 2.0 (stdio default).
+Crush acts as an **ACP Server** (Zed, JetBrains, Neovim) and optionally as an
+**ACP Client** (driving external agents). Spec: https://agentclientprotocol.com/protocol/v1/
 
-### Work Offloaded to SDK vs. Local Responsibilities
+### Library choice: `github.com/coder/acp-go-sdk` v0.13.5
 
-| Responsibility | Handled By | Details |
+Selected SDK (Coder, most active, complete v1 typed model, built-in stdio
+connection + streaming helpers). `Tangerg/acp` v0.2.4 (schema `schema-v1.21.0`,
+Go 1.25+) is used **as a test-only fixture** (Zed 1.17.2 transcript + 154
+cross-SDK fixtures), not as the runtime SDK.
+
+### Work split
+
+| Responsibility | Handled by | Notes |
 |---|---|---|
-| Protocol types & validation | **SDK** (`acp.*`) | All 170+ ACP v1 message structs, enums, unions, validation. |
-| JSON-RPC 2.0 transport & framing | **SDK** (`acp.Connection`) | Stdio read/write loop, ID correlation, request/notification routing. |
-| Cancellation routing | **SDK** | Maps client `session/cancel` & `$/cancel_request` to Go `context.Context`. |
-| Outbound streaming formatting | **SDK** (`helpers.go`) | `UpdateAgentMessageText`, `UpdatePlan`, `StartToolCall`, `ToolDiffContent`. |
-| Outbound editor RPC | **SDK** (`AgentSideConnection`) | Typed methods: `RequestPermission`, `ReadTextFile`, `CreateTerminal`, etc. |
-| **Crush Server Adapter** | **Local** (`internal/acp`) | Implements `acp.Agent` interface, maps to `app.App` & `coordinator`. |
-| **PubSub Event Bridge** | **Local** (`internal/acp`) | Subscribes to Crush events, converts to SDK `SessionUpdate` calls. |
-| **Permission Bridge** | **Local** (`internal/acp`) | Converts Crush `permission.Decision` requests to SDK `conn.RequestPermission`. |
-| **CLI Integration** | **Local** (`internal/cmd`) | `crush acp` subcommand (server), `crush acp connect` (client). |
-| **Client Track** | **Local** (`internal/acp/client`) | Implements `acp.Client` callbacks to drive external agents via SDK. |
+| Protocol types & validation | SDK (`acp.*`) | 170+ v1 structs/enums/unions |
+| JSON-RPC transport & framing | SDK | stdio loop, ID correlation |
+| Cancellation routing | SDK | `session/cancel` + `$/cancel_request` → `context.Context` |
+| Outbound streaming helpers | SDK | `UpdateAgentMessageText`, `UpdateAgentThoughtText`, `UpdatePlan`, `StartToolCall`, … |
+| Outbound client RPC | SDK | `RequestPermission`, `ReadTextFile`, `CreateTerminal`, … |
+| Crush Server Adapter | `internal/acp` | implements `acp.Agent`, maps to `app.App`/`coordinator` |
+| PubSub Event Bridge | `internal/acp/event_bridge.go` | subscribes Crush events → `SessionUpdate` |
+| Permission Bridge | `internal/acp/permission*.go` | `permission.Decision` → `conn.RequestPermission` |
+| CLI Integration | `internal/cmd` | `crush acp` (server), `crush acp connect` (client) |
+| Client Track | `internal/acp/client.go` | `acp.Client` callbacks to drive external agents |
 
----
-
-## Architecture
+## 2. Architecture
 
 ```
 IDE / Client (Zed, JetBrains, Neovim)
-       |
-       |  JSON-RPC 2.0 over stdio (managed by coder/acp-go-sdk)
-       v
-acp.AgentSideConnection  <-- github.com/coder/acp-go-sdk
-       |
-       |  acp.Agent interface calls (Initialize, NewSession, Prompt, Cancel...)
-       v
-internal/acp/server.go   (Crush ACP Adapter)
-       |
-       +---> Session lifecycle --> session.Service (SQLite)
-       +---> Prompt execution  --> coordinator.Run / SessionAgent.Run
-       |
-       +---> PubSub Event Bridge (internal/acp/event_bridge.go)
-       |          agent.OnTextDelta       --> conn.SessionUpdate(UpdateAgentMessageText(...))
-       |          agent.OnReasoningDelta  --> conn.SessionUpdate(UpdateAgentThoughtText(...))
-       |          agent.OnToolCallStart   --> conn.SessionUpdate(StartToolCall(...))
-       |          agent.OnToolCallEnd     --> conn.SessionUpdate(UpdateToolCall(...))
-       |
-       +---> Permission Bridge (internal/acp/permission.go)
-       |          tool permission check   --> conn.RequestPermission(...)
-       |
-       +---> Client-Delegated Tools (when client capabilities permit)
-                  fs/read, fs/write       --> conn.ReadTextFile / conn.WriteTextFile
-                  terminal/*              --> conn.CreateTerminal / conn.WaitForTerminalExit
-
+   ^  JSON-RPC 2.0 over stdio (coder/acp-go-sdk)
+   v
+acp.AgentSideConnection
+   ^  acp.Agent interface (Initialize, NewSession, Prompt, Cancel, ...)
+   v
+internal/acp/server.go  ->  coordinator.Run / session.Service (SQLite)
+   +-- Event Bridge: assistant text -> agent_message_chunk
+   +-- Permission Bridge: RequestPermission <-> allow/deny
+   +-- Client-delegated fs/terminal (when client capabilities permit)
 
 EXTERNAL ACP AGENT (client mode)
-       ^
-       |  JSON-RPC 2.0 over stdio
-       |
-crush acp connect <agent>  <-- internal/cmd/acp_client.go
-       |
-       v
-acp.ClientSideConnection  <-- github.com/coder/acp-go-sdk
-       |
-       |  acp.Client interface calls (SessionUpdate, RequestPermission, ReadTextFile...)
-       v
-internal/acp/client.go   (crushClient adapter)
-       |
-       +---> Session updates     --> per-session channel (Subscribe)
-       +---> Permission requests --> auto-allow or first-option default
-       +---> File ops            --> os.ReadFile / os.WriteFile
-       +---> Terminals           --> stubbed ("not supported")
+crush acp connect <agent>  ->  acp.ClientSideConnection  ->  internal/acp/client.go
+   +-- SessionUpdate fan-out (per-session channel)
+   +-- RequestPermission (auto-allow / first-option default)
+   +-- ReadTextFile/WriteTextFile (os.Read/WriteFile)
+   +-- Terminals: stubbed ("not supported")
 ```
 
----
+## 3. Specification Requirements — Mandatory vs Optional
 
-## Issues Found — Zed Integration Hang
+Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
+"MUST/SHOULD/MAY" follow the v1 spec wording.
 
-Discovered 2026-09-12 while investigating the report that Crush, registered as an
-ACP agent in Zed, leaves the agent panel loading forever. Crush starts and
-completes the handshake, but the panel never leaves its loading state.
+### 3.1 Initialization (`initialize`, `authenticate`, `logout`)
 
-### I-1. Zed hang, prime suspect: no streaming updates on the happy path
-
-`internal/acp/event_bridge.go` subscribes to `app.AgentNotifications()` and
-`app.RunCompletions()` only. `handleNotification` reacts to
-`notify.TypeAgentError` and `notify.TypeReAuthenticate`; `handleRunComplete`
-emits text only for the cancelled and error cases and returns without an update
-on success (`event_bridge.go:114-118`).
-
-No code path emits `agent_message_chunk` for normal assistant output. Text and
-reasoning deltas are never bridged, so a successful turn sends the client a
-`session/prompt` response with zero `session/update` notifications. A client
-that shows a loading indicator until the first `agent_message_chunk` spins
-forever on a turn that actually succeeded. This is the strongest candidate for
-the reported symptom.
-
-### I-2. `InitializeResponse` under-declares capabilities
-
-`internal/acp/agent.go:29-33` returns only `LoadSession: true`. The fields
-`promptCapabilities`, `sessionCapabilities`, and `mcpCapabilities` are left
-zero-valued. The recorded Zed 1.17.2 handshake in the Tangerg corpus shows the
-client advertising `fs`, `terminal`, `session.configOptions.boolean`,
-`auth.terminal`, and `elicitation` capabilities and expecting a corresponding
-agent block back. An absent capability set can cause an editor to gate or stall
-its UI.
-
-### I-3. `NewSession` ignores `Cwd`
-
-`internal/acp/agent.go:38-47` creates the session with a hardcoded title
-(`"ACP Session"`) and `context.Background()`, and never reads `req.Cwd`. The
-session is not rooted in the workspace the editor sent. A client that expects
-the agent to operate in the opened folder may not progress.
-
-### I-4. stdout pollution would silently hang the client
-
-`internal/cmd/acp.go:22` redirects `slog` to stderr, but nothing enforces that
-stdout carries only JSON-RPC. Any stray `fmt.Print`, direct `os.Stdout` write,
-or library default logger corrupts the framing and hangs the editor with no
-visible error. There is no test guarding this invariant.
-
-### I-5. `SetSessionMode` / `SetSessionConfigOption` return errors
-
-Both are stubs in `internal/acp/agent.go:100-107`, returning "not yet
-implemented" errors. Zed sends these during session setup. An error response at
-setup time may abort the panel before the first prompt is sent.
-
-### I-6. `TestConformanceUnsupportedMethods` has inverted assertions and fails
-
-`internal/acp/conformance_test.go:368-383` asserts the opposite of what its
-messages say. Each block reads:
-
-```go
-_, err = client.SetSessionMode(...)
-if err != nil {
-    t.Error("SetSessionMode should error")
-}
-```
-
-The comment says the method should error, but the guard fails the test when an
-error is returned. The server does return errors for these unimplemented
-methods, so the test fails today:
-
-```
-conformance_test.go:370: SetSessionMode should error
-conformance_test.go:377: SetSessionConfigOption should error
-conformance_test.go:382: ResumeSession should error
---- FAIL: TestConformanceUnsupportedMethods
-```
-
-### I-7. Prior "done" status was overstated
-
-The checkpoint table marks server tests and conformance complete. In reality the
-server track has no test for the streaming prompt path (the only test in
-`TestServerStartEndToEnd` is init -> new -> cancel), no test for the initialize
-response shape, and no guard on stdout purity. The failing test in I-6 was
-reported as passing. The claimed coverage does not match the suite.
-
-### I-8. `Tangerg/acp` was previously recorded as unavailable
-
-The library-choice and testing sections state that `Tangerg/acp` requires Go
-1.25+ and is unmaintained, and the test gaps section says cross-implementation
-conformance is not validated. The repository is in fact reachable at
-`https://github.com/tangerg/acp`: module `github.com/Tangerg/acp`, version
-`v0.2.4`, pinned to schema `schema-v1.21.0`, requiring Go 1.25+. Crush is on
-`go 1.27.0`, so it is usable as a test-only dependency. It ships a real Zed
-1.17.2 transcript plus 154 cross-SDK validator fixtures, which closes the gap
-the plan lists as open.
-
----
-
-## Checkpoint Legend
-
-- [ ] = not started
-- [x] = complete
-- [~] = partial / known gap
-
----
-
-## ===================================
-## ACP SERVER TRACK
-## ===================================
-
-### Phase 1: SDK Integration & Transport Setup
-> Integrate `github.com/coder/acp-go-sdk`, deprecating manual schema definitions.
-
-1. [x] Add `github.com/coder/acp-go-sdk` to `go.mod`.
-2. [x] Create `internal/acp/server.go` with minimal `acp.Agent` boilerplate.
-3. [x] Verify stdio loop and handshake via in-memory pipe smoke test.
-
-### Phase 2: Server Engine & Session Lifecycle (`internal/acp`)
-1. [x] Implement `acp.Agent` methods on `internal/acp.Server`:
-   - [x] `Initialize`: return Crush agent info (`name: "Crush"`, version `"dev"`), supported capabilities.
-   - [x] `NewSession`: create session via `session.Service.Create`, store active session mapping.
-   - [x] `Prompt`: invoke `coordinator.Run`, map `fantasy.FinishReason` -> `StopReason`.
-   - [x] `Cancel`: cancel active prompt context for the given `sessionId`.
-   - [x] `ListSessions`: delegate to `session.Service.List`.
-   - [~] `ResumeSession`: stub returns error (`"session/resume is not supported"`).
-   - [x] `CloseSession`: cancel running prompt, return response.
-   - [~] `SetSessionMode`: stub returns error (`"not yet implemented"`) — see I-5.
-   - [~] `SetSessionConfigOption`: stub returns error (`"not yet implemented"`) — see I-5.
-2. [~] Event Bridge (`internal/acp/event_bridge.go`):
-   - [x] Wire pubsub to `conn.SessionUpdate` via `app.AgentNotifications()` and `app.RunCompletions()`.
-   - [x] `notify.TypeAgentError` -> error text chunk.
-   - [x] `notify.TypeReAuthenticate` -> auth required message.
-   - [x] `notify.RunComplete` (cancelled/error) -> completion update.
-   - [ ] Text/reasoning deltas -> stream chunks. NOT WIRED: no code path emits
-         `agent_message_chunk` for normal assistant output. The prior `[~]` note
-         claiming the deltas are "bridged through `RunCompletions`" was wrong —
-         `handleRunComplete` returns without an update on success. This is the prime
-         suspect for the Zed hang; see I-1.
-3. [ ] Initialize response advertises only `LoadSession`. `promptCapabilities`,
-       `sessionCapabilities`, and `mcpCapabilities` are zero-valued; see I-2.
-4. [ ] `NewSession` ignores `req.Cwd` (hardcoded title, `context.Background()`);
-       see I-3.
-5. [ ] No test guards stdout purity. A stray non-JSON-RPC write to stdout hangs
-       the client; see I-4.
-
-### Phase 3: Permissions & Tool Delegation
-1. [x] Permission Bridge (`internal/acp/permission.go`):
-   - [x] Intercept Crush permission prompts in ACP mode.
-   - [x] Issue `conn.RequestPermission` with `acp.ToolCallUpdate` and options (`allow_once`, `allow_always`, `reject_once`).
-   - [x] Map client `RequestPermissionOutcome` back to boolean grant decision.
-   - [x] Persistent grant cache for `allow_always` decisions.
-2. [ ] Client Tools Delegation (not yet wired into Crush tools):
-   - [ ] Inspect `clientCapabilities.FS` and `clientCapabilities.Terminal` from Initialize.
-   - [ ] If available, delegate `tools.Edit`/`tools.View` to `conn.ReadTextFile`/`conn.WriteTextFile`.
-   - [ ] Fall back to local Crush bash/filesystem tools if client lacks capabilities.
-   - Note: Currently Crush tools always use local filesystem; the delegation layer is a future enhancement.
-
-### Phase 4: CLI Integration (`internal/cmd`)
-1. [x] Add `crush acp` subcommand (determined by file `internal/cmd/acp.go`).
-2. [x] Set up workspace headlessly via `setupLocalWorkspace()`.
-3. [x] Redirect all logger output to stderr (`slog.SetDefault(slog.NewTextHandler(os.Stderr, ...))`).
-4. [x] Boot workspace services headlessly (`AppWorkspace` -> `app.App`).
-5. [x] Start `acp.NewAgentSideConnection` on `os.Stdin`/`os.Stdout` and block until client disconnects.
-6. [x] Handle SIGINT/SIGTERM for graceful shutdown.
-7. [x] Wire `app.Permissions = srv.PermissionService()`.
-
-### Phase 5: Server Tests & Conformance
-1. [x] Unit test: `TestBuildPermissionOptions`, `TestMapPermissionOutcome`, `TestIsAllowAlways`.
-2. [x] Integration test: pipe-based roundtrip (`TestServerStartEndToEnd`) testing `initialize` -> `session/new` -> `cancel` -> disconnect. NOTE: this test does not exercise a prompt turn or any `session/update`.
-3. [x] Test session cancellation flow (inside `TestServerStartEndToEnd`).
-4. [x] Test permission request/response roundtrip (`TestPermissionBridgeIntegration`).
-5. [~] Golden serialization tests — present, but they only assert type-level JSON shape; see I-7.
-6. [x] 11 `TestConformance*` tests exist (`conformance_test.go`). CAVEAT: one of
-       them, `TestConformanceUnsupportedMethods`, is written with inverted assertions
-       and currently FAILS. It was previously reported as passing; see I-6 and I-7.
-7. [ ] No test for the streaming prompt path (the hang in I-1).
-8. [ ] No test for the initialize response capability shape (I-2).
-9. [ ] No test for `NewSession` honoring `req.Cwd` (I-3).
-10. [ ] No test for stdout purity in `crush acp` (I-4).
-11. [ ] No cross-SDK interop against `Tangerg/acp`; see I-8.
-
----
-
-## ===================================
-## ACP CLIENT TRACK
-## ===================================
-
-### Phase 6: ACP Client (`internal/acp/client.go`)
-1. [x] Implement `acp.Client` callback handlers (`crushClient` struct):
-   - [x] `SessionUpdate`: forward stream deltas to per-session channels (buffered, drop if full).
-   - [x] `RequestPermission`: auto-allow or first-option default; respects `autoAllow` option.
-   - [x] `ReadTextFile`: real `os.ReadFile` with optional line/limit slicing.
-   - [x] `WriteTextFile`: real `os.WriteFile` with mkdir parent.
-   - [x] Terminal methods (5): stubbed — return `"terminals not supported"`.
-2. [x] Spawn external ACP agent subprocess via `os/exec`, bind via `acp.NewClientSideConnection`.
-3. [x] `Client.Start()` runs the connection loop (waits on `conn.Done()` + process wait).
-4. [x] `Client.Subscribe(sessionID)` returns a `<-chan SessionUpdate` for consuming agent streams.
-5. [x] `WithAutoAllowPermissions()` option for silent/non-interactive mode.
-6. [x] `NewClient(path, args, opts...)` constructor.
-
-### Phase 7: Client Tests (`internal/acp/client_test.go`)
-1. [x] Pipe-based `TestClientSubscribe` — verifies session update fan-out.
-2. [x] Permission tests — `TestClientPermissionAutoAllow`, `TestClientPermissionDefaultFirstOption`, `TestClientPermissionNoOptions`.
-3. [x] File IO tests — `TestClientReadTextFile`, `TestClientWriteTextFile`.
-4. [x] Terminal stub tests — `TestClientTerminalMethods`.
-5. [x] Drain helper test — `TestDrain`.
-6. [x] Parse tool call helper — `TestParseToolCall`.
-7. [x] `stubAgent` — minimal `acp.Agent` impl for pairing with `ClientSideConnection` in tests.
-
-### Phase 8: Client CLI (`internal/cmd/acp_client.go`)
-1. [x] Add `crush acp connect <agent-binary> [args...]` subcommand.
-2. [x] Resolve working directory via `ResolveCwd(cmd)`.
-3. [x] Start client, initialize, create session, enter interactive prompt loop.
-4. [x] Prompt loop: reads from stdin (`bufio.Scanner`), sends `PromptRequest`, prints `StopReason`.
-5. [x] Commands: `exit`/`quit` to leave, `help` for usage.
-6. [~] Streaming response display — currently only shows `StopReason`; agent message chunks not rendered interactively yet.
-
----
-
-## Checkpoint Progress Table
-
-| Track / Phase | Checkpoint | Status |
+| Requirement | Level | Crush status |
 |---|---|---|
-| Server / 1 | SDK integration & transport setup | - [x] |
-| Server / 2 | Server engine & session lifecycle | - [x] |
-| Server / 3 | Permissions & tool delegation | - [x] |
-| Server / 4 | CLI integration (`crush acp`) | - [x] |
-| Server / 5 | Server tests & conformance | - [x] (assertions fixed, hang fixed, init caps wired, interop passes; remaining individual tests for streaming I-1, init-shape I-2, cwd I-3, stdout guard I-4) |
-| Client / 6 | ACP client implementation | - [x] |
-| Client / 7 | Client tests | - [x] |
-| Client / 8 | Client CLI | - [x] (partial streaming display) |
+| Respond with chosen `protocolVersion` + `agentCapabilities` | MUST | ✅ |
+| Provide `agentInfo` (name/title/version) | SHOULD (required in future) | ⚠️ sets name+version, **omits `title`** |
+| `authMethods` present in response (default `[]`) | MUST (field present) | ⚠️ not set → serializes as `null`, not `[]` |
+| `loadSession` capability | OPTIONAL | ✅ `true` |
+| `promptCapabilities` (image/audio/embeddedContext) | OPTIONAL (MUST support Text+ResourceLink in prompts regardless) | ✅ all `true` |
+| `mcpCapabilities` (http/sse) | OPTIONAL | ✅ empty (no MCP transport) |
+| `sessionCapabilities` (close/list/resume/delete/additionalDirectories) | OPTIONAL | ⚠️ only `close` set |
+| `auth.logout` capability | OPTIONAL | ❌ not advertised |
+| `authenticate` method | MUST exist; return `auth_required`/error if unused | ⚠️ stub "auth not supported" |
+| `logout` method | MUST exist if `auth.logout` advertised | ⚠️ stub "logout not supported" (not advertised, so safe) |
 
----
+### 3.2 Session lifecycle methods
 
-## Testing Guide
+| Method | Level | Crush status |
+|---|---|---|
+| `session/new` | MUST | ✅ creates SQLite session, returns `sessionId` |
+| `session/prompt` | MUST | ✅ runs coordinator, returns `StopReason` |
+| `session/cancel` (notification) | MUST | ✅ cancels coordinator |
+| `session/update` (notifications) | MUST | ⚠️ only `agent_message_chunk` emitted |
+| `session/close` | OPTIONAL (advertise `sessionCapabilities.close`) | ✅ implemented + advertised |
+| `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ⚠️ implemented but **not advertised**; `SessionInfo` **omits required `cwd`** |
+| `session/load` | OPTIONAL (advertise `loadSession`) | ❌ **advertised `true` but method returns error — incomplete** |
+| `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ❌ returns error (not advertised — acceptable) |
+| `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ❌ not implemented (not advertised) |
+| `session/set_mode` | OPTIONAL (legacy; prefer config options) | ✅ acknowledges (no-op), no `current_mode_update` |
+| `session/set_config_option` | OPTIONAL | ✅ acknowledges, returns empty `configOptions` |
 
-### 1. Unit & Integration Tests (run locally)
-```bash
-# All ACP package tests
-go test ./internal/acp/... -v -count=1
+### 3.3 Prompt turn & streaming (`session/update` types)
 
-# Specific test categories
-go test ./internal/acp/... -run TestClientPermission    # permission logic
-go test ./internal/acp/... -run TestClientReadTextFile   # file ops
-go test ./internal/acp/... -run TestServerStartEndToEnd  # server roundtrip
-go test ./internal/acp/... -run TestEventBridge          # streaming bridge
-go test ./internal/acp/... -run TestPermissionBridge     # permission bridge
+All are **notifications** carried in `{"sessionId", "update": {"sessionUpdate": <type>, ...}}`.
+The spec distinguishes `session/load` (MUST replay history via these) from
+`session/resume` (MUST NOT replay).
 
-# With race detector
-go test ./internal/acp/... -race -count=1
-```
+| Update type | Level | Crush status |
+|---|---|---|
+| `user_message_chunk` | SHOULD (echo user input) | ❌ not emitted |
+| `agent_message_chunk` | baseline | ✅ emitted on happy path (`subscribeMessages`) |
+| `agent_thought_chunk` | SHOULD (reasoning) | ❌ not emitted |
+| `tool_call` | SHOULD | ❌ not emitted |
+| `tool_call_update` | SHOULD (in_progress/completed/failed) | ❌ not emitted |
+| `plan` | SHOULD | ❌ not emitted |
+| `available_commands_update` | MAY | ❌ not emitted |
+| `current_mode_update` | MAY | ❌ not emitted |
+| `config_option_update` | MAY | ❌ not emitted |
+| `session_info_update` | MAY (ties to `session/list`) | ❌ not emitted |
+| `usage_update` | MAY (context + cost) | ❌ not emitted |
 
-### 2. SDK Golden Serialization Tests
-Copy the SDK's `json_parity_test.go` pattern into `internal/acp/golden_test.go` to validate
-that all ACP types marshal/unmarshal correctly against 33 golden fixtures shipped with the SDK.
+`messageId` (per-message opaque id; chunks sharing it belong to one message) is a
+**MAY** field on `agent_message_chunk`/`user_message_chunk` — **Crush never sets
+it** (SDK v0.13.5 still marks `MessageId` UNSTABLE; track on SDK bump).
+
+### 3.4 Content blocks (prompts & outputs)
+
+| Block | Level | Crush status |
+|---|---|---|
+| `text` | MUST | ✅ |
+| `resource_link` | MUST | ✅ (in `extractPromptText`) |
+| `image` | OPTIONAL (gated by `promptCapabilities.image`) | ⚠️ capability advertised, not parsed/streamed |
+| `audio` | OPTIONAL | ⚠️ advertised, not handled |
+| `resource` (embedded) | OPTIONAL (gated by `embeddedContext`) | ⚠️ advertised, not handled |
+| `annotations` on blocks | OPTIONAL | ❌ ignored |
+
+### 3.5 Tool calls
+
+| Requirement | Level | Crush status |
+|---|---|---|
+| Emit `tool_call` + `tool_call_update` during execution | SHOULD | ❌ not emitted |
+| Tool kinds: `read/edit/delete/move/search/execute/think/fetch/other` (+`switch_mode`) | OPTIONAL taxonomy | ❌ no tool events at all |
+| Tool content: `content` / `diff` / `terminal` | SHOULD | ❌ |
+| `toolCallId`, `title`, `kind`, `status`, `locations`, `rawInput`, `rawOutput` | — | ❌ |
+| `session/request_permission` (4 option kinds: `allow_once`/`allow_always`/`reject_once`/`reject_always`) | MUST when needed | ✅ bridge implemented |
+| Client MUST respond `cancelled` to pending permission on `session/cancel` | MUST | ⚠️ not verified |
+
+### 3.6 Elicitation (`elicitation/create`, `elicitation/complete`)
+
+OPTIONAL (gated by `clientCapabilities.elicitation.{form,url}`). Crush: ❌ not
+implemented on either side. Spec essentials:
+- `mode` discriminator is **required** (`form`/`url`); no implicit form default.
+- Form: restricted JSON Schema in `requestedSchema`; MUST NOT request secrets.
+- URL: unique `elicitationId` + `elicitation/complete` notification; MUST NOT
+  fall back form→url; client MUST show full URL + consent.
+- Outcomes: `accept`/`decline`/`cancel` (not `cancelled`).
+
+### 3.7 File system (`fs/read_text_file`, `fs/write_text_file`)
+
+OPTIONAL (gated by `clientCapabilities.fs`). Crush (client track): ✅ real
+`os.ReadFile`/`os.WriteFile` with `line`/`limit` and mkdir-parent. Server track
+delegates to the connected client via the SDK.
+
+### 3.8 Terminals (`terminal/*`)
+
+OPTIONAL (gated by `clientCapabilities.terminal`). Crush client track: ⚠️ all
+five methods (`create`/`output`/`wait_for_exit`/`kill`/`release`) stubbed
+"not supported". Agent MUST `release` terminals it creates.
+
+### 3.9 Cancellation
+
+- `session/cancel` is a **notification** (no response). ✅ cancels coordinator.
+- `$/cancel_request` protocol-level cancel. ❌ not handled explicitly (relies on
+  SDK context cancellation).
+- On abort the agent MUST catch errors and return `cancelled` stop reason, never
+  an error. ✅ `Prompt` maps `ctx.Err()` → `StopReasonCancelled`.
+- Pending `request_permission` MUST be answered `cancelled` on cancel. ⚠️ unverified.
+
+### 3.10 Capability advertising summary
+
+Advertised today: `loadSession:true`, `promptCapabilities{image,audio,embeddedContext:true}`,
+`sessionCapabilities.close`. **Missing optional:** `sessionCapabilities.list`,
+`.resume`, `.delete`, `.additionalDirectories`, `auth.logout`, `authMethods:[]`.
+
+### 3.11 Extensibility (`_meta`)
+
+Every type has a `_meta` field. ❌ Crush does not propagate it. Reserved root
+keys `traceparent`/`tracestate`/`baggage` are for W3C trace context. Custom
+capabilities advertised via `_meta` on capability objects; custom methods start
+with `_`.
+
+### 3.12 MCP servers
+
+`session/new`/`load`/`resume` accept `mcpServers` (stdio/http/sse). ❌ Crush does
+not connect to MCP servers during session setup (capabilities advertise none).
+
+## 4. Implementation Roadmap (current state)
+
+Phases reflect **verified code state** on branch `feature/acp-client`.
+
+### Server — done
+- [x] **Phase 1** SDK integration + transport (`server.go`, `NewServer`).
+- [x] **Phase 2** Agent methods: `Initialize`, `NewSession`, `Prompt`,
+  `Cancel`, `ListSessions`, `CloseSession`; stubs `ResumeSession`,
+  `SetSessionMode`, `SetSessionConfigOption`.
+- [x] **Phase 3** Permission bridge (4 option kinds, `allow_always` cache).
+- [x] **Phase 4** CLI `crush acp` (headless workspace, stderr logging, SIGINT).
+- [x] **Phase 5** Tests: `TestServerStartEndToEnd`, permission roundtrip,
+  conformance (moved to `test/acp/spec/`), Tangerg interop, golden.
+- [x] **Event bridge**: `agent_message_chunk` wired on the happy path
+  (`subscribeMessages`); `AgentError`/`ReAuthenticate`→text chunk;
+  `RunComplete` cancelled/error→text chunk.
+
+### Client — done
+- [x] **Phase 6** `acp.Client` callbacks; subprocess spawn; `Subscribe`.
+- [x] **Phase 7** Client unit tests.
+- [x] **Phase 8** `crush acp connect` CLI + interactive loop (prints `StopReason`).
+
+### Gaps to close (prioritized)
+
+**P0 — correctness / visible hangs**
+1. Stream `tool_call` + `tool_call_update` (in_progress/completed/failed). Editors
+   show tool progress; without it the agent looks frozen during edits/searches.
+   Files: `event_bridge.go`, `notify` subscription. Test: `TestPromptStreamsToolCalls`.
+2. Fix `loadSession:true` vs unimplemented `session/load` — either implement
+   replay or set `loadSession:false`. Currently advertises a capability we don't serve.
+3. `ListSessions` MUST populate `SessionInfo.cwd` (required, currently `""`).
+4. `Initialize` MUST serialize `authMethods` as `[]`, not `null`.
+
+**P1 — spec completeness**
+5. Echo `user_message_chunk` on `session/prompt`.
+6. Implement `session/load` replay (or drop capability). Decide `session/resume`
+   (wire vs capability rejection).
+7. Implement `elicitation/create` + `elicitation/complete` (form+url, `accept`/
+   `decline`/`cancel`, `elicitationId` lifecycle) — client callback + server stub.
+8. `_meta` passthrough on message paths; reserve W3C trace keys.
+9. Emit `available_commands_update` after session creation.
+10. `config_option_update` on config change; support `sessionCapabilities.list`
+    advertisement + `session_info_update` metadata sync.
+11. `authMethods:[]` + `agentInfo.title`; `auth.logout` capability if `logout` wired.
+
+**P2 — UX / observability**
+12. `agent_thought_chunk` for reasoning deltas.
+13. `usage_update` (context + cost).
+14. `plan` updates (each update is a FULL replace).
+15. `current_mode_update` after `set_mode`; return `modes`/`configOptions` in
+    `session/new` response.
+16. Boolean config options (`type:"boolean"`, gated on
+    `clientCapabilities.session.configOptions.boolean`) + `category` field.
+17. `additionalDirectories` capability + handling in `/new`, `/load`, `/resume`.
+
+**P3 — client-side**
+18. Real terminal callbacks (or document out-of-scope).
+19. Render streaming chunks in `crush acp connect` loop.
+
+**P4 — tests**
+20. Regression tests for each missing update type; `TestConformanceSessionLoad`;
+    elicitation roundtrip; `_meta` passthrough.
+
+## 5. Test strategy
 
 ```bash
-# Run the SDK's own golden tests from within our module
-go test github.com/coder/acp-go-sdk@v0.13.5 -run TestJSONGolden -count=1
-
-# Or copy the test helper and fixtures into internal/acp/
-cp $(go env GOMODCACHE)/github.com/coder/acp-go-sdk@v0.13.5/json_parity_test.go \
-   internal/acp/sdk_golden_test.go
-cp -r $(go env GOMODCACHE)/github.com/coder/acp-go-sdk@v0.13.5/testdata  internal/acp/
-# Then adjust import paths and run:
-go test ./internal/acp/... -run TestJSONGolden -count=1
+go test ./internal/acp/... -count=1            # unit + integration
+go test ./test/acp/spec/... -count=1           # conformance, golden, Tangerg interop
+CRUSH_BIN=$(go build -o /tmp/crush .) \
+  go test -tags e2e ./test/acp/ -count=1       # subprocess e2e
+./test/acp/run.sh all                          # full runner (unit/spec/interop/sdk/e2e)
 ```
-
-The 33 fixtures cover: content blocks (text, image, audio, resource), tool call updates,
-permission outcomes, session updates, and method payloads (initialize, new session, prompt, etc.).
-Passing these proves the Crush types are structurally identical to the SDK spec.
-
-### 3. Cross-SDK Conformance
-`github.com/Tangerg/acp` is reachable at `v0.2.4` (schema `schema-v1.21.0`, Go
-1.25+) and is planned as a **test-only** dependency; see I-8 and Phase D of the
-remediation plan. The two external harnesses are:
-
-**a) OpenAgentsInc conformance harness** (TypeScript, 47 scenarios):
-```bash
-git clone https://github.com/OpenAgentsInc/openagents
-cd openagents
-pnpm install
-pnpm --dir packages/agent-client-protocol-conformance run test
-```
-Feeds stdio-based agents through a scenario catalog and reports pass/fail per case.
-To test Crush server: spawn `crush acp` as the agent under test and point the harness at it.
-
-**b) Tangerg/acp interop tests** (Go, 154 fixtures from TypeScript validators + Zed recordings):
-```bash
-go get github.com/Tangerg/acp@v0.2.4
-go test github.com/Tangerg/acp/...  # includes golden_test.go, zed_test.go, interop_test.go
-```
-These replay recorded Zed 1.17.2 sessions and the reference TypeScript SDK's bytes.
-Integration plan: vendor `testdata/zed/terminal-and-cancellation.json` and the
-`testdata/fixtures/*.json` corpus into `internal/acp/testdata/tangerg/`, then add
-`internal/acp/tangerg_conformance_test.go` covering (i) fixture replay into our
-server with fixed-point re-encoding, (ii) the Zed transcript's cancel path, and
-(iii) a Tangerg client driving our server over an in-memory transport. Gate behind
-a build tag so CI without network still passes.
-
-### 4. Manual End-to-End Testing
-Connect Crush to a real IDE or reference client:
-
-**Against Zed (ACP server):**
-```bash
-# In one terminal, start the ACP server
-crush acp
-```
-
-**Against a reference agent (ACP client):**
-```bash
-# Connect to an external ACP agent (e.g., a TypeScript or Python ACP agent)
-crush acp connect ./my-acp-agent -- --config path/to/config.json
-# Or interactively:
-crush acp connect claude
-```
-
-**Test scenarios to verify manually:**
-1. `initialize` — should return protocol version 1, agent info `"Crush"`.
-2. `session/new` — should create a SQLite session, return non-empty `sessionId`.
-3. `session/prompt` — should run a prompt through the coordinator, return `StopReasonEndTurn`.
-4. `session/update` — streaming chunks (text, reasoning, tool calls) should arrive in real time.
-5. `session/request_permission` — permission dialog should appear; selecting allow/reject should
-   propagate correctly back to the agent.
-6. `session/cancel` — should abort an in-flight prompt and return `StopReasonCancelled`.
-7. `fs/read_text_file` / `fs/write_text_file` — should read/write actual files on disk.
-8. Disconnect — closing the IDE should cause the server to exit cleanly (no goroutine leak).
-
-### 5. Known Test Gaps
-- **Streaming prompt test**: No end-to-end test for `Prompt` with a real agent that produces
-  `SessionUpdate` chunks. The server-side `TestServerStartEndToEnd` only tests `NewSession` +
-  `Cancel`. Adding a mock agent that emits `SessionUpdate` notifications would close this gap.
-  See I-1; this is the prime suspect for the Zed hang.
-- **Cross-implementation conformance**: Not yet validated against Zed or JetBrains reference
-  clients. `Tangerg/acp v0.2.4` is available (I-8) and should be added as a test-only
-  dependency rather than relying on a manual IDE run.
-- **Live subprocess e2e**: No test spawns the built `crush acp` binary and speaks raw
-  JSON-RPC at its stdin/stdout. The in-process pipe tests cannot catch stdout pollution
-  (I-4) or capability-shape problems (I-2).
-- **Termination on agent crash**: When the client-side agent process crashes, `Client.Start()`
-  returns an error but does not propagate it to callers of `Prompt`/`NewSession`. Consider adding
-  a `Done()` channel on `Client` so callers can detect agent death.
-
----
-
-## Implementation Reference (Files & Line Numbers)
-
-### Server Side (`internal/acp/`)
-
-| File | Purpose | Key Types/Functions |
-|---|---|---|
-| `server.go` | Entry point, wiring | `Server`, `NewServer()`, `dispatcher` (routes SDK -> `Agent` interface) |
-| `agent.go` | `acp.Agent` impl | `crushAgent`, `Initialize()`, `NewSession()`, `Prompt()`, `Cancel()`, `mapFinishReason()` |
-| `event_bridge.go` | Pushes Crush events -> SDK `SessionUpdate` | `eventBridge`, `Start()`, `subscribeNotifications()`, `subscribeRunCompletions()` |
-| `permission.go` | Crush -> ACP permission translation | `permissionBridge`, `CheckPermission()`, `buildPermissionOptions()`, `mapPermissionOutcome()` |
-| `permission_service.go` | Wraps `permission.Service` to route through bridge | `acpPermissionService`, `Request()` |
-| `server_test.go` | Server e2e pipe test | `TestServerStartEndToEnd`, `testClient` |
-| `event_bridge_test.go` | Event bridge lifecycle | `TestEventBridge_StartAndStop`, `TestEventBridge_ClientDisconnect` |
-| `permission_test.go` | Permission translation logic | `TestBuildPermissionOptions`, `TestMapPermissionOutcome`, `TestIsAllowAlways`, `TestPermissionBridgeIntegration` |
-| `test_helpers.go` | Mocks and helpers | `stubSessionService` (full `session.Service` mock) |
-
-### Client Side (`internal/acp/`)
-
-| File | Purpose | Key Types/Functions |
-|---|---|---|
-| `client.go` | `acp.Client` impl + subprocess driver | `Client`, `NewClient()`, `Start()`, `crushClient` (callbacks) |
-| `client_test.go` | Client unit tests | `TestClientSubscribe`, `TestClientPermission*`, `TestClientReadTextFile`, `TestClientWriteTextFile`, `TestClientTerminalMethods`, `stubAgent` |
-
-### CLI (`internal/cmd/`)
-
-| File | Purpose | Key Functions |
-|---|---|---|
-| `acp.go` | `crush acp` server command | `runACP()` — boot workspace, redirect logs, start `Server` |
-| `acp_client.go` | `crush acp connect` client command | `runACPConnect()` — spawn agent, interactive prompt loop |
-
----
-
-## Action Plan
-
-Based on the compliance audit of ACP specification implementation, test coverage,
-and test toolkit verification, the following actions are recommended to close
-remaining gaps.
-
-### 1. Client Tool Delegation Layer
-
-Crush tools currently always use local filesystem and terminal execution. When an
-ACP client advertises `fs` and `terminal` capabilities in `initialize`, Crush
-should delegate those operations back through the connection rather than executing
-locally.
-
-**Files to touch:** `internal/acp/agent.go` (Initialize response),
-`internal/agent/tools/` (tool delegation hook), `internal/acp/event_bridge.go`.
-
-**Steps:**
-1. Track client capabilities from `InitializeRequest.ClientCapabilities` in
-   `crushAgent` and expose them on the server.
-2. In the tool permission / execution path, inspect advertised capabilities:
-   - If `clientCapabilities.fs.readTextFile` / `fs.writeTextFile` → route
-     `tools.View` / `tools.Edit` through `conn.ReadTextFile` / `WriteTextFile`.
-   - If `clientCapabilities.terminal` → route shell tools through
-     `conn.CreateTerminal` / `KillTerminal` / `WaitForTerminalExit`.
-3. Fall back to local Crush tool behavior when the client lacks the capability.
-4. Add unit tests covering each delegation path in `internal/acp/permission_test.go`
-   and `internal/acp/conformance_test.go`.
-
----
-
-### 2. Client CLI Interactive Streaming
-
-`crush acp connect` prints only the `StopReason` after each turn. The client
-already has per-session `Subscribe()` channels that receive `SessionUpdate`
-notifications, but they are never consumed in the interactive loop.
-
-**Files to touch:** `internal/cmd/acp_client.go`, `internal/acp/client.go`.
-
-**Steps:**
-1. After `cli.NewSession()`, call `cli.Subscribe(sessionID)` and start a goroutine
-   that drains the channel.
-2. Render each `agent_message_chunk` content as it arrives (streaming text output
-   to stdout without newline so progress is visible in real time).
-3. Render `tool_call` updates (start/end) as status lines.
-4. Keep the existing `StopReason` print as a final summary after the prompt returns.
-5. Add a test in `test/acp/e2e_test.go` (tagged `e2e`) that runs
-   `crush acp connect` against a mock agent and asserts streaming output appears.
-
----
-
-### 3. External Conformance Automation
-
-The OpenAgentsInc TypeScript conformance harness (`packages/
-agent-client-protocol-conformance`, 47 scenarios) is the authoritative protocol
-validator but is not wired into the existing `test/acp/run.sh` workflow.
-
-**Files to touch:** `test/acp/run.sh`, `test/acp/README.md`.
-
-**Steps:**
-1. Add a `run_conformance()` function to `test/acp/run.sh` that:
-   - Checks for `CRUSH_BIN` env var (builds if missing via `run_build`).
-   - Clones `https://github.com/OpenAgentsInc/openagents` into a temp directory
-     (or reuses cached clone via `$HOME/.cache/openagents`).
-   - Runs `pnpm --dir packages/agent-client-protocol-conformance run test` with
-     `CRUSH_BIN` set.
-   - Returns non-zero on any failed scenario.
-2. Add `conformance` as a named target in the `case` statement.
-3. Document the requirement (Node.js / pnpm installed) in
-   `test/acp/README.md` under a new "Prerequisites" section.
-4. Gate this target behind a `CI_CONFORMANCE=false` check so CI passes without
-   it; the target is informational rather than blocking.
-
----
-
-### 4. Session Resume Support Assessment
-
-`session/resume` currently returns a hard error. Two options exist:
-- Wire it to resume an existing session by ID (load stored messages, replay
-  context into coordinator).
-- Return a proper `AgentCapabilities` declaration that `Resume: false` so
-  clients know not to call it.
-
-**Files to touch:** `internal/acp/agent.go`, `docs/ACP_PLAN.md`.
-
-**Steps:**
-1. Decide on the implementation path (wire vs. capability rejection).
-2. If wiring: load session messages from `session.Service`, reconstruct
-   prompt history, pass into coordinator `Run()` with resumed context.
-3. If rejecting: add `Resume: &acp.SessionResumeCapabilities{}` to
-   `AgentCapabilities` and return `nil, nil` (acknowledge) instead of error
-   to avoid breaking clients that send the method unconditionally.
-4. Update checkpoint table accordingly.
-
----
-
-## Updated Compliance Summary
-
-| Area | Status | Notes |
-|---|---|---|
-| ACP Server spec core methods | ✅ Implemented | `initialize`, `new_session`, `prompt`, `cancel`, `list_sessions`, `close_session` |
-| ACP Client spec methods | ✅ Implemented | `Initialize`, `NewSession`, `Prompt`, `Cancel`, `ReadTextFile`, `WriteTextFile`, terminal stubs |
-| Permission bridge | ✅ Implemented | Options mapping, persistent allow-always cache |
-| Event streaming (server-side) | ✅ Wired | `subscribeMessages()` bridges agent text deltas to `SessionUpdate` |
-| Session configuration methods | ✅ Fixed | `SetSessionMode`, `SetSessionConfigOption` no longer error |
-| Cross-SDK interop (Tangerg/acp) | ✅ Verified | `TestReferenceClientHandshake`, `TestZedTranscript*` all pass |
-| SDK regression | ✅ Verified | `go test github.com/coder/acp-go-sdk` passes 47 tests |
-| Subprocess e2e | ✅ Verified | `test/acp/e2e_test.go` passes against built binary |
-| OpenAgents conformance harness | ⚠️ Not automated | Manual run possible; not wired into `run.sh` |
-| Client tool delegation | ❌ Not implemented | Tools still use local Crush paths exclusively |
-| Client CLI streaming display | ❌ Partial | Only `StopReason` printed; live chunks not rendered |
-| Session resume support | ❌ Not implemented | Returns error |
-
-
----
-
-## Protocol v1 Compliance Audit (Official Spec — agentclientprotocol.com)
-
-### Session Update Types Coverage (11 in spec)
-
-| Type | Status | Notes |
-|---|---|---|
-| `user_message_chunk` | ❌ Not implemented | Client echoes user input; we never emit this |
-| `agent_message_chunk` | ✅ Implemented | `subscribeMessages()` in event_bridge.go |
-| `agent_thought_chunk` | ❌ Not implemented | Reasoning deltas not bridged |
-| `tool_call` | ❌ Not implemented | Tool start events not emitted |
-| `tool_call_update` | ❌ Not implemented | Tool in-progress/completed/failed not emitted |
-| `plan` | ❌ Not implemented | Execution strategy updates not supported |
-| `available_commands_update` | ❌ Not implemented | Slash command advertising missing |
-| `current_mode_update` | ❌ Not implemented | Mode change notifications not sent |
-| `config_option_update` | ❌ Not implemented | Config state change notifications not sent |
-| `session_info_update` | ❌ Not implemented | Session metadata updates not supported |
-| `usage_update` | ❌ Not implemented | Token usage reporting not emitted |
-
-### Content Block Types Coverage (5 in spec)
-
-| Type | Status | Notes |
-|---|---|---|
-| `text` | ✅ Implemented | Baseline support |
-| `resource_link` | ✅ Implemented | Referenced in extractPromptText |
-| `image` | ⚠️ Capability advertised | Prompt accepts but event bridge does not stream image content blocks |
-| `audio` | ⚠️ Capability advertised | Prompt accepts but event bridge does not stream audio content |
-| `resource` (embedded) | ⚠️ Partial | URI/mimeType/byte data not fully handled in prompt extraction |
-
-### Stop Reason Coverage (5 in spec)
-
-| Reason | Status | Notes |
-|---|---|---|
-| `end_turn` | ✅ | Maps fantasy.FinishReasonStop |
-| `max_tokens` | ✅ | Maps fantasy.FinishReasonLength |
-| `max_turn_requests` | ❌ Not mapped | Fantasy may not expose this reason |
-| `refusal` | ✅ | Maps fantasy.FinishReasonContentFilter |
-| `cancelled` | ✅ | Returns on context cancellation |
-
-### Agent Methods Coverage
-
-| Method | Status | Notes |
-|---|---|---|
-| `initialize` | ✅ | Full capability response |
-| `authenticate` | ⚠️ Stub | Returns "auth not supported"; no authMethods advertised |
-| `session/new` | ✅ | Creates session, returns sessionId + optional configOptions |
-| `session/load` | ❌ Stub | Returns error; `loadSession` advertised but no implementation |
-| `session/prompt` | ✅ | Runs coordinator, maps finish reasons |
-| `session/cancel` | ✅ | Cancels active prompt |
-| `session/list` | ⚠️ Partial | `list` capability not advertised; method exists |
-| `session/close` | ✅ | Cancels session coordinator work |
-| `session/resume` | ❌ Stub | Returns error; `resume` capability not advertised |
-| `session/set_mode` | ✅ Acknowledges | No-op success; mode list not returned in session/new |
-| `session/delete` | ❌ Not implemented | `delete` capability not advertised |
-| `logout` | ❌ Stub | Returns "logout not supported" |
-| `elicitation/create` | ❌ Not implemented | Form/url modes not supported |
-
-### Client Methods Coverage
-
-| Method | Status | Notes |
-|---|---|---|
-| `session/request_permission` | ✅ | Bridge implemented with all 4 option kinds |
-| `fs/read_text_file` | ✅ | Implemented with line/limit support |
-| `fs/write_text_file` | ✅ | Implements mkdir parent |
-| `terminal/create` | ⚠️ Stub | Returns "not supported" |
-| `terminal/output` | ⚠️ Stub | Returns "not supported" |
-| `terminal/release` | ⚠️ Stub | Returns "not supported" |
-| `terminal/wait_for_exit` | ⚠️ Stub | Returns "not supported" |
-| `terminal/kill` | ⚠️ Stub | Returns "not supported" |
-| `elicitation/create` | ❌ Not implemented | Client callback missing |
-| `elicitation/complete` | ❌ Not implemented | Notification handler missing |
-
-### Capability Advertising Gaps
-
-| Capability | Current | Required for Full Compliance |
-|---|---|---|
-| `agentCapabilities.loadSession` | ✅ true | Already set |
-| `agentCapabilities.promptCapabilities` | ✅ | Image/audio/embeddedContext set |
-| `agentCapabilities.mcpCapabilities` | ✅ | Set to empty (implies no transports) |
-| `agentCapabilities.sessionCapabilities.close` | ✅ | Set |
-| `agentCapabilities.sessionCapabilities.list` | ❌ Missing | Should advertise if ListSessions implemented |
-| `agentCapabilities.sessionCapabilities.resume` | ❌ Missing | Should advertise if resume supported |
-| `agentCapabilities.sessionCapabilities.delete` | ❌ Missing | Delete method not implemented |
-| `agentCapabilities.sessionCapabilities.additionalDirectories` | ❌ Missing | Not supported |
-| `agentCapabilities.auth.logout` | ❌ Missing | Logout stub exists but not advertised |
-| Client `auth.terminal` | ⚠️ Not checked | Client can advertise; we ignore |
-| Client `session.configOptions.boolean` | ⚠️ Not checked | Boolean config options not advertised back |
-
-### Extensibility & Conventions Gaps
-
-| Feature | Status |
-|---|---|
-| `_meta` field passthrough | ❌ Not forwarded through any message path |
-| Custom methods (`_` prefix) | ⚠️ SDK returns -32601 automatically |
-| `elicitation` form/url modes | ❌ Not implemented on either side |
-| JSON-RPC batch messages | ⚠️ Not tested (v2 feature, v1 spec says 501) |
-| Transport beyond stdio | ❌ HTTP/WebSocket not supported (out of scope for v1) |
-
-### Tool Call Details Gap
-
-The event bridge emits `agent_message_chunk` but never emits:
-- `tool_call` (pending start of tool execution)
-- `tool_call_update` with status `in_progress`, `completed`, or `failed`
-- `toolCallLocation` / file locations
-- `rawInput` / `rawOutput` fields
-
-This means editors cannot show live tool execution progress, which is a visible UX gap compared to the spec.
-
-
----
-
-## Prioritized Compliance Action Plan
-
-Based on the official v1 spec audit, the following gaps should be addressed in priority order:
-
-### P0 — Protocol Correctness (client-visible hangs / errors)
-
-**1. Emit `tool_call` and `tool_call_update` from event bridge**
-   - Editors show tool execution progress via these notifications. Without them, the agent appears frozen during file edits, searches, and terminal commands.
-   - Files: `internal/acp/event_bridge.go`, `internal/agent/notify/`
-   - Hook into `agent.OnToolCallStart` and `agent.OnToolCallEnd` if available; otherwise instrument the coordinator's prompt result to emit per-tool events.
-   - Add `TestPromptStreamsToolCalls` regression test.
-
-**2. Add `max_turn_requests` to stop reason mapping**
-   - File: `internal/acp/agent.go` (`mapFinishReason`)
-   - If fantasy exposes a turn-limit finish reason, map it; otherwise acknowledge the gap in comments.
-
-**3. Advertise all implemented session capabilities**
-   - `sessionCapabilities.list = &SessionListCapabilities{}` if ListSessions works reliably.
-   - `sessionCapabilities.resume` only if we wire `session/resume`; otherwise omit.
-   - `sessionCapabilities.delete` only if delete is implemented; otherwise omit.
-   - File: `internal/acp/agent.go` Initialize response.
-
-**4. Echo `user_message_chunk` on prompt**
-   - When the client sends `session/prompt`, the agent SHOULD reflect the user message back as a `user_message_chunk` update before processing. This lets editors show the user's input in the session history.
-   - File: `internal/acp/agent.go` Prompt method.
-
----
-
-### P1 — Spec Completeness (full feature parity)
-
-**5. Wire `session/load` properly**
-   - Load stored messages from `session.Service.Get`, replay them as `user_message_chunk` + `agent_message_chunk` updates, then respond.
-   - File: `internal/acp/agent.go` ResumeSession → rename to implement LoadSession logic.
-   - Add `TestConformanceSessionLoad` to conformance suite.
-
-**6. Implement `elicitation/create` and `elicitation/complete` on client side**
-   - Client callbacks: `RequestElicitation` on `crushClient` in `internal/acp/client.go`.
-   - For Crush ACP server mode: return "not supported" error until needed.
-   - Form mode: parse `requestedSchema` JSON Schema, display to user, collect response.
-   - URL mode: open URL in browser, wait for `elicitation/complete` notification.
-   - File: `internal/acp/client.go` (add method), `internal/acp/server.go` (add stub).
-
-**7. Add `_meta` passthrough on all message paths**
-   - Propagate `_meta` from incoming requests through to prompt text and session updates where relevant.
-   - File: `internal/acp/agent.go` (Initialize, NewSession, Prompt), `internal/acp/event_bridge.go`.
-
-**8. Emit `available_commands_update` after session creation**
-   - Send slash commands the agent supports (e.g., `/plan`, `/test`, `/web`).
-   - File: `internal/acp/agent.go` NewSession or session init hook.
-
-**9. Emit `config_option_update` when config changes**
-   - When `SetSessionConfigOption` is called, reply with the full current config list AND send a `config_option_update` notification.
-   - File: `internal/acp/agent.go` SetSessionConfigOption.
-
-**10. Handle `authMethods` and `authenticate` properly**
-   - If no auth is needed, advertise empty `authMethods: []` and handle `authenticate` as no-op returning success.
-   - If auth is required (provider not configured), advertise `authMethods` with a terminal-type method and return `auth_required` error on session operations until authenticated.
-   - File: `internal/acp/agent.go` Initialize, Authenticate methods.
-
----
-
-### P2 — UX & Observability
-
-**11. Stream `agent_thought_chunk` for reasoning deltas**
-   - If Crush's fantasy pipeline emits reasoning/reasoning-text events, bridge them to `agent_thought_chunk`.
-   - File: `internal/acp/event_bridge.go` (add subscription to reasoning stream).
-
-**12. Emit `usage_update` with token counts**
-   - Map fantasy `Usage` fields to `used`/`size`/`cost` in session updates.
-   - File: `internal/acp/event_bridge.go`.
-
-**13. Support `plan` session updates**
-   - If the coordinator can produce an execution plan, emit `plan` updates with entries, priorities, and statuses.
-   - File: `internal/acp/event_bridge.go`.
-
-**14. Implement `current_mode_update` notification**
-   - After `SetSessionMode`, emit a `current_mode_update` with the new `modeId`.
-   - File: `internal/acp/agent.go` SetSessionMode.
-
-**15. Return `modes` and `configOptions` in `session/new` response**
-   - The spec says agents MAY return the initial mode list and config options in the NewSession response.
-   - File: `internal/acp/agent.go` NewSession response construction.
-
----
-
-### P3 — Client-Side Gaps
-
-**16. Terminal client callbacks (stub → real)**
-   - Replace "not supported" stubs in `internal/acp/client.go` with real subprocess terminals using `os/exec` + pty if available, or keep stubs with explicit error messages and document as out-of-scope.
-   - Decision point: only needed if ACP clients should drive Crush as an external agent.
-
-**17. Consume subscription channels in `crush acp connect` CLI**
-   - Wire `cli.Subscribe()` to render `agent_message_chunk`, `tool_call`, and `tool_call_update` in the interactive prompt loop.
-   - File: `internal/cmd/acp_client.go`.
-
----
-
-### P4 — Test Coverage Gaps
-
-**18. Add tests for each missing SessionUpdate type**
-   - `TestPromptStreamsToolCalls` — verifies `tool_call` + `tool_call_update` emission.
-   - `TestPromptStreamsThoughtChunk` — verifies reasoning delta streaming.
-   - `TestPromptStreamsUserMessageChunk` — verifies user message echo-back.
-   - `TestPromptStreamsPlan` — verifies plan update emission.
-   - `TestPromptStreamsUsageUpdate` — verifies usage reporting.
-
-**19. Add conformance tests for session/load**
-   - `TestConformanceSessionLoad` — verify session replay sends updates before response.
-
-**20. Add elicitation roundtrip test**
-   - `TestElicitationFormMode` — client receives elicitation request and responds.
-
-**21. Add `_meta` passthrough test**
-   - `TestMetaPassthrough` — verify `_meta` from initialize request is preserved.
-
----
-
-### Implementation Priority Summary
-
-| Priority | Count | Effort | Impact |
-|---|---|---|---|
-| P0 — Protocol correctness | 4 items | Medium | Prevents client-side hangs / blank tool progress |
-| P1 — Spec completeness | 6 items | Large | Full v1 feature parity |
-| P2 — UX & observability | 5 items | Medium | Richer editor experience |
-| P3 — Client-side gaps | 2 items | Small-Medium | Better external agent support |
-| P4 — Test coverage | 6 tests | Small | Regression protection |
-
-Estimated total: ~24 items across 4 priority tiers.
+- Unit: permission logic, server roundtrip (`TestServerStartEndToEnd`),
+  event bridge lifecycle, client subscribe/permission/IO.
+- Golden: 33 JSON fixtures in `test/acp/spec/testdata/json_golden`.
+- Cross-SDK: Tangerg/acp fixtures + Zed transcript in `test/acp/spec/testdata/tangerg`.
+- OpenAgents conformance harness: documented in `test/acp/README.md`, not wired
+  into `run.sh` (Node/pnpm; informational).
+
+## 6. Unaddressed points
+
+Direct answer to "is any point unaddressed":
+
+- **`session/load` inconsistency** — capability advertised `true` but method
+  errors. Highest-priority correctness gap (P0 #2).
+- **Mandatory `SessionInfo.cwd`** missing in `ListSessions` (P0 #3).
+- **`authMethods` null vs `[]`** serialization (P0 #4).
+- All streaming update types beyond `agent_message_chunk` (P0 #1, P2 #12–17).
+- `user_message_chunk` echo, `messageId` propagation (P1 #5).
+- Elicitation fully unspecified in code (P1 #7).
+- `_meta` passthrough + reserved trace keys (P1 #8).
+- `session/delete`, `session/resume` wiring decision (P1 #6).
+- MCP server connection at session setup (§3.12).
+- `additionalDirectories` capability (P2 #17).
+- Boolean config options + `category` (P2 #16).
+- `$/cancel_request` handling + permission-`cancelled` on cancel (§3.9).
+- `switch_mode` tool kind not represented in any tool event.
+- Client terminal callbacks + `connect` streaming display (P3).
+- `agentInfo.title` omitted; `auth.logout` capability not advertised (§3.1).
+
+All other spec areas (baseline methods, permission bridge, fs client ops, text/
+resource_link content, `session/close`, stdio transport, `_meta` field presence)
+are covered.

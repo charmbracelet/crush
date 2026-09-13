@@ -850,7 +850,6 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Sessions:             c.sessions,
 		Messages:             c.messages,
 		Cfg:                  c.cfg,
-		Permissions:          c.permissions,
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
@@ -1006,6 +1005,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hookRunner, isSubAgent)
+	filteredTools = wrapToolsWithEscalationNotes(filteredTools, c.permissions)
 
 	return filteredTools, nil
 }

@@ -160,7 +160,7 @@ func (m *Message) HasShellCommand() bool {
 
 // IsPrompt reports whether the message is something the user typed.
 func (m *Message) IsPrompt() bool {
-	return m.Role == User && !m.HasShellCommand()
+	return m.Role == User && !m.HasShellCommand() && len(m.SubAgentReports()) == 0
 }
 
 // ShellCommands returns all ShellCommand parts from the message.

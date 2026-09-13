@@ -176,6 +176,17 @@ type Message struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	IsSummaryMessage bool
+	// PrismModelID and PrismModelName identify the model that actually
+	// served the turn, as reported by the Hyper Prism model router
+	// headers. Empty when the turn was not routed through Prism.
+	PrismModelID   string
+	PrismModelName string
+	// PrismHypercreditSavings and PrismDollarSavings are the savings
+	// from routing through Prism, as reported by its savings trailers.
+	// Nil when not reported. When both are present the hypercredit
+	// figure is the one shown.
+	PrismHypercreditSavings *float64
+	PrismDollarSavings      *float64
 }
 
 func (m *Message) Content() TextContent {

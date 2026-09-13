@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -398,6 +399,22 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	opts = append(opts, kv{"auto_lsp", fmt.Sprintf("%v", autoLSP)})
 	autoSummarize := !c.Options.DisableAutoSummarize
 	opts = append(opts, kv{"auto_summarize", fmt.Sprintf("%v", autoSummarize)})
+
+	if c.Options.TUI != nil {
+		opts = append(opts, kv{"compact_mode", fmt.Sprintf("%v", c.Options.TUI.CompactMode)})
+		// An empty DiffMode means "follow the terminal width"; report that
+		// rather than an empty value.
+		opts = append(opts, kv{"diff_mode", cmp.Or(c.Options.TUI.DiffMode, "auto")})
+		opts = append(opts, kv{"scrollbar", c.Options.TUI.Scrollbar})
+		opts = append(opts, kv{"exit_banner", string(c.Options.TUI.ExitBanner)})
+		opts = append(opts, kv{"transparent", fmt.Sprintf("%v", c.Options.TUI.IsTransparent())})
+		// Report the completion limits only once the user has pinned them;
+		// see Completions.Limits for what zero means.
+		if depth, items := c.Options.TUI.Completions.Limits(); depth != 0 || items != 0 {
+			opts = append(opts, kv{"completions_max_depth", fmt.Sprintf("%d", depth)})
+			opts = append(opts, kv{"completions_max_items", fmt.Sprintf("%d", items)})
+		}
+	}
 
 	slices.SortFunc(opts, func(a, b kv) int { return strings.Compare(a.key, b.key) })
 	b.WriteString("[options]\n")

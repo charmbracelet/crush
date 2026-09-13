@@ -654,6 +654,14 @@ func TestAggregationUpdatedInput(t *testing.T) {
 // both before and after the abandon deadline, and only then returns.
 // Under -race this catches any code path in runOne that reads those
 // buffers after returning the DecisionNone abandon result.
+//
+// The abandoned goroutine outlives r.Run, so the test also gates its
+// shutdown on the stub having been entered (started): wg.Add runs inside
+// the stub, and under a loaded scheduler the goroutine may not be
+// scheduled until after the test body returned. Waiting on started
+// orders wg.Add (and the goroutine's read of the runShell variable)
+// before the cleanup's wg.Wait and the cleanup restoring runShell;
+// without it both pairs are an Add-after-Wait misuse that -race flags.
 func TestRunnerAbandonRaceSafety(t *testing.T) {
 	origRunShell := runShell
 	t.Cleanup(func() { runShell = origRunShell })
@@ -661,6 +669,7 @@ func TestRunnerAbandonRaceSafety(t *testing.T) {
 	// Synchronize shutdown with the abandoned goroutine so the test
 	// exits cleanly even under -race.
 	var wg sync.WaitGroup
+	started := make(chan struct{})
 	release := make(chan struct{})
 	t.Cleanup(func() {
 		close(release)
@@ -670,6 +679,7 @@ func TestRunnerAbandonRaceSafety(t *testing.T) {
 	runShell = func(_ context.Context, opts shell.RunOptions) error {
 		wg.Add(1)
 		defer wg.Done()
+		close(started)
 		// Write before the caller observes ctx.Done(); the caller will
 		// not read the buffer while we still own it.
 		_, _ = io.WriteString(opts.Stdout, "before\n")
@@ -700,6 +710,14 @@ func TestRunnerAbandonRaceSafety(t *testing.T) {
 	// slack so CI noise doesn't flake the test.
 	require.Less(t, elapsed, 3500*time.Millisecond,
 		"runOne should return within timeout+abandonGrace+slack")
+
+	// Block until the abandoned goroutine has entered the stub. In the
+	// common case it was entered long before the abandon deadline and
+	// this returns immediately; in the pathological case the goroutine
+	// was starved for the whole abandon window, and this waits for it to
+	// run so the cleanups below stay ordered after its wg.Add and its
+	// read of the runShell variable.
+	<-started
 }
 
 func TestRunnerUpdatedInput(t *testing.T) {

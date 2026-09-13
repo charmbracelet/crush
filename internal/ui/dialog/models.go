@@ -221,13 +221,16 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				return util.ReportError(err)
 			}
 		default:
+			prevValue := m.input.Value()
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			value := m.input.Value()
-			m.list.Focus()
-			m.list.SetFilter(value)
-			m.list.SelectFirst()
-			m.list.ScrollToTop()
+			if value != prevValue {
+				m.list.Focus()
+				m.list.SetFilter(value)
+				m.list.SelectFirst()
+				m.list.ScrollToTop()
+			}
 			return ActionCmd{cmd}
 		}
 	}
@@ -437,6 +440,26 @@ func (m *Models) setProviderItems() error {
 		}
 
 		name := cmp.Or(displayProvider.Name, providerID)
+
+		// The OpenAI provider holds exactly one credential. Signed in
+		// with ChatGPT, only the models the subscription grants are
+		// usable, so they are all the section lists; the API catalog
+		// would only 404. Without a login the section is the API catalog.
+		if provider.ID == catwalk.InferenceProviderOpenAI && providerConfig.OAuthToken != nil {
+			group := NewModelGroup(t, name, true)
+			for _, model := range providerConfig.ChatGPTModels {
+				item := NewModelItem(t, provider, model, m.modelType, false)
+				group.AppendItems(item)
+				itemsMap[item.ID()] = item
+				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+					selectedItemID = item.ID()
+				}
+			}
+			if len(group.Items) > 0 {
+				groups = append(groups, group)
+			}
+			continue
+		}
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {

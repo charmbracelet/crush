@@ -26,6 +26,26 @@ const (
 
 	ArrowRightIcon string = "→"
 
+	// CodespanPadding is the padding rendered around inline code spans in
+	// markdown. It displays identically to the blank padding it replaced,
+	// but selection copies recognize it and turn it back into the original
+	// backticks (see list.HighlightContent).
+	//
+	// It is a no-break space tagged with the text-presentation variation
+	// selector (U+FE0E): the pair is a single one-cell grapheme that
+	// renders as a blank and, being non-breaking, keeps word wrap from
+	// tearing a codespan between its padding and its text. The selector
+	// makes the sentinel distinct from a real no-break space in message
+	// text (pasted text, some LLM output), which a selection copy must
+	// preserve verbatim.
+	//
+	// The selector must be U+FE0E, not the emoji-presentation U+FE0F:
+	// ansi.StringWidth measures any cluster ending in U+FE0F as two
+	// cells wide, while terminals render it as one, and that mismatch
+	// makes the frame differ repaint the line on every frame (visible
+	// as flicker).
+	CodespanPadding string = "\u00a0\ufe0e"
+
 	ToolPending string = "●"
 	ToolSuccess string = "✓"
 	ToolError   string = "×"
@@ -311,6 +331,7 @@ type Styles struct {
 		AssistantInfoModel     lipgloss.Style
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
+		SubduedHypercreditIcon lipgloss.Style // Subdued ◆ for hypercredit figures within subdued text
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
 	}
 
@@ -456,7 +477,8 @@ type Styles struct {
 		Spinner lipgloss.Style
 
 		// ContentPanel is used for content blocks with subtle background.
-		ContentPanel lipgloss.Style
+		ContentPanel   lipgloss.Style
+		ContentPanelBg color.Color // Background color for ContentPanel syntax highlighting.
 
 		// Scrollbar styles for scrollable content.
 		ScrollbarThumb lipgloss.Style
@@ -497,6 +519,13 @@ type Styles struct {
 
 		APIKey struct {
 			Spinner lipgloss.Style // Loading spinner while validating the key
+		}
+
+		// AuthMethod styles the OAuth-vs-API-key choice dialog.
+		AuthMethod struct {
+			Prompt      lipgloss.Style // "How would you like to authenticate?" question line
+			CardBlurred lipgloss.Style // Unselected choice card frame and label
+			CardFocused lipgloss.Style // Selected choice card frame and label
 		}
 
 		OAuth struct {

@@ -146,6 +146,12 @@ type ProviderConfig struct {
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+
+	// ChatGPTModels lists the models the ChatGPT (Codex) backend grants
+	// when the provider is authenticated with a ChatGPT account. It is
+	// the provider's whole catalog in that case: the API-key models in
+	// Models are not served by the subscription.
+	ChatGPTModels []catwalk.Model `json:"chatgpt_models,omitempty" jsonschema:"-"`
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
@@ -182,6 +188,17 @@ func (c *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
 }
 
+// HasAPIKey reports whether the provider's api_key resolves to a usable
+// credential. The stored value is often an unresolved template like
+// $OPENAI_API_KEY, which is not a credential until the variable exists.
+func (c *ProviderConfig) HasAPIKey(resolver VariableResolver) bool {
+	if c.APIKey == "" {
+		return false
+	}
+	v, err := resolver.ResolveValue(c.APIKey)
+	return err == nil && v != ""
+}
+
 type MCPType string
 
 const (
@@ -200,6 +217,19 @@ type MCPConfig struct {
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
 	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
+
+	// Sessionless marks a server that does not maintain an MCP session (it
+	// never issues a Mcp-Session-Id). When true, Crush omits the
+	// tools/prompts/resources list-changed handlers: the go-sdk opens a
+	// SEP-2575 "subscriptions/listen" stream whenever any of those handlers
+	// is set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)
+	// answer that POST with 404 ("session not found"), which the SDK treats
+	// as fatal. The cost is no live list-changed notifications from this
+	// server.
+	//
+	// When nil, Crush auto-detects a set of known sessionless servers (see
+	// IsSessionless); set it explicitly to override that detection.
+	Sessionless *bool `json:"sessionless,omitempty" jsonschema:"description=Mark a sessionless MCP server (no Mcp-Session-Id) so Crush skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP),default=false"`
 
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
@@ -265,6 +295,15 @@ type TUIOptions struct {
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
+	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+}
+
+// IsTransparent reports whether the TUI draws a transparent background. The
+// nil receiver and the unset pointer both mean opaque, so callers can ask
+// without unwrapping either.
+func (t *TUIOptions) IsTransparent() bool {
+	return t != nil && t.Transparent != nil && *t.Transparent
 }
 
 // Completions defines options for the completions UI.
@@ -273,15 +312,38 @@ type Completions struct {
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
 }
 
+// Limits returns the configured completion limits. Zero means the user has not
+// pinned that limit, and callers fall back to their own built-in cap.
 func (c Completions) Limits() (depth, items int) {
 	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
 }
+
+// Diff mode options.
+const (
+	DiffModeUnified = "unified" // Inline unified diffs
+	DiffModeSplit   = "split"   // Side-by-side diffs
+)
 
 // Scrollbar visibility options.
 const (
 	ScrollbarDefault = "default" // Auto-hide after 2 seconds
 	ScrollbarAlways  = "always"  // Always show when content exceeds viewport
 	ScrollbarNever   = "never"   // Never show scrollbar
+)
+
+// ExitBanner selects what Crush prints after the TUI exits.
+type ExitBanner string
+
+const (
+	// ExitBannerDefault renders the full ASCII art logo with padding. It is
+	// also what the zero value and any unrecognized value fall back to.
+	ExitBannerDefault ExitBanner = "default"
+	// ExitBannerCompact renders only the session and resume lines, with no
+	// logo and no padding. With no active session it renders nothing at all,
+	// so Crush exits silently.
+	ExitBannerCompact ExitBanner = "compact"
+	// ExitBannerNone renders nothing.
+	ExitBannerNone ExitBanner = "none"
 )
 
 type Permissions struct {
@@ -334,6 +396,29 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+}
+
+// DefaultRequestTimeout bounds each LLM API request when the user has not
+// configured a timeout. Slow or unreachable providers fail after it instead
+// of blocking a session forever; streamed responses are only aborted after
+// this much inactivity, and users running slow local models can raise or
+// disable it via options.request_timeout.
+const DefaultRequestTimeout = time.Minute
+
+// GetRequestTimeout returns the per-request timeout for LLM API calls (a
+// hard deadline for non-streaming requests and an idle timeout for
+// streams), or zero when disabled. The nil receiver and the unset field
+// both mean DefaultRequestTimeout, so callers can ask without unwrapping
+// either.
+func (o *Options) GetRequestTimeout() time.Duration {
+	if o == nil || o.RequestTimeout == nil {
+		return DefaultRequestTimeout
+	}
+	if *o.RequestTimeout <= 0 {
+		return 0
+	}
+	return time.Duration(*o.RequestTimeout) * time.Second
 }
 
 type MCPs map[string]MCPConfig
@@ -438,6 +523,33 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 		return "", fmt.Errorf("url: %w", err)
 	}
 	return v, nil
+}
+
+// knownSessionlessMCPs is the set of MCP endpoint URLs (normalized, no
+// trailing slash) that are known not to maintain an MCP session — they
+// never issue a Mcp-Session-Id and reject the SEP-2575
+// "subscriptions/listen" stream. Add an entry when a server is confirmed to
+// behave this way.
+var knownSessionlessMCPs = map[string]struct{}{
+	"https://api.github.com/mcp":        {},
+	"https://api.githubcopilot.com/mcp": {},
+}
+
+// IsSessionless reports whether the server should be treated as sessionless.
+// An explicit Sessionless value wins; when unset, the resolved URL is matched
+// against knownSessionlessMCPs (trailing slash ignored). The URL is resolved
+// through r so $VAR-expanded endpoints are detected too; on a resolution
+// error the explicit value (or false) is used.
+func (m MCPConfig) IsSessionless(r VariableResolver) bool {
+	if m.Sessionless != nil {
+		return *m.Sessionless
+	}
+	url, err := m.ResolvedURL(r)
+	if err != nil {
+		return false
+	}
+	_, ok := knownSessionlessMCPs[strings.TrimSuffix(url, "/")]
+	return ok
 }
 
 // ResolvedHeaders returns m.Headers with every value expanded through
@@ -728,8 +840,33 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 				return &m
 			}
 		}
+		for _, m := range providerConfig.ChatGPTModels {
+			if m.ID == model {
+				return &m
+			}
+		}
 	}
 	return nil
+}
+
+// ValidateReasoningEffort checks that effort is a reasoning level the
+// given provider/model supports. It returns an error listing the accepted
+// levels when the model cannot use it.
+func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error {
+	model := c.GetModel(provider, modelID)
+	if model == nil {
+		return fmt.Errorf("model %q not found for provider %q", modelID, provider)
+	}
+	if len(model.ReasoningLevels) == 0 {
+		return fmt.Errorf("model %q does not support reasoning effort", modelID)
+	}
+	if slices.Contains(model.ReasoningLevels, effort) {
+		return nil
+	}
+	return fmt.Errorf(
+		"model %q does not support reasoning effort %q, accepted values: %s",
+		modelID, effort, strings.Join(model.ReasoningLevels, ", "),
+	)
 }
 
 // IsModelAvailable returns true if the provider is enabled and the model

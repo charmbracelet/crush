@@ -245,27 +245,24 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 	return a
 }
 
-// StartAnimation starts the assistant message animation if it should be spinning.
-func (a *AssistantMessageItem) StartAnimation() tea.Cmd {
-	if !a.isSpinning() {
-		return nil
-	}
-	return a.anim.Start()
+// Spinning implements [Animatable].
+func (a *AssistantMessageItem) Spinning() bool {
+	return a.isSpinning()
 }
 
-// Animate progresses the assistant message animation if it should be spinning.
-func (a *AssistantMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
-	if !a.isSpinning() {
-		return nil
+// Advance implements [Animatable].
+func (a *AssistantMessageItem) Advance() bool {
+	if !a.isSpinning() || !a.anim.Advance() {
+		return false
 	}
 	// Bump the F6 list-cache version so the next draw re-renders
-	// this item: a spinner tick mutates anim's internal frame
-	// counter, which changes the rendered output but is invisible
-	// to the per-section content hashes. Without the bump the
-	// list cache would serve the previously rendered frame
-	// indefinitely and the spinner would appear frozen.
+	// this item: a spinner frame mutates anim's internal counter,
+	// which changes the rendered output but is invisible to the
+	// per-section content hashes. Without the bump the list cache
+	// would serve the previously rendered frame indefinitely and
+	// the spinner would appear frozen.
 	a.Bump()
-	return a.anim.Animate(msg)
+	return true
 }
 
 // ID implements MessageItem.
@@ -558,6 +555,9 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	renderer := common.QuietMarkdownRenderer(a.sty, width)
 	rendered := a.streamingThinking.Render(thinking, width, renderer)
 	rendered = strings.TrimSpace(rendered)
+	// The renderer already knows this count from its cached prefix, so
+	// take it rather than rescanning a document that only grows.
+	renderedLines := a.streamingThinking.LastLines()
 
 	// Count lines and, for the windowed view modes, slice the tail
 	// WITHOUT splitting the entire rendered document. Splitting a
@@ -568,8 +568,9 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	var totalLines int
 	switch a.thinkingViewMode {
 	case thinkingCollapsed:
-		totalLines = countLines(rendered)
-		if totalLines > maxCollapsedThinkingHeight {
+		totalLines = renderedLines
+		// Avoid hiding a single line; showing it beats the hint.
+		if totalLines > maxCollapsedThinkingHeight+1 {
 			tail, hidden := tailLines(rendered, maxCollapsedThinkingHeight, totalLines)
 			hint := a.sty.Messages.ThinkingTruncationHint.Render(
 				fmt.Sprintf(assistantMessageTruncateFormat, hidden),
@@ -579,8 +580,8 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 			lines = strings.Split(rendered, "\n")
 		}
 	case thinkingTailWindow:
-		totalLines = countLines(rendered)
-		if totalLines > maxExpandedThinkingTailLines {
+		totalLines = renderedLines
+		if totalLines > maxExpandedThinkingTailLines+1 {
 			tail, hidden := tailLines(rendered, maxExpandedThinkingTailLines, totalLines)
 			hint := a.sty.Messages.ThinkingTruncationHint.Render(
 				fmt.Sprintf(assistantMessageTailWindowFormat, hidden),
@@ -671,8 +672,7 @@ func (a *AssistantMessageItem) isSpinning() bool {
 // sub-section caches whose source text or extras changed are
 // invalidated; the others survive and serve cache hits on the next
 // RawRender.
-func (a *AssistantMessageItem) SetMessage(msg *message.Message) tea.Cmd {
-	wasSpinning := a.isSpinning()
+func (a *AssistantMessageItem) SetMessage(msg *message.Message) {
 	a.message = msg
 	// Bump the F6 version even if the underlying *message.Message
 	// pointer is identical: callers may have mutated the message in
@@ -684,16 +684,14 @@ func (a *AssistantMessageItem) SetMessage(msg *message.Message) tea.Cmd {
 	// section's source hash, so an unchanged section keeps its prefix
 	// cache valid while a changed section forces a miss naturally.
 	// Section caches themselves are content-keyed, so they do not
-	// need an explicit drop here either.
-	if !wasSpinning && a.isSpinning() {
-		return a.StartAnimation()
-	}
-	return nil
+	// need an explicit drop here either. If the message started
+	// spinning the UI's animation clock picks it up on the next
+	// update.
 }
 
 // Finished implements list.Item. The assistant message is freezable
 // once the message reports IsFinished() and is no longer spinning
-// (no animation tick remains pending). Streaming tail animation is
+// (no animation frame remains pending). Streaming tail animation is
 // caught by isSpinning, so freezing only kicks in once the turn is
 // fully terminal. The list cache invalidates the entry on the next
 // version bump if anything (focus, highlight, expansion) changes.

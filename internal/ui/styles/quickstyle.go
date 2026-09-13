@@ -130,6 +130,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			CursorLineNumber: base.Foreground(o.fgMostSubtle),
 			Placeholder:      base.Foreground(o.fgMostSubtle),
 			Prompt:           base.Foreground(o.accent),
+			Selection:        base.Foreground(o.onPrimary).Background(o.secondary),
 		},
 		Blurred: textarea.StyleState{
 			Base:             base,
@@ -139,6 +140,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			CursorLineNumber: base.Foreground(o.fgMoreSubtle),
 			Placeholder:      base.Foreground(o.fgMostSubtle),
 			Prompt:           base.Foreground(o.fgMoreSubtle),
+			Selection:        base.Foreground(o.onPrimary).Background(o.secondary),
 		},
 		Cursor: textarea.CursorStyle{
 			Color: o.secondary,
@@ -249,8 +251,18 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
+				// Pad inline code with a no-break-space sentinel instead of
+				// a plain space. It displays identically, but selection
+				// copies turn it back into the original backticks (see
+				// [CodespanPadding] and list.HighlightContent); a plain
+				// space is indistinguishable from real text, so copies lost
+				// the backticks ("this is  code "). The sentinel carries a
+				// variation selector so copies can tell it apart from a
+				// real no-break space in the message text, and being
+				// non-breaking it keeps word wrap from tearing a codespan
+				// between its padding and its text.
+				Prefix:          CodespanPadding,
+				Suffix:          CodespanPadding,
 				Color:           hex(o.destructive),
 				BackgroundColor: hex(o.bgLessVisible),
 			},
@@ -489,8 +501,8 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
+				Prefix:          CodespanPadding,
+				Suffix:          CodespanPadding,
 				Color:           plainFg,
 				BackgroundColor: plainBg,
 			},
@@ -905,6 +917,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
+	s.Messages.SubduedHypercreditIcon = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
 
 	// Thinking section styles
@@ -960,6 +973,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.ContentPanel = base.Background(o.bgLessVisible).Foreground(o.fgBase).Padding(1, 2)
+	s.Dialog.ContentPanelBg = o.bgLessVisible
 	s.Dialog.Spinner = base.Foreground(o.secondary)
 	s.Dialog.ScrollbarThumb = base.Foreground(o.secondary)
 	s.Dialog.ScrollbarTrack = base.Foreground(o.separator)
@@ -968,6 +982,12 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	// API key input dialog
 	s.Dialog.APIKey.Spinner = base.Foreground(o.success)
+
+	// Auth method choice dialog: the selected card lights up in the success
+	// color while the other stays quiet.
+	s.Dialog.AuthMethod.Prompt = base.Padding(0, 1)
+	s.Dialog.AuthMethod.CardBlurred = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.separator).Foreground(o.fgMostSubtle)
+	s.Dialog.AuthMethod.CardFocused = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.success).Foreground(o.success)
 
 	// OAuth dialog
 	s.Dialog.OAuth.Spinner = base.Foreground(o.successMoreSubtle)

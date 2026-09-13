@@ -179,9 +179,18 @@ func mcpConfigEqual(a, b config.MCPConfig) bool {
 		slices.Equal(a.DisabledTools, b.DisabledTools) &&
 		slices.Equal(a.EnabledTools, b.EnabledTools) &&
 		a.Timeout == b.Timeout &&
+		boolPtrEqual(a.Sessionless, b.Sessionless) &&
 		maps.Equal(a.Headers, b.Headers) &&
 		a.OAuth == b.OAuth &&
 		a.OAuthClientID == b.OAuthClientID &&
 		a.OAuthClientSecret == b.OAuthClientSecret &&
 		a.OAuthCallbackPort == b.OAuthCallbackPort
+}
+
+// boolPtrEqual compares two *bool by value, treating two nils as equal.
+func boolPtrEqual(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

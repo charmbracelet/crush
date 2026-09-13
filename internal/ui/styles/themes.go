@@ -107,6 +107,11 @@ func CharmtonePantera() Styles {
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
 		Foreground(charmtone.Hazy)
 
+	// The ◆ hypercredit symbol inside subdued text (e.g. savings
+	// suffixes) uses Mochi so it stays visible against its surroundings.
+	s.Messages.SubduedHypercreditIcon = s.Messages.SubduedHypercreditIcon.
+		Foreground(charmtone.Violet)
+
 	return s
 }
 

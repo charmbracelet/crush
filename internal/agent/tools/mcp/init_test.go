@@ -2,9 +2,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -818,4 +823,103 @@ func TestBeginAuth_Concurrent(t *testing.T) {
 	_, cancel2, err := BeginAuth(cfg, name)
 	require.NoError(t, err)
 	cancel2()
+}
+
+// TestCreateSession_Sessionless pins the Sessionless opt-out
+// for sessionless streamable-HTTP servers such as GitHub MCP. Those servers
+// complete the SEP-2575 server/discover probe without ever issuing a
+// Mcp-Session-Id, then answer the follow-up "subscriptions/listen" POST
+// (which the go-sdk opens whenever any tools/prompts/resources list-changed
+// handler is registered) with HTTP 404. The SDK maps that 404 to
+// mcp.ErrSessionMissing and fails the whole connection asynchronously, so
+// the next RPC (here tools/list) errors. With Sessionless set, the
+// handlers are omitted, no listen stream is opened, and the server works.
+//
+// The stub server mimics GitHub: it answers server/discover (no session
+// id), 404s any subscriptions/listen, and serves tools/list.
+func TestCreateSession_Sessionless(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	newStub := func(t *testing.T) (*httptest.Server, *atomic.Int64) {
+		t.Helper()
+		listenTotal := new(atomic.Int64)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			var req struct {
+				ID     any    `json:"id"`
+				Method string `json:"method"`
+			}
+			_ = json.Unmarshal(body, &req)
+
+			writeResult := func(result any) {
+				w.Header().Set("Content-Type", "application/json")
+				resp, _ := json.Marshal(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      req.ID,
+					"result":  result,
+				})
+				_, _ = w.Write(resp)
+			}
+
+			switch req.Method {
+			case "server/discover":
+				// Sessionless: deliberately no Mcp-Session-Id header.
+				writeResult(map[string]any{
+					"supportedVersions": []string{"2026-07-28"},
+					"capabilities":      map[string]any{},
+				})
+			case "subscriptions/listen":
+				listenTotal.Add(1)
+				http.Error(w, "session not found", http.StatusNotFound)
+			case "tools/list":
+				writeResult(map[string]any{"tools": []any{}})
+			default:
+				http.Error(w, "unexpected method", http.StatusNotFound)
+			}
+		}))
+		t.Cleanup(srv.Close)
+		return srv, listenTotal
+	}
+
+	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{
+		"PATH": os.Getenv("PATH"),
+	}))
+
+	t.Run("disabled connects with no listen stream", func(t *testing.T) {
+		srv, listenTotal := newStub(t)
+		const name = "sessionless-disabled"
+		states.Del(name)
+		t.Cleanup(func() { states.Del(name) })
+
+		sessionless := true
+		cfg := config.MCPConfig{Type: config.MCPHttp, URL: srv.URL, Timeout: 15, Sessionless: &sessionless}
+		sess, err := createSession(t.Context(), nil, name, cfg, resolver, false)
+		require.NoError(t, err, "Sessionless must let a sessionless server connect")
+		require.NotNil(t, sess)
+		t.Cleanup(func() { sess.Close() })
+
+		_, err = sess.ListTools(t.Context(), &mcp.ListToolsParams{})
+		require.NoError(t, err)
+		require.Zero(t, listenTotal.Load(), "no subscriptions/listen stream should be opened when disabled")
+	})
+
+	t.Run("default opens listen stream and breaks sessionless server", func(t *testing.T) {
+		srv, listenTotal := newStub(t)
+		const name = "sessionless-default"
+		states.Del(name)
+		t.Cleanup(func() { states.Del(name) })
+
+		// Connect itself succeeds; the listen stream fails asynchronously
+		// and poisons the connection, so the subsequent tools/list fails.
+		cfg := config.MCPConfig{Type: config.MCPHttp, URL: srv.URL, Timeout: 15}
+		sess, err := createSession(t.Context(), nil, name, cfg, resolver, false)
+		require.NoError(t, err)
+		require.NotNil(t, sess)
+		t.Cleanup(func() { sess.Close() })
+
+		_, err = sess.ListTools(t.Context(), &mcp.ListToolsParams{})
+		require.Error(t, err, "default handlers open a listen stream that the sessionless server 404s")
+		require.Contains(t, err.Error(), "session not found")
+		require.GreaterOrEqual(t, listenTotal.Load(), int64(1), "expected the listen stream attempt")
+	})
 }

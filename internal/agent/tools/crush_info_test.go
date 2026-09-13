@@ -210,6 +210,49 @@ func TestCrushInfo_Options(t *testing.T) {
 	require.Contains(t, output, "debug = true")
 }
 
+func TestCrushInfo_TUIOptions(t *testing.T) {
+	t.Parallel()
+
+	transparent := true
+	depth, items := 3, 42
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options: &config.Options{
+			TUI: &config.TUIOptions{
+				CompactMode: true,
+				DiffMode:    config.DiffModeSplit,
+				Scrollbar:   config.ScrollbarNever,
+				ExitBanner:  config.ExitBannerCompact,
+				Transparent: &transparent,
+				Completions: config.Completions{MaxDepth: &depth, MaxItems: &items},
+			},
+		},
+	})
+
+	output := buildCrushInfo(cfg, nil, nil, nil, nil)
+	require.Contains(t, output, "compact_mode = true")
+	require.Contains(t, output, "diff_mode = split")
+	require.Contains(t, output, "scrollbar = never")
+	require.Contains(t, output, "exit_banner = compact")
+	require.Contains(t, output, "transparent = true")
+	require.Contains(t, output, "completions_max_depth = 3")
+	require.Contains(t, output, "completions_max_items = 42")
+}
+
+func TestCrushInfo_TUIOptionsUnpinnedCompletionsOmitted(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options:   &config.Options{TUI: &config.TUIOptions{}},
+	})
+
+	output := buildCrushInfo(cfg, nil, nil, nil, nil)
+	require.Contains(t, output, "transparent = false")
+	require.NotContains(t, output, "completions_max_depth")
+	require.NotContains(t, output, "completions_max_items")
+}
+
 func TestCrushInfo_AutoSummarizeInversion(t *testing.T) {
 	t.Parallel()
 

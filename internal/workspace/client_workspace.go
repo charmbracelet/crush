@@ -86,6 +86,7 @@ var (
 func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	if ws.Config != nil {
 		ws.Config.SetupAgents()
+		ws.Config.NormalizeOptions()
 	}
 	states := protoToSkillStates(ws.Skills)
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
@@ -111,6 +112,7 @@ func (w *ClientWorkspace) refreshWorkspace() {
 	}
 	if updated.Config != nil {
 		updated.Config.SetupAgents()
+		updated.Config.NormalizeOptions()
 	}
 	w.mu.Lock()
 	w.ws = *updated
@@ -931,6 +933,7 @@ func (w *ClientWorkspace) recoverWorkspace() error {
 	}
 	if created.Config != nil {
 		created.Config.SetupAgents()
+		created.Config.NormalizeOptions()
 	}
 	w.mu.Lock()
 	oldID := w.ws.ID
@@ -1283,14 +1286,18 @@ func protoToFile(f proto.File) history.File {
 
 func protoToMessage(m proto.Message) message.Message {
 	msg := message.Message{
-		ID:               m.ID,
-		SessionID:        m.SessionID,
-		Role:             message.MessageRole(m.Role),
-		Model:            m.Model,
-		Provider:         m.Provider,
-		CreatedAt:        m.CreatedAt,
-		UpdatedAt:        m.UpdatedAt,
-		IsSummaryMessage: m.IsSummaryMessage,
+		ID:                      m.ID,
+		SessionID:               m.SessionID,
+		Role:                    message.MessageRole(m.Role),
+		Model:                   m.Model,
+		Provider:                m.Provider,
+		PrismModelID:            m.PrismModelID,
+		PrismModelName:          m.PrismModelName,
+		PrismHypercreditSavings: m.PrismHypercreditSavings,
+		PrismDollarSavings:      m.PrismDollarSavings,
+		CreatedAt:               m.CreatedAt,
+		UpdatedAt:               m.UpdatedAt,
+		IsSummaryMessage:        m.IsSummaryMessage,
 	}
 
 	for _, p := range m.Parts {

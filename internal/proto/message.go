@@ -21,15 +21,19 @@ type CreateMessageParams struct {
 
 // Message represents a message in the proto layer.
 type Message struct {
-	ID               string        `json:"id"`
-	Role             MessageRole   `json:"role"`
-	SessionID        string        `json:"session_id"`
-	Parts            []ContentPart `json:"parts"`
-	Model            string        `json:"model"`
-	Provider         string        `json:"provider"`
-	CreatedAt        int64         `json:"created_at"`
-	UpdatedAt        int64         `json:"updated_at"`
-	IsSummaryMessage bool          `json:"is_summary_message,omitempty"`
+	ID                      string        `json:"id"`
+	Role                    MessageRole   `json:"role"`
+	SessionID               string        `json:"session_id"`
+	Parts                   []ContentPart `json:"parts"`
+	Model                   string        `json:"model"`
+	Provider                string        `json:"provider"`
+	PrismModelID            string        `json:"prism_model_id,omitempty"`
+	PrismModelName          string        `json:"prism_model_name,omitempty"`
+	PrismHypercreditSavings *float64      `json:"prism_hypercredit_savings,omitempty"`
+	PrismDollarSavings      *float64      `json:"prism_dollar_savings,omitempty"`
+	CreatedAt               int64         `json:"created_at"`
+	UpdatedAt               int64         `json:"updated_at"`
+	IsSummaryMessage        bool          `json:"is_summary_message,omitempty"`
 }
 
 // MessageRole represents the role of a message sender.

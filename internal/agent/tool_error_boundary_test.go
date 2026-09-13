@@ -56,6 +56,23 @@ func TestToolErrorBoundary_PropagatesErrorWhenRunIsCanceled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled, "cancellation must still abort the turn")
 }
 
+func TestToolErrorBoundary_JoinsCancellationIntoUnrelatedError(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	inner := boundaryTool("boom", func(context.Context) (fantasy.ToolResponse, error) {
+		// The tool failed for its own reason at the same moment the user
+		// canceled. The abort must still be classified as a cancel.
+		return fantasy.ToolResponse{}, errors.New("failed to write file: disk full")
+	})
+	wrapped := newToolErrorBoundary(inner)
+
+	_, err := wrapped.Run(ctx, fantasy.ToolCall{ID: "tc1", Name: "boom", Input: `{"x":1}`})
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorContains(t, err, "disk full", "the tool's own text must survive")
+}
+
 func TestToolErrorBoundary_PassesSuccessThrough(t *testing.T) {
 	t.Parallel()
 
@@ -304,7 +321,11 @@ func TestToolErrorBoundary_NetworkErrorDoesNotTriggerModelRetries(t *testing.T) 
 	require.Equal(t, message.FinishReasonEndTurn, res.finish.Reason)
 	require.Len(t, res.toolResults, 1)
 	require.True(t, res.toolResults[0].IsError)
-	require.Contains(t, res.toolResults[0].Content, "connection refused")
+	// The OS-specific wording of a refused connection differs (Windows
+	// says "actively refused"), so assert on the tool's own prefix and the
+	// address instead.
+	require.Contains(t, res.toolResults[0].Content, "failed to download from URL")
+	require.Contains(t, res.toolResults[0].Content, "127.0.0.1:1")
 }
 
 func TestToolErrorBoundary_UserCancelDuringToolStillCancelsTurn(t *testing.T) {

@@ -67,10 +67,14 @@ LIMIT 200;
 -- name: ListAllUserMessages :many
 -- Backs prompt history when no session is open. Needs
 -- idx_messages_role_created_at to seek rather than scan the table.
-SELECT *
-FROM messages
-WHERE role = 'user'
-ORDER BY created_at DESC
+-- Child sessions are excluded: a sub-agent's task prompt is a user
+-- message too, but the user never typed it, so it has no place in the
+-- prompt history.
+SELECT m.*
+FROM messages m
+JOIN sessions s ON s.id = m.session_id
+WHERE m.role = 'user' AND s.parent_session_id IS NULL
+ORDER BY m.created_at DESC
 LIMIT 200;
 
 -- name: GetLastAssistantMessageBySession :one

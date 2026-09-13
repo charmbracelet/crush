@@ -228,7 +228,8 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 	// no note. Denials discard the marker.
 	if _, escalated := s.escalatedCalls.Take(permission.ToolCallID); escalated {
 		if granted {
-			s.escalationNotes.Set(permission.ToolCallID, "this action was escalated and approved by the user")
+			s.escalationNotes.Set(permission.ToolCallID,
+				"this action was escalated and approved by the user; outcome: ESCALATED (not ALLOW)")
 		}
 	}
 

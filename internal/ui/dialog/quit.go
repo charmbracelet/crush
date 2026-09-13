@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -29,7 +30,10 @@ type Quit struct {
 	compositor *lipgloss.Compositor
 	hoverX     int
 	hoverY     int
-	keyMap     struct {
+	// runningSubAgents is how many detached sub-agents are still working.
+	// They die with the process, so quitting throws their work away.
+	runningSubAgents int
+	keyMap           struct {
 		LeftRight,
 		EnterSpace,
 		Yes,
@@ -43,10 +47,11 @@ type Quit struct {
 var _ Dialog = (*Quit)(nil)
 
 // NewQuit creates a new quit confirmation dialog.
-func NewQuit(com *common.Common) *Quit {
+func NewQuit(com *common.Common, runningSubAgents int) *Quit {
 	q := &Quit{
-		com:        com,
-		selectedNo: true,
+		com:              com,
+		selectedNo:       true,
+		runningSubAgents: runningSubAgents,
 	}
 	q.keyMap.LeftRight = key.NewBinding(
 		key.WithKeys("left", "right"),
@@ -136,14 +141,10 @@ func (q *Quit) handleMouseClick(msg tea.MouseClickMsg) Action {
 
 // Draw implements [Dialog].
 func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	const (
-		// buttonLine is the index of the content line reserved for the
-		// buttons, which are drawn as layers on top of the frame.
-		buttonLine = 2
-	)
 	var (
-		baseStyle = q.com.Styles.Dialog.Quit.Content
-		hintStyle = q.com.Styles.Dialog.Quit.Hint
+		baseStyle    = q.com.Styles.Dialog.Quit.Content
+		hintStyle    = q.com.Styles.Dialog.Quit.Hint
+		warningStyle = q.com.Styles.Dialog.Quit.Warning
 	)
 	buttonOpts := []common.ButtonOpts{
 		{Text: "Yep!", Selected: !q.selectedNo, Padding: 3},
@@ -159,21 +160,44 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	buttons := strings.Join(buttonViews, " ")
 	buttonsWidth := lipgloss.Width(buttons)
 
+	// Sub-agents run in this process, so quitting kills them mid-task and
+	// their work is not recoverable.
+	var warning string
+	if q.runningSubAgents > 0 {
+		noun := "sub-agents are"
+		if q.runningSubAgents == 1 {
+			noun = "sub-agent is"
+		}
+		warning = warningStyle.Render(fmt.Sprintf(
+			"%d %s still working. Quitting stops them and loses their work.",
+			q.runningSubAgents, noun,
+		))
+	}
+
+	// buttonLine is the index of the content line reserved for the buttons,
+	// which are drawn as layers on top of the frame. The warning, when
+	// present, pushes that row down by its own height plus a blank line.
+	buttonLine := 2
+	if warning != "" {
+		buttonLine += lipgloss.Height(warning) + 1
+	}
+
 	// renderContent builds the dialog body around the given button row. A
 	// blank row of the same width reserves space for the buttons, which are
 	// painted as layers so their bounds double as mouse hit regions.
 	renderContent := func(buttonRow string) string {
-		return baseStyle.Render(
-			lipgloss.JoinVertical(
-				lipgloss.Center,
-				quitQuestion,
-				"",
-				buttonRow,
-				"",
-				hintStyle.Render(quitHintLineOne),
-				hintStyle.Render(quitHintLineTwo),
-			),
+		lines := []string{quitQuestion}
+		if warning != "" {
+			lines = append(lines, "", warning)
+		}
+		lines = append(lines,
+			"",
+			buttonRow,
+			"",
+			hintStyle.Render(quitHintLineOne),
+			hintStyle.Render(quitHintLineTwo),
 		)
+		return baseStyle.Render(lipgloss.JoinVertical(lipgloss.Center, lines...))
 	}
 
 	content := renderContent(strings.Repeat(" ", buttonsWidth))

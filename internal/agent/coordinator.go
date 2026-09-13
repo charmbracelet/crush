@@ -869,6 +869,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
 
+	// Applied last so it is the outermost layer: a Go error from any tool,
+	// hooks included, is reported to the model instead of ending the turn.
+	filteredTools = wrapToolsWithErrorBoundary(filteredTools)
+
 	return filteredTools, nil
 }
 

@@ -203,46 +203,69 @@ Phases reflect **verified code state** on branch `feature/acp-client`.
 - [x] **Phase 7** Client unit tests.
 - [x] **Phase 8** `crush acp connect` CLI + interactive loop (prints `StopReason`).
 
-### Gaps to close (prioritized)
+### Roadmap: remaining spec requirements (prioritized)
 
-**P0 — correctness / visible hangs**
-1. Stream `tool_call` + `tool_call_update` (in_progress/completed/failed). Editors
-   show tool progress; without it the agent looks frozen during edits/searches.
-   Files: `event_bridge.go`, `notify` subscription. Test: `TestPromptStreamsToolCalls`.
-2. Fix `loadSession:true` vs unimplemented `session/load` — either implement
-   replay or set `loadSession:false`. Currently advertises a capability we don't serve.
-3. `ListSessions` MUST populate `SessionInfo.cwd` (required, currently `""`).
-4. `Initialize` MUST serialize `authMethods` as `[]`, not `null`.
+Ordered **required-first**. Each item cites the spec clause and target files.
+"MUST / SHOULD / MAY" follow the v1 spec wording. Completion reflects the
+current code state from §3.
 
-**P1 — spec completeness**
-5. Echo `user_message_chunk` on `session/prompt`.
-6. Implement `session/load` replay (or drop capability). Decide `session/resume`
-   (wire vs capability rejection).
-7. Implement `elicitation/create` + `elicitation/complete` (form+url, `accept`/
-   `decline`/`cancel`, `elicitationId` lifecycle) — client callback + server stub.
-8. `_meta` passthrough on message paths; reserve W3C trace keys.
-9. Emit `available_commands_update` after session creation.
-10. `config_option_update` on config change; support `sessionCapabilities.list`
-    advertisement + `session_info_update` metadata sync.
-11. `authMethods:[]` + `agentInfo.title`; `auth.logout` capability if `logout` wired.
+**Tier 1 — Required (MUST): conformance & correctness**
+- [ ] **R1. `session/load` consistency** — capability is advertised `true` but the
+  method errors. Either implement history replay (`user_message_chunk` +
+  `agent_message_chunk`) or set `loadSession:false`. (`agent.go` `ResumeSession`,
+  `event_bridge.go`.) Test: `TestConformanceSessionLoad`.
+- [ ] **R2. `ListSessions` required fields** — populate `SessionInfo.cwd` (MUST,
+  currently `""`) and `updatedAt`; advertise `sessionCapabilities.list`.
+  (`agent.go` `ListSessions`.)
+- [ ] **R3. `Initialize` `authMethods`** — serialize as `[]`, not `null`
+  (`json:"authMethods"` is non-omittable). (`agent.go` `Initialize`.)
+- [ ] **R4. Cancellation semantics** — on `session/cancel`, answer pending
+  `request_permission` with the `cancelled` outcome and ensure aborts map to
+  `StopReasonCancelled` (never an error). (`event_bridge.go`, `permission.go`.)
+- [ ] **R5. `$/cancel_request`** — ensure SDK-level request cancellation cascades
+  and terminates the prompt turn cleanly.
+- [ ] **R6. `session/update` baseline on replay** — `session/load` MUST stream the
+  full history before its response (superset of R1).
 
-**P2 — UX / observability**
-12. `agent_thought_chunk` for reasoning deltas.
-13. `usage_update` (context + cost).
-14. `plan` updates (each update is a FULL replace).
-15. `current_mode_update` after `set_mode`; return `modes`/`configOptions` in
-    `session/new` response.
-16. Boolean config options (`type:"boolean"`, gated on
-    `clientCapabilities.session.configOptions.boolean`) + `category` field.
-17. `additionalDirectories` capability + handling in `/new`, `/load`, `/resume`.
+**Tier 2 — Recommended (SHOULD): core UX**
+- [ ] **S1. Tool progress** — emit `tool_call` + `tool_call_update`
+  (in_progress/completed/failed; `kind`, `content`/`diff`/`terminal`, `locations`,
+  `rawInput`/`rawOutput`). Most visible "frozen agent" gap. (`event_bridge.go`.)
+  Test: `TestPromptStreamsToolCalls`.
+- [ ] **S2. `user_message_chunk` echo** on `session/prompt`. (`agent.go` `Prompt`.)
+- [ ] **S3. `agent_thought_chunk`** for reasoning deltas. (`event_bridge.go`.)
+- [ ] **S4. `plan` updates** — each notification is a FULL replace. (`event_bridge.go`.)
+- [ ] **S5. `messageId`** on chunks (SDK field currently UNSTABLE; set once the SDK ships it).
+- [ ] **S6. Elicitation** — `elicitation/create` + `elicitation/complete`
+  (form+url, `accept`/`decline`/`cancel`, unique `elicitationId`, no form→url
+  fallback, no secrets in form). Client callback + server stub. (`client.go`, `agent.go`.)
+  Test: `TestElicitationFormMode`.
+- [ ] **S7. `_meta` passthrough** on message paths; reserve W3C trace keys
+  `traceparent`/`tracestate`/`baggage`. (`agent.go`, `event_bridge.go`.)
+- [ ] **S8. `available_commands_update`** after session creation. (`agent.go`.)
+- [ ] **S9. Config/mode/info notifications** — `config_option_update` on
+  `set_config_option`; `current_mode_update` on `set_mode`; `session_info_update`
+  to keep `session/list` in sync. (`agent.go`.)
 
-**P3 — client-side**
-18. Real terminal callbacks (or document out-of-scope).
-19. Render streaming chunks in `crush acp connect` loop.
+**Tier 3 — Optional (MAY): full parity**
+- [ ] **O1.** Return `modes` + `configOptions` in `session/new` response.
+- [ ] **O2.** Boolean config options (`type:"boolean"`, gated on
+  `clientCapabilities.session.configOptions.boolean`) + `category` field
+  (`mode`/`model`/`model_config`/`thought_level`). (`agent.go`.)
+- [ ] **O3.** `additionalDirectories` capability + handling in `/new`, `/load`, `/resume`.
+- [ ] **O4.** `session/delete` + `sessionCapabilities.delete`.
+- [ ] **O5.** `session/resume` decision (wire vs capability rejection).
+- [ ] **O6.** `auth.logout` capability + `logout` behavior.
+- [ ] **O7.** Image/audio/resource content parse + stream (capabilities already
+  advertised; `extractPromptText` currently handles only text/resource_link).
+- [ ] **O8.** Real terminal callbacks (or document out-of-scope).
+- [ ] **O9.** MCP server connection at session setup (`mcpServers`).
+- [ ] **O10.** `agentInfo.title`; `switch_mode` tool kind representation.
+- [ ] **O11.** Render streaming chunks in `crush acp connect` loop. (`acp_client.go`.)
 
-**P4 — tests**
-20. Regression tests for each missing update type; `TestConformanceSessionLoad`;
-    elicitation roundtrip; `_meta` passthrough.
+**Tier 4 — Tests** (gate each Tier 1–3 item)
+- [ ] Regression tests per missing update type; `TestConformanceSessionLoad`;
+  elicitation roundtrip; `_meta` passthrough; cancellation `cancelled` outcome.
 
 ## 5. Test strategy
 

@@ -39,6 +39,13 @@ func newPermissionBridge(conn *acp.AgentSideConnection, log *slog.Logger) *permi
 func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.PermissionRequest) (bool, error) {
 	key := permissionKey{sessionID: req.SessionID, toolCallID: req.ToolCallID}
 
+	// If the session or request was already cancelled, resolve as a denial
+	// without error so the turn ends with StopReasonCancelled rather than a
+	// spurious tool error.
+	if ctx.Err() != nil {
+		return false, nil
+	}
+
 	// Check persistent grants first.
 	b.mu.Lock()
 	if granted, ok := b.permitted[key]; ok {
@@ -66,6 +73,11 @@ func (b *permissionBridge) CheckPermission(ctx context.Context, req permission.P
 
 	resp, err := b.conn.RequestPermission(ctx, permissionReq)
 	if err != nil {
+		// A cancellation during the prompt yields a context error; treat it as a
+		// denial with no error so the turn terminates cleanly.
+		if ctx.Err() != nil {
+			return false, nil
+		}
 		return false, fmt.Errorf("request permission: %w", err)
 	}
 

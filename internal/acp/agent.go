@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/app"
@@ -15,10 +16,11 @@ import (
 type crushAgent struct {
 	app *app.App
 	log *slog.Logger
+	conn *acp.AgentSideConnection
 }
 
 // newCrushAgent creates an ACP agent backed by the given Crush app.
-func newCrushAgent(a *app.App, log *slog.Logger) Agent {
+func newCrushAgent(a *app.App, log *slog.Logger) *crushAgent {
 	return &crushAgent{app: a, log: log}
 }
 
@@ -27,6 +29,7 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 	resp := acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentInfo:       &acp.Implementation{Name: "Crush", Version: "dev"},
+		AuthMethods:     []acp.AuthMethod{},
 		AgentCapabilities: acp.AgentCapabilities{
 			LoadSession: true,
 			PromptCapabilities: acp.PromptCapabilities{
@@ -36,6 +39,7 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 			},
 			SessionCapabilities: acp.SessionCapabilities{
 				Close: &acp.SessionCloseCapabilities{},
+				List:  &acp.SessionListCapabilities{},
 			},
 			McpCapabilities: acp.McpCapabilities{},
 		},
@@ -45,13 +49,9 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 }
 
 // NewSession implements acp.Agent.
-func (a *crushAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	title := "ACP Session"
 
-	// Crush resolves its working directory once at startup, so it cannot move
-	// on a per-session basis. A client asking for a different directory would
-	// otherwise get a session silently operating on the wrong tree, so surface
-	// the disagreement instead of dropping it.
 	if req.Cwd != "" {
 		if local := a.workingDir(); local != "" && !samePath(local, req.Cwd) {
 			return acp.NewSessionResponse{}, fmt.Errorf(
@@ -81,8 +81,6 @@ func (a *crushAgent) workingDir() string {
 	if store == nil {
 		return ""
 	}
-	// A typed-nil *ConfigStore passes the comparison above, so guard the
-	// dereference too: tests construct an App without a store.
 	defer func() { _ = recover() }()
 	return store.WorkingDir()
 }
@@ -105,12 +103,19 @@ func (a *crushAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) 
 		return acp.ListSessionsResponse{}, fmt.Errorf("list sessions: %w", err)
 	}
 	out := make([]acp.SessionInfo, 0, len(sessions))
+	cwd := a.workingDir()
 	for _, s := range sessions {
 		t := s.Title
-		out = append(out, acp.SessionInfo{
+		info := acp.SessionInfo{
 			SessionId: acp.SessionId(s.ID),
 			Title:     &t,
-		})
+			Cwd:       cwd,
+		}
+		if s.UpdatedAt > 0 {
+			ts := time.Unix(s.UpdatedAt, 0).UTC().Format(time.RFC3339)
+			info.UpdatedAt = &ts
+		}
+		out = append(out, info)
 	}
 	return acp.ListSessionsResponse{Sessions: out}, nil
 }
@@ -141,7 +146,6 @@ func (a *crushAgent) Cancel(_ context.Context, req acp.CancelNotification) error
 func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	sessionID := string(req.SessionId)
 
-	// Build prompt text from content blocks.
 	prompt := extractPromptText(req.Prompt)
 	a.log.Info("ACP prompt", "sessionId", sessionID, "promptLen", len(prompt))
 
@@ -159,20 +163,12 @@ func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Pro
 }
 
 // SetSessionMode acknowledges a mode change.
-//
-// Crush has no mode concept, so there is nothing to change, but the method must
-// still succeed: editors send it during session setup and an error can abort
-// the session before the first prompt.
 func (a *crushAgent) SetSessionMode(_ context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	a.log.Info("ACP set session mode", "sessionId", req.SessionId, "modeId", req.ModeId)
 	return acp.SetSessionModeResponse{}, nil
 }
 
-// SetSessionConfigOption acknowledges a configuration change and reports the
-// options Crush supports.
-//
-// The response type requires a non-nil configOptions list, so an empty slice is
-// returned rather than nil.
+// SetSessionConfigOption acknowledges a configuration change.
 func (a *crushAgent) SetSessionConfigOption(_ context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	var sessionID string
 	if req.ValueId != nil {

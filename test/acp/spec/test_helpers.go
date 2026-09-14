@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 )
@@ -68,3 +69,53 @@ func (s *stubSessionService) ParseAgentToolSessionID(_ string) (string, string, 
 	return "", "", true
 }
 func (s *stubSessionService) IsAgentToolSession(_ string) bool { return false }
+
+// stubMessageStore is a minimal in-memory mock of message.Service for testing.
+type stubMessageStore struct {
+	bySession map[string][]message.Message
+}
+
+func newStubMessageStore() *stubMessageStore {
+	return &stubMessageStore{bySession: map[string][]message.Message{}}
+}
+
+func (s *stubMessageStore) Subscribe(_ context.Context) <-chan pubsub.Event[message.Message] {
+	return make(chan pubsub.Event[message.Message])
+}
+
+func (s *stubMessageStore) Create(_ context.Context, sessionID string, _ message.CreateMessageParams) (message.Message, error) {
+	return message.Message{ID: "m", SessionID: sessionID}, nil
+}
+
+func (s *stubMessageStore) Update(_ context.Context, m message.Message) error {
+	s.bySession[m.SessionID] = append(s.bySession[m.SessionID], m)
+	return nil
+}
+
+func (s *stubMessageStore) Get(_ context.Context, _ string) (message.Message, error) {
+	return message.Message{}, nil
+}
+
+func (s *stubMessageStore) List(_ context.Context, sessionID string) ([]message.Message, error) {
+	return s.bySession[sessionID], nil
+}
+
+func (s *stubMessageStore) ListUserMessages(_ context.Context, sessionID string) ([]message.Message, error) {
+	return s.bySession[sessionID], nil
+}
+
+func (s *stubMessageStore) ListAllUserMessages(_ context.Context) ([]message.Message, error) {
+	return nil, nil
+}
+
+func (s *stubMessageStore) GetLastAssistantMessage(_ context.Context, _ string) (message.Message, error) {
+	return message.Message{}, nil
+}
+
+func (s *stubMessageStore) Delete(_ context.Context, _ string) error { return nil }
+
+func (s *stubMessageStore) DeleteSessionMessages(_ context.Context, _ string) error { return nil }
+
+func (s *stubMessageStore) Flush(_ context.Context, _ string) error { return nil }
+
+func (s *stubMessageStore) FlushAll(_ context.Context) error { return nil }

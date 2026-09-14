@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	acp "github.com/coder/acp-go-sdk"
@@ -450,6 +451,73 @@ func TestConformanceSessionLifecycle(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Error("server did not exit")
+	}
+}
+
+// TestConformanceSessionLoad verifies that session/load replays the stored
+// message history as user/agent message chunks before its response.
+func TestConformanceSessionLoad(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	store := newStubMessageStore()
+	store.bySession["sess-load"] = []message.Message{
+		{ID: "u1", SessionID: "sess-load", Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "hello world"}}},
+		{ID: "a1", SessionID: "sess-load", Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: "hi there"}}},
+	}
+	co := newStubCoordinator(nil)
+	app := &app.App{
+		Sessions:         &stubSessionService{sessions: []session.Session{{ID: "sess-load", Title: "Loaded"}}},
+		AgentCoordinator: co,
+		Permissions:      &stubPermSvc{},
+		Messages:         store,
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := acpsrv.NewServer(app, log, c2aR, a2cW)
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done <- srv.Start(ctx)
+	}()
+
+	cl := newStubClient()
+	client := acp.NewClientSideConnection(cl, c2aW, a2cR)
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber}); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	if _, err := client.LoadSession(t.Context(), acp.LoadSessionRequest{SessionId: "sess-load", Cwd: "/workspace", McpServers: []acp.McpServer{}}); err != nil {
+		t.Fatalf("LoadSession failed: %v", err)
+	}
+
+	var user, agent bool
+	for _, u := range cl.updates {
+		if u.Update.UserMessageChunk != nil {
+			user = true
+		}
+		if u.Update.AgentMessageChunk != nil {
+			agent = true
+		}
+	}
+
+	c2aW.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("server did not exit")
+	}
+
+	if !user {
+		t.Error("expected user_message_chunk during session/load replay")
+	}
+	if !agent {
+		t.Error("expected agent_message_chunk during session/load replay")
 	}
 }
 

@@ -4,10 +4,13 @@ package acp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -35,9 +38,11 @@ type Agent interface {
 
 // NewServer creates a new ACP server that connects to the given peer.
 func NewServer(a *app.App, log *slog.Logger, stdin io.Reader, stdout io.Writer) *Server {
-	agent := newCrushAgent(a, log)
-	d := &dispatcher{agent: agent, app: a}
+	ca := newCrushAgent(a, log)
+	d := &dispatcher{agent: ca, app: a}
 	conn := acp.NewAgentSideConnection(d, stdout, stdin)
+	d.conn = conn
+	ca.conn = conn
 
 	// Create permission bridge and wrap the real service.
 	permb := newPermissionBridge(conn, log)
@@ -68,6 +73,7 @@ func (s *Server) StartEventBridge(ctx context.Context) {
 type dispatcher struct {
 	agent Agent
 	app   *app.App
+	conn  *acp.AgentSideConnection
 }
 
 func (d *dispatcher) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
@@ -96,6 +102,44 @@ func (d *dispatcher) CloseSession(ctx context.Context, req acp.CloseSessionReque
 
 func (d *dispatcher) ResumeSession(ctx context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
 	return d.agent.ResumeSession(ctx, req)
+}
+
+// LoadSession implements acp.AgentLoader. It replays the session's stored
+// message history as session/update notifications (user_message_chunk /
+// agent_message_chunk) before returning, satisfying the spec requirement that
+// session/load MUST stream the full history before its response.
+func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	sessionID := string(req.SessionId)
+	msgs, err := d.app.Messages.List(ctx, sessionID)
+	if err != nil {
+		return acp.LoadSessionResponse{}, fmt.Errorf("list messages: %w", err)
+	}
+	for _, m := range msgs {
+		var sb strings.Builder
+		for _, part := range m.Parts {
+			if tc, ok := part.(message.TextContent); ok {
+				sb.WriteString(tc.Text)
+			}
+		}
+		text := sb.String()
+		if text == "" {
+			continue
+		}
+		var update acp.SessionUpdate
+		switch m.Role {
+		case message.User:
+			update = acp.UpdateUserMessageText(text)
+		case message.Assistant:
+			update = acp.UpdateAgentMessageText(text)
+		default:
+			continue
+		}
+		note := acp.SessionNotification{SessionId: req.SessionId, Update: update}
+		if err := d.conn.SessionUpdate(ctx, note); err != nil {
+			return acp.LoadSessionResponse{}, fmt.Errorf("stream loaded message: %w", err)
+		}
+	}
+	return acp.LoadSessionResponse{}, nil
 }
 
 func (d *dispatcher) Cancel(ctx context.Context, req acp.CancelNotification) error {

@@ -5,6 +5,7 @@ package acp
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 
 	notify "github.com/charmbracelet/crush/internal/agent/notify"
@@ -21,21 +22,51 @@ type eventBridge struct {
 	log    *slog.Logger
 	cancel context.CancelFunc
 
-	// mu guards streamed, the per-message count of text bytes already sent to
-	// the client. Message events carry a whole-message snapshot rather than a
-	// delta, so the difference against the last snapshot is the new text.
-	mu       sync.Mutex
-	streamed map[string]int
+	// mu guards the per-message tracking maps below. Message events carry a
+	// whole-message snapshot rather than a delta, so the difference against the
+	// last snapshot is the new content.
+	mu        sync.Mutex
+	streamed  map[string]int                 // msgID -> text bytes already sent
+	thoughts  map[string]int                 // msgID -> reasoning bytes already sent
+	toolCalls map[string]map[string]bool     // msgID -> toolCallID -> finished
+}
+
+// toolKindFor maps a Crush tool name to the closest ACP tool kind.
+func toolKindFor(name string) acp.ToolKind {
+	switch strings.ToLower(name) {
+	case "read", "view", "glob", "grep", "ls", "cat":
+		return acp.ToolKindRead
+	case "edit", "write", "str_replace":
+		return acp.ToolKindEdit
+	case "delete", "rm":
+		return acp.ToolKindDelete
+	case "move", "rename", "mv":
+		return acp.ToolKindMove
+	case "search":
+		return acp.ToolKindSearch
+	case "bash", "shell", "execute":
+		return acp.ToolKindExecute
+	case "fetch", "web_fetch":
+		return acp.ToolKindFetch
+	case "think":
+		return acp.ToolKindThink
+	case "switch_mode":
+		return acp.ToolKindSwitchMode
+	default:
+		return acp.ToolKindOther
+	}
 }
 
 // newEventBridge creates a bridge that listens for agent events and
 // forwards them as ACP session/update notifications.
 func newEventBridge(conn *acp.AgentSideConnection, app *app.App, log *slog.Logger) *eventBridge {
 	return &eventBridge{
-		conn:     conn,
-		app:      app,
-		log:      log,
-		streamed: make(map[string]int),
+		conn:      conn,
+		app:       app,
+		log:       log,
+		streamed:  make(map[string]int),
+		thoughts:  make(map[string]int),
+		toolCalls: make(map[string]map[string]bool),
 	}
 }
 
@@ -89,6 +120,13 @@ func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {
 	if m.Role != message.Assistant || m.SessionID == "" {
 		return
 	}
+	b.streamText(ctx, m)
+	b.streamThoughts(ctx, m)
+	b.streamToolCalls(ctx, m)
+}
+
+// streamText streams the new tail of the assistant message text.
+func (b *eventBridge) streamText(ctx context.Context, m message.Message) {
 	text := m.Content().Text
 
 	b.mu.Lock()
@@ -110,6 +148,99 @@ func (b *eventBridge) handleMessage(ctx context.Context, m message.Message) {
 	}
 	if err := b.conn.SessionUpdate(ctx, update); err != nil {
 		b.log.Warn("Failed to send streamed session update", "error", err)
+	}
+}
+
+// streamThoughts streams reasoning deltas as agent_thought_chunk updates (S3).
+func (b *eventBridge) streamThoughts(ctx context.Context, m message.Message) {
+	thinking := m.ReasoningContent().Thinking
+
+	b.mu.Lock()
+	sent := b.thoughts[m.ID]
+	if len(thinking) < sent {
+		sent = 0
+	}
+	b.thoughts[m.ID] = len(thinking)
+	b.mu.Unlock()
+
+	if len(thinking) <= sent {
+		return
+	}
+	delta := thinking[sent:]
+	update := acp.SessionNotification{
+		SessionId: acp.SessionId(m.SessionID),
+		Update:    acp.UpdateAgentThoughtText(delta),
+	}
+	if err := b.conn.SessionUpdate(ctx, update); err != nil {
+		b.log.Warn("Failed to send thought update", "error", err)
+	}
+}
+
+// streamToolCalls diffs the tool calls in a message snapshot and emits
+// tool_call / tool_call_update notifications as tools start and finish (S1).
+func (b *eventBridge) streamToolCalls(ctx context.Context, m message.Message) {
+	type action struct {
+		id       string
+		name     string
+		input    string
+		finished bool
+		started  bool
+	}
+	var starts, updates []action
+
+	b.mu.Lock()
+	seen := b.toolCalls[m.ID]
+	if seen == nil {
+		seen = make(map[string]bool)
+		b.toolCalls[m.ID] = seen
+	}
+	for _, tc := range m.ToolCalls() {
+		prev, ok := seen[tc.ID]
+		if !ok {
+			seen[tc.ID] = tc.Finished
+			starts = append(starts, action{id: tc.ID, name: tc.Name, input: tc.Input, finished: tc.Finished})
+		} else if prev != tc.Finished {
+			seen[tc.ID] = tc.Finished
+			updates = append(updates, action{id: tc.ID, finished: tc.Finished})
+		}
+	}
+	b.mu.Unlock()
+
+	sessionID := acp.SessionId(m.SessionID)
+	for _, a := range starts {
+		status := acp.ToolCallStatusInProgress
+		if a.finished {
+			status = acp.ToolCallStatusCompleted
+		}
+		opts := []acp.ToolCallStartOpt{
+			acp.WithStartStatus(status),
+			acp.WithStartKind(toolKindFor(a.name)),
+		}
+		if a.input != "" {
+			opts = append(opts, acp.WithStartContent([]acp.ToolCallContent{
+				acp.ToolContent(acp.TextBlock(a.input)),
+			}))
+		}
+		update := acp.SessionNotification{
+			SessionId: sessionID,
+			Update:    acp.StartToolCall(acp.ToolCallId(a.id), a.name, opts...),
+		}
+		if err := b.conn.SessionUpdate(ctx, update); err != nil {
+			b.log.Warn("Failed to send tool call update", "error", err)
+		}
+	}
+	for _, a := range updates {
+		status := acp.ToolCallStatusInProgress
+		if a.finished {
+			status = acp.ToolCallStatusCompleted
+		}
+		update := acp.SessionNotification{
+			SessionId: sessionID,
+			Update:    acp.UpdateToolCall(acp.ToolCallId(a.id), acp.WithUpdateStatus(status)),
+		}
+		if err := b.conn.SessionUpdate(ctx, update); err != nil {
+			b.log.Warn("Failed to send tool call update", "error", err)
+		}
 	}
 }
 

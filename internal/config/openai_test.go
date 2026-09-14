@@ -378,7 +378,7 @@ func TestLoadRefreshesChatGPTModelsWhenCatwalkUpdates(t *testing.T) {
 	newCatwalkStub(t, http.StatusOK, []catwalk.Provider{{
 		Name:                "OpenAI",
 		ID:                  catwalk.InferenceProviderOpenAI,
-		Type:                catwalk.TypeOpenAI,
+		Type:                catwalk.TypeResponses,
 		DefaultLargeModelID: "gpt-5.1",
 		DefaultSmallModelID: "gpt-5.1-mini",
 		Models: []catwalk.Model{

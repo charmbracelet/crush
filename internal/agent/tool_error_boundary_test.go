@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
@@ -135,6 +138,51 @@ func TestWrapToolsWithErrorBoundary(t *testing.T) {
 		boundary, ok := wrapped[i].(*toolErrorBoundary)
 		require.True(t, ok, "every tool must be wrapped")
 		require.Equal(t, want, boundary.Info().Name)
+	}
+}
+
+// TestBuildToolsWrapsEveryToolWithErrorBoundary pins the wiring: the
+// boundary only helps if buildTools applies it, and the harness tests below
+// wrap their tool lists by hand, so without this test the call in
+// buildTools could be dropped and nothing would notice.
+func TestBuildToolsWrapsEveryToolWithErrorBoundary(t *testing.T) {
+	env := testEnv(t)
+
+	// Minimal hermetic config, mirroring coordinator_readiness_test.go: one
+	// openai-typed provider with large and small models selected so the
+	// sub-agent and agentic_fetch tools can be built. No MCP servers.
+	crushJSON := `{
+  "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
+  "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
+    "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
+    "models": [{"id": "mock-model", "name": "Mock", "context_window": 8192, "default_max_tokens": 128}]}},
+  "models": {"large": {"provider": "mock", "model": "mock-model"},
+             "small": {"provider": "mock", "model": "mock-model"}}
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "crush.json"), []byte(crushJSON), 0o644))
+
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.SetupAgents()
+
+	coord := &coordinator{
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
+		history:     env.history,
+		filetracker: *env.filetracker,
+	}
+	agentCfg := cfg.Config().Agents[config.AgentCoder]
+
+	for _, isSubAgent := range []bool{false, true} {
+		toolList, err := coord.buildTools(t.Context(), agentCfg, isSubAgent)
+		require.NoError(t, err)
+		require.NotEmpty(t, toolList)
+		for _, tool := range toolList {
+			_, ok := tool.(*toolErrorBoundary)
+			require.Truef(t, ok, "tool %q (sub-agent=%v) reached the agent unwrapped as %T", tool.Info().Name, isSubAgent, tool)
+		}
 	}
 }
 

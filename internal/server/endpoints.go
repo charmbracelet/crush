@@ -595,5 +595,21 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			PathParam("id", "Workspace ID").
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceMCPDisableDocker),
+
+		apigen.Post("/v1/workspaces/{id}/mcp/enable").
+			Summary("Enable MCP server").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.MCPNameRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceMCPEnable),
+
+		apigen.Post("/v1/workspaces/{id}/mcp/disable").
+			Summary("Disable MCP server").
+			Tags("mcp").
+			PathParam("id", "Workspace ID").
+			Accepts(proto.MCPNameRequest{}).
+			Fails(400, 404, 500).
+			Handle(c.handlePostWorkspaceMCPDisable),
 	}
 }

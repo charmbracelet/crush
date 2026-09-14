@@ -1231,7 +1231,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			currentSession = updatedSession
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		StopWhen: []fantasy.StopCondition{
+		StopWhen: append([]fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize
@@ -1256,7 +1256,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			func(steps []fantasy.StepResult) bool {
 				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
 			},
-		},
+		}, evalStepCaps()...),
 	})
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))

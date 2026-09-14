@@ -565,6 +565,20 @@ func (c *Config) NormalizeOptions() {
 	if c.Options.NotebookAutoInject == nil {
 		c.Options.NotebookAutoInject = ptr(false)
 	}
+	// These read sites default nil/zero at use; materialize them so
+	// the resolved config (what the eval harness's resolved-options
+	// projection reports) carries semantic values, not nulls.
+	if c.Options.NotebookStubSuperseded == nil {
+		c.Options.NotebookStubSuperseded = ptr(false)
+	}
+	if c.Options.AutoLSP == nil {
+		c.Options.AutoLSP = ptr(true)
+	}
+	// Must equal notebook.DefaultRawTokenBudget — config cannot
+	// import notebook (it imports us).
+	if c.Options.NotebookRawTokenBudget <= 0 {
+		c.Options.NotebookRawTokenBudget = 25_000
+	}
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

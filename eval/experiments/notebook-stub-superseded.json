@@ -1,0 +1,11 @@
+{
+	"name": "notebook-stub-superseded",
+	"model": "hyper/deepseek-v4-pro-0813",
+	"temperature": 0,
+	"corpus": ["*"],
+	"runs_per_trajectory": {"stable": 3, "mid": 10, "uncharacterized": 5},
+	"arms": {
+		"control":   {"config": {"options": {"notebook_stub_superseded": false}}},
+		"treatment": {"config": {"options": {"notebook_stub_superseded": true}}}
+	}
+}

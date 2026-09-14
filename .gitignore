@@ -54,3 +54,6 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
+
+# Eval run artifacts (run records, session DBs)
+eval/results/

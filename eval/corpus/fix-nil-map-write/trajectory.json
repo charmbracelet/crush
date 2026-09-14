@@ -1,0 +1,19 @@
+{
+	"id": "fix-nil-map-write",
+	"schema_version": 1,
+	"origin": {"kind": "synthetic"},
+	"start_state": {"kind": "fixture", "fixture_dir": "fixture"},
+	"task": {
+		"turns": [
+			"main.go panics with 'assignment to entry in nil map'. Fix it so running 'go run .' prints the counts."
+		]
+	},
+	"check": {
+		"script": "check.sh",
+		"expect_start_state": "fail",
+		"timeout_seconds": 60
+	},
+	"coverage": {"min_steps": 2},
+	"requires": {"tools": ["go"]},
+	"budget": {"run_timeout_seconds": 300, "max_steps": 15}
+}

@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -407,6 +408,39 @@ type Options struct {
 	Notifications          string   `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills         []string `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	RequestTimeout         *int     `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+}
+
+// OptionKeys returns the Options struct's JSON field names — the set
+// of keys callers may legally address in an "options" config block.
+func OptionKeys() map[string]bool {
+	out := map[string]bool{}
+	t := reflect.TypeOf(Options{})
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// OptionsProjection reflects o into a json-keyed map restricted to
+// keys — the eval harness's "what actually ran" extraction path.
+func OptionsProjection(o Options, keys []string) map[string]any {
+	out := map[string]any{}
+	v := reflect.ValueOf(o)
+	t := v.Type()
+	byJSON := map[string]reflect.Value{}
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		byJSON[name] = v.Field(i)
+	}
+	for _, k := range keys {
+		if fv, ok := byJSON[k]; ok && fv.IsValid() {
+			out[k] = fv.Interface()
+		}
+	}
+	return out
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not

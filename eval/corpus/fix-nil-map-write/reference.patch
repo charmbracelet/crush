@@ -1,0 +1,13 @@
+diff --git a/main.go b/main.go
+index 0be5c33..1904d5d 100644
+--- a/main.go
++++ b/main.go
+@@ -3,7 +3,7 @@ package main
+ import "fmt"
+ 
+ func main() {
+-	var counts map[string]int
++	counts := map[string]int{}
+ 	counts["apple"] = 2
+ 	counts["banana"] = 3
+ 	fmt.Println("apple", counts["apple"])

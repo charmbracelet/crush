@@ -211,6 +211,59 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	return renderJobTool(sty, opts, cappedWidth, "Kill", params.ShellID, description, content)
 }
 
+// -----------------------------------------------------------------------------
+// Job List Tool
+// -----------------------------------------------------------------------------
+
+// JobListToolMessageItem is a message item for job_list tool calls.
+type JobListToolMessageItem struct {
+	*baseToolMessageItem
+}
+
+var _ ToolMessageItem = (*JobListToolMessageItem)(nil)
+
+// NewJobListToolMessageItem creates a new [JobListToolMessageItem].
+func NewJobListToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	return newBaseToolMessageItem(sty, toolCall, result, &JobListToolRenderContext{}, canceled)
+}
+
+// JobListToolRenderContext renders job_list tool messages.
+type JobListToolRenderContext struct{}
+
+// RenderTool implements the [ToolRenderer] interface.
+func (j *JobListToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
+	if opts.IsPending() {
+		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
+	}
+
+	var description string
+	if opts.HasResult() && opts.Result.Metadata != "" {
+		var meta tools.JobListResponseMetadata
+		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
+			switch n := len(meta.Jobs); n {
+			case 0:
+				description = "no jobs"
+			case 1:
+				description = "1 job"
+			default:
+				description = fmt.Sprintf("%d jobs", n)
+			}
+		}
+	}
+
+	content := ""
+	if opts.HasResult() {
+		content = opts.Result.Content
+	}
+	return renderJobTool(sty, opts, cappedWidth, "List", "", description, content)
+}
+
 // renderJobTool renders a job-related tool with the common pattern:
 // header → nested check → early state → body.
 func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, shellID, description, content string) string {
@@ -238,9 +291,12 @@ func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, descripti
 	icon := toolIcon(sty, status)
 	jobPart := sty.Tool.JobToolName.Render("Job")
 	actionPart := sty.Tool.JobAction.Render("(" + action + ")")
-	pidPart := sty.Tool.JobPID.Render("PID " + shellID)
 
-	prefix := fmt.Sprintf("%s %s %s %s", icon, jobPart, actionPart, pidPart)
+	prefix := fmt.Sprintf("%s %s %s", icon, jobPart, actionPart)
+	// Some job tools cover every job at once and have no single ID to show.
+	if shellID != "" {
+		prefix += " " + sty.Tool.JobPID.Render("PID "+shellID)
+	}
 
 	if description == "" {
 		return prefix

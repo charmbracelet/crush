@@ -775,6 +775,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+	app.setupJobReporting()
 	return nil
 }
 

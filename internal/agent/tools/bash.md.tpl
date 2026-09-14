@@ -29,20 +29,26 @@ Common shell builtins and core utils available on Windows.
 <background_execution>
 - Set run_in_background=true to run commands in a separate background shell
 - Returns a shell ID for managing the background process
-- Use job_output tool to view current output from background shell
+- A background job reports back on its own when it finishes, with its exit
+  code and the tail of its output. You do not need to poll for that.
+- Use job_output to check on a job before it finishes. It returns immediately;
+  pass the `next_offset` it gives you to see only new output on the next check
+- Use job_list to recover job IDs you no longer have in view
 - Use job_kill tool to terminate a background shell
 - IMPORTANT: NEVER use `&` at the end of commands to run in background - use run_in_background parameter instead
+- Prefer starting a slow job in the background and continuing with other work
+  over sitting on a blocking call
 - Commands that should run in background:
   * Long-running servers (e.g., `npm start`, `python -m http.server`, `node server.js`)
   * Watch/monitoring tasks (e.g., `npm run watch`, `tail -f logfile`)
   * Continuous processes that don't exit on their own
   * Any command expected to run indefinitely
+  * Slow builds or test suites you can work alongside
 - Commands that should NOT run in background:
-  * Build commands (e.g., `npm run build`, `go build`)
-  * Test suites (e.g., `npm test`, `pytest`)
   * Git operations
   * File operations
   * Short-lived scripts
+  * Anything whose result you need before the very next step
 </background_execution>
 
 <git_message_quality>

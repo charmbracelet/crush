@@ -20,6 +20,7 @@ var jobOutputDescription string
 type JobOutputParams struct {
 	ShellID string `json:"shell_id" description:"The ID of the background shell to retrieve output from"`
 	Wait    bool   `json:"wait" description:"If true, block until the background shell completes before returning output"`
+	Offset  int64  `json:"offset" description:"Byte offset to read from. Pass the next_offset from a previous call to see only new output. Defaults to 0 (the whole transcript)."`
 }
 
 type JobOutputResponseMetadata struct {
@@ -28,6 +29,12 @@ type JobOutputResponseMetadata struct {
 	Description      string `json:"description"`
 	Done             bool   `json:"done"`
 	WorkingDirectory string `json:"working_directory"`
+	// NextOffset is the byte offset to pass on the next call to read only
+	// what has been written since this one.
+	NextOffset int64 `json:"next_offset"`
+	// LogPath is the full transcript on disk, readable with the normal file
+	// tools when the output is too big to return inline.
+	LogPath string `json:"log_path,omitempty"`
 }
 
 func NewJobOutputTool() fantasy.AgentTool {
@@ -49,29 +56,27 @@ func NewJobOutputTool() fantasy.AgentTool {
 				bgShell.WaitContext(ctx)
 			}
 
-			stdout, stderr, done, err := bgShell.GetOutput()
-
-			var outputParts []string
-			if stdout != "" {
-				outputParts = append(outputParts, stdout)
-			}
-			if stderr != "" {
-				outputParts = append(outputParts, stderr)
+			output, nextOffset, err := bgShell.ReadFrom(params.Offset)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to read output for job %s: %v", params.ShellID, err)), nil
 			}
 
+			done := bgShell.IsDone()
 			status := "running"
 			if done {
 				status = "completed"
-				if err != nil {
-					exitCode := shell.ExitCode(err)
-					if exitCode != 0 {
-						outputParts = append(outputParts, fmt.Sprintf("Exit code %d", exitCode))
+				if _, _, _, execErr := bgShell.GetOutput(); execErr != nil {
+					if exitCode := shell.ExitCode(execErr); exitCode != 0 {
+						output = strings.TrimRight(output, "\n") + fmt.Sprintf("\nExit code %d", exitCode)
 					}
 				}
 			}
 
-			output := strings.Join(outputParts, "\n")
-			output = TruncateOutput(output)
+			truncated := false
+			if full := TruncateOutput(output); full != output {
+				output = full
+				truncated = true
+			}
 
 			metadata := JobOutputResponseMetadata{
 				ShellID:          params.ShellID,
@@ -79,13 +84,27 @@ func NewJobOutputTool() fantasy.AgentTool {
 				Description:      bgShell.Description,
 				Done:             done,
 				WorkingDirectory: bgShell.WorkingDir,
+				NextOffset:       nextOffset,
+				LogPath:          bgShell.LogPath,
 			}
 
-			if output == "" {
-				output = BashNoOutput
+			if strings.TrimSpace(output) == "" {
+				if params.Offset > 0 {
+					output = "no new output"
+				} else {
+					output = BashNoOutput
+				}
 			}
 
-			result := fmt.Sprintf("Status: %s\n\n%s", status, output)
+			var footer strings.Builder
+			if !done {
+				fmt.Fprintf(&footer, "\n\nPass offset=%d next time to read only new output.", nextOffset)
+			}
+			if truncated && bgShell.LogPath != "" {
+				fmt.Fprintf(&footer, "\n\nFull transcript: %s", bgShell.LogPath)
+			}
+
+			result := fmt.Sprintf("Status: %s\n\n%s%s", status, output, footer.String())
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 		},
 	)

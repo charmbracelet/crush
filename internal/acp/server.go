@@ -34,6 +34,8 @@ type Agent interface {
 	Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error)
 	SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error)
 	SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
+	Logout(ctx context.Context, req acp.LogoutRequest) (acp.LogoutResponse, error)
+	UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error)
 }
 
 // NewServer creates a new ACP server that connects to the given peer.
@@ -80,8 +82,8 @@ func (d *dispatcher) Authenticate(_ context.Context, _ acp.AuthenticateRequest) 
 	return acp.AuthenticateResponse{}, errors.New("auth not supported")
 }
 
-func (d *dispatcher) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
-	return acp.LogoutResponse{}, errors.New("logout not supported")
+func (d *dispatcher) Logout(ctx context.Context, req acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return d.agent.Logout(ctx, req)
 }
 
 func (d *dispatcher) Initialize(ctx context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
@@ -140,6 +142,11 @@ func (d *dispatcher) LoadSession(ctx context.Context, req acp.LoadSessionRequest
 		}
 	}
 	return acp.LoadSessionResponse{}, nil
+}
+
+// UnstableDeleteSession forwards the session/delete request to the agent.
+func (d *dispatcher) UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
+	return d.agent.UnstableDeleteSession(ctx, req)
 }
 
 func (d *dispatcher) Cancel(ctx context.Context, req acp.CancelNotification) error {

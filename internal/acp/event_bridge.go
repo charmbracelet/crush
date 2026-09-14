@@ -10,6 +10,7 @@ import (
 
 	notify "github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	acp "github.com/coder/acp-go-sdk"
@@ -26,9 +27,9 @@ type eventBridge struct {
 	// whole-message snapshot rather than a delta, so the difference against the
 	// last snapshot is the new content.
 	mu        sync.Mutex
-	streamed  map[string]int                 // msgID -> text bytes already sent
-	thoughts  map[string]int                 // msgID -> reasoning bytes already sent
-	toolCalls map[string]map[string]bool     // msgID -> toolCallID -> finished
+	streamed  map[string]int             // msgID -> text bytes already sent
+	thoughts  map[string]int             // msgID -> reasoning bytes already sent
+	toolCalls map[string]map[string]bool // msgID -> toolCallID -> finished
 }
 
 // toolKindFor maps a Crush tool name to the closest ACP tool kind.
@@ -274,53 +275,78 @@ func (b *eventBridge) handleNotification(ctx context.Context, n notify.Notificat
 	switch n.Type {
 	case notify.TypeAgentError:
 		b.log.Info("ACP: agent error", "sessionId", n.SessionID, "message", n.Message)
-		text := "[Error] " + n.Message
-		update := acp.SessionNotification{
-			SessionId: sessionID,
-			Update:    acp.UpdateAgentMessageText(text),
-		}
-		if err := b.conn.SessionUpdate(ctx, update); err != nil {
-			b.log.Warn("Failed to send session update", "error", err)
-		}
+		b.sendText(ctx, sessionID, "[Error] "+n.Message)
 	case notify.TypeAgentFinished:
 		b.log.Info("ACP: agent finished", "sessionId", n.SessionID)
 		// No explicit update needed - prompt response handles completion
 	case notify.TypeReAuthenticate:
 		b.log.Info("ACP: re-auth required", "sessionId", n.SessionID, "provider", n.ProviderID)
-		text := "[Auth Required] Please re-authenticate with " + n.ProviderID
-		update := acp.SessionNotification{
-			SessionId: sessionID,
-			Update:    acp.UpdateAgentMessageText(text),
-		}
-		if err := b.conn.SessionUpdate(ctx, update); err != nil {
-			b.log.Warn("Failed to send session update", "error", err)
-		}
+		b.sendText(ctx, sessionID, "[Auth Required] Please re-authenticate with "+n.ProviderID)
 	default:
 		b.log.Debug("ACP: unknown notification type", "type", n.Type)
 	}
 }
 
-// handleRunComplete sends a final update when a turn completes.
+// handleRunComplete sends a final update when a turn completes. On error or
+// cancellation it surfaces a short message; on success the prompt response
+// already signalled completion. It always emits a usage_update (O13) so the
+// client can show token usage and cost for the session.
 func (b *eventBridge) handleRunComplete(ctx context.Context, rc notify.RunComplete) {
 	sessionID := acp.SessionId(rc.SessionID)
 	b.log.Info("ACP: run complete", "sessionId", rc.SessionID, "cancelled", rc.Cancelled)
 
-	var text string
 	switch {
 	case rc.Cancelled:
-		text = "[Cancelled] The operation was cancelled."
+		b.sendText(ctx, sessionID, "[Cancelled] The operation was cancelled.")
 	case rc.Error != "":
-		text = "[Error] " + rc.Error
-	default:
-		// Success case: no update needed, Prompt response handles it
-		return
+		b.sendText(ctx, sessionID, "[Error] "+rc.Error)
 	}
 
+	b.usageUpdate(ctx, rc.SessionID)
+}
+
+// sendText emits an agent_message_chunk carrying the given text.
+func (b *eventBridge) sendText(ctx context.Context, sessionID acp.SessionId, text string) {
 	update := acp.SessionNotification{
 		SessionId: sessionID,
 		Update:    acp.UpdateAgentMessageText(text),
 	}
 	if err := b.conn.SessionUpdate(ctx, update); err != nil {
-		b.log.Warn("Failed to send completion update", "error", err)
+		b.log.Warn("Failed to send session update", "error", err)
+	}
+}
+
+// usageUpdate emits a SessionUsageUpdate reporting the session's cumulative
+// token usage against the active model's context window, plus cumulative cost
+// (O13). It is a best-effort signal: missing usage data is simply omitted.
+func (b *eventBridge) usageUpdate(ctx context.Context, sessionID string) {
+	session, err := b.app.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return
+	}
+
+	used := int(session.PromptTokens + session.CompletionTokens)
+	cost := &acp.Cost{Amount: session.Cost, Currency: "USD"}
+
+	size := 0
+	if store := b.app.Store(); store != nil {
+		if model := store.Config().GetModelByType(config.SelectedModelType(config.AgentCoder)); model != nil {
+			size = int(model.ContextWindow)
+		}
+	}
+
+	update := acp.SessionNotification{
+		SessionId: acp.SessionId(sessionID),
+		Update: acp.SessionUpdate{
+			UsageUpdate: &acp.SessionUsageUpdate{
+				SessionUpdate: "usage_update",
+				Size:          size,
+				Used:          used,
+				Cost:          cost,
+			},
+		},
+	}
+	if err := b.conn.SessionUpdate(ctx, update); err != nil {
+		b.log.Warn("Failed to send usage update", "error", err)
 	}
 }

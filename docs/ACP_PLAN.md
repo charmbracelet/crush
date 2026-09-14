@@ -65,10 +65,10 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 | `loadSession` capability | OPTIONAL | ✅ `true` |
 | `promptCapabilities` (image/audio/embeddedContext) | OPTIONAL (MUST support Text+ResourceLink in prompts regardless) | ✅ all `true` |
 | `mcpCapabilities` (http/sse) | OPTIONAL | ✅ empty (no MCP transport) |
-| `sessionCapabilities` (close/list/resume/delete/additionalDirectories) | OPTIONAL | ⚠️ only `close` set |
-| `auth.logout` capability | OPTIONAL | ❌ not advertised |
+| `sessionCapabilities` (close/list/resume/delete/additionalDirectories) | OPTIONAL | ✅ `close`, `list`, `additionalDirectories`, `delete` advertised; `resume` intentionally not advertised (see §4.1) |
+| `auth.logout` capability | OPTIONAL | ✅ advertised |
 | `authenticate` method | MUST exist; return `auth_required`/error if unused | ⚠️ stub "auth not supported" |
-| `logout` method | MUST exist if `auth.logout` advertised | ⚠️ stub "logout not supported" (not advertised, so safe) |
+| `logout` method | MUST exist if `auth.logout` advertised | ✅ success no-op (Crush has no auth session) |
 
 ### 3.2 Session lifecycle methods
 
@@ -79,10 +79,10 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 | `session/cancel` (notification) | MUST | ✅ cancels coordinator |
 | `session/update` (notifications) | MUST | ⚠️ only `agent_message_chunk` emitted |
 | `session/close` | OPTIONAL (advertise `sessionCapabilities.close`) | ✅ implemented + advertised |
-| `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ⚠️ implemented but **not advertised**; `SessionInfo` **omits required `cwd`** |
+| `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ✅ implemented + advertised; `cwd` set, `additionalDirectories` echoed back |
 | `session/load` | OPTIONAL (advertise `loadSession`) | ❌ **advertised `true` but method returns error — incomplete** |
-| `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ❌ returns error (not advertised — acceptable) |
-| `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ❌ not implemented (not advertised) |
+| `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ❌ returns error, capability not advertised (deliberate — see §4.1 O5) |
+| `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ✅ implemented + advertised (`UnstableDeleteSession`) |
 | `session/set_mode` | OPTIONAL (legacy; prefer config options) | ✅ acknowledges (no-op), no `current_mode_update` |
 | `session/set_config_option` | OPTIONAL | ✅ acknowledges, returns empty `configOptions` |
 
@@ -104,7 +104,7 @@ The spec distinguishes `session/load` (MUST replay history via these) from
 | `current_mode_update` | MAY | ❌ not emitted |
 | `config_option_update` | MAY | ❌ not emitted |
 | `session_info_update` | MAY (ties to `session/list`) | ❌ not emitted |
-| `usage_update` | MAY (context + cost) | ❌ not emitted |
+| `usage_update` | MAY (context + cost) | ✅ emitted at run completion (O13) |
 
 `messageId` (per-message opaque id; chunks sharing it belong to one message) is a
 **MAY** field on `agent_message_chunk`/`user_message_chunk` — **Crush never sets
@@ -166,8 +166,8 @@ five methods (`create`/`output`/`wait_for_exit`/`kill`/`release`) stubbed
 ### 3.10 Capability advertising summary
 
 Advertised today: `loadSession:true`, `promptCapabilities{image,audio,embeddedContext:true}`,
-`sessionCapabilities.close`. **Missing optional:** `sessionCapabilities.list`,
-`.resume`, `.delete`, `.additionalDirectories`, `auth.logout`, `authMethods:[]`.
+`sessionCapabilities{close,list,additionalDirectories,delete}`, `auth.logout`. **Missing
+optional:** `sessionCapabilities.resume`, `authMethods:[]` (configured but serializes per SDK defaults).
 
 ### 3.11 Extensibility (`_meta`)
 
@@ -251,10 +251,10 @@ current code state from §3.
 - [x] **O1.** Return `modes` + `configOptions` in `session/new` response.
 - [x] **O2.** Boolean config options — **IMPLEMENT** (`thinking` toggle on
   `SelectedModel.Think` via `UpdatePreferredModel` + `UpdateAgentModel`). See §4.1. (`agent.go`.)
-- [ ] **O3.** `additionalDirectories` capability + handling in `/new`, `/load`, `/resume`.
-- [ ] **O4.** `session/delete` + `sessionCapabilities.delete`.
-- [ ] **O5.** `session/resume` decision (wire vs capability rejection).
-- [ ] **O6.** `auth.logout` capability + `logout` behavior.
+- [x] **O3.** `additionalDirectories` capability + handling in `/new`, `/list` (echo back via `SessionInfo`). See §4.2. (`agent.go`.)
+- [x] **O4.** `session/delete` + `sessionCapabilities.delete` — **IMPLEMENT** (`UnstableDeleteSession`). See §4.2. (`agent.go`, `server.go`.)
+- [x] **O5.** `session/resume` decision: **capability rejection** (keep returns error; do not advertise `resume`). See §4.2. (`agent.go`.)
+- [x] **O6.** `auth.logout` capability + `logout` behavior — **IMPLEMENT** (advertise + success no-op). See §4.2. (`agent.go`, `server.go`.)
 - [x] **O7.** Image/audio/resource content parse + stream — **IMPLEMENT**
   (`buildPrompt` → `message.Attachment` → `Coordinator.Run`). See §4.1. (`agent.go`.)
 - [ ] **O8.** Real terminal callbacks — **DEFER** (no PTY lib; `connect` is a stdio
@@ -272,7 +272,7 @@ current code state from §3.
 >   not yet wired into outgoing chunks.
 > - **S6** elicitation — stable in v1 spec; pinned SDK still exposes it as `Unstable*`.
 > - **S7** `_meta`/trace passthrough — requires a tracing-propagation layer in Crush.
-> - **O12** File System, **O13** Session Usage — newly tracked from the v1 spec.
+> - **O12/O13** File System + Session Usage — now implemented (see §4.2).
 
 ### 4.1 Decisions log — config / modes / terminals group
 
@@ -329,10 +329,55 @@ implementation batch). Each entry records the finding that drove the call.
   updates to stdout; otherwise the CLI only prints `[stop: ...]` and the user
   sees no streaming.
 
-- [ ] **O12.** File System access — `fs/read_text_file` + `fs/write_text_file`, gated on
+### 4.2 Decisions log — optional group (O3–O6, O12–O13)
+
+- **O3 — `additionalDirectories`: IMPLEMENT (advertise + echo).** Advertise
+  `sessionCapabilities.additionalDirectories` and accept `NewSessionRequest.AdditionalDirectories`,
+  storing them per session in a `sync.Map` and echoing them back via
+  `SessionInfo.AdditionalDirectories` in `ListSessions`. Crush has no multi-root
+  model, so they are persisted for round-tripping only; they do not change the
+  agent's filesystem scope.
+
+- **O4 — `session/delete`: IMPLEMENT.** Advertise `sessionCapabilities.delete`
+  (SDK `SessionDeleteCapabilities`, UNSTABLE) and implement `UnstableDeleteSession`:
+  cancel the coordinator, delete the session from the store, and clear the stored
+  additional-directories key. The SDK dispatches `session/delete` only when the
+  agent implements the `UnstableDeleteSession` method (interface assertion in
+  `agent_gen.go`).
+
+- **O5 — `session/resume`: capability rejection (DECISION).** The conformance suite
+  `TestConformanceSessionSetupAndUnsupportedMethods` pins resume as *unsupported*
+  (must error). Rather than wire a half-baked resume, keep `ResumeSession`
+  returning an error and do **not** advertise the `resume` capability. Crush
+  already continues any session id via `session/prompt` without replaying history,
+  so a client that truly needs resume can prompt against the existing session.
+
+- **O6 — `auth.logout`: IMPLEMENT (advertise + no-op).** Advertise
+  `agentCapabilities.auth.logout` and make `Logout` a successful no-op — Crush
+  has no auth session to terminate, so there is nothing to do. `Authenticate`
+  remains a "not supported" stub, which is correct because no auth method is
+  advertised.
+
+- **O12 — File System (`fs`): IMPLEMENT (gated helpers).** Capture
+  `clientCapabilities.fs` at `Initialize`. Add `fsReadTextFile`/`fsWriteTextFile`
+  helpers on the agent that delegate to the connected client (`conn.ReadTextFile`
+  / `conn.WriteTextFile`) when the client supports fs, otherwise fall back to the
+  local OS (`os.ReadFile`/`WriteFile` + mkdir-parent). The client track already
+  answers `fs/read_text_file`/`fs/write_text_file` from its own OS. *Ceiling:*
+  server-track helpers are not yet wired into Crush's tool layer (edit/bash tools
+  use the local FS); wire them when an agent-initiated, client-side file read is
+  needed.
+
+- **O13 — Session Usage (`usage_update`): IMPLEMENT.** At run completion the
+  bridge emits a `usage_update` carrying the session's cumulative token usage
+  (`PromptTokens + CompletionTokens`), the active model's context window size
+  (best-effort via `Config.GetModelByType(coder).ContextWindow`), and cumulative
+  cost. It is a best-effort signal: missing data is simply omitted.
+
+- [x] **O12.** File System access — `fs/read_text_file` + `fs/write_text_file` — **IMPLEMENT** (gated `fsReadTextFile`/`fsWriteTextFile` helpers delegate to client when `clientCapabilities.fs` set, else local OS). See §4.2. (`agent.go`.)
   `clientCapabilities.fs` (read/write booleans); the Agent MUST NOT call them when
   unsupported. (`agent.go`, `event_bridge.go`.)
-- [ ] **O13.** Session Usage update — `usage_update` reporting context-window size/used
+- [x] **O13.** Session Usage update — `usage_update` — **IMPLEMENT** (emitted at run completion with tokens-used + cost). See §4.2. (`event_bridge.go`.)
   and cumulative cost. (`event_bridge.go`.)
 
 **Tier 4 — Tests** (gate each Tier 1–3 item)

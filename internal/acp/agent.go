@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/fantasy"
@@ -22,6 +24,13 @@ type crushAgent struct {
 	app  *app.App
 	log  *slog.Logger
 	conn *acp.AgentSideConnection
+
+	// clientCaps holds the capabilities the connected client advertised during
+	// initialize. Used to gate optional server track features (fs).
+	clientCaps acp.ClientCapabilities
+	// additionalDirs records per-session additional roots accepted on
+	// session/new so they can be echoed back via session/list.
+	additionalDirs sync.Map
 }
 
 // newCrushAgent creates an ACP agent backed by the given Crush app.
@@ -31,6 +40,10 @@ func newCrushAgent(a *app.App, log *slog.Logger) *crushAgent {
 
 // Initialize implements acp.Agent.
 func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
+	// Record what the client can do so we can gate optional server track
+	// features (e.g. fs delegation) on it later.
+	a.clientCaps = req.ClientCapabilities
+
 	resp := acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentInfo: &acp.Implementation{
@@ -40,6 +53,10 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 		},
 		AuthMethods: []acp.AuthMethod{},
 		AgentCapabilities: acp.AgentCapabilities{
+			Auth: acp.AgentAuthCapabilities{
+				// Crush has no auth session, so logout is a no-op success.
+				Logout: &acp.LogoutCapabilities{},
+			},
 			LoadSession: true,
 			PromptCapabilities: acp.PromptCapabilities{
 				Image:           true,
@@ -47,8 +64,10 @@ func (a *crushAgent) Initialize(_ context.Context, req acp.InitializeRequest) (a
 				EmbeddedContext: true,
 			},
 			SessionCapabilities: acp.SessionCapabilities{
-				Close: &acp.SessionCloseCapabilities{},
-				List:  &acp.SessionListCapabilities{},
+				AdditionalDirectories: &acp.SessionAdditionalDirectoriesCapabilities{},
+				Close:                 &acp.SessionCloseCapabilities{},
+				Delete:                &acp.SessionDeleteCapabilities{},
+				List:                  &acp.SessionListCapabilities{},
 			},
 			McpCapabilities: acp.McpCapabilities{},
 		},
@@ -76,6 +95,14 @@ func (a *crushAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) 
 	}
 	a.log.Info("ACP new session", "sessionId", session.ID, "cwd", req.Cwd)
 	sid := acp.SessionId(session.ID)
+
+	// Record the additional roots so session/list can echo them back. Crush has
+	// no multi-root model, so they are persisted for round-tripping only.
+	if len(req.AdditionalDirectories) > 0 {
+		dirs := make([]string, len(req.AdditionalDirectories))
+		copy(dirs, req.AdditionalDirectories)
+		a.additionalDirs.Store(session.ID, dirs)
+	}
 
 	// Advertise setup state the client needs before the first prompt. These
 	// notifications are sent before the response returns, so the client's
@@ -135,6 +162,9 @@ func (a *crushAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) 
 			ts := time.Unix(s.UpdatedAt, 0).UTC().Format(time.RFC3339)
 			info.UpdatedAt = &ts
 		}
+		if dirs, ok := a.additionalDirs.Load(s.ID); ok {
+			info.AdditionalDirectories = dirs.([]string)
+		}
 		out = append(out, info)
 	}
 	return acp.ListSessionsResponse{Sessions: out}, nil
@@ -147,9 +177,35 @@ func (a *crushAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest
 	return acp.CloseSessionResponse{}, nil
 }
 
-// ResumeSession is not supported.
+// ResumeSession is not supported. Per the spec a resume capability that is not
+// advertised must return an error; Crush continues any session id via
+// session/prompt, so resume is intentionally left unimplemented.
 func (a *crushAgent) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
 	return acp.ResumeSessionResponse{}, fmt.Errorf("session/resume is not supported")
+}
+
+// Logout terminates the current authentication session. Crush has no auth
+// session, so this is a successful no-op.
+func (a *crushAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
+	a.log.Info("ACP logout")
+	return acp.LogoutResponse{}, nil
+}
+
+// UnstableDeleteSession deletes a session from the store. The method name keeps
+// the SDK's unstable prefix for the session/delete capability.
+func (a *crushAgent) UnstableDeleteSession(ctx context.Context, req acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
+	id := string(req.SessionId)
+	a.log.Info("ACP delete session", "sessionId", id)
+	if a.app.AgentCoordinator != nil {
+		a.app.AgentCoordinator.Cancel(id)
+	}
+	if a.app.Sessions != nil {
+		if err := a.app.Sessions.Delete(ctx, id); err != nil {
+			return acp.UnstableDeleteSessionResponse{}, fmt.Errorf("delete session: %w", err)
+		}
+	}
+	a.additionalDirs.Delete(id)
+	return acp.UnstableDeleteSessionResponse{}, nil
 }
 
 // Cancel implements acp.Agent.
@@ -393,6 +449,52 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return strings.TrimSpace(s)
+}
+
+// fsReadTextFile reads a text file. When the connected client advertises fs
+// support the read is delegated to the client; otherwise Crush reads it from its
+// own local filesystem. The line/limit windowing supported by the client path
+// is applied only on delegation; local reads return the whole file.
+func (a *crushAgent) fsReadTextFile(ctx context.Context, sessionID acp.SessionId, path string, line, limit *int) (string, error) {
+	if a.clientCaps.Fs.ReadTextFile && a.conn != nil {
+		resp, err := a.conn.ReadTextFile(ctx, acp.ReadTextFileRequest{
+			Path:      path,
+			SessionId: sessionID,
+			Line:      line,
+			Limit:     limit,
+		})
+		if err != nil {
+			return "", fmt.Errorf("client fs read: %w", err)
+		}
+		return resp.Content, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	return string(data), nil
+}
+
+// fsWriteTextFile writes a text file, mirroring fsReadTextFile's delegation
+// policy. Local writes create parent directories as needed.
+func (a *crushAgent) fsWriteTextFile(ctx context.Context, sessionID acp.SessionId, path, content string) error {
+	if a.clientCaps.Fs.WriteTextFile && a.conn != nil {
+		if _, err := a.conn.WriteTextFile(ctx, acp.WriteTextFileRequest{
+			Path:      path,
+			Content:   content,
+			SessionId: sessionID,
+		}); err != nil {
+			return fmt.Errorf("client fs write: %w", err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+	return nil
 }
 
 // buildPrompt converts ACP content blocks into a plain-text prompt plus any

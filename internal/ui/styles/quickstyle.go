@@ -898,6 +898,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.ModelInfo.Reasoning = lipgloss.NewStyle().Foreground(o.fgMostSubtle).PaddingLeft(2)
 	s.ModelInfo.TokenCount = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.ModelInfo.TokenPercentageWarn = lipgloss.NewStyle().Foreground(o.attention)
 	s.ModelInfo.EstimatedUsagePrefix = s.ModelInfo.TokenPercentage
 	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.ModelInfo.HypercreditIcon = lipgloss.NewStyle().Foreground(o.secondary)

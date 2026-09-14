@@ -2083,6 +2083,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
 
+	case dialog.ActionReloadSkills:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := m.com.Workspace.ReloadSkills(ctx); err != nil {
+				return util.NewErrorMsg(fmt.Errorf("failed to reload skills: %w", err))
+			}
+			return util.NewInfoMsg("Skills reloaded")
+		})
+
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
 			cmds = append(cmds, cmd)

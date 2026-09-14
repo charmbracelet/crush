@@ -493,6 +493,13 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(400, 404, 500).
 			Handle(c.handlePostWorkspaceSkillRead),
 
+		apigen.Post("/v1/workspaces/{id}/skills/reload").
+			Summary("Reload skills").
+			Tags("skills").
+			PathParam("id", "Workspace ID").
+			Fails(404, 500).
+			Handle(c.handlePostWorkspaceSkillsReload),
+
 		apigen.Post("/v1/workspaces/{id}/mcp/refresh-tools").
 			Summary("Refresh MCP tools").
 			Tags("mcp").

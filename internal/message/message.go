@@ -127,6 +127,7 @@ func newFlushBaseline(m *Message) flushBaseline {
 }
 
 type service struct {
+	writerGuard func(context.Context, string) error
 	*pubsub.Broker[Message]
 	q        db.Querier
 	debounce time.Duration
@@ -137,6 +138,18 @@ type service struct {
 
 // ServiceOption configures a [Service] at construction.
 type ServiceOption func(*service)
+
+// WithWriterGuard enforces process ownership before any transcript mutation.
+func WithWriterGuard(guard func(context.Context, string) error) ServiceOption {
+	return func(s *service) { s.writerGuard = guard }
+}
+
+func (s *service) checkWriter(ctx context.Context, id string) error {
+	if s.writerGuard != nil {
+		return s.writerGuard(ctx, id)
+	}
+	return nil
+}
 
 // WithDebounce overrides the debounce window for [Service.Update]. A
 // zero or negative value disables debouncing entirely (every update
@@ -165,6 +178,9 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.checkWriter(ctx, message.SessionID); err != nil {
+		return err
+	}
 	err = s.q.DeleteMessage(ctx, message.ID)
 	if err != nil {
 		return err
@@ -186,6 +202,9 @@ func (s *service) Delete(ctx context.Context, id string) error {
 }
 
 func (s *service) Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error) {
+	if err := s.checkWriter(ctx, sessionID); err != nil {
+		return Message{}, err
+	}
 	if params.Role != Assistant {
 		params.Parts = append(params.Parts, Finish{
 			Reason: "stop",
@@ -222,6 +241,9 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 }
 
 func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) error {
+	if err := s.checkWriter(ctx, sessionID); err != nil {
+		return err
+	}
 	messages, err := s.List(ctx, sessionID)
 	if err != nil {
 		return err
@@ -241,6 +263,9 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 // synchronously (terminal updates, debounce <= 0) or buffers it until
 // the next debounce tick. See [Service] for the contract.
 func (s *service) Update(ctx context.Context, msg Message) error {
+	if err := s.checkWriter(ctx, msg.SessionID); err != nil {
+		return err
+	}
 	cloned := msg.Clone()
 
 	// Zero or negative debounce: flush every update synchronously. This

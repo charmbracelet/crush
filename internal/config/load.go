@@ -36,6 +36,23 @@ import (
 
 const defaultCatwalkURL = "https://catwalk.charm.land"
 
+// legacyProviderTypes maps provider type values from the catwalk v2
+// schema onto the v3 endpoint types that describe the same API format, so
+// configs written before the migration keep working. Custom provider
+// types with registered enrichers (ollama, litellm, ...) are not listed
+// here and pass through unchanged.
+var legacyProviderTypes = map[catwalk.Type]catwalk.Type{
+	"openai":        catwalk.TypeResponses,
+	"openai-compat": catwalk.TypeCompletions,
+	"openrouter":    catwalk.TypeCompletions,
+	"vercel":        catwalk.TypeCompletions,
+	"anthropic":     catwalk.TypeMessages,
+	"azure":         catwalk.TypeResponses,
+	"bedrock":       catwalk.TypeMessages,
+	"google":        catwalk.TypeCompletions,
+	"google-vertex": catwalk.TypeCompletions,
+}
+
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -418,7 +435,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			ExtraHeaders:   pc.ExtraHeaders,
 			ExistingModels: pc.Models,
 		}
-		providerType := cmp.Or(pc.Type, catwalk.TypeOpenAICompat)
+		providerType := cmp.Or(pc.Type, catwalk.TypeCompletions)
 		wg.Go(func() {
 			models, err := discover.DiscoverModels(discoverCtx, cfg, resolver)
 			if err == nil && len(models) > 0 {
@@ -443,8 +460,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		// Make sure the provider ID is set.
 		providerConfig.ID = id
 		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
-		// Default to OpenAI if not set.
-		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
+		// Migrate legacy provider types onto the catwalk v3 endpoint types.
+		if mapped, ok := legacyProviderTypes[providerConfig.Type]; ok {
+			providerConfig.Type = mapped
+		}
+		// Default to OpenAI chat completions if not set.
+		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeCompletions)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
 			providerConfig.Type != hyper.Name &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
@@ -735,7 +756,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Provider:        string(p.ID),
 			Model:           defaultLargeModel.ID,
 			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
-			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
+			ReasoningEffort: defaultLargeModel.Reasoning.DefaultEffortLevel,
 		}
 
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
@@ -750,7 +771,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Provider:        string(p.ID),
 			Model:           defaultSmallModel.ID,
 			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
-			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
+			ReasoningEffort: defaultSmallModel.Reasoning.DefaultEffortLevel,
 		}
 		return largeModel, smallModel, err
 	}
@@ -828,7 +849,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if largeModelSelected.ReasoningEffort != "" {
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
 			} else {
-				large.ReasoningEffort = model.DefaultReasoningEffort
+				large.ReasoningEffort = model.Reasoning.DefaultEffortLevel
 			}
 			large.Think = largeModelSelected.Think
 			if largeModelSelected.Temperature != nil {
@@ -873,7 +894,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 			if smallModelSelected.ReasoningEffort != "" {
 				small.ReasoningEffort = smallModelSelected.ReasoningEffort
 			} else {
-				small.ReasoningEffort = model.DefaultReasoningEffort
+				small.ReasoningEffort = model.Reasoning.DefaultEffortLevel
 			}
 			if smallModelSelected.Temperature != nil {
 				small.Temperature = smallModelSelected.Temperature

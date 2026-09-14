@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -34,6 +35,7 @@ const (
 type authKeyMap struct {
 	Continue key.Binding
 	Cancel   key.Binding
+	Submit   key.Binding
 }
 
 // defaultAuthKeybinds returns the default key bindings for the OAuth TUI.
@@ -47,22 +49,27 @@ func defaultAuthKeybinds() authKeyMap {
 			key.WithKeys("ctrl+c", "esc"),
 			key.WithHelp("ctrl+c", "cancel"),
 		),
+		Submit: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "submit code"),
+		),
 	}
 }
 
 // ShortHelp returns the key bindings for the short help screen.
 func (k authKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Continue, k.Cancel}
+	return []key.Binding{k.Continue, k.Submit, k.Cancel}
 }
 
 // FullHelp returns the key bindings for the full help screen.
 func (k authKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Continue, k.Cancel}}
+	return [][]key.Binding{{k.Continue, k.Submit, k.Cancel}}
 }
 
 // updateAuthKeymap enables/disables key bindings based on the current state.
 func (m *authModel) updateAuthKeymap() {
 	m.keymap.Continue.SetEnabled(m.state == authStateIntro)
+	m.keymap.Submit.SetEnabled(m.state == authStateWaiting && m.codeEntry)
 }
 
 // authModel is the Bubble Tea model for the OAuth authorization flow.
@@ -78,6 +85,15 @@ type authModel struct {
 	verificationURL string
 	userCode        string
 	browserFailed   bool
+
+	// codeEntry is set when the flow can finish with a pasted code from
+	// the authorization page; codeInput is its paste field, shown while
+	// waiting for the browser callback, and codeErr the last paste
+	// failure. The callback and the paste race: whichever lands first
+	// wins, and a failed paste keeps the flow waiting.
+	codeEntry bool
+	codeInput textinput.Model
+	codeErr   string
 
 	help   help.Model
 	keymap authKeyMap
@@ -99,6 +115,14 @@ type authReadyMsg struct {
 }
 
 type authTokenMsg struct {
+	token *oauth.Token
+	err   error
+}
+
+// authCodeResultMsg carries the outcome of a pasted-code exchange. A
+// failure keeps the flow waiting: the loopback callback may still
+// arrive, and the user can retry the paste.
+type authCodeResultMsg struct {
 	token *oauth.Token
 	err   error
 }
@@ -163,6 +187,17 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.state = authStateWaiting
 		m.updateAuthKeymap()
+		if msg.userCode == "" {
+			if _, ok := m.flow.(codeEntryFlow); ok {
+				m.codeEntry = true
+				m.codeInput = textinput.New()
+				m.codeInput.Prompt = "> "
+				m.codeInput.Placeholder = "Paste the code from the browser..."
+				m.codeInput.SetWidth(max(0, m.authWidth()-4))
+				m.codeInput.Focus()
+				m.updateAuthKeymap()
+			}
+		}
 		cmds := []tea.Cmd{waitCmd(m.flow), m.spinner.Tick}
 		if msg.userCode != "" {
 			cmds = append(cmds, tea.SetClipboard(msg.userCode))
@@ -185,6 +220,19 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 
+	case authCodeResultMsg:
+		if msg.err != nil {
+			// Keep waiting: the callback can still arrive and the paste
+			// can be retried.
+			m.codeErr = msg.err.Error()
+			m.codeInput.SetValue("")
+			return m, nil
+		}
+		m.token = msg.token
+		m.blankLines = m.contentHeight()
+		m.quitting = true
+		return m, tea.Quit
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -198,6 +246,9 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.help.SetWidth(msg.Width)
+		if m.codeEntry {
+			m.codeInput.SetWidth(max(0, m.authWidth()-4))
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -214,9 +265,34 @@ func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(startFlowCmd(m.newFlow), m.spinner.Tick)
 			}
 		}
+		// While the paste field is up, typing lands in it: enter submits
+		// the code, and the cancel binding above still quits.
+		if m.state == authStateWaiting && m.codeEntry {
+			if key.Matches(msg, m.keymap.Submit) {
+				value := strings.TrimSpace(m.codeInput.Value())
+				if value == "" {
+					return m, nil
+				}
+				f, ok := m.flow.(codeEntryFlow)
+				if !ok {
+					return m, nil
+				}
+				return m, submitCodeCmd(f, value)
+			}
+			var cmd tea.Cmd
+			m.codeInput, cmd = m.codeInput.Update(msg)
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		m.help, cmd = m.help.Update(msg)
 		return m, cmd
+
+	case tea.PasteMsg:
+		if m.state == authStateWaiting && m.codeEntry {
+			var cmd tea.Cmd
+			m.codeInput, cmd = m.codeInput.Update(msg)
+			return m, cmd
+		}
 	}
 
 	return m, nil
@@ -303,6 +379,16 @@ func (m authModel) content() string {
 		b.WriteString("\n\n  ")
 		b.WriteString(m.spinner.View())
 		b.WriteString(wrap.Render("Waiting for authorization..."))
+		if m.codeEntry {
+			b.WriteString("\n\n  ")
+			b.WriteString(wrap.Render("Declined or browser didn't connect? Enter the code from the page:"))
+			b.WriteString("\n  ")
+			b.WriteString(m.codeInput.View())
+			if m.codeErr != "" {
+				b.WriteString("\n\n  ")
+				b.WriteString(errorStyle.Render(wrap.Render(m.codeErr)))
+			}
+		}
 	case authStateExchanging:
 		b.WriteString(m.spinner.View())
 		b.WriteString(wrap.Render("Exchanging token..."))
@@ -354,5 +440,17 @@ func waitCmd(f flow) tea.Cmd {
 
 		token, err := f.Wait(ctx)
 		return authTokenMsg{token: token, err: err}
+	}
+}
+
+// submitCodeCmd exchanges a pasted code for a token off the update loop,
+// racing the loopback callback still being waited on.
+func submitCodeCmd(f codeEntryFlow, input string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		token, err := f.CompleteWithCode(ctx, input)
+		return authCodeResultMsg{token: token, err: err}
 	}
 }

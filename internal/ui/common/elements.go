@@ -91,6 +91,10 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	)
 }
 
+// contextWarnThreshold is the percentage of the context window past which
+// the usage readout turns the warning colour.
+const contextWarnThreshold = 80
+
 // formatTokensAndCost formats token usage and cost with appropriate units
 // (K/M) and percentage of context window.
 func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64, estimated bool) string {
@@ -124,10 +128,12 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 		percentageText = "~" + percentageText
 	}
 	formattedPercentage := t.ModelInfo.TokenPercentage.Render(percentageText)
-	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
-	if percentage > 80 {
-		formattedTokens = fmt.Sprintf("%s %s", styles.LSPWarningIcon, formattedTokens)
+	// A nearly full context window is worth noticing, so the percentage
+	// itself carries the warning colour rather than a separate marker.
+	if percentage > contextWarnThreshold {
+		formattedPercentage = t.ModelInfo.TokenPercentageWarn.Render(percentageText)
 	}
+	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
 
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
 }

@@ -1261,6 +1261,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
+	// A turn stopped at its output token limit finishes with
+	// FinishReasonLength, so the error path above never runs for it.
+	if currentAssistant != nil {
+		if closeErr := a.closeUnfinishedToolCalls(ctx, currentAssistant); closeErr != nil {
+			// The turn produced a valid result, so a failure here is logged
+			// rather than returned.
+			slog.Error("Failed to close unfinished tool calls",
+				"session_id", call.SessionID, "error", closeErr)
+		}
+	}
+
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {

@@ -242,13 +242,13 @@ current code state from §3.
   Test: `TestElicitationFormMode`.
 - [ ] **S7. `_meta` passthrough** on message paths; reserve W3C trace keys
   `traceparent`/`tracestate`/`baggage`. (`agent.go`, `event_bridge.go`.)
-- [ ] **S8. `available_commands_update`** after session creation. (`agent.go`.)
-- [ ] **S9. Config/mode/info notifications** — `config_option_update` on
+- [x] **S8. `available_commands_update`** after session creation. (`agent.go`.)
+- [x] **S9. Config/mode/info notifications** — `config_option_update` on
   `set_config_option`; `current_mode_update` on `set_mode`; `session_info_update`
   to keep `session/list` in sync. (`agent.go`.)
 
 **Tier 3 — Optional (MAY): full parity**
-- [ ] **O1.** Return `modes` + `configOptions` in `session/new` response.
+- [x] **O1.** Return `modes` + `configOptions` in `session/new` response.
 - [ ] **O2.** Boolean config options (`type:"boolean"`, gated on
   `clientCapabilities.session.configOptions.boolean`) + `category` field
   (`mode`/`model`/`model_config`/`thought_level`). (`agent.go`.)
@@ -260,8 +260,11 @@ current code state from §3.
   advertised; `extractPromptText` currently handles only text/resource_link).
 - [ ] **O8.** Real terminal callbacks (or document out-of-scope).
 - [ ] **O9.** MCP server connection at session setup (`mcpServers`).
-- [ ] **O10.** `agentInfo.title`; `switch_mode` tool kind representation.
+- [x] **O10.** `agentInfo.title`; `switch_mode` tool kind representation.
 - [ ] **O11.** Render streaming chunks in `crush acp connect` loop. (`acp_client.go`.)
+
+
+> **Deferred (blocked on upstream / SDK):** S4 (plan updates) needs a Crush plan subsystem, which does not exist yet. S5 (`messageId`) and S6 (elicitation) depend on UNSTABLE SDK surfaces and a Crush elicitation trigger. S7 (`_meta`/trace passthrough) needs a tracing-propagation layer in Crush. These are tracked but not implemented here.
 
 **Tier 4 — Tests** (gate each Tier 1–3 item)
 - [ ] Regression tests per missing update type; `TestConformanceSessionLoad`;

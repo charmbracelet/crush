@@ -349,11 +349,17 @@ func TestPromptStreamsAgentMessageChunk(t *testing.T) {
 	// The update is written while Prompt is still in flight; give the
 	// notification queue a moment to drain on the client side.
 	deadline := time.Now().Add(2 * time.Second)
+	sawChunk := false
 	for time.Now().Before(deadline) {
 		mu.Lock()
-		n := len(updates)
+		for _, u := range updates {
+			if u.Update.AgentMessageChunk != nil {
+				sawChunk = true
+				break
+			}
+		}
 		mu.Unlock()
-		if n > 0 {
+		if sawChunk {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -459,4 +465,82 @@ func (c *emittingCoordinator) Run(ctx context.Context, sessionID, prompt string,
 
 func (c *emittingCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	return c.Run(ctx, sessionID, prompt, attachments...)
+}
+
+// S8/S9: session creation must emit the setup notifications (available
+// commands, session info) the client needs before the first prompt.
+func TestNewSessionEmitsSetupUpdates(t *testing.T) {
+	msgs := newStubMessageService()
+	co := newStubCoordinator(nil)
+	a := stubApp(co)
+	a.Messages = msgs
+
+	var (
+		mu      sync.Mutex
+		updates []acp.SessionNotification
+	)
+	c := &trackingUpdateClient{
+		stubClient: newStubClient(),
+		hook: func(n acp.SessionNotification) {
+			mu.Lock()
+			updates = append(updates, n)
+			mu.Unlock()
+		},
+	}
+
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	defer c2aR.Close()
+	defer c2aW.Close()
+	defer a2cR.Close()
+	defer a2cW.Close()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := acpsrv.NewServer(a, log, c2aR, a2cW)
+	srv.StartEventBridge(t.Context())
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		done <- srv.Start(ctx)
+	}()
+
+	client := acp.NewClientSideConnection(c, c2aW, a2cR)
+	if _, err := client.Initialize(t.Context(), acp.InitializeRequest{
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: acp.ClientCapabilities{},
+	}); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if _, err := client.NewSession(t.Context(), acp.NewSessionRequest{
+		Cwd: "/workspace", McpServers: []acp.McpServer{},
+	}); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	sawCommands, sawInfo := false, false
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		for _, u := range updates {
+			if u.Update.AvailableCommandsUpdate != nil {
+				sawCommands = true
+			}
+			if u.Update.SessionInfoUpdate != nil {
+				sawInfo = true
+			}
+		}
+		mu.Unlock()
+		if sawCommands && sawInfo {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !sawCommands {
+		t.Fatal("NewSession did not emit available_commands_update (S8)")
+	}
+	if !sawInfo {
+		t.Fatal("NewSession did not emit session_info_update (S9)")
+	}
 }

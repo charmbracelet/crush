@@ -141,16 +141,14 @@ func TestWrapToolsWithErrorBoundary(t *testing.T) {
 	}
 }
 
-// TestBuildToolsWrapsEveryToolWithErrorBoundary pins the wiring: the
-// boundary only helps if buildTools applies it, and the harness tests below
-// wrap their tool lists by hand, so without this test the call in
-// buildTools could be dropped and nothing would notice.
-func TestBuildToolsWrapsEveryToolWithErrorBoundary(t *testing.T) {
-	env := testEnv(t)
+// newHermeticCoordinator builds a coordinator against a minimal config,
+// mirroring coordinator_readiness_test.go: one openai-typed provider with
+// large and small models selected so the sub-agent and agentic_fetch tools
+// can be built, and no MCP servers. It returns the coder agent config so
+// callers can run buildTools exactly as production does.
+func newHermeticCoordinator(t *testing.T, env fakeEnv) (*coordinator, *config.ConfigStore, config.Agent) {
+	t.Helper()
 
-	// Minimal hermetic config, mirroring coordinator_readiness_test.go: one
-	// openai-typed provider with large and small models selected so the
-	// sub-agent and agentic_fetch tools can be built. No MCP servers.
 	crushJSON := `{
   "options": {"disable_default_providers": true, "disable_provider_auto_update": true},
   "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
@@ -173,7 +171,16 @@ func TestBuildToolsWrapsEveryToolWithErrorBoundary(t *testing.T) {
 		history:     env.history,
 		filetracker: *env.filetracker,
 	}
-	agentCfg := cfg.Config().Agents[config.AgentCoder]
+	return coord, cfg, cfg.Config().Agents[config.AgentCoder]
+}
+
+// TestBuildToolsWrapsEveryToolWithErrorBoundary pins the wiring: the
+// boundary only helps if buildTools applies it, and the harness tests below
+// wrap their tool lists by hand, so without this test the call in
+// buildTools could be dropped and nothing would notice.
+func TestBuildToolsWrapsEveryToolWithErrorBoundary(t *testing.T) {
+	env := testEnv(t)
+	coord, _, agentCfg := newHermeticCoordinator(t, env)
 
 	for _, isSubAgent := range []bool{false, true} {
 		toolList, err := coord.buildTools(t.Context(), agentCfg, isSubAgent)
@@ -183,6 +190,67 @@ func TestBuildToolsWrapsEveryToolWithErrorBoundary(t *testing.T) {
 			_, ok := tool.(*toolErrorBoundary)
 			require.Truef(t, ok, "tool %q (sub-agent=%v) reached the agent unwrapped as %T", tool.Info().Name, isSubAgent, tool)
 		}
+	}
+}
+
+// TestToolErrorBoundary_ReportsMissingSessionToModel documents the choice
+// made for crush-internal invariants. Several tools return a Go error when
+// the session id (or, for the agent tool, the message id) is missing from
+// the context. That can only happen through a crush bug, never through a
+// model mistake. The boundary still turns it into an error result: the
+// text reaches the model and the user, the warn log keeps it visible, and
+// the turn is not lost. If that policy changes (an opt-out error type that
+// aborts the turn, say), this is the test to flip.
+//
+// The three MCP tools with the same check are not covered: they only exist
+// when an MCP server is configured.
+func TestToolErrorBoundary_ReportsMissingSessionToModel(t *testing.T) {
+	env := testEnv(t)
+	coord, _, agentCfg := newHermeticCoordinator(t, env)
+	toolList, err := coord.buildTools(t.Context(), agentCfg, false)
+	require.NoError(t, err)
+	byName := make(map[string]fantasy.AgentTool, len(toolList))
+	for _, tool := range toolList {
+		byName[tool.Info().Name] = tool
+	}
+	inWorkDir := func(name string) string { return filepath.Join(env.workingDir, name) }
+
+	cases := []struct {
+		tool        string
+		input       string
+		want        string
+		withSession bool // set the session id but not the message id
+	}{
+		{tools.BashToolName, `{"command":"echo hi"}`, "session ID is required", false},
+		{tools.DownloadToolName, `{"url":"http://127.0.0.1:1/x","file_path":"x.bin"}`, "session ID is required", false},
+		{tools.EditToolName, fmt.Sprintf(`{"file_path":%q,"old_string":"","new_string":"hi"}`, inWorkDir("new.txt")), "session ID is required", false},
+		{tools.FetchToolName, `{"url":"http://127.0.0.1:1/","format":"text"}`, "session ID is required", false},
+		{tools.LSToolName, `{"path":"/"}`, "session ID is required", false},
+		{tools.MultiEditToolName, fmt.Sprintf(`{"file_path":%q,"edits":[{"old_string":"","new_string":"x"}]}`, inWorkDir("m.txt")), "session ID is required", false},
+		{tools.TodosToolName, `{"todos":[{"content":"a","status":"pending","active_form":"b"}]}`, "session ID is required", false},
+		{tools.ViewToolName, `{"file_path":"/etc/hosts"}`, "session ID is required", false},
+		{tools.WriteToolName, fmt.Sprintf(`{"file_path":%q,"content":"hi"}`, inWorkDir("w.txt")), "session_id is required", false},
+		{AgentToolName, `{"prompt":"find something"}`, "session id missing from context", false},
+		{AgentToolName, `{"prompt":"find something"}`, "agent message id missing from context", true},
+	}
+	for _, tc := range cases {
+		name := tc.tool
+		if tc.withSession {
+			name += "/message-id"
+		}
+		t.Run(name, func(t *testing.T) {
+			tool, ok := byName[tc.tool]
+			require.Truef(t, ok, "tool %q missing from the coder tool list", tc.tool)
+
+			ctx := t.Context()
+			if tc.withSession {
+				ctx = context.WithValue(ctx, tools.SessionIDContextKey, "sess-1")
+			}
+			resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "tc1", Name: tc.tool, Input: tc.input})
+			require.NoError(t, err, "an internal invariant failure must not abort the turn")
+			require.True(t, resp.IsError)
+			require.Contains(t, resp.Content, tc.want)
+		})
 	}
 }
 

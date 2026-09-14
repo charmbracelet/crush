@@ -74,3 +74,14 @@ func (m *OAuthOpenAI) stopPolling() tea.Msg {
 	}
 	return nil
 }
+
+// supportsCodeEntry reports whether the provider's flow can finish with
+// a pasted code. Only the Grok browser flow offers the manual fallback.
+func (m *OAuthOpenAI) supportsCodeEntry() bool {
+	return false
+}
+
+// submitCode is unreachable for providers without code entry.
+func (m *OAuthOpenAI) submitCode(string) tea.Cmd {
+	return nil
+}

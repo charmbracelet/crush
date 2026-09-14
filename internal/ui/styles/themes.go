@@ -166,6 +166,9 @@ func charmtoneOverrides(s Styles) Styles {
 	s.Messages.SubduedHypercreditIcon = s.Messages.SubduedHypercreditIcon.
 		Foreground(charmtone.Violet)
 
+	s.ModelInfo.TokenPercentageWarn = s.ModelInfo.TokenPercentageWarn.
+		Foreground(charmtone.Uni)
+
 	return s
 }
 

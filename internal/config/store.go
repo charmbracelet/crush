@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/oauth/grok"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/tidwall/gjson"
@@ -589,6 +590,12 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 				providerConfig.OAuthToken = nil
 				providerConfig.ChatGPTModels = nil
 			}
+			if providerID == string(catwalk.InferenceProviderXAI) {
+				// Either OAuth or an API key, never both: the key
+				// replaces a previous Grok login, whose refreshes would
+				// otherwise overwrite the key again.
+				providerConfig.OAuthToken = nil
+			}
 		}
 		if providerID == string(catwalk.InferenceProviderOpenAI) {
 			// Either OAuth or an API key, never both: the new key
@@ -597,6 +604,13 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 				return err
 			}
 			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.chatgpt_models", providerID)); err != nil {
+				return err
+			}
+		}
+		if providerID == string(catwalk.InferenceProviderXAI) {
+			// Either OAuth or an API key, never both: the new key
+			// leaves nothing usable on the Grok side behind.
+			if err := s.RemoveConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID)); err != nil {
 				return err
 			}
 		}
@@ -973,6 +987,8 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken str
 		return copilot.RefreshToken(ctx, refreshToken)
 	case string(catwalk.InferenceProviderOpenAI):
 		return openai.RefreshToken(ctx, refreshToken)
+	case string(catwalk.InferenceProviderXAI):
+		return grok.RefreshToken(ctx, refreshToken)
 	case hyperp.Name:
 		return hyper.ExchangeToken(ctx, refreshToken)
 	default:

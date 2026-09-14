@@ -264,7 +264,19 @@ current code state from §3.
 - [ ] **O11.** Render streaming chunks in `crush acp connect` loop. (`acp_client.go`.)
 
 
-> **Deferred (blocked on upstream / SDK):** S4 (plan updates) needs a Crush plan subsystem, which does not exist yet. S5 (`messageId`) and S6 (elicitation) depend on UNSTABLE SDK surfaces and a Crush elicitation trigger. S7 (`_meta`/trace passthrough) needs a tracing-propagation layer in Crush. These are tracked but not implemented here.
+> **Deferred / SDK-gated** (tracked below, not yet implemented):
+> - **S4** plan updates — requires a Crush plan subsystem (does not exist yet).
+> - **S5** `messageId` — stable in v1 spec; pinned SDK v0.13.5 has the field but it is
+>   not yet wired into outgoing chunks.
+> - **S6** elicitation — stable in v1 spec; pinned SDK still exposes it as `Unstable*`.
+> - **S7** `_meta`/trace passthrough — requires a tracing-propagation layer in Crush.
+> - **O12** File System, **O13** Session Usage — newly tracked from the v1 spec.
+
+- [ ] **O12.** File System access — `fs/read_text_file` + `fs/write_text_file`, gated on
+  `clientCapabilities.fs` (read/write booleans); the Agent MUST NOT call them when
+  unsupported. (`agent.go`, `event_bridge.go`.)
+- [ ] **O13.** Session Usage update — `usage_update` reporting context-window size/used
+  and cumulative cost. (`event_bridge.go`.)
 
 **Tier 4 — Tests** (gate each Tier 1–3 item)
 - [ ] Regression tests per missing update type; `TestConformanceSessionLoad`;

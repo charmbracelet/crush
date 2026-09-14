@@ -1238,7 +1238,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    catwalk.TypeOpenAI,
+					Type:    catwalk.TypeResponses,
 					Models: []catwalk.Model{{
 						ID: "test-model",
 					}},
@@ -1266,7 +1266,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom-anthropic": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.anthropic.com/v1",
-					Type:    catwalk.TypeAnthropic,
+					Type:    catwalk.TypeMessages,
 					Models: []catwalk.Model{{
 						ID: "claude-3-sonnet",
 					}},
@@ -1286,7 +1286,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.Equal(t, "custom-anthropic", customProvider.ID)
 		require.Equal(t, "test-key", customProvider.APIKey)
 		require.Equal(t, "https://api.anthropic.com/v1", customProvider.BaseURL)
-		require.Equal(t, catwalk.TypeAnthropic, customProvider.Type)
+		require.Equal(t, catwalk.TypeMessages, customProvider.Type)
 	})
 
 	t.Run("disabled custom provider is removed", func(t *testing.T) {
@@ -1295,7 +1295,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    catwalk.TypeOpenAI,
+					Type:    catwalk.TypeResponses,
 					Disable: true,
 					Models: []catwalk.Model{{
 						ID: "test-model",
@@ -2341,7 +2341,7 @@ func TestConfig_configureProviders_LiteralEmptyHeaderDropped(t *testing.T) {
 			"my-llm": {
 				APIKey:  "test-key",
 				BaseURL: "https://my-llm.example.com/v1",
-				Type:    catwalk.TypeOpenAI,
+				Type:    catwalk.TypeResponses,
 				Models:  []catwalk.Model{{ID: "m"}},
 				ExtraHeaders: map[string]string{
 					"X-Custom": "",

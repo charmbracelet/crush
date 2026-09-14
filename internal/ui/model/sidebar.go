@@ -29,15 +29,15 @@ func (m *UI) modelInfo(width int) string {
 			providerName = providerConfig.Name
 
 			// Only check reasoning if model can reason
-			if model.CatwalkCfg.CanReason {
-				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
+			if config.ModelCanReason(model.CatwalkCfg) {
+				if len(model.CatwalkCfg.Reasoning.EffortLevels) == 0 {
 					if model.ModelCfg.Think {
 						reasoningInfo = "Thinking On"
 					} else {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.Reasoning.DefaultEffortLevel)
 					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}

@@ -8,75 +8,51 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsOpenCodeMessagesModel(t *testing.T) {
+func TestServingProvider(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		provider string
-		model    string
-		expected bool
-	}{
-		{"opencode-zen", "qwen3.7-max", true},
-		{"opencode-zen", "qwen3.5-plus", true},
-		{"opencode-zen", "qwen3.6-plus", true},
-		{"opencode-zen", "qwen3.7-plus", true},
-		{"opencode-zen", "claude-opus-4-5", true},
-		{"opencode-zen", "claude-sonnet-5", true},
-		{"opencode-zen", "muse-spark-1.3-contributor-free", false},
-		{"opencode-zen", "gpt-5.6-luna", false},
-		{"opencode-zen", "grok-4.5", false},
-		{"opencode-zen", "minimax-m3", false},
-		{"opencode-zen", "kimi-k3", false},
-		{"opencode-zen", "big-pickle", false},
-		{"opencode-go", "minimax-m2.7", true},
-		{"opencode-go", "minimax-m3", true},
-		{"opencode-go", "qwen3.7-max", true},
-		{"opencode-go", "qwen3.7-plus", true},
-		{"opencode-go", "qwen3.6-plus", true},
-		{"opencode-go", "qwen3.8-flash", true},
-		{"opencode-go", "qwen3.8-max", true},
-		{"opencode-go", "muse-spark-1.3-contributor", false},
-		{"opencode-go", "gpt-5.6-luna", false},
-		{"opencode-go", "glm-5.3", false},
-		{"opencode-go", "kimi-k3", false},
-		{"opencode-go", "longcat-2.0", false},
-		{"opencode-go", "ox-alpha-free", false},
-		{"opencode-go", "minimax", false},
-		{"other", "claude-opus-4-5", false},
-		{"other", "qwen3.7-max", false},
+	providerCfg := func(id string, providerType catwalk.Type) config.ProviderConfig {
+		return config.ProviderConfig{ID: id, Type: providerType}
 	}
-	for _, tt := range tests {
-		require.Equal(t, tt.expected, isOpenCodeMessagesModel(tt.provider, tt.model), "%s/%s", tt.provider, tt.model)
+	model := func(modelType catwalk.Type) catwalk.Model {
+		return catwalk.Model{ID: "some-model", Type: modelType}
 	}
-}
 
-func TestIsOpenCodeResponsesModel(t *testing.T) {
-	t.Parallel()
+	t.Run("bespoke SDKs are selected by provider ID", func(t *testing.T) {
+		t.Parallel()
+		for providerID, expected := range map[string]string{
+			string(catwalk.InferenceProviderBedrock):       "bedrock",
+			string(catwalk.InferenceProviderBedrockEurope): "bedrock",
+			string(catwalk.InferenceProviderAzure):         "azure",
+			string(catwalk.InferenceProviderGemini):        "google",
+			string(catwalk.InferenceProviderVertexAI):      "google",
+			string(catwalk.InferenceProviderOpenRouter):    "openrouter",
+			string(catwalk.InferenceProviderVercel):        "vercel",
+			"hyper":                                        "hyper",
+			string(catwalk.InferenceProviderCopilot):       "openai-compat",
+			string(catwalk.InferenceProviderOpenCodeGo):    "openai-compat",
+			string(catwalk.InferenceProviderOpenCodeZen):   "openai-compat",
+		} {
+			require.Equal(t, expected, servingProvider(providerCfg(providerID, catwalk.TypeCompletions), model("")), providerID)
+		}
+	})
 
-	tests := []struct {
-		model    string
-		expected bool
-	}{
-		{"muse-spark-1.3-contributor-free", true},
-		{"muse-spark-1.2", true},
-		{"grok-4.5", true},
-		{"grok-4.6", true},
-		{"grok-build-0.1", true},
-		{"gpt-5.6-luna", true},
-		{"gpt-5.5", true},
-		{"gpt-5.3-codex", true},
-		{"minimax-m3", false},
-		{"qwen3.7-max", false},
-		{"kimi-k3", false},
-		{"glm-5.3", false},
-		{"big-pickle", false},
-		{"ox-alpha-free", false},
-		{"hy3", false},
-		{"longcat-2.0", false},
-	}
-	for _, tt := range tests {
-		require.Equal(t, tt.expected, isOpenCodeResponsesModel(tt.model), tt.model)
-	}
+	t.Run("generic providers are selected by the model's wire type", func(t *testing.T) {
+		t.Parallel()
+		for wireType, expected := range map[catwalk.Type]string{
+			catwalk.TypeResponses:   "openai",
+			catwalk.TypeMessages:    "anthropic",
+			catwalk.TypeCompletions: "openai-compat",
+		} {
+			require.Equal(t, expected, servingProvider(providerCfg("custom", ""), model(wireType)), wireType)
+			require.Equal(t, expected, servingProvider(providerCfg("custom", wireType), model("")), wireType)
+		}
+	})
+
+	t.Run("custom provider types are passed through", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "litellm", servingProvider(providerCfg("litellm", "litellm"), model("")))
+	})
 }
 
 func TestBuildProviderOpenCodeRouting(t *testing.T) {
@@ -92,18 +68,18 @@ func TestBuildProviderOpenCodeRouting(t *testing.T) {
 			providerCfg := config.ProviderConfig{
 				ID:      providerID,
 				BaseURL: "https://opencode.ai/zen/v1",
-				Type:    catwalk.TypeOpenAICompat,
+				Type:    catwalk.TypeCompletions,
 				APIKey:  "$OPENCODE_API_KEY",
 			}
 			coord := newTestCoordinator(t, env, providerID, providerCfg)
 
-			for _, modelID := range []string{"kimi-k3", "muse-spark-1.3-contributor-free", "grok-4.6", "gpt-5.6-luna"} {
+			for _, wireType := range []catwalk.Type{catwalk.TypeCompletions, catwalk.TypeResponses, catwalk.TypeMessages} {
 				provider, err := coord.buildProvider(providerCfg, config.SelectedModel{
-					Model:    modelID,
+					Model:    "some-model",
 					Provider: providerID,
-				}, false)
-				require.NoError(t, err, modelID)
-				require.NotNil(t, provider, modelID)
+				}, false, wireType)
+				require.NoError(t, err, wireType)
+				require.NotNil(t, provider, wireType)
 			}
 		})
 	}

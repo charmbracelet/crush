@@ -739,11 +739,15 @@ Crush supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
 > [!NOTE]
-> Note that we support two "types" for OpenAI. Make sure to choose the right one
-> to ensure the best experience!
+> The provider type describes the API format the provider speaks. Make sure
+> to choose the right one to ensure the best experience!
 >
-> - `openai` should be used when proxying or routing requests through OpenAI.
-> - `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
+> - `responses` should be used when proxying or routing requests through OpenAI.
+> - `completions` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
+> - `messages` should be used for Anthropic-compatible APIs.
+>
+> Legacy values (`openai`, `openai-compat`, `anthropic`) are still accepted and
+> migrated automatically.
 
 #### OpenAI-Compatible APIs
 
@@ -751,7 +755,7 @@ Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
 API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
 ```bash
-provider add deepseek --type openai-compat \
+provider add deepseek --type completions \
   --base-url "https://api.deepseek.com/v1" \
   --api-key "$DEEPSEEK_API_KEY"
 
@@ -771,7 +775,7 @@ Custom Anthropic-compatible providers follow this format:
 
 ```bash
 provider add custom-anthropic \
-  --type anthropic \
+  --type messages \
   --base-url "https://api.anthropic.com/v1" \
   --api-key "$ANTHROPIC_API_KEY" \
   --extra-header anthropic-version 2023-06-01
@@ -780,7 +784,7 @@ model add custom-anthropic/claude-sonnet-4-20250514 \
   --name "Claude Sonnet 4" \
   --context-window 200000 \
   --default-max-tokens 50000 \
-  --can-reason true \
+  --thinking toggleable \
   --supports-images true \
   --price-input 3 \
   --price-output 15 \
@@ -841,13 +845,13 @@ To add specific models to the configuration, configure as such:
 
 ```bash
 # crushrc — authentication still comes from gcloud and the VERTEXAI_* env vars.
-provider add vertexai --type google-vertex
+provider add vertexai
 
 model add vertexai/claude-sonnet-4@20250514 \
   --name "VertexAI Sonnet 4" \
   --context-window 200000 \
   --default-max-tokens 50000 \
-  --can-reason true \
+  --thinking toggleable \
   --supports-images true \
   --price-input 3 \
   --price-output 15 \

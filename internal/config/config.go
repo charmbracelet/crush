@@ -156,19 +156,11 @@ type ProviderConfig struct {
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
 func (c *ProviderConfig) ToProvider() catwalk.Provider {
-	// Convert config provider to provider.Provider format
-	provider := catwalk.Provider{
+	return catwalk.Provider{
 		Name:   c.Name,
 		ID:     catwalk.InferenceProvider(c.ID),
-		Models: make([]catwalk.Model, len(c.Models)),
+		Models: c.Models,
 	}
-
-	// Convert models
-	for i, model := range c.Models {
-		provider.Models[i] = model
-	}
-
-	return provider
 }
 
 func (c *ProviderConfig) SetupGitHubCopilot() {

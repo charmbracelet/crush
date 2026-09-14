@@ -152,7 +152,9 @@ unaffected.
 
 ## `UserPromptSubmit` event
 
-**Status:** not implemented.
+**Status:** partially implemented. The event, its stdin payload, and `context`
+injection into the outbound prompt have shipped; `updated_prompt`, `decision`
+(deny), and `halt` remain future work, as does `context_files`.
 
 ### Motivation
 

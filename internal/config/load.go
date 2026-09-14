@@ -1417,6 +1417,8 @@ func normalizeHookEvent(name string) string {
 	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
 	case "pretooluse":
 		return "PreToolUse"
+	case "userpromptsubmit":
+		return "UserPromptSubmit"
 	default:
 		return name
 	}

@@ -3,6 +3,8 @@ package hooks
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -772,4 +774,120 @@ func TestParseStdoutClaudeCodeFormat(t *testing.T) {
 		require.Equal(t, DecisionAllow, r.Decision)
 		require.Equal(t, "hello", r.Context)
 	})
+}
+
+func TestBuildPromptPayload(t *testing.T) {
+	t.Parallel()
+
+	payload := BuildPromptPayload(EventUserPromptSubmit, "sess-1", "/work", "fix the login flow")
+	s := string(payload)
+	require.Contains(t, s, `"event":"UserPromptSubmit"`)
+	require.Contains(t, s, `"session_id":"sess-1"`)
+	require.Contains(t, s, `"cwd":"/work"`)
+	require.Contains(t, s, `"prompt":"fix the login flow"`)
+	require.NotContains(t, s, "tool_name")
+	require.NotContains(t, s, "tool_input")
+}
+
+func TestBuildPromptEnv(t *testing.T) {
+	t.Parallel()
+
+	env := BuildPromptEnv(EventUserPromptSubmit, "sess-1", "/work", "/project")
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := splitFirst(e, "=")
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	require.Equal(t, EventUserPromptSubmit, envMap["CRUSH_EVENT"])
+	require.Equal(t, "sess-1", envMap["CRUSH_SESSION_ID"])
+	require.Equal(t, "/work", envMap["CRUSH_CWD"])
+	require.Equal(t, "/project", envMap["CRUSH_PROJECT_DIR"])
+	require.Equal(t, "1", envMap["CRUSH"])
+	require.Equal(t, "crush", envMap["AGENT"])
+	require.NotContains(t, envMap, "CRUSH_TOOL_NAME")
+}
+
+// validatedPromptHooks builds UserPromptSubmit hook configs and runs
+// ValidateHooks to compile matchers, mirroring the real config-load path.
+func validatedPromptHooks(t *testing.T, hooks []config.HookConfig) []config.HookConfig {
+	t.Helper()
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			EventUserPromptSubmit: hooks,
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+	return cfg.Hooks[EventUserPromptSubmit]
+}
+
+func TestRunnerRunPromptConcatenatesContextAndIgnoresMatchers(t *testing.T) {
+	t.Parallel()
+
+	hooks := validatedPromptHooks(t, []config.HookConfig{
+		// Matchers are meaningless for a prompt; this hook must still run.
+		{Command: `echo '{"context":"current branch: feat/login"}'`, Matcher: "^bash$"},
+		{Command: `echo '{"context":"remember gofumpt"}'`},
+	})
+	r := NewRunner(hooks, t.TempDir(), t.TempDir())
+	agg, err := r.RunPrompt(context.Background(), "sess-1", "fix the login flow")
+	require.NoError(t, err)
+	require.Equal(t, DecisionNone, agg.Decision)
+	require.Equal(t, "current branch: feat/login\nremember gofumpt", agg.Context)
+	require.Len(t, agg.Hooks, 2)
+}
+
+func TestRunnerRunPromptPassesPromptOnStdin(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "payload.json")
+	t.Setenv("CRUSH_PROMPT_HOOK_OUT", out)
+
+	hookCfg := config.HookConfig{Command: `cat > "$CRUSH_PROMPT_HOOK_OUT"`}
+	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	agg, err := r.RunPrompt(context.Background(), "sess-1", "fix the login flow")
+	require.NoError(t, err)
+	require.Equal(t, DecisionNone, agg.Decision)
+
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"event":"UserPromptSubmit"`)
+	require.Contains(t, string(data), `"prompt":"fix the login flow"`)
+}
+
+func TestRunnerRunPromptDeduplicatesCommands(t *testing.T) {
+	t.Parallel()
+
+	hooks := validatedPromptHooks(t, []config.HookConfig{
+		{Command: `echo '{"context":"one"}'`},
+		{Command: `echo '{"context":"one"}'`},
+	})
+	r := NewRunner(hooks, t.TempDir(), t.TempDir())
+	agg, err := r.RunPrompt(context.Background(), "sess-1", "hello")
+	require.NoError(t, err)
+	require.Len(t, agg.Hooks, 1)
+	require.Equal(t, "one", agg.Context)
+}
+
+func TestRunnerRunPromptSurfacesDecisionsWithoutEnforcingThem(t *testing.T) {
+	t.Parallel()
+
+	hooks := validatedPromptHooks(t, []config.HookConfig{
+		{Command: `echo "policy violation" >&2; exit 2`},
+	})
+	r := NewRunner(hooks, t.TempDir(), t.TempDir())
+	agg, err := r.RunPrompt(context.Background(), "sess-1", "deploy production")
+	require.NoError(t, err)
+	require.Equal(t, DecisionDeny, agg.Decision)
+	require.Equal(t, "policy violation", agg.Reason)
+}
+
+func TestRunnerRunPromptWithoutHooks(t *testing.T) {
+	t.Parallel()
+
+	r := NewRunner(nil, t.TempDir(), t.TempDir())
+	agg, err := r.RunPrompt(context.Background(), "sess-1", "hello")
+	require.NoError(t, err)
+	require.Equal(t, DecisionNone, agg.Decision)
+	require.Empty(t, agg.Context)
 }

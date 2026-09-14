@@ -12,7 +12,13 @@ import (
 
 // Hook event name constants.
 const (
+	// EventPreToolUse fires before a tool call and can gate, rewrite, or
+	// annotate it.
 	EventPreToolUse = "PreToolUse"
+	// EventUserPromptSubmit fires after a user message is recorded and
+	// before the turn reaches the LLM. Only injected context is honored
+	// today; see Runner.RunPrompt.
+	EventUserPromptSubmit = "UserPromptSubmit"
 )
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the

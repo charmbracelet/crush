@@ -1,3 +1,5 @@
+# ACP (Agent Client Protocol) Implementation Plan
+
 ## 1. Overview
 
 ACP standardizes editor↔agent communication over JSON-RPC 2.0 (stdio default).
@@ -58,42 +60,250 @@ Status legend: ✅ done · ⚠️ partial/stub · ❌ not implemented.
 | Requirement | Level | Crush status |
 |---|---|---|
 | Respond with chosen `protocolVersion` + `agentCapabilities` | MUST | ✅ |
-| Provide `agentInfo` (name/title/version) | SHOULD | ✅ |
-| `authMethods` present in response | MUST | ✅ |
-| `loadSession` capability | OPTIONAL | ✅ |
-| `promptCapabilities` | OPTIONAL | ✅ |
-| `mcpCapabilities` | OPTIONAL | ✅ |
-| `sessionCapabilities` | OPTIONAL | ✅ |
+| Provide `agentInfo` (name/title/version) | SHOULD (required in future) | ⚠️ sets name+version, **omits `title`** |
+| `authMethods` present in response (default `[]`) | MUST (field present) | ⚠️ not set → serializes as `null`, not `[]` |
+| `loadSession` capability | OPTIONAL | ✅ `true` |
+| `promptCapabilities` (image/audio/embeddedContext) | OPTIONAL (MUST support Text+ResourceLink in prompts regardless) | ✅ all `true` |
+| `mcpCapabilities` (http/sse) | OPTIONAL | ✅ empty (no MCP transport) |
+| `sessionCapabilities` (close/list/resume/delete/additionalDirectories) | OPTIONAL | ⚠️ only `close` set |
+| `auth.logout` capability | OPTIONAL | ❌ not advertised |
+| `authenticate` method | MUST exist; return `auth_required`/error if unused | ⚠️ stub "auth not supported" |
+| `logout` method | MUST exist if `auth.logout` advertised | ⚠️ stub "logout not supported" (not advertised, so safe) |
 
 ### 3.2 Session lifecycle methods
 
 | Method | Level | Crush status |
 |---|---|---|
-| `session/new` | MUST | ✅ |
-| `session/prompt` | MUST | ✅ |
-| `session/cancel` | MUST | ✅ |
-| `session/update` | MUST | ✅ |
-| `session/close` | OPTIONAL | ✅ |
-| `session/list` | OPTIONAL | ✅ |
-| `session/load` | OPTIONAL | ✅ |
-| `session/resume` | OPTIONAL | ❌ |
-| `session/delete` | OPTIONAL | ❌ |
-| `session/set_mode` | OPTIONAL | ✅ |
-| `session/set_config_option` | OPTIONAL | ✅ |
+| `session/new` | MUST | ✅ creates SQLite session, returns `sessionId` |
+| `session/prompt` | MUST | ✅ runs coordinator, returns `StopReason` |
+| `session/cancel` (notification) | MUST | ✅ cancels coordinator |
+| `session/update` (notifications) | MUST | ⚠️ only `agent_message_chunk` emitted |
+| `session/close` | OPTIONAL (advertise `sessionCapabilities.close`) | ✅ implemented + advertised |
+| `session/list` | OPTIONAL (advertise `sessionCapabilities.list`) | ⚠️ implemented but **not advertised**; `SessionInfo` **omits required `cwd`** |
+| `session/load` | OPTIONAL (advertise `loadSession`) | ❌ **advertised `true` but method returns error — incomplete** |
+| `session/resume` | OPTIONAL (advertise `sessionCapabilities.resume`) | ❌ returns error (not advertised — acceptable) |
+| `session/delete` | OPTIONAL (advertise `sessionCapabilities.delete`) | ❌ not implemented (not advertised) |
+| `session/set_mode` | OPTIONAL (legacy; prefer config options) | ✅ acknowledges (no-op), no `current_mode_update` |
+| `session/set_config_option` | OPTIONAL | ✅ acknowledges, returns empty `configOptions` |
 
-### 3.3 Prompt turn & streaming
+### 3.3 Prompt turn & streaming (`session/update` types)
+
+All are **notifications** carried in `{"sessionId", "update": {"sessionUpdate": <type>, ...}}`.
+The spec distinguishes `session/load` (MUST replay history via these) from
+`session/resume` (MUST NOT replay).
 
 | Update type | Level | Crush status |
 |---|---|---|
-| `user_message_chunk` | SHOULD | ❌ |
-| `agent_message_chunk` | baseline | ✅ |
-| `agent_thought_chunk` | SHOULD | ✅ |
-| `tool_call` | SHOULD | ✅ |
-| `tool_call_update` | SHOULD | ✅ |
+| `user_message_chunk` | SHOULD (echo user input) | ❌ not emitted |
+| `agent_message_chunk` | baseline | ✅ emitted on happy path (`subscribeMessages`) |
+| `agent_thought_chunk` | SHOULD (reasoning) | ❌ not emitted |
+| `tool_call` | SHOULD | ❌ not emitted |
+| `tool_call_update` | SHOULD (in_progress/completed/failed) | ❌ not emitted |
+| `plan` | SHOULD | ❌ not emitted |
+| `available_commands_update` | MAY | ❌ not emitted |
+| `current_mode_update` | MAY | ❌ not emitted |
+| `config_option_update` | MAY | ❌ not emitted |
+| `session_info_update` | MAY (ties to `session/list`) | ❌ not emitted |
+| `usage_update` | MAY (context + cost) | ❌ not emitted |
 
-## 4. Prioritized Roadmap (Tier 1-4)
+`messageId` (per-message opaque id; chunks sharing it belong to one message) is a
+**MAY** field on `agent_message_chunk`/`user_message_chunk` — **Crush never sets
+it** (SDK v0.13.5 still marks `MessageId` UNSTABLE; track on SDK bump).
 
-- [x] **Tier 1 (R1-R6)**: R1(Session Load/Replay), R2(Session List: cwd/time), R3(AuthMethods []), R4(Cancel Denial), R5(Cancel Request SDK-native), R6(LoadSession stream).
-- [x] **Tier 2 (S1, S3)**: S1(ToolCall/Update streaming), S3(AgentThought streaming).
-- [ ] **Tier 3 (S4, S6, S8, S9)**: S4(Plan updates), S6(Elicitation), S8(available_commands_update), S9(session_info_update).
-- [ ] **Tier 4 (S5, S7, O1-O11)**: S5(messageId), S7(_meta/trace), O1-O11 (parity).
+### 3.4 Content blocks (prompts & outputs)
+
+| Block | Level | Crush status |
+|---|---|---|
+| `text` | MUST | ✅ |
+| `resource_link` | MUST | ✅ (in `extractPromptText`) |
+| `image` | OPTIONAL (gated by `promptCapabilities.image`) | ⚠️ capability advertised, not parsed/streamed |
+| `audio` | OPTIONAL | ⚠️ advertised, not handled |
+| `resource` (embedded) | OPTIONAL (gated by `embeddedContext`) | ⚠️ advertised, not handled |
+| `annotations` on blocks | OPTIONAL | ❌ ignored |
+
+### 3.5 Tool calls
+
+| Requirement | Level | Crush status |
+|---|---|---|
+| Emit `tool_call` + `tool_call_update` during execution | SHOULD | ❌ not emitted |
+| Tool kinds: `read/edit/delete/move/search/execute/think/fetch/other` (+`switch_mode`) | OPTIONAL taxonomy | ❌ no tool events at all |
+| Tool content: `content` / `diff` / `terminal` | SHOULD | ❌ |
+| `toolCallId`, `title`, `kind`, `status`, `locations`, `rawInput`, `rawOutput` | — | ❌ |
+| `session/request_permission` (4 option kinds: `allow_once`/`allow_always`/`reject_once`/`reject_always`) | MUST when needed | ✅ bridge implemented |
+| Client MUST respond `cancelled` to pending permission on `session/cancel` | MUST | ⚠️ not verified |
+
+### 3.6 Elicitation (`elicitation/create`, `elicitation/complete`)
+
+OPTIONAL (gated by `clientCapabilities.elicitation.{form,url}`). Crush: ❌ not
+implemented on either side. Spec essentials:
+- `mode` discriminator is **required** (`form`/`url`); no implicit form default.
+- Form: restricted JSON Schema in `requestedSchema`; MUST NOT request secrets.
+- URL: unique `elicitationId` + `elicitation/complete` notification; MUST NOT
+  fall back form→url; client MUST show full URL + consent.
+- Outcomes: `accept`/`decline`/`cancel` (not `cancelled`).
+
+### 3.7 File system (`fs/read_text_file`, `fs/write_text_file`)
+
+OPTIONAL (gated by `clientCapabilities.fs`). Crush (client track): ✅ real
+`os.ReadFile`/`os.WriteFile` with `line`/`limit` and mkdir-parent. Server track
+delegates to the connected client via the SDK.
+
+### 3.8 Terminals (`terminal/*`)
+
+OPTIONAL (gated by `clientCapabilities.terminal`). Crush client track: ⚠️ all
+five methods (`create`/`output`/`wait_for_exit`/`kill`/`release`) stubbed
+"not supported". Agent MUST `release` terminals it creates.
+
+### 3.9 Cancellation
+
+- `session/cancel` is a **notification** (no response). ✅ cancels coordinator.
+- `$/cancel_request` protocol-level cancel. ❌ not handled explicitly (relies on
+  SDK context cancellation).
+- On abort the agent MUST catch errors and return `cancelled` stop reason, never
+  an error. ✅ `Prompt` maps `ctx.Err()` → `StopReasonCancelled`.
+- Pending `request_permission` MUST be answered `cancelled` on cancel. ⚠️ unverified.
+
+### 3.10 Capability advertising summary
+
+Advertised today: `loadSession:true`, `promptCapabilities{image,audio,embeddedContext:true}`,
+`sessionCapabilities.close`. **Missing optional:** `sessionCapabilities.list`,
+`.resume`, `.delete`, `.additionalDirectories`, `auth.logout`, `authMethods:[]`.
+
+### 3.11 Extensibility (`_meta`)
+
+Every type has a `_meta` field. ❌ Crush does not propagate it. Reserved root
+keys `traceparent`/`tracestate`/`baggage` are for W3C trace context. Custom
+capabilities advertised via `_meta` on capability objects; custom methods start
+with `_`.
+
+### 3.12 MCP servers
+
+`session/new`/`load`/`resume` accept `mcpServers` (stdio/http/sse). ❌ Crush does
+not connect to MCP servers during session setup (capabilities advertise none).
+
+## 4. Implementation Roadmap (current state)
+
+Phases reflect **verified code state** on branch `feature/acp-client`.
+
+### Server — done
+- [x] **Phase 1** SDK integration + transport (`server.go`, `NewServer`).
+- [x] **Phase 2** Agent methods: `Initialize`, `NewSession`, `Prompt`,
+  `Cancel`, `ListSessions`, `CloseSession`; stubs `ResumeSession`,
+  `SetSessionMode`, `SetSessionConfigOption`.
+- [x] **Phase 3** Permission bridge (4 option kinds, `allow_always` cache).
+- [x] **Phase 4** CLI `crush acp` (headless workspace, stderr logging, SIGINT).
+- [x] **Phase 5** Tests: `TestServerStartEndToEnd`, permission roundtrip,
+  conformance (moved to `test/acp/spec/`), Tangerg interop, golden.
+- [x] **Event bridge**: `agent_message_chunk` wired on the happy path
+  (`subscribeMessages`); `AgentError`/`ReAuthenticate`→text chunk;
+  `RunComplete` cancelled/error→text chunk.
+
+### Client — done
+- [x] **Phase 6** `acp.Client` callbacks; subprocess spawn; `Subscribe`.
+- [x] **Phase 7** Client unit tests.
+- [x] **Phase 8** `crush acp connect` CLI + interactive loop (prints `StopReason`).
+
+### Roadmap: remaining spec requirements (prioritized)
+
+Ordered **required-first**. Each item cites the spec clause and target files.
+"MUST / SHOULD / MAY" follow the v1 spec wording. Completion reflects the
+current code state from §3.
+
+**Tier 1 — Required (MUST): conformance & correctness**
+- [x] **R1. `session/load` consistency** — capability is advertised `true` but the
+  method errors. Either implement history replay (`user_message_chunk` +
+  `agent_message_chunk`) or set `loadSession:false`. (`agent.go` `ResumeSession`,
+  `event_bridge.go`.) Test: `TestConformanceSessionLoad`.
+- [x] **R2. `ListSessions` required fields** — populate `SessionInfo.cwd` (MUST,
+  currently `""`) and `updatedAt`; advertise `sessionCapabilities.list`.
+  (`agent.go` `ListSessions`.)
+- [x] **R3. `Initialize` `authMethods`** — serialize as `[]`, not `null`
+  (`json:"authMethods"` is non-omittable). (`agent.go` `Initialize`.)
+- [x] **R4. Cancellation semantics** — on `session/cancel`, answer pending
+  `request_permission` with the `cancelled` outcome and ensure aborts map to
+  `StopReasonCancelled` (never an error). (`event_bridge.go`, `permission.go`.)
+- [x] **R5. `$/cancel_request`** — ensure SDK-level request cancellation cascades
+  and terminates the prompt turn cleanly.
+- [x] **R6. `session/update` baseline on replay** — `session/load` MUST stream the
+  full history before its response (superset of R1).
+
+**Tier 2 — Recommended (SHOULD): core UX**
+- [x] **S1. Tool progress** — emit `tool_call` + `tool_call_update`
+  (in_progress/completed/failed; `kind`, `content`/`diff`/`terminal`, `locations`,
+  `rawInput`/`rawOutput`). Most visible "frozen agent" gap. (`event_bridge.go`.)
+  Test: `TestPromptStreamsToolCalls`.
+- [ ] **S2. `user_message_chunk` echo** on `session/prompt`. (`agent.go` `Prompt`.)
+- [x] **S3. `agent_thought_chunk`** for reasoning deltas. (`event_bridge.go`.)
+- [ ] **S4. `plan` updates** — each notification is a FULL replace. (`event_bridge.go`.)
+- [ ] **S5. `messageId`** on chunks (SDK field currently UNSTABLE; set once the SDK ships it).
+- [ ] **S6. Elicitation** — `elicitation/create` + `elicitation/complete`
+  (form+url, `accept`/`decline`/`cancel`, unique `elicitationId`, no form→url
+  fallback, no secrets in form). Client callback + server stub. (`client.go`, `agent.go`.)
+  Test: `TestElicitationFormMode`.
+- [ ] **S7. `_meta` passthrough** on message paths; reserve W3C trace keys
+  `traceparent`/`tracestate`/`baggage`. (`agent.go`, `event_bridge.go`.)
+- [ ] **S8. `available_commands_update`** after session creation. (`agent.go`.)
+- [ ] **S9. Config/mode/info notifications** — `config_option_update` on
+  `set_config_option`; `current_mode_update` on `set_mode`; `session_info_update`
+  to keep `session/list` in sync. (`agent.go`.)
+
+**Tier 3 — Optional (MAY): full parity**
+- [ ] **O1.** Return `modes` + `configOptions` in `session/new` response.
+- [ ] **O2.** Boolean config options (`type:"boolean"`, gated on
+  `clientCapabilities.session.configOptions.boolean`) + `category` field
+  (`mode`/`model`/`model_config`/`thought_level`). (`agent.go`.)
+- [ ] **O3.** `additionalDirectories` capability + handling in `/new`, `/load`, `/resume`.
+- [ ] **O4.** `session/delete` + `sessionCapabilities.delete`.
+- [ ] **O5.** `session/resume` decision (wire vs capability rejection).
+- [ ] **O6.** `auth.logout` capability + `logout` behavior.
+- [ ] **O7.** Image/audio/resource content parse + stream (capabilities already
+  advertised; `extractPromptText` currently handles only text/resource_link).
+- [ ] **O8.** Real terminal callbacks (or document out-of-scope).
+- [ ] **O9.** MCP server connection at session setup (`mcpServers`).
+- [ ] **O10.** `agentInfo.title`; `switch_mode` tool kind representation.
+- [ ] **O11.** Render streaming chunks in `crush acp connect` loop. (`acp_client.go`.)
+
+**Tier 4 — Tests** (gate each Tier 1–3 item)
+- [ ] Regression tests per missing update type; `TestConformanceSessionLoad`;
+  elicitation roundtrip; `_meta` passthrough; cancellation `cancelled` outcome.
+
+## 5. Test strategy
+
+```bash
+go test ./internal/acp/... -count=1            # unit + integration
+go test ./test/acp/spec/... -count=1           # conformance, golden, Tangerg interop
+CRUSH_BIN=$(go build -o /tmp/crush .) \
+  go test -tags e2e ./test/acp/ -count=1       # subprocess e2e
+./test/acp/run.sh all                          # full runner (unit/spec/interop/sdk/e2e)
+```
+- Unit: permission logic, server roundtrip (`TestServerStartEndToEnd`),
+  event bridge lifecycle, client subscribe/permission/IO.
+- Golden: 33 JSON fixtures in `test/acp/spec/testdata/json_golden`.
+- Cross-SDK: Tangerg/acp fixtures + Zed transcript in `test/acp/spec/testdata/tangerg`.
+- OpenAgents conformance harness: documented in `test/acp/README.md`, not wired
+  into `run.sh` (Node/pnpm; informational).
+
+## 6. Unaddressed points
+
+Direct answer to "is any point unaddressed":
+
+- **`session/load` inconsistency** — capability advertised `true` but method
+  errors. Highest-priority correctness gap (P0 #2).
+- **Mandatory `SessionInfo.cwd`** missing in `ListSessions` (P0 #3).
+- **`authMethods` null vs `[]`** serialization (P0 #4).
+- All streaming update types beyond `agent_message_chunk` (P0 #1, P2 #12–17).
+- `user_message_chunk` echo, `messageId` propagation (P1 #5).
+- Elicitation fully unspecified in code (P1 #7).
+- `_meta` passthrough + reserved trace keys (P1 #8).
+- `session/delete`, `session/resume` wiring decision (P1 #6).
+- MCP server connection at session setup (§3.12).
+- `additionalDirectories` capability (P2 #17).
+- Boolean config options + `category` (P2 #16).
+- `$/cancel_request` handling + permission-`cancelled` on cancel (§3.9).
+- `switch_mode` tool kind not represented in any tool event.
+- Client terminal callbacks + `connect` streaming display (P3).
+- `agentInfo.title` omitted; `auth.logout` capability not advertised (§3.1).
+
+All other spec areas (baseline methods, permission bridge, fs client ops, text/
+resource_link content, `session/close`, stdio transport, `_meta` field presence)
+are covered.

@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	acp "github.com/coder/acp-go-sdk"
 )
 
@@ -164,10 +166,10 @@ func (a *crushAgent) Cancel(_ context.Context, req acp.CancelNotification) error
 func (a *crushAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	sessionID := string(req.SessionId)
 
-	prompt := extractPromptText(req.Prompt)
+	prompt, attachments := buildPrompt(req.Prompt)
 	a.log.Info("ACP prompt", "sessionId", sessionID, "promptLen", len(prompt))
 
-	result, err := a.app.AgentCoordinator.Run(ctx, sessionID, prompt)
+	result, err := a.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	if err != nil {
 		if ctx.Err() != nil {
 			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
@@ -192,15 +194,49 @@ func (a *crushAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeR
 // SetSessionConfigOption acknowledges a configuration change and notifies the
 // client of the resulting config options.
 func (a *crushAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	var sessionID acp.SessionId
-	if req.ValueId != nil {
-		sessionID = req.ValueId.SessionId
-	} else if req.Boolean != nil {
-		sessionID = req.Boolean.SessionId
+	sessionID := configOptionSessionID(req)
+	if req.Boolean != nil && req.Boolean.ConfigId == "thinking" {
+		if err := a.setThinking(ctx, req.Boolean.Value); err != nil {
+			a.log.Warn("Failed to apply thinking config option", "error", err)
+		}
 	}
 	a.log.Info("ACP set session config option", "sessionId", sessionID)
 	a.pushUpdate(ctx, sessionID, a.configOptionsUpdate())
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: a.configOptions()}, nil
+}
+
+// configOptionSessionID extracts the session id from either request variant.
+func configOptionSessionID(req acp.SetSessionConfigOptionRequest) acp.SessionId {
+	if req.ValueId != nil {
+		return req.ValueId.SessionId
+	}
+	if req.Boolean != nil {
+		return req.Boolean.SessionId
+	}
+	return ""
+}
+
+// setThinking toggles the current model's reasoning flag and persists it the
+// same way the TUI's toggle-thinking command does.
+func (a *crushAgent) setThinking(ctx context.Context, enabled bool) error {
+	store := a.app.Store()
+	if store == nil {
+		return nil
+	}
+	cfg := store.Config()
+	agent, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return nil
+	}
+	model := cfg.Models[agent.Model]
+	if model.Think == enabled {
+		return nil
+	}
+	model.Think = enabled
+	if err := store.UpdatePreferredModel(config.ScopeGlobal, agent.Model, model); err != nil {
+		return fmt.Errorf("update preferred model: %w", err)
+	}
+	return a.app.UpdateAgentModel(ctx)
 }
 
 // pushUpdate sends a session/update notification to the connected client. It is
@@ -259,37 +295,66 @@ func (a *crushAgent) sessionInfoUpdate(title string) acp.SessionUpdate {
 	}
 }
 
-// configOptions advertises the available session modes as a select option so the
-// client can render a mode switcher.
+// configOptions advertises the available session modes as a select option and a
+// boolean "thinking" toggle so the client can render a mode switcher and a
+// reasoning on/off control.
 func (a *crushAgent) configOptions() []acp.SessionConfigOption {
+	return configOptionsFor(a.config())
+}
+
+// configOptionsFor builds the config-option list from a config snapshot.
+func configOptionsFor(cfg *config.Config) []acp.SessionConfigOption {
 	opts := []acp.SessionConfigOption{}
-	if cfg := a.config(); cfg != nil {
-		selectOpts := []acp.SessionConfigSelectOption{}
-		for id, agent := range cfg.Agents {
-			if agent.Disabled {
-				continue
-			}
-			desc := agent.Description
-			selectOpts = append(selectOpts, acp.SessionConfigSelectOption{
-				Value:       acp.SessionConfigValueId(id),
-				Name:        agent.Name,
-				Description: &desc,
-			})
+	if cfg == nil {
+		return opts
+	}
+	opts = append(opts, acp.SessionConfigOption{
+		Boolean: &acp.SessionConfigOptionBoolean{
+			Id:           "thinking",
+			Name:         "Thinking",
+			Type:         "boolean",
+			CurrentValue: thinkingEnabled(cfg),
+			Description:  acp.Ptr("Enable extended reasoning for supported models"),
+		},
+	})
+	selectOpts := []acp.SessionConfigSelectOption{}
+	for id, agent := range cfg.Agents {
+		if agent.Disabled {
+			continue
 		}
-		ungrouped := acp.SessionConfigSelectOptionsUngrouped(selectOpts)
-		opts = append(opts, acp.SessionConfigOption{
-			Select: &acp.SessionConfigOptionSelect{
-				Id:           "mode",
-				Name:         "Mode",
-				Type:         "select",
-				CurrentValue: "coder",
-				Options: acp.SessionConfigSelectOptions{
-					Ungrouped: &ungrouped,
-				},
-			},
+		desc := agent.Description
+		selectOpts = append(selectOpts, acp.SessionConfigSelectOption{
+			Value:       acp.SessionConfigValueId(id),
+			Name:        agent.Name,
+			Description: &desc,
 		})
 	}
+	ungrouped := acp.SessionConfigSelectOptionsUngrouped(selectOpts)
+	opts = append(opts, acp.SessionConfigOption{
+		Select: &acp.SessionConfigOptionSelect{
+			Id:           "mode",
+			Name:         "Mode",
+			Type:         "select",
+			CurrentValue: "coder",
+			Options: acp.SessionConfigSelectOptions{
+				Ungrouped: &ungrouped,
+			},
+		},
+	})
 	return opts
+}
+
+// thinkingEnabled reports whether the current model has reasoning enabled.
+func thinkingEnabled(cfg *config.Config) bool {
+	agent, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return false
+	}
+	model, ok := cfg.Models[agent.Model]
+	if !ok {
+		return false
+	}
+	return model.Think
 }
 
 // configOptionsUpdate wraps configOptions in a session/update notification.
@@ -330,18 +395,36 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// extractPromptText converts ACP content blocks to a plain-text prompt.
-func extractPromptText(blocks []acp.ContentBlock) string {
-	var sb string
+// buildPrompt converts ACP content blocks into a plain-text prompt plus any
+// binary attachments (images/audio) the model can consume.
+func buildPrompt(blocks []acp.ContentBlock) (string, []message.Attachment) {
+	var sb strings.Builder
+	var attachments []message.Attachment
 	for _, b := range blocks {
-		if b.Text != nil {
-			sb += b.Text.Text
-		}
-		if b.ResourceLink != nil {
-			sb += "[resource: " + b.ResourceLink.Name + ": " + b.ResourceLink.Uri + "]"
+		switch {
+		case b.Text != nil:
+			sb.WriteString(b.Text.Text)
+		case b.Image != nil:
+			if data, err := base64.StdEncoding.DecodeString(b.Image.Data); err == nil {
+				attachments = append(attachments, message.Attachment{
+					Content:  data,
+					MimeType: b.Image.MimeType,
+					FileName: "image",
+				})
+			}
+		case b.Audio != nil:
+			if data, err := base64.StdEncoding.DecodeString(b.Audio.Data); err == nil {
+				attachments = append(attachments, message.Attachment{
+					Content:  data,
+					MimeType: b.Audio.MimeType,
+					FileName: "audio",
+				})
+			}
+		case b.ResourceLink != nil:
+			sb.WriteString("[resource: " + b.ResourceLink.Name + ": " + b.ResourceLink.Uri + "]")
 		}
 	}
-	return sb
+	return sb.String(), attachments
 }
 
 // mapFinishReason converts fantasy finish reasons to ACP stop reasons.

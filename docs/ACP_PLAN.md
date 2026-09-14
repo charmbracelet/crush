@@ -232,7 +232,7 @@ current code state from §3.
   (in_progress/completed/failed; `kind`, `content`/`diff`/`terminal`, `locations`,
   `rawInput`/`rawOutput`). Most visible "frozen agent" gap. (`event_bridge.go`.)
   Test: `TestPromptStreamsToolCalls`.
-- [ ] **S2. `user_message_chunk` echo** on `session/prompt`. (`agent.go` `Prompt`.)
+- [ ] **S2. `user_message_chunk` echo** on `session/prompt`. → **DROPPED** (client→agent only; spec-violating + I-1 race). See §4.1.
 - [x] **S3. `agent_thought_chunk`** for reasoning deltas. (`event_bridge.go`.)
 - [ ] **S4. `plan` updates** — each notification is a FULL replace. (`event_bridge.go`.)
 - [ ] **S5. `messageId`** on chunks (SDK field currently UNSTABLE; set once the SDK ships it).
@@ -249,19 +249,21 @@ current code state from §3.
 
 **Tier 3 — Optional (MAY): full parity**
 - [x] **O1.** Return `modes` + `configOptions` in `session/new` response.
-- [ ] **O2.** Boolean config options (`type:"boolean"`, gated on
-  `clientCapabilities.session.configOptions.boolean`) + `category` field
-  (`mode`/`model`/`model_config`/`thought_level`). (`agent.go`.)
+- [x] **O2.** Boolean config options — **IMPLEMENT** (`thinking` toggle on
+  `SelectedModel.Think` via `UpdatePreferredModel` + `UpdateAgentModel`). See §4.1. (`agent.go`.)
 - [ ] **O3.** `additionalDirectories` capability + handling in `/new`, `/load`, `/resume`.
 - [ ] **O4.** `session/delete` + `sessionCapabilities.delete`.
 - [ ] **O5.** `session/resume` decision (wire vs capability rejection).
 - [ ] **O6.** `auth.logout` capability + `logout` behavior.
-- [ ] **O7.** Image/audio/resource content parse + stream (capabilities already
-  advertised; `extractPromptText` currently handles only text/resource_link).
-- [ ] **O8.** Real terminal callbacks (or document out-of-scope).
-- [ ] **O9.** MCP server connection at session setup (`mcpServers`).
+- [x] **O7.** Image/audio/resource content parse + stream — **IMPLEMENT**
+  (`buildPrompt` → `message.Attachment` → `Coordinator.Run`). See §4.1. (`agent.go`.)
+- [ ] **O8.** Real terminal callbacks — **DEFER** (no PTY lib; `connect` is a stdio
+  REPL with no terminal surface). Stays stubbed. See §4.1. (`client.go`.)
+- [ ] **O9.** MCP server connection at session setup — **DEFER** (`mcp.Initialize`
+  is startup-only; no per-session add API). See §4.1.
 - [x] **O10.** `agentInfo.title`; `switch_mode` tool kind representation.
-- [ ] **O11.** Render streaming chunks in `crush acp connect` loop. (`acp_client.go`.)
+- [x] **O11.** Render streaming chunks in `crush acp connect` loop — **IMPLEMENT**
+  (`Client.Subscribe` drain goroutine). See §4.1. (`acp_client.go`.)
 
 
 > **Deferred / SDK-gated** (tracked below, not yet implemented):
@@ -271,6 +273,61 @@ current code state from §3.
 > - **S6** elicitation — stable in v1 spec; pinned SDK still exposes it as `Unstable*`.
 > - **S7** `_meta`/trace passthrough — requires a tracing-propagation layer in Crush.
 > - **O12** File System, **O13** Session Usage — newly tracked from the v1 spec.
+
+### 4.1 Decisions log — config / modes / terminals group
+
+Per-item research + decisions for the O2/O7–O9/O11 cluster (the next
+implementation batch). Each entry records the finding that drove the call.
+
+- **SDK bump (S5/S6 gate).** No version newer than `coder/acp-go-sdk@v0.13.5`
+  exists in the module proxy. S5/S6 stay SDK-gated; revisit on next SDK release.
+
+- **S2 — `user_message_chunk` echo: DROPPED.** ACP specifies `user_message_chunk`
+  as *client→agent only* (the client echoes the user's own input); an agent
+  emitting it is spec-violating. Also, pushing `session/update` from within the
+  `session/prompt` request handler trips the I-1 conformance poll and races the
+  streaming barrier (same reason S8/S9 are safe — they fire outside a prompt).
+  Decision: do not implement; leave capability off.
+
+- **O2 — Boolean config option (`thinking`): IMPLEMENT.** Crush stores the flag
+  on `config.SelectedModel.Think`. Runtime toggle path already exists and is what
+  the TUI uses: read the current agent's model (`cfg.Agents[coder].Model` →
+  `cfg.Models[type]`), flip `.Think`, persist via
+  `ConfigStore.UpdatePreferredModel(ScopeGlobal, type, model)`, then
+  `App.UpdateAgentModel(ctx)`. Advertise as `SessionConfigOptionBoolean{Id:"thinking"}`
+  and apply in `SetSessionConfigOption` when `req.Boolean.ConfigId == "thinking"`.
+  *Ceiling:* toggle is global (persisted), not per-session. Make per-session once
+  `coordinator` accepts a runtime think override.
+
+- **O7 — Image/audio/resource content: IMPLEMENT.** ACP `ContentBlockImage` /
+  `ContentBlockAudio` carry base64 `Data` + `MimeType`; `ContentBlockResource`
+  carries embedded bytes. Map each to a `message.Attachment{Content, MimeType,
+  FileName}` and pass to `Coordinator.Run(ctx, sid, prompt, attachments...)`
+  (the existing `attachments ...message.Attachment` variadic). `extractPromptText`
+  is split into `buildPrompt` returning `(text, attachments)`. Text and
+  `resource_link` keep current behavior (text concatenated; link rendered inline).
+
+- **O8 — Real terminals: DEFER + document.** `crush acp connect` is a stdio REPL;
+  it has **no interactive terminal surface** to forward a PTY into, and Crush
+  carries **no PTY abstraction** (`creack/pty` is not a dependency). The five
+  `terminal/*` client callbacks stay stubbed "not supported" and the connect
+  `ClientCapabilities` does **not** advertise `terminal`. Revisit when/if the
+  connect CLI gains a terminal pane or a PTY helper is added.
+
+- **O9 — MCP at session setup: DEFER + document.** `mcp.Initialize(ctx,
+  permissions, store)` runs **once at app startup** and reads the config store;
+  there is **no per-session / runtime "add MCP server" API** (`mcp` package has
+  only startup `Initialize`/`InitializeSingle`/`WaitForInit*`). Wiring
+  `UnstableConnectMcp` would require new infrastructure (per-session MCP manager +
+  dynamic tool registration on the coordinator). Out of scope for this batch;
+  implement only after that manager lands.
+
+- **O11 — Render streaming chunks in `crush acp connect`: IMPLEMENT.**
+  `Client.Subscribe(sid)` already returns the per-session `SessionUpdate` channel
+  that `crushClient.SessionUpdate` feeds. Start a drain goroutine before
+  `Prompt` and render `AgentMessageChunk`, `AgentThoughtChunk`, and `ToolCall`
+  updates to stdout; otherwise the CLI only prints `[stop: ...]` and the user
+  sees no streaming.
 
 - [ ] **O12.** File System access — `fs/read_text_file` + `fs/write_text_file`, gated on
   `clientCapabilities.fs` (read/write booleans); the Agent MUST NOT call them when

@@ -95,6 +95,18 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "Session: %s\n\n", ns.SessionId)
 
+	// Drain session/update notifications (streaming chunks, tool calls) so the
+	// user sees output as it arrives instead of only the final stop reason.
+	sub, err := cli.Subscribe(ns.SessionId)
+	if err != nil {
+		return fmt.Errorf("subscribe session: %w", err)
+	}
+	go func() {
+		for u := range sub {
+			renderUpdate(u)
+		}
+	}()
+
 	// Interactive prompt loop.
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -139,4 +151,22 @@ func runACPConnect(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// renderUpdate writes a streaming session/update to the terminal. Agent message
+// text goes to stdout (the answer); thoughts and tool calls go to stderr so they
+// stay out of any piped stdout capture.
+func renderUpdate(u acpsdk.SessionUpdate) {
+	switch {
+	case u.AgentMessageChunk != nil:
+		if t := u.AgentMessageChunk.Content.Text; t != nil {
+			fmt.Fprint(os.Stdout, t.Text)
+		}
+	case u.AgentThoughtChunk != nil:
+		if t := u.AgentThoughtChunk.Content.Text; t != nil {
+			fmt.Fprint(os.Stderr, t.Text)
+		}
+	case u.ToolCall != nil:
+		fmt.Fprintf(os.Stderr, "\n[tool: %s]\n", u.ToolCall.Title)
+	}
 }

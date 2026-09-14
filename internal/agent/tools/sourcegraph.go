@@ -182,7 +182,7 @@ func formatSourcegraphResults(result map[string]any, contextWindow, maxResults i
 		formatSourcegraphResult(&buffer, i, res, contextWindow)
 	}
 
-	return buffer.String(), nil
+	return TruncateOutput(buffer.String()), nil
 }
 
 func writeSourcegraphErrors(buffer *strings.Builder, result map[string]any) bool {

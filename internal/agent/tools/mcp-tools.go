@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -86,6 +88,24 @@ func (m *Tool) Info() fantasy.ToolInfo {
 			// Handle case where it's already []string
 			required = reqStr
 		}
+
+		// The ToolInfo pipeline only carries the properties map, so any
+		// $defs/definitions in the original MCP schema are lost, leaving
+		// dangling $ref pointers. Some providers (e.g. Moonshot) validate
+		// tool schemas and reject such requests outright. Inline every
+		// "#/$defs/..." and "#/definitions/..." reference so the forwarded
+		// schema is self-contained.
+		defs := map[string]any{}
+		for _, key := range []string{"$defs", "definitions"} {
+			if d, ok := input[key].(map[string]any); ok {
+				for name, def := range d {
+					defs[name] = def
+				}
+			}
+		}
+		if len(defs) > 0 {
+			parameters = resolveRefs(parameters, defs, 0)
+		}
 	}
 
 	return fantasy.ToolInfo{
@@ -94,6 +114,83 @@ func (m *Tool) Info() fantasy.ToolInfo {
 		Parameters:  parameters,
 		Required:    required,
 	}
+}
+
+const maxRefDepth = 64
+
+// resolveRefs returns a copy of node with local JSON Schema references
+// ("#/$defs/Name" and "#/definitions/Name") replaced by deep copies of their
+// targets. The input MCP schema is cached and shared, so nothing is mutated
+// in place. Depth is capped to guard against cyclic definitions.
+func resolveRefs(node map[string]any, defs map[string]any, depth int) map[string]any {
+	if depth > maxRefDepth {
+		return node
+	}
+	result := make(map[string]any, len(node))
+	for key, value := range node {
+		switch child := value.(type) {
+		case map[string]any:
+			if resolved, ok := resolveRef(child, defs, depth); ok {
+				result[key] = resolved
+				continue
+			}
+			result[key] = resolveRefs(child, defs, depth+1)
+		case []any:
+			items := make([]any, len(child))
+			for i, item := range child {
+				switch elem := item.(type) {
+				case map[string]any:
+					if resolved, ok := resolveRef(elem, defs, depth); ok {
+						items[i] = resolved
+						continue
+					}
+					items[i] = resolveRefs(elem, defs, depth+1)
+				default:
+					items[i] = elem
+				}
+			}
+			result[key] = items
+		default:
+			result[key] = value
+		}
+	}
+	return result
+}
+
+// resolveRef checks whether node is a local reference and, if so, returns a
+// resolved deep copy of its target.
+func resolveRef(node map[string]any, defs map[string]any, depth int) (map[string]any, bool) {
+	ref, ok := node["$ref"].(string)
+	if !ok || len(node) != 1 {
+		return nil, false
+	}
+	var name string
+	for _, prefix := range []string{"#/$defs/", "#/definitions/"} {
+		if strings.HasPrefix(ref, prefix) {
+			name = strings.TrimPrefix(ref, prefix)
+			break
+		}
+	}
+	if name == "" {
+		return nil, false
+	}
+	target, ok := defs[name].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return resolveRefs(deepCopyMap(target), defs, depth+1), true
+}
+
+func deepCopyMap(source map[string]any) map[string]any {
+	data, err := json.Marshal(source)
+	if err != nil {
+		return map[string]any{}
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return map[string]any{}
+	}
+	return result
 }
 
 func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolResponse, error) {

@@ -524,6 +524,8 @@ func buildPrompt(blocks []acp.ContentBlock) (string, []message.Attachment) {
 			}
 		case b.ResourceLink != nil:
 			sb.WriteString("[resource: " + b.ResourceLink.Name + ": " + b.ResourceLink.Uri + "]")
+		case b.Resource != nil && b.Resource.Resource.TextResourceContents != nil:
+			sb.WriteString("[resource: " + b.Resource.Resource.TextResourceContents.Uri + ": " + b.Resource.Resource.TextResourceContents.Text + "]")
 		}
 	}
 	return sb.String(), attachments

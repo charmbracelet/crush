@@ -118,7 +118,7 @@ it** (SDK v0.13.5 still marks `MessageId` UNSTABLE; track on SDK bump).
 | `resource_link` | MUST | ✅ (in `extractPromptText`) |
 | `image` | OPTIONAL (gated by `promptCapabilities.image`) | ⚠️ capability advertised, not parsed/streamed |
 | `audio` | OPTIONAL | ⚠️ advertised, not handled |
-| `resource` (embedded) | OPTIONAL (gated by `embeddedContext`) | ⚠️ advertised, not handled |
+| `resource` (embedded) | OPTIONAL (gated by `embeddedContext`) | ✅ parsed into prompt (O7) |
 | `annotations` on blocks | OPTIONAL | ❌ ignored |
 
 ### 3.5 Tool calls

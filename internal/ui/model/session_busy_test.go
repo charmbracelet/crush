@@ -509,6 +509,52 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 	require.True(t, m.chat.animRunning)
 }
 
+// TestBusyProbeReEnablesFrozenAnimationClock pins the boot race: a session
+// loaded before the first busy probe lands reads the zero-value memoized
+// cache and freezes the animation clock even though the agent is working,
+// so the spinner rendered on boot never ticks. When the authoritative
+// busy result arrives it must re-enable the clock so the Update tail can
+// arm it for the freshly rendered spinner.
+func TestBusyProbeReEnablesFrozenAnimationClock(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: true}
+	m := newBusyUI(ws)
+
+	// An unfinished assistant turn (no Finish part) renders with a spinner.
+	msgs := []message.Message{
+		{
+			ID:        "m1",
+			SessionID: "s1",
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.ReasoningContent{Thinking: "thinking..."},
+			},
+		},
+	}
+
+	// Boot: the busy cache still reads its zero value, so the session load
+	// freezes the animation clock even though the agent is working.
+	require.False(t, m.isAgentBusy(), "boot: the memoized busy state is not populated yet")
+	cmd := m.setSessionMessages(msgs)
+	require.Nil(t, cmd)
+	require.False(t, m.chat.animAllowed, "the boot reload must freeze the clock off the unpopulated cache")
+	require.Nil(t, m.chat.EnsureAnimating(), "the frozen clock must not arm")
+	require.False(t, m.chat.animRunning)
+
+	// The authoritative probe lands: the agent is busy. The gate must
+	// re-open so the visible spinner ticks.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, agentBusy: true})
+	require.True(t, m.chat.animAllowed, "a busy probe must re-enable the animation gate")
+	require.NotNil(t, m.chat.EnsureAnimating(), "a visible spinning item must arm the clock once allowed")
+	require.True(t, m.chat.animRunning)
+
+	// An idle probe must not re-freeze the clock on its own: the ghost
+	// guard belongs to the session reload, not to the probe.
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, ready: true, agentBusy: false})
+	require.True(t, m.chat.animAllowed, "an idle probe must leave the gate alone")
+}
+
 // TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for
 // busy/permission state: a probe started before a newer state transition
 // (here an optimistic busy write) must not overwrite the newer value when it

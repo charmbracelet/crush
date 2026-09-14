@@ -461,7 +461,9 @@ func (t *baseToolMessageItem) computeStatus() ToolStatus {
 	return t.status
 }
 
-// isSpinning returns true if the tool should show animation.
+// isSpinning returns true if the tool should show animation. A recorded
+// result stops it even when the call was never marked finished, which is how
+// closeUnfinishedToolCalls settles a call the model did not finish.
 func (t *baseToolMessageItem) isSpinning() bool {
 	if t.spinningFunc != nil {
 		return t.spinningFunc(SpinningState{
@@ -470,7 +472,7 @@ func (t *baseToolMessageItem) isSpinning() bool {
 			Status:   t.status,
 		})
 	}
-	return !t.toolCall.Finished && t.status != ToolStatusCanceled
+	return !t.toolCall.Finished && t.result == nil && t.status != ToolStatusCanceled
 }
 
 // SetSpinningFunc sets a custom function to determine if the tool should spin.

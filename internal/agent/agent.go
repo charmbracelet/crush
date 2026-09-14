@@ -1195,6 +1195,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, err
 	}
 
+	// A turn stopped at its output token limit finishes with
+	// FinishReasonLength, so the error path above never runs for it.
+	if currentAssistant != nil {
+		if closeErr := a.closeUnfinishedToolCalls(ctx, currentAssistant); closeErr != nil {
+			// The turn produced a valid result, so a failure here is logged
+			// rather than returned.
+			slog.Error("Failed to close unfinished tool calls",
+				"session_id", call.SessionID, "error", closeErr)
+		}
+	}
+
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
@@ -2109,6 +2120,84 @@ func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 
 func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
+}
+
+// truncatedToolCallResult is recorded for a tool call the model stopped
+// writing because it ran out of room.
+const truncatedToolCallResult = "the model ran out of output tokens before it finished writing this tool call, so the call was never run; retry with smaller arguments, splitting the work across several calls if that helps"
+
+// refusedToolCallResult is recorded for a tool call abandoned when the
+// provider's safety classifier stopped the response.
+const refusedToolCallResult = "the provider's safety classifier stopped this response before the tool call was finished, so the call was never run; rephrase the request or try a different model"
+
+// abandonedToolCallResult is recorded for a tool call the turn left
+// unfinished for a reason we cannot name.
+const abandonedToolCallResult = "the turn ended before the model finished writing this tool call, so the call was never run; retry the call if the result is still needed"
+
+// unfinishedToolCallResult reports what to say about a tool call its turn
+// abandoned. Why the turn stopped decides what a second attempt should
+// change, so a refusal must not be reported as an output limit.
+func unfinishedToolCallResult(assistant *message.Message) string {
+	finish := assistant.FinishPart()
+	if finish == nil {
+		return abandonedToolCallResult
+	}
+	switch finish.Reason {
+	case message.FinishReasonMaxTokens:
+		return truncatedToolCallResult
+	case message.FinishReasonContentFilter:
+		return refusedToolCallResult
+	default:
+		return abandonedToolCallResult
+	}
+}
+
+// closeUnfinishedToolCalls finishes unfinished tool calls and records an error
+// result for each. A turn stopped at its output token limit, or stopped by a
+// safety classifier, never reaches OnToolCall, so the call would otherwise
+// animate forever with nothing left to cancel, and providers reject a tool
+// call that has no reply.
+func (a *sessionAgent) closeUnfinishedToolCalls(ctx context.Context, assistant *message.Message) error {
+	var unfinished []message.ToolCall
+	for _, tc := range assistant.ToolCalls() {
+		if !tc.Finished {
+			unfinished = append(unfinished, tc)
+		}
+	}
+	if len(unfinished) == 0 {
+		return nil
+	}
+	result := unfinishedToolCallResult(assistant)
+
+	for _, tc := range unfinished {
+		slog.Warn("Closing a tool call the model never finished",
+			"session_id", assistant.SessionID,
+			"tool_call_id", tc.ID,
+			"tool_name", tc.Name)
+		tc.Finished = true
+		if tc.Input == "" {
+			tc.Input = "{}"
+		}
+		assistant.AddToolCall(tc)
+	}
+	if err := a.messages.Update(ctx, *assistant); err != nil {
+		return err
+	}
+
+	for _, tc := range unfinished {
+		if _, err := a.messages.Create(ctx, assistant.SessionID, message.CreateMessageParams{
+			Role: message.Tool,
+			Parts: []message.ContentPart{message.ToolResult{
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+				Content:    result,
+				IsError:    true,
+			}},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.

@@ -548,15 +548,21 @@ func (m *UI) Init() tea.Cmd {
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
-	// load prompt history async
-	cmds = append(cmds, m.loadPromptHistory())
 	// Prime the memoized LSP state off-thread.
 	if cmd := m.requestLSPRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	// load initial session if specified
-	if cmd := m.loadInitialSession(); cmd != nil {
-		cmds = append(cmds, cmd)
+	initialSession := m.loadInitialSession()
+	if initialSession != nil {
+		cmds = append(cmds, initialSession)
+	}
+	// loadSessionMsg reloads history for whichever session arrives, so
+	// doing it here too would be discarded — and with no session set yet
+	// it reads every user message in the database, which the pending
+	// session load then queues behind on the single connection.
+	if initialSession == nil {
+		cmds = append(cmds, m.loadPromptHistory())
 	}
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())

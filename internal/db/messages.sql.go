@@ -150,8 +150,11 @@ SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, 
 FROM messages
 WHERE role = 'user'
 ORDER BY created_at DESC
+LIMIT 200
 `
 
+// Backs prompt history when no session is open. Needs
+// idx_messages_role_created_at to seek rather than scan the table.
 func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	rows, err := q.query(ctx, q.listAllUserMessagesStmt, listAllUserMessages)
 	if err != nil {
@@ -240,8 +243,10 @@ SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, 
 FROM messages
 WHERE session_id = ? AND role = 'user'
 ORDER BY created_at DESC
+LIMIT 200
 `
 
+// Backs prompt history, which steps back one entry at a time.
 func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := q.query(ctx, q.listUserMessagesBySessionStmt, listUserMessagesBySession, sessionID)
 	if err != nil {

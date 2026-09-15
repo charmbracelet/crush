@@ -17,11 +17,11 @@ type WorkspacePermissionMode string
 const (
 	// WorkspacePermissionModeNormal prompts for all non-safe commands.
 	WorkspacePermissionModeNormal WorkspacePermissionMode = "normal"
-	// WorkspacePermissionModeYolo auto-approves non-dangerous commands and
-	// prompts for dangerous ones.
+	// WorkspacePermissionModeYolo auto-approves every request, including
+	// dangerous commands, while keeping the exec-time block list armed.
 	WorkspacePermissionModeYolo WorkspacePermissionMode = "yolo"
-	// WorkspacePermissionModeSysadmin auto-approves everything, including
-	// dangerous commands.
+	// WorkspacePermissionModeSysadmin auto-approves every request and drops
+	// the exec-time block list as well.
 	WorkspacePermissionModeSysadmin WorkspacePermissionMode = "sysadmin"
 )
 

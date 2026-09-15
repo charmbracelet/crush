@@ -158,6 +158,12 @@ type Styles struct {
 		PromptYoloDotsFocused lipgloss.Style
 		PromptYoloDotsBlurred lipgloss.Style
 
+		// Auto mode prompt (" A " icon + ":::" dots).
+		PromptAutoIconFocused lipgloss.Style
+		PromptAutoIconBlurred lipgloss.Style
+		PromptAutoDotsFocused lipgloss.Style
+		PromptAutoDotsBlurred lipgloss.Style
+
 		// Bang mode prompt (" ! " icon + ":::" dots, Turtle color).
 		PromptBangIconFocused lipgloss.Style
 		PromptBangIconBlurred lipgloss.Style

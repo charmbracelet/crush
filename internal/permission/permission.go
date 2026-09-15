@@ -49,6 +49,10 @@ type PermissionNotification struct {
 	ToolCallID string `json:"tool_call_id"`
 	Granted    bool   `json:"granted"`
 	Denied     bool   `json:"denied"`
+	// Reason optionally explains a denial (e.g. a PrePermission hook
+	// verdict). Empty when the denial came from the user or from an
+	// automatic path without a reason.
+	Reason string `json:"reason,omitempty"`
 }
 
 type PermissionRequest struct {
@@ -60,6 +64,56 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+}
+
+// HookDecision is the outcome of a permission-hook evaluation.
+type HookDecision int
+
+const (
+	// HookDecisionNone means the hook expressed no opinion; the normal
+	// prompt proceeds.
+	HookDecisionNone HookDecision = iota
+	// HookDecisionAllow means the hook approved the call; the prompt is
+	// skipped and the call is granted.
+	HookDecisionAllow
+	// HookDecisionDeny means the hook blocked the call; the prompt is
+	// skipped and the call is denied with Reason surfacing to the UI.
+	HookDecisionDeny
+)
+
+// PreHookResult is the outcome of a PrePermission hook evaluation.
+type PreHookResult struct {
+	Decision HookDecision
+	Reason   string
+}
+
+// PermissionHooks lets the agent layer run external policy hooks around
+// the permission prompt. Implementations are optional; the service
+// behaves unchanged when none is set.
+//
+// PrePermission runs only when a request is about to prompt the user
+// (after allowlists, session auto-approvals, and prior grants have been
+// exhausted). Returning allow or deny short-circuits the prompt.
+// PermissionDenied is a fire-and-forget notification that a request was
+// denied; it never blocks the denial.
+type PermissionHooks interface {
+	PrePermission(ctx context.Context, req PermissionRequest) PreHookResult
+	PermissionDenied(ctx context.Context, req PermissionRequest)
+}
+
+// AutoModeToggler is implemented by hooks that can be enabled/disabled
+// at runtime (the native auto mode). SetAutoMode forwards to any
+// installed hooks implementing this interface.
+type AutoModeToggler interface {
+	SetAutoModeEnabled(enabled bool)
+}
+
+// AutoModeGrantObserver is implemented by hooks that track quota state
+// and want to learn when the human grants a request that was escalated
+// to them. A human decision restores trust, so the auto mode resets its
+// consecutive-denial counter.
+type AutoModeGrantObserver interface {
+	OnAutoModeGrant(sessionID string)
 }
 
 type Service interface {
@@ -81,6 +135,25 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	// SetPermissionHooks installs optional external policy hooks. It may
+	// be called once at startup; calls after the service is in use should
+	// be avoided.
+	SetPermissionHooks(hooks PermissionHooks)
+	// DenialReason returns and clears the reason recorded for a denied
+	// tool call (e.g. by a PrePermission hook or the native auto mode),
+	// so tools can surface it to the model. Empty when the denial had no
+	// recorded reason.
+	DenialReason(toolCallID string) string
+	// SetAutoMode sets the runtime auto-mode state and forwards it to any
+	// installed hooks that support runtime toggling (the native auto
+	// mode). AutoMode reports the current runtime state.
+	SetAutoMode(enabled bool)
+	AutoMode() bool
+	// EscalationNote returns and clears the note recorded for a tool call
+	// that was escalated to the human and granted, so the tool can tell
+	// the model the action required manual approval. Empty when the grant
+	// was automatic (allowlist, hook, classifier, session permission).
+	EscalationNote(toolCallID string) string
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -103,6 +176,13 @@ type permissionService struct {
 	autoApproveSessionsMu sync.RWMutex
 	skip                  atomic.Bool
 	allowedTools          []string
+	hooksMu               sync.RWMutex
+	hooks                 PermissionHooks
+	hooksWG               sync.WaitGroup
+	denialReasons         *csync.Map[string, string]
+	escalatedCalls        *csync.Map[string, bool]
+	escalationNotes       *csync.Map[string, string]
+	autoMode              atomic.Bool
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -141,6 +221,30 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 		Granted:    granted,
 		Denied:     denied,
 	})
+
+	// A grant on a call that was escalated to the human carries a note so
+	// the tool can tell the model the action required manual approval;
+	// automatic grants (allowlist, classifier, session permission) leave
+	// no note. Denials discard the marker.
+	if _, escalated := s.escalatedCalls.Take(permission.ToolCallID); escalated {
+		if granted {
+			s.escalationNotes.Set(permission.ToolCallID,
+				"this action was escalated and approved by the user; outcome: ESCALATED (not ALLOW)")
+		}
+	}
+
+	if denied {
+		s.dispatchPermissionDenied(permission)
+	} else if granted {
+		// The human resolved an escalated request with a grant: notify
+		// quota-tracking hooks so consecutive-denial counters reset.
+		s.hooksMu.RLock()
+		h := s.hooks
+		s.hooksMu.RUnlock()
+		if obs, ok := h.(AutoModeGrantObserver); ok {
+			obs.OnAutoModeGrant(permission.SessionID)
+		}
+	}
 
 	// respCh is buffered (cap 1) and only ever has at most one sender
 	// per request because Take removes the entry under the map lock,
@@ -258,6 +362,35 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
+	// PrePermission hooks decide only when a prompt would actually
+	// happen: allowlists, hook approvals, session auto-approvals, and
+	// previously granted permissions have all been exhausted at this
+	// point. They run while holding requestMu, so a slow hook delays
+	// other permission requests; hooks that classify should keep a short
+	// timeout (see the docs for the default and how to tune it).
+	if h := s.currentHooks(); h != nil {
+		switch res := h.PrePermission(ctx, permission); res.Decision {
+		case HookDecisionAllow:
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				ToolCallID: opts.ToolCallID,
+				Granted:    true,
+			})
+			return true, nil
+		case HookDecisionDeny:
+			s.denialReasons.Set(opts.ToolCallID, res.Reason)
+			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+				ToolCallID: opts.ToolCallID,
+				Denied:     true,
+				Reason:     res.Reason,
+			})
+			return false, nil
+		}
+	}
+
+	// The prompt path is an escalation: mark the call so a grant records a
+	// note the tool can surface to the model.
+	s.escalatedCalls.Set(permission.ToolCallID, true)
+
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission
 	s.activeRequestMu.Unlock()
@@ -283,6 +416,87 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
+// SetPermissionHooks installs the external policy hooks, replacing any
+// previously installed implementation.
+func (s *permissionService) SetPermissionHooks(hooks PermissionHooks) {
+	s.hooksMu.Lock()
+	s.hooks = hooks
+	s.hooksMu.Unlock()
+}
+
+// DenialReason returns and clears the recorded denial reason for a tool
+// call, so the tool can surface it to the model. It is consumed exactly
+// once, keeping the map bounded.
+func (s *permissionService) DenialReason(toolCallID string) string {
+	if toolCallID == "" {
+		return ""
+	}
+	reason, ok := s.denialReasons.Take(toolCallID)
+	if !ok {
+		return ""
+	}
+	return reason
+}
+
+// EscalationNote returns and clears the note recorded for a tool call
+// that was escalated to the human and granted.
+func (s *permissionService) EscalationNote(toolCallID string) string {
+	if toolCallID == "" {
+		return ""
+	}
+	note, ok := s.escalationNotes.Take(toolCallID)
+	if !ok {
+		return ""
+	}
+	return note
+}
+
+// SetAutoMode sets the runtime auto-mode state and forwards it to any
+// installed hooks that support runtime toggling.
+func (s *permissionService) SetAutoMode(enabled bool) {
+	s.autoMode.Store(enabled)
+	if h := s.currentHooks(); h != nil {
+		if toggler, ok := h.(AutoModeToggler); ok {
+			toggler.SetAutoModeEnabled(enabled)
+		}
+	}
+}
+
+// AutoMode reports the runtime auto-mode state.
+func (s *permissionService) AutoMode() bool {
+	return s.autoMode.Load()
+}
+
+func (s *permissionService) currentHooks() PermissionHooks {
+	s.hooksMu.RLock()
+	h := s.hooks
+	s.hooksMu.RUnlock()
+	return h
+}
+
+// dispatchPermissionDenied fires the PermissionDenied hook asynchronously
+// with a background context so denials are never blocked by hook
+// execution, and so the hook does not inherit a cancelled/timed-out
+// request context. In-flight dispatches are tracked so tests can wait
+// for completion via waitForHookDispatches.
+func (s *permissionService) dispatchPermissionDenied(req PermissionRequest) {
+	h := s.currentHooks()
+	if h == nil {
+		return
+	}
+	s.hooksWG.Add(1)
+	go func() {
+		defer s.hooksWG.Done()
+		h.PermissionDenied(context.Background(), req)
+	}()
+}
+
+// waitForHookDispatches blocks until all in-flight PermissionDenied hook
+// dispatches have completed. Test-only helper.
+func (s *permissionService) waitForHookDispatches() {
+	s.hooksWG.Wait()
+}
+
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {
 	return s.notificationBroker.Subscribe(ctx)
 }
@@ -304,6 +518,9 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		autoApproveSessions: make(map[string]bool),
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
+		denialReasons:       csync.NewMap[string, string](),
+		escalatedCalls:      csync.NewMap[string, bool](),
+		escalationNotes:     csync.NewMap[string, string](),
 	}
 	svc.skip.Store(skip)
 	return svc

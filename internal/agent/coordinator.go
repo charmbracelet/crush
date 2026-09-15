@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/automode"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
@@ -210,6 +211,24 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
+	}
+
+	// Bridge external policy hooks (PrePermission, PermissionDenied)
+	// from the permission service to the hooks runner. Reading config
+	// fresh per dispatch means reloads apply to these hooks too.
+	if opts.Permissions != nil && opts.Messages != nil {
+		var policyHooks permission.PermissionHooks = newPermissionHookDispatcher(opts.Config, opts.Messages)
+		// Native auto mode is always installed so the TUI mode cycle can
+		// toggle it at runtime; its initial state comes from config. It
+		// runs as the primary policy hook, with external hooks as
+		// fallback.
+		native := automode.New(c.automodeOptions(amOrDefault(opts.Config)))
+		policyHooks = compositeHooks{primary: native, secondary: policyHooks}
+		opts.Permissions.SetPermissionHooks(policyHooks)
+		// Seed the runtime auto-mode state (also forwards to the native
+		// toggler) so headless gating and the TUI toggle agree with the
+		// config's initial value.
+		opts.Permissions.SetAutoMode(c.AutoModeEnabled())
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -777,7 +796,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// Build hook runner if PreToolUse hooks are configured.
 	var hookRunner *hooks.Runner
 	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir()).
+			WithTranscriptProvider(transcriptProvider(c.messages))
 	}
 
 	allTools = append(
@@ -868,6 +888,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	filteredTools = wrapToolsWithEscalationNotes(filteredTools, c.permissions)
 
 	return filteredTools, nil
 }

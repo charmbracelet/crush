@@ -201,10 +201,8 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	for _, blockFunc := range blockFuncs {
 		if blockFunc(append([]string{interpreter}, cmdArgs...)) {
 			return fmt.Errorf(
-				"command is not allowed for security reasons: %q, named by the shebang in %s. "+
-					"Run it directly rather than from inside a script to be asked for approval in normal mode, "+
-					"or use sysadmin mode (-yy) to allow dangerous commands without checks",
-				interpreter, scriptPath,
+				"blocked: %s is a dangerous command, named by the shebang in %s",
+				normalizeCommand(interpreter), filepath.Base(scriptPath),
 			)
 		}
 	}

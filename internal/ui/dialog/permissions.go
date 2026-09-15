@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // PermissionsID is the identifier for the permissions dialog.
@@ -492,12 +493,15 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	lines := []string{title}
 
 	// Add warning for dangerous commands, naming what tripped the check so
-	// the user can judge it rather than just be alarmed by it.
+	// the user can judge it rather than just be alarmed by it. The reason
+	// names a shell construct where it cannot name a command, and those
+	// run long, so the line wraps rather than clipping: a warning cut off
+	// mid-phrase is worse than one that costs a second line.
 	if p.permission.Danger != "" {
 		warning := lipgloss.NewStyle().
 			Foreground(t.Status.WarnIndicator.GetBackground()).
 			Width(contentWidth).
-			Render("⚠ Potentially dangerous: " + p.permission.Danger)
+			Render(ansi.Wordwrap("⚠ Potentially dangerous: "+p.permission.Danger, contentWidth, ""))
 		lines = append(lines, "", warning)
 	}
 

@@ -171,11 +171,11 @@ func TestBackgroundShell_WithBlockFuncs(t *testing.T) {
 	// The command should have been blocked, check stderr or error
 	if execErr != nil {
 		// Error might contain the message
-		require.Contains(t, execErr.Error(), "not allowed")
+		require.Contains(t, execErr.Error(), "is a dangerous command")
 	} else {
 		// Or it might be in stderr
 		output := stdout + stderr
-		require.Contains(t, output, "not allowed")
+		require.Contains(t, output, "is a dangerous command")
 	}
 }
 

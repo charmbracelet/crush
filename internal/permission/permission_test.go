@@ -128,7 +128,7 @@ func TestPermissionService_SkipMode(t *testing.T) {
 			Action:      "execute",
 			Description: "dangerous command",
 			Path:        "/tmp",
-			Danger:      "it uses sudo",
+			Danger:      "sudo",
 		})
 		require.NoError(t, err)
 		assert.True(t, result, "expected dangerous permission to be granted in yolo mode")
@@ -147,7 +147,7 @@ func TestPermissionService_SkipMode(t *testing.T) {
 				Action:      "execute",
 				Description: "dangerous command",
 				Path:        "/tmp",
-				Danger:      "it uses sudo",
+				Danger:      "sudo",
 			})
 			require.NoError(t, err)
 			assert.True(t, result)
@@ -158,7 +158,7 @@ func TestPermissionService_SkipMode(t *testing.T) {
 		events := service.Subscribe(t.Context())
 		event := <-events
 		assert.Equal(t, "bash", event.Payload.ToolName)
-		assert.Equal(t, "it uses sudo", event.Payload.Danger)
+		assert.Equal(t, "sudo", event.Payload.Danger)
 
 		// Grant the permission.
 		service.Grant(event.Payload)
@@ -175,7 +175,7 @@ func TestPermissionService_SkipMode(t *testing.T) {
 			Action:      "execute",
 			Description: "dangerous command",
 			Path:        "/tmp",
-			Danger:      "it uses sudo",
+			Danger:      "sudo",
 		})
 		require.NoError(t, err)
 		assert.True(t, result, "expected dangerous permission to be granted in sysadmin mode")

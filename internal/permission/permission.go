@@ -40,11 +40,12 @@ type PermissionMode int
 const (
 	// PermissionModeNormal prompts for all non-safe commands.
 	PermissionModeNormal PermissionMode = iota
-	// PermissionModeYolo auto-approves non-dangerous commands, prompts for
-	// dangerous ones.
+	// PermissionModeYolo auto-approves every request, including dangerous
+	// commands, but keeps the exec-time block list armed so a dangerous
+	// command that only surfaces once the shell runs it is still caught.
 	PermissionModeYolo
-	// PermissionModeSysadmin auto-approves everything including dangerous
-	// commands.
+	// PermissionModeSysadmin auto-approves every request and drops the
+	// exec-time block list as well, so nothing is checked at any point.
 	PermissionModeSysadmin
 )
 
@@ -206,13 +207,12 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	mode := s.mode
 	s.modeMu.RUnlock()
 
-	// Sysadmin mode: auto-approve everything including dangerous commands.
-	if mode == PermissionModeSysadmin {
-		return true, nil
-	}
-	// In yolo mode, auto-approve non-dangerous commands but still prompt for
-	// dangerous ones.
-	if mode == PermissionModeYolo && opts.Danger == "" {
+	// Both yolo and sysadmin mean "stop asking me", so neither prompts,
+	// not even for a dangerous command. They part ways after this, at exec
+	// time: yolo keeps the block list armed for commands the static check
+	// did not flag, and sysadmin disarms it entirely. Normal mode is the
+	// only one that still puts a dangerous command in front of the user.
+	if mode == PermissionModeYolo || mode == PermissionModeSysadmin {
 		return true, nil
 	}
 

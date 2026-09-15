@@ -158,14 +158,25 @@ func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
 	tool, perms := newBashToolWithRecordingPerms(workingDir, true)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
-	// ls && echo should trigger permission check.
+	// A chain is judged by its parts, so joining two read-only commands is
+	// no more of a prompt than either one alone would be.
 	resp := runBashTool(t, tool, ctx, BashParams{
 		Description: "chained ls",
 		Command:     "ls && echo done",
 	})
 
 	require.False(t, resp.IsError)
-	require.Equal(t, 1, perms.requestCount, "chained command should trigger permission request")
+	require.Equal(t, 0, perms.requestCount, "a chain of read-only commands should not prompt")
+
+	// One part that writes is enough to require approval for the whole chain.
+	perms.requestCount = 0
+	resp = runBashTool(t, tool, ctx, BashParams{
+		Description: "chained touch",
+		Command:     "ls && touch newfile",
+	})
+
+	require.False(t, resp.IsError)
+	require.Equal(t, 1, perms.requestCount, "a chain containing a write must prompt")
 
 	// Plain ls should NOT trigger permission check.
 	perms.requestCount = 0

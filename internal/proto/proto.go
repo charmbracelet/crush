@@ -142,10 +142,11 @@ func (a AgentInfo) IsZero() bool {
 // remains correct only when no other turns are in flight for the
 // same session.
 type AgentMessage struct {
-	SessionID   string       `json:"session_id"`
-	RunID       string       `json:"run_id,omitempty"`
-	Prompt      string       `json:"prompt"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	HiddenUserMessage bool         `json:"hidden_user_message,omitempty"`
+	SessionID         string       `json:"session_id"`
+	RunID             string       `json:"run_id,omitempty"`
+	Prompt            string       `json:"prompt"`
+	Attachments       []Attachment `json:"attachments,omitempty"`
 }
 
 // ShellCommandRequest represents a request to run a shell command directly.

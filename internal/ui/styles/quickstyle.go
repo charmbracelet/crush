@@ -56,6 +56,8 @@ type quickStyleOpts struct {
 	success           color.Color
 	successMoreSubtle color.Color
 	successMostSubtle color.Color
+	yolo              color.Color
+	plan              color.Color
 
 	// ANSI 16-color palette. These remap the basic terminal colors that
 	// programs emit (e.g. bang-mode shell output) onto legible, on-brand
@@ -368,6 +370,34 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 	}
 
+	// PlanMarkdown keeps the rich markdown colors for the plan card. H2–H5 in
+	// s.Markdown only set Prefix and rely on glamour inheriting Color/Bold
+	// from the base Heading style; copy them explicitly so section headings
+	// stand out inside the card.
+	planMD := s.Markdown
+	headingColor := hex(o.info)
+	headingBold := new(true)
+	for _, h := range []*ansi.StyleBlock{&planMD.H2, &planMD.H3, &planMD.H4, &planMD.H5} {
+		if h.Color == nil {
+			h.Color = headingColor
+		}
+		if h.Bold == nil {
+			h.Bold = headingBold
+		}
+	}
+	// Replace raw markdown prefixes ("## ", "### ", …) with clean indentation so
+	// the plan card doesn't show literal ## / ### characters. H1 keeps its own
+	// distinct box styling; H2 gets no prefix (top-level sections stand on their
+	// own with bold+color); H3–H5 use increasing indentation for hierarchy.
+	planMD.H2.Prefix = ""
+	planMD.H3.Prefix = "  "
+	planMD.H4.Prefix = "    "
+	planMD.H5.Prefix = "      "
+	planMD.Code.Color = hex(o.destructive)
+	planMD.Code.Bold = new(true)
+	planMD.CodeBlock.Color = hex(o.fgBase)
+	s.PlanMarkdown = planMD
+
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
 	plainBg := hex(o.bgLeastVisible)
 	plainFg := hex(o.fgMoreSubtle)
@@ -499,12 +529,17 @@ func quickStyle(o quickStyleOpts) Styles {
 			Color:           plainFg,
 			BackgroundColor: plainBg,
 		},
+		// Inline code is the one primitive that must NOT take plainFg/plainBg:
+		// with both matching the surrounding text it renders identically to it,
+		// leaving only the Prefix/Suffix spaces to hint at a code span. A step up
+		// in background (and a slightly brighter foreground) keeps the quiet
+		// palette while making the chip readable.
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				Prefix:          CodespanPadding,
 				Suffix:          CodespanPadding,
-				Color:           plainFg,
-				BackgroundColor: plainBg,
+				Color:           hex(o.fgSubtle),
+				BackgroundColor: hex(o.bgLessVisible),
 			},
 		},
 		CodeBlock: ansi.StyleCodeBlock{
@@ -727,13 +762,23 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Buttons
 	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
 	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
+	s.Button.Inactive = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgMostVisible)
 	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.fgMostSubtle)
 	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor
+	s.Editor.PromptNormalIconFocused = lipgloss.NewStyle().Foreground(o.success).Bold(true).SetString("  > ")
+	s.Editor.PromptNormalIconBlurred = s.Editor.PromptNormalIconFocused.Foreground(o.fgMoreSubtle).Bold(false)
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
 	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
-	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" Y ")
+	// The bullet is 1 cell everywhere (unlike ⏸, whose rendered width is
+	// terminal-dependent), so the badge fills the 4-cell prompt column
+	// exactly and stays flush with the ":::" continuation dots.
+	s.Editor.PromptPlanIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" ⏸ ")
+	s.Editor.PromptPlanIconBlurred = s.Editor.PromptPlanIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptPlanDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
+	s.Editor.PromptPlanDotsBlurred = s.Editor.PromptPlanDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.bgBase).Background(o.busy).Bold(true).SetString(" ! ")
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
@@ -920,6 +965,15 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.SubduedHypercreditIcon = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgSubtle).Italic(true)
 
+	// Plan section styles. The plan card is a bordered box with no background
+	// fill: the terminal background shows through, and only intentional chips
+	// (inline code, H1 badge) keep a background of their own.
+	s.Messages.PlanBox = lipgloss.NewStyle().
+		Foreground(o.fgBase).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(o.plan).
+		Padding(1, 2)
+
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted
@@ -1027,6 +1081,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
+	s.Status.ModeBadgePlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.primary).Padding(0, 1).Bold(true).SetString("PLAN MODE")
+	s.Status.ModeBadgeYolo = lipgloss.NewStyle().Foreground(o.bgBase).Background(o.busy).Padding(0, 1).Bold(true).SetString("YOLO MODE")
+	s.Status.ModeBannerPlanBadge = s.Status.ModeBadgePlan
+	s.Status.ModeBannerPlan = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.plan).Padding(0, 1)
+	s.Status.ModeBannerYoloBadge = s.Status.ModeBadgeYolo
+	s.Status.ModeBannerYolo = lipgloss.NewStyle().Foreground(o.bgBase).Background(o.yolo).Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")
 	s.Status.InfoIndicator = s.Status.SuccessIndicator
 	s.Status.UpdateIndicator = s.Status.SuccessIndicator.SetString("HEY!")
@@ -1076,3 +1136,8 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	return s
 }
+
+// withMarkdownBackground returns a copy of cfg with bg applied to every style
+// primitive that does not already set its own background, so glamour paints an
+// uninterrupted background under all rendered text. Primitives that carry an
+// intentional background of their own (e.g. H1, inline code) keep it.

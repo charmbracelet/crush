@@ -776,7 +776,7 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	yoloPrompt := ansi.Strip(m.textarea.View())
 	require.NotEqual(t, normalPrompt, yoloPrompt,
 		"a remote yolo toggle must change the rendered editor prompt")
-	require.Contains(t, yoloPrompt, "Y",
+	require.Contains(t, yoloPrompt, "!",
 		"the yolo prompt icon must render after a remote toggle")
 
 	// Flipping back off must restore the normal prompt.

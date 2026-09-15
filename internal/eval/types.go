@@ -1,5 +1,5 @@
 // Package eval implements the golden-trajectory harness described in
-// docs/plans/EVAL_HARNESS.md: a fixed, rerun-able corpus of tasks — each a
+// docs/design/EVAL_HARNESS.md: a fixed, rerun-able corpus of tasks — each a
 // start state, a prompt sequence, and a deterministic end-state check —
 // plus the paired-experiment machinery that gates changes on corpus
 // outcomes instead of live traffic.

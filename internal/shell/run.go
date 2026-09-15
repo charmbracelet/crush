@@ -350,16 +350,10 @@ func blockHandler(blockFuncs []BlockFunc) execMiddleware {
 			}
 			for _, blockFunc := range blockFuncs {
 				if blockFunc(args) {
-					// Say how to get past this. Reaching here means the
-					// command was not visible to the static check that would
-					// otherwise have raised a prompt, so the reader has no
-					// other clue about which lever to pull.
-					return fmt.Errorf(
-						"command is not allowed for security reasons: %q. "+
-							"Run it directly rather than from inside a script to be asked for approval in normal mode, "+
-							"or use sysadmin mode (-yy) to allow dangerous commands without checks",
-						args[0],
-					)
+					// Name the command that was recognised, not the wrapper
+					// in front of it, so this agrees with the warning the
+					// static check would have shown for the same command.
+					return fmt.Errorf("blocked: %s is a dangerous command", normalizeCommand(ResolveArgv(args)[0]))
 				}
 			}
 			return next(ctx, args)

@@ -426,9 +426,9 @@ func TestBashTool_ApprovedDangerousCommandRuns(t *testing.T) {
 	})
 
 	require.Equal(t, 1, perms.requestCount, "a dangerous command must be prompted for")
-	require.Equal(t, "it uses ifconfig", perms.lastDanger,
+	require.Equal(t, "ifconfig", perms.lastDanger,
 		"the prompt must name what tripped the check")
-	require.NotContains(t, resp.Content, "not allowed for security reasons",
+	require.NotContains(t, resp.Content, "is a dangerous command",
 		"an approved command must not be re-blocked at exec time")
 }
 
@@ -455,7 +455,7 @@ func TestBashTool_UnflaggedCommandKeepsBlockList(t *testing.T) {
 	})
 
 	require.Empty(t, perms.lastDanger, "the static check cannot see through a glob")
-	require.Contains(t, resp.Content, "not allowed for security reasons")
+	require.Contains(t, resp.Content, "is a dangerous command")
 }
 
 // TestBashTool_SysadminModeSkipsBlockList pins sysadmin mode as the deliberate
@@ -478,7 +478,7 @@ func TestBashTool_SysadminModeSkipsBlockList(t *testing.T) {
 		Command:     "ifconf?g --help",
 	})
 
-	require.NotContains(t, resp.Content, "not allowed for security reasons")
+	require.NotContains(t, resp.Content, "is a dangerous command")
 }
 
 // TestBashTool_DeniedDangerousCommandDoesNotRun is the other half: denial at
@@ -562,7 +562,7 @@ func TestBashTool_YoloModeDoesNotPromptForDangerousCommands(t *testing.T) {
 		t.Fatal("yolo mode blocked waiting for a permission prompt that should never have been raised")
 	}
 
-	require.NotContains(t, got, "not allowed for security reasons",
+	require.NotContains(t, got, "is a dangerous command",
 		"a dangerous command must not be blocked in yolo mode")
 
 	select {
@@ -591,14 +591,15 @@ func TestBashTool_NormalModeStillPromptsForDangerousCommands(t *testing.T) {
 	})
 
 	require.Equal(t, 1, perms.requestCount, "normal mode must still ask")
-	require.Equal(t, "it uses ifconfig", perms.lastDanger,
+	require.Equal(t, "ifconfig", perms.lastDanger,
 		"the prompt must name what tripped the check")
 }
 
-// TestBlockedCommandErrorNamesTheWayOut checks that a command stopped by the
-// exec-time block list explains how to proceed, since reaching that point
-// means no prompt was ever shown to explain it.
-func TestBlockedCommandErrorNamesTheWayOut(t *testing.T) {
+// TestBlockedCommandErrorNamesTheCommand checks that a command stopped at
+// exec time names the command that was recognised. The static check and the
+// run-time check have to agree about that, or the same command is described
+// two different ways depending on which one caught it.
+func TestBlockedCommandErrorNamesTheCommand(t *testing.T) {
 	workingDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "ifconfig"), []byte("#!/bin/sh\n"), 0o755))
 	perms := &recordingPermissionService{
@@ -615,9 +616,6 @@ func TestBlockedCommandErrorNamesTheWayOut(t *testing.T) {
 		Command:     "ifconf?g --help",
 	})
 
-	require.Contains(t, resp.Content, "not allowed for security reasons")
-	require.Contains(t, resp.Content, "sysadmin mode",
-		"the error must name the mode that allows it")
-	require.Contains(t, resp.Content, "normal mode",
-		"the error must name the mode that asks about it")
+	require.Contains(t, resp.Content, "ifconfig is a dangerous command",
+		"the error must name the command, not the spelling that reached it")
 }
